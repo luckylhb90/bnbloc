@@ -61,12 +61,18 @@ in an agent's memory; updates killing running tasks.
   disk, tokens, money)? Where is the cap, and what happens at it?
 - Copy versus reference: is something duplicated per actor that should be
   indexed once and fetched on demand?
+- Is any cap smaller than a promise made one layer up (an attachment the product
+  accepts, a skill folder a member syncs, a turn the product starts)? A limit
+  belongs to the layer that owns the promise; every layer below carries it or
+  reports the real cause. Never bound a member's work by a fixed number: bound
+  it by activity and by the product's own caps.
 
 *Test:* seed realistic volume; the 31st item; the 201st message; the
 largest allowed file; a month of use.
 *Seen:* later channels starved by a busy one; every attachment copied to
 every agent; deliverables past 30 unreachable; a conversation grown past
-the model's context.
+the model's context; a mirror cap below the attachment cap; an 8 MiB cap that
+refused a skill folder a member needed to sync.
 
 ### 4. Failure and recovery
 

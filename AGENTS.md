@@ -2115,6 +2115,14 @@ workspace an agent keeps; a check of only the new path misses that
   return once the change is in effect), then asks for both: each of
   attachment, workspace write, memory and workspace file is its own
   PASS/FAIL line, and a failed run keeps its room for debugging.
+- **A change to what an agent is told or given is proven on a resumed
+  session of the real core, not on a new one.** Guidance, tools and
+  instructions reach a session through a channel the core may freeze when it
+  resumes a conversation (one core fixes its system prompt at the first turn
+  and ignores a changed one), so a new session proves nothing about a kept
+  one. Check the same session before and after: its files, its conversation,
+  its tools and its instructions (`docs/architecture/core-providers.md`).
+  A fix that only a new session shows is not a fix.
 - **A release that touches rooms, records, attachments or borrowing runs
   the two-member check**: `scripts/two-member-check.sh <A's agent>
   <teammate provider>` (or `BNBLOC_RELEASE_TWO_MEMBERS=1

@@ -52,22 +52,6 @@ them.
 
 ## Mistakes
 
-### Prove an upgrade keeps what is in use: the same session, its files, its conversation and its tools, on a live session before and after
-
-A core update lost the workspace bindings of sessions in use: agents came back
-with empty workspaces. A later update brought sessions back without the MCP
-tools their profile had given them, and every later turn ran without room
-tools until the member gave up. Both updates passed their unit tests. A
-session that comes back missing part of what it was created with is worse
-than one that does not come back at all. "Restored" has to mean restored
-whole, or not restored.
-
-Evidence: docs/bugs/2026-10-13-agent-loses-its-workspace.md;
-docs/bugs/2026-10-14-work-save-misses-new-files.md (cause 4). Now checked by
-`bnbloc smoke --scenario long-task --between "<the update>"`: memory,
-workspace file and room tools.
-Seen 2× (2026-10-13, 2026-10-14).
-
 ### Reproduce the reporter's exact case, with the real input on the real surface, before you call it fixed or not reproducible
 
 A coding agent was killed a few seconds into every room turn. Every manual
@@ -105,19 +89,6 @@ in the same change.
 Evidence: docs/bugs/2026-10-14-work-save-misses-new-files.md (follow-up);
 commit 349926c7.
 Seen 1× (2026-10-14).
-
-### Put no fixed limits on a member's work: bound it by activity and by the product's own caps
-
-A two-hour turn deadline ended real multi-hour tasks. Attachments the
-product accepted were then refused one layer down: by a core's request-body
-cap, and by a mirror cap smaller than the attachment cap. Each limit was
-"reasonable" on its own, and each one broke real work the product had
-promised to handle.
-
-Evidence: docs/prd/2026-10-13-live-turns.md;
-docs/bugs/2026-10-13-attachments-dropped-silently.md; commit 10b147ce (the
-mirror cap follows the attachment cap).
-Seen 2× (2026-10-13, 2026-10-14).
 
 ### Write public text with neutral names from the first draft, not at push time
 
@@ -278,8 +249,14 @@ did. The fix added the missing field to the second copy. The copies still
 duplicate the link, the title prefix and the dedup key: build a notice in
 one place, and give both senders the same inputs.
 
-Evidence: commits 5e2d1b2a, e2df2b3a.
-Seen 1× (2026-10-15).
+A notice schedule's run reused the sending function but not its inputs: the
+schedule path skipped nobody-but-the-sender differently (it excluded the
+schedule's creator as a "sender" who had not just acted) and, with no public
+origin configured, built a relative link, because the app path took the
+origin from a request the run does not have. Same builder, same inputs.
+
+Evidence: commits 5e2d1b2a, e2df2b3a, 669ed853.
+Seen 2× (2026-10-15, 2026-10-16).
 
 ### Say what the error showed, not the cause you guessed
 
@@ -302,6 +279,61 @@ are deployment data the publisher supplies.
 
 Evidence: session of 2026-10-15 (component upgrade).
 Seen 1× (2026-10-15).
+
+### Establish the cause on the live system before you ship a fix; a prompt sentence added on a guess is a patch
+
+Room guidance and tools reached kept sessions late or never. Four bridge
+releases in an afternoon each added a mechanism (a one-time note, a tool
+digest, an epoch, a re-brief) for a symptom whose cause nobody had read off
+the core: it fixes its instruction prefix at a conversation's first turn and
+ignores a changed one on resume. Once that was read, the fix was the
+instructions file the core re-reads at every start, and every briefing
+mechanism was deleted. Separately, an AI schedule run was given a sentence
+saying when it runs, on the guess that it misread its task; nothing had shown
+the sentence changed what it did, and it was removed twenty-five minutes
+later. Ask first which component owns the behavior and what it does on the
+failing input, read it from its code or a run, write it down, and change that
+component.
+
+Evidence: bridge commits aca462fc, 034e273d, f9347809, 0fc730a4 and their
+removal 2c7f511c; docs/architecture/core-providers.md (c3381b26); 031265d7,
+7497cecc.
+Seen 1× (2026-10-16).
+
+### Report what happened, not what was attempted
+
+A notice schedule's run answered "notified N people" and the dialog toasted
+"Sent now" when the emitter had queued nothing: the creator was excluded as
+the sender and the other member had app notices off. A failed run toasted
+success too, because a run's failure is a reply, not a rejected call. The
+member saw "sent" for a notice nobody received. An action's confirmation
+comes from its result (queued or not, ok or error), never from the call
+having returned.
+
+Evidence: commit 669ed853.
+Seen 1× (2026-10-16).
+
+### Write what a repository or a release keeps in the project's language, not the conversation's
+
+Two desktop releases went out with release notes in Chinese because the
+conversation was in Chinese. The product owner had to point it out; the rule
+is now in AGENTS.md ("Language: English unless told otherwise"). Before
+publishing, committing or writing a doc, check the text is the project's
+language.
+
+Evidence: commit 4d9625b1 (the rule); releases 0.1.63 and 0.1.64.
+Seen 1× (2026-10-16).
+
+### Before you read a failure as yours, look for edits in the tree that you did not make
+
+A full Go run failed `TestPromptBudgets` once; the package passed alone and
+on a rerun. `git status` then showed uncommitted edits to the bridge's room
+tools, brief and prompt test that were not mine: another agent shares the
+checkout. The failure was plausibly theirs mid-edit, though that was not
+proven. Look at the tree first, then decide whose failure it is.
+
+Evidence: session of 2026-10-17 (no commit: a local observation).
+Seen 1× (2026-10-17).
 
 ## Done right
 
@@ -348,6 +380,29 @@ used. The live test then only had to prove the rest.
 Evidence: docs/notifications.md (Groups); services/gateway/notifier_group_binds.go.
 Seen 1× (2026-10-15).
 
+### Take the model out of a step that has no decision in it
+
+An AI task whose text said "Thursday 9:00, send this title and this body to
+this group" was misread at run time ("it is not Thursday 9:00, so I did not
+send"). Rewording it would have been another patch. The fix removed the model
+from the step: a notice schedule carries its destination, title and body as
+data and sends them with no model, and an optional compose mode lets the
+model write only the body. Ask of every AI step what the model decides there;
+if nothing, it is a record.
+
+Evidence: commit e8589cdc; docs/prd/2026-10-15-app-identity-schedules-notify-ai.md §4a.
+Seen 1× (2026-10-16).
+
+### Repeat a new test under -race before it lands
+
+A new gateway test passed alone and in the first full run, and failed once in
+four repetitions under `-race`: it assumed the outbox lists notices in send
+order, and it lists by id. The fix looked a title up instead of indexing. A
+test that leans on an order its code never promised shows only when repeated.
+
+Evidence: commit e8589cdc (the test as landed).
+Seen 1× (2026-10-16).
+
 ## Promoted
 
 - **Never skip, drop or truncate silently: say what was left out, to the
@@ -355,3 +410,14 @@ Seen 1× (2026-10-15).
   proxy deadline; 2026-10-13 attachments dropped; 2026-10-14 files under
   `out/` never published). Promoted 2026-10-14 → `docs/design-review.md`,
   lens 8 (Test and Seen).
+- **Put no fixed limits on a member's work: bound it by activity and by the
+  product's own caps.** Seen 3× (2026-10-13 a turn deadline ended real
+  tasks; 2026-10-14 a mirror cap below the attachment cap; 2026-10-16 an 8 MiB
+  cap refused a skill folder the member needed to sync). Promoted 2026-10-17
+  → `docs/design-review.md`, lens 3 (a cap below a promise made one layer up).
+- **Prove an upgrade keeps what is in use: the same session, its files, its
+  conversation and its tools, on a live session before and after.** Seen 3×
+  (2026-10-13 workspace bindings lost; 2026-10-14 room tools lost on
+  restore; 2026-10-16 new guidance and tools never reached kept sessions,
+  proven only on new ones). Promoted 2026-10-17 → AGENTS.md "Releases" (a
+  change to what an agent is told or given is proven on a resumed session).
