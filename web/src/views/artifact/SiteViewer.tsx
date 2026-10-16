@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { openExternal } from "@/lib/desktop";
 import {
+  SITE_FRAME_ALLOW,
   SITE_SANDBOX,
   SITE_WIDTHS,
   siteFrameUrl,
@@ -121,6 +122,7 @@ export default function SiteViewer({ site, file, toolbar }: ArtifactViewerProps)
         src={frame.src}
         title={file.name}
         sandbox={SITE_SANDBOX}
+        allow={SITE_FRAME_ALLOW}
         referrerPolicy="no-referrer"
         className="block h-full w-full border-0 bg-white"
       />

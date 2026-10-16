@@ -1,6 +1,9 @@
 # Voice input and image generation (2026-10-16)
 
-Status: M1–M6 built (2026-10-16/17). Decided while building:
+Status: M1–M6 built (2026-10-16/17); the app surfaces hardened 2026-10-17
+(the member-opened app frame may use the microphone; a share link's visitor
+frame may not — recording an anonymous visitor is an abuse surface, and the
+demo SDK answers refusal-shaped stubs). Decided while building:
 
 - **The ai routes of the app data API spend none of the app data
   budgets** (apps.go): their limit is the caller's per-member assist rate,

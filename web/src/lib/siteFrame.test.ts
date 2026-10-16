@@ -1,4 +1,4 @@
-import { SITE_SANDBOX, SITE_TICKET_SLACK_MS, siteFrameUrl, siteGatewayUrl, siteTicketRefreshDelay } from "./siteFrame.ts";
+import { SITE_FRAME_ALLOW, SITE_SANDBOX, SITE_TICKET_SLACK_MS, siteFrameUrl, siteGatewayUrl, siteTicketRefreshDelay } from "./siteFrame.ts";
 
 function test(name: string, fn: () => void): void {
   try {
@@ -67,6 +67,10 @@ test("a site URL on the sites origin is used as the gateway handed it out", () =
 test("the sandbox never grants the app origin", () => {
   eq(SITE_SANDBOX.includes("allow-same-origin"), false, "no same origin");
   eq(SITE_SANDBOX.includes("allow-top-navigation"), false, "no top navigation");
+});
+
+test("only the microphone permission rides the member frame", () => {
+  eq(SITE_FRAME_ALLOW, "microphone", "the member-opened app frame may record for app.ai.voice");
 });
 
 test("tickets are re-minted before they expire", () => {

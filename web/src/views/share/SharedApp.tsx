@@ -58,6 +58,8 @@ export function SharedApp({
         title={title}
         sandbox={SITE_SANDBOX}
         referrerPolicy="no-referrer"
+        // No allow="microphone": a share link's visitors must not record
+        // anyone; members open apps from their room for voice input.
         className="block h-full w-full border-0 bg-white"
       />
     </div>

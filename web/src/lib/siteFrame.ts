@@ -36,6 +36,12 @@ export const SITE_SCHEME = "bnbloc-site";
  *  reach) and never top navigation. */
 export const SITE_SANDBOX = "allow-scripts allow-forms allow-popups allow-modals allow-downloads";
 
+/** The permissions a member-opened app frame may use: the microphone, for the
+ *  app's voice input (app.ai.voice — a page calling getUserMedia). A share
+ *  link's frame gets none: an anonymous visitor must not record anyone.
+ *  app.ai.image needs no permission (the provider call runs server-side). */
+export const SITE_FRAME_ALLOW = "microphone";
+
 /** Device-width presets of the site toolbar ("fill" = responsive). */
 export const SITE_WIDTHS: readonly { readonly value: string; readonly label: string }[] = [
   { value: "fill", label: "Responsive" },

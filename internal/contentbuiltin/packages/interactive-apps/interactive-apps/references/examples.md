@@ -202,6 +202,55 @@ async function polish(textarea, status) {
 }
 ```
 
+## Drawing an image, and speaking to it
+
+`app.ai.image` draws (count in one call; image: change that image instead).
+`app.ai.voice` turns spoken audio into text — the page records with
+getUserMedia (a member-opened app may; a share link's visitor cannot). Both
+are for signed-in callers only, and show the image with the page's own
+image element.
+
+```js
+async function draw(status) {
+  status.textContent = "Drawing…";
+  try {
+    const { images } = await app.ai.image({ prompt: "A badge for the picnic, flat colors", aspect: "square", count: 3 });
+    status.textContent = "";
+    for (const img of images) {
+      const el = document.createElement("img");
+      el.src = img.dataUrl;             // the image is inline, never a link out
+      el.alt = "Option";
+      document.body.append(el);
+    }
+  } catch (e) {
+    status.textContent = e.code === "sign_in_required" ? "Sign in to draw." : "Drawing is not available (" + e.status + ").";
+  }
+}
+
+let recording = null;
+async function voice(status, textarea) {
+  if (!recording) {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    recording = new MediaRecorder(stream);
+    recording.start();
+    status.textContent = "Recording… press again to stop.";
+    return;
+  }
+  const chunks = [];
+  recording.ondataavailable = (e) => chunks.push(e.data);
+  await new Promise((done) => (recording.onstop = done));
+  recording = null;
+  status.textContent = "Transcribing…";
+  try {
+    const { text } = await app.ai.voice(new Blob(chunks));
+    textarea.value += (textarea.value ? " " : "") + text;
+    status.textContent = "";
+  } catch (e) {
+    status.textContent = "Voice input is not available (" + e.status + ").";
+  }
+}
+```
+
 ## A counter a person keeps for themself
 
 `$inc` adds on the locked document, so taps from two of the person's tabs
