@@ -1,5 +1,5 @@
+import { formatBytes } from "./format.ts";
 import {
-  formatBytes,
   publishLabel,
   reachCounts,
   skillLine,
@@ -60,7 +60,7 @@ eq(publishLabel(row({ choice: { vm: false, borrowers: false, published: { hash: 
 eq(publishLabel(row({ changed: true, choice: { vm: false, borrowers: false, published: { hash: "h", componentId: "c", version: "1" } } })), "Publish changes", "changed");
 eq(publishLabel(row({ publishProblem: "My Notes.md: names" })), "Cannot add to library", "a name the library refuses");
 eq(skillLine(row({ publishProblem: "My Notes.md: names" })), "Does a · not for the library: My Notes.md: names", "and why");
-eq([formatBytes(10), formatBytes(2048), formatBytes(3 * 1024 * 1024)], ["10 B", "2.0 KB", "3.0 MB"], "sizes");
+eq([formatBytes(10), formatBytes(2048), formatBytes(3 * 1024 * 1024)], ["10 bytes", "2.0 KB", "3.0 MB"], "sizes");
 
 const framed = new Uint8Array([0x61, 0x62, 0x0a, 0x1f, 0x8b, 0x0a, 0x00]);
 const un = unframePackedSkill(framed);

@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { contentApi } from "@/lib/contentComponentsApi";
+import { formatBytes } from "@/lib/format";
 import { desktop } from "@/lib/desktop";
 import { errorText } from "@/lib/errors";
 import {
-  formatBytes,
   publishLabel,
   reachCounts,
   skillLine,

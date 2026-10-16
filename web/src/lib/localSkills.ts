@@ -160,12 +160,6 @@ export function publishLabel(r: SkillRow): string {
   return r.changed ? "Publish changes" : "In your library";
 }
 
-export function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(n < 10 * 1024 ? 1 : 0)} KB`;
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
-}
-
 /** A packed skill as the shell frames it: the hash, a line feed, the tar. */
 export function unframePackedSkill(bytes: Uint8Array): { readonly hash: string; readonly archive: Uint8Array } {
   const at = bytes.indexOf(0x0a);

@@ -56,9 +56,9 @@ export const RULES = [
     id: 3,
     name: "browser storage keys and access live in lib/storageKeys.ts",
     // Keys were spelled twice, unscoped by member or gateway, and wrapped in
-    // four copies of the try/DOMException guard (web L1). A package or
-    // contract kind ("bnbloc.x.package/v1") is not a storage key.
-    pattern: /\b(?:localStorage|sessionStorage)\.|["'`]bnbloc\.(?![\w-]+\.(?:package|contract)\/)[A-Za-z]/,
+    // four copies of the try/DOMException guard (web L1). A package, contract
+    // or provider kind ("bnbloc.x.package/v1") is not a storage key.
+    pattern: /\b(?:localStorage|sessionStorage)\.|["'`]bnbloc\.(?![\w-]+\.(?:package|contract|provider)\/)[A-Za-z]/,
     // webPush: a service-worker message type; desktopRelease: an archive name.
     allowed: ["lib/storageKeys.ts", "lib/wire.gen.ts", "lib/webPush.ts", "lib/desktopRelease.ts"],
     sample: { file: "views/X.tsx", text: 'localStorage.setItem("bnbloc.sidebarCollapsed", "1");' },

@@ -8,6 +8,9 @@ import {
   XIcon,
   RobotIcon,
   BrainIcon,
+  MicrophoneSlashIcon,
+  MicrophoneIcon,
+  SpinnerIcon,
 } from "@phosphor-icons/react";
 import { cn } from "@/lib/cn";
 import type { LocalAgent } from "@/lib/useLocalAgent";
@@ -42,6 +45,8 @@ import { useComposerPrompts } from "@/views/composer/useComposerPrompts";
 import { PromptPickerButton, PromptVariablesDialog, SlashMenu } from "@/views/composer/PromptPicker";
 import { explicitRecipient, resolveRecipient } from "@/views/composer/recipient";
 import { useEnhancePrompt } from "@/views/composer/useEnhancePrompt";
+import { useVoiceInput } from "@/views/composer/useVoiceInput";
+import { useMediaCapability } from "@/lib/media";
 import { AssistButton } from "@/views/AssistButton";
 
 const toolButton =
@@ -177,6 +182,14 @@ export function Composer({
     taRef,
   });
   const enhancing = enhance.state !== "idle";
+  // Voice input: press to record, press again to transcribe into the caret.
+  // Hidden when the deployment has no transcription provider (or AI is off).
+  const canVoice = useMediaCapability("transcribe");
+  function applyTextForVoice(next: string) {
+    setText(next);
+    requestAnimationFrame(() => taRef.current?.focus());
+  }
+  const voice = useVoiceInput({ setText: applyTextForVoice, taRef });
   // Prompts of the member's packs and the room's: the picker, /commands
   // and expert quick prompts that point at a pack's prompt.
   const prompts = useComposerPrompts(roomId, !people, setText, taRef);
@@ -748,6 +761,24 @@ export function Composer({
               aria-label="Attach files"
             >
               <PaperclipIcon size={18} />
+            </button>
+          )}
+          {main && canVoice && (
+            <button
+              type="button"
+              onClick={() => void voice.toggle()}
+              disabled={disabled || sending || enhancing || (voice.state !== "idle" && voice.state !== "recording")}
+              className={toolButton}
+              title={voice.state === "recording" ? "Stop and transcribe" : voice.state === "idle" ? "Speak to text" : "Transcribing…"}
+              aria-label={voice.state === "recording" ? "Stop recording" : "Speak"}
+            >
+              {voice.state === "recording" ? (
+                <MicrophoneSlashIcon size={18} className="animate-pulse text-[var(--color-danger)]" />
+              ) : voice.state === "idle" ? (
+                <MicrophoneIcon size={18} />
+              ) : (
+                <SpinnerIcon size={18} className="animate-spin" />
+              )}
             </button>
           )}
           {main && (
