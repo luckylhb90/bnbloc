@@ -34,6 +34,13 @@ export function readTar(buf) {
   }
 }
 
+/** What a previewer must not reach for: the global `fetch` (not a method that
+ *  happens to be called `fetch`, as in a bundled TeX parser, whether called
+ *  `x.fetch()` or defined `fetch() {…}`), `window.fetch`, XMLHttpRequest,
+ *  WebSocket. The frame's CSP (`connect-src 'none'`) is the enforcement; this
+ *  catches a previewer that would fail at run time. */
+export const NETWORK_CALLS = /(?<![.\w$])fetch\((?![^()]*\)\s*\{)|\b(?:window|globalThis|self)\.fetch\b|XMLHttpRequest|WebSocket\(/;
+
 /** Checks two builds a and b of one previewer: same archive, the sha256 side
  *  file, the sorted file list, the package shape, the toolbar ids, the
  *  claimed extensions/MIME types, no inline script, no network calls.
@@ -63,7 +70,7 @@ export async function assertBundle(a, b, { files: want, toolbar: toolbarIds }) {
   const html = files.get(pkg.previewer.entry).toString("utf8");
   assert.match(html, /<script src="main\.js" defer><\/script>/, "external classic script");
   assert.doesNotMatch(html, /<script>/, "no inline script (the CSP refuses it)");
-  assert.doesNotMatch(files.get("main.js").toString("utf8"), /\bfetch\(|XMLHttpRequest|WebSocket\(/, "no network calls");
+  assert.doesNotMatch(files.get("main.js").toString("utf8"), NETWORK_CALLS, "no network calls");
   // Every inlined third-party package has its licenses in NOTICES.txt.
   if (a.packages.length > 0) {
     assert.ok(files.has("NOTICES.txt"), "NOTICES.txt for the bundled packages");

@@ -1,0 +1,8 @@
+%% An offboarding-style flow: a decision, two branches and a loop back.
+flowchart TD
+    A([Start]) --> B{P2P check passed?}
+    B -->|yes| C[Local Team hand-off]
+    B -->|no| D[Block / Unblock 360]
+    D --> E[Notify the member]
+    E --> B
+    C --> F((Done))
