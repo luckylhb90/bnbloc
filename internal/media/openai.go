@@ -93,16 +93,22 @@ func (a *openAICompatible) Transcribe(ctx context.Context, p Provider, audio []b
 	return capText(reply.Text, wire.MaxMediaTranscriptChars), nil
 }
 
-// Generate posts a prompt to {base}/images/generations and returns the
-// inline image. It asks for b64_json and, when the provider refuses that
-// parameter (400), asks once without it (the assist client's
-// response_format rule: some OpenAI-compatible gateways reject unknown
-// parameters).
-func (a *openAICompatible) Generate(ctx context.Context, p Provider, req ImageRequest) (*Image, error) {
+// Generate draws (or, with Input set, edits) Count images in ONE provider
+// call — one request's cost and latency, not n. A generation posts JSON to
+// {base}/images/generations; an edit posts multipart to
+// {base}/images/edits with the input image as the "image" part. Both ask
+// for b64_json and, when the provider refuses that parameter (400), ask
+// once without it (the assist client's response_format rule: some
+// OpenAI-compatible gateways reject unknown parameters).
+func (a *openAICompatible) Generate(ctx context.Context, p Provider, req ImageRequest) ([]Image, error) {
+	n := req.Count
+	if n < 1 {
+		n = 1
+	}
 	body := map[string]any{
 		"model":  p.Model.Model,
 		"prompt": req.Prompt,
-		"n":      1,
+		"n":      n,
 	}
 	if size := aspectSize(req.Aspect, p.Params); size != "" {
 		body["size"] = size
@@ -112,33 +118,73 @@ func (a *openAICompatible) Generate(ctx context.Context, p Provider, req ImageRe
 			body[strings.TrimPrefix(k, paramImagePrefix)] = v
 		}
 	}
-	img, err := postGenerate(ctx, p, body, true)
+	imgs, err := postImages(ctx, p, body, req.Input, true)
 	if errors.Is(err, errBadRequest) { // the provider refused the parameters: retry once plainly
-		img, err = postGenerate(ctx, p, body, false)
+		imgs, err = postImages(ctx, p, body, req.Input, false)
 	}
 	if err != nil {
 		return nil, err
 	}
-	return img, nil
+	return imgs, nil
 }
 
-// postGenerate posts the generation body, asking for b64_json when asked.
-func postGenerate(ctx context.Context, p Provider, body map[string]any, b64 bool) (*Image, error) {
+// postImages posts the generation (or edit) body, asking for b64_json when
+// asked, and decodes every inline image of the reply.
+func postImages(ctx context.Context, p Provider, body map[string]any, input *ImageInput, b64 bool) ([]Image, error) {
 	if b64 {
 		body["response_format"] = "b64_json"
 	} else {
 		delete(body, "response_format")
 	}
-	raw, err := json.Marshal(body)
-	if err != nil {
-		return nil, err
+	var req *http.Request
+	var err error
+	if input != nil {
+		// An edit: the model, the prompt and the input image as parts. The
+		// body's fields ride along as parts too; the extra JSON-only knobs
+		// (size, n) stay fields.
+		var buf bytes.Buffer
+		mw := multipart.NewWriter(&buf)
+		for k, v := range body {
+			switch v.(type) {
+			case string:
+				_ = mw.WriteField(k, v.(string))
+			default:
+				if raw, merr := json.Marshal(v); merr == nil {
+					_ = mw.WriteField(k, string(raw))
+				}
+			}
+		}
+		fh := textproto.MIMEHeader{}
+		fh.Set("Content-Disposition", mime.FormatMediaType("form-data", map[string]string{"name": "image", "filename": "image"}))
+		fh.Set("Content-Type", input.MimeType)
+		part, werr := mw.CreatePart(fh)
+		if werr != nil {
+			return nil, werr
+		}
+		if _, werr = part.Write(input.Bytes); werr != nil {
+			return nil, werr
+		}
+		if werr = mw.Close(); werr != nil {
+			return nil, werr
+		}
+		req, err = http.NewRequestWithContext(ctx, http.MethodPost,
+			strings.TrimRight(p.Model.BaseURL, "/")+"/images/edits", bytes.NewReader(buf.Bytes()))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", mw.FormDataContentType())
+	} else {
+		raw, merr := json.Marshal(body)
+		if merr != nil {
+			return nil, merr
+		}
+		req, err = http.NewRequestWithContext(ctx, http.MethodPost,
+			strings.TrimRight(p.Model.BaseURL, "/")+"/images/generations", bytes.NewReader(raw))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		strings.TrimRight(p.Model.BaseURL, "/")+"/images/generations", bytes.NewReader(raw))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
 	if p.Model.APIKey != "" {
 		req.Header.Set("Authorization", "Bearer "+p.Model.APIKey)
 	}
@@ -166,16 +212,25 @@ func postGenerate(ctx context.Context, p Provider, body map[string]any, b64 bool
 	if err := json.Unmarshal(rraw, &reply); err != nil || len(reply.Data) == 0 || reply.Data[0].B64JSON == "" {
 		return nil, fmt.Errorf("%w: the reply holds no inline image (b64_json)", ErrProviderUnreachable)
 	}
-	img := reply.Data[0]
-	b, err := base64.StdEncoding.DecodeString(img.B64JSON)
-	if err != nil || len(b) == 0 || len(b) > wire.MaxMediaImageBytes {
-		return nil, fmt.Errorf("%w: the reply's image is not readable base64 within %d bytes", ErrProviderUnreachable, wire.MaxMediaImageBytes)
+	out := make([]Image, 0, len(reply.Data))
+	for _, img := range reply.Data {
+		if img.B64JSON == "" {
+			break // a provider mixing inline and linked images: stop at the first link
+		}
+		b, err := base64.StdEncoding.DecodeString(img.B64JSON)
+		if err != nil || len(b) == 0 || len(b) > wire.MaxMediaImageBytes {
+			return nil, fmt.Errorf("%w: the reply's image is not readable base64 within %d bytes", ErrProviderUnreachable, wire.MaxMediaImageBytes)
+		}
+		mime := sniffImage(b)
+		if mime == "" {
+			return nil, fmt.Errorf("%w: the reply's image is not a PNG, JPEG or WebP", ErrProviderUnreachable)
+		}
+		out = append(out, Image{Bytes: b, MimeType: mime, RevisedPrompt: strings.TrimSpace(img.RevisedPrompt)})
+		if len(out) >= wire.MaxMediaImages {
+			break // a provider answering more than the cap is cut, not failed
+		}
 	}
-	mime := sniffImage(b)
-	if mime == "" {
-		return nil, fmt.Errorf("%w: the reply's image is not a PNG, JPEG or WebP", ErrProviderUnreachable)
-	}
-	return &Image{Bytes: b, MimeType: mime, RevisedPrompt: strings.TrimSpace(img.RevisedPrompt)}, nil
+	return out, nil
 }
 
 // errBadRequest: the provider refused the parameters (400); the caller

@@ -73,9 +73,14 @@ export function transcribeAudio(blob: Blob, filename = "voice.wav", signal?: Abo
   });
 }
 
-/** Generates one image. */
-export function generateImage(prompt: string, aspect: MediaImageAspect = "square", signal?: AbortSignal): Promise<MediaImageReply> {
-  return req<MediaImageReply>("/v1/media/image", { method: "POST", body: JSON.stringify({ prompt, aspect }), signal });
+/** Generates images (count of them in one call, at most
+ *  wire.MaxMediaImages). */
+export function generateImage(
+  prompt: string,
+  opts: { aspect?: MediaImageAspect; count?: number; image?: string } = {},
+  signal?: AbortSignal,
+): Promise<MediaImageReply> {
+  return req<MediaImageReply>("/v1/media/image", { method: "POST", body: JSON.stringify({ prompt, ...opts }), signal });
 }
 
 // ---- The platform console's media providers ----
@@ -87,6 +92,7 @@ export interface MediaProviderConfigView {
   baseUrl: string;
   model: string;
   keySet: boolean;
+  orgHosts?: string[];
   params?: Record<string, string>;
   updatedBy?: string;
   updatedAtMs?: number;
@@ -99,12 +105,15 @@ export interface MediaProviderUpdateBody {
   model: string;
   apiKey?: string;
   clearKey?: boolean;
+  /** The platform's to set: the hosts organizations may name for their own. */
+  orgHosts?: string[];
   params?: Record<string, string>;
 }
 
-/** The console's provider API per capability (never the key). */
-export function mediaProviderApi(cap: "transcribe" | "image") {
-  const base = `/v1/platform/media/${cap}`;
+/** The console's provider API per capability (never the key): the
+ *  platform's (super admin) and the organization's own (org admin). */
+export function mediaProviderApi(cap: "transcribe" | "image", scope: "platform" | "org" = "platform") {
+  const base = scope === "org" ? `/v1/tenant/media/${cap}` : `/v1/platform/media/${cap}`;
   return {
     get: () => req<MediaProviderConfigView>(base),
     put: (body: MediaProviderUpdateBody) =>
@@ -114,6 +123,13 @@ export function mediaProviderApi(cap: "transcribe" | "image") {
       }),
     test: () => req<{ ok: boolean; error?: string; reply?: string; latencyMs: number }>(`${base}/test`, { method: "POST" }),
   };
+}
+
+/** The organization's own provider view (the org admin's page). */
+export interface OrgMediaProviderView {
+  provider: MediaProviderConfigView;
+  allowedHosts: string[];
+  platformModel?: string;
 }
 
 /** The adapter kinds the console offers (kinds are the platform's wire

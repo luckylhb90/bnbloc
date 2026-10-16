@@ -285,14 +285,18 @@
     return call("POST", "ai", body);
   }
 
-  // ai.image draws one image on the organization's AI: {prompt, aspect} to
-  // {dataUrl, mimeType, width, height} (the image inline, never a link out).
-  // ai.voice turns spoken audio (a Blob from getUserMedia or a file) into
-  // text. Both are for signed-in callers only, like ai itself.
+  // ai.image draws images on the organization's AI: {prompt, aspect?,
+  // count?, image?} to {images: [{dataUrl, mimeType, width, height}]}, the
+  // images inline, never a link out. count draws several in one call (at
+  // most 4); image (a previous reply's dataUrl) asks the provider to change
+  // that image instead of drawing a new one. For signed-in callers only,
+  // like ai itself.
   ai.image = function (req) {
     if (!req || typeof req.prompt !== "string" || !req.prompt.trim()) return Promise.reject(appError(400, "", "ai.image needs a prompt"));
     var body = { prompt: req.prompt };
     if (req.aspect) body.aspect = req.aspect;
+    if (req.count) body.count = req.count;
+    if (req.image) body.image = req.image;
     if (memory) return memory.aiImage(body);
     return call("POST", "ai/image", body);
   };

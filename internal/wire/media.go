@@ -27,21 +27,40 @@ type MediaProviderConfig struct {
 	BaseURL      string `json:"baseUrl"`
 	Model        string `json:"model"`
 	KeySet       bool   `json:"keySet"`
+	// OrgHosts are the hosts an organization's own provider may name (the
+	// platform row only; none = organizations cannot set their own).
+	OrgHosts []string `json:"orgHosts"`
 	// Params is the provider's own knobs as the admin set them.
 	Params      map[string]string `json:"params,omitempty"`
 	UpdatedBy   string            `json:"updatedBy,omitempty"`
 	UpdatedAtMs int64             `json:"updatedAtMs,omitempty"`
 }
 
+// MediaOrgProvider is GET /v1/tenant/media/{capability}: the organization's
+// own provider (BaseURL "" = it uses the platform's) and the hosts it may
+// name.
+type MediaOrgProvider struct {
+	Provider MediaProviderConfig `json:"provider"`
+	// AllowedHosts are the platform's orgHosts; empty = an organization
+	// cannot set its own provider.
+	AllowedHosts []string `json:"allowedHosts"`
+	// PlatformModel names the platform's model ("" = none), shown as what
+	// members use when the organization sets none.
+	PlatformModel string `json:"platformModel,omitempty"`
+}
+
 // MediaProviderUpdate is PUT /v1/platform/media/{capability}: an empty APIKey
 // keeps the stored one, ClearKey removes it, an empty BaseURL turns the
 // capability off. Kind must name a registered adapter.
 type MediaProviderUpdate struct {
-	Kind     string            `json:"kind"`
-	BaseURL  string            `json:"baseUrl"`
-	Model    string            `json:"model"`
-	APIKey   string            `json:"apiKey,omitempty"`
-	ClearKey bool              `json:"clearKey,omitempty"`
+	Kind     string `json:"kind"`
+	BaseURL  string `json:"baseUrl"`
+	Model    string `json:"model"`
+	APIKey   string `json:"apiKey,omitempty"`
+	ClearKey bool   `json:"clearKey,omitempty"`
+	// OrgHosts is the platform's to set (the hosts organizations may name);
+	// an update without it keeps the stored ones.
+	OrgHosts []string          `json:"orgHosts,omitempty"`
 	Params   map[string]string `json:"params,omitempty"`
 }
 
@@ -81,11 +100,23 @@ type MediaImageRequest struct {
 	Prompt string `json:"prompt"`
 	// Aspect defaults to MediaImageAspectSquare.
 	Aspect string `json:"aspect,omitempty" tstype:"MediaImageAspect"`
+	// Count is how many images to draw in one provider call (1…MaxMediaImages,
+	// default 1): one request's cost, not n.
+	Count int `json:"count,omitempty"`
+	// Image, when set, is the image to change (an edit) instead of drawing a
+	// new one: a data URL the caller holds (a previous reply's, an
+	// attachment's bytes the caller may read). At most MaxMediaImageBytes.
+	Image string `json:"image,omitempty"`
 }
 
-// MediaImageReply is POST /v1/media/image's answer: the image inline
-// (dataUrl), never a link out to another host.
+// MediaImageReply is POST /v1/media/image's answer: the images inline
+// (dataUrl), never a link out to another host. One answer per Count ask.
 type MediaImageReply struct {
+	Images []MediaImage `json:"images"`
+}
+
+// MediaImage is one generated (or edited) image.
+type MediaImage struct {
 	DataURL  string `json:"dataUrl"`
 	MimeType string `json:"mimeType"`
 	Width    int    `json:"width"`

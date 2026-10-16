@@ -4,11 +4,14 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
@@ -50,6 +53,19 @@ func (f *mediaProviderFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			f.last["__filename"] = header.Filename
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"text": f.transcript})
+	case "/v1/images/edits":
+		if err := r.ParseMultipartForm(32 << 20); err != nil {
+			tFail(w, "multipart: %v", err)
+			return
+		}
+		f.last = map[string]string{"prompt": r.FormValue("prompt"), "model": r.FormValue("model")}
+		if file, _, err := r.FormFile("image"); err == nil {
+			b, _ := io.ReadAll(file)
+			f.last["__image"] = fmt.Sprintf("%d bytes", len(b))
+			_ = file.Close()
+		}
+		b64 := base64.StdEncoding.EncodeToString(tinyTestPNG)
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]any{"b64_json": b64, "revised_prompt": "a nicer one"}}})
 	case "/v1/images/generations":
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
@@ -63,11 +79,19 @@ func (f *mediaProviderFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				f.last[k] = string(raw)
 			}
 		}
+		count := 1
+		if n, ok := body["n"].(float64); ok && int(n) > 0 {
+			count = int(n)
+		}
 		b64 := f.imageB64
 		if b64 == "" {
 			b64 = base64.StdEncoding.EncodeToString(tinyTestPNG)
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]any{"b64_json": b64, "revised_prompt": "a nicer one"}}})
+		data := make([]any, 0, count)
+		for i := 0; i < count; i++ {
+			data = append(data, map[string]any{"b64_json": b64, "revised_prompt": "a nicer one"})
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
 	default:
 		http.NotFound(w, r)
 	}
@@ -184,14 +208,15 @@ func TestMediaImage(t *testing.T) {
 		t.Fatalf("image = %d %s", r.status, r.body)
 	}
 	var reply wire.MediaImageReply
-	if err := json.Unmarshal([]byte(r.body), &reply); err != nil {
-		t.Fatal(err)
+	if err := json.Unmarshal([]byte(r.body), &reply); err != nil || len(reply.Images) != 1 {
+		t.Fatalf("reply = %s %v", r.body, err)
 	}
-	if !strings.HasPrefix(reply.DataURL, "data:image/png;base64,") || reply.MimeType != "image/png" || reply.Width != 1 || reply.Height != 1 {
-		t.Fatalf("reply = %+v", reply)
+	img := reply.Images[0]
+	if !strings.HasPrefix(img.DataURL, "data:image/png;base64,") || img.MimeType != "image/png" || img.Width != 1 || img.Height != 1 {
+		t.Fatalf("image = %+v", img)
 	}
-	if reply.RevisedPrompt != "a nicer one" {
-		t.Fatalf("revised = %q", reply.RevisedPrompt)
+	if img.RevisedPrompt != "a nicer one" {
+		t.Fatalf("revised = %q", img.RevisedPrompt)
 	}
 	if fake.last["size"] != "1536x1024" {
 		t.Fatalf("size = %v", fake.last)
@@ -200,9 +225,35 @@ func TestMediaImage(t *testing.T) {
 	if len(rows) != 1 || rows[0].Name != "image" {
 		t.Fatalf("audit = %+v", rows)
 	}
-	if strings.Contains(rows[0].Detail, "a poster") || strings.Contains(rows[0].Detail, reply.DataURL[:40]) {
+	if strings.Contains(rows[0].Detail, "a poster") || strings.Contains(rows[0].Detail, img.DataURL[:40]) {
 		t.Fatalf("the audit row leaks content: %s", rows[0].Detail)
 	}
+	// A batch: three images in one provider call, one audit row.
+	fake.last["n"] = ""
+	sink.take()
+	r = e.call(http.MethodPost, "/v1/media/image", wire.MediaImageRequest{Prompt: "three poster options", Count: 3}, e.as("maya"))
+	if r.status != http.StatusOK {
+		t.Fatalf("batch = %d %s", r.status, r.body)
+	}
+	var batch wire.MediaImageReply
+	if err := json.Unmarshal(r.body, &batch); err != nil || len(batch.Images) != 3 {
+		t.Fatalf("batch = %s %v", r.body, err)
+	}
+	if rows := sink.take(); len(rows) != 1 {
+		t.Fatalf("batch audit = %+v", rows)
+	}
+
+	// An edit: the input image rides the request (a data URL), the provider
+	// gets /images/edits.
+	sink.take()
+	r = e.call(http.MethodPost, "/v1/media/image", wire.MediaImageRequest{Prompt: "a red hat on it", Image: "data:image/png;base64," + base64.StdEncoding.EncodeToString(tinyTestPNG)}, e.as("maya"))
+	if r.status != http.StatusOK {
+		t.Fatalf("edit = %d %s", r.status, r.body)
+	}
+	if rows := sink.take(); len(rows) != 1 {
+		t.Fatalf("edit audit = %+v", rows)
+	}
+
 	// A refusal keeps the provider's own status.
 	fake.status, fake.body = http.StatusUnavailableForLegalReasons, `{"error":{"message":"content policy"}}`
 	r = e.call(http.MethodPost, "/v1/media/image", wire.MediaImageRequest{Prompt: "nope"}, e.as("maya"))
@@ -258,7 +309,7 @@ func TestAppAIMedia(t *testing.T) {
 		t.Fatalf("ai.image = %d %s", r.status, r.body)
 	}
 	var reply wire.MediaImageReply
-	if err := json.Unmarshal(r.body, &reply); err != nil || !strings.HasPrefix(reply.DataURL, "data:image/png;base64,") {
+	if err := json.Unmarshal(r.body, &reply); err != nil || len(reply.Images) != 1 || !strings.HasPrefix(reply.Images[0].DataURL, "data:image/png;base64,") {
 		t.Fatalf("reply = %s %v", r.body, err)
 	}
 	rows := sink.take()
@@ -295,4 +346,86 @@ func TestAppAIMedia(t *testing.T) {
 	if r := e.call(http.MethodPost, jack+"~app/ai/image", wire.MediaImageRequest{Prompt: "p"}); r.status != http.StatusConflict {
 		t.Fatalf("image with AI off = %d %s", r.status, r.body)
 	}
+}
+
+// M6: an organization's own provider replaces the platform's for its
+// members while its host stays allowed (the assist org-model pattern); a
+// host the platform does not allow is refused; a member without org admins
+// cannot set one; an empty base URL goes back to the platform's.
+func TestMediaOrgProvider(t *testing.T) {
+	fake := &mediaProviderFake{transcript: "platform says"}
+	e := mediaGW(t, fake)
+	orgFake := &mediaProviderFake{transcript: "the org's own provider"}
+	orgSrv := httptest.NewServer(orgFake)
+	t.Cleanup(orgSrv.Close)
+	// The platform row allows the org host.
+	r := e.call(http.MethodPut, "/v1/platform/media/transcribe", wire.MediaProviderUpdate{
+		Kind: "openai-compatible", BaseURL: fakeBaseOf(t, e), Model: "media-model", APIKey: "sk-media",
+		OrgHosts: []string{hostOfBaseURL(orgSrv.URL)}, Params: map[string]string{"image.size.square": "1024x1024"},
+	}, e.superAdmin())
+	if r.status != http.StatusOK {
+		t.Fatalf("platform orgHosts = %d %s", r.status, r.body)
+	}
+	// An org admin sets the organization's own provider on the allowed host.
+	orgAdmin := "Authorization: Bearer " + e.gw.Signer.Issue(auth.Claims{Subject: "ada", Tenant: e.tenant, Role: "org_admin", ExpiresAtUnix: time.Now().Add(time.Hour).Unix()})
+	r = e.call(http.MethodPut, "/v1/tenant/media/transcribe", wire.MediaProviderUpdate{
+		Kind: "openai-compatible", BaseURL: orgSrv.URL + "/v1", Model: "org-model", APIKey: "sk-org",
+	}, orgAdmin)
+	if r.status != http.StatusOK {
+		t.Fatalf("org provider = %d %s", r.status, r.body)
+	}
+	// A member's call now answers through the org provider's model.
+	res := e.callRaw(http.MethodPost, "/v1/media/transcriptions", "audio/wav", []byte("ORG"), e.as("maya"))
+	if res.status != http.StatusOK {
+		t.Fatalf("transcribe = %d %s", res.status, res.body)
+	}
+	var reply wire.MediaTranscribeReply
+	if json.Unmarshal(res.body, &reply) != nil || reply.Text != "the org's own provider" {
+		t.Fatalf("reply = %s", res.body)
+	}
+	if orgFake.last["model"] != "org-model" {
+		t.Fatalf("org model = %v", orgFake.last)
+	}
+	// A host the platform does not allow is refused.
+	other := httptest.NewServer(&mediaProviderFake{})
+	t.Cleanup(other.Close)
+	r = e.call(http.MethodPut, "/v1/tenant/media/transcribe", wire.MediaProviderUpdate{
+		Kind: "openai-compatible", BaseURL: other.URL + "/v1", Model: "m",
+	}, orgAdmin)
+	if r.status != http.StatusBadRequest {
+		t.Fatalf("a host the platform does not allow = %d %s", r.status, r.body)
+	}
+	// A member cannot set the organization's provider.
+	r = e.call(http.MethodPut, "/v1/tenant/media/transcribe", wire.MediaProviderUpdate{
+		Kind: "openai-compatible", BaseURL: orgSrv.URL + "/v1", Model: "m",
+	}, e.as("maya"))
+	if r.status != http.StatusForbidden {
+		t.Fatalf("a member setting the org provider = %d", r.status)
+	}
+	// An empty base URL goes back to the platform's provider.
+	r = e.call(http.MethodPut, "/v1/tenant/media/transcribe", wire.MediaProviderUpdate{Kind: "openai-compatible", BaseURL: "", Model: "", ClearKey: true}, orgAdmin)
+	if r.status != http.StatusOK {
+		t.Fatalf("clear org provider = %d %s", r.status, r.body)
+	}
+	res = e.callRaw(http.MethodPost, "/v1/media/transcriptions", "audio/wav", []byte("P"), e.as("maya"))
+	if res.status != http.StatusOK {
+		t.Fatalf("platform again = %d %s", res.status, res.body)
+	}
+	// The platform row's view carries the allowed hosts.
+	r = e.call(http.MethodGet, "/v1/platform/media/transcribe", nil, e.superAdmin())
+	var view wire.MediaProviderConfig
+	if json.Unmarshal(r.body, &view) != nil || len(view.OrgHosts) != 1 {
+		t.Fatalf("platform view = %s", r.body)
+	}
+}
+
+// fakeBaseOf names the fake the mediaGW config used (re-read from the row).
+func fakeBaseOf(t *testing.T, e *appGW) string {
+	t.Helper()
+	r := e.call(http.MethodGet, "/v1/platform/media/transcribe", nil, e.superAdmin())
+	var view wire.MediaProviderConfig
+	if json.Unmarshal(r.body, &view) != nil {
+		t.Fatalf("read the provider = %s", r.body)
+	}
+	return view.BaseURL
 }

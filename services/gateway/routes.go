@@ -235,6 +235,11 @@ func (s *Service) routes() []route {
 		gated("GET /v1/tenant/assist-model", org, s.handleOrgAssistModel),
 		gated("PUT /v1/tenant/assist-model", org, s.handlePutOrgAssistModel),
 		gated("POST /v1/tenant/assist-model/test", org, s.handleTestOrgAssistModel),
+		// The organization's own media providers (media.go): on a host the
+		// platform allows, replacing the platform's for its members.
+		gated("GET /v1/tenant/media/{capability}", org, s.handleOrgMediaProvider),
+		gated("PUT /v1/tenant/media/{capability}", org, s.handlePutOrgMediaProvider),
+		gated("POST /v1/tenant/media/{capability}/test", org, s.handleTestOrgMediaProvider),
 		gated("GET /v1/tenant/content-requests", org, s.handleListContentRequests).with(needContent),
 		gated("GET /v1/tenant/content-requests/{id}", org, s.handleReviewContentRequest).with(needContent),
 		gated("POST /v1/tenant/content-requests/{id}/approve", org, s.decideContentRequest(store.ContentRequestApproved)).spends(costBudget).with(needContent),

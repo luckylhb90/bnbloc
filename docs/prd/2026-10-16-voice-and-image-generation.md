@@ -1,8 +1,6 @@
 # Voice input and image generation (2026-10-16)
 
-Status: M1–M5 built (2026-10-16, commits 9890368d, bd561205, f486b4a9,
-acc23820, 570a3350, and the console card). M6 (an organization's own
-providers) is next. Decided while building:
+Status: M1–M6 built (2026-10-16/17). Decided while building:
 
 - **The ai routes of the app data API spend none of the app data
   budgets** (apps.go): their limit is the caller's per-member assist rate,
@@ -13,9 +11,32 @@ providers) is next. Decided while building:
   the image.
 - **transcribe_audio is read-only**: it posts the workspace file's bytes
   and fences the transcript; nothing is published.
-- **The interactive-apps skill's budget rose to 1850** with the two SDK
+- **The interactive-apps skill's budget rose to 1870** with the two SDK
   calls (still under the 8 KiB inline cap); the session prefix budget rose
   with the two tool briefs.
+- **A generation draws n images in ONE provider call** (n rides the
+  provider's own n parameter; 1…MaxMediaImages): one request's cost and
+  latency, not n requests — the reply is a list, and the room tool
+  publishes each under its own name (poster.png, poster-2.png…).
+- **An edit is a first-class generation** (2026-10-17): the request carries
+  the input image inline (a data URL the caller holds — a previous reply's,
+  a file the caller may read), the adapter posts it to
+  {base}/images/edits. The gateway stays stateless: no image store, no id
+  to resolve.
+- **runMediaImage is the one owner of a generation call** (the member route
+  and an app's ~app/ai/image): the caller's rate, the validation, the
+  provider, the audit and the reply live once; serveAppAIImage delegates.
+- **M6 is the assist org-model pattern, applied to the providers**
+  (2026-10-17): media.Settings carries the tenant; the platform row's
+  orgHosts allowlist is enforced by modelsettings; an organization's
+  provider replaces the platform's for its members while its host stays
+  allowed (Effective). The org routes are GET/PUT/test
+  /v1/tenant/media/{capability}; the org page shows the two cards.
+- **The transport is shared** (extgov's guardedTransport: one connection
+  pool), so a per-call http.Client costs one allocation, not a TLS
+  handshake — the settings row is read once per call (Model + Own in one
+  read), the key opened once. Not cached beyond the call: a provider
+  change applies to the next call, like the assist model's.
 
 Two model abilities the room product keeps asking for, both re-implemented
 from scratch on the platform's own seams (nothing here imports or names

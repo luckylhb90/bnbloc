@@ -2429,6 +2429,7 @@ export const MaxMediaTranscriptChars = 32768;
 export const MaxMediaImagePrompt = 4000;
 export const MaxMediaImageReplyBytes = 16777216;
 export const MaxMediaImageBytes = 12582912;
+export const MaxMediaImages = 4;
 
 // ContentTagPattern is the one rule for a content component tag: lower-case
 // letters of any script (CJK and other caseless letters included), digits,
@@ -2609,10 +2610,26 @@ export interface MediaProviderConfig {
   baseUrl: string;
   model: string;
   keySet: boolean;
+  // OrgHosts are the hosts an organization's own provider may name (the
+  // platform row only; none = organizations cannot set their own).
+  orgHosts: string[];
   // Params is the provider's own knobs as the admin set them.
   params?: Record<string, string>;
   updatedBy?: string;
   updatedAtMs?: number;
+}
+
+// MediaOrgProvider is GET /v1/tenant/media/{capability}: the organization's
+// own provider (BaseURL "" = it uses the platform's) and the hosts it may
+// name.
+export interface MediaOrgProvider {
+  provider: MediaProviderConfig;
+  // AllowedHosts are the platform's orgHosts; empty = an organization
+  // cannot set its own provider.
+  allowedHosts: string[];
+  // PlatformModel names the platform's model ("" = none), shown as what
+  // members use when the organization sets none.
+  platformModel?: string;
 }
 
 // MediaProviderUpdate is PUT /v1/platform/media/{capability}: an empty APIKey
@@ -2624,6 +2641,9 @@ export interface MediaProviderUpdate {
   model: string;
   apiKey?: string;
   clearKey?: boolean;
+  // OrgHosts is the platform's to set (the hosts organizations may name);
+  // an update without it keeps the stored ones.
+  orgHosts?: string[];
   params?: Record<string, string>;
 }
 
@@ -2659,11 +2679,23 @@ export interface MediaImageRequest {
   prompt: string;
   // Aspect defaults to MediaImageAspectSquare.
   aspect?: MediaImageAspect;
+  // Count is how many images to draw in one provider call (1…MaxMediaImages,
+  // default 1): one request's cost, not n.
+  count?: number;
+  // Image, when set, is the image to change (an edit) instead of drawing a
+  // new one: a data URL the caller holds (a previous reply's, an
+  // attachment's bytes the caller may read). At most MaxMediaImageBytes.
+  image?: string;
 }
 
-// MediaImageReply is POST /v1/media/image's answer: the image inline
-// (dataUrl), never a link out to another host.
+// MediaImageReply is POST /v1/media/image's answer: the images inline
+// (dataUrl), never a link out to another host. One answer per Count ask.
 export interface MediaImageReply {
+  images: MediaImage[];
+}
+
+// MediaImage is one generated (or edited) image.
+export interface MediaImage {
   dataUrl: string;
   mimeType: string;
   width: number;

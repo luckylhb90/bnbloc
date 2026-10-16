@@ -10,14 +10,16 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/roomlog"
 )
 
-// The image generation reply: a tiny PNG as a data URL.
-const imageReply = `{"dataUrl":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNgAAIAAAUAAen63NgAAAAASUVORK5CYII=","mimeType":"image/png","width":1,"height":1,"revisedPrompt":"a nicer poster"}`
+// The image generation reply: a tiny PNG as a data URL, one image.
+const tinyPNGDataURL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNgAAIAAAUAAen63NgAAAAASUVORK5CYII="
+
+var imageReply = []byte(`{"images":[{"dataUrl":"` + tinyPNGDataURL + `","mimeType":"image/png","width":1,"height":1,"revisedPrompt":"a nicer poster"}]}`)
 
 // imageEnv is a bound env whose gateway answers one image reply and whose
 // Publish records what it was asked to publish.
 func imageEnv(t *testing.T) (*Env, *recordingGateway, *[]string) {
 	t.Helper()
-	gw := &recordingGateway{reply: func(string, string) ([]byte, error) { return []byte(imageReply), nil }}
+	gw := &recordingGateway{reply: func(string, string) ([]byte, error) { return imageReply, nil }}
 	env := contentEnv(fakeWorkspace{}, gw, true)
 	published := []string{}
 	env.Config.Publish = func(ctx context.Context, room string, job Job, name, mimeType string, content []byte) (string, error) {
@@ -53,7 +55,8 @@ func TestGenerateImage(t *testing.T) {
 		t.Fatalf("published = %v", *published)
 	}
 	out := res.Value.(map[string]any)
-	if out["artifactId"] != "artf_generated" || out["fileName"] != "retro.png" || out["width"] != 1 {
+	images, _ := out["images"].([]map[string]any)
+	if len(images) != 1 || images[0]["artifactId"] != "artf_generated" || images[0]["fileName"] != "retro.png" || images[0]["width"] != 1 {
 		t.Fatalf("result = %+v", out)
 	}
 	// The result never carries the image bytes; the revised prompt is fenced.
@@ -61,8 +64,31 @@ func TestGenerateImage(t *testing.T) {
 	if strings.Contains(string(raw), "iVBORw0KGgo") {
 		t.Fatal("the image bytes entered the result")
 	}
-	if revised, _ := out["revisedPrompt"].(string); !strings.Contains(revised, roomlog.Fence(imageAuthor, "a nicer poster")) {
+	if revised, _ := images[0]["revisedPrompt"].(string); !strings.Contains(revised, roomlog.Fence(imageAuthor, "a nicer poster")) {
 		t.Fatalf("revised = %q", revised)
+	}
+}
+
+// A batch publishes one image per name, numbered after the first.
+func TestGenerateImageBatch(t *testing.T) {
+	env, gw, published := imageEnv(t)
+	gw.reply = func(string, string) ([]byte, error) {
+		return []byte(`{"images":[` +
+			`{"dataUrl":"` + tinyPNGDataURL + `","mimeType":"image/png","width":1,"height":1},` +
+			`{"dataUrl":"` + tinyPNGDataURL + `","mimeType":"image/png","width":1,"height":1},` +
+			`{"dataUrl":"` + tinyPNGDataURL + `","mimeType":"image/png","width":1,"height":1}]}`), nil
+	}
+	res := generateImage(context.Background(), env, json.RawMessage(`{"prompt":"three poster options","count":3,"fileName":"poster.png"}`))
+	if res.Err != "" {
+		t.Fatalf("batch = %s", res.Err)
+	}
+	if strings.Join(*published, ";") != "poster.png image/png;poster-2.png image/png;poster-3.png image/png" {
+		t.Fatalf("published = %v", *published)
+	}
+	out := res.Value.(map[string]any)
+	images, _ := out["images"].([]map[string]any)
+	if len(images) != 3 {
+		t.Fatalf("images = %+v", out)
 	}
 }
 
@@ -90,7 +116,9 @@ func TestGenerateImageRefusals(t *testing.T) {
 		t.Fatalf("unbound = %q", res.Err)
 	}
 	env2, gw, _ := imageEnv(t)
-	gw.reply = func(string, string) ([]byte, error) { return nil, &StatusError{Status: 409, Body: []byte(`{"code":"","error":"no provider"}`)} }
+	gw.reply = func(string, string) ([]byte, error) {
+		return nil, &StatusError{Status: 409, Body: []byte(`{"code":"","error":"no provider"}`)}
+	}
 	if res := generateImage(context.Background(), env2, json.RawMessage(`{"prompt":"x"}`)); res.Err == "" || !strings.Contains(res.Err, "no provider") {
 		t.Fatalf("gateway refusal = %q", res.Err)
 	}

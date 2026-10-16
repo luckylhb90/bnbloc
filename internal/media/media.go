@@ -78,8 +78,9 @@ type Adapter interface {
 	Serves(cap Capability) bool
 	// Transcribe turns audio into text (Serves(CapTranscribe) adapters).
 	Transcribe(ctx context.Context, p Provider, audio []byte, mimeType, filename string) (string, error)
-	// Generate draws one image (Serves(CapImage) adapters).
-	Generate(ctx context.Context, p Provider, req ImageRequest) (*Image, error)
+	// Generate draws (or, with Input set, edits) images in one provider call
+	// (Serves(CapImage) adapters): Count images, 1…MaxMediaImages.
+	Generate(ctx context.Context, p Provider, req ImageRequest) ([]Image, error)
 }
 
 // adapters is the registry: every wire protocol family the platform can
@@ -110,10 +111,21 @@ type Provider struct {
 	client  *http.Client
 }
 
-// ImageRequest is one generation ask.
+// ImageRequest is one generation ask: Count images drawn from Prompt (an
+// edit of Input when set), in one provider call.
 type ImageRequest struct {
 	Prompt string
 	Aspect string // wire.MediaImageAspect*
+	Count  int
+	// Input, when set, is the image to change (an edit): its bytes and MIME
+	// type. The caller checks the caller may read it.
+	Input *ImageInput
+}
+
+// ImageInput is the image an edit changes.
+type ImageInput struct {
+	Bytes    []byte
+	MimeType string
 }
 
 // Image is one generated image: the bytes, sniffed MIME type and the
@@ -124,7 +136,11 @@ type Image struct {
 	RevisedPrompt string
 }
 
-// Settings reads and writes one capability's provider (the platform's row).
+// Settings reads and writes the providers: the platform's rows, and an
+// organization's own (the assist model's pattern: the platform's row carries
+// the hosts an organization's own provider may name; an organization's
+// provider replaces the platform's for its members while its host stays
+// allowed).
 type Settings struct {
 	Store store.PlatformSettingsStore
 	// Box seals the key; nil = the provider cannot be configured.
@@ -132,9 +148,10 @@ type Settings struct {
 	Now func() int64
 }
 
-// settings is the capability's modelsettings view.
-func (s *Settings) settings(cap Capability) *modelsettings.Settings {
-	return &modelsettings.Settings{Store: s.Store, Box: s.Box, Now: s.Now, Key: settingKey + string(cap)}
+// settings is the capability's modelsettings view (the platform's row, or
+// tenant's own).
+func (s *Settings) settings(cap Capability, tenant string) *modelsettings.Settings {
+	return &modelsettings.Settings{Store: s.Store, Box: s.Box, Now: s.Now, Key: settingKey + string(cap), Tenant: tenant}
 }
 
 // Configurable reports whether a provider can be stored and read.
@@ -142,14 +159,18 @@ func (s *Settings) Configurable() bool {
 	return s != nil && s.Store != nil && s.Box != nil
 }
 
-// View is the provider as the platform console shows it: never the key.
-func (s *Settings) View(ctx context.Context, cap Capability) (wire.MediaProviderConfig, error) {
-	v, err := s.settings(cap).View(ctx)
+// View is the provider as the console shows it: never the key (the
+// platform's row carries orgHosts; an organization's row shows none).
+func (s *Settings) View(ctx context.Context, cap Capability, tenant string) (wire.MediaProviderConfig, error) {
+	v, err := s.settings(cap, tenant).View(ctx)
 	if err != nil {
 		return wire.MediaProviderConfig{}, err
 	}
 	out := wire.MediaProviderConfig{Configurable: v.Configurable, BaseURL: v.BaseURL, Model: v.Model,
-		KeySet: v.KeySet, UpdatedBy: v.UpdatedBy, UpdatedAtMs: v.UpdatedAtMs, Params: map[string]string{}}
+		KeySet: v.KeySet, OrgHosts: v.OrgHosts, UpdatedBy: v.UpdatedBy, UpdatedAtMs: v.UpdatedAtMs, Params: map[string]string{}}
+	if out.OrgHosts == nil {
+		out.OrgHosts = []string{}
+	}
 	for k, val := range v.Own {
 		if strings.HasPrefix(k, ownParamsPrefix) {
 			out.Params[strings.TrimPrefix(k, ownParamsPrefix)] = val
@@ -168,9 +189,10 @@ const (
 	ownParamsPrefix = "params."
 )
 
-// Put stores a provider update. kind must name a registered adapter that
-// serves the capability.
-func (s *Settings) Put(ctx context.Context, cap Capability, u wire.MediaProviderUpdate, actor string) (wire.MediaProviderConfig, error) {
+// Put stores a provider update (the platform's row, or an organization's
+// own on a host the platform allows). kind must name a registered adapter
+// that serves the capability.
+func (s *Settings) Put(ctx context.Context, cap Capability, tenant string, u wire.MediaProviderUpdate, actor string) (wire.MediaProviderConfig, error) {
 	kind := strings.TrimSpace(u.Kind)
 	adapter, ok := adapters[kind]
 	if !ok {
@@ -186,20 +208,22 @@ func (s *Settings) Put(ctx context.Context, cap Capability, u wire.MediaProvider
 	for k, v := range u.Params {
 		own[ownParamsPrefix+k] = v
 	}
-	_, err := s.settings(cap).Put(ctx, modelsettings.Update{BaseURL: u.BaseURL, Model: u.Model,
-		APIKey: u.APIKey, ClearKey: u.ClearKey, Own: own}, actor)
+	_, err := s.settings(cap, tenant).Put(ctx, modelsettings.Update{BaseURL: u.BaseURL, Model: u.Model,
+		APIKey: u.APIKey, ClearKey: u.ClearKey, OrgHosts: u.OrgHosts, Own: own}, actor)
 	if err != nil {
 		return wire.MediaProviderConfig{}, err
 	}
-	return s.View(ctx, cap)
+	return s.View(ctx, cap, tenant)
 }
 
-// Provider resolves the capability's provider with its key opened and its
-// adapter selected; ok false when none is configured. It fails when the
-// stored kind names no registered adapter (an adapter was removed).
-func (s *Settings) Provider(ctx context.Context, cap Capability) (Provider, bool, error) {
-	set := s.settings(cap)
-	m, err := set.Model(ctx)
+// Provider resolves the capability's provider for an organization: its own
+// while set and its host allowed (modelsettings.Effective), else the
+// platform's, with its key opened and its adapter selected; ok false when
+// none is configured. It fails when the stored kind names no registered
+// adapter (an adapter was removed).
+func (s *Settings) Provider(ctx context.Context, cap Capability, tenant string) (Provider, bool, error) {
+	set := s.settings(cap, "")
+	m, err := set.Effective(ctx, tenant)
 	if err != nil || !m.Configured() {
 		return Provider{}, false, err
 	}
@@ -212,9 +236,20 @@ func (s *Settings) Provider(ctx context.Context, cap Capability) (Provider, bool
 		return Provider{}, false, fmt.Errorf("the %s provider's kind %q is not a registered adapter", cap, kind)
 	}
 	// The params arrive with the kind in the row's own fields; read them
-	// through the one reader of the row.
+	// through the one reader of the row. An organization's own provider's
+	// params are its row's own (the kind travels in the platform row and
+	// every org row).
 	params := map[string]string{}
-	v, err := set.View(ctx)
+	row := set
+	if m.Org {
+		row = s.settings(cap, tenant)
+		if kind, err = row.Own(ctx, ownKind); err != nil || strings.TrimSpace(kind) == "" {
+			// An organization's row without its own kind follows the
+			// platform's adapter.
+			_ = err
+		}
+	}
+	v, err := row.View(ctx)
 	if err != nil {
 		return Provider{}, false, err
 	}
@@ -256,8 +291,8 @@ func (p Provider) Transcribe(ctx context.Context, audio []byte, mimeType, filena
 	return p.adapter.Transcribe(ctx, p, audio, mimeType, filename)
 }
 
-// Generate draws one image through the capability's provider.
-func (p Provider) Generate(ctx context.Context, req ImageRequest) (*Image, error) {
+// Generate draws (or edits) images through the capability's provider.
+func (p Provider) Generate(ctx context.Context, req ImageRequest) ([]Image, error) {
 	if p.adapter == nil || !p.adapter.Serves(CapImage) {
 		return nil, ErrProviderUnreachable
 	}

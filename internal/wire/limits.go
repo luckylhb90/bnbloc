@@ -34,6 +34,7 @@ const (
 	MaxMediaImagePrompt     = 4000      // a generation's prompt, in characters
 	MaxMediaImageReplyBytes = 16 << 20  // read of one generation's reply body
 	MaxMediaImageBytes      = 12 << 20  // one generated image, decoded
+	MaxMediaImages          = 4         // images one generation call may draw
 )
 
 // ContentTagPattern is the one rule for a content component tag: lower-case

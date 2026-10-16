@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -105,72 +104,17 @@ func (s *Service) serveAppAI(w http.ResponseWriter, r *http.Request, c appCapabi
 }
 
 // serveAppAIImage answers POST ~app/ai/image (docs/prd/
-// 2026-10-16-voice-and-image-generation.md §5): an app's page draws one
-// image on the organization's media provider. The same rails as app.ai: a
-// signed-in caller, the caller's per-member assist rate, audited as an
-// assist run with the app's id, the image never audited.
+// 2026-10-16-voice-and-image-generation.md §5): an app's page draws images
+// on the organization's media provider — runMediaImage, the same rails as
+// app.ai (a signed-in caller, the caller's assist rate, audited with the
+// app's id, the images never audited).
 func (s *Service) serveAppAIImage(w http.ResponseWriter, r *http.Request, c appCapability) {
 	w.Header().Set("Cache-Control", "no-store")
 	if c.scope.Kind != svcauth.AppMember {
 		writeAppErr(w, errAppAIVisitor)
 		return
 	}
-	claims := auth.Claims{Subject: c.scope.Participant, Tenant: c.tenant}
-	if !s.assistLimiter.get(assistRate, assistBurst, s.Peers.Size).allow(claims.Tenant + "/" + claims.Subject) {
-		httpx.Error(w, "too many AI requests: try again in a minute", http.StatusTooManyRequests)
-		return
-	}
-	raw, ok := readBody(w, r, 64<<10)
-	if !ok {
-		return
-	}
-	var req wire.MediaImageRequest
-	if err := json.Unmarshal(raw, &req); err != nil {
-		httpx.Error(w, "invalid json body", http.StatusBadRequest)
-		return
-	}
-	req.Prompt = strings.TrimSpace(req.Prompt)
-	switch {
-	case req.Prompt == "":
-		httpx.Error(w, "ai.image needs a prompt", http.StatusBadRequest)
-		return
-	case !utf8.ValidString(req.Prompt) || utf8.RuneCountInString(req.Prompt) > wire.MaxMediaImagePrompt:
-		httpx.Error(w, fmt.Sprintf("the prompt is at most %d characters", wire.MaxMediaImagePrompt), http.StatusBadRequest)
-		return
-	case req.Aspect != "" && !aspectAllowed(req.Aspect):
-		httpx.Error(w, "aspect must be one of "+strings.Join(wire.MediaImageAspects, ", "), http.StatusBadRequest)
-		return
-	}
-	ctx := r.Context()
-	p, has, err := s.mediaProvider(ctx, claims, media.CapImage)
-	if err != nil {
-		obs.ServerError(w, "read the media provider failed", err)
-		httpx.Error(w, "read the media provider failed", http.StatusInternalServerError)
-		return
-	}
-	if !has {
-		httpx.Error(w, "image generation is not available here: the deployment has no image provider, or your organization turned AI off", http.StatusConflict)
-		return
-	}
-	start := time.Now()
-	img, err := p.Generate(ctx, media.ImageRequest{Prompt: req.Prompt, Aspect: req.Aspect})
-	usage := wire.AssistUsage{Model: p.Model.Model, LatencyMs: time.Since(start).Milliseconds()}
-	s.auditModelRun(ctx, claims, "app:"+c.scope.AppID+":image", "room "+c.scope.RoomID, assist.Model(p.Model), usage, err)
-	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			return
-		}
-		writeMediaErr(w, err)
-		return
-	}
-	width, height := pngSize(img.Bytes)
-	httpx.WriteJSON(w, http.StatusOK, wire.MediaImageReply{
-		DataURL:       "data:" + img.MimeType + ";base64," + base64.StdEncoding.EncodeToString(img.Bytes),
-		MimeType:      img.MimeType,
-		Width:         width,
-		Height:        height,
-		RevisedPrompt: img.RevisedPrompt,
-	})
+	s.runMediaImage(w, r, auth.Claims{Subject: c.scope.Participant, Tenant: c.tenant}, readJSONMediaImage, "app:"+c.scope.AppID+":image")
 }
 
 // serveAppAIVoice answers POST ~app/ai/voice: an app's page turns spoken

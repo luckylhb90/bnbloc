@@ -32,7 +32,7 @@ const (
 	appsSelfTest    = "interactive-apps/references/self-test.md"
 	sdkBegin        = "<!-- sdk:begin -->"
 	sdkEnd          = "<!-- sdk:end -->"
-	appsSkillMaxTk  = 1850 // below the 8 KiB a core without agentProfile inlines a skill body at
+	appsSkillMaxTk  = 1870 // below the 8 KiB a core without agentProfile inlines a skill body at
 	appBuilderMaxTk = 700
 )
 

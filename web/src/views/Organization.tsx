@@ -23,6 +23,7 @@ import { ErrorBox } from "@/ui/ErrorBox";
 import { Switch } from "@/ui/Segment";
 import { RequestsTab } from "@/views/org/RequestsTab";
 import { OrgAssistModel } from "@/views/org/OrgAssistModel";
+import { OrgMediaProviders } from "@/views/org/OrgMediaProviders";
 import { TenantsTab } from "@/views/org/TenantsTab";
 import { OrgSyncTab } from "@/views/org/OrgSyncTab";
 import { DeploymentCard } from "@/views/org/DeploymentCard";
@@ -717,6 +718,7 @@ function SettingsTab() {
           to, is sent to that model. Off: the assist buttons are hidden for this organization.
         </p>
         {!(settings?.assistDisabled ?? false) && <OrgAssistModel />}
+        {!(settings?.assistDisabled ?? false) && <OrgMediaProviders />}
       </div>
       <TenantRetentionSection />
     </section>

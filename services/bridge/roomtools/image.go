@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"path"
+	"strconv"
 	"strings"
 
 	"github.com/luckylhb90/bnbloc/internal/roomlog"
@@ -40,6 +42,7 @@ func generateImageTool() Tool {
 type generateImageArgs struct {
 	Prompt   string `json:"prompt"`
 	Aspect   string `json:"aspect"`
+	Count    int    `json:"count"`
 	FileName string `json:"fileName"`
 }
 
@@ -64,45 +67,81 @@ func generateImage(ctx context.Context, env *Env, args json.RawMessage) Result {
 	if in.Aspect != "" {
 		body["aspect"] = in.Aspect
 	}
+	if in.Count > 1 {
+		body["count"] = in.Count
+	}
 	raw, err := env.Gateway.Do(ctx, "POST", "/v1/media/image?"+q.Encode(), body)
 	if err != nil {
 		return refusal("generating the image", err)
 	}
 	var reply struct {
-		DataURL       string `json:"dataUrl"`
-		MimeType      string `json:"mimeType"`
-		Width         int    `json:"width"`
-		Height        int    `json:"height"`
-		RevisedPrompt string `json:"revisedPrompt"`
+		Images []struct {
+			DataURL       string `json:"dataUrl"`
+			MimeType      string `json:"mimeType"`
+			Width         int    `json:"width"`
+			Height        int    `json:"height"`
+			RevisedPrompt string `json:"revisedPrompt"`
+		} `json:"images"`
 	}
-	if err := json.Unmarshal(raw, &reply); err != nil || !strings.HasPrefix(reply.DataURL, "data:") {
+	if err := json.Unmarshal(raw, &reply); err != nil || len(reply.Images) == 0 {
 		return toolError("the image provider's reply could not be read")
 	}
-	image, err := decodeDataURL(reply.DataURL)
-	if err != nil {
-		return toolError("the image provider's reply could not be read: %v", err)
+	// Every image of the batch publishes under its own name; the first keeps
+	// the plain name, the rest are numbered (poster.png, poster-2.png…).
+	base := strings.TrimSpace(in.FileName)
+	published := make([]map[string]any, 0, len(reply.Images))
+	for i, img := range reply.Images {
+		image, err := decodeDataURL(img.DataURL)
+		if err != nil {
+			return toolError("the image provider's reply could not be read: %v", err)
+		}
+		name := base
+		if name == "" {
+			name = imageFileName(in.Prompt, img.MimeType)
+			base = name
+		}
+		if i > 0 {
+			name = numberedFile(base, i+1)
+		}
+		artifactID, err := env.Publish(ctx, room, job, name, img.MimeType, image)
+		if err != nil {
+			return toolError("publishing %s into the room failed: %v", name, err)
+		}
+		row := map[string]any{"artifactId": artifactID, "fileName": name}
+		if img.Width > 0 {
+			row["width"], row["height"] = img.Width, img.Height
+		}
+		if revised := strings.TrimSpace(img.RevisedPrompt); revised != "" {
+			// What the provider wrote, not what the person said: data.
+			row["revisedPrompt"] = roomlog.Fence(imageAuthor, revised)
+		}
+		published = append(published, row)
 	}
-	name := strings.TrimSpace(in.FileName)
-	if name == "" {
-		name = imageFileName(in.Prompt, reply.MimeType)
+	return Result{Value: map[string]any{
+		"images": published,
+		"note":   "The images are in the room's Docs; tell the person they are there and what they show.",
+	}}
+}
+
+// numberedFile names the n-th image of a batch: the base with -n before
+// the extension (poster.png, poster-3.png).
+func numberedFile(base string, n int) string {
+	ext := path.Ext(base)
+	if ext == "" {
+		ext = ".png"
 	}
-	artifactID, err := env.Publish(ctx, room, job, name, reply.MimeType, image)
-	if err != nil {
-		return toolError("publishing the image into the room failed: %v", err)
+	return strings.TrimSuffix(base, ext) + "-" + strconv.Itoa(n) + ext
+}
+
+// extOf is a MIME type's file extension.
+func extOf(mimeType string) string {
+	switch mimeType {
+	case "image/jpeg":
+		return ".jpg"
+	case "image/webp":
+		return ".webp"
 	}
-	out := map[string]any{
-		"artifactId": artifactID,
-		"fileName":   name,
-		"note":       "The image is in the room's Docs; tell the person it is there and what it shows.",
-	}
-	if reply.Width > 0 {
-		out["width"], out["height"] = reply.Width, reply.Height
-	}
-	if revised := strings.TrimSpace(reply.RevisedPrompt); revised != "" {
-		// What the provider wrote, not what the person said: data.
-		out["revisedPrompt"] = roomlog.Fence(imageAuthor, revised)
-	}
-	return Result{Value: out}
+	return ".png"
 }
 
 // decodeDataURL splits a data:...;base64,<bytes> URL into its bytes.

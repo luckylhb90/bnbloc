@@ -23,6 +23,7 @@ function MediaProviderFields({ cap, label, hint }: { readonly cap: "transcribe" 
   const [kind, setKind] = useState<string>(MEDIA_ADAPTER_KINDS[0]);
   const [baseUrl, setBaseUrl] = useState("");
   const [model, setModel] = useState("");
+  const [orgHosts, setOrgHosts] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [replacing, setReplacing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -35,6 +36,7 @@ function MediaProviderFields({ cap, label, hint }: { readonly cap: "transcribe" 
     setKind(c.kind || MEDIA_ADAPTER_KINDS[0]);
     setBaseUrl(c.baseUrl);
     setModel(c.model);
+    setOrgHosts((c.orgHosts ?? []).join(", "));
     setApiKey("");
     setReplacing(false);
   };
@@ -56,7 +58,8 @@ function MediaProviderFields({ cap, label, hint }: { readonly cap: "transcribe" 
     return error ? <ErrorBox>{error}</ErrorBox> : <p className="text-sm text-[var(--color-fg-muted)]">Loading…</p>;
   }
   const dirty =
-    kind !== saved.kind || baseUrl.trim() !== saved.baseUrl || model.trim() !== saved.model || !!apiKey.trim();
+    kind !== saved.kind || baseUrl.trim() !== saved.baseUrl || model.trim() !== saved.model || !!apiKey.trim() ||
+    orgHostList(orgHosts).join(",") !== (saved.orgHosts ?? []).join(",");
   const on = !!saved.baseUrl && !!saved.model;
 
   const save = async (clearKey = false) => {
@@ -129,6 +132,9 @@ function MediaProviderFields({ cap, label, hint }: { readonly cap: "transcribe" 
           <Field label="Model" hint="The model name the provider serves this capability with.">
             <Input value={model} onChange={(e) => setModel(e.target.value)} />
           </Field>
+          <Field label="Organization hosts" hint="Hosts organizations may use for their own provider (comma or one per line). None: organizations use this provider.">
+            <Input value={orgHosts} onChange={(e) => setOrgHosts(e.target.value)} placeholder="llm.example.com" />
+          </Field>
           <Field label="API key" hint={saved.keySet && !replacing ? "Stored sealed; never shown again." : "Sent once and stored sealed."}>
             {saved.keySet && !replacing ? (
               <div className="flex items-center gap-2">
@@ -175,6 +181,14 @@ function MediaProviderFields({ cap, label, hint }: { readonly cap: "transcribe" 
       )}
     </Card>
   );
+}
+
+// orgHostList splits the org-hosts input (comma or space separated).
+function orgHostList(text: string): string[] {
+  return text
+    .split(/[,\s]+/)
+    .map((h) => h.trim())
+    .filter(Boolean);
 }
 
 // PlatformMediaProviders is the two capability cards.

@@ -36,7 +36,7 @@ func settings(t *testing.T) *Settings {
 // putProvider stores the test provider for cap.
 func putProvider(t *testing.T, s *Settings, cap Capability, srvURL string) {
 	t.Helper()
-	_, err := s.Put(context.Background(), cap, wire.MediaProviderUpdate{
+	_, err := s.Put(context.Background(), cap, "", wire.MediaProviderUpdate{
 		Kind: AdapterKindOpenAICompatible, BaseURL: srvURL, Model: "test-model", APIKey: "sk-test",
 		Params: map[string]string{"image.size.square": "1024x1024"},
 	}, "ops")
@@ -48,7 +48,7 @@ func putProvider(t *testing.T, s *Settings, cap Capability, srvURL string) {
 // provider resolves cap's provider or fails.
 func provider(t *testing.T, s *Settings, cap Capability) Provider {
 	t.Helper()
-	p, ok, err := s.Provider(context.Background(), cap)
+	p, ok, err := s.Provider(context.Background(), cap, "")
 	if err != nil || !ok {
 		t.Fatalf("provider = %v, %v, %v", p, ok, err)
 	}
@@ -60,7 +60,7 @@ func provider(t *testing.T, s *Settings, cap Capability) Provider {
 func TestSettingsRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	s := settings(t)
-	if _, ok, _ := s.Provider(ctx, CapTranscribe); ok {
+	if _, ok, _ := s.Provider(ctx, CapTranscribe, ""); ok {
 		t.Fatal("no provider is configured yet")
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -69,7 +69,7 @@ func TestSettingsRoundTrip(t *testing.T) {
 	}))
 	defer srv.Close()
 	putProvider(t, s, CapTranscribe, srv.URL+"/v1")
-	view, err := s.View(ctx, CapTranscribe)
+	view, err := s.View(ctx, CapTranscribe, "")
 	if err != nil || !view.KeySet || view.Model != "test-model" || view.Kind != AdapterKindOpenAICompatible {
 		t.Fatalf("view = %+v %v", view, err)
 	}
@@ -84,17 +84,17 @@ func TestSettingsRoundTrip(t *testing.T) {
 	if strings.Contains(row.Value, "sk-test") {
 		t.Fatal("the key is stored in clear")
 	}
-	if _, err := s.Put(ctx, CapTranscribe, wire.MediaProviderUpdate{Kind: "no-such-adapter", BaseURL: srv.URL, Model: "m"}, "ops"); err == nil {
+	if _, err := s.Put(ctx, CapTranscribe, "", wire.MediaProviderUpdate{Kind: "no-such-adapter", BaseURL: srv.URL, Model: "m"}, "ops"); err == nil {
 		t.Fatal("an unknown kind must be refused")
 	}
-	if _, err := s.Put(ctx, CapTranscribe, wire.MediaProviderUpdate{Kind: AdapterKindOpenAICompatible, BaseURL: srv.URL + "/v1", Model: "m",
+	if _, err := s.Put(ctx, CapTranscribe, "", wire.MediaProviderUpdate{Kind: AdapterKindOpenAICompatible, BaseURL: srv.URL + "/v1", Model: "m",
 		Params: map[string]string{"k": strings.Repeat("x", 600)}}, "ops"); err == nil {
 		t.Fatal("a params value over 512 bytes must be refused")
 	}
-	if _, err := s.Put(ctx, CapTranscribe, wire.MediaProviderUpdate{Kind: AdapterKindOpenAICompatible, BaseURL: "", Model: ""}, "ops"); err != nil {
+	if _, err := s.Put(ctx, CapTranscribe, "", wire.MediaProviderUpdate{Kind: AdapterKindOpenAICompatible, BaseURL: "", Model: ""}, "ops"); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok, _ := s.Provider(ctx, CapTranscribe); ok {
+	if _, ok, _ := s.Provider(ctx, CapTranscribe, ""); ok {
 		t.Fatal("an empty base URL clears the provider")
 	}
 }
@@ -172,15 +172,73 @@ func TestGenerateWire(t *testing.T) {
 	}))
 	defer srv.Close()
 	putProvider(t, s, CapImage, srv.URL+"/v1")
-	img, err := provider(t, s, CapImage).Generate(context.Background(), ImageRequest{Prompt: "a poster", Aspect: wire.MediaImageAspectLandscape})
-	if err != nil {
-		t.Fatal(err)
+	imgs, err := provider(t, s, CapImage).Generate(context.Background(), ImageRequest{Prompt: "a poster", Aspect: wire.MediaImageAspectLandscape})
+	if err != nil || len(imgs) != 1 {
+		t.Fatalf("imgs = %v %v", imgs, err)
 	}
+	img := imgs[0]
 	if !bytes.Equal(img.Bytes, tinyPNG) || img.MimeType != "image/png" || img.RevisedPrompt != "a better one" {
 		t.Fatalf("img = %d bytes %q %q", len(img.Bytes), img.MimeType, img.RevisedPrompt)
 	}
 	if gotBody["response_format"] != "b64_json" || gotBody["size"] != "1536x1024" || gotBody["prompt"] != "a poster" || gotBody["model"] != "test-model" {
 		t.Fatalf("body = %v", gotBody)
+	}
+}
+
+// A batch ask draws n images in ONE provider call (n rides the body).
+func TestGenerateBatchWire(t *testing.T) {
+	s := settings(t)
+	var gotN any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		gotN = body["n"]
+		b64 := base64.StdEncoding.EncodeToString(tinyPNG)
+		_, _ = w.Write([]byte(`{"data":[{"b64_json":"` + b64 + `"},{"b64_json":"` + b64 + `"},{"b64_json":"` + b64 + `"}]}`))
+	}))
+	defer srv.Close()
+	putProvider(t, s, CapImage, srv.URL+"/v1")
+	imgs, err := provider(t, s, CapImage).Generate(context.Background(), ImageRequest{Prompt: "three cats", Count: 3})
+	if err != nil || len(imgs) != 3 {
+		t.Fatalf("imgs = %d %v", len(imgs), err)
+	}
+	if gotN != float64(3) {
+		t.Fatalf("n = %v", gotN)
+	}
+}
+
+// An edit posts multipart to /images/edits with the input image as the
+// "image" part and the prompt as a field.
+func TestGenerateEditWire(t *testing.T) {
+	s := settings(t)
+	var gotPath, gotPrompt string
+	var gotFile []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		if err := r.ParseMultipartForm(32 << 20); err != nil {
+			t.Errorf("multipart: %v", err)
+			return
+		}
+		gotPrompt = r.FormValue("prompt")
+		file, _, err := r.FormFile("image")
+		if err == nil {
+			gotFile, _ = io.ReadAll(file)
+			_ = file.Close()
+		}
+		b64 := base64.StdEncoding.EncodeToString(tinyPNG)
+		_, _ = w.Write([]byte(`{"data":[{"b64_json":"` + b64 + `"}]}`))
+	}))
+	defer srv.Close()
+	putProvider(t, s, CapImage, srv.URL+"/v1")
+	in := tinyPNG
+	imgs, err := provider(t, s, CapImage).Generate(context.Background(), ImageRequest{
+		Prompt: "a red hat on the cat", Input: &ImageInput{Bytes: in, MimeType: "image/png"},
+	})
+	if err != nil || len(imgs) != 1 {
+		t.Fatalf("edit = %v %v", imgs, err)
+	}
+	if gotPath != "/v1/images/edits" || gotPrompt != "a red hat on the cat" || !bytes.Equal(gotFile, in) {
+		t.Fatalf("path=%q prompt=%q file=%d bytes", gotPath, gotPrompt, len(gotFile))
 	}
 }
 
@@ -284,7 +342,7 @@ func TestRemovedAdapter(t *testing.T) {
 		Value: `{"baseUrl":"https://llm.example.com/v1","model":"m","kind":"gone"}`}); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok, err := s.Provider(ctx, CapImage); err == nil || ok {
+	if _, ok, err := s.Provider(ctx, CapImage, ""); err == nil || ok {
 		t.Fatalf("a removed adapter must fail: %v %v", ok, err)
 	}
 }

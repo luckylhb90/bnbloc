@@ -143,11 +143,13 @@ declare global {
      *  an anonymous visitor, 409 "ai_unavailable" where the organization
      *  has no model or turned AI off, 429 when the caller asks too often. */
     ai(req: { prompt: string; input?: string | object; json?: boolean }): Promise<{ text?: string; json?: Record<string, unknown> }>;
-    /** Draws one image on the organization's AI: the image comes back
-     *  inline ({dataUrl, mimeType, width, height, revisedPrompt?}), never a
-     *  link out. aspect: "square" (default) | "landscape" | "portrait".
-     *  Signed-in callers only, like ai itself. */
-    ai.image(req: { prompt: string; aspect?: "square" | "landscape" | "portrait" }): Promise<{ dataUrl: string; mimeType: string; width: number; height: number; revisedPrompt?: string }>;
+    /** Draws images on the organization's AI (count of them in one call,
+     *  at most 4): they come back inline (images: [{dataUrl, mimeType,
+     *  width, height, revisedPrompt?}]), never a link out. With image (a
+     *  previous reply's dataUrl) the provider changes that image instead of
+     *  drawing a new one. aspect: "square" (default) | "landscape" |
+     *  "portrait". Signed-in callers only, like ai itself. */
+    ai.image(req: { prompt: string; aspect?: "square" | "landscape" | "portrait"; count?: number; image?: string }): Promise<{ images: { dataUrl: string; mimeType: string; width: number; height: number; revisedPrompt?: string }[] }>;
     /** Turns spoken audio (a Blob or File from getUserMedia or an input) into
      *  text. Signed-in callers only, like ai itself. */
     ai.voice(blob: Blob, filename?: string): Promise<{ text: string }>;

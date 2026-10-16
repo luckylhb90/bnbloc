@@ -41,8 +41,9 @@ func (s *Service) mediaSettings() *media.Settings {
 }
 
 // mediaProvider resolves the capability's provider for claims'
-// organization: a configured provider and an organization that has not
-// turned AI off (the assist switch's meaning: no data leaving to a model).
+// organization: its own while set and allowed (media.Settings.Provider), a
+// configured provider, and an organization that has not turned AI off (the
+// assist switch's meaning: no data leaving to a model).
 func (s *Service) mediaProvider(ctx context.Context, claims auth.Claims, cap media.Capability) (media.Provider, bool, error) {
 	if s.PlatformSettings == nil {
 		return media.Provider{}, false, nil
@@ -54,7 +55,7 @@ func (s *Service) mediaProvider(ctx context.Context, claims auth.Claims, cap med
 	if t.AssistDisabled {
 		return media.Provider{}, false, nil
 	}
-	return s.mediaSettings().Provider(ctx, cap)
+	return s.mediaSettings().Provider(ctx, cap, claims.Tenant)
 }
 
 // mediaCaller resolves who a media call acts as: the caller themself, or
@@ -151,25 +152,42 @@ func (s *Service) handleMediaTranscribe(w http.ResponseWriter, r *http.Request, 
 // Same admission, budget, rate and audit as a transcription (never the
 // prompt, never the image).
 func (s *Service) handleMediaImage(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
-	ctx := r.Context()
 	// A room tool's call runs as the job's requester (?job=&room=, the
 	// content routes' admission): the bridge driving the job acts for them.
 	actor, ok := s.mediaCaller(w, r, claims)
 	if !ok {
 		return
 	}
-	claims = actor
-	if !s.assistLimiter.get(assistRate, assistBurst, s.Peers.Size).allow(claims.Tenant + "/" + claims.Subject) {
-		httpx.Error(w, "too many requests: try again in a minute", http.StatusTooManyRequests)
-		return
-	}
-	raw, ok := readBody(w, r, 64<<10)
+	s.runMediaImage(w, r, actor, readJSONMediaImage, "image")
+}
+
+// readJSONMediaImage reads a member route's JSON body.
+func readJSONMediaImage(w http.ResponseWriter, r *http.Request) (wire.MediaImageRequest, bool) {
+	raw, ok := readBody(w, r, 64<<10+wire.MaxMediaImageBytes)
 	if !ok {
-		return
+		return wire.MediaImageRequest{}, false
 	}
 	var req wire.MediaImageRequest
 	if err := json.Unmarshal(raw, &req); err != nil {
 		httpx.Error(w, "invalid json body", http.StatusBadRequest)
+		return wire.MediaImageRequest{}, false
+	}
+	return req, true
+}
+
+// runMediaImage is the ONE owner of an image generation call (the member
+// route and an app's ~app/ai/image): the caller's assist rate, the request's
+// validation, the organization's provider, the generation (Count images in
+// one provider call; an edit of the request's inline image), the audit row
+// (never the prompt, never the images) and the reply.
+func (s *Service) runMediaImage(w http.ResponseWriter, r *http.Request, claims auth.Claims, read func(http.ResponseWriter, *http.Request) (wire.MediaImageRequest, bool), auditName string) {
+	ctx := r.Context()
+	if !s.assistLimiter.get(assistRate, assistBurst, s.Peers.Size).allow(claims.Tenant + "/" + claims.Subject) {
+		httpx.Error(w, "too many requests: try again in a minute", http.StatusTooManyRequests)
+		return
+	}
+	req, ok := read(w, r)
+	if !ok {
 		return
 	}
 	req.Prompt = strings.TrimSpace(req.Prompt)
@@ -184,6 +202,15 @@ func (s *Service) handleMediaImage(w http.ResponseWriter, r *http.Request, claim
 		httpx.Error(w, "aspect must be one of "+strings.Join(wire.MediaImageAspects, ", "), http.StatusBadRequest)
 		return
 	}
+	var input *media.ImageInput
+	if req.Image != "" {
+		b, mimeType, err := decodeDataURLImage(req.Image)
+		if err != nil {
+			httpx.Error(w, "image must be a data URL of a PNG, JPEG or WebP image", http.StatusBadRequest)
+			return
+		}
+		input = &media.ImageInput{Bytes: b, MimeType: mimeType}
+	}
 	p, has, err := s.mediaProvider(ctx, claims, media.CapImage)
 	if err != nil {
 		obs.ServerError(w, "read the media provider failed", err)
@@ -194,18 +221,68 @@ func (s *Service) handleMediaImage(w http.ResponseWriter, r *http.Request, claim
 		httpx.Error(w, errMediaUnavailable.Error(), http.StatusConflict)
 		return
 	}
+	if req.Count < 1 {
+		req.Count = 1 // the default: one image
+	}
+	if req.Count > wire.MaxMediaImages {
+		httpx.Error(w, fmt.Sprintf("count must be 1…%d", wire.MaxMediaImages), http.StatusBadRequest)
+		return
+	}
 	start := time.Now()
-	img, err := p.Generate(ctx, media.ImageRequest{Prompt: req.Prompt, Aspect: req.Aspect})
+	imgs, err := p.Generate(ctx, media.ImageRequest{Prompt: req.Prompt, Aspect: req.Aspect, Count: req.Count, Input: input})
 	usage := wire.AssistUsage{Model: p.Model.Model, LatencyMs: timeSinceMs(s, start)}
-	s.auditMediaRun(ctx, claims, "image", usage, err)
+	s.auditMediaRun(ctx, claims, auditName, usage, err)
 	if err != nil {
 		writeMediaErr(w, err)
 		return
 	}
-	dataURL := "data:" + img.MimeType + ";base64," + base64Of(img.Bytes)
-	width, height := pngSize(img.Bytes)
-	httpx.WriteJSON(w, http.StatusOK, wire.MediaImageReply{DataURL: dataURL, MimeType: img.MimeType,
-		Width: width, Height: height, RevisedPrompt: img.RevisedPrompt})
+	out := wire.MediaImageReply{Images: make([]wire.MediaImage, 0, len(imgs))}
+	for _, img := range imgs {
+		width, height := pngSize(img.Bytes)
+		out.Images = append(out.Images, wire.MediaImage{
+			DataURL:       "data:" + img.MimeType + ";base64," + base64Of(img.Bytes),
+			MimeType:      img.MimeType,
+			Width:         width,
+			Height:        height,
+			RevisedPrompt: img.RevisedPrompt,
+		})
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+// decodeDataURLImage splits a data:…;base64,<bytes> URL into sniffed image
+// bytes and their MIME type.
+func decodeDataURLImage(dataURL string) ([]byte, string, error) {
+	_, b64, ok := strings.Cut(dataURL, ",")
+	if !ok {
+		return nil, "", errBadDataURL
+	}
+	b, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil || len(b) == 0 || len(b) > wire.MaxMediaImageBytes {
+		return nil, "", errBadDataURL
+	}
+	mimeType := sniffMIME(b)
+	if mimeType == "" {
+		return nil, "", errBadDataURL
+	}
+	return b, mimeType, nil
+}
+
+// errBadDataURL: an input image that is not an inline PNG, JPEG or WebP.
+var errBadDataURL = errors.New("not an inline image")
+
+// sniffMIME is the image sniff of the gateway's media path (media.Image's
+// sniff spelled here; the owner is the adapter's).
+func sniffMIME(b []byte) string {
+	switch {
+	case len(b) >= 8 && string(b[:8]) == "\x89PNG\r\n\x1a\n":
+		return "image/png"
+	case len(b) >= 3 && b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF:
+		return "image/jpeg"
+	case len(b) >= 12 && string(b[:4]) == "RIFF" && string(b[8:12]) == "WEBP":
+		return "image/webp"
+	}
+	return ""
 }
 
 // auditMediaRun records one media model call: the capability's name, the
@@ -311,7 +388,7 @@ func (s *Service) handleMediaProvider(w http.ResponseWriter, r *http.Request, _ 
 		httpx.Error(w, "capability must be one of "+strings.Join(capNames(), ", "), http.StatusNotFound)
 		return
 	}
-	view, err := s.mediaSettings().View(r.Context(), cap)
+	view, err := s.mediaSettings().View(r.Context(), cap, "")
 	if err != nil {
 		obs.ServerError(w, "read the media provider failed", err)
 		httpx.Error(w, "read the media provider failed", http.StatusInternalServerError)
@@ -341,7 +418,7 @@ func (s *Service) handlePutMediaProvider(w http.ResponseWriter, r *http.Request,
 	if !httpx.DecodeJSON(w, r, 64<<10, &u) {
 		return
 	}
-	view, err := s.mediaSettings().Put(r.Context(), cap, u, claims.Subject)
+	view, err := s.mediaSettings().Put(r.Context(), cap, "", u, claims.Subject)
 	switch {
 	case errors.Is(err, modelsettings.ErrSettingsOff):
 		httpx.Error(w, err.Error(), http.StatusConflict)
@@ -367,17 +444,92 @@ func hostOfBaseURL(base string) string {
 	return u.Host
 }
 
-// handleTestMediaProvider answers POST /v1/platform/media/{capability}/test:
-// one real short call through the stored provider, its latency reported. A
-// failure is the answer, not an HTTP error.
-func (s *Service) handleTestMediaProvider(w http.ResponseWriter, r *http.Request, _ auth.Claims) {
+// handleOrgMediaProvider answers GET /v1/tenant/media/{capability}: the
+// organization's own provider and the hosts it may name (the platform's
+// orgHosts; empty = an organization cannot set its own).
+func (s *Service) handleOrgMediaProvider(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	cap, ok := mediaCapability(r)
 	if !ok {
 		httpx.Error(w, "capability must be one of "+strings.Join(capNames(), ", "), http.StatusNotFound)
 		return
 	}
 	ctx := r.Context()
-	p, has, err := s.mediaProvider(ctx, auth.Claims{}, cap)
+	own, err := s.mediaSettings().View(ctx, cap, claims.Tenant)
+	if err != nil {
+		obs.ServerError(w, "read the media provider failed", err)
+		httpx.Error(w, "read the media provider failed", http.StatusInternalServerError)
+		return
+	}
+	platform, err := s.mediaSettings().View(ctx, cap, "")
+	if err != nil {
+		obs.ServerError(w, "read the media provider failed", err)
+		httpx.Error(w, "read the media provider failed", http.StatusInternalServerError)
+		return
+	}
+	out := wire.MediaOrgProvider{Provider: own, AllowedHosts: platform.OrgHosts, PlatformModel: platform.Model}
+	if out.AllowedHosts == nil {
+		out.AllowedHosts = []string{}
+	}
+	if out.Provider.OrgHosts == nil {
+		out.Provider.OrgHosts = []string{}
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+// handlePutOrgMediaProvider answers PUT /v1/tenant/media/{capability}: the
+// organization's own provider, on a host the platform allows. An empty base
+// URL goes back to the platform's.
+func (s *Service) handlePutOrgMediaProvider(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
+	cap, ok := mediaCapability(r)
+	if !ok {
+		httpx.Error(w, "capability must be one of "+strings.Join(capNames(), ", "), http.StatusNotFound)
+		return
+	}
+	var u wire.MediaProviderUpdate
+	if !httpx.DecodeJSON(w, r, 64<<10, &u) {
+		return
+	}
+	u.OrgHosts = nil // an organization never sets the hosts
+	view, err := s.mediaSettings().Put(r.Context(), cap, claims.Tenant, u, claims.Subject)
+	switch {
+	case errors.Is(err, modelsettings.ErrSettingsOff):
+		httpx.Error(w, err.Error(), http.StatusConflict)
+	case errors.As(err, &modelsettings.InvalidError{}):
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
+	case err != nil:
+		obs.ServerError(w, "save the media provider failed", err)
+		httpx.Error(w, "save the media provider failed", http.StatusInternalServerError)
+	default:
+		s.audit(r.Context(), claims.Tenant, store.ExtAuditRecord{Kind: wire.AuditKindAssist, Name: "org-media-" + string(cap),
+			Action: "provider-set", Actor: claims.Subject, Outcome: wire.AuditOutcomeAllow,
+			Detail: "kind " + view.Kind + ", model " + view.Model + " at " + hostOfBaseURL(view.BaseURL)})
+		s.handleOrgMediaProvider(w, r, claims)
+	}
+}
+
+// handleTestMediaProvider answers POST /v1/platform/media/{capability}/test
+// through the platform's provider.
+func (s *Service) handleTestMediaProvider(w http.ResponseWriter, r *http.Request, _ auth.Claims) {
+	s.testMediaProvider(w, r, "")
+}
+
+// handleTestOrgMediaProvider answers POST
+// /v1/tenant/media/{capability}/test through the organization's effective
+// provider (its own, else the platform's).
+func (s *Service) handleTestOrgMediaProvider(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
+	s.testMediaProvider(w, r, claims.Tenant)
+}
+
+// testMediaProvider makes one real short call through the capability's
+// provider for tenant; a failure is the answer, not an HTTP error.
+func (s *Service) testMediaProvider(w http.ResponseWriter, r *http.Request, tenant string) {
+	cap, ok := mediaCapability(r)
+	if !ok {
+		httpx.Error(w, "capability must be one of "+strings.Join(capNames(), ", "), http.StatusNotFound)
+		return
+	}
+	ctx := r.Context()
+	p, has, err := s.mediaSettings().Provider(ctx, cap, tenant)
 	if err != nil {
 		obs.ServerError(w, "read the media provider failed", err)
 		httpx.Error(w, "read the media provider failed", http.StatusInternalServerError)
@@ -399,14 +551,16 @@ func (s *Service) handleTestMediaProvider(w http.ResponseWriter, r *http.Request
 		}
 		out.OK, out.Reply = true, firstNonEmpty(strings.TrimSpace(text), "(no speech)")
 	default:
-		img, err := p.Generate(ctx, media.ImageRequest{Prompt: "A small solid blue square on white.", Aspect: wire.MediaImageAspectSquare})
+		imgs, err := p.Generate(ctx, media.ImageRequest{Prompt: "A small solid blue square on white.", Aspect: wire.MediaImageAspectSquare})
 		out.LatencyMs = time.Since(start).Milliseconds()
 		if err != nil {
 			out.Error = mediaErrText(err)
 			break
 		}
-		out.OK = true
-		out.Reply = fmt.Sprintf("%s, %d bytes", img.MimeType, len(img.Bytes))
+		if len(imgs) > 0 {
+			out.OK = true
+			out.Reply = fmt.Sprintf("%s, %d bytes", imgs[0].MimeType, len(imgs[0].Bytes))
+		}
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
