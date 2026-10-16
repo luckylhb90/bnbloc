@@ -86,9 +86,9 @@ stage_web() {
   (cd web && node --test 'src/**/*.test.ts' 'scripts/*.test.mjs' 'previewer-sdk/src/*.test.ts')
   log "web: knip (no unused files, exports or dependencies)"
   pnpm --dir web exec knip
-  log "web: previewers (shared build, sprite-sheet, pptx, docx, xlsx, mermaid): install, type-check, build tests"
+  log "web: previewers (shared build, sprite-sheet, pptx, docx, xlsx, mermaid, drawio): install, type-check, build tests"
   local p
-  for p in pptx docx xlsx mermaid; do pnpm --dir "examples/previewers/$p" install --frozen-lockfile --silent; done
+  for p in pptx docx xlsx mermaid drawio; do pnpm --dir "examples/previewers/$p" install --frozen-lockfile --silent; done
   web/node_modules/.bin/tsc -p examples/previewers/tsconfig.json
   node --test examples/previewers/lib/*.test.mjs examples/previewers/*/build.test.mjs
 }

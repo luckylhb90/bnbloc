@@ -11,8 +11,6 @@
 import mermaid from "mermaid";
 
 import {
-  ZOOM_MAX,
-  ZOOM_MIN,
   onFile,
   onInit,
   onToolbar,
@@ -24,6 +22,7 @@ import {
 } from "../../../../web/previewer-sdk/src/index.ts";
 import { keepLinksInside } from "../../lib/office.ts";
 import { collapseText, quotedLabel, watchPointing } from "../../lib/selection.ts";
+import { clampZoom, fitZoom } from "../../lib/zoom.ts";
 import { linesNaming, nodeIdOf, parseErrorMessage, sourceUnits } from "./source.ts";
 
 const stageEl = document.getElementById("stage") as HTMLElement;
@@ -61,19 +60,6 @@ function toolbarItems(): ToolbarItem[] {
 
 function publishToolbar(): void {
   setToolbar(toolbarItems());
-}
-
-function clampZoom(z: number): number {
-  return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z));
-}
-
-/** The zoom that shows the whole drawing in the stage, never above 100%
- *  (a small diagram is not blown up). */
-function fitZoom(): number {
-  if (!natural.w || !natural.h) return 1;
-  const w = Math.max(1, stageEl.clientWidth - 32);
-  const h = Math.max(1, stageEl.clientHeight - 32);
-  return clampZoom(Math.min(1, w / natural.w, h / natural.h));
 }
 
 function applyZoom(): void {
@@ -131,7 +117,7 @@ async function draw(text: string, name: string): Promise<void> {
   svg.removeAttribute("width");
   svg.removeAttribute("height");
   svg.style.maxWidth = "none";
-  zoom = fitZoom();
+  zoom = fitZoom(stageEl, natural);
   applyZoom();
   showStatus("");
   setTitle(name);
@@ -182,7 +168,7 @@ onFile((bytes, file) => {
 onToolbar((id, value) => {
   if (!svg) return;
   if (id === "zoom" && typeof value === "number") zoom = clampZoom(value);
-  else if (id === "fit") zoom = fitZoom();
+  else if (id === "fit") zoom = fitZoom(stageEl, natural);
   else return;
   applyZoom();
   publishToolbar();

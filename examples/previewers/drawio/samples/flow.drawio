@@ -1,0 +1,88 @@
+<mxfile host="app.diagrams.net" modified="2026-10-16T09:00:00.000Z" agent="sample" version="24.0.0">
+  <diagram id="orders" name="Order flow">
+    <mxGraphModel dx="900" dy="640" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="start" value="Request received" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="200" y="30" width="140" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="check" value="Approved?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="200" y="140" width="140" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="fulfil" value="Fulfil order" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="40" y="290" width="140" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="db" value="Orders DB" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="60" y="410" width="100" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="notify" value="&lt;b&gt;Notify&lt;/b&gt; requester&lt;br&gt;by &lt;i&gt;email&lt;/i&gt;" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="380" y="290" width="150" height="60" as="geometry"/>
+        </mxCell>
+        <object label="Archive" tooltip="Kept for 90 days" id="archive">
+          <mxCell style="shape=note;whiteSpace=wrap;html=1;backgroundOutline=1;darkOpacity=0.05;size=20;" vertex="1" parent="1">
+            <mxGeometry x="395" y="410" width="120" height="80" as="geometry"/>
+          </mxCell>
+        </object>
+        <mxCell id="lane" value="Warehouse" style="swimlane;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="580" y="140" width="200" height="200" as="geometry"/>
+        </mxCell>
+        <mxCell id="pick" value="Pick items" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="lane">
+          <mxGeometry x="30" y="60" width="140" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="pack" value="Pack" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="lane">
+          <mxGeometry x="30" y="130" width="140" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-start" value="" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="start" target="check">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-yes" value="yes" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;" edge="1" parent="1" source="check" target="fulfil">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-no" value="no" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;" edge="1" parent="1" source="check" target="notify">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-db" value="" style="endArrow=classic;html=1;rounded=0;dashed=1;" edge="1" parent="1" source="fulfil" target="db">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-ship" value="ship" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=classic;" edge="1" parent="1" source="fulfil" target="pick">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="110" y="260"/>
+              <mxPoint x="560" y="260"/>
+              <mxPoint x="560" y="225"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e-pack" value="" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="pick" target="pack">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e-archive" value="" style="endArrow=classic;html=1;rounded=0;" edge="1" parent="1" source="notify" target="archive">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="shapes" name="Shapes">
+    <mxGraphModel dx="900" dy="640" grid="1" gridSize="10" page="1" pageWidth="827" pageHeight="1169">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="s1" value="Parallelogram" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fixedSize=1;" vertex="1" parent="1"><mxGeometry x="20" y="20" width="140" height="60" as="geometry"/></mxCell>
+        <mxCell id="s2" value="Trapezoid" style="shape=trapezoid;perimeter=trapezoidPerimeter;whiteSpace=wrap;html=1;fixedSize=1;" vertex="1" parent="1"><mxGeometry x="190" y="20" width="140" height="60" as="geometry"/></mxCell>
+        <mxCell id="s3" value="Step" style="shape=step;perimeter=stepPerimeter;whiteSpace=wrap;html=1;fixedSize=1;" vertex="1" parent="1"><mxGeometry x="360" y="20" width="140" height="60" as="geometry"/></mxCell>
+        <mxCell id="s4" value="Process" style="shape=process;whiteSpace=wrap;html=1;backgroundOutline=1;" vertex="1" parent="1"><mxGeometry x="530" y="20" width="140" height="60" as="geometry"/></mxCell>
+        <mxCell id="s5" value="Document" style="shape=document;whiteSpace=wrap;html=1;boundedLbl=1;" vertex="1" parent="1"><mxGeometry x="20" y="120" width="140" height="80" as="geometry"/></mxCell>
+        <mxCell id="s6" value="Cube" style="shape=cube;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;darkOpacity=0.05;darkOpacity2=0.1;" vertex="1" parent="1"><mxGeometry x="190" y="120" width="140" height="80" as="geometry"/></mxCell>
+        <mxCell id="s7" value="Card" style="shape=card;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="360" y="120" width="140" height="80" as="geometry"/></mxCell>
+        <mxCell id="s8" value="Folder" style="shape=folder;whiteSpace=wrap;html=1;boundedLbl=1;" vertex="1" parent="1"><mxGeometry x="530" y="120" width="140" height="80" as="geometry"/></mxCell>
+        <mxCell id="s9" value="Hexagon" style="shape=hexagon;perimeter=hexagonPerimeter2;whiteSpace=wrap;html=1;fixedSize=1;" vertex="1" parent="1"><mxGeometry x="20" y="240" width="140" height="80" as="geometry"/></mxCell>
+        <mxCell id="s10" value="Cloud" style="ellipse;shape=cloud;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="190" y="240" width="140" height="80" as="geometry"/></mxCell>
+        <mxCell id="s11" value="Triangle" style="triangle;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="380" y="240" width="80" height="80" as="geometry"/></mxCell>
+        <mxCell id="s12" value="A note in plain text" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;" vertex="1" parent="1"><mxGeometry x="530" y="260" width="140" height="40" as="geometry"/></mxCell>
+        <mxCell id="s13" value="Library stencil" style="shape=mxgraph.flowchart.decision;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="20" y="360" width="140" height="80" as="geometry"/></mxCell>
+        <mxCell id="s14" value="Themed colours" style="rounded=1;whiteSpace=wrap;html=1;fillColor=light-dark(#dae8fc,#1d2d44);strokeColor=default;fontColor=default;" vertex="1" parent="1"><mxGeometry x="190" y="360" width="140" height="80" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

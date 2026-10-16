@@ -1,0 +1,113 @@
+/* Theme tokens: the host sends light|dark in preview.init. The drawing keeps
+   its own colours on white (they are the document: default strokes are
+   black); the desk, tabs and notes follow the theme. */
+:root {
+  --bg: #f6f6f4;
+  --fg: #1d1d1b;
+  --muted: #6b6b66;
+  --line: #d6d5d1;
+  --accent: #0a74d9;
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --bg: #161615;
+  --fg: #ededea;
+  --muted: #9a9a94;
+  --line: #3a3a37;
+  --accent: #4cc2ff;
+  color-scheme: dark;
+}
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--fg);
+  font: 12px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+body {
+  display: flex;
+  flex-direction: column;
+}
+#note {
+  margin: 0;
+  padding: 6px 12px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+}
+#note:empty {
+  display: none;
+}
+#stage {
+  flex: 1;
+  overflow: auto;
+}
+#diagram {
+  position: relative;
+  margin: 0 auto;
+  background: #ffffff;
+  color: #000000;
+  user-select: none;
+}
+#tabs {
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+  padding: 4px 8px;
+  border-top: 1px solid var(--line);
+}
+#tabs[hidden] {
+  display: none;
+}
+#tabs button {
+  padding: 4px 12px;
+  font: inherit;
+  white-space: nowrap;
+  color: var(--fg);
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+}
+#tabs button[aria-selected="true"] {
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+#status {
+  position: fixed;
+  inset: auto 0 40px 0;
+  margin: 0;
+  padding: 8px 12px;
+  color: var(--muted);
+  text-align: center;
+}
+#status:empty {
+  display: none;
+}
+#status.error {
+  color: #d92d20;
+  white-space: pre-wrap;
+  text-align: left;
+  background: var(--bg);
+  border-top: 1px solid var(--muted);
+}
+/* The part the Ask AI panel points at (lib/selection.ts): a cell is drawn as
+   SVG, so it takes an outline filter, not a CSS outline. */
+#diagram [data-cell] {
+  cursor: pointer;
+}
+#diagram .bnbloc-picked {
+  filter: drop-shadow(0 0 0 var(--accent)) drop-shadow(0 0 3px var(--accent));
+}
+/* A part the host asked to show (lib/selection.ts reveal). */
+@keyframes bnbloc-flash {
+  from { filter: drop-shadow(0 0 6px var(--accent)) drop-shadow(0 0 6px var(--accent)); }
+  to { filter: drop-shadow(0 0 0 transparent); }
+}
+#diagram .bnbloc-flash {
+  animation: bnbloc-flash 1.6s ease-out;
+}
