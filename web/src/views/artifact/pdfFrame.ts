@@ -14,6 +14,11 @@
 //   host  -> guest: { type: "pdf.command", id: "zoom"|"fit"|"page"|"page-prev"|"page-next", value }
 //   guest -> host : { type: "pdf.status", page, pages, zoom }
 //   guest -> host : { type: "pdf.error", message }
+//   guest -> host : { type: "pdf.selection", text, page, rect }  (text "" = cleared)
+//
+// The pages carry pdf.js's text layer (transparent text over each canvas), so
+// text can be selected; the guest reports the selection with where it shows
+// in the frame (the viewer's box) and the host's Ask AI panel names it.
 //
 // Compare reads a PDF the same way, in a hidden runner frame
 // (compare/pdfUnits.ts): pdf.units instead of pdf.load, answered with each
@@ -29,9 +34,13 @@ export type PdfMessage =
   | GuestMessage
   | { kind: "status"; page: number; pages: number; zoom: number }
   | { kind: "error"; message: string }
+  | { kind: "selection"; text: string; page: number; rect: { x: number; y: number; w: number; h: number } | null }
   | { kind: "units"; units: readonly Unit[]; truncated: boolean };
 
 const ERROR_LIMIT = 500;
+// A selection is read as text: bounded here, then again by the protocol.
+const SELECTION_TEXT_LIMIT = 4000;
+const RECT_LIMIT = 10_000_000;
 
 function count(v: unknown, max: number): number | null {
   return typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= max ? v : null;
@@ -55,6 +64,17 @@ export function readPdfMessage(
     if (page === null || pages === null || zoom === null) return null;
     return { kind: "status", page, pages, zoom };
   }
+  if (data.type === "pdf.selection" && typeof data.text === "string") {
+    if (data.text === "") return { kind: "selection", text: "", page: 0, rect: null };
+    const page = count(data.page, 1_000_000);
+    const r = data.rect as Record<string, unknown> | null;
+    const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) && Math.abs(v) <= RECT_LIMIT ? v : null);
+    const rect = r && typeof r === "object" && num(r.x) !== null && num(r.y) !== null && num(r.w) !== null && num(r.h) !== null && (r.w as number) >= 0 && (r.h as number) >= 0
+      ? { x: r.x as number, y: r.y as number, w: r.w as number, h: r.h as number }
+      : null;
+    if (page === null || page < 1) return null;
+    return { kind: "selection", text: data.text.slice(0, SELECTION_TEXT_LIMIT), page, rect };
+  }
   if (data.type === "pdf.error" && typeof data.message === "string") {
     return { kind: "error", message: data.message.slice(0, ERROR_LIMIT) };
   }
@@ -73,6 +93,10 @@ body{overflow:auto;font:13px system-ui,sans-serif;color:#bbb;}
 .page{position:relative;background:#fff;box-shadow:0 1px 6px rgba(0,0,0,.45);flex:none;}
 .page canvas{position:absolute;inset:0;width:100%;height:100%;}
 #msg{padding:16px;}
+.textLayer{position:absolute;inset:0;overflow:clip;line-height:1;text-align:initial;forced-color-adjust:none;z-index:1;--user-unit:1;--total-scale-factor:calc(var(--scale-factor,1) * var(--user-unit));--scale-round-x:1px;--scale-round-y:1px;}
+.textLayer :is(span,br){color:transparent;position:absolute;white-space:pre;cursor:text;transform-origin:0% 0%;}
+.textLayer .markedContent{display:contents;}
+.textLayer ::selection{background:rgba(0,100,255,.3);}
 </style>
 <div id="msg">Loading PDF…</div>
 <div id="pages"></div>
@@ -84,7 +108,7 @@ body{overflow:auto;font:13px system-ui,sans-serif;color:#bbb;}
   var started = false;
   var doc = null, pages = [], base = null;
   var fitWidth = true, zoom = 1, current = 1;
-  var observer = null, statusTimer = 0;
+  var observer = null, statusTimer = 0, selFrame = 0, hadSel = false, laidOutAt = 0;
   var list = document.getElementById("pages");
   var msg = document.getElementById("msg");
 
@@ -120,6 +144,7 @@ body{overflow:auto;font:13px system-ui,sans-serif;color:#bbb;}
     }, 50);
   }
   function layout() {
+    laidOutAt = Date.now();
     var s = cssScale();
     pages.forEach(function (p) {
       var size = p.size || base;
@@ -127,6 +152,7 @@ body{overflow:auto;font:13px system-ui,sans-serif;color:#bbb;}
       p.el.style.height = Math.floor(size.height * s) + "px";
       p.renderedAt = 0;
       if (p.canvas) { p.canvas.remove(); p.canvas = null; }
+      if (p.text) { p.text.remove(); p.text = null; }
       if (observer) { observer.unobserve(p.el); observer.observe(p.el); }
     });
     status();
@@ -152,6 +178,14 @@ body{overflow:auto;font:13px system-ui,sans-serif;color:#bbb;}
         p.canvas = canvas;
         p.el.appendChild(canvas);
         p.renderedAt = s;
+        // Transparent text over the canvas, so text can be selected.
+        if (p.text) p.text.remove();
+        var layer = document.createElement("div");
+        layer.className = "textLayer";
+        layer.style.setProperty("--scale-factor", String(s));
+        p.text = layer;
+        p.el.appendChild(layer);
+        return new globalThis.pdfjsLib.TextLayer({ textContentSource: page.streamTextContent(), container: layer, viewport: page.getViewport({ scale: s }) }).render().catch(function () {});
       });
     }).catch(fail).then(function () { p.busy = false; if (p.renderedAt !== cssScale() && p.visible) render(p); });
   }
@@ -177,6 +211,33 @@ body{overflow:auto;font:13px system-ui,sans-serif;color:#bbb;}
     else if (id === "page-prev") goTo(current - 1);
     else if (id === "page-next") goTo(current + 1);
   }
+
+  // The member's text selection, with the page it starts in and where it
+  // shows (the frame is the viewer's box); an empty text clears it.
+  // force: the member's own click or Escape. A selection that vanished
+  // because the pages were laid out again (the panel beside the viewer opened,
+  // the zoom changed: the text layer is rebuilt) is not the member clearing it.
+  function postSelection(force) {
+    selFrame = 0;
+    var sel = document.getSelection();
+    var text = sel && !sel.isCollapsed ? sel.toString().replace(/\\s+/g, " ").trim() : "";
+    if (!text) {
+      if (hadSel && (force === true || Date.now() - laidOutAt > 3000)) { hadSel = false; post({ type: "pdf.selection", text: "" }); }
+      return;
+    }
+    var node = sel.anchorNode;
+    var el = node && (node.nodeType === 1 ? node : node.parentElement);
+    var pageEl = el && el.closest ? el.closest(".page") : null;
+    if (!pageEl || !pageEl.__page) return;
+    var r = sel.getRangeAt(0).getBoundingClientRect();
+    hadSel = true;
+    post({ type: "pdf.selection", text: text.slice(0, 4000), page: pageEl.__page.n, rect: { x: r.left, y: r.top, w: r.width, h: r.height } });
+  }
+  function soon() { if (!selFrame) selFrame = requestAnimationFrame(function () { postSelection(false); }); }
+  document.addEventListener("pointerup", function () { setTimeout(function () { postSelection(true); }, 0); });
+  document.addEventListener("keyup", function (e) { if (e.key === "Escape" || e.shiftKey) setTimeout(function () { postSelection(true); }, 0); });
+  window.addEventListener("scroll", function () { if (hadSel) soon(); }, { passive: true });
+  window.addEventListener("resize", function () { if (hadSel) soon(); });
 
   // pdf.js, then the document: the one way the guest opens a PDF.
   async function open(d) {
@@ -232,7 +293,7 @@ body{overflow:auto;font:13px system-ui,sans-serif;color:#bbb;}
       for (var n = 1; n <= doc.numPages; n++) {
         var el = document.createElement("div");
         el.className = "page";
-        var p = { n: n, el: el, canvas: null, size: null, renderedAt: 0, busy: false, visible: false };
+        var p = { n: n, el: el, canvas: null, text: null, size: null, renderedAt: 0, busy: false, visible: false };
         el.__page = p;
         pages.push(p);
         list.appendChild(el);

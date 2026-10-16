@@ -1,14 +1,37 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { CaretDownIcon, CaretRightIcon } from "@phosphor-icons/react";
 import type { ArtifactViewerProps } from "./registry";
 import { useViewerToolbar } from "./toolbar";
 import { errorText } from "@/lib/errors";
+import type { PartRule } from "../../../previewer-sdk/src/pointing.ts";
+import { childPath, valueText } from "./jsonPath";
+import { usePointing, type PointingHooks } from "./usePointing";
 
 // JsonViewer: a collapsible tree that stays responsive on large documents —
 // children render only when their node is open, at most PAGE per node until
 // "show more", and "expand all" is offered only below EXPAND_ALL_MAX nodes.
 // Values render as text nodes (no markup). Invalid JSON shows the parse error
 // and the raw text.
+
+// Pointing (previewer-sdk/src/pointing.ts): every node carries its path
+// (data-path; a scalar also its value), a click on a value picks it, selected
+// text is named by the path of the node it starts in.
+const JSON_PARTS: readonly PartRule[] = [
+  {
+    selector: "[data-path]",
+    noun: (el) => (el.dataset.v !== undefined ? "Value" : "Object"),
+    kind: "block",
+    text: (el) => (el.dataset.v !== undefined ? `${el.dataset.path} = ${el.dataset.v}` : (el.dataset.path ?? "")),
+    label: (el) => el.dataset.path ?? "",
+  },
+];
+const JSON_POINTING: PointingHooks = {
+  describeText(range) {
+    const el = range.startContainer instanceof Element ? range.startContainer : range.startContainer.parentElement;
+    const path = el?.closest<HTMLElement>("[data-path]")?.dataset.path;
+    return path ? { where: path } : null;
+  },
+};
 
 const PAGE = 200;
 const EXPAND_ALL_MAX = 5000;
@@ -33,11 +56,13 @@ function Scalar({ value }: { readonly value: unknown }) {
 
 function JsonNode({
   name,
+  path,
   value,
   depth,
   openDepth,
 }: {
   readonly name: string | null;
+  readonly path: string;
   readonly value: unknown;
   readonly depth: number;
   readonly openDepth: number;
@@ -47,7 +72,7 @@ function JsonNode({
   const label = name !== null && <span className="text-[var(--color-fg)]">{name}: </span>;
   if (!value || typeof value !== "object") {
     return (
-      <div className="pl-5">
+      <div className="pl-5" data-path={path} data-v={valueText(value)}>
         {label}
         <Scalar value={value} />
       </div>
@@ -57,7 +82,7 @@ function JsonNode({
   const entries = isArray ? (value as unknown[]).map((v, i) => [String(i), v] as const) : Object.entries(value as Record<string, unknown>);
   const summary = isArray ? `[${entries.length}]` : `{${entries.length}}`;
   return (
-    <div>
+    <div data-path={path}>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -71,7 +96,7 @@ function JsonNode({
       {open && (
         <div className="ml-[7px] border-l border-[var(--color-border)] pl-2">
           {entries.slice(0, shown).map(([key, child]) => (
-            <JsonNode key={key} name={isArray ? key : JSON.stringify(key)} value={child} depth={depth + 1} openDepth={openDepth} />
+            <JsonNode key={key} name={isArray ? key : JSON.stringify(key)} path={childPath(path, key, isArray)} value={child} depth={depth + 1} openDepth={openDepth} />
           ))}
           {entries.length > shown && (
             <button
@@ -88,7 +113,9 @@ function JsonNode({
   );
 }
 
-export default function JsonViewer({ content, toolbar }: ArtifactViewerProps) {
+export default function JsonViewer({ content, toolbar, onSelection }: ArtifactViewerProps) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  usePointing(ref, onSelection, JSON_PARTS, JSON_POINTING);
   const parsed = useMemo(() => {
     try {
       return { ok: true as const, value: JSON.parse(content) as unknown };
@@ -119,8 +146,8 @@ export default function JsonViewer({ content, toolbar }: ArtifactViewerProps) {
     );
   }
   return (
-    <div className="h-full overflow-auto p-3 font-mono text-[12px] leading-5 text-[var(--color-fg-muted)]">
-      <JsonNode key={tree.gen} name={null} value={parsed.value} depth={0} openDepth={tree.openDepth} />
+    <div ref={ref} className="h-full overflow-auto p-3 font-mono text-[12px] leading-5 text-[var(--color-fg-muted)]">
+      <JsonNode key={tree.gen} name={null} path="$" value={parsed.value} depth={0} openDepth={tree.openDepth} />
     </div>
   );
 }

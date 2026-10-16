@@ -439,7 +439,7 @@ export function ArtifactTabView({
       </div>
       {artifact.isApp && <AppDataLine roomId={roomId} artifactId={artifactId} appName={file.name} />}
       <div className="flex min-h-0 flex-1 flex-col @2xl:flex-row">
-      <div className="relative min-h-0 flex-1 overflow-hidden" role="region" aria-label={file.name}>
+      <div className="relative min-h-0 flex-1 overflow-hidden" role="region" aria-label={file.name} data-viewer-box>
         {mode === "edit" ? (
           <div className="flex h-full flex-col gap-2 p-2">
             <textarea

@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { fitSelection } from "../../../previewer-sdk/src/protocol.ts";
+import { quotedLabel } from "../../../previewer-sdk/src/pointing.ts";
 import { composeArtifactDocument, loadMessage } from "@/lib/artifactFrame";
 import { loadPdfjs, pdfRunnerUrl } from "./pdfAssets";
 import type { ArtifactViewerProps } from "./registry";
@@ -11,7 +13,9 @@ import { PDF_GUEST_HTML, readPdfMessage } from "./pdfFrame";
 // PDF opens, as source text handed to the frame — the frame itself loads
 // nothing from the network.
 
-export default function PdfViewer({ blob, file, toolbar, reveal }: ArtifactViewerProps) {
+export default function PdfViewer({ blob, file, toolbar, reveal, onSelection }: ArtifactViewerProps) {
+  const onSelectionRef = useRef(onSelection);
+  onSelectionRef.current = onSelection;
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const handedOff = useRef(false);
   const loaded = useRef(false);
@@ -52,12 +56,23 @@ export default function PdfViewer({ blob, file, toolbar, reveal }: ArtifactViewe
         case "error":
           setError(msg.message);
           return;
+        case "selection":
+          // The frame fills the viewer's box, so its rect is already the box's.
+          onSelectionRef.current?.(
+            msg.text
+              ? fitSelection({ label: quotedLabel(`Page ${msg.page}`, msg.text), detail: msg.text, kind: "text", ...(msg.rect ? { rect: msg.rect } : {}) })
+              : null,
+          );
+          return;
         default:
           return;
       }
     };
     window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
+    return () => {
+      window.removeEventListener("message", onMessage);
+      onSelectionRef.current?.(null);
+    };
   }, [blob, doc, send]);
 
   // "Show" a page (Compare's units: "page:<n>"), once the document is open.
