@@ -107,12 +107,31 @@ is plain files; no tool is added.
   prefilled from the message (the curator may tighten it) and the person edits a
   sentence. Notes can be edited, pinned, superseded and deleted in the room's
   "What this project knows" panel. This path needs no AI.
-- **The curator proposes.** A per-room scheduled run (the gateway's schedule run
-  seam; the organization's assist model and budget, audited as `assist`) reads
-  what happened since its cursor (new messages, deliverables published, schedule
-  results, corrections) and files **proposals**: add a note, supersede one (the
-  proposal must name what it replaces), compact a run of memory notes, or edit
+- **The curator proposes, on a nightly sweep.** One sweep a night, owned by one
+  replica at a time (an advisory lock, like the retention worker), walks the rooms
+  that opted in and issues one run per room through the gateway's schedule-run seam
+  (the organization's assist model and budget, audited as `assist`). A run reads
+  what happened since the room's cursor (new messages, deliverables published,
+  schedule results, corrections) and files **proposals**: add a note, supersede one
+  (the proposal must name what it replaces), compact a run of memory notes, or edit
   the brief. A proposal carries its evidence (source refs), not a free summary.
+  - *Why nightly is enough:* the recent conversation is already in an agent's
+    history, so memory matters for what has scrolled out of it (days and weeks
+    later), and proposals are reviewed in a weekly digest, so freshness is not what
+    limits the loop. Nothing runs per turn: that costs money and adds noise.
+  - *Cost follows new content, not room count:* a room with no new activity past
+    its cursor costs one query. A room runs only once it has enough new material
+    (a minimum number of new messages or a published deliverable) or a week has
+    passed (compaction); otherwise its material accumulates for the next night.
+  - *No spike:* runs are spread over a window (by a hash of the room id) so the
+    assist model is not hit at once; a tenant has a daily cap on what the curator
+    may spend, after which its remaining rooms wait for the next night; a tenant
+    with `assistDisabled` is skipped.
+  - *Not instant, on purpose:* an owner has "Update now" for one room (the same run,
+    started by hand, rate limited), and "Save to memory" is immediate and needs no
+    AI.
+  - *Resumable:* each room's run is claimed with its cursor, so a crash or a failed
+    run is retried the next night and never files a proposal twice.
 - **Curation is off until the room's owner turns it on.** It reads the room's
   messages with the organization's model and costs budget; the organization's
   `assistDisabled` switch applies. Saving and reading notes work without it.
@@ -246,6 +265,9 @@ is cluttered with weak skills (evidence threshold, adoption counts, withdrawal).
 - Confirm the two defaults: derived notes survive a source message's deletion
   (marked unverified), and the handoff export carries notes.
 - The embedding setting and OpenSearch vector support (not verified).
+- The sweep's window and its time zone (a deployment setting; not decided), the
+  minimum new-material threshold and the tenant's daily spend cap (to set from
+  real rooms after stage 2 runs).
 - Who besides owners and admins may turn curation on or review (this PRD:
   owners and admins).
 - Whether a room agent may surface a candidate lesson without a tool (not in
