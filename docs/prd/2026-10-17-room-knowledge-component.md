@@ -1,6 +1,6 @@
 # Room knowledge, memory and evolution as an installable component (2026-10-17)
 
-Status: **redesign, not built.** Supersedes `2026-10-16-room-memory-and-evolution.md`,
+Status: **redesign, not built; revised after a feasibility review (§8, 2026-10-17), owner confirmation of §8's direction pending. Where §8 and §2 differ, §8 wins.** Supersedes `2026-10-16-room-memory-and-evolution.md`,
 whose stage 1 was built into the platform (notes store, routes, `.room/memory/` files,
 a web panel): that was the wrong shape and is removed in stage 5 below. What that
 PRD got right (the content model, the read tiers, the curator, the evolution path,
@@ -232,3 +232,140 @@ tolerant both ways).
   (this design says never).
 - Verification gaps from the first PRD that still apply: whether the OpenSearch cluster
   has vector support and the embedding setting (now the component's business).
+
+## 8. Feasibility review (2026-10-17) and the revised design
+
+Four read-only reviews checked §2 against the code (extension framework and outbox;
+the per-turn context path; the panel, frame and proxy; events, history and assist).
+Evidence is `file:line` in each finding; "unverified" means not confirmable from this
+repo.
+
+### 8.1 Findings that change the design
+
+1. **`events` push cannot be built on the notification outbox.** The outbox is unordered
+   (a retried row is overtaken; no room sequence in the payload), lossy (the observer's
+   512-slot queue drops, retries stop after 8 attempts or about 21 minutes, failed rows
+   are pruned after 7 days), cross-tenant and not room-owned, with one sequential worker
+   and no breaker (`internal/notify/worker.go`, `observer.go`,
+   `internal/store/mysql_notifications.go`). There is no durable ordered event source
+   anywhere: the commit hook (`Hub.Committed`) is in-memory, agent replies reach realtime
+   by a best-effort HTTP call, and rename, schedule result and "member left" have no
+   event. A real push feed means a per-room event log written with `room_messages`.
+2. **The panel cannot be a previewer-style frame.** The previewer frame is on the main
+   origin with `connect-src 'none'` in Go and Rust, a package shape that forbids network
+   and API, and a file-oriented message set (`services/gateway/previewers.go`,
+   `previewer_scheme.rs`, `previewer_validation.go`); a gateway-origin frame is blocked
+   by the desktop CSP, and the site scheme forwards no authorization, caps bodies at 68
+   KiB and allows non-GET only under `~app/`. §2.3's "sites origin" was wrong.
+3. **The gateway proxy must not forward a member to a third party as it is.** `proxyAs`
+   does not strip `Authorization`, and the internal signature covers only
+   `ts|user|tenant|role` for 5 minutes, not method, path or body
+   (`service.go:737-742`, `svcauth.go:91-134`); the notifier signature covers timestamp
+   and body only (`notify/sign.go:27`). A new scheme and a header allowlist are needed.
+4. **Callback identity has no precedent for a component naming its own room.** Existing
+   callbacks derive tenant and room from a capability the platform minted (reply token,
+   connect code); the install secret is one per component name platform-wide, with no
+   kind or tenant in its key (`notify/secrets.go:17`), so a name could collide with a
+   notifier and one leak reaches every enabled room.
+5. **A component cannot read history as a service today.** A `svc:` subject has no room
+   membership; adding it as a member makes it `IsHuman()` and skips the people-chat
+   guard; `/history` is backward and per channel; the forward `/feed` is internal and
+   unguarded. A read-only "extension reader" identity and a forward, agent-scoped,
+   cursor feed with `retainedFrom` and revisions are needed. Edit, delete and retention
+   have no event (hard delete, only `retainedFrom`; the revisions cursor can skip rows
+   sharing a millisecond).
+6. **Assist has no non-member caller**, the 20/min bucket is per member, there is no
+   tenant spend cap, and audit names a person (`assist.go`, `routes.go:388-394`).
+7. **Context fan-out is feasible but needs more than §2.1 said.** The pre-turn pass is
+   sequential with a 20 s per-request bound and no overall budget, and it runs inside
+   the turn's deadline and start gate (`roomctx.go:155-206`, `bridge.go:449,1439`); a
+   write failure drops the whole pass to the push prompt (`roomctx.go:297-301`); `.room/`
+   files are never deleted, so an off or removed extension leaves stale files; one
+   header is a weaker fence than the per-body content-tagged fences used today
+   (`markers.go:36-46`); channel sessions of one seat share a workspace and run
+   concurrently, so a per-channel `channelId` input would let one turn overwrite what
+   another is reading (`roomctx.go:215-217`); a core without the file writer gets no
+   `.room/` at all (only `manifestcore` and `protocol` implement it in this repo; whether
+   the cores installed outside this repo do is **unverified**); the
+   guidance budget has no headroom (a generic line costs about 29 tokens).
+8. **Size.** The kind scaffolding alone is about 10 files and 400 to 600 lines
+   (notifier-hardcoded pieces: secret store, install hooks, visibility, CLI, web); the
+   four contracts, `room_extensions`, the proxy, the feed, the service identity and the
+   web registries bring the total to an estimated 40 to 60 files and 5,000 to 8,000
+   lines, before any memory behavior. An estimate, not a measurement.
+9. **Two things the reviews confirm as sound:** the job-grant pattern for per-turn reads
+   (`content_requester.go`) and borrowed runs (separate seat workspace per borrower, no
+   cross-leak path found); and `roomlog.AgentChannels` as the one rule of what an
+   agent-side reader may see.
+
+### 8.2 The revised design: the same principle, a smaller platform
+
+The principle stands: the platform knows no notes. What changes is how little it
+adds. v1 of the room-extension framework is **three contracts, all pull or request/response**:
+
+1. **`context` (platform → component, pull)** as §2.1, with these changes: the bridge
+   fetches it in a **separate, best-effort step** after the existing pass (a failure
+   never falls back to the push prompt), **in parallel across components with one hard
+   overall budget well under the turn's**, with the last good answer cached by etag;
+   the request has **no `channelId`** (one workspace, many channels); files are written
+   under `.room/ext/<component>/` with a per-component manifest and **tombstone**
+   semantics (a removed or off component's files are overwritten with a one-line note);
+   the platform fences **each file's content** with the existing content-tagged fence,
+   not one header; a hard count and byte cap lives in the bridge (cores enforce none);
+   a core without the file writer gets nothing, said plainly in the docs (verify per
+   core). The component-down case is a per-component circuit breaker, which is new.
+2. **`panel` as a host-rendered declarative UI, not a frame.** The component answers
+   typed JSON (a list, a form, a detail, actions, a diff, a message reference) that the
+   web renders in host-owned React, the way Settings → Skills renders a provider and
+   plugin settings render forms. No frame, no CSP change, no desktop scheme work, no
+   SDK, no tickets. Calls are `POST /v1/rooms/{room}/ext/{component}/call {op, args}`
+   through the gateway: a **new signature** over method, path, body hash, room, subject,
+   role, nonce and a short expiry, a **header allowlist** (never the member's bearer),
+   body caps, a rate limit per component and per subject, an audit kind, and a
+   streaming-capable client. The cost is expressiveness (a fixed set of widgets, a
+   component cannot draw its own UI), which a notes list, an editor and a review inbox do
+   not need; richer UIs are a later contract (`panel/v2`, a frame via host-relayed
+   `postMessage`, the reviewed option) if a component needs one. `messageActions` and
+   the panel entry come from a **code-owned registry** in the web (icons from a fixed list).
+3. **`service` (component → platform), pull only:** a **forward, agent-scoped feed** of a
+   room (`GET /v1/ext/rooms/{room}/feed?after=`, cursor, `retainedFrom`, edits and
+   deletes as tombstone entries, applying `roomlog.AgentChannels` itself) for rooms
+   where the component is on; the component derives tenant and room from the grant
+   (**not** from its request body), with a **per-kind, per-name secret** and the new
+   signature scheme; and assist runs as the component with its own limiter, an audit
+   actor naming it and a per-tenant cap (new). There is **no `events` push in v1**: the
+   component polls the feed on its own clock, which also gives it the cursor and replay
+   that push could not. Push can arrive later as `events/v1` on a per-room durable log.
+
+Everything else in §2 stands: the kind, install through the shared endpoint path,
+per-room enablement with the consent text and audit, tombstoned `room.deleted` (an
+outbox row that outlives the room, or an enqueue inside the delete transaction),
+conformance kit with a fake extension, no note vocabulary in platform code.
+
+### 8.3 Residual risks the revision does not remove
+
+- **Operations.** An organization runs one more service and its database (the
+  notifier precedent, but heavier: it stores room knowledge). A small embedded store
+  option helps; the burden is real.
+- **Room content leaves the platform for the component's host.** Opt-in per room,
+  agent-readable scope only, network allowlist, audit and revoke are the guards; they
+  are guards, not a proof.
+- **Cores.** Delivery of the files depends on each core's file writer (unverified for
+  the ones outside this repo).
+- **A deleted or retained-away message** leaves the notes distilled from it; the
+  component must honor the feed's tombstones, and distillation is not exactly
+  traceable. Said to the room owner at enable time.
+- **Order of work.** The framework precedes any memory behavior, so the first release
+  that a member sees is the whole stage 5 swap; until then the stage 1 platform code
+  stays.
+
+### 8.4 The alternative that was considered: an app plus one seam
+
+An interactive app already has storage, privacy, a UI, `app.ai`, per-room schedules with
+their own time zone, and a Library path, and would need only a generic "files an app
+offers its room's agents" seam and a history-read and write action for schedule runs.
+Rejected as the primary design: an app is built by an agent from a prompt, not
+installed as a deterministic package (a work saves its recipe, not its bundle), an app
+has no server-side compute (ranking and caps would live in page code that runs only
+when someone opens it), and a Library app is not what the owner meant by an installable
+component. It remains the right shape for room-local tools that need none of the above.
