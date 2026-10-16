@@ -107,8 +107,10 @@ func TestPromptBudgets(t *testing.T) {
 		// +80 on 2026-10-14: save_component takes a workspace file and a
 		// work's description and "how it was made" request
 		// (docs/bugs/2026-10-14-work-save-misses-new-files.md).
+		// +160 on 2026-10-17: generate_image joins the tools (one brief line
+		// and its parameters; the image itself never enters the context).
 		{"tools/list", toolsList, 2630},
-		{"session prefix (guidance + tools/list)", guidance + toolsList, 2940},
+		{"session prefix (guidance + tools/list)", guidance + toolsList, 3100},
 	} {
 		got := tokens(c.text)
 		t.Logf("%-48s %5d tokens (budget %d)", c.name, got, c.budget)

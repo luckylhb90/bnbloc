@@ -501,6 +501,41 @@
     {
       "annotations": {
         "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "description": "Draw one image from a prompt and publish it into the room's Docs; agree with the person first what it is for.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "aspect": {
+            "description": "square (default), landscape or portrait.",
+            "enum": [
+              "square",
+              "landscape",
+              "portrait"
+            ],
+            "type": "string"
+          },
+          "fileName": {
+            "description": "A file name, e.g. poster.png; default from the prompt.",
+            "type": "string"
+          },
+          "prompt": {
+            "description": "What to draw, concretely.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "type": "object"
+      },
+      "name": "generate_image",
+      "title": "Draw an image"
+    },
+    {
+      "annotations": {
+        "openWorldHint": false,
         "readOnlyHint": true
       },
       "description": "The full instructions of a room tool; topic is its name. Read it before using a tool you do not know. For you, not the person.",

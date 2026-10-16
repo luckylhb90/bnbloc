@@ -43,6 +43,11 @@ type Config struct {
 	// Names resolves people's display names (id → name) the way the
 	// bridge's records do (nil = ids only).
 	Names func(ctx context.Context, ids []string) map[string]string
+	// Publish publishes a generated file (an image the deployment's media
+	// provider drew) into the room's Docs as a deliverable of the bound
+	// job: the bridge's one publish path, injected here. nil = the tools
+	// that publish generated files are refused.
+	Publish func(ctx context.Context, room string, job Job, name, mimeType string, content []byte) (string, error)
 }
 
 // Default waits: ask_agent runs inside the dispatching agent's own turn,

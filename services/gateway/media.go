@@ -57,6 +57,21 @@ func (s *Service) mediaProvider(ctx context.Context, claims auth.Claims, cap med
 	return s.mediaSettings().Provider(ctx, cap)
 }
 
+// mediaCaller resolves who a media call acts as: the caller themself, or
+// with ?job=&room= the bridge running the job as the job's requester
+// (contentGrant, the content routes' admission).
+func (s *Service) mediaCaller(w http.ResponseWriter, r *http.Request, caller auth.Claims) (auth.Claims, bool) {
+	if strings.TrimSpace(r.URL.Query().Get("job")) == "" {
+		return caller, true
+	}
+	actor, err := s.contentGrant(r, caller)
+	if err != nil {
+		writeGrantErr(w, err)
+		return auth.Claims{}, false
+	}
+	return actor.Claims, true
+}
+
 // handleMediaCapabilities answers GET /v1/media: which media calls run for
 // the caller (the entries the web shows).
 func (s *Service) handleMediaCapabilities(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
@@ -88,6 +103,13 @@ var errMediaUnavailable = errors.New("this is not available here: the deployment
 // never the text).
 func (s *Service) handleMediaTranscribe(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	ctx := r.Context()
+	// A room tool's call runs as the job's requester (?job=&room=, the
+	// content routes' admission): the bridge driving the job acts for them.
+	actor, ok := s.mediaCaller(w, r, claims)
+	if !ok {
+		return
+	}
+	claims = actor
 	if !s.assistLimiter.get(assistRate, assistBurst, s.Peers.Size).allow(claims.Tenant + "/" + claims.Subject) {
 		httpx.Error(w, "too many requests: try again in a minute", http.StatusTooManyRequests)
 		return
@@ -130,6 +152,13 @@ func (s *Service) handleMediaTranscribe(w http.ResponseWriter, r *http.Request, 
 // prompt, never the image).
 func (s *Service) handleMediaImage(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	ctx := r.Context()
+	// A room tool's call runs as the job's requester (?job=&room=, the
+	// content routes' admission): the bridge driving the job acts for them.
+	actor, ok := s.mediaCaller(w, r, claims)
+	if !ok {
+		return
+	}
+	claims = actor
 	if !s.assistLimiter.get(assistRate, assistBurst, s.Peers.Size).allow(claims.Tenant + "/" + claims.Subject) {
 		httpx.Error(w, "too many requests: try again in a minute", http.StatusTooManyRequests)
 		return

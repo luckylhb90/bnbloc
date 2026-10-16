@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 
 	corepkg "github.com/luckylhb90/bnbloc/core"
+	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/services/bridge/roomtools"
 )
 
@@ -32,7 +33,8 @@ import (
 // before Run.
 func (b *Bridge) EnableRoomTools(shimCommand string) (stop func(), err error) {
 	st := loadRoomToolsState(b.cfg.StateDir)
-	srv, err := roomtools.Start(roomtools.Config{Gateway: roomToolsGateway{b}, GatewayBaseURL: b.cfg.GatewayBaseURL, Addr: st.Addr, Names: b.displayNames})
+	srv, err := roomtools.Start(roomtools.Config{Gateway: roomToolsGateway{b}, GatewayBaseURL: b.cfg.GatewayBaseURL, Addr: st.Addr, Names: b.displayNames,
+		Publish: b.publishGeneratedFile})
 	if err != nil {
 		return nil, err
 	}
@@ -165,6 +167,24 @@ func (c *roomToolsContributor) RestoreSession(_ context.Context, info SessionInf
 	}
 	turn, release := c.hooks(sess)
 	return SessionContribution{RoomTools: true, Turn: turn, Release: release, State: state}, true
+}
+
+// publishGeneratedFile publishes a file the room tools generated on the
+// deployment's media provider (an image it drew) into the room's Docs, as a
+// deliverable of the bound job — the bridge's one publish path
+// (publishArtifactNow). It answers the artifact id.
+func (b *Bridge) publishGeneratedFile(ctx context.Context, room string, job roomtools.Job, name, mimeType string, content []byte) (string, error) {
+	rs := b.latestRoomSession(room)
+	if rs == nil {
+		return "", fmt.Errorf("the room has no session to publish through")
+	}
+	rel := "generated/" + name
+	d := deliverable{rel: rel, kind: store.ArtifactKindForFile(rel, mimeType), title: name, fileName: name,
+		mimeType: mimeType, content: content, turn: deliverableTurn{JobID: job.JobID, SourceSeq: job.MessageSeq}}
+	if err := b.publishArtifactNow(ctx, room, job.ChannelID, rs, d, "agent"); err != nil {
+		return "", err
+	}
+	return artifactIDForFile(room, rs, rel), nil
 }
 
 func roomToolsScope(info SessionInfo) roomtools.Scope {

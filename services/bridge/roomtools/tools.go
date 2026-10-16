@@ -40,6 +40,15 @@ type Env struct {
 	Progress func(progress float64, message string)
 }
 
+// Publish publishes a generated file into the room's Docs (Config.Publish,
+// the bridge's one publish path); "" when this bridge cannot.
+func (e *Env) Publish(ctx context.Context, room string, job Job, name, mimeType string, content []byte) (string, error) {
+	if e == nil || e.Config.Publish == nil {
+		return "", fmt.Errorf("this deployment's bridge cannot publish generated files")
+	}
+	return e.Config.Publish(ctx, room, job, name, mimeType, content)
+}
+
 // Result is a tool's answer: a JSON-able value, or an error message the
 // agent reads (an MCP tool error, not a protocol error).
 type Result struct {
@@ -161,7 +170,7 @@ func DefaultRegistry() *Registry {
 	for _, t := range []Tool{
 		listRoomAgentsTool(), askAgentTool(), roomStatusTool(), readRoomTool(), readArtifactTool(),
 		saveComponentTool(), getComponentTool(), listComponentsTool(), publishComponentTool(), tryDraftTool(),
-		postProgressTool(), appDataTool(), schedulesTool(),
+		postProgressTool(), appDataTool(), schedulesTool(), generateImageTool(),
 	} {
 		if err := r.Register(t); err != nil {
 			panic(err) // a static registration bug
