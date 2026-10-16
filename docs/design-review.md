@@ -209,6 +209,25 @@ version identity; problems found only by a user.
 
 ## The process
 
+### 13. AI capability
+
+- Every new feature gets an AI answer, the product owner's standing request
+  (2026-10-17): where could the platform's AI make this easier (draft it,
+  fill it in, explain it, summarize it, suggest the next step, curate it over
+  time), and what is the entry point?
+- Built on the one seam: an assist (`docs/architecture/ai-assist.md`) for a
+  manual, in-browser step; a gateway schedule run for something on a clock;
+  never a second model client, never a new tool or rule for room agents.
+- Where AI is deliberately not used, say why: a step with no decision in it
+  is a record, not a prompt (LESSONS.md "Take the model out of a step that has
+  no decision in it"). AI proposes and a person decides whatever changes
+  shared state, spends money or leaves the room.
+- Cost and fallback: the member's own budget and rate, the organization's
+  off switch, and the feature working without the model.
+
+*Test:* the PRD names the AI entry point or the reason for none; with the
+assist model off the feature still works and says why the AI part is gone.
+
 ### Before building — in the PRD
 
 Every PRD (`docs/prd/`) for a change that alters behaviour has a
@@ -231,6 +250,7 @@ Every PRD (`docs/prd/`) for a change that alters behaviour has a
 | Load on users and agents | … |
 | Release and compatibility | … |
 | Observability | … |
+| AI capability | … |
 
 **Pre-mortem.** It shipped and a month later it failed badly. The three
 most likely reasons, and what this design does about each: …
