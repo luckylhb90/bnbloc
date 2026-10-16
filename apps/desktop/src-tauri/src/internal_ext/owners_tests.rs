@@ -150,13 +150,14 @@ fn loopback_hosts_are_named_only_by_loopback() {
 /// or maps a gateway status itself.
 #[test]
 fn gateway_calls_go_through_the_gateway_client() {
-    // The sandbox API authenticates to its own sidecar with the launch's
-    // bearer, never the member session.
+    // The sandbox API and a skills provider authenticate to their own
+    // sidecar with the launch's bearer, never the member session.
     only_in_any(
         ".bearer_auth(",
         &[
             "internal_ext/gateway_client.rs",
             "internal_ext/sandbox_api.rs",
+            "internal_ext/skills_provider.rs",
         ],
     );
 }

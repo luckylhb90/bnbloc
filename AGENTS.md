@@ -738,7 +738,13 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   hooks drawn ONLY
   from the code-owned registry (`chat_message.v1`, `agent_messages.v1`,
   `notification.v1` in `core/pkgmeta/package_validation.go`). An unknown hook fails validation
-  before anything persists. Which kinds may carry which payload field is
+  before anything persists. A plugin may instead (or also) declare a
+  capability that gives it another job and the launch inputs for it:
+  `skills-provider` (a bearer the desktop keeps, Settings → Skills renders its
+  `bnbloc.skills.provider/v1` API) and `sandbox-mounts` (a descriptor file and a
+  mirror folder, `docs/architecture/sandbox-mounts.md`); the package names the
+  env vars and a plugin with only those subscribes to no hook
+  (`docs/architecture/local-skills.md`). Which kinds may carry which payload field is
   one table (`kindFields`, `core/pkgmeta/shape.go`; a stray field is
   refused, `TestKindOnlyFieldsRefused`), and the runtime blocks are
   `RequireEndpointRuntime`/`requireGuardedEndpoint`/`requireSidecarRuntime`
@@ -1387,7 +1393,8 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `list_components` reads the same) and `.room/apps.md` (`ReadApps`, the
   room's interactive apps with their collections' counts, written by
   `AppsUpdate` once the room has an app and every turn after, so it never
-  goes stale; `CtxState.AppsListed`). An agent with tools reads a
+  goes stale; `CtxState.AppsListed`) and `.room/groups.md` (`ReadGroups`: the
+  connected group chats' names, `GroupsUpdate`, `CtxState.GroupsListed`). An agent with tools reads a
   deliverable with `read_artifact`, through the room's own artifact routes
   (membership and room checked there), bounded and fenced as untrusted; a
   site's file through the gateway's site file read on the main origin

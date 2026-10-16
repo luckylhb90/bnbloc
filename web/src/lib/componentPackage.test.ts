@@ -84,6 +84,23 @@ assert(!tokenless.ok, "a sandbox sidecar without tokenEnv is refused");
 const wrongSandbox = parseComponentPackage(sandboxJSON.replace("bnbloc.sandbox.contract/v1", "bnbloc.sandbox.contract/v9"));
 assert(!wrongSandbox.ok, "an unknown sandbox contract is refused");
 
+const skillsPlugin = {
+  kind: "bnbloc.plugin.package/v1",
+  contract: "bnbloc.plugin.contract/v1",
+  name: "local-skills",
+  version: "0.1.0",
+  publisher: "platform",
+  runtime: "sidecar",
+  capabilities: ["skills-provider", "sandbox-mounts"],
+  sidecar: { localUrl: "http://127.0.0.1:7192", tokenEnv: "SK_TOKEN", mountsEnv: "SK_MOUNTS_FILE", mountRootEnv: "SK_MOUNT_ROOT" },
+  artifacts: { "darwin-arm64": { url: "", sha256: "" } },
+};
+const skills = parseComponentPackage(JSON.stringify(skillsPlugin));
+assert(skills.ok, "a plugin with another job needs no hook");
+if (skills.ok) assert(skills.value.sidecar?.mountsEnv === "SK_MOUNTS_FILE", "mount envs survive package import");
+assert(!parseComponentPackage(JSON.stringify({ ...skillsPlugin, capabilities: [] })).ok, "a plugin with no hook and no job is refused");
+assert(!parseComponentPackage(JSON.stringify({ ...skillsPlugin, capabilities: ["skills-provider"] })).ok, "mount envs without the capability are refused");
+
 const previewerJSON = JSON.stringify({
   kind: "bnbloc.previewer.package/v1",
   contract: "bnbloc.previewer.contract/v1",

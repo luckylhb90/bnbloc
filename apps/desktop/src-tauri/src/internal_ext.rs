@@ -32,6 +32,7 @@ pub(super) mod sidecar_status;
 pub(super) mod sidecar_sweep;
 pub(super) mod sidecar_targets;
 pub(super) mod sidecar_util;
+pub(super) mod skills_provider;
 pub(super) mod update_gate;
 
 use std::collections::{HashMap, HashSet};
@@ -47,6 +48,7 @@ pub use sidecar_model::AdapterStatus;
 use sidecar_model::{GatewayAccess, Inner, ManagedSidecar, SidecarSpec};
 pub use sidecar_targets::SidecarAuthStatus;
 use sidecar_util::core_env_var;
+pub use skills_provider::SkillsProviderView;
 
 use crate::child_process::{Backoff, Child, Stopping};
 
@@ -81,6 +83,8 @@ pub struct Adapter {
     host: Arc<plugin_host::PluginHost>,
     /// The active sandbox component's launch and machine (sandbox.rs).
     sandbox: Arc<Mutex<sandbox::SandboxState>>,
+    /// The skills providers whose process runs (skills_provider.rs).
+    providers: Arc<Mutex<skills_provider::Providers>>,
     /// The installed MCP tools and their materialized binaries
     /// (mcp_tools.rs).
     mcp: Arc<mcp_tools::McpState>,
@@ -115,6 +119,7 @@ impl Adapter {
             })),
             reconcile_lock: Arc::new(tokio::sync::Mutex::new(())),
             sandbox: Arc::new(Mutex::new(sandbox::SandboxState::default())),
+            providers: Arc::new(Mutex::new(skills_provider::Providers::default())),
             mcp: Arc::new(mcp_tools::McpState::default()),
             catalog_hints: Arc::new(plugin_events::HintDebounce::default()),
             stopping: Stopping::default(),

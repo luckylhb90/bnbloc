@@ -47,6 +47,9 @@ type Policy struct {
 	// AgentDirs are the folders agent CLIs read skills from; a skill is also
 	// reachable at an entry of one that links to it.
 	AgentDirs []string `json:"agentDirs"`
+	// SuggestedSources are folders the Settings view offers to add when they
+	// exist: offered, never added for the member.
+	SuggestedSources []string `json:"suggestedSources"`
 	// Exclude are name patterns never copied (matched against each path part).
 	Exclude []string `json:"exclude"`
 	// ScriptExts and ScriptDirs say what counts as a script.
@@ -82,6 +85,7 @@ func union(a, b []string) []string {
 func (p Policy) Merge(o Policy) Policy {
 	out := p
 	out.AgentDirs = union(p.AgentDirs, o.AgentDirs)
+	out.SuggestedSources = union(p.SuggestedSources, o.SuggestedSources)
 	out.Exclude = union(p.Exclude, o.Exclude)
 	out.ScriptExts = union(p.ScriptExts, o.ScriptExts)
 	out.ScriptDirs = union(p.ScriptDirs, o.ScriptDirs)

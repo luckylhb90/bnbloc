@@ -9,16 +9,19 @@ import (
 )
 
 // runComponents handles component operations that are not core-specific:
-// notifier signing-secret rotation and test sends.
+// notifier signing-secret rotation and test sends, and publishing a package
+// file with its binaries.
 func runComponents(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("components: expected a subcommand (rotate-secret|test)")
+		return fmt.Errorf("components: expected a subcommand (rotate-secret|test|publish-package)")
 	}
 	switch args[0] {
 	case "rotate-secret":
 		return componentsRotateSecret(args[1:])
 	case "test":
 		return componentsTest(args[1:])
+	case "publish-package":
+		return componentsPublishPackage(args[1:])
 	default:
 		return fmt.Errorf("components: unknown subcommand %q", args[0])
 	}

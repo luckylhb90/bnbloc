@@ -3,6 +3,7 @@ package pkgmeta
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -86,8 +87,23 @@ const PluginHostChat = "chat"
 // plugin may declare in permissions.host.
 var pluginHostPermissions = map[string]bool{PluginHostChat: true}
 
+// Plugin capabilities: what a plugin is for. A plugin with none of the two
+// below must subscribe to a hook; these give it another job and the desktop
+// the matching launch and call rights.
+const (
+	// PluginCapabilitySkillsProvider: the plugin serves bnbloc.skills.provider/v1
+	// on sidecar.localUrl behind its tokenEnv bearer; the desktop forwards the
+	// host Settings → Skills view's calls to it.
+	PluginCapabilitySkillsProvider = "skills-provider"
+	// PluginCapabilitySandboxMounts: the plugin writes a bnbloc.sandbox.mounts/v1
+	// descriptor to the file in sidecar.mountsEnv, for the sandbox bridge.
+	PluginCapabilitySandboxMounts = "sandbox-mounts"
+)
+
 var pluginCapabilities = map[string]bool{
-	"room-events": true,
+	"room-events":                  true,
+	PluginCapabilitySkillsProvider: true,
+	PluginCapabilitySandboxMounts:  true,
 }
 
 // LookupHook resolves a declared hook id to its delivery spec.
@@ -116,8 +132,8 @@ func validatePluginPackage(pkg Package) error {
 	if pkg.Runtime != RuntimeSidecar {
 		return fmt.Errorf(`plugin runtime must be "sidecar"`)
 	}
-	if len(pkg.Hooks) == 0 {
-		return fmt.Errorf("plugin must declare at least one hook")
+	if len(pkg.Hooks) == 0 && !slices.Contains(pkg.Capabilities, PluginCapabilitySkillsProvider) && !slices.Contains(pkg.Capabilities, PluginCapabilitySandboxMounts) {
+		return fmt.Errorf("plugin must declare at least one hook (or a capability that gives it another job)")
 	}
 	for _, id := range pkg.Hooks {
 		if _, ok := hookRegistry[id]; !ok {
@@ -125,6 +141,9 @@ func validatePluginPackage(pkg Package) error {
 		}
 	}
 	if err := requireSidecarRuntime(pkg, "plugin"); err != nil {
+		return err
+	}
+	if err := validatePluginJobs(pkg); err != nil {
 		return err
 	}
 	seen := map[string]bool{}
@@ -138,6 +157,23 @@ func validatePluginPackage(pkg Package) error {
 		seen[p] = true
 	}
 	return validateLocalSettings(pkg.LocalSettings)
+}
+
+// validatePluginJobs checks the launch fields the capabilities that are not
+// about hooks need, and refuses the ones that would be unused.
+func validatePluginJobs(pkg Package) error {
+	sc := pkg.Sidecar
+	mounts := slices.Contains(pkg.Capabilities, PluginCapabilitySandboxMounts)
+	if mounts && (sc.MountsEnv == "" || sc.MountRootEnv == "") {
+		return fmt.Errorf("a %s plugin requires sidecar.mountsEnv and sidecar.mountRootEnv", PluginCapabilitySandboxMounts)
+	}
+	if !mounts && (sc.MountsEnv != "" || sc.MountRootEnv != "") {
+		return fmt.Errorf("sidecar.mountsEnv and sidecar.mountRootEnv need the %s capability", PluginCapabilitySandboxMounts)
+	}
+	if slices.Contains(pkg.Capabilities, PluginCapabilitySkillsProvider) && sc.TokenEnv == "" {
+		return fmt.Errorf("a %s plugin requires sidecar.tokenEnv (its bearer)", PluginCapabilitySkillsProvider)
+	}
+	return nil
 }
 
 func validateAuthProviderPackage(pkg Package) error {

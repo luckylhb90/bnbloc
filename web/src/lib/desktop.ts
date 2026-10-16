@@ -9,6 +9,7 @@
 import { inDesktopShell } from "./config";
 import { api, type AgentTarget, type UpdatePolicy } from "./api";
 import type { McpToolSettings } from "./mcpTools";
+import { unframePackedSkill, type SkillsProvider, type SkillsSettings, type SkillsState } from "./localSkills";
 import type { PluginLocalSettings } from "./pluginSettings";
 import type { SandboxMode, SandboxStatus, ShellEnvReload } from "./sandboxStatus";
 import { SESSION_KEY, parseSessionRecord, type SessionRecord } from "./sessionGrant";
@@ -154,6 +155,16 @@ async function popOutWindow(command: string, args: Record<string, string>): Prom
   }
 }
 
+// skillsInvoke calls one of the shell's skills commands; a failure reads as
+// its message.
+async function skillsInvoke(command: string, args: Record<string, unknown>): Promise<unknown> {
+  const t = tauri();
+  if (!t) throw new Error("local skills are only available in the desktop app");
+  return t.invoke(command, args).catch((e: unknown) => {
+    throw new Error(e instanceof Error ? e.message : String(e));
+  });
+}
+
 export const desktop = {
   available: (): boolean => tauri() !== null,
 
@@ -288,6 +299,34 @@ export const desktop = {
     await t.invoke("plugin_local_settings_clear", { plugin }).catch((e: unknown) => {
       throw new Error(e instanceof Error ? e.message : String(e));
     });
+  },
+
+  // Local skills (Settings → Skills): the installed plugins that provide
+  // skills and each one's `bnbloc.skills.provider/v1` API, called through the
+  // shell on loopback. Nothing here reaches the gateway.
+  async skillsProviders(): Promise<SkillsProvider[]> {
+    const t = tauri();
+    if (!t) return [];
+    return (await t.invoke("skills_providers")) as SkillsProvider[];
+  },
+
+  async skillsProviderState(plugin: string): Promise<SkillsState> {
+    return (await skillsInvoke("skills_provider_state", { plugin })) as SkillsState;
+  },
+
+  async saveSkillsSettings(plugin: string, settings: SkillsSettings): Promise<SkillsState> {
+    return (await skillsInvoke("skills_provider_settings", { plugin, settings })) as SkillsState;
+  },
+
+  // One skill packed by its provider: the tar.gz and the hash of the skill.
+  async packSkill(plugin: string, name: string): Promise<{ hash: string; archive: Uint8Array }> {
+    const raw = (await skillsInvoke("skills_provider_pack", { plugin, name })) as ArrayBuffer;
+    return unframePackedSkill(new Uint8Array(raw));
+  },
+
+  // The folder picker for a skills source; null when cancelled.
+  async pickSkillsFolder(): Promise<string | null> {
+    return (await skillsInvoke("skills_pick_folder", {})) as string | null;
   },
 
   // Installed MCP tools with this computer's state (Settings → Tools): the

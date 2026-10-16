@@ -14,6 +14,17 @@ type Choice struct {
 	VM bool `json:"vm"`
 	// Borrowers also puts it in the sandbox of a run another member borrows.
 	Borrowers bool `json:"borrowers"`
+	// Published records the last publish to the member's library (the web
+	// sets it after an import); the skill's hash against it says whether the
+	// skill changed since.
+	Published *Published `json:"published,omitempty"`
+}
+
+// Published is a skill as it was last published.
+type Published struct {
+	Hash        string `json:"hash"`
+	ComponentID string `json:"componentId"`
+	Version     string `json:"version"`
 }
 
 // Settings are a member's, kept on their machine. The zero value is the

@@ -35,6 +35,13 @@ pub(super) const PLUGIN_SETTINGS_DIR: &str = "plugin-settings";
 pub(super) const MCP_SETTINGS_DIR: &str = "mcp-settings";
 /// A member's sandbox data dirs (`<member>/sandbox/<name>`: VM disks).
 pub(super) const SANDBOX_DATA_DIR: &str = "sandbox";
+/// A plugin's private data dir (`<member>/plugin-data/<plugin>`), for a
+/// plugin that declares `sidecar.dataDirEnv`.
+pub(super) const PLUGIN_DATA_DIR: &str = "plugin-data";
+/// Where components leave the sandbox mounts they contribute, inside the
+/// bridge's state dir (`<member>/bridge/mounts/<component>/mounts.json`;
+/// docs/architecture/sandbox-mounts.md).
+pub(super) const MOUNTS_DIR: &str = "mounts";
 /// The bridge's state (`<member>/bridge/`: which workspace each agent of a
 /// room uses), handed to it as `BRIDGE_STATE_DIR_ENV`.
 pub(super) const BRIDGE_STATE_DIR: &str = "bridge";

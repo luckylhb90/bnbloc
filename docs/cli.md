@@ -245,6 +245,16 @@ bnbloc cores publish-sidecar --name acme --version 1.4.0 --publisher acme-inc \
   --rollout optin
 ```
 
+A plugin, a notifier sidecar or any other package that ships binaries is a
+package file without `artifacts` plus the binaries; `publish-package` uploads
+them, pins them in the package, signs and installs it (a sidecar file a package
+declares is `--binary <platform>/<file>=<path>`):
+
+```sh
+bnbloc components publish-package --package packages/local-skills/package.json \
+  --binary darwin-arm64=dist/bnbloc-local-skills-darwin-arm64 --rollout optin
+```
+
 The generic ACP core, [bnbloc-acp](https://github.com/luckylhb90/bnbloc-acp),
 is published the same way from its release binaries (its README has the
 command); each member then lists their Agent Client Protocol agents in their

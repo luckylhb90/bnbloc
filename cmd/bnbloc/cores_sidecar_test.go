@@ -182,3 +182,51 @@ func TestKeysGenWritesPrivateKey0600(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A package file with no artifacts is published with the binaries it is given:
+// they are uploaded and pinned, the package is signed, and a plugin that has
+// no hook (a skills provider) passes the gate.
+func TestPublishPackageUploadsBinariesAndPinsThem(t *testing.T) {
+	home := isolateHome(t)
+	if err := keysGen([]string{"--out", filepath.Join(home, ".bnbloc", "component-publisher")}); err != nil {
+		t.Fatal(err)
+	}
+	gw := newPublishGateway(t)
+	bin := writeTemp(t, "local-skills", "binary")
+	pkgFile := filepath.Join("..", "..", "packages", "local-skills", "package.json")
+	if err := componentsPublishPackage([]string{"--gateway", gw.URL, "--token", "admin", "--package", pkgFile, "--binary", "darwin-arm64=" + bin, "--rollout", "optin"}); err != nil {
+		t.Fatal(err)
+	}
+	if gw.uploads != 1 || gw.published["rollout"] != "optin" || gw.published["signature"] == "" {
+		t.Fatalf("uploads=%d publish=%v", gw.uploads, gw.published)
+	}
+	pkg, err := pkgmeta.ParsePackage([]byte(gw.published["package"]))
+	if err != nil {
+		t.Fatalf("published package invalid: %v", err)
+	}
+	art := pkg.Artifacts["darwin-arm64"]
+	if pkg.Kind != pkgmeta.KindPluginPackageV1 || art.URL == "" || len(art.SHA256) != 64 || !strings.Contains(strings.Join(pkg.Capabilities, ","), "skills-provider") {
+		t.Fatalf("pkg = %+v", pkg)
+	}
+}
+
+func TestPublishPackageRefusesBeforeUploading(t *testing.T) {
+	isolateHome(t)
+	gw := newPublishGateway(t)
+	bin := writeTemp(t, "bin", "binary")
+	pinned := writeTemp(t, "pinned.json", `{"kind":"bnbloc.plugin.package/v1","contract":"bnbloc.plugin.contract/v1","name":"p","version":"1.0.0","runtime":"sidecar","capabilities":["skills-provider"],"sidecar":{"localUrl":"http://127.0.0.1:7192","tokenEnv":"T"},"artifacts":{"darwin-arm64":{"url":"x","sha256":"y"}}}`)
+	hookless := writeTemp(t, "hookless.json", `{"kind":"bnbloc.plugin.package/v1","contract":"bnbloc.plugin.contract/v1","name":"p","version":"1.0.0","runtime":"sidecar","sidecar":{"localUrl":"http://127.0.0.1:7192"}}`)
+	for name, args := range map[string][]string{
+		"artifacts named in the file": {"--package", pinned, "--binary", "darwin-arm64=" + bin},
+		"a package the gate refuses":  {"--package", hookless, "--binary", "darwin-arm64=" + bin},
+		"no package":                  {"--binary", "darwin-arm64=" + bin},
+		"no binary":                   {"--package", hookless},
+	} {
+		if err := componentsPublishPackage(append([]string{"--gateway", gw.URL, "--token", "admin", "--unsigned"}, args...)); err == nil {
+			t.Errorf("%s must be refused", name)
+		}
+	}
+	if gw.uploads != 0 || gw.published != nil {
+		t.Errorf("a refused package uploads nothing: uploads=%d published=%v", gw.uploads, gw.published)
+	}
+}

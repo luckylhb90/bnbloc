@@ -183,12 +183,26 @@ pub(super) struct GuestProfile {
 
 /// What a plugin sidecar is launched with beyond the common sidecar fields:
 /// the host API capabilities it may use (`permissions.host`: it then gets
-/// `BNBLOC_PLUGIN_HOST_URL`/`_TOKEN`) and its desktop-local settings schema
-/// (`localSettings`: the values are passed in `BNBLOC_PLUGIN_SETTINGS_FILE`).
+/// `BNBLOC_PLUGIN_HOST_URL`/`_TOKEN`), its desktop-local settings schema
+/// (`localSettings`: the values are passed in `BNBLOC_PLUGIN_SETTINGS_FILE`),
+/// and what its capabilities earn it (skills_provider.rs): a bearer for the
+/// `skills-provider` job, a data dir, and for `sandbox-mounts` the descriptor
+/// file and mirror folder, each in the env var the package names.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) struct PluginLaunch {
     pub(super) host: Vec<String>,
     pub(super) local_settings: Vec<LocalSettingField>,
+    pub(super) capabilities: Vec<String>,
+    pub(super) token_env: String,
+    pub(super) data_dir_env: String,
+    pub(super) mounts_env: String,
+    pub(super) mount_root_env: String,
+}
+
+impl PluginLaunch {
+    pub(super) fn has(&self, capability: &str) -> bool {
+        self.capabilities.iter().any(|c| c == capability)
+    }
 }
 
 /// One field of a plugin's desktop-local settings schema (pkgmeta.LocalSetting).
@@ -342,6 +356,9 @@ pub(super) struct ComponentEntry {
     pub(super) permissions: Option<ComponentPermissions>,
     #[serde(default)]
     pub(super) local_settings: Option<Vec<LocalSettingField>>,
+    /// What a plugin is for (`skills-provider`, `sandbox-mounts`, …).
+    #[serde(default)]
+    pub(super) capabilities: Vec<String>,
     #[serde(default)]
     pub(super) guest: Option<GuestProfile>,
     /// Present for an installed previewer: its bundle pin.
@@ -531,11 +548,16 @@ impl ComponentEntry {
     }
 
     /// Plugin launch metadata from the catalog entry (cores get none).
-    fn plugin_launch(&self) -> PluginLaunch {
+    fn plugin_launch(&self, sidecar: &ArtifactSidecar) -> PluginLaunch {
         if self.kind != ComponentKind::Plugin {
             return PluginLaunch::default();
         }
         PluginLaunch {
+            capabilities: self.capabilities.clone(),
+            token_env: sidecar.token_env.clone().unwrap_or_default(),
+            data_dir_env: sidecar.data_dir_env.clone().unwrap_or_default(),
+            mounts_env: sidecar.mounts_env.clone().unwrap_or_default(),
+            mount_root_env: sidecar.mount_root_env.clone().unwrap_or_default(),
             host: self
                 .permissions
                 .as_ref()
@@ -630,7 +652,7 @@ impl ComponentEntry {
                     listen_env: sidecar.listen_env.clone().unwrap_or_default(),
                     supervised_env: sidecar.supervised_env.clone().unwrap_or_default(),
                     args: sidecar.args.clone().unwrap_or_default(),
-                    plugin: self.plugin_launch(),
+                    plugin: self.plugin_launch(sidecar),
                     sandbox: self.sandbox_launch(sidecar, platform)?,
                 })
             }
@@ -649,6 +671,8 @@ pub(super) struct ArtifactSidecar {
     pub(super) args: Option<Vec<String>>,
     pub(super) token_env: Option<String>,
     pub(super) data_dir_env: Option<String>,
+    pub(super) mounts_env: Option<String>,
+    pub(super) mount_root_env: Option<String>,
     pub(super) files: Option<Vec<ArtifactSidecarFile>>,
 }
 

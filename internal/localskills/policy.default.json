@@ -8,6 +8,7 @@
     "~/.gemini/skills",
     "~/.cursor/skills"
   ],
+  "suggestedSources": ["~/.agents/skills"],
   "exclude": [".git", "node_modules", "__pycache__", ".venv", ".DS_Store", "*.pyc"],
   "scriptExts": [".sh", ".bash", ".zsh", ".py", ".js", ".mjs", ".ts", ".rb", ".pl", ".go", ".ps1", ".bat", ".cmd"],
   "scriptDirs": ["scripts", "bin"],

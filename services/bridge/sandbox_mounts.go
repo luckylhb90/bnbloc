@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	corepkg "github.com/luckylhb90/bnbloc/core"
 	sandbox "github.com/luckylhb90/bnbloc/sandbox/protocol"
 )
 
@@ -90,7 +91,14 @@ func ParseMountRoots(raw, home string) (roots, refused []string) {
 
 func within(root, p string) bool {
 	rel, err := filepath.Rel(root, p)
-	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	if err != nil {
+		return false
+	}
+	if rel == "." {
+		return true
+	}
+	_, ok := corepkg.CleanRelPath(filepath.ToSlash(rel))
+	return ok
 }
 
 func overlaps(a, b string) bool { return within(a, b) || within(b, a) }

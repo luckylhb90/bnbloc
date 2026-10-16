@@ -33,6 +33,7 @@ use crate::internal_ext::sidecar_fetch::FetchError;
 use crate::internal_ext::sidecar_model::{ComponentKind, ComponentsResponse, SidecarSpec};
 use crate::internal_ext::sidecar_sweep::{forget_entries_except, Live, SweepDirs};
 use crate::internal_ext::sidecar_util::{cache_stem, runtime_listener_for, RuntimeListener};
+use crate::internal_ext::skills_provider;
 use crate::internal_ext::Adapter;
 use crate::secret::Secret;
 
@@ -198,11 +199,17 @@ impl KindRuntime for Plugin {
                 &member.join(PLUGIN_SETTINGS_DIR),
                 live.names(ComponentKind::Plugin),
             );
+            skills_provider::sweep_member(member, live.names(ComponentKind::Plugin));
         }
     }
 
+    /// A plugin that reads the member's directory (its settings, its data dir,
+    /// its mount descriptor) restarts with the member scope.
     fn member_scoped(&self, spec: &SidecarSpec) -> bool {
         !spec.plugin.local_settings.is_empty()
+            || !spec.plugin.data_dir_env.is_empty()
+            || spec.plugin.has(skills_provider::CAP_MOUNTS)
+            || spec.plugin.has(skills_provider::CAP_PROVIDER)
     }
 
     /// A plugin missing required local settings is not launched: the member
@@ -236,8 +243,26 @@ impl KindRuntime for Plugin {
                 )
                 .await?;
             }
+            guard.secret = adapter.plugin_job_env(spec, cmd)?;
             Ok(guard)
         })
+    }
+
+    /// A skills provider's process runs: the web may call it until it exits.
+    fn on_spawned(
+        &self,
+        adapter: &Adapter,
+        spec: &SidecarSpec,
+        url: &str,
+        _exe: &Path,
+        guard: &mut LaunchGuard,
+    ) {
+        let Some(token) = guard.secret.take() else {
+            return;
+        };
+        let seq = adapter.provider_spawned(&spec.name, url, token);
+        let adapter = adapter.clone();
+        guard.on_end(move |_| adapter.provider_exited(seq));
     }
 }
 

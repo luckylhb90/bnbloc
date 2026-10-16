@@ -1,7 +1,8 @@
 # Local skills: a member's own skills in the sandbox, and in their library (2026-10-16)
 
-Status: in progress (2026-10-16); revised the same day to make it an installable
-component behind two small contracts. Builds on `docs/prd/2026-10-09-agent-vm-sandbox.md`
+Status: implemented (2026-10-16) except the end-to-end check on a real sandboxed
+run (milestone F); revised the same day to make it an installable component
+behind two small contracts. How it is built: `docs/architecture/local-skills.md`. Builds on `docs/prd/2026-10-09-agent-vm-sandbox.md`
 (the hybrid execution: the agent CLI on the host, its shell commands in one
 Linux VM), `docs/architecture/sandbox-protocol.md` (spaces and mounts),
 `docs/architecture/content-components.md` (skills as content) and
@@ -110,8 +111,8 @@ Settings → Skills (web)  ──skills-provider/v1──▶  local-skills compo
   any optional component. It owns everything about skills (`internal/localskills`:
   scan, eligibility, filters, secret scan, mirror, reach paths, the policy). It
   declares two capabilities, `skills-provider` and `sandbox-mounts`; a plugin that
-  declares neither of the room-event hooks needs none (hooks are required only with
-  `room-events`).
+  subscribes to no room event, so a plugin that declares one of these
+  capabilities needs no hook (the hook rule is waived for it).
 - **Contract 1, sandbox mounts (the platform seam, component → bridge).** A
   component writes `<bridge state dir>/mounts/<component>/mounts.json`:
   `{contract:"bnbloc.sandbox.mounts/v1", mounts:[{host, guest, for}], notes:[…]}`
@@ -122,8 +123,8 @@ Settings → Skills (web)  ──skills-provider/v1──▶  local-skills compo
   stays there once symlinks are resolved; `guest` is absolute, clean, not under
   the turn's workdir and not a system root; at most 256 mounts and 256 KiB per
   component, at most 16 components; every mount is read-only whatever the file
-  says. A mount that fails is dropped and named in the turn's notice, never
-  failing the turn. The contributed mounts are not part of the core's path
+  says. A mount that fails is dropped and logged
+  (`bnbloc.bridge.sandbox_mount_dropped`), never failing the turn. The contributed mounts are not part of the core's path
   mapping (only the workspace is). The bridge reads the files each turn, so an
   install, a change or an uninstall needs no restart; it knows no skill.
 - **Contract 2, skills provider (the host UI ↔ a component, loopback HTTP).** The
@@ -133,16 +134,16 @@ Settings → Skills (web)  ──skills-provider/v1──▶  local-skills compo
   `PUT /v1/settings` (enabled, sources, agent folders, the choices) and
   `POST /v1/pack` (one skill as an archive the Library imports, after the filters
   and the scan). The web never calls it directly: a Tauri command forwards to the
-  plugin's own address, only for a plugin that declares `skills-provider`, and
-  `Settings → Skills` renders what any such component returns. A member's own
+  plugin's own address, only for a plugin that declares `skills-provider` (three commands, one per route,
+  never a generic path), and `Settings → Skills` renders what any such component returns. A member's own
   component implements the same three routes.
 - **The desktop** passes a plugin that declares these capabilities its launch
   environment (a data folder for its settings, the mounts folder the bridge reads,
   the mirror root under the workspaces root, its bearer); a plugin without them
   gets none of it. Its settings (sources, ticks) live in its data folder, 0600.
-- **The web** talks to the host through Tauri commands (the folder picker for a
-  source is the system's, so the web sees a name and never a path, as local files
-  do).
+- **The web** talks to the host through Tauri commands. The folder picker for a
+  source is the system's and its path goes to the provider; the web does see the
+  paths it lists (they are the member's own folders, shown in their own Settings).
 - **Own and borrowed runs** are told apart by the bridge (`isBorrow`); it passes
   the distinction to `for` selection. A run that is not sandboxed gets no mounts.
 - **The sandbox conformance suite** never tests `SpaceMount.ReadOnly`; a case that
@@ -156,15 +157,15 @@ Settings → Skills (web)  ──skills-provider/v1──▶  local-skills compo
 | Actors | The member installs the component and chooses skills; it runs as the member on their machine. The owner chooses skills and who may use them. A borrower's run mounts a skill only when the owner ticked "For borrowers" for it; a skill is never mounted for someone else by default. Another member never sees the owner's source folders or list; they see a published component only when the owner publishes and shares it. |
 | Time and lifecycle | Applied per turn from the settings file; a running turn keeps what it started with. A removed or unticked skill's mirror is deleted at the next turn. The mirror survives a restart (it is a folder) and is rebuilt from the sources when missing. |
 | Scale and cost | Per skill ≤ 512 files and 8 MiB; at most 64 ticked skills; an unchanged skill costs one stat per file per turn. The mirror is at most 512 MiB in all, then the newest ticks win and the rest are listed "over the limit". |
-| Failure and recovery | A skill that cannot be copied (permission, vanished folder) is left out of the turn, named in the list, and the turn runs without it, never failing because of it. A mount the backend refuses runs the turn without the skills and says so in the turn's notice. |
-| Boundaries and privacy | The guest sees a read-only copy at the skill's own paths and nothing else of the home folder. Credentials never enter the guest (existing rule); a credential-looking file stops the skill (rule 9). The web never sees a path. |
+| Failure and recovery | A skill that cannot be copied (permission, vanished folder) is left out of the turn, named in the list, and the turn runs without it, never failing because of it. A mount the backend refuses (or a descriptor that fails validation) runs the turn without the skills; the bridge logs it, and the Settings list carries the component's own notes on what it left out. |
+| Boundaries and privacy | The guest sees a read-only copy at the skill's own paths and nothing else of the home folder. Credentials never enter the guest (existing rule); a credential-looking file stops the skill (rule 9). The skills list shows the member's own folders to the member alone. |
 | Abuse and untrusted input | A component is untrusted to the bridge: it can only offer read-only mounts under its own folder of the one share, and the bridge drops anything else. A local process calling the provider API needs the per-launch bearer. A skill is code the member chose to run in their own sandbox. A symlink out of the folder is not followed (eligibility); the mirror is a copy, so a skill cannot reach through it to the original. A borrower cannot tick anything. |
 | One owner | Everything about skills: `internal/localskills`, behind the component. The mount seam: the bridge's validation of descriptor files. Import: `contentpkg`. |
 | Defaults and fallbacks | Feature off; no sources; no skill ticked; borrowers off. Without the table's agents present, only the source path is mounted. A turn that is not sandboxed ignores all of it. |
 | External contracts | Two new contracts (`bnbloc.sandbox.mounts/v1` files, `bnbloc.skills.provider/v1` loopback HTTP) and a plugin capability list (`skills-provider`, `sandbox-mounts`). The sandbox protocol is unchanged (read-only extra mounts it already has). Import is unchanged. |
 | Load on users and agents | Three toggles and a list; no new tool, no prompt text, the agent sees its skills where it always did. |
-| Release and compatibility | Desktop-only (macOS first: that is the sandbox backend's platform). A component nobody installs changes nothing; one installed does nothing until the member turns it on. The bridge reads mount files per turn, so no restart. Plugin validation relaxes (hooks only with `room-events`), a change to a code-owned list, with no compatibility shim. |
-| Observability | The list shows each skill's state (mirrored, not eligible and why, hidden by another source, published, changed); a turn's notice says when skills were left out. |
+| Release and compatibility | Desktop-only (macOS first: that is the sandbox backend's platform). A component nobody installs changes nothing; one installed does nothing until the member turns it on. The bridge reads mount files per turn, so no restart. Plugin validation relaxes (a hook is required unless the plugin declares `skills-provider` or `sandbox-mounts`), a change to a code-owned list, with no compatibility shim. |
+| Observability | The list shows each skill's state (mirrored, not eligible and why, hidden by another source, published, changed); the bridge logs a mount it dropped. |
 
 **Pre-mortem.**
 
@@ -176,9 +177,9 @@ Settings → Skills (web)  ──skills-provider/v1──▶  local-skills compo
 2. **"A skill's `.env` ended up in the guest."** Names and content are filtered
    and scanned before the copy, and the mirror holds only what passed; a skill
    with a credential-looking file is not mirrored at all.
-3. **"My edit did not show up."** The mirror is brought up to date at the start of
-   every sandboxed turn by comparing each file's size and modification time (to
-   nanoseconds); a file that differs is copied again.
+3. **"My edit did not show up."** The component brings the mirror up to date every
+   ten seconds (and on every settings change) by comparing each file's size and
+   modification time (to nanoseconds); a file that differs is copied again.
 4. **"A borrower read my private skill."** Mounts are per skill, so a borrowed turn
    gets mounts only for the skills ticked "For borrowers" and nothing else of the
    mirror is visible in its guest. (What the owner's own CLI loads on the host is

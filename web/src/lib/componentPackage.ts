@@ -47,7 +47,7 @@ function parsePackageRecord(record: Readonly<Record<string, unknown>>): ParseRes
   if (!mcp.ok) return mcp;
   if (mcp.value && kind !== "bnbloc.mcp.package/v1") return { ok: false, error: "mcp is only valid for MCP tool packages" };
   if (kind === "bnbloc.core.package/v1" && !protocol) return { ok: false, error: "core package requires protocol.min and protocol.max" };
-  const shapeError = packageShapeError(kind, runtime, record, artifacts.value, sidecar.value, hooks.value);
+  const shapeError = packageShapeError(kind, runtime, record, artifacts.value, sidecar.value, hooks.value, capabilities.value);
   if (shapeError) return { ok: false, error: shapeError };
   return {
     ok: true,
@@ -81,6 +81,7 @@ function packageShapeError(
   artifacts: ComponentPackageEnvelope["artifacts"] | undefined,
   sidecar: ComponentPackageEnvelope["sidecar"] | undefined,
   hooks: readonly string[] | undefined,
+  capabilities: readonly string[] | undefined,
 ): string | null {
   const short = componentKindOfPackage(kind);
   const meta = short ? COMPONENT_KINDS[short] : undefined;
@@ -89,7 +90,14 @@ function packageShapeError(
     if (record["contract"] !== meta.contract) return `${meta.noun} package contract ${String(record["contract"])} is not supported`;
   }
   if (meta?.runtimes && !meta.runtimes.includes(runtime)) return `${meta.noun} package runtime must be ${meta.runtimes.join(" or ")}`;
-  if (short === "plugin" && (!hooks || hooks.length === 0)) return "plugin package requires at least one hook";
+  if (short === "plugin") {
+    const jobs = (capabilities ?? []).filter((c) => c === "skills-provider" || c === "sandbox-mounts");
+    if ((!hooks || hooks.length === 0) && jobs.length === 0) return "plugin package requires at least one hook (or a capability that gives it another job)";
+    const mounts = (capabilities ?? []).includes("sandbox-mounts");
+    if (mounts && !(sidecar?.mountsEnv && sidecar?.mountRootEnv)) return "a sandbox-mounts plugin requires sidecar.mountsEnv and sidecar.mountRootEnv";
+    if (!mounts && (sidecar?.mountsEnv || sidecar?.mountRootEnv)) return "sidecar.mountsEnv and sidecar.mountRootEnv need the sandbox-mounts capability";
+    if ((capabilities ?? []).includes("skills-provider") && !sidecar?.tokenEnv) return "a skills-provider plugin requires sidecar.tokenEnv (its bearer)";
+  }
   if (short === "sandbox" && runtime === "sidecar" && !sidecar?.tokenEnv) return "sandbox sidecar requires sidecar.tokenEnv";
   if (short === "previewer" && !("previewer" in record)) return "previewer package requires previewer";
   if (short === "mcp" && !("mcp" in record)) return "MCP package requires mcp (its tools)";
@@ -155,6 +163,8 @@ function readSidecar(value: unknown): { readonly ok: true; readonly value?: Comp
       ...(typeof value["supervisedEnv"] === "string" ? { supervisedEnv: value["supervisedEnv"] } : {}),
       ...(typeof value["tokenEnv"] === "string" ? { tokenEnv: value["tokenEnv"] } : {}),
       ...(typeof value["dataDirEnv"] === "string" ? { dataDirEnv: value["dataDirEnv"] } : {}),
+      ...(typeof value["mountsEnv"] === "string" ? { mountsEnv: value["mountsEnv"] } : {}),
+      ...(typeof value["mountRootEnv"] === "string" ? { mountRootEnv: value["mountRootEnv"] } : {}),
       ...(args.value ? { args: [...args.value] } : {}),
       ...(files.value ? { files: [...files.value] } : {}),
     },

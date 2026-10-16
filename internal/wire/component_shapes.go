@@ -51,6 +51,13 @@ type ComponentSidecar struct {
 	// DataDirEnv names the env var the desktop sets to a per-component
 	// private data directory it creates (owner-only) before launch.
 	DataDirEnv string `json:"dataDirEnv,omitempty"`
+	// MountsEnv names the env var the desktop sets to the descriptor file a
+	// plugin with the "sandbox-mounts" capability writes its read-only sandbox
+	// mounts to (docs/architecture/sandbox-mounts.md); MountRootEnv the folder
+	// the host side of those mounts must be under. Both only with that
+	// capability.
+	MountsEnv    string `json:"mountsEnv,omitempty"`
+	MountRootEnv string `json:"mountRootEnv,omitempty"`
 	// Files are extra per-platform artifacts the sidecar needs beside its
 	// executable (e.g. a VMM helper binary and a firmware library). Each is
 	// published in Package.Artifacts under "<platform>/<name>", downloaded

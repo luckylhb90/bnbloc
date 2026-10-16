@@ -23,7 +23,7 @@ func SidecarFileArtifactKey(platform, name string) string { return platform + "/
 
 // validateSidecarShape is the kind-neutral rule set of the shared sidecar
 // launch block (any kind with a sidecar): identifier-shaped, unique env names
-// across listenEnv/supervisedEnv/tokenEnv/dataDirEnv/files, well-formed
+// across listenEnv/supervisedEnv/tokenEnv/dataDirEnv/mountsEnv/mountRootEnv/files, well-formed
 // unique file names, and an artifact map where every "<platform>/<name>" key
 // is a declared file of a platform that has a main artifact, and every
 // platform with a main artifact carries every declared file.
@@ -47,6 +47,7 @@ func validateSidecarShape(pkg Package) error {
 		for _, f := range []struct{ field, env string }{
 			{"listenEnv", sc.ListenEnv}, {"supervisedEnv", sc.SupervisedEnv},
 			{"tokenEnv", sc.TokenEnv}, {"dataDirEnv", sc.DataDirEnv},
+			{"mountsEnv", sc.MountsEnv}, {"mountRootEnv", sc.MountRootEnv},
 		} {
 			if err := claim(f.field, f.env); err != nil {
 				return err

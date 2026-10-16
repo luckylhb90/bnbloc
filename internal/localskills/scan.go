@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 )
 
@@ -44,6 +45,10 @@ type Skill struct {
 	HasScripts bool
 	Eligible   bool
 	Reason     string
+	// PublishProblem is why the skill cannot be added to the library ("" when
+	// it can): the library takes file names of letters, digits, '.', '_' and
+	// '-' only. It does not stop the skill reaching the sandbox.
+	PublishProblem string
 	// Hash is the digest of the skill's files (names, sizes, contents), set when
 	// the skill could be read whole: the same hash is the same skill.
 	Hash string
@@ -75,7 +80,14 @@ func matchAny(patterns []string, name string) bool {
 
 func within(root, target string) bool {
 	rel, err := filepath.Rel(root, target)
-	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	if err != nil {
+		return false
+	}
+	if rel == "." {
+		return true
+	}
+	_, ok := core.CleanRelPath(filepath.ToSlash(rel))
+	return ok
 }
 
 // walk lists the files of a skill folder that the policy lets through, and the
@@ -250,6 +262,12 @@ func (s *Scanner) Inspect(source, dir string) Skill {
 	}
 	if problem == "" {
 		sk.Hash, _ = digest(files)
+	}
+	for _, f := range files {
+		if !core.ValidBundlePath(sk.Name + "/" + f.Rel) {
+			sk.PublishProblem = fmt.Sprintf("%s: the library takes file names of letters, digits, '.', '_' and '-' only", f.Rel)
+			break
+		}
 	}
 	sk.Eligible = sk.Reason == ""
 	return sk

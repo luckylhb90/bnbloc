@@ -370,3 +370,53 @@ func TestParsePackage_rejectsLocalSettingsOnOtherKinds(t *testing.T) {
 		t.Fatalf("error = %v; want localSettings refusal", err)
 	}
 }
+
+func skillsPluginBody(t *testing.T, mutate func(map[string]any)) []byte {
+	return validPluginPackageBody(t, func(b map[string]any) {
+		b["hooks"] = []string{}
+		b["capabilities"] = []string{PluginCapabilitySkillsProvider, PluginCapabilitySandboxMounts}
+		b["sidecar"] = map[string]any{
+			"localUrl": "http://127.0.0.1:7192", "listenEnv": "SK_LISTEN_URL", "tokenEnv": "SK_TOKEN", "dataDirEnv": "SK_DATA_DIR",
+			"mountsEnv": "SK_MOUNTS_FILE", "mountRootEnv": "SK_MOUNT_ROOT",
+		}
+		if mutate != nil {
+			mutate(b)
+		}
+	})
+}
+
+func TestParsePackage_pluginWithAnotherJobNeedsNoHook(t *testing.T) {
+	pkg, err := ParsePackage(skillsPluginBody(t, nil))
+	if err != nil {
+		t.Fatalf("a skills plugin without hooks: %v", err)
+	}
+	if pkg.Sidecar.MountsEnv != "SK_MOUNTS_FILE" || pkg.Sidecar.MountRootEnv != "SK_MOUNT_ROOT" {
+		t.Fatalf("mount envs survive: %+v", pkg.Sidecar)
+	}
+	cases := map[string]func(map[string]any){
+		"requires sidecar.tokenEnv": func(b map[string]any) {
+			sc := b["sidecar"].(map[string]any)
+			delete(sc, "tokenEnv")
+		},
+		"requires sidecar.mountsEnv": func(b map[string]any) {
+			delete(b["sidecar"].(map[string]any), "mountsEnv")
+		},
+		"need the sandbox-mounts capability": func(b map[string]any) {
+			b["capabilities"] = []string{PluginCapabilitySkillsProvider}
+		},
+		"collides": func(b map[string]any) {
+			b["sidecar"].(map[string]any)["mountRootEnv"] = "SK_MOUNTS_FILE"
+		},
+		"at least one hook": func(b map[string]any) {
+			b["capabilities"] = []string{"room-events"}
+			sc := b["sidecar"].(map[string]any)
+			delete(sc, "mountsEnv")
+			delete(sc, "mountRootEnv")
+		},
+	}
+	for want, mutate := range cases {
+		if _, err := ParsePackage(skillsPluginBody(t, mutate)); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("want an error with %q, got %v", want, err)
+		}
+	}
+}

@@ -241,6 +241,35 @@ fn plugin_spec_carries_host_permissions_and_local_settings() {
     );
 }
 
+#[test]
+fn plugin_spec_carries_its_capabilities_and_the_env_names_they_earn() {
+    let response: ComponentsResponse = serde_json::from_str(
+        r#"{
+        "components":[{
+            "kind":"plugin","name":"local-skills","version":"0.1.0","runtime":"sidecar",
+            "requiresDesktop":true,"rollout":"optin","installed":true,"managed":true,
+            "capabilities":["skills-provider","sandbox-mounts"],
+            "artifacts":{"darwin-arm64":{"url":"http://gw/v1/artifacts/sha256/abc","sha256":"abc0000000000000000000000000000000000000000000000000000000000000"}},
+            "sidecar":{"localUrl":"http://127.0.0.1:7194","tokenEnv":"SK_TOKEN","dataDirEnv":"SK_DATA_DIR","mountsEnv":"SK_MOUNTS_FILE","mountRootEnv":"SK_MOUNT_ROOT"}
+        }]
+    }"#,
+    )
+    .expect("catalog");
+    let resolved = resolve_component_specs(&response, "darwin-arm64");
+    let plugin = &resolved.specs[0].plugin;
+    assert!(plugin.has("skills-provider") && plugin.has("sandbox-mounts"));
+    assert!(!plugin.has("room-events"));
+    assert_eq!(
+        (
+            plugin.token_env.as_str(),
+            plugin.data_dir_env.as_str(),
+            plugin.mounts_env.as_str(),
+            plugin.mount_root_env.as_str()
+        ),
+        ("SK_TOKEN", "SK_DATA_DIR", "SK_MOUNTS_FILE", "SK_MOUNT_ROOT")
+    );
+}
+
 fn sandbox_entry(name: &str) -> String {
     format!(
         r#"{{

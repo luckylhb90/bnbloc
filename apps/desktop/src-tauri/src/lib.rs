@@ -205,6 +205,65 @@ fn plugin_local_settings_clear(
     state.clear_plugin_local_settings(&plugin)
 }
 
+/// Installed plugins that provide skills (Settings → Skills), with their state.
+#[tauri::command]
+fn skills_providers(
+    state: State<'_, internal_ext::Adapter>,
+) -> Vec<internal_ext::SkillsProviderView> {
+    state.skills_providers()
+}
+
+/// A skills provider's state (`bnbloc.skills.provider/v1`, GET /v1/state).
+#[tauri::command]
+async fn skills_provider_state(
+    state: State<'_, internal_ext::Adapter>,
+    plugin: String,
+) -> Result<serde_json::Value, String> {
+    state.skills_provider_state(&plugin).await
+}
+
+/// Replace a skills provider's settings (PUT /v1/settings); answers its state.
+#[tauri::command]
+async fn skills_provider_settings(
+    state: State<'_, internal_ext::Adapter>,
+    plugin: String,
+    settings: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    state.skills_provider_apply(&plugin, settings).await
+}
+
+/// One skill packed by its provider (POST /v1/pack): its hash, a line feed,
+/// then the tar, as raw bytes.
+#[tauri::command]
+async fn skills_provider_pack(
+    state: State<'_, internal_ext::Adapter>,
+    plugin: String,
+    name: String,
+) -> Result<tauri::ipc::Response, String> {
+    state
+        .skills_provider_pack(&plugin, &name)
+        .await
+        .map(tauri::ipc::Response::new)
+}
+
+/// The folder picker for adding a skills source. None when the member cancels.
+/// The provider is told the path; this command only learns it from the dialog.
+#[tauri::command]
+async fn skills_pick_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_title("Choose a folder of skills")
+            .blocking_pick_folder()
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    let Some(path) = picked else { return Ok(None) };
+    let path = path.into_path().map_err(|e| e.to_string())?;
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
 /// Installed MCP tools with this desktop's state (Settings → Tools): the
 /// stdio binary's download state and the member credentials. Secret values
 /// are never returned.
@@ -446,6 +505,11 @@ pub fn run() {
             plugin_local_settings,
             plugin_local_settings_save,
             plugin_local_settings_clear,
+            skills_providers,
+            skills_provider_state,
+            skills_provider_settings,
+            skills_provider_pack,
+            skills_pick_folder,
             mcp_tool_settings,
             mcp_tool_settings_save,
             mcp_tool_settings_clear,
@@ -489,7 +553,9 @@ pub fn run() {
         tauri::RunEvent::Exit => child_process::terminate_all(detach_children(app), EXIT_GRACE),
         // macOS Open With / a double-click on an associated document.
         #[cfg(target_os = "macos")]
-        tauri::RunEvent::Opened { urls } => local_files::hand(app, local_files::paths_in_urls(&urls)),
+        tauri::RunEvent::Opened { urls } => {
+            local_files::hand(app, local_files::paths_in_urls(&urls))
+        }
         _ => {}
     });
 }
