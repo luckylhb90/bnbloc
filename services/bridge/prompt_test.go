@@ -101,9 +101,11 @@ func TestPromptBudgets(t *testing.T) {
 		// sees none of the tools or files; +30 for the line that timed work is a
 		// schedule, not a timer in a page or the agent's own scheduler; +60 on
 		// 2026-10-16 for the notice form of schedules (fixed words, or an AI writing
-		// the body) beside the AI task.
-		{"session guidance (tools, .room/)", guidance, 745},
-		{"session guidance (tools, .room/, team lead)", team, 825},
+		// the body) beside the AI task; +20 on 2026-10-17 for the one .room/ legend
+		// line that points at memory/INDEX.md and BRIEF.md (the room's notes,
+		// docs/prd/2026-10-16-room-memory-and-evolution.md).
+		{"session guidance (tools, .room/)", guidance, 765},
+		{"session guidance (tools, .room/, team lead)", team, 847},
 		// +80 on 2026-10-14: save_component takes a workspace file and a
 		// work's description and "how it was made" request
 		// (docs/bugs/2026-10-14-work-save-misses-new-files.md).
@@ -111,7 +113,7 @@ func TestPromptBudgets(t *testing.T) {
 		// and its parameters; the image itself never enters the context).
 		// +90 the same day: transcribe_audio (one brief line, one parameter).
 		{"tools/list", toolsList, 2630},
-		{"session prefix (guidance + tools/list)", guidance + toolsList, 3200},
+		{"session prefix (guidance + tools/list)", guidance + toolsList, 3215},
 	} {
 		got := tokens(c.text)
 		t.Logf("%-48s %5d tokens (budget %d)", c.name, got, c.budget)
