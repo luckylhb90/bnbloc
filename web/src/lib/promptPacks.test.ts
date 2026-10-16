@@ -251,6 +251,28 @@ eq(
   eq((back.prompts as { selection?: unknown }[])[1].selection, ["text", "block"], "selection round trip");
 }
 
+// ---- scoped suggestions replace generic ones (docs/prd/2026-10-16-ask-ai-every-file.md rule 5).
+{
+  const diagram = { name: "flow.mmd", mimeType: "text/vnd.mermaid", extension: "mmd" };
+  const code = { name: "main.py", mimeType: "text/x-python", extension: "py" };
+  const generic = pack("file-prompts", [
+    prompt("rewrite", { title: "Rewrite this", starter: true, selection: ["text", "block"] }),
+    prompt("shorter", { title: "Make it shorter", starter: true, selection: ["text", "block"] }),
+  ], { scope: "builtin" });
+  const diagrams = pack("diagram-prompts", [
+    prompt("rename", { title: "Rename this", starter: true, selection: ["block"], files: { extensions: [".mmd", ".drawio"] } }),
+    prompt("step", { title: "Add a step after this", starter: true, selection: ["block"], files: { extensions: [".mmd"] } }),
+  ], { scope: "builtin" });
+  const codePrompts = pack("code-prompts", [prompt("explain", { title: "Explain this code", starter: true, selection: ["text"], files: { extensions: [".py", ".go"] } })], { scope: "builtin" });
+  const choices = promptChoices([], [], [generic, diagrams, codePrompts]);
+  eq(fileSuggestions(choices, diagram, "block").map((c) => c.prompt.id), ["rename", "step"], "a diagram box: its own, never the text ones");
+  eq(fileSuggestions(choices, code, "text").map((c) => c.prompt.id), ["explain"], "selected code: the code prompts replace the text ones");
+  eq(fileSuggestions(choices, { name: "notes.md", mimeType: "text/markdown", extension: "md" }, "text").map((c) => c.prompt.id), ["rewrite", "shorter"], "no scoped prompt for Markdown: the generic ones");
+  eq(fileSuggestions(choices, diagram, "text").map((c) => c.prompt.id), ["rewrite", "shorter"], "a kind no scoped prompt covers: the generic ones");
+  // Turning the scoped pack off (an admin) gives the generic ones back.
+  eq(fileSuggestions(promptChoices([], [], [generic]), diagram, "block").map((c) => c.prompt.id), ["rewrite", "shorter"], "without the pack: the fallback");
+}
+
 console.log("promptPacks tests passed");
 
 // ---- starters: the prompts flagged starter of the room's prompt packs, each pack once, bounded.

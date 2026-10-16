@@ -1,9 +1,9 @@
 {
   "kind": "bnbloc.prompt.package/v1",
   "name": "file-prompts",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "displayName": "File prompts",
-  "description": "Suggested requests for a file, offered in its Ask AI panel and in a room whose workbench shows it (decks, documents, sheets, PDFs, Markdown, tables, images, video and audio), and for the part of it a member selects.",
+  "description": "Suggested requests for a file, offered in its Ask AI panel and in a room whose workbench shows it (decks, documents, sheets, PDFs, Markdown, tables, images, video and audio), and for the part of it a member selects (a slide, cells, an image area, a time range, a passage of a PDF).",
   "category": "general",
   "tags": [
     "files",
@@ -635,6 +635,57 @@
       },
       "selection": [
         "time"
+      ]
+    },
+    {
+      "id": "sel-pdf-explain",
+      "title": "Explain this passage",
+      "body": "Explain the selected passage in plain words.",
+      "starter": true,
+      "files": {
+        "extensions": [
+          ".pdf"
+        ],
+        "mimeTypes": [
+          "application/pdf"
+        ]
+      },
+      "selection": [
+        "text"
+      ]
+    },
+    {
+      "id": "sel-pdf-summary",
+      "title": "Summarize this",
+      "body": "Summarize the selected passage in two or three sentences.",
+      "starter": true,
+      "files": {
+        "extensions": [
+          ".pdf"
+        ],
+        "mimeTypes": [
+          "application/pdf"
+        ]
+      },
+      "selection": [
+        "text"
+      ]
+    },
+    {
+      "id": "sel-pdf-translate",
+      "title": "Translate this",
+      "body": "Translate the selected passage into English.",
+      "starter": true,
+      "files": {
+        "extensions": [
+          ".pdf"
+        ],
+        "mimeTypes": [
+          "application/pdf"
+        ]
+      },
+      "selection": [
+        "text"
       ]
     }
   ]

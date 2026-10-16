@@ -1,0 +1,482 @@
+{
+  "kind": "bnbloc.prompt.package/v1",
+  "name": "code-prompts",
+  "version": "1.0.0",
+  "displayName": "Code and config prompts",
+  "description": "Suggested requests for source files and configuration (Python, Go, TypeScript, JSON, YAML…) and for the lines or value a member selects.",
+  "category": "general",
+  "tags": [
+    "files",
+    "starters",
+    "code"
+  ],
+  "prompts": [
+    {
+      "id": "code-explain",
+      "title": "Explain this file",
+      "body": "Explain what this file does, how it is organised and how its main parts fit together.",
+      "starter": true,
+      "files": {
+        "extensions": [
+          ".py",
+          ".go",
+          ".js",
+          ".mjs",
+          ".jsx",
+          ".ts",
+          ".tsx",
+          ".java",
+          ".kt",
+          ".swift",
+          ".rs",
+          ".c",
+          ".h",
+          ".cc",
+          ".cpp",
+          ".hpp",
+          ".cs",
+          ".rb",
+          ".php",
+          ".lua",
+          ".sh",
+          ".sql",
+          ".scala",
+          ".r",
+          ".pl",
+          ".vue",
+          ".svelte"
+        ]
+      }
+    },
+    {
+      "id": "code-review",
+      "title": "Review this file",
+      "body": "Review this file for bugs, unclear code and risky edge cases. List what you find, most serious first, and fix the clear mistakes.",
+      "starter": true,
+      "files": {
+        "extensions": [
+          ".py",
+          ".go",
+          ".js",
+          ".mjs",
+          ".jsx",
+          ".ts",
+          ".tsx",
+          ".java",
+          ".kt",
+          ".swift",
+          ".rs",
+          ".c",
+          ".h",
+          ".cc",
+          ".cpp",
+          ".hpp",
+          ".cs",
+          ".rb",
+          ".php",
+          ".lua",
+          ".sh",
+          ".sql",
+          ".scala",
+          ".r",
+          ".pl",
+          ".vue",
+          ".svelte"
+        ]
+      }
+    },
+    {
+      "id": "code-tests",
+      "title": "Add tests",
+      "body": "Add tests for this file's behaviour, in the project's existing test style, and run them.",
+      "starter": true,
+      "files": {
+        "extensions": [
+          ".py",
+          ".go",
+          ".js",
+          ".mjs",
+          ".jsx",
+          ".ts",
+          ".tsx",
+          ".java",
+          ".kt",
+          ".swift",
+          ".rs",
+          ".c",
+          ".h",
+          ".cc",
+          ".cpp",
+          ".hpp",
+          ".cs",
+          ".rb",
+          ".php",
+          ".lua",
+          ".sh",
+          ".sql",
+          ".scala",
+          ".r",
+          ".pl",
+          ".vue",
+          ".svelte"
+        ]
+      }
+    },
+    {
+      "id": "code-document",
+      "title": "Add doc comments",
+      "body": "Add short doc comments to the public functions and to any logic that is not obvious. Do not change behaviour.",
+      "starter": true,
+      "files": {
+        "extensions": [
+          ".py",
+          ".go",
+          ".js",
+          ".mjs",
+          ".jsx",
+          ".ts",
+          ".tsx",
+          ".java",
+          ".kt",
+          ".swift",
+          ".rs",
+          ".c",
+          ".h",
+          ".cc",
+          ".cpp",
+          ".hpp",
+          ".cs",
+          ".rb",
+          ".php",
+          ".lua",
+          ".sh",
+          ".sql",
+          ".scala",
+          ".r",
+          ".pl",
+          ".vue",
+          ".svelte"
+        ]
+      }
+    },
+    {
+      "id": "sel-code-explain",
+      "title": "Explain this code",
+      "body": "Explain the selected code: what it does, why it is written this way, and anything surprising.",
+      "starter": true,
+      "files": {
+        "extensions": [
+          ".py",
+          ".go",
+          ".js",
+          ".mjs",
+          ".jsx",
+          ".ts",
+          ".tsx",
+          ".java",
+          ".kt",
+          ".swift",
+          ".rs",
+          ".c",
+          ".h",
+          ".cc",
+          ".cpp",
+          ".hpp",
+          ".cs",
+          ".rb",
+          ".php",
+          ".lua",
+          ".sh",
+          ".sql",
+          ".scala",
+          ".r",
+          ".pl",
+          ".vue",
+          ".svelte"
+        ]
+      },
+      "selection": [
+        "text",
+        "block"
+      ]
+    },
+    {
+      "id": "sel-code-bugs",
+      "title": "Find bugs in this",
+      "body": "Look for bugs and edge cases in the selected code. Say what you find and fix the clear ones.",
+      "starter": true,
+      "files": {
+        "extensions": [
+          ".py",
+          ".go",
+          ".js",
+          ".mjs",
+          ".jsx",
+          ".ts",
+          ".tsx",
+          ".java",
+          ".kt",
+          ".swift",
+          ".rs",
+          ".c",
+          ".h",
+          ".cc",
+          ".cpp",
+          ".hpp",
+          ".cs",
+          ".rb",
+          ".php",
+          ".lua",
+          ".sh",
+          ".sql",
+          ".scala",
+          ".r",
+          ".pl",
+          ".vue",
+          ".svelte"
+        ]
+      },
+      "selection": [
+        "text",
+        "block"
+      ]
+    },
+    {
+      "id": "sel-code-refactor",
+      "title": "Refactor this",
+      "body": "Refactor the selected code for readability without changing what it does.",
+      "starter": true,
+      "files": {
+        "extensions": [
+          ".py",
+          ".go",
+          ".js",
+          ".mjs",
+          ".jsx",
+          ".ts",
+          ".tsx",
+          ".java",
+          ".kt",
+          ".swift",
+          ".rs",
+          ".c",
+          ".h",
+          ".cc",
+          ".cpp",
+          ".hpp",
+          ".cs",
+          ".rb",
+          ".php",
+          ".lua",
+          ".sh",
+          ".sql",
+          ".scala",
+          ".r",
+          ".pl",
+          ".vue",
+          ".svelte"
+        ]
+      },
+      "selection": [
+        "text",
+        "block"
+      ]
+    },
+    {
+      "id": "sel-code-tests",
+      "title": "Add tests for this",
+      "body": "Add tests for the selected code, in the project's existing test style.",
+      "starter": true,
+      "files": {
+        "extensions": [
+          ".py",
+          ".go",
+          ".js",
+          ".mjs",
+          ".jsx",
+          ".ts",
+          ".tsx",
+          ".java",
+          ".kt",
+          ".swift",
+          ".rs",
+          ".c",
+          ".h",
+          ".cc",
+          ".cpp",
+          ".hpp",
+          ".cs",
+          ".rb",
+          ".php",
+          ".lua",
+          ".sh",
+          ".sql",
+          ".scala",
+          ".r",
+          ".pl",
+          ".vue",
+          ".svelte"
+        ]
+      },
+      "selection": [
+        "text",
+        "block"
+      ]
+    },
+    {
+      "id": "sel-code-comments",
+      "title": "Add comments",
+      "body": "Add brief comments to the selected code where its intent is not obvious.",
+      "starter": true,
+      "files": {
+        "extensions": [
+          ".py",
+          ".go",
+          ".js",
+          ".mjs",
+          ".jsx",
+          ".ts",
+          ".tsx",
+          ".java",
+          ".kt",
+          ".swift",
+          ".rs",
+          ".c",
+          ".h",
+          ".cc",
+          ".cpp",
+          ".hpp",
+          ".cs",
+          ".rb",
+          ".php",
+          ".lua",
+          ".sh",
+          ".sql",
+          ".scala",
+          ".r",
+          ".pl",
+          ".vue",
+          ".svelte"
+        ]
+      },
+      "selection": [
+        "text",
+        "block"
+      ]
+    },
+    {
+      "id": "config-explain",
+      "title": "Explain this file",
+      "body": "Explain what this file is for and what each top-level setting does.",
+      "starter": true,
+      "files": {
+        "extensions": [
+          ".json",
+          ".yaml",
+          ".yml",
+          ".toml",
+          ".ini",
+          ".cfg",
+          ".conf"
+        ]
+      }
+    },
+    {
+      "id": "config-check",
+      "title": "Check for mistakes",
+      "body": "Check this file for mistakes: wrong types, missing or unknown keys, inconsistent values. Fix the clear ones and list the rest.",
+      "starter": true,
+      "files": {
+        "extensions": [
+          ".json",
+          ".yaml",
+          ".yml",
+          ".toml",
+          ".ini",
+          ".cfg",
+          ".conf"
+        ]
+      }
+    },
+    {
+      "id": "config-tidy",
+      "title": "Tidy it",
+      "body": "Tidy this file: consistent formatting and a sensible order of keys. Keep every value and comment.",
+      "starter": true,
+      "files": {
+        "extensions": [
+          ".json",
+          ".yaml",
+          ".yml",
+          ".toml",
+          ".ini",
+          ".cfg",
+          ".conf"
+        ]
+      }
+    },
+    {
+      "id": "sel-config-explain",
+      "title": "Explain this value",
+      "body": "Explain the selected setting or value: what it controls and what is safe to change.",
+      "starter": true,
+      "files": {
+        "extensions": [
+          ".json",
+          ".yaml",
+          ".yml",
+          ".toml",
+          ".ini",
+          ".cfg",
+          ".conf"
+        ]
+      },
+      "selection": [
+        "text",
+        "block"
+      ]
+    },
+    {
+      "id": "sel-config-fix",
+      "title": "Fix this value",
+      "body": "The selected value looks wrong. Say why and correct it.",
+      "starter": true,
+      "files": {
+        "extensions": [
+          ".json",
+          ".yaml",
+          ".yml",
+          ".toml",
+          ".ini",
+          ".cfg",
+          ".conf"
+        ]
+      },
+      "selection": [
+        "text",
+        "block"
+      ]
+    },
+    {
+      "id": "sel-config-remove",
+      "title": "Remove this",
+      "body": "Remove the selected part and anything that only exists to support it.",
+      "starter": true,
+      "files": {
+        "extensions": [
+          ".json",
+          ".yaml",
+          ".yml",
+          ".toml",
+          ".ini",
+          ".cfg",
+          ".conf"
+        ]
+      },
+      "selection": [
+        "text",
+        "block"
+      ]
+    }
+  ]
+}

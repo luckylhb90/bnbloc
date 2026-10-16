@@ -59,7 +59,16 @@ Validation (`core/pkgmeta/previewer_validation.go`, enforced at install):
   capability;
 - no prompts: a file's suggested requests are prompt-pack prompts scoped to
   the files they are for (`files`; `docs/prd/2026-10-14-file-prompts-and-compare.md`).
-  The old `suggestions` field is refused by the strict schema.
+  The old `suggestions` field is refused by the strict schema. The built-in
+  packs are per domain (`file-prompts` for Office, PDF, Markdown, tables,
+  images and media; `code-prompts`; `diagram-prompts`); for a selection the
+  prompts scoped to the file's type *and* the selection's kind replace the
+  generic ones (`docs/prd/2026-10-16-ask-ai-every-file.md`). A previewer for a
+  new type gets suggestions by someone publishing a prompt pack for it.
+- pointing is one engine, `web/previewer-sdk/src/pointing.ts`: the same code
+  runs in a previewer frame (reporting through `sendSelection`) and in the
+  app's built-in viewers (reporting to the tab). A viewer lists its parts as
+  data (`PartRule`: a selector, a noun, a kind) and says where selected text is.
 
 The vocabularies (capabilities, toolbar kinds and icons, limits) are defined
 once in `web/previewer-sdk/src/protocol.ts`; the Go validator mirrors them and

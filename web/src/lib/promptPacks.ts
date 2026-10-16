@@ -102,8 +102,10 @@ const SOURCE_ORDER: Readonly<Record<PromptChoice["source"], number>> = { room: 0
 // (docs/prd/2026-10-14-file-prompts-and-compare.md rule 2), or for the part
 // of it the member selected (docs/prd/2026-10-14-select-edit-review.md
 // rule 2), among the prompts the composer offers (promptChoices):
-//   - with a selection, the starters scoped to its kind whose files (if
-//     any) match the file; none, and the file's own;
+//   - with a selection, the starters scoped to its kind whose files match
+//     the file; none, the starters scoped to its kind for any file; none,
+//     and the file's own (the prompts for this kind of file replace the
+//     generic ones: docs/prd/2026-10-16-ask-ai-every-file.md rule 5);
 //   - without, the starters scoped to files that match it.
 // The most specific match first (a pack for .pptx before one for every
 // Office file; any file last), then the room's packs, the member's, the
@@ -123,15 +125,23 @@ export function fileSuggestions(
 }
 
 function rankSuggestions(choices: readonly PromptChoice[], file: FileFacts, selectionKind: string | undefined, limit: number): PromptChoice[] {
-  const scored: { c: PromptChoice; specificity: number }[] = [];
+  const scoped: { c: PromptChoice; specificity: number }[] = [];
+  const generic: { c: PromptChoice; specificity: number }[] = [];
   for (const c of choices) {
     const p = c.prompt;
     if (!p.starter) continue;
     if (selectionKind ? !p.selection?.includes(selectionKind) : !p.files || p.selection?.length) continue;
     // A selection prompt for any file ranks below one for this kind of file.
     const specificity = p.files ? matchSpecificity(p.files, file) : selectionKind ? 0.5 : 0;
-    if (specificity > 0) scored.push({ c, specificity });
+    if (specificity > 0) (p.files ? scoped : generic).push({ c, specificity });
   }
+  // The prompts written for this kind of file (and this kind of selection)
+  // replace the ones for any file: they are the fallback, so a box in a
+  // diagram never offers "Make it shorter".
+  return top(scoped.length > 0 ? scoped : generic, limit);
+}
+
+function top(scored: { c: PromptChoice; specificity: number }[], limit: number): PromptChoice[] {
   scored.sort(
     (a, b) =>
       b.specificity - a.specificity ||

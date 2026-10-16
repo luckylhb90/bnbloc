@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -142,5 +143,51 @@ func TestFilePromptsAreScopedStarters(t *testing.T) {
 		if pr.Files != nil || len(pr.Selection) > 0 {
 			t.Errorf("room starter %s is scoped to files", pr.ID)
 		}
+	}
+}
+
+// The per-domain suggestion packs (docs/prd/2026-10-16-ask-ai-every-file.md
+// rule 6) are scoped starters like file-prompts, and their selection prompts
+// always name the files they are for: a selection prompt without files is a
+// generic one, and generic prompts are the fallback that a scoped prompt
+// replaces (rule 5), so only file-prompts may carry them.
+func TestTypePromptPacksAreScoped(t *testing.T) {
+	want := map[string][]string{
+		"code-prompts":    {"text", "block"},
+		"diagram-prompts": {"block", "text", "region"},
+	}
+	for name, kinds := range want {
+		pack, ok := Get(IDPrefix + name)
+		if !ok {
+			t.Fatalf("the %s pack is missing", name)
+		}
+		covered := map[string]bool{}
+		for _, pr := range pack.Validated.Manifest.Prompts {
+			if !pr.Starter || pr.Files == nil {
+				t.Errorf("%s/%s: starter %v, files %v: every prompt of a type pack is scoped to files", name, pr.ID, pr.Starter, pr.Files)
+			}
+			if len(pr.Variables) > 0 {
+				t.Errorf("%s/%s asks for variables: a suggestion should need no form", name, pr.ID)
+			}
+			for _, k := range pr.Selection {
+				covered[k] = true
+			}
+		}
+		for _, k := range kinds {
+			if !covered[k] {
+				t.Errorf("%s offers nothing for a %q selection", name, k)
+			}
+		}
+	}
+	// The PDF text selection prompts ship with file-prompts.
+	files, _ := Get(IDPrefix + "file-prompts")
+	pdf := 0
+	for _, pr := range files.Validated.Manifest.Prompts {
+		if pr.Files != nil && slices.Contains(pr.Files.Extensions, ".pdf") && slices.Contains(pr.Selection, "text") {
+			pdf++
+		}
+	}
+	if pdf == 0 {
+		t.Error("no PDF text selection prompts ship")
 	}
 }
