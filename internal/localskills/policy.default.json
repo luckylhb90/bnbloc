@@ -1,0 +1,33 @@
+{
+  "agentDirs": [
+    "~/.agents/skills",
+    "~/.claude/skills",
+    "~/.codex/skills",
+    "~/.config/opencode/skills",
+    "~/.config/opencode/skill",
+    "~/.gemini/skills",
+    "~/.cursor/skills"
+  ],
+  "exclude": [".git", "node_modules", "__pycache__", ".venv", ".DS_Store", "*.pyc"],
+  "scriptExts": [".sh", ".bash", ".zsh", ".py", ".js", ".mjs", ".ts", ".rb", ".pl", ".go", ".ps1", ".bat", ".cmd"],
+  "scriptDirs": ["scripts", "bin"],
+  "secretNames": [".env", ".env.*", "*.pem", "*.key", "*.p12", "*.pfx", "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", "credentials.json", ".netrc", ".npmrc"],
+  "secretRules": [
+    { "name": "a private key block", "pattern": "-----BEGIN [A-Z ]*PRIVATE KEY-----" },
+    { "name": "an AWS access key id", "pattern": "\\b(AKIA|ASIA)[0-9A-Z]{16}\\b" },
+    { "name": "a GitHub token", "pattern": "\\bgh[pousr]_[A-Za-z0-9]{30,}\\b" },
+    { "name": "a Slack token", "pattern": "\\bxox[abprs]-[A-Za-z0-9-]{10,}\\b" },
+    { "name": "a Google API key", "pattern": "\\bAIza[0-9A-Za-z_-]{35}\\b" },
+    { "name": "an OpenAI or Anthropic style key", "pattern": "\\bsk-(ant-)?[A-Za-z0-9_-]{32,}\\b" },
+    { "name": "a credential assignment", "pattern": "(?i)\\b(password|passwd|secret|api[_-]?key|access[_-]?token|auth[_-]?token)\\b\\s*[:=]\\s*['\"]?[A-Za-z0-9/+_.=-]{16,}" }
+  ],
+  "limits": {
+    "files": 512,
+    "bytes": 8388608,
+    "skills": 64,
+    "mirrorBytes": 536870912,
+    "scanDepth": 2,
+    "scanEntries": 2000,
+    "secretScanBytes": 262144
+  }
+}
