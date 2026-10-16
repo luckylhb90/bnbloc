@@ -2,7 +2,8 @@ import { cleanTags, splitList, tagProblem, type ContentComponent, type ContentFo
 import { emptyPromptDraft, slugify, syncVariables, uniqueId, type PromptDraft, type PromptPackForm } from "./promptPacks.ts";
 import { roomIdProblem } from "./roomId.ts";
 import type { RecurrenceForm } from "./schedules.ts";
-import { MaxAssistItems, MaxAssistText, type AssistJSONReply, type ContentQuickPrompt } from "./wire.gen.ts";
+import { bodyLimit, truncateBytes, type NoteType } from "./notes.ts";
+import { MaxAssistItems, MaxAssistText, MaxNoteTitleRunes, type AssistJSONReply, type ContentQuickPrompt } from "./wire.gen.ts";
 
 // The second round of AI assist (docs/prd/2026-10-13-ai-assist.md §6), its
 // pure side: a JSON task's reply onto the Library's forms (draft-expert,
@@ -18,6 +19,7 @@ export const DRAFT_SKILL_PACK = "draft-skill-pack";
 export const DRAFT_PROMPT_PACK = "draft-prompt-pack";
 export const PLAN_ROOM = "plan-room";
 export const DRAFT_SCHEDULE = "draft-schedule";
+export const DRAFT_NOTE = "draft-note";
 
 type Fields = AssistJSONReply["fields"];
 
@@ -241,6 +243,35 @@ export function roomPlanFrom(fields: Fields, experts: readonly ContentComponent[
     skills: picked,
     firstMessage: fieldText(fields, "firstMessage"),
   };
+}
+
+// ---- A note ----
+
+/** A note as draft-note wrote it: a one-line title and a body, both fitted
+ *  to what the server accepts (title at most MaxNoteTitleRunes characters,
+ *  the body at most its type's bytes); "" for what the reply did not give. */
+export interface NoteDraft {
+  readonly title: string;
+  readonly body: string;
+}
+
+/** noteDraftFrom is a draft-note reply onto the note form: the title made one
+ *  line and cut to the title limit with an ellipsis, the body cut to the
+ *  type's limit on a character boundary. */
+export function noteDraftFrom(fields: Fields, type: NoteType): NoteDraft {
+  const line = fieldText(fields, "title").replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ").replace(/\s+/g, " ").trim();
+  const chars = Array.from(line);
+  const title = chars.length > MaxNoteTitleRunes ? `${chars.slice(0, MaxNoteTitleRunes - 1).join("").trimEnd()}…` : line;
+  return { title, body: truncateBytes(fieldText(fields, "body"), bodyLimit(type)) };
+}
+
+/** noteRequestText is draft-note's text: the member's sentence and the form
+ *  as it is (its type always, so the task knows what to write). */
+export function noteRequestText(sentence: string, form: { readonly type: NoteType; readonly title: string; readonly body: string }): string {
+  const current: Record<string, unknown> = { type: form.type };
+  if (form.title.trim()) current.title = form.title.trim();
+  if (form.body.trim()) current.body = form.body.trim();
+  return draftRequestText(sentence, current);
 }
 
 // ---- A schedule ----

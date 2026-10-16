@@ -1,0 +1,16 @@
+{
+  "kind": "bnbloc.assist.package/v1",
+  "name": "draft-note",
+  "version": "1.0.0",
+  "displayName": "Draft a note",
+  "description": "Writes or tightens a note of a room's memory (its brief, a decision, a dated fact, a lesson) from a sentence, what the form holds and what the room has been doing.",
+  "category": "authoring",
+  "tags": ["assist", "notes"],
+  "icon": "sparkle",
+  "output": "json",
+  "fields": [
+    { "name": "title", "description": "One line: what the note is about" },
+    { "name": "body", "description": "The note, in Markdown" }
+  ],
+  "context": ["room", "clock"]
+}

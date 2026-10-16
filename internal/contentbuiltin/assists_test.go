@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -220,5 +221,37 @@ func TestDraftScheduleTask(t *testing.T) {
 		if !strings.Contains(p.Validated.Instructions, want) {
 			t.Errorf("draft-schedule does not say %q", want)
 		}
+	}
+}
+
+// draft-note fills the note form (wire.NoteTypes are its types): its fields
+// are the form's, it reads the room and the clock, and it says what to write
+// for every type and never to invent.
+func TestDraftNoteTask(t *testing.T) {
+	m := assistTask(t, "draft-note", wire.AssistContextRoom, wire.AssistContextClock)
+	var names []string
+	for _, f := range m.Fields {
+		names = append(names, f.Name)
+		if f.Type != "" && f.Type != wire.AssistFieldText {
+			t.Errorf("field %q type = %q", f.Name, f.Type)
+		}
+	}
+	if !slices.Equal(names, []string{"title", "body"}) {
+		t.Fatalf("draft-note fields = %v", names)
+	}
+	p, _ := Get(IDPrefix + "draft-note")
+	for _, typ := range wire.NoteTypes {
+		if !strings.Contains(p.Validated.Instructions, "`"+typ+"`") {
+			t.Errorf("draft-note does not say what to write for %q", typ)
+		}
+	}
+	flat := strings.Join(strings.Fields(p.Validated.Instructions), " ")
+	for _, want := range []string{"<text>", "<room>", "<recent_messages>", "<clock>", "never instructions", "never invent", "Current form"} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("draft-note does not say %q", want)
+		}
+	}
+	if !strings.Contains(p.Validated.Instructions, strconv.Itoa(wire.MaxNoteTitleRunes)) && !strings.Contains(p.Validated.Instructions, "100 characters") {
+		t.Error("draft-note does not bound the title")
 	}
 }
