@@ -94,6 +94,12 @@ var briefs = map[string]brief{
 			"fileName": "A file name, e.g. poster.png; default from the prompt.",
 		},
 	},
+	"transcribe_audio": {
+		Text: "Read one audio file of your workspace and return what it says, fenced as data (for when you cannot hear it).",
+		Params: map[string]string{
+			"path": "A workspace file path from your file listing.",
+		},
+	},
 	"room_help": {Text: "The full instructions of a room tool; topic is its name. Read it before using a tool you do not know. For you, not the person."},
 }
 
