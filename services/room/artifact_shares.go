@@ -26,7 +26,8 @@ import (
 // members may open ("org", the default), anyone who signs in to this
 // deployment ("signed_in") or anyone holding it ("anyone").
 // The token (internal/sharelink, docs/prd/2026-10-13-short-share-links.md)
-// is shown once; only its hash is stored, and the link is found by it. The gateway resolves a link through the signed internal route
+// is found by its hash, and kept sealed so its creator can copy it again
+// (docs/prd/2026-10-16-share-link-copy-again.md). The gateway resolves a link through the signed internal route
 // below and decides who may open it (shareAccess); every dead link answers
 // the same 404 here.
 
@@ -62,6 +63,7 @@ func (s *Service) registerShareRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/rooms/{roomId}/artifacts/{artifactId}/shares", s.handleListShares)
 	mux.HandleFunc("PATCH /v1/rooms/{roomId}/artifacts/{artifactId}/shares/{shareId}", s.handleSetShareAccess)
 	mux.HandleFunc("DELETE /v1/rooms/{roomId}/artifacts/{artifactId}/shares/{shareId}", s.handleRevokeShare)
+	mux.HandleFunc("GET /v1/rooms/{roomId}/artifacts/{artifactId}/shares/{shareId}/link", s.handleShareLink)
 	// Org-admin list: reachable only through /v1/tenant/*, which the gateway
 	// gates on manage_org before signing the request.
 	mux.HandleFunc("GET /v1/tenant/shares", s.handleTenantShares)
@@ -181,8 +183,9 @@ func (s *Service) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 	}
 	token, hash := sharelink.New()
 	now := s.Now()
+	shareID := ids.New("")
 	sh, err := s.Artifacts.CreateArtifactShare(r.Context(), store.ArtifactShare{
-		ShareID: ids.New(""), TokenHash: hash, RoomID: art.RoomID, ArtifactID: art.ArtifactID, Version: body.Version, Access: body.Access,
+		ShareID: shareID, TokenHash: hash, TokenSealed: s.sealShareToken(r, shareID, token), RoomID: art.RoomID, ArtifactID: art.ArtifactID, Version: body.Version, Access: body.Access,
 		CreatedBy: caller(r), CreatedAtMs: now, ExpiresAtMs: now + int64(body.ExpiresInHours)*hourMs,
 	})
 	if err != nil {
@@ -191,7 +194,7 @@ func (s *Service) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The gateway adds the link's URL (wire.ShareCreated.URL).
-	httpx.WriteJSON(w, http.StatusCreated, wire.ShareCreated{Share: viewShare(sh, now), Token: token})
+	httpx.WriteJSON(w, http.StatusCreated, wire.ShareCreated{Share: viewOwnShare(sh, now, caller(r)), Token: token})
 }
 
 // handleListShares lists an artifact's links, newest first; revoked and
@@ -213,7 +216,7 @@ func (s *Service) handleListShares(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]wire.ShareView, 0, len(list))
 	for _, sh := range list {
-		out = append(out, viewShare(sh, now))
+		out = append(out, viewOwnShare(sh, now, caller(r)))
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"shares": out})
 }

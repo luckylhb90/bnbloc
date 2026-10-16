@@ -2,7 +2,7 @@ import { ApiError, req } from "./api.ts";
 import { apiUrl } from "./config";
 import { errorDetail } from "./session.ts";
 import { tapOnboarding } from "./onboardingEvents.ts";
-import type { PublicShare, ShareAccess, ShareCreated, ShareTicket, ShareView, SiteTicket, TenantShareView } from "./shares.ts";
+import type { PublicShare, ShareAccess, ShareCreated, ShareLink, ShareTicket, ShareView, SiteTicket, TenantShareView } from "./shares.ts";
 import type { AppVisitorToken, ShareCreateRequest } from "./wire.gen.ts";
 import { roomPath } from "./roomId.ts";
 
@@ -18,8 +18,8 @@ function sharesPath(roomId: string, artifactId: string): string {
 
 export const sharesApi = {
   // Create a link to one version (0 = always the latest). The link (`url`,
-  // the server's: the web never builds one) comes back once; only its
-  // token's hash is stored.
+  // the server's: the web never builds one) comes back here, and again from
+  // `link` for its creator while it works.
   create: (roomId: string, artifactId: string, body: ShareCreateRequest) =>
     req<ShareCreated>(sharesPath(roomId, artifactId), { method: "POST", body: JSON.stringify(body) }).then(
       tapOnboarding<ShareCreated>({ kind: "share_created", roomId }),
@@ -35,6 +35,10 @@ export const sharesApi = {
   ticket: (token: string) => req<ShareTicket>("/v1/share-tickets", { method: "POST", body: JSON.stringify({ token }) }),
   // The artifact's links, newest first (revoked/expired ones for 30 days).
   list: (roomId: string, artifactId: string) => req<{ shares: ShareView[] }>(sharesPath(roomId, artifactId)),
+  // The creator's own active link again (`url`, the server's): 404 for anyone
+  // else, a dead link, or a link whose token was not stored.
+  link: (roomId: string, artifactId: string, shareId: string) =>
+    req<ShareLink>(`${sharesPath(roomId, artifactId)}/${encodeURIComponent(shareId)}/link`),
   // Creator, room owner/admins, or an org admin.
   revoke: (roomId: string, artifactId: string, shareId: string) =>
     req<void>(`${sharesPath(roomId, artifactId)}/${encodeURIComponent(shareId)}`, { method: "DELETE", as: "none" }),

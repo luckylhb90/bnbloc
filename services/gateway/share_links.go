@@ -35,17 +35,46 @@ func (s *Service) handleShareLink(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, sharelink.PagePath(token), http.StatusFound)
 }
 
-// maxShareCreatedBody bounds the room service's create answer the proxy
-// reads to add the URL (a link and its token).
+// maxShareCreatedBody bounds the room service's answer the proxy reads to add
+// the URL (a link and its token).
 const maxShareCreatedBody = 64 << 10
 
 // withShareURL completes a link's create answer (wire.ShareCreated) with
 // its URL on the gateway's public origin. Any other status passes as the
 // room service wrote it.
 func (s *Service) withShareURL(r *http.Request) func(*http.Response) error {
+	return s.completeShareAnswer(r, http.StatusCreated, func(origin string, raw []byte) (any, error) {
+		var created wire.ShareCreated
+		if json.Unmarshal(raw, &created) != nil || !sharelink.Valid(created.Token) {
+			return nil, fmt.Errorf("share create answered an unreadable link")
+		}
+		created.URL = sharelink.URL(origin, created.Token)
+		return created, nil
+	})
+}
+
+// withShareLinkURL answers a creator's copy of their link again
+// (docs/prd/2026-10-16-share-link-copy-again.md): the room service's
+// wire.ShareLink{token} leaves as {url}, the token itself never reaching the
+// client.
+func (s *Service) withShareLinkURL(r *http.Request) func(*http.Response) error {
+	return s.completeShareAnswer(r, http.StatusOK, func(origin string, raw []byte) (any, error) {
+		var link wire.ShareLink
+		if json.Unmarshal(raw, &link) != nil || !sharelink.Valid(link.Token) {
+			return nil, fmt.Errorf("share link answered an unreadable token")
+		}
+		return wire.ShareLink{URL: sharelink.URL(origin, link.Token)}, nil
+	})
+}
+
+// completeShareAnswer rewrites the room service's answer of status through
+// fill, with the gateway's public origin, as a no-store response: a share
+// link is the one thing the gateway spells (internal/sharelink). Any other
+// status passes as the room service wrote it.
+func (s *Service) completeShareAnswer(r *http.Request, status int, fill func(origin string, raw []byte) (any, error)) func(*http.Response) error {
 	origin := s.publicOrigin(r)
 	return func(resp *http.Response) error {
-		if resp.StatusCode != http.StatusCreated {
+		if resp.StatusCode != status {
 			return nil
 		}
 		raw, err := io.ReadAll(io.LimitReader(resp.Body, maxShareCreatedBody+1))
@@ -53,12 +82,14 @@ func (s *Service) withShareURL(r *http.Request) func(*http.Response) error {
 		if err != nil {
 			return err
 		}
-		var created wire.ShareCreated
-		if len(raw) > maxShareCreatedBody || json.Unmarshal(raw, &created) != nil || !sharelink.Valid(created.Token) {
-			return fmt.Errorf("share create answered an unreadable link")
+		if len(raw) > maxShareCreatedBody {
+			return fmt.Errorf("share answer is too large")
 		}
-		created.URL = sharelink.URL(origin, created.Token)
-		body, err := json.Marshal(created)
+		answer, err := fill(origin, raw)
+		if err != nil {
+			return err
+		}
+		body, err := json.Marshal(answer)
 		if err != nil {
 			return err
 		}

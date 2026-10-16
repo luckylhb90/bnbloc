@@ -19,6 +19,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
+	"github.com/luckylhb90/bnbloc/internal/sealbox"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/svcauth"
 	"github.com/luckylhb90/bnbloc/internal/wire"
@@ -78,6 +79,9 @@ type Service struct {
 	// BNBLOC_SECRET_STORE_KEY, no app data.
 	AppDocs   store.AppDocs
 	AppCipher *appdata.Cipher
+	// ShareBox seals a share link's token so its creator can copy it again
+	// (artifact_share_link.go). Nil (no key): links are shown once, as before.
+	ShareBox *sealbox.Box
 	// RoomGroups holds the group chats connected to rooms (room_groups.go).
 	// Nil answers those routes 503 and refuses group notices.
 	RoomGroups store.RoomGroupStore

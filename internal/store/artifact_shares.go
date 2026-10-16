@@ -28,14 +28,19 @@ var ErrArtifactShareRevokeTime = errors.New("store: artifact share revocation ne
 // (docs/prd/2026-10-09-artifact-shares-and-site-previews.md; access:
 // docs/prd/2026-10-13-share-link-sign-in.md; the token:
 // docs/prd/2026-10-13-short-share-links.md). The token (internal/sharelink)
-// is shown once at create; only TokenHash (sharelink.Hash) is stored, and
-// the link is found by it.
+// is shown at create; TokenHash (sharelink.Hash) is what the link is found
+// by, and TokenSealed (docs/prd/2026-10-16-share-link-copy-again.md) lets its
+// creator copy it again.
 type ArtifactShare struct {
-	ShareID    string
-	TokenHash  string
-	TenantID   string
-	RoomID     string
-	ArtifactID string
+	ShareID   string
+	TokenHash string
+	// TokenSealed is the token sealed under the deployment's secret store key
+	// (internal/sealbox, bound to the tenant and the share id); "" for a link
+	// created without a key, before it existed, or since revoked.
+	TokenSealed string
+	TenantID    string
+	RoomID      string
+	ArtifactID  string
 	// Version is the pinned version; 0 follows the artifact's latest.
 	Version int
 	// Access is who may open the link (wire.ShareAccess); a link created
@@ -105,7 +110,7 @@ type ArtifactShareStore interface {
 	// that still exist, with their titles.
 	ListTenantArtifactShares(ctx context.Context, q TenantShareQuery) ([]TenantArtifactShare, error)
 	// RevokeArtifactShare revokes a link at atMs (idempotent: the first
-	// revocation is kept) and returns it as stored. atMs <= 0 is
+	// revocation is kept), clears its sealed token, and returns it as stored. atMs <= 0 is
 	// ErrArtifactShareRevokeTime on both backends.
 	RevokeArtifactShare(ctx context.Context, shareID, by string, atMs int64) (ArtifactShare, error)
 	// ResolveArtifactShare looks a link up by id in ANY tenant (a share
@@ -273,7 +278,7 @@ func (s *MemoryArtifacts) RevokeArtifactShare(ctx context.Context, shareID, by s
 		return ArtifactShare{}, ErrArtifactShareNotFound
 	}
 	if sh.RevokedAtMs == 0 {
-		sh.RevokedAtMs, sh.RevokedBy = atMs, by
+		sh.RevokedAtMs, sh.RevokedBy, sh.TokenSealed = atMs, by, ""
 		s.shares[shareID] = sh
 	}
 	return sh, nil

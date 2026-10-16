@@ -121,3 +121,26 @@ func TestUnknownOrOldShareLinkIsACleanNotFound(t *testing.T) {
 		}
 	}
 }
+
+// A creator copies their link again: the answer is the link's URL on the
+// gateway's public origin, never the token, uncached; the route belongs to the
+// creator alone (another member gets the room service's 404).
+func TestShareLinkCopyAgainCarriesTheURL(t *testing.T) {
+	e := newAppGW(t)
+	created := e.createLink(e.appA, "", mainHost)
+	if !created.Share.Copyable {
+		t.Fatalf("the create answer does not say the link can be copied again: %+v", created.Share)
+	}
+	path := "/v1/rooms/" + e.roomID + "/artifacts/" + e.appA + "/shares/" + created.Share.ShareID + "/link"
+	r := e.call(http.MethodGet, path, nil, mainHost, "Authorization: Bearer "+e.session("maya"))
+	var link map[string]any
+	if r.status != http.StatusOK || json.Unmarshal(r.body, &link) != nil || link["url"] != created.URL || r.header.Get("Cache-Control") != "no-store" {
+		t.Fatalf("copy again = %d %s (cache %q), want url %q", r.status, r.body, r.header.Get("Cache-Control"), created.URL)
+	}
+	if _, leaked := link["token"]; leaked {
+		t.Fatalf("the answer carries the bare token: %s", r.body)
+	}
+	if r := e.call(http.MethodGet, path, nil, mainHost, "Authorization: Bearer "+e.session("jack")); r.status != http.StatusNotFound && r.status != http.StatusForbidden {
+		t.Fatalf("another member's copy = %d %s, want a refusal", r.status, r.body)
+	}
+}

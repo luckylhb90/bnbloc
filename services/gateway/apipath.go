@@ -163,6 +163,13 @@ func (p apiPath) isArtifactShareCreate(method string) bool {
 	return method == http.MethodPost && len(p.segs) == 6 && p.RoomSub == "artifacts" && p.segs[5] == "shares"
 }
 
+// isArtifactShareLink is GET /v1/rooms/{id}/artifacts/{artifactId}/shares/{shareId}/link:
+// its creator's copy of the link again, whose answer the proxy turns into the
+// link's URL (withShareLinkURL).
+func (p apiPath) isArtifactShareLink(method string) bool {
+	return method == http.MethodGet && len(p.segs) == 8 && p.RoomSub == "artifacts" && p.segs[5] == "shares" && p.segs[7] == "link"
+}
+
 func (p apiPath) isArtifactShareRevoke(method string) bool {
 	return method == http.MethodDelete && len(p.segs) == 7 && p.RoomSub == "artifacts" && p.segs[5] == "shares"
 }

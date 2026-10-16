@@ -30,6 +30,18 @@ func TestArtifactShareRoutes(t *testing.T) {
 	if !mustParseAPIPath(t, http.MethodDelete, "/v1/rooms/r1/artifacts/a1/shares/s1").isArtifactShareRevoke(http.MethodDelete) {
 		t.Fatal("revoke path not recognized")
 	}
+	if !mustParseAPIPath(t, http.MethodGet, "/v1/rooms/r1/artifacts/a1/shares/s1/link").isArtifactShareLink(http.MethodGet) {
+		t.Fatal("copy-again path not recognized")
+	}
+	for _, c := range []struct{ method, path string }{
+		{http.MethodPost, "/v1/rooms/r1/artifacts/a1/shares/s1/link"},
+		{http.MethodGet, "/v1/rooms/r1/artifacts/a1/shares/s1/view"},
+		{http.MethodGet, "/v1/rooms/r1/members/a1/shares/s1/link"},
+	} {
+		if mustParseAPIPath(t, c.method, c.path).isArtifactShareLink(c.method) {
+			t.Fatalf("%s %s treated as a share copy", c.method, c.path)
+		}
+	}
 	for _, c := range []struct{ method, path string }{
 		{http.MethodGet, "/v1/rooms/r1/artifacts/a1/shares/s1"},
 		{http.MethodDelete, "/v1/rooms/r1/artifacts/a1/shares"},

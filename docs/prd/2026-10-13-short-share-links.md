@@ -1,6 +1,8 @@
 # Short share links (2026-10-13)
 
-Status: accepted by the product owner (2026-10-13, final); **landed**
+Status: accepted by the product owner (2026-10-13, final); amended
+2026-10-16 (`2026-10-16-share-link-copy-again.md`: the token is also kept
+sealed so its creator can copy the link again); **landed**
 2026-10-13: recorded in f70e5d1, built in ba3dca4 (store, room service,
 gateway and web together: the architecture test reads both). No
 migration. Front proxies that route by path must send `/s/` to the
@@ -42,7 +44,9 @@ host.
 - **The link's one URL owner** is the gateway: the share create response
   (`wire.ShareCreated`) carries `url`, `sharelink.URL(publicOrigin, token)`,
   filled in by the gateway's proxy on the way out; the web shows and copies
-  it and never builds a share URL. The token is shown once, so no list
+  it and never builds a share URL. The token is shown once at create (amended
+  2026-10-16: its creator can fetch it again through one route, which the
+  gateway also turns into a URL), so no list
   (share dialog, Share links tab, Library My apps) carries a link; nothing
   else (notifications, room tools) hands one out.
 

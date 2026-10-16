@@ -32,8 +32,9 @@ const Prefix = "/s/"
 // token).
 const Pattern = "GET " + Prefix + "{token}"
 
-// New mints a token and the hash to store (the token itself is shown once
-// and never stored).
+// New mints a token and the hash to store. The token is shown at create and,
+// sealed, kept for its creator to copy again
+// (docs/prd/2026-10-16-share-link-copy-again.md); it is never stored in clear.
 func New() (token, hash string) {
 	b := make([]byte, 0, TokenLen)
 	var buf [32]byte

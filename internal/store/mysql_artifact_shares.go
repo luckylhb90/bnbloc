@@ -11,7 +11,7 @@ import (
 
 var _ ArtifactShareStore = (*MySQLArtifacts)(nil)
 
-const artifactShareCols = `s.share_id, s.token_hash, s.tenant_id, s.room_id, s.artifact_id, s.version, s.access, s.created_by, s.created_at_ms, s.expires_at_ms, s.revoked_at_ms, s.revoked_by, s.view_count, s.last_viewed_at_ms`
+const artifactShareCols = `s.share_id, s.token_hash, s.tenant_id, s.room_id, s.artifact_id, s.version, s.access, s.created_by, s.created_at_ms, s.expires_at_ms, s.revoked_at_ms, s.revoked_by, s.view_count, s.last_viewed_at_ms, s.token_sealed`
 
 // shareEndedAt is when a link stopped working: its revocation or expiry,
 // whichever came first (ArtifactShare.endedAtMs in Go).
@@ -28,9 +28,9 @@ func (m *MySQLArtifacts) CreateArtifactShare(ctx context.Context, sh ArtifactSha
 	sh.TenantID = tid
 	sh.RevokedAtMs, sh.RevokedBy, sh.ViewCount, sh.LastViewedAtMs = 0, "", 0, 0
 	if _, err := m.DB.ExecContext(ctx, `
-INSERT INTO artifact_shares (share_id, token_hash, tenant_id, room_id, artifact_id, version, access, created_by, created_at_ms, expires_at_ms)
-VALUES (?,?,?,?,?,?,?,?,?,?)`,
-		sh.ShareID, sh.TokenHash, tid, sh.RoomID, sh.ArtifactID, sh.Version, sh.Access, sh.CreatedBy, sh.CreatedAtMs, sh.ExpiresAtMs); err != nil {
+INSERT INTO artifact_shares (share_id, token_hash, tenant_id, room_id, artifact_id, version, access, created_by, created_at_ms, expires_at_ms, token_sealed)
+VALUES (?,?,?,?,?,?,?,?,?,?,NULLIF(?, ''))`,
+		sh.ShareID, sh.TokenHash, tid, sh.RoomID, sh.ArtifactID, sh.Version, sh.Access, sh.CreatedBy, sh.CreatedAtMs, sh.ExpiresAtMs, sh.TokenSealed); err != nil {
 		return ArtifactShare{}, dupAs(err, ErrArtifactShareExists)
 	}
 	return sh, nil
@@ -131,7 +131,7 @@ func (m *MySQLArtifacts) RevokeArtifactShare(ctx context.Context, shareID, by st
 		return ArtifactShare{}, ErrArtifactShareRevokeTime
 	}
 	if _, err := m.DB.ExecContext(ctx, `
-UPDATE artifact_shares SET revoked_at_ms=?, revoked_by=?
+UPDATE artifact_shares SET revoked_at_ms=?, revoked_by=?, token_sealed=NULL
 WHERE tenant_id=? AND share_id=? AND revoked_at_ms IS NULL`, atMs, by, tid, shareID); err != nil {
 		return ArtifactShare{}, err
 	}
@@ -170,15 +170,15 @@ WHERE tenant_id=? AND share_id=?`, atMs, tid, shareID)
 func scanArtifactShare(row rowScanner, extra ...any) (ArtifactShare, error) {
 	var sh ArtifactShare
 	var revokedAt, lastViewed sql.NullInt64
-	var revokedBy sql.NullString
+	var revokedBy, sealed sql.NullString
 	dest := append([]any{&sh.ShareID, &sh.TokenHash, &sh.TenantID, &sh.RoomID, &sh.ArtifactID, &sh.Version, &sh.Access,
-		&sh.CreatedBy, &sh.CreatedAtMs, &sh.ExpiresAtMs, &revokedAt, &revokedBy, &sh.ViewCount, &lastViewed}, extra...)
+		&sh.CreatedBy, &sh.CreatedAtMs, &sh.ExpiresAtMs, &revokedAt, &revokedBy, &sh.ViewCount, &lastViewed, &sealed}, extra...)
 	if err := row.Scan(dest...); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ArtifactShare{}, ErrArtifactShareNotFound
 		}
 		return ArtifactShare{}, err
 	}
-	sh.RevokedAtMs, sh.RevokedBy, sh.LastViewedAtMs = revokedAt.Int64, revokedBy.String, lastViewed.Int64
+	sh.RevokedAtMs, sh.RevokedBy, sh.LastViewedAtMs, sh.TokenSealed = revokedAt.Int64, revokedBy.String, lastViewed.Int64, sealed.String
 	return sh, nil
 }

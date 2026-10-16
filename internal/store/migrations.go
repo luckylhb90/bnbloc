@@ -1638,6 +1638,15 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return createSchemaTable(ctx, db, "room_group_codes")
 		},
 	},
+	{
+		// A share link's token, sealed under the deployment key, so its
+		// creator can copy it again (docs/prd/2026-10-16-share-link-copy-again.md).
+		// Nullable: links created before it, or without a key, have none.
+		id: "2026_10_share_link_copy",
+		run: func(ctx context.Context, db sqlConn) error {
+			return addColumnIfMissing(ctx, db, "artifact_shares", "token_sealed", "VARCHAR(128) NULL AFTER last_viewed_at_ms")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

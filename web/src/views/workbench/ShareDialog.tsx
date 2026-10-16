@@ -13,6 +13,8 @@ import {
   shareAccessChanged,
   shareAccessLabel,
   shareAccessOptions,
+  shareCopyState,
+  shareCreatedHint,
   shareRequest,
   shareState,
   shareTargetDescription,
@@ -23,6 +25,7 @@ import {
   type ShareView,
 } from "@/lib/shares";
 import { sharesApi } from "@/lib/sharesApi";
+import { useAuth } from "@/lib/auth";
 import { useTenantPolicy } from "@/lib/tenantPolicy";
 import { Button } from "@/ui/Button";
 import { Dialog } from "@/ui/Dialog";
@@ -66,6 +69,7 @@ export function ShareDialog({
   readonly kind?: ShareTarget;
 }) {
   const toast = useToast();
+  const { subject } = useAuth();
   const policy = useTenantPolicy();
   const org = policy?.name ?? "";
   // Until the policy is known, only a link for the organization is offered.
@@ -76,6 +80,8 @@ export function ShareDialog({
   const [days, setDays] = useState(DEFAULT_SHARE_DAYS);
   const [busy, setBusy] = useState(false);
   const [link, setLink] = useState<string | null>(null);
+  // Whether the link just created can be copied again from the list.
+  const [linkCopyable, setLinkCopyable] = useState(false);
   const [shares, setShares] = useState<ShareView[] | null>(null);
   const [listFailed, setListFailed] = useState(false);
 
@@ -107,12 +113,24 @@ export function ShareDialog({
       const res = await sharesApi.create(roomId, artifactId, shareRequest({ latest: latest === "latest", version, days, access: chosen }));
       const url = res.url;
       setLink(url);
+      setLinkCopyable(res.share.copyable === true);
       void copyLink(url);
       void reload();
     } catch (e) {
       toast.error(errorText(e, "Could not create the link"));
     } finally {
       setBusy(false);
+    }
+  };
+
+  // The creator's own link again (the server answers its URL).
+  const copyAgain = async (share: ShareView) => {
+    try {
+      const { url } = await sharesApi.link(roomId, artifactId, share.shareId);
+      if (!url) throw new Error("no link");
+      void copyLink(url);
+    } catch (e) {
+      toast.error(errorText(e, "This link can't be shown again"));
     }
   };
 
@@ -225,7 +243,7 @@ export function ShareDialog({
                 <CopyIcon size={14} /> Copy
               </Button>
             </div>
-            <p className="text-xs text-[var(--color-fg-muted)]">This link is shown only once. Copy it now.</p>
+            <p className="text-xs text-[var(--color-fg-muted)]">{shareCreatedHint(linkCopyable)}</p>
           </div>
         )}
         <div className="flex flex-col gap-1.5">
@@ -247,6 +265,7 @@ export function ShareDialog({
             <ul className="flex flex-col divide-y divide-[var(--color-border)] rounded-[var(--radius)] border border-[var(--color-border)]">
               {shares.map((s) => {
                 const state = shareState(s, now);
+                const copyState = shareCopyState(s, state, subject ?? "");
                 return (
                   <li key={s.shareId} className="flex items-center gap-2 px-3 py-2">
                     <div className="min-w-0 flex-1">
@@ -257,6 +276,7 @@ export function ShareDialog({
                       </p>
                       <p className="truncate text-xs text-[var(--color-fg-subtle)]">
                         {viewsLabel(s.viewCount)} · <UserName id={s.createdBy} /> · {relativeTime(s.createdAtMs)}
+                        {copyState === "unavailable" && " · The link can't be shown again"}
                       </p>
                     </div>
                     <span
@@ -267,6 +287,11 @@ export function ShareDialog({
                     >
                       {state === "active" ? expiresLabel(s.expiresAtMs, now) : state === "revoked" ? "Revoked" : "Expired"}
                     </span>
+                    {copyState === "copy" && (
+                      <Button size="sm" variant="ghost" onClick={() => void copyAgain(s)} aria-label="Copy the link">
+                        <CopyIcon size={14} /> Copy link
+                      </Button>
+                    )}
                     {state === "active" && (
                       <Select
                         className="h-8 max-w-[11rem] shrink-0 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 text-xs text-[var(--color-fg)]"

@@ -744,6 +744,9 @@ func (s *Service) proxyAs(w http.ResponseWriter, r *http.Request, p apiPath, cla
 	if p.isArtifactShareCreate(r.Method) {
 		// A new link leaves with its URL on this gateway's public origin.
 		proxy.ModifyResponse = s.withShareURL(r)
+	} else if p.isArtifactShareLink(r.Method) {
+		// A creator's copy of their link again leaves as its URL too.
+		proxy.ModifyResponse = s.withShareLinkURL(r)
 	}
 	proxy.ServeHTTP(w, r)
 }

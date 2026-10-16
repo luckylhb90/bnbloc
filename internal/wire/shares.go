@@ -96,6 +96,19 @@ type ShareView struct {
 	// Active is the link's own state (not revoked, not expired); the
 	// organization switch is reported by GET /v1/my/tenant-policy.
 	Active bool `json:"active"`
+	// Copyable is set only for the link's creator, on an active link whose
+	// token was stored sealed: GET …/shares/{shareId}/link answers it again
+	// (docs/prd/2026-10-16-share-link-copy-again.md).
+	Copyable bool `json:"copyable,omitempty"`
+}
+
+// ShareLink answers GET /v1/rooms/{roomId}/artifacts/{artifactId}/shares/{shareId}/link:
+// the link of its creator's active share. The room service answers Token;
+// the gateway replaces it with URL on the way out, as for a link's create
+// (ShareCreated), so the token itself never reaches the client.
+type ShareLink struct {
+	Token string `json:"token,omitempty"`
+	URL   string `json:"url,omitempty"`
 }
 
 // ShareResolveRequest is the gateway's internal POST

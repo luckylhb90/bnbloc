@@ -455,7 +455,10 @@ CREATE TABLE IF NOT EXISTS artifact_versions (
 -- stored, and the link is found by it. version 0 follows the artifact's
 -- latest version. access is who may open it: 'org' (signed-in members of
 -- the organization), 'signed_in' (anyone signed in) or 'anyone'
--- (docs/prd/2026-10-13-share-link-sign-in.md). Not exported with the room.
+-- (docs/prd/2026-10-13-share-link-sign-in.md). token_sealed is the token
+-- sealed under the deployment key, so its creator can copy it again until it
+-- is revoked (docs/prd/2026-10-16-share-link-copy-again.md). Not exported
+-- with the room.
 CREATE TABLE IF NOT EXISTS artifact_shares (
   share_id          VARCHAR(32) PRIMARY KEY,
   token_hash        CHAR(64) NOT NULL,
@@ -471,6 +474,7 @@ CREATE TABLE IF NOT EXISTS artifact_shares (
   revoked_by        VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL,
   view_count        BIGINT NOT NULL DEFAULT 0,
   last_viewed_at_ms BIGINT NULL,
+  token_sealed      VARCHAR(128) NULL,
   UNIQUE KEY uq_artifact_shares_token (token_hash),
   KEY idx_artifact_shares_artifact (tenant_id, room_id, artifact_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

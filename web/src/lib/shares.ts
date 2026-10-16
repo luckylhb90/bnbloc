@@ -5,7 +5,7 @@
 // required) unless its creator lets anyone signed in, or anyone at all,
 // open it (docs/prd/2026-10-13-share-link-sign-in.md).
 
-export type { ShareAccess, ShareCreated, ShareTicket, ShareView, TenantPolicy } from "./wire.gen.ts";
+export type { ShareAccess, ShareCreated, ShareLink, ShareTicket, ShareView, TenantPolicy } from "./wire.gen.ts";
 import type { ShareAccess, ShareCreateRequest, ShareTicket, ShareView, TenantPolicy } from "./wire.gen.ts";
 import { ApiError, errorReason } from "./errors.ts";
 import { ShareAccessValues } from "./wire.gen.ts";
@@ -217,6 +217,26 @@ export function shareState(share: Pick<ShareView, "active" | "revokedAtMs" | "ex
   if (share.revokedAtMs) return "revoked";
   if (!share.active || share.expiresAtMs <= nowMs) return "expired";
   return "active";
+}
+
+/**
+ * What a link's row offers: "copy" (its creator can copy it again), "unavailable"
+ * (the viewer's own active link whose token was not stored: made before links
+ * could be copied again, or on a deployment without the key), or "none".
+ */
+export function shareCopyState(
+  share: Pick<ShareView, "createdBy" | "copyable">,
+  state: "active" | "revoked" | "expired",
+  me: string,
+): "copy" | "unavailable" | "none" {
+  if (state !== "active") return "none";
+  if (share.copyable) return "copy";
+  return me !== "" && share.createdBy === me ? "unavailable" : "none";
+}
+
+/** The note under a new link: whether it can be copied again later. */
+export function shareCreatedHint(copyable: boolean): string {
+  return copyable ? "You can copy it again from the list below." : "This link is shown only once. Copy it now.";
 }
 
 /** "Latest version" or "v3". */

@@ -8,6 +8,8 @@ import {
   shareAccessChanged,
   shareAccessLabel,
   shareAccessOptions,
+  shareCopyState,
+  shareCreatedHint,
   shareRequest,
   shareState,
   shareVersionLabel,
@@ -169,4 +171,15 @@ await asyncTest("the share page of an anyone link and an org link outside it", a
     thrown = e;
   });
   eq(thrown instanceof ApiError && thrown.status === 404, true, "a dead link is thrown (the page's gone state)");
+});
+
+test("a link row offers a copy only to its creator, and says when it cannot be", () => {
+  eq(shareCopyState({ createdBy: "maya", copyable: true }, "active", "maya"), "copy", "own copyable link");
+  eq(shareCopyState({ createdBy: "maya" }, "active", "maya"), "unavailable", "own link whose token was not stored");
+  eq(shareCopyState({ createdBy: "maya" }, "active", "jack"), "none", "someone else's link says nothing");
+  eq(shareCopyState({ createdBy: "maya", copyable: true }, "revoked", "maya"), "none", "a revoked link");
+  eq(shareCopyState({ createdBy: "maya" }, "expired", "maya"), "none", "an expired link");
+  eq(shareCopyState({ createdBy: "maya" }, "active", ""), "none", "no signed-in subject");
+  eq(shareCreatedHint(true).includes("again"), true, "a copyable link says so");
+  eq(shareCreatedHint(false).includes("only once"), true, "a link shown once says so");
 });
