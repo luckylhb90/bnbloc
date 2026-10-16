@@ -50,9 +50,13 @@ Two gaps:
      card and Compare name the same unit.
    - A click on the background, or Escape, clears it.
 5. **The built-in SVG viewer names parts too.** A region picked on an SVG
-   carries the text labels inside it (`detail: "labels: Start, P2P check
-   passed?"`), found in the SVG's own `<text>` elements through its
-   `viewBox`; any other image keeps the plain region.
+   carries the text labels inside it (the detail ends `Labels in it: “Start”,
+   “Check passed?”.`), found in the SVG's own `<text>` elements through its
+   `viewBox` (`web/src/lib/svgLabels.ts`); any other image keeps the plain
+   region. The markup is read, never laid out (the viewer shows an SVG as an
+   `<img>`), so a label counts when the middle of its estimated text box is in
+   the area; a drawing that positions text with CSS classes, `<use>` or
+   `foreignObject` yields fewer labels, never wrong pixels.
 6. **Compare works whatever the MIME says.** Both declare `units`:
    Mermaid's units are its source statements (comment and blank lines
    dropped, aligned by text); draw.io's are its cells keyed
@@ -77,9 +81,9 @@ Two gaps:
   shapes as bare style names (`ellipse;`, `rhombus;`) resolved by its own
   stylesheet and uses shape names maxGraph lacks (`cylinder3`,
   `parallelogram`, `process`, `document`, `step`, `cube`, `note`, `folder`,
-  `card`, `trapezoid`). A **data table** (`src/shapes.ts`) maps bare names
+  `card`, `trapezoid`). A **data table** (`src/shapeTable.ts`) maps bare names
   to styles and names to custom shapes; a shape it does not know is drawn
-  as its rounded rectangle with its label (never blank, never an error).
+  as a plain box with its label (never blank, never an error).
   Adding a shape is adding a row.
 - **Pages** are tabs under the drawing, like a workbook's sheets; the
   toolbar has zoom and fit.

@@ -26,3 +26,12 @@ eq(visibleGrid({ scale: 4, x: 500, y: 0 }, { w: 10, h: 10 }, { w: 200, h: 200 })
   const s = regionSelection(r, image);
   if (s.label !== "Area 90×10 at (10, 0)" || !s.detail.includes("(100, 10)") || !s.detail.includes("100×50 image")) throw new Error(JSON.stringify(s));
 }
+
+{
+  const r = { x: 10, y: 0, w: 90, h: 10 };
+  const plain = regionSelection(r, { w: 100, h: 50 });
+  const named = regionSelection(r, { w: 100, h: 50 }, ["Start", "P2P check passed?"]);
+  if (named.label !== plain.label) throw new Error("the chip does not change");
+  if (!named.detail.startsWith(plain.detail) || !named.detail.endsWith(" Labels in it: “Start”, “P2P check passed?”.")) throw new Error(named.detail);
+  if (regionSelection(r, { w: 100, h: 50 }, []).detail !== plain.detail) throw new Error("no labels, no sentence");
+}

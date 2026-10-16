@@ -81,11 +81,13 @@ export function regionRect(view: ImageView, r: Region): Region {
 
 /** The selection an area makes: a short label, and the coordinates the
  *  agent works from. */
-export function regionSelection(r: Region, image: Size): { label: string; detail: string } {
+export function regionSelection(r: Region, image: Size, labels: readonly string[] = []): { label: string; detail: string } {
   return {
     label: `Area ${r.w}×${r.h} at (${r.x}, ${r.y})`,
     detail:
       `The rectangle from (${r.x}, ${r.y}) to (${r.x + r.w}, ${r.y + r.h}) in image pixels, ${r.w}×${r.h}, ` +
-      `of the ${image.w}×${image.h} image (origin at the top-left).`,
+      `of the ${image.w}×${image.h} image (origin at the top-left).` +
+      // The text inside, for a drawing that has any (lib/svgLabels.ts).
+      (labels.length ? ` Labels in it: ${labels.map((l) => `“${l}”`).join(", ")}.` : ""),
   };
 }

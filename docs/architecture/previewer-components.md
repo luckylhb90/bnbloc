@@ -257,6 +257,18 @@ pnpm --dir examples/previewers/pptx install --frozen-lockfile
 node examples/previewers/pptx/build.mjs
 ```
 
+Two diagram previewers follow (`docs/prd/2026-10-16-diagram-previewers.md`):
+[`mermaid`](../../examples/previewers/mermaid) (`.mmd`, `.mermaid`; mermaid in
+strict mode, a syntax error shown with its line) and
+[`drawio`](../../examples/previewers/drawio) (`.drawio`, `.dio`; maxGraph over
+draw.io's own geometry, every page as a tab). Both let the member point at a
+box or an arrow (`kind: "block"`, the label and the source lines or cell id),
+and both declare `units` for Compare. In `drawio`, `src/model.ts` is the one
+reader of the file (what a cell is, the cell/page/inflate bounds, the clean
+model maxGraph draws, HTML labels through DOMPurify) and `src/shapeTable.ts`
+is draw.io's stylesheet and shape library as data: adding a shape is adding a
+row. `examples/previewers/lib/zoom.ts` is their shared zoom and fit.
+
 All builds share `examples/previewers/lib/bundle.mjs`: esbuild, the
 deterministic archive, the package placeholder, and `NOTICES.txt` with the
 license files of every third-party package esbuild inlined (a bundled

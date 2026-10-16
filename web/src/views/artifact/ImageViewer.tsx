@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
 import { formatBytes } from "@/lib/format";
-import type { ArtifactViewerProps } from "./registry";
+import { MAX_SVG_CHARS, svgLabelsIn } from "@/lib/svgLabels";
+import type { ArtifactFileInfo, ArtifactViewerProps } from "./registry";
 import { useViewerToolbar } from "./toolbar";
 import {
   centered,
@@ -52,11 +53,33 @@ function useImageSource(blob: Blob): { url: string | null; error: string } {
   return state;
 }
 
+// An SVG's markup, read only to name the labels inside a picked area
+// (lib/svgLabels.ts); it is never rendered.
+function useSvgSource(blob: Blob, file: ArtifactFileInfo): string {
+  const isSvg = blob.type === "image/svg+xml" || file.extension?.toLowerCase() === "svg";
+  const [text, setText] = useState("");
+  useEffect(() => {
+    if (!isSvg || blob.size > MAX_SVG_CHARS) {
+      setText("");
+      return;
+    }
+    let cancelled = false;
+    void blob.text().then((t) => {
+      if (!cancelled) setText(t);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [blob, isSvg]);
+  return text;
+}
+
 const CHECKER =
   "repeating-conic-gradient(color-mix(in srgb, var(--color-fg) 9%, transparent) 0% 25%, transparent 0% 50%) 0 0 / 16px 16px";
 
 export default function ImageViewer({ blob, file, toolbar, onSelection }: ArtifactViewerProps) {
   const { url, error } = useImageSource(blob);
+  const svgSource = useSvgSource(blob, file);
   const boxRef = useRef<HTMLDivElement | null>(null);
   const [box, setBox] = useState<Size>({ w: 0, h: 0 });
   const [natural, setNatural] = useState<Size | null>(null);
@@ -77,15 +100,17 @@ export default function ImageViewer({ blob, file, toolbar, onSelection }: Artifa
   // The area as the tab's selection, again as the view moves (its action
   // follows it); none once it is cleared.
   const hadRegion = useRef(false);
+  // The text inside the area, for an SVG: found once per area, not per pan.
+  const labels = useMemo(() => (region && natural && svgSource ? svgLabelsIn(svgSource, region, natural) : []), [region, natural, svgSource]);
   useEffect(() => {
     if (region && natural) {
       hadRegion.current = true;
-      onSelectionRef.current?.({ ...regionSelection(region, natural), kind: "region", rect: regionRect(view, region) });
+      onSelectionRef.current?.({ ...regionSelection(region, natural, labels), kind: "region", rect: regionRect(view, region) });
     } else if (hadRegion.current) {
       hadRegion.current = false;
       onSelectionRef.current?.(null);
     }
-  }, [region, view, natural]);
+  }, [region, view, natural, labels]);
 
   useEffect(() => {
     const el = boxRef.current;
