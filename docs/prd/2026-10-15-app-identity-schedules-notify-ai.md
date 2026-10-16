@@ -160,6 +160,12 @@ call and no assist budget.
   assist model writes the body from at each run; where, the title and the
   sending stay fixed, and the model has no actions. It is for wording that
   should vary, and it spends the owner's assist budget like an `ai` run.
+- **Who is reached.** A notice an app sends skips its sender, who just acted.
+  A notice schedule is nobody acting now, so its creator is a recipient like
+  the rest of the room. Members who muted the room or switched app notices
+  off are still skipped; a run that queued nothing (nobody left, or the slot
+  was already sent) says "nothing was sent", never "notified", and "Run now"
+  shows the run's own answer, error included.
 - **Same rails.** Dedup key is the schedule and slot, so a re-claimed slot
   sends once; "Try it" and "Run now" in dry mode report "would notify";
   three failed runs pause the schedule. An agent may create `ai` and

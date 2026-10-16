@@ -58,9 +58,13 @@ func TestNoticeScheduleRunSendsWithoutAModel(t *testing.T) {
 		t.Fatal("a notice that says what it sends asked a model")
 	}
 	// The same slot again (a re-claimed run) sends nothing twice; the next week's slot does.
-	e.runSlot(sc, slot, false)
+	_, again := e.runSlot(sc, slot, false)
 	if n := len(queued(t, outbox)); n != 1 {
 		t.Fatalf("a re-run of the slot queued %d notices", n)
+	}
+	// A run that queued nothing says so, never "notified".
+	if again.Status != wire.ScheduleRunOK || !strings.Contains(again.Summary, "nothing was sent") || strings.Contains(again.Summary, "notified") {
+		t.Fatalf("a re-run's answer = %+v", again)
 	}
 	e.runSlot(sc, slot.AddDate(0, 0, 7), false)
 	// The outbox lists by notice id, not by send order: look for the title.
@@ -142,5 +146,19 @@ func TestNoticeScheduleRunComposesTheBody(t *testing.T) {
 	model.turns = []any{map[string]any{"content": "   "}}
 	if _, r := e.runSlot(sc, slot.AddDate(0, 0, 14), false); r.Status != wire.ScheduleRunError || !strings.Contains(r.Error, "no text") {
 		t.Fatalf("an empty body = %+v", r)
+	}
+}
+
+// A notice for the room reaches its creator too: a scheduled reminder is nobody
+// acting now (an app's notice skips its sender, who just acted).
+func TestNoticeScheduleReachesItsCreator(t *testing.T) {
+	e, _, outbox := scheduleGW(t)
+	slot := time.Date(2026, 10, 22, 1, 0, 0, 0, time.UTC)
+	if _, r := e.runSlot(noticeSchedule("room", "Standup", "Now.", false), slot, false); r.Status != wire.ScheduleRunOK || strings.Contains(r.Summary, "nothing was sent") {
+		t.Fatalf("run = %+v", r)
+	}
+	got := queued(t, outbox)
+	if len(got) != 1 || !strings.Contains(strings.Join(recipientsOf(got[0]), ","), "jack") {
+		t.Fatalf("the creator (jack) is a recipient of their own reminder: %+v", got)
 	}
 }

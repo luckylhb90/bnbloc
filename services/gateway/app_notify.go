@@ -114,7 +114,7 @@ func (s *Service) serveAppNotify(w http.ResponseWriter, r *http.Request, c appCa
 		Actor: c.scope.Participant, Title: title, Text: in.Text, URL: link, DedupKey: dedup,
 	}
 	ctx := tenant.NewContext(context.WithoutCancel(r.Context()), c.tenant)
-	if err := s.sendNotice(ctx, ev, targets); err != nil {
+	if _, err := s.sendNotice(ctx, ev, targets); err != nil {
 		if errors.Is(err, notify.ErrNoGroupNotifier) {
 			httpx.WriteJSON(w, http.StatusConflict, httpx.ErrorBody{Error: "the group chat's notifier no longer delivers here: connect the group again", Code: wire.AppGroupsUnavailable})
 			return
@@ -134,14 +134,12 @@ func (s *Service) serveAppNotify(w http.ResponseWriter, r *http.Request, c appCa
 // notifier it was connected with (notify.ErrNoGroupNotifier when that
 // notifier no longer delivers to the tenant or to groups), else to its
 // members.
-func (s *Service) sendNotice(ctx context.Context, ev notify.Event, targets wire.AppNotifyTargets) error {
+func (s *Service) sendNotice(ctx context.Context, ev notify.Event, targets wire.AppNotifyTargets) (queued bool, err error) {
 	if targets.Group != "" {
 		ev.Group, ev.GroupNotifier, ev.GroupAddress = targets.Group, targets.GroupNotifier, targets.GroupAddress
-		_, err := s.Alerts.EmitGroup(ctx, ev)
-		return err
+		return s.Alerts.EmitGroup(ctx, ev)
 	}
-	_, err := s.Alerts.Emit(ctx, ev)
-	return err
+	return s.Alerts.Emit(ctx, ev)
 }
 
 // noticeAuditDetail is a notice's audit detail: where it went, never what

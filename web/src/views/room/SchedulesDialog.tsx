@@ -119,8 +119,12 @@ export function SchedulesDialog({
   const act = async (s: RoomSchedule, label: string, fn: () => Promise<unknown>, done: string) => {
     setBusy(s.scheduleId + label);
     try {
-      await fn();
-      toast.success(done);
+      // A run of an AI task or a notice answers what it did; say that, not a
+      // fixed "done" (a failed run is a reply, not a rejected call).
+      const answer = await fn();
+      const run = label === "run" ? (answer as Partial<ScheduleRunReply> | undefined) : undefined;
+      if (run?.status === "error") toast.error(run.error || "The run failed");
+      else toast.success(run?.summary || done);
       reload();
     } catch (e) {
       toast.error(errorText(e, `Could not ${label} the schedule`));

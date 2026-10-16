@@ -367,6 +367,12 @@ func (r *scheduleRun) notify(ctx context.Context, raw json.RawMessage) (string, 
 		}
 		link = u.String()
 	}
+	if r.origin == "" {
+		// No public origin is configured and a run has no request to take one
+		// from: a link of "/#/room/…" opens nowhere, so the emitter's own (its
+		// room link, or none) stands.
+		link = ""
+	}
 	body, _ := json.Marshal(wire.AppNotifyRequest{To: in.To})
 	var targets wire.AppNotifyTargets
 	path := "/internal/v1/rooms/" + url.PathEscape(r.sc.RoomID) + "/notice-targets?as=" + url.QueryEscape(r.claims.Subject)
@@ -389,16 +395,31 @@ func (r *scheduleRun) notify(ctx context.Context, raw json.RawMessage) (string, 
 	if r.s.Alerts == nil {
 		return "", errors.New("notifications are not configured")
 	}
+	// A notice an app sends skips its sender, who just acted. A notice
+	// schedule is nobody acting now: its creator is as much a member of the
+	// room as the rest, and a reminder for the room reaches them too.
+	actor := r.claims.Subject
+	if r.sc.Recipient.Kind == wire.ScheduleRecipientNotice {
+		actor = ""
+	}
 	ev := notify.Event{
 		Type: wire.NotificationAppNotice, RoomID: r.sc.RoomID, RoomName: targets.RoomName, Recipients: targets.Recipients,
-		Actor: r.claims.Subject, Title: in.Title, Text: in.Text, URL: link,
+		Actor: actor, Title: in.Title, Text: in.Text, URL: link,
 		DedupKey: r.dedupKey(raw),
 	}
-	if err := r.s.sendNotice(ctx, ev, targets); err != nil {
+	queued, err := r.s.sendNotice(ctx, ev, targets)
+	if err != nil {
 		if errors.Is(err, notify.ErrNoGroupNotifier) {
 			return "", err
 		}
 		return "", errors.New("the notice could not be queued")
+	}
+	if !queued {
+		// The emitter queues nothing when everyone is filtered out (members who
+		// switched app notices off or muted the room) or the run was sent before:
+		// say so, never "notified".
+		r.record("notify", "nothing was sent to "+who+": "+in.Title)
+		return "nothing was sent to " + who + ": nobody was left to notify (members who muted the room or switched app notices off are skipped), or this run was already sent", nil
 	}
 	r.s.audit(ctx, r.claims.Tenant, store.ExtAuditRecord{Kind: wire.AuditKindApp, Name: "schedule:" + r.sc.ScheduleID, Action: "notify", Actor: r.claims.Subject,
 		Outcome: wire.AuditOutcomeAllow, Detail: noticeAuditDetail(r.sc.RoomID, targets)})
