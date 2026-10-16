@@ -1,5 +1,7 @@
 package wire
 
+import "encoding/json"
+
 // Scheduled prompts (N2) and room templates (N3). realtime serves schedules
 // (it owns chat publish and runs the scheduler); room serves templates (it
 // owns rooms, members, and channels). The JSON tags are the public contract
@@ -22,6 +24,11 @@ const (
 	ScheduleRecipientRoom  = "room"
 	ScheduleRecipientAgent = "agent"
 	ScheduleRecipientAI    = "ai"
+	// ScheduleRecipientNotice is a notice sent at set times, through the
+	// notification emitter (the one an app's notify uses): where it goes, its
+	// title and its body are the schedule's own, so a run needs no model to
+	// say what to do. With Compose the model only writes the body.
+	ScheduleRecipientNotice = "notice"
 )
 
 // Schedule recurrence kinds.
@@ -56,6 +63,16 @@ type ScheduleRecipient struct {
 	OwnerID  string `json:"ownerId,omitempty"`
 	Provider string `json:"provider,omitempty"`
 	Core     string `json:"core,omitempty"`
+	// For kind "notice": To is where it goes, as an app's notify says it
+	// (AppNotifyRoom, a list of logins, or "group:<name>"); Title is its title
+	// and URL an optional link on this deployment. The schedule's text is its
+	// body, in which {date}, {week} and the other NoticeVars names stand for the
+	// run's own values. With Compose the text is instead what the model is asked
+	// to write the body from each run (the destination and title stay fixed).
+	To      json.RawMessage `json:"to,omitempty"`
+	Title   string          `json:"title,omitempty"`
+	URL     string          `json:"url,omitempty"`
+	Compose bool            `json:"compose,omitempty"`
 }
 
 // ScheduleRecurrence is when a schedule fires. Only the fields of its Kind
@@ -92,11 +109,11 @@ type RoomSchedule struct {
 	LastSummary string `json:"lastSummary,omitempty"`
 	// FailedRuns is how many runs in a row failed (0 after a run that
 	// did not).
-	FailedRuns int64 `json:"failedRuns,omitempty"`
-	LastSeq     int64              `json:"lastSeq,omitempty"`
-	RunCount    int64              `json:"runCount"`
-	CreatedAtMs int64              `json:"createdAtMs"`
-	UpdatedAtMs int64              `json:"updatedAtMs"`
+	FailedRuns  int64 `json:"failedRuns,omitempty"`
+	LastSeq     int64 `json:"lastSeq,omitempty"`
+	RunCount    int64 `json:"runCount"`
+	CreatedAtMs int64 `json:"createdAtMs"`
+	UpdatedAtMs int64 `json:"updatedAtMs"`
 }
 
 // ScheduleRunRequest is realtime's call to the gateway to run an ai

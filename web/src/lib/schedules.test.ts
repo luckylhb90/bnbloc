@@ -3,6 +3,9 @@ import {
   formFromRecurrence,
   recurrenceFromForm,
   isBorrowedRecipient,
+  noticeTargetLabel,
+  noticeToOf,
+  noticeWhereOf,
   localDateTimeToMs,
   msToLocalDateTime,
   recipientLabel,
@@ -78,3 +81,18 @@ eq(scheduleStatus({ ...base, enabled: false, lastError: "the room no longer exis
   const round = formFromRecurrence({ kind: "once", atMs: Date.UTC(2026, 9, 9, 13, 0) }, "America/New_York", now);
   eq([round.kind, round.onceLocal], ["once", "2026-10-09T09:00"], "once round trip");
 }
+
+// A notice's target round-trips through the editor's fields.
+eq(noticeWhereOf("room"), { target: "room", group: "", logins: "" }, "room target");
+eq(noticeWhereOf("group:Infra"), { target: "group", group: "Infra", logins: "" }, "group target");
+eq(noticeWhereOf(["maya", "jack"]), { target: "logins", group: "", logins: "maya, jack" }, "logins target");
+eq(noticeWhereOf(undefined), { target: "room", group: "", logins: "" }, "no target reads as the room");
+eq(noticeToOf({ target: "room", group: "x", logins: "y" }), "room", "room ignores the other fields");
+eq(noticeToOf({ target: "group", group: " Infra ", logins: "" }), "group:Infra", "a group name is trimmed");
+eq(noticeToOf({ target: "group", group: "  ", logins: "" }), undefined, "a group target needs a name");
+eq(noticeToOf({ target: "logins", group: "", logins: "maya, jack;maya  nora" }), ["maya", "jack", "nora"], "logins split on commas, semicolons and spaces, once each");
+eq(noticeToOf({ target: "logins", group: "", logins: " , " }), undefined, "a logins target needs someone");
+eq(noticeTargetLabel("group:Infra"), "group Infra", "group label");
+eq(noticeTargetLabel(["maya", "jack"]), "maya, jack", "logins label");
+eq(noticeTargetLabel("room"), "the room", "room label");
+eq(recipientLabel({ kind: "notice", to: "group:Infra", title: "t" }), "notice to group Infra", "a notice's recipient label");

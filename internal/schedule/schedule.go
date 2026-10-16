@@ -111,8 +111,10 @@ func NormalizeRecipient(r wire.ScheduleRecipient) (wire.ScheduleRecipient, error
 		return out, nil
 	case wire.ScheduleRecipientAI:
 		return wire.ScheduleRecipient{Kind: wire.ScheduleRecipientAI}, nil
+	case wire.ScheduleRecipientNotice:
+		return normalizeNotice(r)
 	}
-	return r, fmt.Errorf("recipient: unknown kind %q (room, agent, ai)", r.Kind)
+	return r, fmt.Errorf("recipient: unknown kind %q (room, agent, ai, notice)", r.Kind)
 }
 
 // LoadZone loads an IANA timezone. The process-local zone is refused: a

@@ -140,6 +140,34 @@ that the platform's assist model carries out with a small set of
   `kind: assist` with the schedule id. An organization with
   `assistDisabled` cannot create or run `ai` schedules.
 
+## 4a. A notice: fixed words on time, no model
+
+Added 2026-10-16. A reminder whose words are known now ("fill in the weekly
+report by Friday") does not need a model to decide anything, and a model
+asked to carry it out can misread its own text (a task that mentions a time
+was taken as "wait until then"). The fourth recipient kind, **`notice`**,
+says everything a run sends: `to` (`room`, logins or `group:<name>`), a
+`title` and the schedule's `text` as the body. A run sends it through the
+one notify function (section 5: members, groups, dedup, audit) with no model
+call and no assist budget.
+
+- **Placeholders.** Title and body may hold `{date}`, `{time}`, `{year}`,
+  `{month}`, `{day}`, `{week}` and `{room}`, computed from the slot in the
+  schedule's time zone (`internal/schedule/notice.go`, `NoticeVars` is the
+  one list). `{{` and `}}` are literal braces; an unknown name is refused
+  when the schedule is saved, with the list of known names.
+- **Compose.** With `compose` the schedule's text is the instruction the
+  assist model writes the body from at each run; where, the title and the
+  sending stay fixed, and the model has no actions. It is for wording that
+  should vary, and it spends the owner's assist budget like an `ai` run.
+- **Same rails.** Dedup key is the schedule and slot, so a re-claimed slot
+  sends once; "Try it" and "Run now" in dry mode report "would notify";
+  three failed runs pause the schedule. An agent may create `ai` and
+  `notice` schedules through its job's grant, never `room` or `agent`.
+- **Which to use.** A notice when the words can be written now; `compose`
+  when only the wording varies; an `ai` task when a run must read data or
+  decide something.
+
 ## 5. Notify from an app
 
 The SDK adds `app.notify({to, title, text, url?})` from a page; an `ai`

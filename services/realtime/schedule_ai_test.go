@@ -106,3 +106,57 @@ func TestAIScheduleFailuresPause(t *testing.T) {
 		t.Fatalf("after three failed runs = %+v", got)
 	}
 }
+
+func noticeBody(text string, recipient map[string]any) map[string]any {
+	recipient["kind"] = "notice"
+	return dailyBody(text, recipient)
+}
+
+// A notice schedule is made from what it sends (where, a title, a body that may
+// name the run's own values) and refuses what a typo or a missing part would send
+// wrong; it needs the gateway's run route like an ai schedule, and its due slot
+// goes there, not out as chat.
+func TestNoticeScheduleIsValidatedAndRunsThroughTheRunner(t *testing.T) {
+	f := newSchedFixture(t)
+	good := noticeBody("Fill in {week} by Friday.", map[string]any{"to": "group:Infra", "title": "Weekly report {week}"})
+	if code, out := f.do("alice", http.MethodPost, "/v1/rooms/room-1/schedules", good); code != http.StatusServiceUnavailable {
+		t.Fatalf("a notice schedule without a runner = %d %s", code, out)
+	}
+	runs := &fakeAIRuns{reply: wire.ScheduleRunReply{Status: wire.ScheduleRunOK, Summary: "notified the group Infra"}}
+	f.svc.AIRuns = runs
+
+	for name, body := range map[string]map[string]any{
+		"no target":      noticeBody("x", map[string]any{"title": "t"}),
+		"no title":       noticeBody("x", map[string]any{"to": "room"}),
+		"unknown name":   noticeBody("Due {wek}", map[string]any{"to": "room", "title": "t"}),
+		"unknown title":  noticeBody("x", map[string]any{"to": "room", "title": "Week {wek}"}),
+		"no instruction": noticeBody("", map[string]any{"to": "room", "title": "t", "compose": true}),
+	} {
+		if code, out := f.do("alice", http.MethodPost, "/v1/rooms/room-1/schedules", body); code != http.StatusBadRequest {
+			t.Errorf("%s = %d %s", name, code, out)
+		}
+	}
+	// A body may be empty (a title is a notice), and a compose instruction may
+	// hold braces (the model reads it as words).
+	f.create("alice", noticeBody("", map[string]any{"to": "room", "title": "Standup"}))
+	f.create("alice", noticeBody("Write a short reminder, as {a list}.", map[string]any{"to": "room", "title": "t", "compose": true}))
+
+	sc := f.create("alice", good)
+	if sc.Recipient.Kind != wire.ScheduleRecipientNotice || string(sc.Recipient.To) != `"group:Infra"` || sc.Recipient.Title != "Weekly report {week}" {
+		t.Fatalf("stored recipient = %+v", sc.Recipient)
+	}
+	slot := time.UnixMilli(sc.NextRunAtMs)
+	if n := f.svc.RunDueSchedules(context.Background(), slot.Add(time.Second)); n < 1 {
+		t.Fatalf("ran %d", n)
+	}
+	if len(runs.runs) < 1 || len(f.history()) != 0 {
+		t.Fatalf("runs %v, history %d: a notice is not chat", runs.runs, len(f.history()))
+	}
+	if got := f.get(sc.ScheduleID); got.LastStatus != wire.ScheduleRunOK || got.LastSummary != "notified the group Infra" {
+		t.Fatalf("after run = %+v", got)
+	}
+	// Run now and its dry run go to the runner too.
+	if code, out := f.do("alice", http.MethodPost, "/v1/rooms/room-1/schedules/"+sc.ScheduleID+"/run?dry=1", nil); code != http.StatusOK {
+		t.Fatalf("dry run = %d %s", code, out)
+	}
+}

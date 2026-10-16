@@ -99,14 +99,16 @@ func TestPromptBudgets(t *testing.T) {
 		// gives the full instructions on demand (roomtools/brief.go), so the
 		// guidance no longer repeats the tools' rules; one line says the person
 		// sees none of the tools or files; +30 for the line that timed work is a
-		// schedule, not a timer in a page or the agent's own scheduler.
+		// schedule, not a timer in a page or the agent's own scheduler; +60 on
+		// 2026-10-16 for the notice form of schedules (fixed words, or an AI writing
+		// the body) beside the AI task.
 		{"session guidance (tools, .room/)", guidance, 745},
 		{"session guidance (tools, .room/, team lead)", team, 825},
 		// +80 on 2026-10-14: save_component takes a workspace file and a
 		// work's description and "how it was made" request
 		// (docs/bugs/2026-10-14-work-save-misses-new-files.md).
 		{"tools/list", toolsList, 2630},
-		{"session prefix (guidance + tools/list)", guidance + toolsList, 2880},
+		{"session prefix (guidance + tools/list)", guidance + toolsList, 2940},
 	} {
 		got := tokens(c.text)
 		t.Logf("%-48s %5d tokens (budget %d)", c.name, got, c.budget)

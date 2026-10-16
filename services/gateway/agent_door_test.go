@@ -116,7 +116,14 @@ func TestAgentDoorSchedulesAsTheRequester(t *testing.T) {
 		t.Fatalf("no grant acts as the caller: %+v", got)
 	}
 
-	// An agent schedules AI tasks only.
+	// An agent schedules AI tasks and notices only; a notice goes through.
+	notice := `{"text":"Fill it in.","recipient":{"kind":"notice","to":"group:Infra","title":"Weekly report"},"recurrence":{"kind":"weekly","time":"10:00","days":[4]},"timezone":"UTC"}`
+	if code, _ := g.do("jack", http.MethodPost, base+"?job=job-maya", "application/json", []byte(notice)); code != http.StatusOK {
+		t.Fatalf("a notice schedule by an agent = %d", code)
+	}
+	if got, _ := back.last(); got.subject != "maya" || got.body != notice {
+		t.Fatalf("notice backend saw %+v", got)
+	}
 	n := back.count()
 	for name, body := range map[string]string{
 		"a message as the person": `{"text":"x","recipient":{"kind":"room"},"recurrence":{"kind":"daily","time":"09:00"},"timezone":"UTC"}`,
@@ -124,7 +131,7 @@ func TestAgentDoorSchedulesAsTheRequester(t *testing.T) {
 		"no recipient":            `{"text":"x","recurrence":{"kind":"daily","time":"09:00"},"timezone":"UTC"}`,
 		"not json":                `nope`,
 	} {
-		if code, raw := g.do("jack", http.MethodPost, base+"?job=job-maya", "application/json", []byte(body)); code != http.StatusForbidden || !strings.Contains(string(raw), "AI tasks only") {
+		if code, raw := g.do("jack", http.MethodPost, base+"?job=job-maya", "application/json", []byte(body)); code != http.StatusForbidden || !strings.Contains(string(raw), "AI tasks and notices only") {
 			t.Errorf("%s = %d %s", name, code, raw)
 		}
 	}
@@ -151,7 +158,7 @@ func TestAgentDoorSchedulesAsTheRequester(t *testing.T) {
 
 	// Creating and deleting are audited with the agent and the requester, never the text.
 	recs, err := audit.AuditLog(context.Background(), store.AuditLogQuery{AllTenants: true, Kinds: []string{wire.AuditKindSchedule}, Limit: 20})
-	if err != nil || len(recs) != 2 {
+	if err != nil || len(recs) != 3 {
 		t.Fatalf("audit = %+v, %v", recs, err)
 	}
 	for _, r := range recs {

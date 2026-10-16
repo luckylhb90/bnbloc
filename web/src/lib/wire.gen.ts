@@ -3428,6 +3428,11 @@ export const MaxChatTextBytes = 16384;
 export const ScheduleRecipientRoom = "room";
 export const ScheduleRecipientAgent = "agent";
 export const ScheduleRecipientAI = "ai";
+// ScheduleRecipientNotice is a notice sent at set times, through the
+// notification emitter (the one an app's notify uses): where it goes, its
+// title and its body are the schedule's own, so a run needs no model to
+// say what to do. With Compose the model only writes the body.
+export const ScheduleRecipientNotice = "notice";
 
 // Schedule recurrence kinds.
 // RecurOnce runs once at AtMs.
@@ -3453,6 +3458,16 @@ export interface ScheduleRecipient {
   ownerId?: string;
   provider?: string;
   core?: string;
+  // For kind "notice": To is where it goes, as an app's notify says it
+  // (AppNotifyRoom, a list of logins, or "group:<name>"); Title is its title
+  // and URL an optional link on this deployment. The schedule's text is its
+  // body, in which {date}, {week} and the other NoticeVars names stand for the
+  // run's own values. With Compose the text is instead what the model is asked
+  // to write the body from each run (the destination and title stay fixed).
+  to?: unknown;
+  title?: string;
+  url?: string;
+  compose?: boolean;
 }
 
 // ScheduleRecurrence is when a schedule fires. Only the fields of its Kind
@@ -4648,8 +4663,8 @@ export type RoomEventKind = "chat_message" | "agent_messages" | "agent_job_creat
 export const RoomEventKindValues: readonly RoomEventKind[] = ["chat_message", "agent_messages", "agent_job_created", "agent_job_updated", "agent_job_progress", "agent_session_state", "agent_roster", "presence_join", "presence_leave", "presence_snapshot", "presence_typing", "message_deleted", "message_edited", "task_updated", "artifact_updated", "artifact_state", "member_joined", "member_removed", "room_deleted", "content_saved", "content_uses_changed", "app_changed"];
 export type JobActivityKind = "tool" | "thinking" | "text";
 export const JobActivityKindValues: readonly JobActivityKind[] = ["tool", "thinking", "text"];
-export type ScheduleRecipientKind = "room" | "agent" | "ai";
-export const ScheduleRecipientKindValues: readonly ScheduleRecipientKind[] = ["room", "agent", "ai"];
+export type ScheduleRecipientKind = "room" | "agent" | "ai" | "notice";
+export const ScheduleRecipientKindValues: readonly ScheduleRecipientKind[] = ["room", "agent", "ai", "notice"];
 export type RecurrenceKind = "once" | "daily" | "weekly" | "cron";
 export const RecurrenceKindValues: readonly RecurrenceKind[] = ["once", "daily", "weekly", "cron"];
 export type ScheduleRunStatus = "ok" | "error" | "skipped";

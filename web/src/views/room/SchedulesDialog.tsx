@@ -21,16 +21,20 @@ import {
   formFromRecurrence,
   formatInZone,
   isBorrowedRecipient,
+  noticeToOf,
+  noticeWhereOf,
   recipientLabel,
   recurrenceFromForm,
   scheduleStatus,
   timezoneOptions,
   type RecurrenceForm,
+  type NoticeTarget,
   type RecurrenceKind,
   type RoomSchedule,
   type ScheduleInput,
   type ScheduleRecipient,
 } from "@/lib/schedules";
+import { roomGroupsApi } from "@/lib/roomGroupsApi";
 import { schedulesApi } from "@/lib/schedulesApi";
 import type { ScheduleRunReply } from "@/lib/wire.gen";
 import { Button } from "@/ui/Button";
@@ -151,7 +155,7 @@ export function SchedulesDialog({
             <ClockIcon size={26} className="text-[var(--color-fg-subtle)]" />
             <p className="text-sm font-medium">No schedules yet</p>
             <p className="max-w-sm text-xs text-[var(--color-fg-muted)]">
-              Schedule a recurring prompt — a daily standup question to an agent, a weekly reminder to the room — or a task for AI in plain words.
+              Schedule a recurring prompt — a daily standup question to an agent — a notice to the room, a group chat or people, or a task for AI in plain words.
             </p>
           </div>
         ) : (
@@ -164,6 +168,7 @@ export function SchedulesDialog({
                 <li key={s.scheduleId} className="rounded-[var(--radius)] border border-[var(--color-border)] p-3">
                   <div className="flex items-start gap-2">
                     <div className="min-w-0 flex-1">
+                      {s.recipient.kind === "notice" && s.recipient.title && <p className="break-words text-sm font-medium">{s.recipient.title}</p>}
                       <p className="line-clamp-2 whitespace-pre-wrap break-words text-sm">{s.text}</p>
                       <p className="mt-1 text-xs text-[var(--color-fg-muted)]">
                         To <span className="font-medium text-[var(--color-fg)]">{recipientLabel(s.recipient, nameOf)}</span>
@@ -206,12 +211,12 @@ export function SchedulesDialog({
                         size="sm"
                         variant="ghost"
                         disabled={busy !== null}
-                        onClick={() => void act(s, "run", () => schedulesApi.runNow(roomId, s.scheduleId), s.recipient.kind === "ai" ? "Ran now" : "Posted now")}
+                        onClick={() => void act(s, "run", () => schedulesApi.runNow(roomId, s.scheduleId), s.recipient.kind === "ai" ? "Ran now" : s.recipient.kind === "notice" ? "Sent now" : "Posted now")}
                       >
                         <PaperPlaneRightIcon size={14} /> Run now
                       </Button>
                     )}
-                    {mine && s.recipient.kind === "ai" && (
+                    {mine && (s.recipient.kind === "ai" || s.recipient.kind === "notice") && (
                       <Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => setTrying(s)}>
                         <SparkleIcon size={14} /> Try it
                       </Button>
@@ -269,7 +274,7 @@ export function SchedulesDialog({
 
 // recipientKey identifies a recipient option ("room" or the agent identity).
 function recipientKey(r: ScheduleRecipient): string {
-  if (r.kind === "room" || r.kind === "ai") return r.kind;
+  if (r.kind === "room" || r.kind === "ai" || r.kind === "notice") return r.kind;
   return agentIdentity({ ownerId: r.ownerId ?? "", core: r.core || undefined, provider: r.provider ?? "" });
 }
 
@@ -305,6 +310,23 @@ function ScheduleEditor({
   const [timezone, setTimezone] = useState(schedule?.timezone ?? browserTimezone());
   const [channelId, setChannelId] = useState(schedule?.channelId ?? "");
   const [recipient, setRecipient] = useState<ScheduleRecipient>(schedule?.recipient ?? seed?.recipient ?? { kind: "room" });
+  // A notice's destination, title and whether an AI writes its body (kind "notice").
+  const [notice, setNotice] = useState(() => ({
+    where: noticeWhereOf(schedule?.recipient.to),
+    title: schedule?.recipient.title ?? "",
+    compose: schedule?.recipient.compose ?? false,
+  }));
+  const [groupNames, setGroupNames] = useState<string[]>([]);
+  useEffect(() => {
+    let live = true;
+    roomGroupsApi
+      .list(roomId)
+      .then((r) => live && setGroupNames((r.groups ?? []).map((g) => g.name)))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [roomId]);
   const [form, setForm] = useState<RecurrenceForm>(() => formFromRecurrence(schedule?.recurrence, schedule?.timezone ?? browserTimezone()));
   const [enabled, setEnabled] = useState(schedule?.enabled ?? true);
   const [err, setErr] = useState("");
@@ -355,8 +377,22 @@ function ScheduleEditor({
     return built.recurrence ? describeRecurrence(built.recurrence, timezone) : null;
   }, [form, timezone]);
 
+  const isNotice = recipient.kind === "notice";
   const save = async () => {
-    if (!text.trim()) {
+    if (isNotice) {
+      if (noticeToOf(notice.where) === undefined) {
+        setErr(notice.where.target === "group" ? "Pick the group chat" : "Name who gets it");
+        return;
+      }
+      if (!notice.title.trim()) {
+        setErr("Write the notice's title");
+        return;
+      }
+      if (notice.compose && !text.trim()) {
+        setErr("Say what the AI should write");
+        return;
+      }
+    } else if (!text.trim()) {
       setErr(recipient.kind === "ai" ? "Write the task" : "Write the message to post");
       return;
     }
@@ -367,7 +403,10 @@ function ScheduleEditor({
     }
     setErr("");
     setBusy(true);
-    const body: ScheduleInput = { text, recipient, recurrence: built.recurrence, timezone, channelId };
+    const sent: ScheduleRecipient = isNotice
+      ? { kind: "notice", to: noticeToOf(notice.where), title: notice.title.trim(), ...(notice.compose ? { compose: true } : {}) }
+      : recipient;
+    const body: ScheduleInput = { text, recipient: sent, recurrence: built.recurrence, timezone, channelId };
     try {
       if (schedule) {
         await schedulesApi.update(roomId, schedule.scheduleId, body);
@@ -396,7 +435,13 @@ function ScheduleEditor({
       onClose={onClose}
       size="lg"
       title={schedule ? "Edit schedule" : "New schedule"}
-      description={recipient.kind === "ai" ? "AI carries the task out at each run, with your permissions." : "Posted as you, through the normal chat path."}
+      description={
+        isNotice
+          ? "A notice sent at each run, as you, through your organization's notifications."
+          : recipient.kind === "ai"
+            ? "AI carries the task out at each run, with your permissions."
+            : "Posted as you, through the normal chat path."
+      }
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
@@ -423,12 +468,58 @@ function ScheduleEditor({
             <AssistButton variant="text" label="Describe it" state={describing} onRun={() => void describe()} disabled={!said.trim()} />
           </div>
         )}
+        {isNotice && (
+          <>
+            <Field label="Title">
+              <Input value={notice.title} onChange={(e) => setNotice((n) => ({ ...n, title: e.target.value }))} placeholder="Weekly report {week}" />
+            </Field>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Goes to">
+                <Select
+                  className={SELECT}
+                  value={notice.where.target}
+                  onChange={(e) => setNotice((n) => ({ ...n, where: { ...n.where, target: e.target.value as NoticeTarget } }))}
+                >
+                  <option value="room">The room's members</option>
+                  <option value="group">A group chat of this room</option>
+                  <option value="logins">Specific people</option>
+                </Select>
+              </Field>
+              {notice.where.target === "group" && (
+                <Field label="Group chat" hint={groupNames.length === 0 ? "None is connected to this room yet (the room's Group chats)." : undefined}>
+                  {groupNames.length > 0 ? (
+                    <Select className={SELECT} value={notice.where.group} onChange={(e) => setNotice((n) => ({ ...n, where: { ...n.where, group: e.target.value } }))}>
+                      <option value="">Choose…</option>
+                      {[...new Set([...groupNames, notice.where.group].filter((g) => g !== ""))].map((g) => (
+                        <option key={g} value={g}>
+                          {g}
+                        </option>
+                      ))}
+                    </Select>
+                  ) : (
+                    <Input value={notice.where.group} onChange={(e) => setNotice((n) => ({ ...n, where: { ...n.where, group: e.target.value } }))} placeholder="Group name" />
+                  )}
+                </Field>
+              )}
+              {notice.where.target === "logins" && (
+                <Field label="People" hint="Logins, separated by commas">
+                  <Input value={notice.where.logins} onChange={(e) => setNotice((n) => ({ ...n, where: { ...n.where, logins: e.target.value } }))} placeholder="maya@example.com, jack@example.com" />
+                </Field>
+              )}
+            </div>
+            <Switch checked={notice.compose} onChange={(compose) => setNotice((n) => ({ ...n, compose }))} label="Let AI write the message each time" />
+          </>
+        )}
         <Field
-          label={recipient.kind === "ai" ? "Task" : "Message"}
+          label={isNotice ? (notice.compose ? "What the AI should write" : "Message") : recipient.kind === "ai" ? "Task" : "Message"}
           hint={
-            recipient.kind === "ai"
-              ? "In your own words. At each run AI reads the room's apps' data and can notify people or a connected group chat (group:<name>), post here or ask an agent, as you. Try it before turning it on."
-              : undefined
+            isNotice
+              ? notice.compose
+                ? "In your own words. At each run AI writes the message from this; the title and who gets it stay as set."
+                : "Sent as written. {date} {time} {week} {month} {year} {day} and {room} stand for the run's own values; write {{ for a brace."
+              : recipient.kind === "ai"
+                ? "In your own words. At each run AI reads the room's apps' data and can notify people or a connected group chat (group:<name>), post here or ask an agent, as you. Try it before turning it on."
+                : undefined
           }
         >
           <Textarea
@@ -436,7 +527,15 @@ function ScheduleEditor({
             rows={4}
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder={recipient.kind === "ai" ? "Remind whoever has not filled in this week's report, with the link." : "What changed since yesterday? Summarize open questions."}
+            placeholder={
+              isNotice
+                ? notice.compose
+                  ? "Ask the team, friendly and short, to fill in this week's report."
+                  : "Please fill in this week's report ({week}) by Friday."
+                : recipient.kind === "ai"
+                  ? "Remind whoever has not filled in this week's report, with the link."
+                  : "What changed since yesterday? Summarize open questions."
+            }
           />
         </Field>
         <div className="grid gap-4 sm:grid-cols-2">
@@ -446,10 +545,11 @@ function ScheduleEditor({
               value={recipientKey(recipient)}
               onChange={(e) => {
                 const o = options.find((x) => x.key === e.target.value);
-                setRecipient(o ? o.recipient : { kind: e.target.value === "ai" ? "ai" : "room" });
+                setRecipient(o ? o.recipient : { kind: e.target.value === "ai" ? "ai" : e.target.value === "notice" ? "notice" : "room" });
               }}
             >
               <option value="room">The room (people only)</option>
+              <option value="notice">Notice: send a message to the room, a group chat or people</option>
               <option value="ai">AI: carry out the task</option>
               {groups.map((g) => (
                 <optgroup key={g} label={g}>
@@ -545,7 +645,7 @@ function ScheduleEditor({
   );
 }
 
-// TryRunDialog is an AI task's dry run: what a run would do now (real
+// TryRunDialog is an AI task's or a notice's dry run: what a run would do now (real
 // reads, nothing sent), for its creator to check before it runs for real.
 function TryRunDialog({ roomId, schedule, onClose }: { readonly roomId: string; readonly schedule: RoomSchedule; readonly onClose: () => void }) {
   const [reply, setReply] = useState<ScheduleRunReply | null>(null);
@@ -555,7 +655,7 @@ function TryRunDialog({ roomId, schedule, onClose }: { readonly roomId: string; 
     schedulesApi
       .tryAI(roomId, schedule.scheduleId)
       .then((r) => live && setReply(r))
-      .catch((e) => live && setFailed(errorText(e, "Could not try the task")));
+      .catch((e) => live && setFailed(errorText(e, "Could not try it")));
     return () => {
       live = false;
     };
@@ -564,8 +664,8 @@ function TryRunDialog({ roomId, schedule, onClose }: { readonly roomId: string; 
     <Dialog
       open
       onClose={onClose}
-      title="Try the task"
-      description="What a run would do now. It read the room for real and sent nothing."
+      title={schedule.recipient.kind === "notice" ? "Try the notice" : "Try the task"}
+      description="What a run would do now. It read for real and sent nothing."
       footer={
         <Button variant="primary" onClick={onClose}>
           Close
@@ -575,7 +675,7 @@ function TryRunDialog({ roomId, schedule, onClose }: { readonly roomId: string; 
       {failed ? (
         <p className="text-sm text-[var(--color-danger)]">{failed}</p>
       ) : !reply ? (
-        <p className="py-4 text-center text-sm text-[var(--color-fg-muted)]">Running the task…</p>
+        <p className="py-4 text-center text-sm text-[var(--color-fg-muted)]">Running it…</p>
       ) : (
         <div className="flex flex-col gap-3 text-sm">
           {reply.error ? <p className="text-[var(--color-danger)]">{reply.error}</p> : reply.summary && <p>{reply.summary}</p>}

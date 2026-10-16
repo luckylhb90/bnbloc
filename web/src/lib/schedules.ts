@@ -150,7 +150,49 @@ export function isBorrowedRecipient(r: ScheduleRecipient, me: string): boolean {
 // "Jack · codex"); the canonical handle stays recipientHandle's job.
 export function recipientLabel(r: ScheduleRecipient, nameOf: (id: string) => string = defaultDisplayName): string {
   if (r.kind === "ai") return "AI";
+  if (r.kind === "notice") return `notice to ${noticeTargetLabel(r.to)}`;
   return r.kind === "agent" ? formatAgentHandle(nameOf(r.ownerId ?? ""), r.provider ?? "") : "room";
+}
+
+// A notice schedule's target is what an app's notify takes: "room", a list of
+// logins, or "group:<name>" (a group chat the room connected).
+export type NoticeTarget = "room" | "group" | "logins";
+
+export interface NoticeWhere {
+  readonly target: NoticeTarget;
+  readonly group: string;
+  readonly logins: string;
+}
+
+const GROUP_PREFIX = "group:";
+
+/** The target as the editor holds it (a group's name, the logins one per comma). */
+export function noticeWhereOf(to: unknown): NoticeWhere {
+  if (Array.isArray(to)) return { target: "logins", group: "", logins: to.filter((x) => typeof x === "string").join(", ") };
+  if (typeof to === "string" && to.startsWith(GROUP_PREFIX)) return { target: "group", group: to.slice(GROUP_PREFIX.length), logins: "" };
+  return { target: "room", group: "", logins: "" };
+}
+
+/** The target to send: undefined when what the member picked is not filled in. */
+export function noticeToOf(w: NoticeWhere): unknown {
+  switch (w.target) {
+    case "room":
+      return "room";
+    case "group":
+      return w.group.trim() === "" ? undefined : GROUP_PREFIX + w.group.trim();
+    case "logins": {
+      const logins = [...new Set(w.logins.split(/[\s,;]+/).filter((x) => x !== ""))];
+      return logins.length === 0 ? undefined : logins;
+    }
+  }
+}
+
+/** A notice's target in words, for the list. */
+export function noticeTargetLabel(to: unknown): string {
+  const w = noticeWhereOf(to);
+  if (w.target === "group") return `group ${w.group}`;
+  if (w.target === "logins") return w.logins;
+  return "the room";
 }
 
 // scheduleStatus summarizes a schedule's state for the list.

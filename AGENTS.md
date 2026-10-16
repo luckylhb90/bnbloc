@@ -741,7 +741,7 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   guidance, and never add a tool whose brief needs a paragraph. An agent acts
   for the person who asked it only through its job's grant, as that person, on
   routes people already use (`services/gateway/agent_door.go`: schedules, an AI
-  task only, and the room's group names).
+  task or a notice only, and the room's group names).
 - **Plugins are typed sidecar packages, never cores.** A plugin package
   declares `kind: "bnbloc.plugin.package/v1"`,
   `contract: "bnbloc.plugin.contract/v1"`, and `runtime: "sidecar"`, with

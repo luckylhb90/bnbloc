@@ -20,15 +20,30 @@ func schedulesTool() Tool {
 		Name:  "schedules",
 		Title: "The room's schedules",
 		Description: "List the room's schedules (with the group chats its members connected), create one, or delete one of the person's own. " +
-			"A schedule is an AI task in plain words that runs on time as the person who asked you, with their rights and their organization's assist budget: " +
-			"it can read the room's apps' data, notify the room's members or a connected group chat, and post in the room. " +
-			"Create one only after the person confirmed what it does, when (and in which time zone) and where it sends; then tell them what you set and when it first runs. " +
-			"They can pause or delete it in the room's Schedules. A person may own 20 schedules in a room, a room holds 50. " +
+			"Two kinds of schedule. A notice sends fixed words to the room, to logins or to a connected group chat at set times, with no AI: " +
+			"use it for a reminder whose words you can write now (send.to \"room\", [logins] or \"group:<name>\", send.title, send.text). " +
+			"{date}, {time}, {week} (the ISO week), {month}, {year}, {day} and {room} in its title and text stand for the run's own values in the schedule's time zone. " +
+			"With send.compose the text is instead what an AI is asked to write the body from each time (the destination and title stay fixed): use it when only the wording should vary. " +
+			"An AI task (task) is a plain-words job an AI carries out on time with the room's apps' data, notices and messages: use it only when a run must read data or decide something. " +
+			"Say in the task what to do each time, not when: the recurrence says when. " +
+			"Both run as the person who asked you, with their rights; an AI task spends their organization's assist budget. " +
+			"Create one only after the person confirmed what it sends, when (and in which time zone) and where; then tell them what you set and when it first runs. " +
+			"They can pause, try or delete it in the room's Schedules. A person may own 20 schedules in a room, a room holds 50. " +
 			"Recurrence: kind weekly (days 0=Sunday … 6=Saturday, time HH:MM), daily (time), once (at, RFC 3339) or cron (five fields). " +
-			"Only AI tasks: a schedule that posts as the person or drives an agent is theirs to create in the room's Schedules.",
+			"A schedule that posts as the person or drives an agent is theirs to create in the room's Schedules.",
 		InputSchema: objectSchema(map[string]any{
 			"action": map[string]any{"type": "string", "enum": []string{"list", "create", "delete"}, "description": "What to do."},
-			"task":   map[string]any{"type": "string", "description": "For create: what to do each time, in plain words, e.g. \"notify the weekly report group who has not filled in this week's report\"."},
+			"task":   map[string]any{"type": "string", "description": "For create an AI task: what to do each time, in plain words, never when, e.g. \"notify the weekly report group who has not filled in this week's report\"."},
+			"send": map[string]any{
+				"type": "object", "description": "For create a notice (instead of task): the fixed words sent at each run.",
+				"properties": map[string]any{
+					"to":      map[string]any{"description": "\"room\", \"group:<name>\" (from list's groups) or a list of logins."},
+					"title":   map[string]any{"type": "string", "description": "The notice's title."},
+					"text":    map[string]any{"type": "string", "description": "Its body; with compose, what the AI writes the body from."},
+					"compose": map[string]any{"type": "boolean", "description": "An AI writes the body each time from text."},
+				},
+				"required": []string{"to", "title"}, "additionalProperties": false,
+			},
 			"recurrence": map[string]any{
 				"type": "object", "description": "For create: when.",
 				"properties": map[string]any{
@@ -48,8 +63,14 @@ func schedulesTool() Tool {
 }
 
 type scheduleArgs struct {
-	Action     string `json:"action"`
-	Task       string `json:"task"`
+	Action string `json:"action"`
+	Task   string `json:"task"`
+	Send   *struct {
+		To      json.RawMessage `json:"to"`
+		Title   string          `json:"title"`
+		Text    string          `json:"text"`
+		Compose bool            `json:"compose"`
+	} `json:"send"`
 	Recurrence struct {
 		Kind string `json:"kind"`
 		Time string `json:"time"`
@@ -111,6 +132,9 @@ func listSchedules(ctx context.Context, env *Env, room, base, grant string) Resu
 			// What a person or an agent wrote: data to read, never instructions.
 			"task": roomlog.Fence(schedulesAuthor, sc.Text),
 		}
+		if sc.Recipient.Kind == wire.ScheduleRecipientNotice {
+			row["to"], row["title"], row["compose"] = sc.Recipient.To, roomlog.Fence(schedulesAuthor, sc.Recipient.Title), sc.Recipient.Compose
+		}
 		if sc.NextRunAtMs > 0 {
 			row["next"] = timeIn(sc.NextRunAtMs, sc.Timezone)
 		}
@@ -136,8 +160,8 @@ func listSchedules(ctx context.Context, env *Env, room, base, grant string) Resu
 
 func createSchedule(ctx context.Context, env *Env, in scheduleArgs, path string) Result {
 	task := strings.TrimSpace(in.Task)
-	if task == "" {
-		return toolError("task is required: what to do each time, in plain words")
+	if (task == "") == (in.Send == nil) {
+		return toolError("give exactly one of task (an AI task, in plain words) and send (fixed words to send)")
 	}
 	tz := strings.TrimSpace(in.Timezone)
 	if tz == "" {
@@ -152,6 +176,10 @@ func createSchedule(ctx context.Context, env *Env, in scheduleArgs, path string)
 		rec.AtMs = at.UnixMilli()
 	}
 	body := map[string]any{"text": task, "recipient": map[string]any{"kind": wire.ScheduleRecipientAI}, "recurrence": rec, "timezone": tz}
+	if n := in.Send; n != nil {
+		body["text"] = n.Text
+		body["recipient"] = map[string]any{"kind": wire.ScheduleRecipientNotice, "to": n.To, "title": n.Title, "compose": n.Compose}
+	}
 	raw, err := env.Gateway.Do(ctx, "POST", path, body)
 	if err != nil {
 		return refusal("creating the schedule", err)

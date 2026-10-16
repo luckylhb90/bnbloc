@@ -72,6 +72,10 @@ type scheduleRun struct {
 	posts   int
 	seq     int64
 	origin  string
+	// dedup, when set, is every notice of this run's dedup key (a notice
+	// schedule's slot); else it is the schedule, the slot and the notice's own
+	// content.
+	dedup string
 }
 
 // scheduleAction is one action the model may call: its tool and how it is
@@ -130,21 +134,24 @@ func (s *Service) handleScheduleRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sc := in.Schedule
-	if sc.Recipient.Kind != wire.ScheduleRecipientAI || sc.RoomID == "" || sc.CreatedBy == "" || sc.TenantID == "" || in.SlotMs <= 0 {
-		httpx.Error(w, "not an ai schedule run", http.StatusBadRequest)
+	if !schedule.RunsAtGateway(sc.Recipient.Kind) || sc.RoomID == "" || sc.CreatedBy == "" || sc.TenantID == "" || in.SlotMs <= 0 {
+		httpx.Error(w, "not an ai or notice schedule run", http.StatusBadRequest)
 		return
 	}
 	reply := s.runSchedule(tenant.NewContext(r.Context(), sc.TenantID), sc, time.UnixMilli(in.SlotMs), in.DryRun)
 	httpx.WriteJSON(w, http.StatusOK, reply)
 }
 
-// runSchedule runs one ai slot and reports it; it never fails the call
+// runSchedule runs one slot of an ai or notice schedule and reports it; it never fails the call
 // (the reply's status and error say what happened).
 func (s *Service) runSchedule(ctx context.Context, sc wire.RoomSchedule, slot time.Time, dry bool) wire.ScheduleRunReply {
 	claims := auth.Claims{Subject: sc.CreatedBy, Tenant: sc.TenantID}
 	run := &scheduleRun{s: s, claims: claims, sc: sc, slot: slot, dry: dry, origin: strings.TrimRight(s.PublicURL, "/")}
 	fail := func(msg string) wire.ScheduleRunReply {
 		return wire.ScheduleRunReply{Status: wire.ScheduleRunError, Error: msg, Actions: run.actionsOrEmpty(), Seq: run.seq}
+	}
+	if sc.Recipient.Kind == wire.ScheduleRecipientNotice {
+		return s.runNotice(ctx, run)
 	}
 	model, ok, err := s.assistModel(ctx, claims)
 	if err != nil {
@@ -385,7 +392,7 @@ func (r *scheduleRun) notify(ctx context.Context, raw json.RawMessage) (string, 
 	ev := notify.Event{
 		Type: wire.NotificationAppNotice, RoomID: r.sc.RoomID, RoomName: targets.RoomName, Recipients: targets.Recipients,
 		Actor: r.claims.Subject, Title: in.Title, Text: in.Text, URL: link,
-		DedupKey: fmt.Sprintf("schedule:%s:%d:%x", r.sc.ScheduleID, r.slot.UnixMilli(), noticeDigest(string(raw))),
+		DedupKey: r.dedupKey(raw),
 	}
 	if err := r.s.sendNotice(ctx, ev, targets); err != nil {
 		if errors.Is(err, notify.ErrNoGroupNotifier) {
@@ -397,6 +404,14 @@ func (r *scheduleRun) notify(ctx context.Context, raw json.RawMessage) (string, 
 		Outcome: wire.AuditOutcomeAllow, Detail: noticeAuditDetail(r.sc.RoomID, targets)})
 	r.record("notify", "notified "+who+": "+in.Title)
 	return "notified " + who, nil
+}
+
+// dedupKey is a notice's dedup key.
+func (r *scheduleRun) dedupKey(raw json.RawMessage) string {
+	if r.dedup != "" {
+		return r.dedup
+	}
+	return fmt.Sprintf("schedule:%s:%d:%x", r.sc.ScheduleID, r.slot.UnixMilli(), noticeDigest(string(raw)))
 }
 
 // postMessage posts in the room as the owner (realtime's chat).

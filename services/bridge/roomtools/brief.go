@@ -77,12 +77,13 @@ var briefs = map[string]brief{
 		Params: map[string]string{"filter": "Field (dotted ok) to a value or {$eq $ne $in $gt $gte $lt $lte $exists}."},
 	},
 	"schedules": {
-		Text: "The room's schedules: list (with the connected group chats), create a timed AI task, or delete one. " +
+		Text: "The room's schedules: list, create a notice (fixed words to the room, logins or a group; {week} {date} fill in) or an AI task, or delete one. " +
 			"Create only after the person confirmed what, when, the time zone and where it sends.",
 		Params: map[string]string{
-			"task":       "What to do each time, in plain words.",
-			"recurrence": "weekly (days 0=Sunday…6, time HH:MM), daily (time), once (at, RFC 3339), cron.",
-			"timezone":   "IANA, e.g. Asia/Shanghai; ask if unsure.",
+			"task":       "An AI task: what to do each time, never when.",
+			"send":       "Instead of task: fixed words to send.",
+			"recurrence": "weekly (days 0=Sunday…6, time HH:MM), daily, once (at), cron.",
+			"timezone":   "IANA, e.g. Asia/Shanghai.",
 		},
 	},
 	"room_help": {Text: "The full instructions of a room tool; topic is its name. Read it before using a tool you do not know. For you, not the person."},

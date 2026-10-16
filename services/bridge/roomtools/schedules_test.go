@@ -94,7 +94,7 @@ func TestSchedulesTool(t *testing.T) {
 func TestSchedulesToolRefusals(t *testing.T) {
 	gw := &fakeScheduleGateway{}
 	for name, tc := range map[string]struct{ args, want string }{
-		"no task":      {`{"action":"create","timezone":"UTC","recurrence":{"kind":"daily","time":"09:00"}}`, "task is required"},
+		"no task":      {`{"action":"create","timezone":"UTC","recurrence":{"kind":"daily","time":"09:00"}}`, "exactly one of task"},
 		"no timezone":  {`{"action":"create","task":"x","recurrence":{"kind":"daily","time":"09:00"}}`, "timezone is required"},
 		"bad once":     {`{"action":"create","task":"x","timezone":"UTC","recurrence":{"kind":"once","at":"tomorrow"}}`, "RFC 3339"},
 		"delete no id": {`{"action":"delete"}`, "id is required"},
@@ -119,5 +119,41 @@ func TestWhenText(t *testing.T) {
 	}
 	if got := whenText(wire.ScheduleRecurrence{Kind: "weekly", Time: "10:00", Days: []int{1, 4}}, "Asia/Shanghai"); got != "every Monday, Thursday at 10:00 (Asia/Shanghai)" {
 		t.Fatal(got)
+	}
+}
+
+// A notice is created from what it sends (where, a title, a body, optionally an AI
+// to write the body), sent as the schedule's recipient; exactly one of a task and
+// a notice is given; the list shows a notice's destination and title.
+func TestSchedulesToolNotice(t *testing.T) {
+	gw := &fakeScheduleGateway{}
+	env := scheduleEnv(t, gw, true)
+
+	r := runSchedules(env, `{"action":"create","send":{"to":"group:Infra","title":"Weekly report {week}","text":"Fill it in.","compose":false},"timezone":"Asia/Shanghai","recurrence":{"kind":"weekly","days":[4],"time":"09:00"}}`)
+	if r.Err != "" {
+		t.Fatal(r.Err)
+	}
+	post := gw.posts[0]
+	rcpt, _ := post["recipient"].(map[string]any)
+	if post["text"] != "Fill it in." || rcpt["kind"] != wire.ScheduleRecipientNotice || rcpt["to"] != "group:Infra" || rcpt["title"] != "Weekly report {week}" || rcpt["compose"] != false {
+		t.Fatalf("the schedule sent = %v", post)
+	}
+	r = runSchedules(env, `{"action":"create","send":{"to":["maya","jack"],"title":"Standup","text":"Write a short, friendly reminder.","compose":true},"timezone":"UTC","recurrence":{"kind":"daily","time":"09:00"}}`)
+	if r.Err != "" {
+		t.Fatal(r.Err)
+	}
+	if rcpt, _ := gw.posts[1]["recipient"].(map[string]any); rcpt["compose"] != true || len(rcpt["to"].([]any)) != 2 {
+		t.Fatalf("composed notice sent = %v", gw.posts[1])
+	}
+	for name, args := range map[string]string{
+		"neither": `{"action":"create","timezone":"UTC","recurrence":{"kind":"daily","time":"09:00"}}`,
+		"both":    `{"action":"create","task":"x","send":{"to":"room","title":"t"},"timezone":"UTC","recurrence":{"kind":"daily","time":"09:00"}}`,
+	} {
+		if r := runSchedules(env, args); !strings.Contains(r.Err, "exactly one of task") {
+			t.Errorf("%s: %q", name, r.Err)
+		}
+	}
+	if len(gw.posts) != 2 {
+		t.Fatalf("a refused create reached the gateway: %d posts", len(gw.posts))
 	}
 }

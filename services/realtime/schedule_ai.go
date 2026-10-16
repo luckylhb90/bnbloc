@@ -66,12 +66,12 @@ func (g GatewayAIRuns) RunSchedule(ctx context.Context, sc wire.RoomSchedule, sl
 	return out, json.Unmarshal(raw, &out)
 }
 
-// runClaimedAI runs a claimed ai slot and fills res. A transport failure
+// runClaimedAtGateway runs a claimed slot of an ai or notice schedule and fills res. A transport failure
 // keeps the slot for the next tick (within the misfire grace); a run that
 // failed is recorded, and the schedule pauses after aiPauseAfter in a row.
-func (s *Service) runClaimedAI(ctx context.Context, sc wire.RoomSchedule, slot time.Time, res *store.ScheduleRunResult) {
+func (s *Service) runClaimedAtGateway(ctx context.Context, sc wire.RoomSchedule, slot time.Time, res *store.ScheduleRunResult) {
 	if s.AIRuns == nil {
-		res.Status, res.Error, res.Disable, res.NextRunAtMs = wire.ScheduleRunError, "AI schedules are not available on this deployment", true, 0
+		res.Status, res.Error, res.Disable, res.NextRunAtMs = wire.ScheduleRunError, gatewayRunsUnavailable(sc.Recipient.Kind)+" are not available on this deployment", true, 0
 		return
 	}
 	reply, err := s.AIRuns.RunSchedule(ctx, sc, slot, false)
@@ -87,11 +87,11 @@ func (s *Service) runClaimedAI(ctx context.Context, sc wire.RoomSchedule, slot t
 	}
 }
 
-// runAINow is "Run now" of an ai schedule (creator only): ?dry=1 is the dry
+// runAtGatewayNow is "Run now" of an ai or notice schedule (creator only): ?dry=1 is the dry
 // run (nothing recorded), else a real run at now, recorded like a slot.
-func (s *Service) runAINow(w http.ResponseWriter, r *http.Request, sc wire.RoomSchedule, now time.Time) {
+func (s *Service) runAtGatewayNow(w http.ResponseWriter, r *http.Request, sc wire.RoomSchedule, now time.Time) {
 	if s.AIRuns == nil {
-		httpx.Unavailable(w, "AI schedules")
+		httpx.Unavailable(w, gatewayRunsUnavailable(sc.Recipient.Kind))
 		return
 	}
 	dry := r.URL.Query().Get("dry") == "1"

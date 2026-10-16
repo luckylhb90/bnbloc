@@ -23,12 +23,14 @@ import (
 // rights and spends their assist budget.
 //
 //	GET    /v1/rooms/{id}/schedules          the room's schedules
-//	POST   /v1/rooms/{id}/schedules          a new schedule, an AI task only
+//	POST   /v1/rooms/{id}/schedules          a new schedule, an AI task or a notice only
 //	DELETE /v1/rooms/{id}/schedules/{sid}    one of the requester's own
 //	GET    /v1/rooms/{id}/groups             the connected group chats' names
 //
 // Nothing else is opened: a schedule that posts as the person or drives an
-// agent is theirs to create, and editing or running one is theirs too.
+// agent is theirs to create, and editing or running one is theirs too. A notice
+// goes where the person could send one themselves (the room, their organization's
+// logins, a group chat their room connected), through the one notify path.
 
 // maxAgentScheduleBody bounds the body the door reads to check a schedule.
 const maxAgentScheduleBody = 64 << 10
@@ -70,7 +72,7 @@ func (s *Service) agentDoor(w http.ResponseWriter, r *http.Request, p apiPath, c
 	return actor.Claims, true
 }
 
-// agentScheduleAllowed lets an agent create an AI task only, and spends the
+// agentScheduleAllowed lets an agent create an AI task or a notice only, and spends the
 // requester's cost budget (a loop is stopped, as a person's would be). The body
 // is read to check and put back for the proxy.
 func (s *Service) agentScheduleAllowed(w http.ResponseWriter, r *http.Request, actor contentActor) bool {
@@ -84,8 +86,8 @@ func (s *Service) agentScheduleAllowed(w http.ResponseWriter, r *http.Request, a
 	var in struct {
 		Recipient wire.ScheduleRecipient `json:"recipient"`
 	}
-	if json.Unmarshal(raw, &in) != nil || in.Recipient.Kind != wire.ScheduleRecipientAI {
-		httpx.Error(w, `an agent schedules AI tasks only (recipient kind "ai"): a schedule that posts as the person or drives an agent is theirs to create`, http.StatusForbidden)
+	if json.Unmarshal(raw, &in) != nil || !(in.Recipient.Kind == wire.ScheduleRecipientAI || in.Recipient.Kind == wire.ScheduleRecipientNotice) {
+		httpx.Error(w, `an agent schedules AI tasks and notices only (recipient kind "ai" or "notice"): a schedule that posts as the person or drives an agent is theirs to create`, http.StatusForbidden)
 		return false
 	}
 	return s.spend(w, actor.Claims, costBudget)

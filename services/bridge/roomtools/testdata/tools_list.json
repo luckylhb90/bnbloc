@@ -409,7 +409,7 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "The room's schedules: list (with the connected group chats), create a timed AI task, or delete one. Create only after the person confirmed what, when, the time zone and where it sends.",
+      "description": "The room's schedules: list, create a notice (fixed words to the room, logins or a group; {week} {date} fill in) or an AI task, or delete one. Create only after the person confirmed what, when, the time zone and where it sends.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -426,7 +426,7 @@
           },
           "recurrence": {
             "additionalProperties": false,
-            "description": "weekly (days 0=Sunday…6, time HH:MM), daily (time), once (at, RFC 3339), cron.",
+            "description": "weekly (days 0=Sunday…6, time HH:MM), daily, once (at), cron.",
             "properties": {
               "at": {
                 "type": "string"
@@ -460,12 +460,33 @@
             ],
             "type": "object"
           },
+          "send": {
+            "additionalProperties": false,
+            "description": "Instead of task: fixed words to send.",
+            "properties": {
+              "compose": {
+                "type": "boolean"
+              },
+              "text": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "to": {}
+            },
+            "required": [
+              "to",
+              "title"
+            ],
+            "type": "object"
+          },
           "task": {
-            "description": "What to do each time, in plain words.",
+            "description": "An AI task: what to do each time, never when.",
             "type": "string"
           },
           "timezone": {
-            "description": "IANA, e.g. Asia/Shanghai; ask if unsure.",
+            "description": "IANA, e.g. Asia/Shanghai.",
             "type": "string"
           }
         },
