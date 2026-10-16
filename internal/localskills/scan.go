@@ -17,6 +17,7 @@ import (
 
 	"github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
+	"github.com/luckylhb90/bnbloc/internal/tarbundle"
 )
 
 // maxSkillMD bounds the SKILL.md read for its frontmatter.
@@ -260,10 +261,24 @@ func (s *Scanner) Inspect(source, dir string) Skill {
 			}
 		}
 	}
-	if problem == "" {
+	// The library takes a skill within its own bundle limits (tarbundle's):
+	// the sandbox takes more (the policy's), so a big skill is still usable
+	// there and only cannot be published. The hash serves "changed since
+	// published", so only a publishable skill is hashed (a big one is not read
+	// whole every time it is scanned).
+	switch {
+	case sk.Files > tarbundle.ContentLimits.MaxFiles:
+		sk.PublishProblem = fmt.Sprintf("too many files for the library (%d, at most %d)", sk.Files, tarbundle.ContentLimits.MaxFiles)
+	case sk.Bytes > int64(tarbundle.ContentLimits.MaxBytes):
+		sk.PublishProblem = fmt.Sprintf("too large for the library (%s, at most %d MiB)", formatMiB(sk.Bytes), tarbundle.ContentLimits.MaxBytes>>20)
+	}
+	if problem == "" && sk.PublishProblem == "" {
 		sk.Hash, _ = digest(files)
 	}
 	for _, f := range files {
+		if sk.PublishProblem != "" {
+			break
+		}
 		if !core.ValidBundlePath(sk.Name + "/" + f.Rel) {
 			sk.PublishProblem = fmt.Sprintf("%s: the library takes file names of letters, digits, '.', '_' and '-' only", f.Rel)
 			break
@@ -317,4 +332,13 @@ func (s *Scanner) Files(dir string) ([]File, error) {
 		return nil, fmt.Errorf("%s", problem)
 	}
 	return files, nil
+}
+
+// formatMiB is a size in MiB, one decimal under 10.
+func formatMiB(n int64) string {
+	mib := float64(n) / (1 << 20)
+	if mib < 10 {
+		return fmt.Sprintf("%.1f MiB", mib)
+	}
+	return fmt.Sprintf("%.0f MiB", mib)
 }

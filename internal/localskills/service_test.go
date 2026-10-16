@@ -253,3 +253,39 @@ func TestServiceWithoutMountsFolderPublishesNothing(t *testing.T) {
 		t.Fatalf("it says it publishes no mounts: %+v %v", st.Notes, err)
 	}
 }
+
+// A skill over the library's size is still usable in the sandbox (the policy's
+// limits are larger); it only cannot be published, and is not hashed whole.
+func TestBigSkillIsForTheSandboxNotTheLibrary(t *testing.T) {
+	s, home := newService(t)
+	src := filepath.Join(home, "src")
+	dir := skill(t, src, "archify")
+	blob := make([]byte, 9<<20)
+	for i := range blob {
+		blob[i] = byte(i%251) + 1
+	}
+	if err := os.WriteFile(filepath.Join(dir, "assets.bin"), blob, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st, err := s.Apply(Settings{Enabled: true, Sources: []string{src}, Skills: map[string]Choice{"archify": {VM: true}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := st.Skills[0]
+	if !row.Eligible || row.Reason != "" {
+		t.Fatalf("a 9 MiB skill reaches the sandbox: %+v", row)
+	}
+	if !strings.Contains(row.PublishProblem, "too large for the library") || row.Hash != "" {
+		t.Fatalf("it cannot be published, and is not hashed: %+v", row)
+	}
+	if _, _, err := s.Pack("archify"); err == nil {
+		t.Fatal("a skill over the library's size is not packed")
+	}
+	d := readDescriptor(t, s)
+	if len(d.Mounts) == 0 {
+		t.Fatal("and it is mounted")
+	}
+	if _, err := os.Stat(filepath.Join(s.MirrorRoot, "archify", "assets.bin")); err != nil {
+		t.Fatalf("the copy is whole: %v", err)
+	}
+}

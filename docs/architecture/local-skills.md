@@ -63,7 +63,8 @@ changes".
   member's own file): which agent folders exist, which files a skill never
   carries (credentials, `.git`, …), size and count limits, how deep a source is
   searched. A skill that holds a credential file, a link out of its folder or
-  exceeds a limit is **ineligible**: not mirrored, not packed, and the Settings
+  exceeds a limit (5000 files, 256 MiB; the library's own bundle limit of 512
+  files and 8 MiB only stops *publishing*, never the sandbox) is **ineligible**: not mirrored, not packed, and the Settings
   row says why. Adding an agent (Codex, opencode, a company CLI, …) is a row in
   the policy, not code.
 - **Mirror**: a copy, never the member's folder. A folder is mounted only
