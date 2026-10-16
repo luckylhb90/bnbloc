@@ -175,6 +175,16 @@ stale session rebound, a core or bridge restart. The contract is additive
   instructions file rewritten, the skills directory holding exactly the
   profile's skills (a skill an earlier session wore and this one does not
   is removed, so a session never wears a role it was not given);
+- applies a session's instructions in a way a **resumed conversation still
+  reads**: some harnesses keep the system prompt a conversation began with
+  (resumed with another appended system prompt, the conversation answers from
+  the first; verified with Claude Code), so instructions that change between
+  sessions (the room's guidance, an expert's text) would never reach an agent
+  that continues an earlier conversation. The instructions file the harness
+  reads again whenever it starts (`CLAUDE.md`, `AGENTS.md`) is the mapping that
+  survives a resume, and it wins over the stale system prompt; a core that maps
+  instructions to a system-prompt append or to the first prompt must start a
+  new conversation when they change;
 - answers `404 workspace_not_found` for a workspace it no longer holds —
   including a sandboxed session's workspace whose directory it cannot place
   any more (it lost its record of the workdir), never a `bad_request`; the
