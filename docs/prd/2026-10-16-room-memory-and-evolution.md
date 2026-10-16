@@ -1,7 +1,9 @@
 # Room memory, knowledge and evolution (2026-10-16)
 
 Status: design agreed with the product owner (2026-10-16) on the points under
-"Decisions"; **not built**. Stage 1 is next. The design review below is checked
+"Decisions". **Stage 1 is built** (2026-10-17: store, room routes and gateway read
+in fe416c71; the `.room/memory/` files and the web panel after it); stages 2 to 4
+are not. The design review below is checked
 against the code where it says so and marked "to verify at build" where it is
 not.
 
