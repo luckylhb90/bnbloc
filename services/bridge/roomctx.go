@@ -146,9 +146,12 @@ func (b *Bridge) attachmentMeta(ctx context.Context, room, id string) wire.ChatA
 // looks wrong now" is answerable from the actual gestures), and, once the
 // room has an interactive app, apps.md (roomlog.AppsUpdate: each app's
 // collections and document counts, read with the job's grant; rewritten
-// every turn from then on, so it never goes stale). A failed read renders
-// as unreadable, never as empty, and never fails the turn. next is st with
-// what the pass records (ReadmeSum, AppsListed) once the files are written.
+// every turn from then on, so it never goes stale), and the room's notes
+// (.room/memory/, roomlog.MemoryUpdate: read with the job's grant, written
+// only when their content changed). A failed read renders as unreadable,
+// never as empty, and never fails the turn. next is st with what the pass
+// records (ReadmeSum, AppsListed, AppSDKSum, MemorySum) once the files are
+// written.
 func (b *Bridge) roomRecordFiles(ctx context.Context, room, jobID string, self roomlog.Producer, st roomlog.CtxState, g roomlog.Guidance, cp *deliverableCopier) (files []roomlog.NamedFile, next roomlog.CtxState) {
 	next = st
 	readme, readmeSum, changed := roomlog.ReadmeUpdate(st, g)
@@ -184,11 +187,18 @@ func (b *Bridge) roomRecordFiles(ctx context.Context, room, jobID string, self r
 	if lerr != nil {
 		slog.Debug("bnbloc bridge library unreadable", "event", "bnbloc.bridge.roomctx_library_failed", "room", room, "job", jobID, "error", lerr)
 	}
+	memory, merr := roomlog.ReadMemory(ctx, b.gatewayGET, room, jobID)
+	if merr != nil {
+		slog.Debug("bnbloc bridge room notes unreadable", "event", "bnbloc.bridge.roomctx_memory_failed", "room", room, "job", jobID, "error", merr)
+	}
+	memoryFiles, memorySum := roomlog.MemoryUpdate(st.MemorySum, memory, merr)
+	next.MemorySum = memorySum
 	files = append(files,
 		roomlog.DeliverablesFile(deliverables, derr, self, copies),
 		roomlog.LibraryFile(library, lerr),
 		roomlog.LiveFile(b.liveTrail(room)),
 	)
+	files = append(files, memoryFiles...)
 	if writeApps {
 		files = append(files, appsFile)
 	}
@@ -282,7 +292,7 @@ func (b *Bridge) materializeRoomContext(ctx context.Context, w corepkg.Workspace
 		index = append(index, rec)
 	}
 	records, recorded := b.roomRecordFiles(ctx, room, jobID, self, st, g, cp)
-	next.ReadmeSum, next.AppsListed, next.AppSDKSum = recorded.ReadmeSum, recorded.AppsListed, recorded.AppSDKSum
+	next.ReadmeSum, next.AppsListed, next.AppSDKSum, next.MemorySum = recorded.ReadmeSum, recorded.AppsListed, recorded.AppSDKSum, recorded.MemorySum
 	files = append(append(files, records...), roomlog.IndexFile(index))
 	for _, f := range files {
 		if err := w.WriteWorkspaceFile(ctx, ep, workspaceID, f.Name, f.Content); err != nil {

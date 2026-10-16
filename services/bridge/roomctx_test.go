@@ -38,6 +38,10 @@ type pullGateway struct {
 	// query of each usage read.
 	appStats   map[string]string
 	appQueries []string
+	// memory is the room's notes (wire.RoomMemory as JSON; "" = the read
+	// fails), memoryQueries the query of each read.
+	memory        string
+	memoryQueries []string
 	// attachments are the room's chat attachments by id; downloads counts
 	// each one's byte reads; reports are the bodies posted to
 	// agent-activity/messages (notices among them).
@@ -225,6 +229,16 @@ func newPullGateway(t *testing.T) *pullGateway {
 			return
 		}
 		fmt.Fprint(w, body)
+	})
+	mux.HandleFunc("GET /v1/rooms/r1/memory", func(w http.ResponseWriter, r *http.Request) {
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		g.memoryQueries = append(g.memoryQueries, r.URL.RawQuery)
+		if g.memory == "" {
+			http.NotFound(w, r)
+			return
+		}
+		fmt.Fprint(w, g.memory)
 	})
 	mux.HandleFunc("POST /v1/rooms/r1/agent-activity/session-state", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -495,6 +509,104 @@ func TestRoomRecordsWriteAppsOnceTheRoomHasOne(t *testing.T) {
 	defer g.mu.Unlock()
 	if len(g.appQueries) != 1 || g.appQueries[0] != "job=job-2" {
 		t.Fatalf("usage reads = %q, want one for the app's turn with its job's grant", g.appQueries)
+	}
+}
+
+// The room's notes reach the workspace as .room/memory/BRIEF.md, INDEX.md and
+// notes.md, read with the turn's job grant: nothing is written in a room
+// without notes, the files are written once while the notes do not change,
+// again when they do, and they say so when the notes are all gone (state:
+// CtxState.MemorySum, threaded as materializeRoomContext does).
+func TestRoomRecordsWriteTheRoomsNotes(t *testing.T) {
+	g := newPullGateway(t)
+	g.setHistory("general", []int64{1}, map[int64]string{1: "hello"})
+	b := New(Config{GatewayBaseURL: g.srv.URL, GatewayToken: "t", OwnerSubject: "maya"})
+	var st roomlog.CtxState
+	turn := func(job string, memory string) map[string]string {
+		t.Helper()
+		g.mu.Lock()
+		g.memory = memory
+		g.mu.Unlock()
+		files, next := b.roomRecordFiles(context.Background(), "r1", job, roomlog.Producer{Owner: "maya", Provider: "codex"}, st, roomlog.Guidance{HasRoomFiles: true}, nil)
+		st.MemorySum = next.MemorySum
+		out := map[string]string{}
+		for _, f := range files {
+			if strings.HasPrefix(f.Name, ".room/memory/") {
+				out[f.Name] = f.Content
+			}
+		}
+		return out
+	}
+	const notes = `{"brief":{"noteId":"note_b","type":"brief","title":"Atlas","body":"The Q4 launch site.","status":"active","author":"maya","revision":1,"createdAtMs":1,"updatedAtMs":1760000000000},` +
+		`"notes":[{"noteId":"note_k","type":"knowledge","title":"Blue theme","body":"Blue only.","status":"active","author":"jack","revision":1,"createdAtMs":1,"updatedAtMs":1760000000000}]}`
+
+	if got := turn("job-1", ""); len(got) != 0 { // the read fails (404): nothing was written, nothing is
+		t.Fatalf("an unreadable first read wrote %v", got)
+	}
+	if got := turn("job-2", `{"notes":[]}`); len(got) != 0 {
+		t.Fatalf("a room without notes wrote %v", got)
+	}
+	got := turn("job-3", notes)
+	if len(got) != 3 || !strings.Contains(got[".room/memory/BRIEF.md"], "The Q4 launch site.") ||
+		!strings.Contains(got[".room/memory/INDEX.md"], "- note_k · knowledge · Blue theme · Blue only. · updated 2025-10-09") ||
+		!strings.Contains(got[".room/memory/notes.md"], "## note_k · knowledge") {
+		t.Fatalf("the room's notes were not written as three files: %v", got)
+	}
+	if got := turn("job-4", notes); len(got) != 0 {
+		t.Fatalf("unchanged notes were written again: %v", got)
+	}
+	if got := turn("job-5", ""); len(got) != 3 || !strings.Contains(got[".room/memory/INDEX.md"], "this is not a sign that there are none") {
+		t.Fatalf("a failed read after the notes were written must say so: %v", got)
+	}
+	if got := turn("job-6", `{"notes":[]}`); len(got) != 3 || !strings.Contains(got[".room/memory/INDEX.md"], "(no notes now)") || strings.Contains(got[".room/memory/notes.md"], "note_k") {
+		t.Fatalf("deleted notes must leave files that say there are none: %v", got)
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	want := []string{"job=job-1", "job=job-2", "job=job-3", "job=job-4", "job=job-5", "job=job-6"}
+	if !slices.Equal(g.memoryQueries, want) {
+		t.Fatalf("notes reads = %q, want one per turn with its job's grant", g.memoryQueries)
+	}
+}
+
+// A pull pass writes the notes with the other records, and INDEX.md of the
+// channels stays the last file; the session records their sum so a quiet
+// room's next turn writes none of them again.
+func TestDriveClaimPullWritesTheRoomsNotes(t *testing.T) {
+	g := newPullGateway(t)
+	g.setHistory("general", []int64{1}, map[int64]string{1: "hello"})
+	g.setHistory("test", []int64{}, nil)
+	g.mu.Lock()
+	g.memory = `{"notes":[{"noteId":"note_k","type":"knowledge","title":"Blue theme","body":"Blue only.","status":"active","author":"jack","revision":1,"createdAtMs":1,"updatedAtMs":1760000000000}]}`
+	g.mu.Unlock()
+	prov := &fakeCoreProvider{url: g.srv.URL}
+	b := New(Config{
+		GatewayBaseURL: g.srv.URL,
+		GatewayToken:   "t",
+		OwnerSubject:   "maya",
+		Cores:          []CoreConfig{{Name: "core-a", Provider: prov, Endpoint: corepkg.Endpoint{BaseURL: g.srv.URL}}},
+	})
+	count := func(name string) int {
+		n := 0
+		for _, w := range prov.recordedWrites() {
+			if w == name {
+				n++
+			}
+		}
+		return n
+	}
+	for i, text := range []string{"turn one", "turn two"} {
+		if _, err := b.driveClaim(context.Background(), testDrive(b, jobRef{ID: fmt.Sprintf("job-%d", i)}, "r1", "maya", "core-a", "agent-a", "t", text, "ch"), nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{".room/memory/BRIEF.md", ".room/memory/INDEX.md", ".room/memory/notes.md"} {
+		if n := count(name); n != 1 {
+			t.Errorf("%s written %d times over two turns of unchanged notes, want once", name, n)
+		}
+	}
+	if writes := prov.recordedWrites(); writes[len(writes)-1] != ".room/INDEX.md" {
+		t.Errorf("the channels' INDEX must stay last: %v", writes)
 	}
 }
 
