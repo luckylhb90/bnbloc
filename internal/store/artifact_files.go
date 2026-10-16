@@ -33,6 +33,10 @@ var artifactTextTypes = map[string]string{
 	".r": "text/x-r", ".pl": "text/x-perl", ".sql": "text/x-sql", ".sh": "text/x-shellscript",
 	".vue": "text/plain", ".svelte": "text/plain", ".proto": "text/plain", ".graphql": "text/plain",
 	".tf": "text/plain",
+	// Diagram sources: typed by name, so a previewer that claims the MIME wins
+	// over the plain-text viewer that claims whatever the sniffer said.
+	".mmd": "text/vnd.mermaid", ".mermaid": "text/vnd.mermaid",
+	".drawio": "application/vnd.jgraph.mxfile", ".dio": "application/vnd.jgraph.mxfile",
 }
 
 // artifactTextNames are extensionless files published as text.

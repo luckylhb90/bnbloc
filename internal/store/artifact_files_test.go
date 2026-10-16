@@ -11,6 +11,11 @@ func TestArtifactFileTyping(t *testing.T) {
 		{"index.html", "text/html", ArtifactKindHTML, nil},
 		{"main.go", "text/x-go", ArtifactKindCode, nil},
 		{"Makefile", "text/plain", ArtifactKindCode, nil},
+		// A diagram source is typed by its name, not by what its bytes sniff as.
+		{"flow.mmd", "text/vnd.mermaid", ArtifactKindCode, []byte("flowchart TD\n  A --> B\n")},
+		{"flow.mermaid", "text/vnd.mermaid", ArtifactKindCode, nil},
+		{"orders.drawio", "application/vnd.jgraph.mxfile", ArtifactKindCode, []byte("<mxfile><diagram/></mxfile>")},
+		{"orders.dio", "application/vnd.jgraph.mxfile", ArtifactKindCode, nil},
 		{"chart.png", "image/png", ArtifactKindImage, nil},
 		{"logo.svg", "image/svg+xml", ArtifactKindImage, nil},
 		{"report.pdf", "application/pdf", ArtifactKindFile, nil},
