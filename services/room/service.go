@@ -85,6 +85,9 @@ type Service struct {
 	// RoomGroups holds the group chats connected to rooms (room_groups.go).
 	// Nil answers those routes 503 and refuses group notices.
 	RoomGroups store.RoomGroupStore
+	// RoomNotes holds what rooms know (room_notes.go). Nil answers the notes
+	// routes 503.
+	RoomNotes store.RoomNoteStore
 	// Audit records every export of an app's data and every agent read of
 	// it (auditAppRead, appdata_export.go). nil records nothing.
 	Audit store.ExtensionAuditStore
@@ -206,6 +209,7 @@ func (s *Service) Handler() http.Handler {
 	s.registerAgentHostRoutes(mux)
 	s.registerAppDataRoutes(mux)
 	s.registerRoomGroupRoutes(mux)
+	s.registerRoomNoteRoutes(mux)
 	mux.HandleFunc("GET /v1/my/apps", s.handleMyApps)
 	return svcauth.EnsureTenant(mux)
 }

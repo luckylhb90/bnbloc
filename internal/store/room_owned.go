@@ -68,6 +68,8 @@ var roomOwnedTables = []roomOwnedTable{
 	byTenantRoom("room_schedules"),
 	byTenantRoom("room_groups"),
 	byTenantRoom("room_group_codes"),
+	byTenantRoom("room_notes"),
+	byTenantRoom("room_note_revisions"),
 	byTenantRoom("notification_reply_tokens"),
 	byTenantRoom("content_drafts"),
 	byTenantRoom("content_room_shares"),

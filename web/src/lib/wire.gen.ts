@@ -2747,6 +2747,141 @@ export interface MyAppList {
   nextCursor?: string;
 }
 
+// ---- wire/notes.go ----
+
+// NoteType is what kind of note a note is.
+// NoteBrief is the project in one page, always read. A room has at most one
+// active brief: a new one supersedes the old.
+export const NoteBrief = "brief";
+// NoteKnowledge is a decision (with its reason), a convention, a glossary
+// entry, a pointer to a deliverable.
+export const NoteKnowledge = "knowledge";
+// NoteMemory is a dated fact distilled from the conversation.
+export const NoteMemory = "memory";
+// NoteLesson is how this project does something.
+export const NoteLesson = "lesson";
+
+// NoteTypes is every type, in the order a listing groups them.
+export const NoteTypes: readonly string[] = ["brief", "knowledge", "memory", "lesson"];
+
+// NoteStatus is where a note stands. Only active notes are read by agents.
+export const NoteActive = "active";
+// NoteSuperseded: a newer note replaced it (kept for its history).
+export const NoteSuperseded = "superseded";
+// NoteArchived: put away by a member; it can be made active again.
+export const NoteArchived = "archived";
+
+// NoteSourceKind is what a note's source points at.
+export const NoteSourceMessage = "message";
+export const NoteSourceArtifact = "artifact";
+
+// Note limits: one place for the API, the stores and the web.
+export const MaxNoteTitleRunes = 120;
+export const MaxNoteBodyBytes = 4096;
+// MaxBriefBodyBytes is the brief's larger bound (about 1.5K tokens of
+// text and a little over).
+export const MaxBriefBodyBytes = 8192;
+export const MaxNoteSources = 8;
+// MaxActiveRoomNotes bounds the notes a room keeps active (its brief
+// included): the active set stays small by design (supersede, archive).
+export const MaxActiveRoomNotes = 200;
+// MaxRoomNotes bounds every note of a room, whatever its status.
+export const MaxRoomNotes = 1000;
+
+// NoteSource says where a note came from, so a reader can check it: a
+// message of the room (Ref is its sequence number) or a deliverable (Ref is
+// its id, Version one of its versions).
+export interface NoteSource {
+  kind: NoteSourceKind;
+  ref: string;
+  version?: number;
+}
+
+// RoomNote is one note of a room.
+export interface RoomNote {
+  noteId: string;
+  type: NoteType;
+  title: string;
+  body: string;
+  status: NoteStatus;
+  // Supersedes is the note this one replaced, when it did.
+  supersedes?: string;
+  sources?: NoteSource[];
+  // Author is the member who wrote it (or, later, the curator).
+  author: string;
+  pinned?: boolean;
+  // Revision counts the note's changes, from 1.
+  revision: number;
+  createdAtMs: number;
+  updatedAtMs: number;
+  // VerifiedAtMs is when a member last confirmed the note is still true.
+  verifiedAtMs?: number;
+}
+
+// NoteCreateRequest is POST /v1/rooms/{roomId}/notes. Supersedes names an
+// active note of the room the new one replaces (it becomes superseded in the
+// same step); a new brief supersedes the room's active brief on its own.
+export interface NoteCreateRequest {
+  type: NoteType;
+  title: string;
+  body: string;
+  pinned?: boolean;
+  supersedes?: string;
+  sources?: NoteSource[];
+}
+
+// NoteUpdateRequest is PATCH /v1/rooms/{roomId}/notes/{noteId}: only the
+// fields present change. Status moves a note between active and archived
+// (superseded is made by a create). Verify records that the note was just
+// confirmed. ExpectedRevision, when set, refuses the change (409) if the note
+// moved on since the editor read it.
+export interface NoteUpdateRequest {
+  title?: string;
+  body?: string;
+  pinned?: boolean;
+  status?: NoteStatus;
+  verify?: boolean;
+  expectedRevision?: number;
+}
+
+// NoteRollbackRequest is POST /v1/rooms/{roomId}/notes/{noteId}/rollback: the
+// note takes the content of an earlier revision, as a new revision.
+export interface NoteRollbackRequest {
+  revision: number;
+}
+
+// NotesReply lists a room's notes, newest-updated first (the brief and the
+// pinned ones first).
+export interface NotesReply {
+  notes: RoomNote[];
+}
+
+// NoteRevision is one stored state of a note, for history and rollback.
+export interface NoteRevision {
+  revision: number;
+  type: NoteType;
+  title: string;
+  body: string;
+  status: NoteStatus;
+  pinned?: boolean;
+  changedBy: string;
+  atMs: number;
+}
+
+// NoteRevisionsReply lists a note's revisions, newest first.
+export interface NoteRevisionsReply {
+  revisions: NoteRevision[];
+}
+
+// RoomMemory is what an agent is handed of a room's notes: the active brief
+// (nil when the room has none) and the other active notes in the order the
+// agent's index lists them (internal/notes.Rank). It is the answer of GET
+// /v1/rooms/{roomId}/memory?job=, read by the bridge for .room/memory/.
+export interface RoomMemory {
+  brief?: RoomNote;
+  notes: RoomNote[];
+}
+
 // ---- wire/notifications.go ----
 
 // Notification types carried in NotificationPayload.Type.
@@ -4774,6 +4909,12 @@ export type JobActivityKind = "tool" | "thinking" | "text";
 export const JobActivityKindValues: readonly JobActivityKind[] = ["tool", "thinking", "text"];
 export type MediaImageAspect = "square" | "landscape" | "portrait";
 export const MediaImageAspectValues: readonly MediaImageAspect[] = ["square", "landscape", "portrait"];
+export type NoteType = "brief" | "knowledge" | "memory" | "lesson";
+export const NoteTypeValues: readonly NoteType[] = ["brief", "knowledge", "memory", "lesson"];
+export type NoteStatus = "active" | "superseded" | "archived";
+export const NoteStatusValues: readonly NoteStatus[] = ["active", "superseded", "archived"];
+export type NoteSourceKind = "message" | "artifact";
+export const NoteSourceKindValues: readonly NoteSourceKind[] = ["message", "artifact"];
 export type ScheduleRecipientKind = "room" | "agent" | "ai" | "notice";
 export const ScheduleRecipientKindValues: readonly ScheduleRecipientKind[] = ["room", "agent", "ai", "notice"];
 export type RecurrenceKind = "once" | "daily" | "weekly" | "cron";

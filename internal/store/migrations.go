@@ -1647,6 +1647,16 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return addColumnIfMissing(ctx, db, "artifact_shares", "token_sealed", "VARCHAR(128) NULL AFTER last_viewed_at_ms")
 		},
 	},
+	{
+		// Room notes and their revisions (docs/prd/2026-10-16-room-memory-and-evolution.md).
+		id: "2026_10_room_notes",
+		run: func(ctx context.Context, db sqlConn) error {
+			if err := createSchemaTable(ctx, db, "room_notes"); err != nil {
+				return err
+			}
+			return createSchemaTable(ctx, db, "room_note_revisions")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

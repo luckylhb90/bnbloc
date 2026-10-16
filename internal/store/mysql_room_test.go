@@ -50,6 +50,8 @@ func TestMySQLDeleteRoomRemovesEveryRoomOwnedRow(t *testing.T) {
 		"app_files":                   `INSERT INTO app_files (app_id, file_id, tenant_id, room_id, by_key, public, name_sealed, author_sealed, content_type, size_bytes, blob_key, created_at_ms) VALUES ('app-{id}', 'f1', 'org-a', '{id}', 'p', 0, 'n', 'a', 'image/png', 1, 'sha256/x', 1)`,
 		"room_groups":                 `INSERT INTO room_groups (tenant_id, room_id, name, notifier, address, connected_by, created_at_ms) VALUES ('org-a', '{id}', 'g', 'n', 'a', 'maya', 1)`,
 		"room_group_codes":            `INSERT INTO room_group_codes (code, tenant_id, room_id, name, created_by, expires_at_ms) VALUES ('c-{id}', 'org-a', '{id}', 'g', 'maya', 1)`,
+		"room_notes":                  `INSERT INTO room_notes (tenant_id, room_id, note_id, type, title, body, status, author, revision, created_at_ms, updated_at_ms) VALUES ('org-a', '{id}', 'n1', 'memory', 't', 'b', 'active', 'maya', 1, 1, 1)`,
+		"room_note_revisions":         `INSERT INTO room_note_revisions (tenant_id, room_id, note_id, revision, type, title, body, status, changed_by, at_ms) VALUES ('org-a', '{id}', 'n1', 1, 'memory', 't', 'b', 'active', 'maya', 1)`,
 		"app_keys":                    `INSERT INTO app_keys (app_id, tenant_id, room_id, wrapped_key, created_at_ms) VALUES ('app-{id}', 'org-a', '{id}', 'wk', 1)`,
 		// More documents than one shred batch (appShredBatch), so the
 		// batched delete loops.

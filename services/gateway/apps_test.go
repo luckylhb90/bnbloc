@@ -108,6 +108,7 @@ func newAppGW(t *testing.T) *appGW {
 	e.room = roomsvc.New(b.Room, b.Channel)
 	e.room.Artifacts, e.room.Profiles, e.room.Tenants = b.Artifacts, b.Profiles, b.Tenant
 	e.room.AppDocs, e.room.AppCipher, e.room.ShareBox = b.AppDocs, appdata.NewCipher(box), box
+	e.room.RoomNotes = b.RoomNotes
 	e.room.Publisher = realtime.NewHTTPPublisher(rtSrv.URL, "room")
 	e.room.Blobs = realtime.NewHandoffClient(rtSrv.URL, "room")
 	roomSrv := httptest.NewServer(e.countAppCalls(svcauth.Middleware(appGWKey, e.room.Handler())))

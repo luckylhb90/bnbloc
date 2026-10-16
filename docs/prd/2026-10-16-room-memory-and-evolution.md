@@ -76,21 +76,34 @@ is plain files; no tool is added.
 - **Tier 1, `INDEX.md`:** one line per active note (title, type, one-line hook,
   updated), capped in lines; beyond the cap, grouped by type with counts and the
   highest-ranked first.
-- **Tier 2, `notes/<id>.md`:** each note's body, opened on demand; the long
-  tail is found with plain file search. A note someone else wrote is fenced as
-  data (`roomlog.Fence`), like every other text a file hands an agent.
-- **What enters the index**, in order: pinned, then recently updated or
-  recently verified, then by type weight; superseded and archived notes never.
+- **Tier 2, `notes.md`:** the bodies of the active notes in index order, each under
+  its id and title, within a byte cap; an agent reads a section or searches the file.
+  One file rather than one per note, because the workspace writer can create and
+  overwrite files but not remove them: a superseded or deleted note simply leaves
+  the rewritten file, where a per-note file would linger. A note someone else wrote
+  is fenced as data (`roomlog.Fence`), like every other text a file hands an agent.
+  A note over the cap is listed in the index and marked "body not included".
+- **What enters the index**, in order: pinned, then the durable types (knowledge,
+  lessons) before dated memory, each by how fresh it is (last edit or last
+  confirmation), newest first; superseded and archived notes never
+  (`internal/notes.Rank`).
   An unverified or stale note is shown with its date, never as current fact.
+- **How the bridge reads it.** `GET /v1/rooms/{roomId}/memory?job=` is admitted
+  through the job grant like the apps and library reads (the requester must be a
+  member; a borrowed run reads the requester's room); the room service answers
+  the brief and the ranked active notes (`internal/notes.Rank`), and the bridge
+  renders and caps them. Members read and edit through `/v1/rooms/{roomId}/notes`.
 - **The session guidance gains one line** pointing to `.room/memory/INDEX.md`
   (in the `.room/` legend, inside the prompt budget test). Nothing else is added
   to any prompt.
 - **Retrieval has one owner**: `internal/notes` (`Select(room, query, limit)`
   returns note ids with scores). The materializer and the curator are its only
   callers; no agent-facing search path exists (the rule for message search holds:
-  search serves human memberships only). Today it is the notes table's FULLTEXT
-  index (ngram, like the message index) plus aliases the curator writes for each
-  note. The message search owner (`internal/search`) is for messages and stays
+  search serves human memberships only). Stage 1 has no text query at all (the
+  materializer ranks; the panel filters the room's few hundred notes in the
+  browser); the FULLTEXT index (ngram, like the message index, created with the
+  same stopword care) and the aliases the curator writes for each note arrive in
+  stage 2 with the first caller that needs a query. The message search owner (`internal/search`) is for messages and stays
   as it is: notes are another corpus with other semantics (ranked, status-aware).
 - **Swapping the retrieval later** changes the implementation behind `Select`
   only: an OpenSearch index of notes (the cluster the message index can already
@@ -107,14 +120,19 @@ is plain files; no tool is added.
   prefilled from the message (the curator may tighten it) and the person edits a
   sentence. Notes can be edited, pinned, superseded and deleted in the room's
   "What this project knows" panel. This path needs no AI.
-- **The curator proposes, on a nightly sweep.** One sweep a night, owned by one
-  replica at a time (an advisory lock, like the retention worker), walks the rooms
-  that opted in and issues one run per room through the gateway's schedule-run seam
-  (the organization's assist model and budget, audited as `assist`). A run reads
-  what happened since the room's cursor (new messages, deliverables published,
-  schedule results, corrections) and files **proposals**: add a note, supersede one
-  (the proposal must name what it replaces), compact a run of memory notes, or edit
-  the brief. A proposal carries its evidence (source refs), not a free summary.
+- **The curator proposes, on a nightly sweep the room schedules itself.** Each
+  room's curation has its own settings, chosen by the room's owner: on or off, the
+  **time of day** its run is due and the **time zone** it is read in (the zone
+  defaults to the owner's own, as a schedule's does). A sweep owned by one replica at
+  a time (an advisory lock, like the retention worker) wakes often, finds the rooms
+  whose due time has passed since their last run, and issues one run per room
+  through the gateway's schedule-run seam (the organization's assist model and
+  budget, audited as `assist`). There is no deployment-wide window to design: the
+  deployment cannot know when each project is quiet. A run reads what happened since
+  the room's cursor (new messages, deliverables published, schedule results,
+  corrections) and files **proposals**: add a note, supersede one (the proposal must
+  name what it replaces), compact a run of memory notes, or edit the brief. A
+  proposal carries its evidence (source refs), not a free summary.
   - *Why nightly is enough:* the recent conversation is already in an agent's
     history, so memory matters for what has scrolled out of it (days and weeks
     later), and proposals are reviewed in a weekly digest, so freshness is not what
@@ -122,17 +140,17 @@ is plain files; no tool is added.
   - *Cost follows new content, not room count:* a room with no new activity past
     its cursor costs one query. A room runs only once it has enough new material
     (a minimum number of new messages or a published deliverable) or a week has
-    passed (compaction); otherwise its material accumulates for the next night.
-  - *No spike:* runs are spread over a window (by a hash of the room id) so the
-    assist model is not hit at once; a tenant has a daily cap on what the curator
-    may spend, after which its remaining rooms wait for the next night; a tenant
-    with `assistDisabled` is skipped.
+    passed (compaction); otherwise its material accumulates for the next due time.
+  - *No spike:* rooms choose their own times, but many will choose the same
+    ("02:00"), so a due run starts within a short, room-hashed delay, and a tenant has
+    a daily cap on what the curator may spend, after which its remaining rooms wait
+    for the next due time; a tenant with `assistDisabled` is skipped.
   - *Not instant, on purpose:* an owner has "Update now" for one room (the same run,
     started by hand, rate limited), and "Save to memory" is immediate and needs no
     AI.
   - *Resumable:* each room's run is claimed with its cursor, so a crash or a failed
-    run is retried the next night and never files a proposal twice.
-- **Curation is off until the room's owner turns it on.** It reads the room's
+    run is retried at the next due time and never files a proposal twice.
+- **Curation is off until the room's owner turns it on and sets when it runs.** It reads the room's
   messages with the organization's model and costs budget; the organization's
   `assistDisabled` switch applies. Saving and reading notes work without it.
 - **A person reviews.** Proposals wait in an inbox, grouped into a weekly digest:
@@ -251,7 +269,7 @@ is cluttered with weak skills (evidence threshold, adoption counts, withdrawal).
 - A note is created, edited, superseded, deleted and rolled back from its
   revisions, by a member with chat rights; a visitor and another room's member
   are refused; tenant isolation holds (contract tests on memory and MySQL).
-- `.room/memory/` holds `BRIEF.md`, `INDEX.md` and `notes/`, written only when
+- `.room/memory/` holds `BRIEF.md`, `INDEX.md` and `notes.md`, written only when
   content changes, within the byte and line caps, fenced for others' text; a
   golden file and the prompt budget test cover the session-guidance line.
 - `internal/notes.Select` is the only reader; an architecture test forbids another
@@ -265,8 +283,7 @@ is cluttered with weak skills (evidence threshold, adoption counts, withdrawal).
 - Confirm the two defaults: derived notes survive a source message's deletion
   (marked unverified), and the handoff export carries notes.
 - The embedding setting and OpenSearch vector support (not verified).
-- The sweep's window and its time zone (a deployment setting; not decided), the
-  minimum new-material threshold and the tenant's daily spend cap (to set from
+- The minimum new-material threshold and the tenant's daily spend cap (to set from
   real rooms after stage 2 runs).
 - Who besides owners and admins may turn curation on or review (this PRD:
   owners and admins).

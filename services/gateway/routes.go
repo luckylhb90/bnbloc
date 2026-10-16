@@ -162,6 +162,7 @@ func (s *Service) routes() []route {
 		open("GET /v1/previewers/{name}/{version}/{ticket}/{path...}", "a previewer ticket in the path", s.handlePreviewerFile),
 		member("POST /v1/rooms/{roomId}/artifacts/{artifactId}/versions/{version}/site-ticket", s.handleSiteTicket),
 		member("GET /v1/rooms/{roomId}/artifacts/{artifactId}/versions/{version}/files/{path...}", s.handleSiteFileRead),
+		member("GET /v1/rooms/{roomId}/memory", s.handleRoomMemory),
 		member("GET /v1/rooms/{roomId}/artifacts/{artifactId}/versions/{version}/cover", s.handleSiteCover),
 		member("POST /v1/rooms/{roomId}/attachments/{attachmentId}/ticket", s.handleAttachmentTicket),
 		open("GET /v1/sites/{ticket}", "a site ticket in the path", s.handleSiteRootRedirect),

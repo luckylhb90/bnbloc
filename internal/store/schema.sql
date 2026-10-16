@@ -970,6 +970,45 @@ CREATE TABLE IF NOT EXISTS room_group_codes (
   KEY idx_room_group_codes_room (tenant_id, room_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- What a room (a project) knows (docs/prd/2026-10-16-room-memory-and-
+-- evolution.md): its brief, knowledge, dated memory and lessons. Every change
+-- appends a row to room_note_revisions (history and rollback); deleting a note
+-- deletes its revisions. Both are deleted with the room.
+CREATE TABLE IF NOT EXISTS room_notes (
+  tenant_id      VARCHAR(64) NOT NULL,
+  room_id        VARCHAR(64) NOT NULL,
+  note_id        VARCHAR(32) NOT NULL,
+  type           VARCHAR(16) NOT NULL,
+  title          VARCHAR(480) NOT NULL,
+  body           TEXT NOT NULL,
+  status         VARCHAR(16) NOT NULL,
+  supersedes     VARCHAR(32) NULL,
+  sources_json   TEXT NULL,
+  author         VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  pinned         TINYINT(1) NOT NULL DEFAULT 0,
+  revision       INT NOT NULL,
+  created_at_ms  BIGINT NOT NULL,
+  updated_at_ms  BIGINT NOT NULL,
+  verified_at_ms BIGINT NULL,
+  PRIMARY KEY (tenant_id, room_id, note_id),
+  KEY idx_room_notes_room (tenant_id, room_id, status, type)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS room_note_revisions (
+  tenant_id  VARCHAR(64) NOT NULL,
+  room_id    VARCHAR(64) NOT NULL,
+  note_id    VARCHAR(32) NOT NULL,
+  revision   INT NOT NULL,
+  type       VARCHAR(16) NOT NULL,
+  title      VARCHAR(480) NOT NULL,
+  body       TEXT NOT NULL,
+  status     VARCHAR(16) NOT NULL,
+  pinned     TINYINT(1) NOT NULL DEFAULT 0,
+  changed_by VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  at_ms      BIGINT NOT NULL,
+  PRIMARY KEY (tenant_id, room_id, note_id, revision)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- Files an interactive app's pages uploaded (app.files): the bytes in the
 -- blob store (blob_key, like an attachment's), the name and the uploader's
 -- identity sealed under the app's data key, the rest routing metadata.
