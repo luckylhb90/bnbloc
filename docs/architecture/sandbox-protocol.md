@@ -106,6 +106,7 @@ conforming, advertising one and failing it is not:
 | `fork` | live fork |
 | `warmPool` | warm pools + claim |
 | `execTokens` | space-scoped exec tokens (required by bnbloc's hybrid execution) |
+| `readOnlyMounts` | a shared space mount with `readOnly:true` is enforced: writes, creates and deletes fail in the guest, the host folder is never touched (a component's mounts are applied only where this is advertised) |
 
 ## Endpoints
 

@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -83,14 +84,27 @@ func main() {
 	if len(refusedEnv) > 0 {
 		log.Printf("bnbloc-bridge: BNBLOC_SANDBOX_ENV: ignoring %q (not an environment variable name or PREFIX* pattern a sandboxed run may receive)", refusedEnv)
 	}
+	// Where components contribute mounts to a sandboxed turn, and the guest
+	// folders they may mount under (default: the member's home).
+	home, _ := os.UserHomeDir()
+	mountRoots, refusedRoots := bridge.ParseMountRoots(config.FromEnvRaw("BNBLOC_SANDBOX_MOUNT_ROOTS"), home)
+	if len(refusedRoots) > 0 {
+		log.Printf("bnbloc-bridge: BNBLOC_SANDBOX_MOUNT_ROOTS: ignoring %q (not an absolute, clean folder)", refusedRoots)
+	}
+	mountsDir := ""
+	if stateDir := strings.TrimSpace(config.FromEnvRaw("BNBLOC_BRIDGE_STATE_DIR")); stateDir != "" {
+		mountsDir = filepath.Join(stateDir, "mounts")
+	}
 	sandboxCfg := bridge.SandboxConfig{
-		Mode:           sandboxMode,
-		Env:            sandboxEnv,
-		URL:            strings.TrimRight(strings.TrimSpace(config.FromEnvRaw("BNBLOC_SANDBOX_URL")), "/"),
-		Token:          strings.TrimSpace(config.FromEnvRaw("BNBLOC_SANDBOX_TOKEN")),
-		VMExec:         strings.TrimSpace(config.FromEnvRaw("BNBLOC_SANDBOX_VMEXEC")),
-		Machine:        strings.TrimSpace(config.FromEnvRaw("BNBLOC_SANDBOX_MACHINE")),
-		WorkspacesRoot: strings.TrimSpace(config.FromEnvRaw("BNBLOC_SANDBOX_WORKSPACES_ROOT")),
+		Mode:            sandboxMode,
+		Env:             sandboxEnv,
+		URL:             strings.TrimRight(strings.TrimSpace(config.FromEnvRaw("BNBLOC_SANDBOX_URL")), "/"),
+		Token:           strings.TrimSpace(config.FromEnvRaw("BNBLOC_SANDBOX_TOKEN")),
+		VMExec:          strings.TrimSpace(config.FromEnvRaw("BNBLOC_SANDBOX_VMEXEC")),
+		Machine:         strings.TrimSpace(config.FromEnvRaw("BNBLOC_SANDBOX_MACHINE")),
+		WorkspacesRoot:  strings.TrimSpace(config.FromEnvRaw("BNBLOC_SANDBOX_WORKSPACES_ROOT")),
+		MountsDir:       mountsDir,
+		MountGuestRoots: mountRoots,
 	}
 	// Memory only from here on: nothing this process spawns inherits the
 	// sandbox admin bearer.

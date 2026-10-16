@@ -84,13 +84,19 @@ const (
 	// the admin bearer never reaches an agent process; a core receives only a
 	// short-lived token that can run commands in its own room's space.
 	CapabilityExecTokens = "execTokens"
+	// CapabilityReadOnlyMounts: a shared space mount with readOnly:true is
+	// enforced by the sandbox, not by the guest's goodwill: a write, a create
+	// or a delete through it fails in the guest, and the host folder is never
+	// touched. A component's mounts (the bridge's mount contributions) are
+	// applied only to a backend that advertises it.
+	CapabilityReadOnlyMounts = "readOnlyMounts"
 )
 
 // Capabilities lists every v1 capability name (validation registry).
 var Capabilities = []string{
 	CapabilityExec, CapabilityTTY, CapabilitySpaces, CapabilityShares, CapabilityPorts, CapabilityDisks,
 	CapabilitySnapshots, CapabilityPause, CapabilityEgressPolicy, CapabilitySpaceEgress, CapabilitySecrets,
-	CapabilityFork, CapabilityWarmPool, CapabilityExecTokens,
+	CapabilityFork, CapabilityWarmPool, CapabilityExecTokens, CapabilityReadOnlyMounts,
 }
 
 // KnownCapability reports whether name is a v1 capability.

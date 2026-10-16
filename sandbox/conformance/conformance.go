@@ -130,6 +130,7 @@ func Run(t *testing.T, cfg Config) {
 		{"spaceExec", s.spaceExec, false},
 		{"spaceIsolation", s.spaceIsolation, false},
 		{"sharedMountLive", s.sharedMountLive, false},
+		{"readOnlyMounts", s.readOnlyMounts, false},
 		{"execLatency", s.execLatency, false},
 		{"stdinPipe", s.stdinPipe, false},
 		{"tty", s.tty, false},
@@ -626,6 +627,45 @@ func (s *suite) sharedMountLive(t *testing.T) {
 	info, err := os.Stat(filepath.Join(s.shareDir, spaceAName))
 	if err != nil || info.Mode().Perm()&0o700 != 0o700 {
 		t.Fatalf("guest ownership changes leaked to the host dir mode: %v %v", info.Mode(), err)
+	}
+}
+
+// readOnlyMounts: a shared mount marked readOnly refuses writes, creates and
+// deletes in the guest, and the host folder stays as it was (capability
+// readOnlyMounts).
+func (s *suite) readOnlyMounts(t *testing.T) {
+	s.need(t, protocol.CapabilitySpaces, protocol.CapabilityShares, protocol.CapabilityReadOnlyMounts)
+	if s.shareDir == "" {
+		t.Skip("no host share dir")
+	}
+	src := filepath.Join(s.shareDir, "ro-source")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(src, "ro.txt")
+	if err := os.WriteFile(file, []byte("original"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	const guest = "/mnt/readonly-source"
+	req := s.spaceRequest("room-ro")
+	req.Mounts = append(req.Mounts, protocol.SpaceMount{Kind: protocol.MountShared, HostPath: src, GuestPath: guest, ReadOnly: true})
+	if _, err := s.c.EnsureSpace(s.ctx, s.ep, s.main.ID, "room-ro", req); err != nil {
+		t.Fatalf("ensure space with a read-only mount: %v", err)
+	}
+	t.Cleanup(func() { _ = s.c.DeleteSpace(s.ctx, s.ep, s.main.ID, "room-ro", true) })
+	script := "cat " + guest + "/ro.txt; echo; " +
+		"(echo changed > " + guest + "/ro.txt) 2>/dev/null && echo WROTE; " +
+		"(echo more >> " + guest + "/ro.txt) 2>/dev/null && echo APPENDED; " +
+		"(touch " + guest + "/new.txt) 2>/dev/null && echo CREATED; " +
+		"(rm " + guest + "/ro.txt) 2>/dev/null && echo REMOVED; true"
+	if got := out(t, s.spaceSh(t, "room-ro", script)); got != "original\n" {
+		t.Fatalf("a read-only mount accepted a change, or was not readable: %q", got)
+	}
+	if raw, err := os.ReadFile(file); err != nil || string(raw) != "original" {
+		t.Fatalf("the host file changed through a read-only mount: %q %v", raw, err)
+	}
+	if _, err := os.Stat(filepath.Join(src, "new.txt")); err == nil {
+		t.Fatal("a file was created on the host through a read-only mount")
 	}
 }
 

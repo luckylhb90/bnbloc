@@ -44,6 +44,8 @@ type fakeSandboxd struct {
 	// code).
 	ensureFails      *sandbox.ProtocolError
 	ensureFailStatus int
+	// caps replaces the advertised capabilities when set.
+	caps []string
 }
 
 // spaceCalls is the fake's space call log.
@@ -51,6 +53,13 @@ func (f *fakeSandboxd) spaceCalls() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.calls...)
+}
+
+func (f *fakeSandboxd) advertised() []string {
+	if f.caps != nil {
+		return f.caps
+	}
+	return []string{sandbox.CapabilityExec, sandbox.CapabilitySpaces, sandbox.CapabilityShares, sandbox.CapabilityExecTokens}
 }
 
 func newFakeSandboxd(t *testing.T) *fakeSandboxd {
@@ -68,7 +77,7 @@ func newFakeSandboxd(t *testing.T) *fakeSandboxd {
 		case p == sandbox.PathDiscover:
 			_ = json.NewEncoder(w).Encode(sandbox.Discovery{Name: "fake", Version: "1", Contract: sandbox.ContractV1,
 				Protocol:     sandbox.ProtocolRange{Min: "1.0", Max: "1.0"},
-				Capabilities: []string{sandbox.CapabilityExec, sandbox.CapabilitySpaces, sandbox.CapabilityShares, sandbox.CapabilityExecTokens},
+				Capabilities: f.advertised(),
 				Backend:      sandbox.Backend{Name: "fake", Isolation: sandbox.IsolationMicroVM}})
 		case p == sandbox.MachinePath("bnbloc") && r.Method == http.MethodGet:
 			_ = json.NewEncoder(w).Encode(sandbox.Machine{ID: "m1", Name: "bnbloc", State: f.state})

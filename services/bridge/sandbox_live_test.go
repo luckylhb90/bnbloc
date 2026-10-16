@@ -49,11 +49,11 @@ func TestSandboxPrepare_liveSidecar(t *testing.T) {
 	if ready, reason := rt.status(ctx); !ready {
 		t.Fatalf("sandbox not ready: %s", reason)
 	}
-	exec, err := rt.prepare(ctx, driveKey{room: "room-1", core: "core-a", provider: "codex", sandboxed: true}, "alice", nil, sandboxExecTokenTTL)
+	exec, err := rt.prepare(ctx, driveKey{room: "room-1", core: "core-a", provider: "codex", sandboxed: true}, "alice", nil, sandboxExecTokenTTL, false)
 	if err != nil {
 		t.Fatalf("prepare: %v", err)
 	}
-	if _, err := rt.prepare(ctx, driveKey{room: "room-1", core: "core-a", provider: "codex", sandboxed: true}, "alice", nil, sandboxExecTokenTTL); err != nil {
+	if _, err := rt.prepare(ctx, driveKey{room: "room-1", core: "core-a", provider: "codex", sandboxed: true}, "alice", nil, sandboxExecTokenTTL, false); err != nil {
 		t.Fatalf("re-prepare (per-turn re-ensure): %v", err)
 	}
 	s := exec.Sandbox

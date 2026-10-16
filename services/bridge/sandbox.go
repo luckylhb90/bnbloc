@@ -91,6 +91,11 @@ type SandboxConfig struct {
 	VMExec         string
 	Machine        string
 	WorkspacesRoot string
+	// MountsDir is where components write the mounts they contribute to a
+	// sandboxed turn (sandbox_mounts.go; "" = none are read), and
+	// MountGuestRoots the guest folders they may mount under.
+	MountsDir       string
+	MountGuestRoots []string
 }
 
 // LogValue keeps the config (and its bearer) out of every log line.
@@ -138,6 +143,9 @@ type sandboxRuntime struct {
 	// quiesced holds the spaces the bridge stopped every process of since
 	// their last use (the turn fence: sandbox_fence.go).
 	quiesced map[string]bool
+	// readOnlyMounts is whether the probed sandbox advertises
+	// readOnlyMounts: only then are a component's mounts offered to a guest.
+	readOnlyMounts bool
 
 	policyMu sync.Mutex
 	policy   map[string]sandboxPolicyEntry // tenant -> cached policy
@@ -214,6 +222,9 @@ func (s *sandboxRuntime) probe(ctx context.Context) (bool, string) {
 			return false, "the agent sandbox lacks " + c
 		}
 	}
+	s.mu.Lock()
+	s.readOnlyMounts = sandbox.HasCapability(d, sandbox.CapabilityReadOnlyMounts)
+	s.mu.Unlock()
 	m, err := s.client.GetMachine(pctx, s.endpoint(), s.cfg.Machine)
 	if err != nil {
 		return false, "the agent sandbox machine is missing"
@@ -262,7 +273,7 @@ func slugPart(s string, max int) string {
 // forwarded names for this drive (nil unless decideSandbox marked it
 // ownerEnv): the space's envAllowlist is re-ensured from it every turn, so
 // a turn for someone else after the owner's converges back to the default.
-func (s *sandboxRuntime) prepare(ctx context.Context, k driveKey, owner string, env []string, ttl time.Duration) (*corepkg.Execution, error) {
+func (s *sandboxRuntime) prepare(ctx context.Context, k driveKey, owner string, env []string, ttl time.Duration, borrowed bool) (*corepkg.Execution, error) {
 	room, core, provider := k.room, k.core, k.provider
 	space := sandboxSpaceName(k)
 	workdir := filepath.Join(s.cfg.WorkspacesRoot, space)
@@ -282,6 +293,10 @@ func (s *sandboxRuntime) prepare(ctx context.Context, k driveKey, owner string, 
 	// The workspace is mounted at the identical guest path; the core's path
 	// mounts are derived from the space's.
 	mounts := []sandbox.SpaceMount{{Kind: sandbox.MountShared, HostPath: workdir, GuestPath: workdir}}
+	// What components contribute (read-only copies, at paths the member
+	// allows) is the guest's alone: the core's path mapping is the workspace.
+	space0 := len(mounts)
+	mounts = append(mounts, s.contributedMounts(workdir, borrowed)...)
 	if _, err := s.client.EnsureSpace(ctx, s.endpoint(), s.cfg.Machine, space, sandbox.SpaceRequest{
 		Workdir:      workdir,
 		Mounts:       mounts,
@@ -304,7 +319,7 @@ func (s *sandboxRuntime) prepare(ctx context.Context, k driveKey, owner string, 
 		Space:       space,
 		VMExec:      s.cfg.VMExec,
 		Workdir:     workdir,
-		Mounts:      pathMounts(mounts),
+		Mounts:      pathMounts(mounts[:space0]),
 		Env:         env,
 		// The protected paths (the role the session wears, the room
 		// context, host-executed project config) are write-denied: a
@@ -503,7 +518,7 @@ func (b *Bridge) planSandbox(ctx context.Context, d *drive) (refuse string) {
 	owner := d.owner
 	key := driveKey{room: d.job.RoomID, core: d.core, provider: d.job.Provider, sandboxed: true, owner: d.seatOwner, requester: d.seatRequester()}
 	d.prepareExec = func(ctx context.Context) (*corepkg.Execution, error) {
-		exec, err := s.prepare(ctx, key, owner, env, d.execTokenTTL())
+		exec, err := s.prepare(ctx, key, owner, env, d.execTokenTTL(), d.borrowed)
 		if err != nil {
 			return nil, s.prepareFailure(ctx, err)
 		}
