@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	corepkg "github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/services/bridge/roomtools"
@@ -224,11 +225,20 @@ func toolsChanged(states []json.RawMessage) bool {
 	return false
 }
 
-// toolsChangedNote is what a session that began under other room tools is
-// told once, at the start of its new session: an agent's own conversation can
-// outlast the session (a core may resume it), and what it concluded then ("the
-// room has no way to schedule") stays true to it unless it is told.
-func toolsChangedNote() string {
-	return "[The room tools changed since you last worked in this room. You now have:\n" + roomtools.Overview() +
-		"Anything you concluded earlier about what the room cannot do may be out of date.]\n\n"
+// updateNote is what a session that began under other room guidance or tools
+// is told once, at the start of its new session. An agent's own conversation
+// can outlast the session (a core may resume it, and keep the instructions it
+// was created with), so what it was told then, and what it concluded ("the
+// room has no way to schedule"), stays true to it unless it is told.
+func updateNote(u update) string {
+	var b strings.Builder
+	b.WriteString("[bnbloc was updated since you last worked in this room.")
+	if u.guidance {
+		b.WriteString(" Your room guidance changed: read .room/README.md again; it replaces what you were told when this conversation began.")
+	}
+	if u.tools || u.guidance {
+		b.WriteString(" Your room tools are now:\n" + roomtools.Overview())
+	}
+	b.WriteString(" Anything you concluded earlier about what the room cannot do may be out of date.]\n\n")
+	return b.String()
 }

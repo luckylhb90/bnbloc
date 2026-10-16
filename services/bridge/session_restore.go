@@ -115,11 +115,16 @@ func (b *Bridge) restoreSession(ctx context.Context, d *drive, key driveKey, sk 
 	if rec.ProfileSum != d.content.bindingSum() || rec.Owner != d.owner {
 		return forget("the drive wears other content")
 	}
+	// A session keeps the guidance and the tools it began with, and an agent's
+	// conversation may keep them longer: one that began under others starts
+	// anew and is told what changed.
+	changed := update{guidance: rec.Context.GuidanceSum != roomlog.GuidanceSum(rec.Guidance), tools: toolsChanged(rec.Contributions)}
+	if changed.guidance || changed.tools {
+		b.noteUpdated(sk, changed)
+		return forget("the room guidance or tools changed since it began")
+	}
 	hooks, ok := b.restoreContributions(ctx, info, rec.Contributions)
 	if !ok {
-		if toolsChanged(rec.Contributions) {
-			b.noteToolsChanged(sk)
-		}
 		return forget("a session contributor could not reattach")
 	}
 	rs := &roomSession{
@@ -141,23 +146,38 @@ func (b *Bridge) restoreSession(ctx context.Context, d *drive, key driveKey, sk 
 	return rs
 }
 
-// noteToolsChanged remembers that channel session sk's next session starts
-// after the room tools changed (takeToolsChanged).
-func (b *Bridge) noteToolsChanged(sk sessionKey) {
+// update is what changed for a session since it began.
+type update struct{ guidance, tools bool }
+
+// noteUpdated remembers that channel session sk's next session follows a change
+// of the room guidance or tools (takeUpdated).
+func (b *Bridge) noteUpdated(sk sessionKey, u update) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.toolsChanged == nil {
-		b.toolsChanged = map[sessionKey]bool{}
+	if b.updated == nil {
+		b.updated = map[sessionKey]update{}
 	}
-	b.toolsChanged[sk] = true
+	b.updated[sk] = u
 }
 
-// takeToolsChanged reports, once, that sk's new session follows a change of the
-// room tools.
-func (b *Bridge) takeToolsChanged(sk sessionKey) bool {
+// noteUpdatedIfNone is noteUpdated unless sk already has what changed noted.
+func (b *Bridge) noteUpdatedIfNone(sk sessionKey, u update) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	was := b.toolsChanged[sk]
-	delete(b.toolsChanged, sk)
-	return was
+	if _, ok := b.updated[sk]; ok {
+		return
+	}
+	if b.updated == nil {
+		b.updated = map[sessionKey]update{}
+	}
+	b.updated[sk] = u
+}
+
+// takeUpdated reports, once, what changed before sk's new session.
+func (b *Bridge) takeUpdated(sk sessionKey) (update, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	u, ok := b.updated[sk]
+	delete(b.updated, sk)
+	return u, ok
 }

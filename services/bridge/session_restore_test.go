@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	corepkg "github.com/luckylhb90/bnbloc/core"
+	"github.com/luckylhb90/bnbloc/internal/roomlog"
 	"github.com/luckylhb90/bnbloc/services/bridge/roomtools"
 )
 
@@ -223,10 +224,11 @@ func TestRoomToolsReattachAfterARestart(t *testing.T) {
 	}
 }
 
-// A session that began under other room tools is told once, in its new first
-// prompt, what the tools are now: its own conversation may outlast the session
-// and keep concluding that the room cannot do what a new tool now does.
-func TestToolsChangedIsToldOnce(t *testing.T) {
+// A session that began under other room guidance or tools is told once, in its
+// new first prompt, what changed: its agent's own conversation may outlast the
+// session and keep the instructions it was created with and the conclusions it
+// drew ("the room cannot schedule").
+func TestUpdatedSessionIsToldOnce(t *testing.T) {
 	grant := func(tools string) []json.RawMessage {
 		raw, _ := json.Marshal(roomToolsGrant{URL: "http://127.0.0.1:1/mcp", Nonce: "n", Tools: tools})
 		return []json.RawMessage{raw}
@@ -234,10 +236,7 @@ func TestToolsChangedIsToldOnce(t *testing.T) {
 	if toolsChanged(grant(roomtools.ListDigest())) {
 		t.Fatal("the same tool list is not a change")
 	}
-	for name, states := range map[string][]json.RawMessage{
-		"another list":           grant("an older list"),
-		"kept before it existed": grant(""),
-	} {
+	for name, states := range map[string][]json.RawMessage{"another list": grant("an older list"), "kept before it existed": grant("")} {
 		if !toolsChanged(states) {
 			t.Errorf("%s is a change", name)
 		}
@@ -248,17 +247,49 @@ func TestToolsChangedIsToldOnce(t *testing.T) {
 
 	b := New(Config{})
 	sk := sessionKey{driveKey: driveKey{room: "r", core: "c", provider: "p"}, channel: "ch"}
-	if b.takeToolsChanged(sk) {
+	if _, ok := b.takeUpdated(sk); ok {
 		t.Fatal("nothing noted yet")
 	}
-	b.noteToolsChanged(sk)
-	if !b.takeToolsChanged(sk) || b.takeToolsChanged(sk) {
+	b.noteUpdated(sk, update{guidance: true, tools: true})
+	u, ok := b.takeUpdated(sk)
+	if !ok || !u.guidance || !u.tools {
+		t.Fatalf("takeUpdated = %+v %v", u, ok)
+	}
+	if _, again := b.takeUpdated(sk); again {
 		t.Fatal("a change is told exactly once")
 	}
-	note := toolsChangedNote()
-	for _, want := range []string{"schedules:", "room_help:", "may be out of date"} {
-		if !strings.Contains(note, want) {
-			t.Errorf("the note lacks %q:\n%s", want, note)
+	both := updateNote(update{guidance: true, tools: true})
+	for _, want := range []string{"room guidance changed", ".room/README.md", "schedules:", "room_help:", "may be out of date"} {
+		if !strings.Contains(both, want) {
+			t.Errorf("the note lacks %q:\n%s", want, both)
 		}
+	}
+	if only := updateNote(update{guidance: true}); !strings.Contains(only, "schedules:") {
+		t.Errorf("the guidance names the tools, so the note lists them too:\n%s", only)
+	}
+}
+
+// A kept session whose recorded guidance differs from today's (or that never
+// recorded one) is not restored, and what changed is noted for its new session.
+func TestKeptSessionOfOtherGuidanceIsNotRestored(t *testing.T) {
+	dir := t.TempDir()
+	gw := newSandboxGateway(t, "room-1", false)
+	prov := &restartProv{}
+	cfg := Config{GatewayBaseURL: gw.srv.URL, GatewayToken: "t", OwnerSubject: "alice", Cores: newTestCore(prov), StateDir: dir}
+	New(cfg).runBridgeJob(context.Background(), job("job-1", "alice"))
+	b := New(cfg)
+	sk := sessionKey{driveKey: driveKey{room: "room-1", core: "core-a", provider: "codex"}, channel: "ch"}
+	rec, ok := b.workspaces.session(sk)
+	if !ok {
+		t.Fatal("no kept binding")
+	}
+	if rec.Context.GuidanceSum != roomlog.GuidanceSum(rec.Guidance) {
+		t.Fatalf("a session records the guidance it began with: %q", rec.Context.GuidanceSum)
+	}
+	rec.Context.GuidanceSum = "an older guidance"
+	b.workspaces.putSession(sk, rec)
+	b.runBridgeJob(context.Background(), job("job-2", "alice"))
+	if prov.created != 2 {
+		t.Fatalf("created %d sessions; want a new one for other guidance", prov.created)
 	}
 }

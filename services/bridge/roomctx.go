@@ -450,7 +450,10 @@ func (b *Bridge) drivePrompt(ctx context.Context, d *drive, workspaceID string, 
 	// away.
 	// The guidance a session starts with is the one it keeps: when the room's
 	// guidance changed since (a bnbloc update), say so once.
-	guidanceChanged := st != nil && st.NoteGuidance(newSt.ReadmeSum, fresh)
+	guidanceChanged := false
+	if st != nil && newSt.ReadmeSum != "" {
+		guidanceChanged = st.NoteGuidance(roomlog.GuidanceSum(g), fresh)
+	}
 	return roomlog.ComposeTurn(now, !d.caps.profile, guidanceChanged, delta)
 }
 

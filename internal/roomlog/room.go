@@ -104,7 +104,26 @@ func AppSDKUpdate(st CtxState, js []byte) (f NamedFile, sum string, changed bool
 // turn.
 func ReadmeUpdate(st CtxState, g Guidance) (f NamedFile, sum string, changed bool) {
 	f = ReadmeFile(g)
-	h := sha256.Sum256([]byte(f.Content))
-	sum = hex.EncodeToString(h[:])
+	sum = readmeSum(f)
 	return f, sum, sum != st.ReadmeSum
 }
+
+func readmeSum(f NamedFile) string {
+	h := sha256.Sum256([]byte(f.Content))
+	return hex.EncodeToString(h[:])
+}
+
+// GuidanceSum is the sum of the room guidance (README.md) that g renders
+// today: what a session recorded when it began (CtxState.GuidanceSum), so a
+// kept session whose recorded sum differs began under other guidance.
+//
+// guidanceEpoch is mixed in so a release can have every kept session briefed
+// anew once, when the briefing itself changed in a way the README's text does
+// not show (a core that kept an older conversation, say). Bump it with a reason.
+func GuidanceSum(g Guidance) string {
+	return readmeSum(NamedFile{Name: ".room/README.md", Content: ReadmeFile(g).Content + "\x00" + guidanceEpoch})
+}
+
+// guidanceEpoch: 2026-10-16: a session whose agent resumed an older conversation
+// kept that conversation's guidance and tools notes, which the bridge did not know.
+const guidanceEpoch = "2026-10-16"

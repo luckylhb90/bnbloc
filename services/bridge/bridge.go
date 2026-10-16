@@ -181,9 +181,9 @@ const leaseRenewInterval = 20 * time.Second
 
 // Bridge runs the chat->agent->reply loop for one member.
 type Bridge struct {
-	// toolsChanged marks the channel sessions whose next session follows a
-	// change of the room tools (guarded by mu).
-	toolsChanged map[sessionKey]bool
+	// updated marks the channel sessions whose next session follows a change
+	// of the room guidance or tools (guarded by mu).
+	updated map[sessionKey]update
 	// names are people's display names (names.go).
 	names       nameCache
 	cfg         Config
@@ -1738,6 +1738,12 @@ func (b *Bridge) ensureSession(ctx context.Context, d *drive, key driveKey, prom
 		workspaceID = created
 		b.workspaces.bind(key, workspaceID)
 	}
+	if reused {
+		// A new session in a workspace the agent already works in: the core may
+		// resume the agent's earlier conversation with the instructions that
+		// conversation began with, so the new session says the guidance may differ.
+		b.noteUpdatedIfNone(sk, update{guidance: true})
+	}
 	rs, atts, err := b.startSession(ctx, d, key, entry, workspaceID, prompt, opts)
 	if err != nil && reused && corepkg.NotFound(err) {
 		// The core no longer holds the workspace (it was deleted, or the
@@ -1795,9 +1801,10 @@ func (b *Bridge) startSession(ctx context.Context, d *drive, key driveKey, entry
 	// contributors' servers): its profile or its first prompt's head.
 	profile, prefix, hooks, facts := b.sessionGuidance(ctx, d, entry.endpoint, workspaceID, b.sessionInfo(d, opts))
 	var st roomlog.CtxState
+	st.GuidanceSum = roomlog.GuidanceSum(facts) // what this session begins with, whatever the core's prompt model
 	note := ""
-	if b.takeToolsChanged(d.sessionKey()) {
-		note = toolsChangedNote()
+	if u, ok := b.takeUpdated(d.sessionKey()); ok {
+		note = updateNote(u)
 	}
 	initialPrompt := prefix + note + prompt(workspaceID, &st, atts, facts)
 	rs := &roomSession{owner: d.owner, seat: key, provider: provider, core: d.core, workspaceID: workspaceID, ws: b.workspaces.shared(key, workspaceID), ctx: st, hooks: hooks, profileSum: d.content.bindingSum(), guidance: facts}
