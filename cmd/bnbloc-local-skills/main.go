@@ -67,11 +67,11 @@ func run() error {
 	}
 	token := config.FromEnvRaw(envToken)
 	if token == "" {
-		return fmt.Errorf("%s is required: the provider API never answers without a bearer", envToken)
+		return fmt.Errorf("%s is not set: this bnbloc desktop is too old to start a skills component (it hands plugins no bearer); update the app", envToken)
 	}
 	dataDir := config.FromEnvRaw(envDataDir)
 	if dataDir == "" {
-		return fmt.Errorf("%s is required", envDataDir)
+		return fmt.Errorf("%s is not set: this bnbloc desktop is too old to start a skills component; update the app", envDataDir)
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
