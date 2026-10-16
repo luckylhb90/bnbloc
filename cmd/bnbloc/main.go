@@ -90,6 +90,9 @@ Components:
   bnbloc cores list
   bnbloc cores uninstall <name>
   bnbloc cores enable <name> (--tenant <id>... | --all-tenants)
+  bnbloc components publish-package --package <file> --binary <goos-goarch>=<path>...
+        [--rollout auto|optin|off] [--seckey f | --unsigned]
+        a package file without artifacts (a plugin, a notifier sidecar): its binaries are uploaded and pinned
   bnbloc components rotate-secret <name>  new notifier signing secret (printed once)
   bnbloc components test <name>           send a test notification through a notifier to you
   bnbloc content export <id> [--version v] [--publisher p] [--out f]
