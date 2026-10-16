@@ -69,10 +69,15 @@ func TestEveryGatewayRouteGated(t *testing.T) {
 		}
 		if rt.app != nil {
 			// An app route spends the app budgets: reads the read ones,
-			// every other method the stricter write ones.
+			// every other method the stricter write ones — except the ai
+			// routes, which carry the caller's per-member assist rate
+			// instead (apps.go) and spend none.
 			want := appWriteBudget
 			if method == http.MethodGet {
 				want = appReadBudget
+			}
+			if strings.Contains(rt.pattern, "/ai") {
+				want = noBudget
 			}
 			if rt.budget != want {
 				t.Errorf("%s: an app route spends %v, want %v", rt.pattern, rt.budget, want)

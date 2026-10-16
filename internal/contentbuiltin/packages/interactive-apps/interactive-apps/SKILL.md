@@ -73,9 +73,12 @@ recipe.
   `app.files.url(id)` shows it, `app.files.remove(id)` deletes it.
 - For signed-in callers: `app.ai({prompt, input, json})`, the
   organization's AI on `input` (kept apart from your `prompt`), to
-  `{text}` or `{json}`; `app.notify({to, title, text})`, a notice through
-  the organization's notifications, to "room", logins or a connected group
-  chat ("group:<name>"); `app.groups()` lists them as `[{name}]` (owners):
+  `{text}` or `{json}`; `app.ai.image({prompt, aspect?})` one image to
+  `{dataUrl, mimeType, width, height}` (aspect square, landscape or
+  portrait); `app.ai.voice(blob)` spoken audio to `{text}`;
+  `app.notify({to, title, text})`, a notice through the organization's
+  notifications, to "room", logins or a connected group chat
+  ("group:<name>"); `app.groups()` lists them as `[{name}]` (owners):
   offer them, never hardcode one. A page cannot run on a timer: a reminder or
   report at a time is a schedule (the schedules room tool).
 - `app.subscribe(fn)` calls `fn` with `{appId, collection, id, version}`

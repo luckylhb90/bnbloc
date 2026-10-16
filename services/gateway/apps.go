@@ -96,30 +96,35 @@ var appEntries = []struct {
 
 // appAPI is the app data API under each entry: method, path below the
 // prefix, and how it is served. ownersOnly routes are the room entry's
-// only (an app's own page has no use for them).
+// only (an app's own page has no use for them). ai routes carry their own
+// limit (the caller's per-member assist rate, the assist routes' rule), so
+// they spend no app data budget.
 var appAPI = []struct {
 	method, path string
 	ownersOnly   bool
+	noBudget     bool
 	serve        func(s *Service, w http.ResponseWriter, r *http.Request, c appCapability)
 }{
-	{http.MethodPost, "/c/{collection}", false, forwardAppCollection},
-	{http.MethodGet, "/c/{collection}", false, forwardAppCollection},
-	{http.MethodGet, "/c/{collection}/{id}", false, forwardAppDoc},
-	{http.MethodPut, "/c/{collection}/{id}", false, forwardAppDoc},
-	{http.MethodPatch, "/c/{collection}/{id}", false, forwardAppDoc},
-	{http.MethodDelete, "/c/{collection}/{id}", false, forwardAppDoc},
-	{http.MethodGet, "/me", false, forwardAppPath("/me")},
-	{http.MethodPost, "/files", false, forwardAppUpload},
-	{http.MethodGet, "/files/{id}", false, forwardAppFile("")},
-	{http.MethodGet, "/files/{id}/content", false, forwardAppFile("/content")},
-	{http.MethodDelete, "/files/{id}", false, forwardAppFile("")},
-	{http.MethodPost, "/ai", false, (*Service).serveAppAI},
-	{http.MethodPost, "/notify", false, (*Service).serveAppNotify},
-	{http.MethodGet, "/groups", false, forwardAppPath("/groups")},
-	{http.MethodGet, "/events", false, (*Service).forwardAppEvents},
-	{http.MethodGet, "/stats", true, forwardAppPath("/stats")},
-	{http.MethodGet, "/export", true, forwardAppPath("/export")},
-	{http.MethodDelete, "/data", true, forwardAppPath("/data")},
+	{http.MethodPost, "/c/{collection}", false, false, forwardAppCollection},
+	{http.MethodGet, "/c/{collection}", false, false, forwardAppCollection},
+	{http.MethodGet, "/c/{collection}/{id}", false, false, forwardAppDoc},
+	{http.MethodPut, "/c/{collection}/{id}", false, false, forwardAppDoc},
+	{http.MethodPatch, "/c/{collection}/{id}", false, false, forwardAppDoc},
+	{http.MethodDelete, "/c/{collection}/{id}", false, false, forwardAppDoc},
+	{http.MethodGet, "/me", false, false, forwardAppPath("/me")},
+	{http.MethodPost, "/files", false, false, forwardAppUpload},
+	{http.MethodGet, "/files/{id}", false, false, forwardAppFile("")},
+	{http.MethodGet, "/files/{id}/content", false, false, forwardAppFile("/content")},
+	{http.MethodDelete, "/files/{id}", false, false, forwardAppFile("")},
+	{http.MethodPost, "/ai", false, true, (*Service).serveAppAI},
+	{http.MethodPost, "/ai/image", false, true, (*Service).serveAppAIImage},
+	{http.MethodPost, "/ai/voice", false, true, (*Service).serveAppAIVoice},
+	{http.MethodPost, "/notify", false, false, (*Service).serveAppNotify},
+	{http.MethodGet, "/groups", false, false, forwardAppPath("/groups")},
+	{http.MethodGet, "/events", false, false, (*Service).forwardAppEvents},
+	{http.MethodGet, "/stats", true, false, forwardAppPath("/stats")},
+	{http.MethodGet, "/export", true, false, forwardAppPath("/export")},
+	{http.MethodDelete, "/data", true, false, forwardAppPath("/data")},
 }
 
 // appRoutes are the route-table rows of the app data API: every entry ×
@@ -141,6 +146,13 @@ func (s *Service) appRoutes() []route {
 				if e.entry == appRoom {
 					rt.perm = rbac.PermDriveAgent
 				}
+			}
+			if a.noBudget {
+				// The ai routes carry their own limit (the caller's
+				// per-member assist rate, the assist routes' rule), so they
+				// spend none of the app data budgets; their permission is
+				// the write one (a viewer may not spend the org's AI).
+				rt.budget = noBudget
 			}
 			out = append(out, rt)
 		}

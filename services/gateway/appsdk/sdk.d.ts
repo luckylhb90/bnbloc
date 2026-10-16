@@ -143,6 +143,14 @@ declare global {
      *  an anonymous visitor, 409 "ai_unavailable" where the organization
      *  has no model or turned AI off, 429 when the caller asks too often. */
     ai(req: { prompt: string; input?: string | object; json?: boolean }): Promise<{ text?: string; json?: Record<string, unknown> }>;
+    /** Draws one image on the organization's AI: the image comes back
+     *  inline ({dataUrl, mimeType, width, height, revisedPrompt?}), never a
+     *  link out. aspect: "square" (default) | "landscape" | "portrait".
+     *  Signed-in callers only, like ai itself. */
+    ai.image(req: { prompt: string; aspect?: "square" | "landscape" | "portrait" }): Promise<{ dataUrl: string; mimeType: string; width: number; height: number; revisedPrompt?: string }>;
+    /** Turns spoken audio (a Blob or File from getUserMedia or an input) into
+     *  text. Signed-in callers only, like ai itself. */
+    ai.voice(blob: Blob, filename?: string): Promise<{ text: string }>;
     /** Sends a notice through the organization's notifications (its chat
      *  bot, desktop, browser push: whatever each person uses). to: "room"
      *  is the room's members (any signed-in caller); a list of logins (the

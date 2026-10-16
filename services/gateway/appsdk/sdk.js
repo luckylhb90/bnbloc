@@ -285,6 +285,25 @@
     return call("POST", "ai", body);
   }
 
+  // ai.image draws one image on the organization's AI: {prompt, aspect} to
+  // {dataUrl, mimeType, width, height} (the image inline, never a link out).
+  // ai.voice turns spoken audio (a Blob from getUserMedia or a file) into
+  // text. Both are for signed-in callers only, like ai itself.
+  ai.image = function (req) {
+    if (!req || typeof req.prompt !== "string" || !req.prompt.trim()) return Promise.reject(appError(400, "", "ai.image needs a prompt"));
+    var body = { prompt: req.prompt };
+    if (req.aspect) body.aspect = req.aspect;
+    if (memory) return memory.aiImage(body);
+    return call("POST", "ai/image", body);
+  };
+  ai.voice = function (blob, filename) {
+    if (!blob || typeof blob.size !== "number" || !blob.size) return Promise.reject(appError(400, "", "ai.voice takes audio (a Blob or File)"));
+    if (blob.size > MAX_FILE_BYTES) return Promise.reject(appError(413, "", "ai.voice takes at most " + MAX_FILE_BYTES + " bytes of audio"));
+    if (memory) return memory.aiVoice();
+    var path = "ai/voice" + (filename ? "?filename=" + enc(filename) : "");
+    return send(path, { method: "POST", headers: { "Content-Type": blob.type || "application/octet-stream" }, body: blob }).then(parse);
+  };
+
   // ---- notify ----
 
   // notify sends a notice through the organization's notifications: to
@@ -595,11 +614,15 @@
       return held ? Promise.resolve(URL.createObjectURL(held.blob)) : refuse(404, "file not found");
     }
 
-    // ai in the demo answers without a model: the input, marked.
+    // ai in the demo answers without a model: the input, marked; the image
+    // and voice shapes answer refusal-shaped stubs (a demo page never
+    // reaches a provider).
     function demoAI(body) {
       if (body.json) return Promise.resolve({ json: { demo: true, input: body.input } });
       return Promise.resolve({ text: "[demo AI reply] " + body.input });
     }
+    demoAI.image = function () { return refuse(409, "the demo does not draw images"); };
+    demoAI.voice = function () { return refuse(409, "the demo does not transcribe audio"); };
 
     return { call: call, subscribe: subscribe, upload: upload, fileURL: fileURL, ai: demoAI };
   }

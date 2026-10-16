@@ -153,7 +153,7 @@ func TestMediaTranscribe(t *testing.T) {
 	fake := &mediaProviderFake{transcript: "hello world"}
 	e := mediaGW(t, fake)
 	sink := e.gw.ExtAudit.(*recordedAudit)
-		r := e.callRaw(http.MethodPost, "/v1/media/transcriptions?filename=clip.wav", "audio/wav", []byte("WAVBYTES"), e.as("maya"))
+	r := e.callRaw(http.MethodPost, "/v1/media/transcriptions?filename=clip.wav", "audio/wav", []byte("WAVBYTES"), e.as("maya"))
 	if r.status != http.StatusOK {
 		t.Fatalf("transcribe = %d %s", r.status, r.body)
 	}
@@ -243,4 +243,56 @@ func (e *appGW) callRaw(method, path, contentType string, body []byte, header st
 	rec := httptest.NewRecorder()
 	e.gw.Handler().ServeHTTP(rec, req)
 	return resp{status: rec.Code, body: rec.Body.Bytes()}
+}
+
+// A page's ai.image call: the app's prompt to the organization's image
+// provider, audited with the app's id, the image inline; a visitor and an
+// organization with AI off refused; ai.voice turns audio into text.
+func TestAppAIMedia(t *testing.T) {
+	fake := &mediaProviderFake{}
+	e := mediaGW(t, fake)
+	sink := e.gw.ExtAudit.(*recordedAudit)
+	jack := e.ticketBase("jack", e.appA)
+	r := e.call(http.MethodPost, jack+"~app/ai/image", wire.MediaImageRequest{Prompt: "a poster", Aspect: "square"})
+	if r.status != http.StatusOK {
+		t.Fatalf("ai.image = %d %s", r.status, r.body)
+	}
+	var reply wire.MediaImageReply
+	if err := json.Unmarshal(r.body, &reply); err != nil || !strings.HasPrefix(reply.DataURL, "data:image/png;base64,") {
+		t.Fatalf("reply = %s %v", r.body, err)
+	}
+	rows := sink.take()
+	if len(rows) != 1 || rows[0].Name != "app:"+e.appA+":image" || rows[0].Actor != "jack" {
+		t.Fatalf("audit = %+v", rows)
+	}
+	if strings.Contains(rows[0].Detail, "a poster") {
+		t.Fatalf("the audit row leaks the prompt: %s", rows[0].Detail)
+	}
+	if fake.last["size"] != "1024x1024" {
+		t.Fatalf("size = %v", fake.last)
+	}
+
+	fake.transcript = "hello from the app"
+	r = e.callRaw(http.MethodPost, jack+"~app/ai/voice?filename=clip.wav", "audio/wav", []byte("WAVBYTES"), "Authorization: Bearer "+e.session("jack"))
+	var voice wire.MediaTranscribeReply
+	if err := json.Unmarshal(r.body, &voice); err != nil || voice.Text != "hello from the app" {
+		t.Fatalf("voice = %s %v", r.body, err)
+	}
+	rows = sink.take()
+	if len(rows) != 1 || rows[0].Name != "app:"+e.appA+":voice" {
+		t.Fatalf("voice audit = %+v", rows)
+	}
+
+	tok, _ := e.shareWith(e.appA, "anyone")
+	vis := visitorHeader(e.visitor(tok, ""))
+	if r := e.call(http.MethodPost, shareBase(tok)+"~app/ai/image", wire.MediaImageRequest{Prompt: "p"}, vis); r.status != http.StatusForbidden || r.json()["code"] != wire.AppSignInRequired {
+		t.Fatalf("a visitor's image = %d %s", r.status, r.body)
+	}
+	off := true
+	if _, err := e.b.Tenant.SetTenantPolicy(e.ctx(), e.tenant, store.TenantPolicyUpdate{AssistDisabled: &off}); err != nil {
+		t.Fatal(err)
+	}
+	if r := e.call(http.MethodPost, jack+"~app/ai/image", wire.MediaImageRequest{Prompt: "p"}); r.status != http.StatusConflict {
+		t.Fatalf("image with AI off = %d %s", r.status, r.body)
+	}
 }
