@@ -59,7 +59,6 @@ func main() {
 	svc.AppDocs = backends.AppDocs
 	svc.ShareBox = box
 	svc.RoomGroups = backends.RoomGroups
-	svc.RoomNotes = backends.RoomNotes
 	// Exports and agent reads of app data are audited.
 	svc.Audit = backends.ExtAudit
 	// A member's apps name who produced each (the source job's run record).

@@ -54,7 +54,6 @@ import { JobProgressProvider } from "@/views/room/JobProgressStrip";
 import { SaveTemplateDialog } from "@/views/room/SaveTemplateDialog";
 import { TemplateStartCard } from "@/views/room/TemplateStartCard";
 import { SchedulesDialog } from "@/views/room/SchedulesDialog";
-import { NotesDialog } from "@/views/room/NotesDialog";
 import { GroupChatsDialog } from "@/views/room/GroupChatsDialog";
 import { RunsDialog } from "@/views/room/RunsDialog";
 import { CONTENT_SAVED, contentSaves, parseContentSaved } from "@/lib/contentSavedEvents";
@@ -100,7 +99,6 @@ export function RoomView({
   const [showSearch, setShowSearch] = useState(false);
   const [savingTemplate, setSavingTemplate] = useState(false);
   const [showSchedules, setShowSchedules] = useState(false);
-  const [showNotes, setShowNotes] = useState(false);
   const [showGroups, setShowGroups] = useState(false);
   // An app's "Automate…" opens the schedules on a new AI task about it.
   const [automating, setAutomating] = useState<string | undefined>();
@@ -129,9 +127,6 @@ export function RoomView({
   // add the suggested members of an imported room.
   const me = data.me ?? null;
   const canManageRoom = !!me && canInvite(me);
-  // Who may act in the conversation (a visitor reads): the one rule behind
-  // saving to memory and the notes panel's writes.
-  const mayAct = !!me && mayChat(me);
   // Visitors follow the room but may not post (D1), and neither may a
   // read-only (viewer) organization role (the gateway refuses its chat);
   // unknown until the member list answers, so the composer never flashes
@@ -391,7 +386,6 @@ export function RoomView({
     selectChannel,
     jumpReady: peopleChat.resolved,
     divertJump: peopleChat.divertJump,
-    mayAct,
   });
 
   const rail = (
@@ -457,7 +451,7 @@ export function RoomView({
   );
 
   return (
-    <DeliverableOwner.Provider value={mayAct}>
+    <DeliverableOwner.Provider value={!!me && mayChat(me)}>
     <div className="coarse-targets relative flex h-full min-h-0 flex-col" data-room-stage={roomStage} data-pointer={isCoarsePointer ? "coarse" : "fine"}>
       <RoomHeader
         room={room}
@@ -480,7 +474,6 @@ export function RoomView({
         exportingBytes={handoffExport.exporting ? handoffExport.progressBytes : null}
         onSaveTemplate={canManageRoom ? () => setSavingTemplate(true) : undefined}
         onShowSchedules={member ? () => setShowSchedules(true) : undefined}
-        onShowNotes={member ? () => setShowNotes(true) : undefined}
         onShowRuns={member ? () => setShowRuns(true) : undefined}
         onTogglePeopleChat={
           member ? () => (peopleChat.open ? closePeopleChat() : peopleChat.openPanel()) : undefined
@@ -677,7 +670,6 @@ export function RoomView({
           }}
         />
       )}
-      {showNotes && <NotesDialog roomId={roomId} mayAct={mayAct} onClose={() => setShowNotes(false)} />}
       {showGroups && <GroupChatsDialog roomId={roomId} mayChange={member} onClose={() => setShowGroups(false)} />}
       {showRuns && <RunsDialog roomId={roomId} onClose={() => setShowRuns(false)} />}
       {quotaAsk && (

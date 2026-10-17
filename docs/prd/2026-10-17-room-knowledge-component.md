@@ -1,5 +1,8 @@
 # Room knowledge, memory and evolution as an installable component (2026-10-17)
 
+> **WITHDRAWN 2026-10-17.** The platform code this PRD's stage 1 built (notes store, routes, `.room/memory/` files, the room panel, the `draft-note` assist) was the wrong shape and has been removed. The room's knowledge is to be built from the platform's existing Components (content components, schedules, deliverables), not compiled into the platform; the design is to be redone. Kept only as a record of what was tried. Left behind on purpose: the `room_notes` and `room_note_revisions` tables and migration `2026_10_room_notes` (already applied on QA; a later release drops them, `docs/design-review.md` and AGENTS.md "A migration only adds").
+> Its extension framework (a new component kind with four contracts) was judged too heavy and is not to be built. 
+
 Status: **redesign, not built; revised after a feasibility review (§8, 2026-10-17), owner confirmation of §8's direction pending. Where §8 and §2 differ, §8 wins.** Supersedes `2026-10-16-room-memory-and-evolution.md`,
 whose stage 1 was built into the platform (notes store, routes, `.room/memory/` files,
 a web panel): that was the wrong shape and is removed in stage 5 below. What that

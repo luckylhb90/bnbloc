@@ -5,8 +5,6 @@ import {
   fieldList,
   filledForm,
   findByName,
-  noteDraftFrom,
-  noteRequestText,
   promptPackDraftPatch,
   roomPlanFrom,
   scheduleDraftFrom,
@@ -14,7 +12,7 @@ import {
 } from "./assistDrafts.ts";
 import { emptyContentForm, type ContentComponent } from "./contentComponents.ts";
 import { emptyPromptPackForm } from "./promptPacks.ts";
-import { MaxAssistText, MaxBriefBodyBytes, MaxNoteBodyBytes, MaxNoteTitleRunes } from "./wire.gen.ts";
+import { MaxAssistText } from "./wire.gen.ts";
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
@@ -147,21 +145,4 @@ function comp(p: Partial<ContentComponent> & Pick<ContentComponent, "id" | "name
   eq(scheduleDraftFrom({ kind: "cron", cron: "0 9 *" }), { text: "", form: {} }, "a short cron is dropped");
   eq(scheduleDraftFrom({ kind: "once", at: "2026-10-20T14:00" }), { text: "", form: { onceLocal: "2026-10-20T14:00", kind: "once" } }, "once");
   eq(scheduleDraftFrom({ kind: "hourly", time: "10:00" }), { text: "", form: { time: "10:00" } }, "an unknown kind");
-}
-
-// A note: the reply fitted to the server's limits (one-line title cut at the
-// title limit with an ellipsis, body cut to the type's bytes), and the
-// request text carries the type and what the form holds.
-{
-  const d = noteDraftFrom({ title: "  We deploy\non  Thursdays\t", body: " Because of the freeze. " }, "knowledge");
-  eq(d, { title: "We deploy on Thursdays", body: "Because of the freeze." }, "a title is one line, trimmed");
-  const long = noteDraftFrom({ title: "é".repeat(MaxNoteTitleRunes + 20), body: "x".repeat(MaxNoteBodyBytes + 500) }, "memory");
-  assert(Array.from(long.title).length === MaxNoteTitleRunes && long.title.endsWith("…"), "a long title is cut with an ellipsis");
-  assert(new TextEncoder().encode(long.body).length <= MaxNoteBodyBytes, "a body is cut to its type's bytes");
-  const brief = noteDraftFrom({ body: "y".repeat(MaxNoteBodyBytes + 500) }, "brief");
-  assert(brief.body.length > MaxNoteBodyBytes && brief.body.length <= MaxBriefBodyBytes, "a brief may be longer");
-  eq(noteDraftFrom({}, "lesson"), { title: "", body: "" }, "nothing given, nothing guessed");
-  eq(noteDraftFrom({ title: 7, body: ["a"] }, "lesson"), { title: "", body: "" }, "not text, not used");
-  eq(noteRequestText(" tighten it ", { type: "lesson", title: "", body: "" }), 'tighten it\n\nCurrent form:\n{\n "type": "lesson"\n}', "the type is always sent");
-  assert(noteRequestText("", { type: "brief", title: "T", body: "B" }).includes('"title": "T"'), "the form's content is sent");
 }

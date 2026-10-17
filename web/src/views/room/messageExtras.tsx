@@ -1,19 +1,18 @@
 import { createContext, useContext } from "react";
-import { BookmarkSimpleIcon, BrainIcon, CheckSquareIcon, ListChecksIcon } from "@phosphor-icons/react";
+import { BookmarkSimpleIcon, CheckSquareIcon, ListChecksIcon } from "@phosphor-icons/react";
 import type { MessageTask, TaskStatus } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import type { FeedItem } from "@/views/room/types";
 import { useDisplayName } from "@/lib/useDisplayName";
 
-// Team actions on a feed row — "Save as prompt" (prompt packs), "Save to
-// memory" (room notes) and "Mark as task" (F6) — plus the task badge. They reach the memoized Message rows through context
+// Team actions on a feed row — "Save as prompt" (prompt packs) and "Mark as
+// task" (F6)
+// — plus the task badge. They reach the memoized Message rows through context
 // so the row props (and the existing copy / edit / delete actions) stay as
 // they are; only these small components re-render when tasks change.
 export interface MessageExtras {
   readonly taskBySeq: ReadonlyMap<number, MessageTask>;
   readonly onSaveAsPrompt: (item: FeedItem) => void;
-  // "Save to memory" (a room note): absent for a member who may not act.
-  readonly onSaveToMemory?: (item: FeedItem) => void;
   readonly onMarkTask: (seq: number) => void;
   readonly onUnmarkTask: (seq: number) => void;
   readonly onSetTaskStatus: (seq: number, status: TaskStatus) => void;
@@ -32,7 +31,7 @@ function persistedSeq(item: FeedItem): number | null {
 const iconButton =
   "tactile flex items-center text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60 rounded-sm";
 
-// MessageExtraActions renders the team actions as small icon buttons that
+// MessageExtraActions renders the two team actions as small icon buttons that
 // sit beside the existing copy control. `floating` places them in a hover
 // cluster at the row's top-right (grouped rows have no header to host them),
 // absolutely positioned so the feed layout never shifts.
@@ -58,17 +57,6 @@ export function MessageExtraActions({ item, floating }: { item: FeedItem; floati
           className={iconButton}
         >
           <BookmarkSimpleIcon size={12} />
-        </button>
-      )}
-      {item.text && extras.onSaveToMemory && (
-        <button
-          type="button"
-          onClick={() => extras.onSaveToMemory?.(item)}
-          title="Save to memory"
-          aria-label="Save to memory"
-          className={iconButton}
-        >
-          <BrainIcon size={12} />
         </button>
       )}
       <button

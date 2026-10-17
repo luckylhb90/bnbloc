@@ -45,10 +45,6 @@ type CtxState struct {
 	// ReadmeSum is the sum of the .room/README.md last written into the
 	// workspace (ReadmeUpdate); empty until the first pull pass.
 	ReadmeSum string
-	// MemorySum is the sum of the .room/memory/ files last written into the
-	// workspace (MemoryUpdate); empty while none was written (a room with no
-	// notes writes none).
-	MemorySum string
 	// AppsListed: the workspace holds a .room/apps.md (the room
 	// had an app), so every pass rewrites it (AppsUpdate).
 	AppsListed bool

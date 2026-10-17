@@ -12,7 +12,6 @@ import {
   SquaresFourIcon,
   ClockIcon,
   ListChecksIcon,
-  BrainIcon,
 } from "@phosphor-icons/react";
 import type { Room } from "@/lib/api";
 import type { Stage } from "@/lib/capability";
@@ -48,7 +47,6 @@ export function RoomHeader({
   borrowBadge = 0,
   onSaveTemplate,
   onShowSchedules,
-  onShowNotes,
   onShowRuns,
   onTogglePeopleChat,
   peopleChatOpen = false,
@@ -82,8 +80,6 @@ export function RoomHeader({
   readonly onSaveTemplate?: () => void;
   // Opens the room's scheduled prompts panel (N2).
   readonly onShowSchedules?: () => void;
-  // Opens "What this project knows", the room's notes.
-  readonly onShowNotes?: () => void;
   // Opens the room's agent run records (R10).
   readonly onShowRuns?: () => void;
   // Opens/closes the room's people chat (absent for a room preview).
@@ -208,11 +204,6 @@ export function RoomHeader({
       {onShowSchedules && (
         <Button variant="ghost" size="icon" title="Schedules" aria-label="Scheduled messages" onClick={onShowSchedules} className="tap">
           <ClockIcon size={18} />
-        </Button>
-      )}
-      {onShowNotes && (
-        <Button variant="ghost" size="icon" title="Notes" aria-label="What this project knows" onClick={onShowNotes} className="tap">
-          <BrainIcon size={18} />
         </Button>
       )}
       {onShowRuns && (

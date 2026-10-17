@@ -1438,17 +1438,6 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   deliverable or a component is one of its working files, and never
   compute a producer, a Library listing or an app listing elsewhere.
 
-- **Room notes have one owner per half** (`docs/prd/2026-10-16-room-memory-and-evolution.md`).
-  `internal/notes` owns what a note may hold (`Check`) and the order an
-  agent reads them in (`Rank`); `internal/store/room_notes.go` owns the
-  rules among notes for both backends (one active brief, a replaced note is
-  history, the caps, revisions); `services/room/room_notes.go` is the only
-  reader of the store (`TestRoomNotesAreReadOnlyThroughTheRoomService`). An
-  agent is handed notes only through the gateway's job-granted
-  `GET /v1/rooms/{room}/memory`, which the bridge writes as `.room/memory/`
-  (`roomlog.MemoryUpdate` owns those files' text, caps and fencing). Never
-  add an agent-facing note search, and never read notes from the store
-  anywhere else.
 - **Built-in content is a content source**, not a second library:
   `internal/contentbuiltin`, wrapped over the content store at gateway and
   realtime startup, scope `builtin`, artifact key `builtin/<sha256>`.

@@ -17,6 +17,31 @@ import (
 // (D3: write-only columns are deleted); add one here only with a reason.
 var writeOnlyColumnAllowed = map[string]string{
 	"extension_audit.key_id": "forensic record of the signing key an install was verified with; read by operators in the table, not by the console",
+	// Retiring: no code reads or writes the room notes tables any more (the
+	// feature was withdrawn on 2026-10-17); they stay in schema.sql for one release
+	// of version skew, and the next release's migration drops them.
+	"room_note_revisions.at_ms":      "retiring: the withdrawn room notes feature; dropped by the next release",
+	"room_note_revisions.body":       "retiring: the withdrawn room notes feature; dropped by the next release",
+	"room_note_revisions.changed_by": "retiring: the withdrawn room notes feature; dropped by the next release",
+	"room_note_revisions.note_id":    "retiring: the withdrawn room notes feature; dropped by the next release",
+	"room_note_revisions.pinned":     "retiring: the withdrawn room notes feature; dropped by the next release",
+	"room_note_revisions.revision":   "retiring: the withdrawn room notes feature; dropped by the next release",
+	"room_note_revisions.status":     "retiring: the withdrawn room notes feature; dropped by the next release",
+	"room_note_revisions.title":      "retiring: the withdrawn room notes feature; dropped by the next release",
+	"room_note_revisions.type":       "retiring: the withdrawn room notes feature; dropped by the next release",
+	"room_notes.author":              "retiring: the withdrawn room notes feature; dropped by the next release",
+	"room_notes.body":                "retiring: the withdrawn room notes feature; dropped by the next release",
+	"room_notes.created_at_ms":       "retiring: the withdrawn room notes feature; dropped by the next release",
+	"room_notes.note_id":             "retiring: the withdrawn room notes feature; dropped by the next release",
+	"room_notes.pinned":              "retiring: the withdrawn room notes feature; dropped by the next release",
+	"room_notes.revision":            "retiring: the withdrawn room notes feature; dropped by the next release",
+	"room_notes.sources_json":        "retiring: the withdrawn room notes feature; dropped by the next release",
+	"room_notes.status":              "retiring: the withdrawn room notes feature; dropped by the next release",
+	"room_notes.supersedes":          "retiring: the withdrawn room notes feature; dropped by the next release",
+	"room_notes.title":               "retiring: the withdrawn room notes feature; dropped by the next release",
+	"room_notes.type":                "retiring: the withdrawn room notes feature; dropped by the next release",
+	"room_notes.updated_at_ms":       "retiring: the withdrawn room notes feature; dropped by the next release",
+	"room_notes.verified_at_ms":      "retiring: the withdrawn room notes feature; dropped by the next release",
 	// Bookkeeping timestamps that predate the check; candidates for the
 	// next removal migration (or a reader that needs them).
 	"org_sync_default_rooms.granted_at_ms": "pre-existing: when organization sync granted the default room",
