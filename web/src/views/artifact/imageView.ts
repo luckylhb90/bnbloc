@@ -74,6 +74,13 @@ export function spanRegion(a: { x: number; y: number }, b: { x: number; y: numbe
   return { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(a.x - b.x), h: Math.abs(a.y - b.y) };
 }
 
+/** The type a crop is saved as: the image's own when the browser encodes
+ *  it (PNG, JPEG, WebP), else PNG (a GIF's first frame, an SVG's
+ *  rendering). */
+export function cropMimeType(source: string): string {
+  return source === "image/jpeg" || source === "image/webp" ? source : "image/png";
+}
+
 /** Where an area shows in the container (CSS pixels). */
 export function regionRect(view: ImageView, r: Region): Region {
   return { x: view.x + r.x * view.scale, y: view.y + r.y * view.scale, w: r.w * view.scale, h: r.h * view.scale };

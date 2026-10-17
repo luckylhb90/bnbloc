@@ -299,3 +299,10 @@ export function isPreviewableImage(facts: ArtifactFileFacts): boolean {
 export function downloadFileName(file: { readonly name: string; readonly mimeType: string }): string {
   return normalizeMime(file.mimeType) === SITE_MIME && !file.name.toLowerCase().endsWith(".tar") ? `${file.name}.tar` : file.name;
 }
+
+/** A copy's name: "poster.png" becomes "poster copy.png", "Notes" "Notes
+ *  copy" (a leading dot is part of the name). */
+export function copyName(name: string): string {
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? `${name.slice(0, dot)} copy${name.slice(dot)}` : `${name} copy`;
+}

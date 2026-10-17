@@ -226,6 +226,11 @@ func (s *Service) routes() []route {
 		member("GET /v1/media", s.handleMediaCapabilities),
 		gated("POST /v1/media/transcriptions", drive, s.handleMediaTranscribe).spends(costBudget),
 		gated("POST /v1/media/image", drive, s.handleMediaImage).spends(costBudget),
+		// Decision models (decisions.go): calibrated answers to bounded
+		// questions, the same rules as the media calls.
+		member("GET /v1/decisions", s.handleDecisionCapability),
+		gated("POST /v1/decisions", drive, s.handleDecide).spends(costBudget),
+		gated("POST /v1/systemone", drive, s.handleSystemOne).spends(costBudget),
 
 		// Organization administration (manage_org in the acting tenant).
 		gated("GET /v1/tenant/mcp-connectors", org, s.handleListMCPConnectors),
@@ -239,6 +244,9 @@ func (s *Service) routes() []route {
 		gated("GET /v1/tenant/media/{capability}", org, s.handleOrgMediaProvider),
 		gated("PUT /v1/tenant/media/{capability}", org, s.handlePutOrgMediaProvider),
 		gated("POST /v1/tenant/media/{capability}/test", org, s.handleTestOrgMediaProvider),
+		gated("GET /v1/tenant/decisions", org, s.handleOrgDecisionProvider),
+		gated("PUT /v1/tenant/decisions", org, s.handlePutOrgDecisionProvider),
+		gated("POST /v1/tenant/decisions/test", org, s.handleTestOrgDecisionProvider),
 		gated("GET /v1/tenant/content-requests", org, s.handleListContentRequests).with(needContent),
 		gated("GET /v1/tenant/content-requests/{id}", org, s.handleReviewContentRequest).with(needContent),
 		gated("POST /v1/tenant/content-requests/{id}/approve", org, s.decideContentRequest(store.ContentRequestApproved)).spends(costBudget).with(needContent),
@@ -280,6 +288,10 @@ func (s *Service) routes() []route {
 		gated("GET /v1/platform/media/{capability}", platform, s.handleMediaProvider),
 		gated("PUT /v1/platform/media/{capability}", platform, s.handlePutMediaProvider),
 		gated("POST /v1/platform/media/{capability}/test", platform, s.handleTestMediaProvider),
+		// The decision model (decisions.go).
+		gated("GET /v1/platform/decisions", platform, s.handleDecisionProvider),
+		gated("PUT /v1/platform/decisions", platform, s.handlePutDecisionProvider),
+		gated("POST /v1/platform/decisions/test", platform, s.handleTestDecisionProvider),
 		gated("GET /v1/platform/content-components", platform, s.handleListPlatformContent).with(needContent),
 		gated("GET /v1/platform/content-components/{id}/package", platform, s.handleExportContentPackage).with(needContent),
 		gated("POST /v1/platform/content-components/{id}/unpublish", platform, s.handlePlatformContentStatus(store.ContentStatusRetired)).with(needContent),

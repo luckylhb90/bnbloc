@@ -11,7 +11,6 @@ import {
   MicrophoneSlashIcon,
   MicrophoneIcon,
   SpinnerIcon,
-  ImageIcon,
 } from "@phosphor-icons/react";
 import { cn } from "@/lib/cn";
 import type { LocalAgent } from "@/lib/useLocalAgent";
@@ -47,7 +46,6 @@ import { PromptPickerButton, PromptVariablesDialog, SlashMenu } from "@/views/co
 import { explicitRecipient, resolveRecipient } from "@/views/composer/recipient";
 import { useEnhancePrompt } from "@/views/composer/useEnhancePrompt";
 import { useVoiceInput } from "@/views/composer/useVoiceInput";
-import { DrawImageDialog } from "@/views/composer/DrawImageDialog";
 import { useMediaCapability } from "@/lib/media";
 import { AssistButton } from "@/views/AssistButton";
 
@@ -187,13 +185,11 @@ export function Composer({
   // Voice input: press to record, press again to transcribe into the caret.
   // Hidden when the deployment has no transcription provider (or AI is off).
   const canVoice = useMediaCapability("transcribe");
-  const canDraw = useMediaCapability("image");
   function applyTextForVoice(next: string) {
     setText(next);
     requestAnimationFrame(() => taRef.current?.focus());
   }
   const voice = useVoiceInput({ setText: applyTextForVoice, taRef });
-  const [drawing, setDrawing] = useState(false);
   // Prompts of the member's packs and the room's: the picker, /commands
   // and expert quick prompts that point at a pack's prompt.
   const prompts = useComposerPrompts(roomId, !people, setText, taRef);
@@ -623,14 +619,16 @@ export function Composer({
         />
         {/* The input row: mic left, the text field, send right. Voice and
             sending are what the text field is FOR, so they sit beside it,
-            not in the tool tray below. */}
-        <div className="flex items-end gap-1">
+            not in the tool tray below. Both are one compact size (size-8)
+            centred on the first text line (mb-1 in the 2.5rem field), and
+            the mic's column lines up with the tray's first icon (px-3). */}
+        <div className="flex items-end gap-1 px-3">
         {canVoice && (
           <button
             type="button"
             onClick={() => void voice.toggle()}
             disabled={disabled || sending || enhancing || (voice.state !== "idle" && voice.state !== "recording")}
-            className={cn(toolButton, "mb-1 shrink-0")}
+            className={cn(toolButton, "mb-1 size-8")}
             title={voice.state === "recording" ? "Stop and transcribe" : voice.state === "idle" ? "Speak to text" : "Transcribing…"}
             aria-label={voice.state === "recording" ? "Stop recording" : "Speak"}
           >
@@ -709,7 +707,7 @@ export function Composer({
               void send();
             }
           }}
-          className="block max-h-40 min-h-[2.5rem] w-full flex-1 resize-none bg-transparent px-4 pb-1 pt-2.5 text-sm text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none"
+          className="block max-h-40 min-h-[2.5rem] w-full flex-1 resize-none bg-transparent px-1 pb-1 pt-2.5 text-sm text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none"
         />
         <Button
           variant="primary"
@@ -723,9 +721,9 @@ export function Composer({
             (!text.trim() && refs.length === 0 && attachments.files.length === 0)
           }
           title="Send"
-          className="mb-1 shrink-0"
+          className="mb-1 size-8 shrink-0"
         >
-          <PaperPlaneRightIcon size={16} weight="fill" />
+          <PaperPlaneRightIcon size={15} weight="fill" />
         </Button>
         </div>
         {/* Bottom toolbar, directly under the input row: ONE row at every
@@ -859,30 +857,10 @@ export function Composer({
               disabled={disabled || sending || (!enhancing && !text.trim())}
             />
           )}
-          {canDraw && (
-            <button
-              type="button"
-              onClick={() => setDrawing(true)}
-              disabled={disabled || sending}
-              className={cn(toolButton, "shrink-0")}
-              title="Draw an image"
-              aria-label="Draw an image"
-            >
-              <ImageIcon size={18} />
-            </button>
-          )}
         </div>
       </div>
       <ExpertPermissionDialog expert={exp.confirming} onAnswer={exp.resolveConfirm} />
       <PromptVariablesDialog choice={prompts.filling} onCancel={prompts.cancelFill} onInsert={prompts.submitFill} />
-      <DrawImageDialog
-        open={drawing}
-        onClose={() => setDrawing(false)}
-        onImages={(images) => {
-          attachments.addFiles(images.map((i) => i.file));
-          requestAnimationFrame(() => taRef.current?.focus());
-        }}
-      />
     </div>
   );
 }

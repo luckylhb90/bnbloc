@@ -6,6 +6,7 @@ import type { ArtifactFileInfo, ArtifactViewerProps } from "./registry";
 import { useViewerToolbar } from "./toolbar";
 import {
   centered,
+  cropMimeType,
   clampScale,
   fitScale,
   GRID_MIN_SCALE,
@@ -27,7 +28,8 @@ import {
 // pan (drag), fit / 100%, a pixel grid from 400%, and a checkerboard
 // background for transparency. "Select an area" turns a drag into a
 // rectangle the Ask AI panel names (a region selection, image pixels;
-// docs/prd/2026-10-14-select-edit-review.md rule 7).
+// docs/prd/2026-10-14-select-edit-review.md rule 7); where the host can
+// version the file, "Crop" cuts the image to it as the next version.
 
 // Older inline image artifacts carry a URL as text instead of bytes.
 const LEGACY_URL = /^(https:\/\/|data:image\/(png|jpe?g|gif|webp);base64,)/i;
@@ -77,7 +79,7 @@ function useSvgSource(blob: Blob, file: ArtifactFileInfo): string {
 const CHECKER =
   "repeating-conic-gradient(color-mix(in srgb, var(--color-fg) 9%, transparent) 0% 25%, transparent 0% 50%) 0 0 / 16px 16px";
 
-export default function ImageViewer({ blob, file, toolbar, onSelection }: ArtifactViewerProps) {
+export default function ImageViewer({ blob, file, toolbar, onSelection, onPublish }: ArtifactViewerProps) {
   const { url, error } = useImageSource(blob);
   const svgSource = useSvgSource(blob, file);
   const boxRef = useRef<HTMLDivElement | null>(null);
@@ -212,6 +214,30 @@ export default function ImageViewer({ blob, file, toolbar, onSelection }: Artifa
     e.preventDefault();
   };
 
+  // Crop to the area: an exact cut, published as the file's next version
+  // (no model: docs/prd/2026-10-17-image-generation-redesign.md §2.5).
+  const [cropping, setCropping] = useState(false);
+  const imgRef = useRef<HTMLImageElement | null>(null);
+  const crop = async () => {
+    const img = imgRef.current;
+    if (!onPublish || !region || !img || cropping) return;
+    setCropping(true);
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = region.w;
+      canvas.height = region.h;
+      canvas.getContext("2d")?.drawImage(img, region.x, region.y, region.w, region.h, 0, 0, region.w, region.h);
+      const type = cropMimeType(blob.type);
+      const out = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, type, 0.95));
+      if (!out) throw new Error("the browser could not encode the crop");
+      await onPublish(out, `Cropped to ${region.w}×${region.h} at (${region.x}, ${region.y})`);
+      setRegion(null);
+      setSelecting(false);
+    } finally {
+      setCropping(false);
+    }
+  };
+
   const gridAvailable = view.scale >= GRID_MIN_SCALE;
   useViewerToolbar(
     toolbar,
@@ -222,6 +248,7 @@ export default function ImageViewer({ blob, file, toolbar, onSelection }: Artifa
       { id: "grid", kind: "toggle", icon: "grid", label: "Pixel grid (from 400%)", active: grid && gridAvailable, disabled: !gridAvailable },
       { id: "background", kind: "toggle", icon: "background", label: "Checkerboard background", active: checker },
       { id: "select", kind: "toggle", icon: "crop", label: "Select an area", active: selecting, disabled: !natural },
+      ...(onPublish ? [{ id: "cut", kind: "button" as const, icon: "cut", label: "Crop to the area (a new version)", disabled: !region || cropping }] : []),
     ],
     (id, value) => {
       if (id === "zoom" && typeof value === "number") zoomTo(value);
@@ -229,6 +256,7 @@ export default function ImageViewer({ blob, file, toolbar, onSelection }: Artifa
       else if (id === "actual") actualSize();
       else if (id === "grid") setGrid(value === true);
       else if (id === "background") setChecker(value === true);
+      else if (id === "cut") void crop().catch(() => setCropping(false));
       else if (id === "select") {
         setSelecting(value === true);
         if (value !== true) setRegion(null);
@@ -261,6 +289,7 @@ export default function ImageViewer({ blob, file, toolbar, onSelection }: Artifa
           <p className="p-4 text-sm text-[var(--color-fg-subtle)]">{message}</p>
         ) : url ? (
           <img
+            ref={imgRef}
             src={url}
             alt=""
             draggable={false}

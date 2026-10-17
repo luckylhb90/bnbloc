@@ -86,6 +86,11 @@ export interface ArtifactViewerProps {
   readonly onSelection?: (s: ViewerSelection | null) => void;
   /** A unit to show (its Compare `at`); a new nonce shows it again. */
   readonly reveal?: { readonly at: string; readonly nonce: number };
+  /** Publishes an exact edit the viewer made (a crop) as the file's next
+   *  version, on the shown one; absent where the file cannot be versioned
+   *  (a share page, an attachment, an older version). Resolves to the new
+   *  version. */
+  readonly onPublish?: (bytes: Blob, summary: string) => Promise<number>;
 }
 
 /** What a viewer reports as selected: the frame protocol's Selection

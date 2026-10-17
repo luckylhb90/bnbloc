@@ -35,6 +35,7 @@ const (
 	MaxMediaImageReplyBytes = 16 << 20 // read of one generation's reply body
 	MaxMediaImageBytes      = 12 << 20 // one generated image, decoded
 	MaxMediaImages          = 4        // images one generation call may draw
+	MaxMediaImageInputs     = 4        // room files and attachments one generation may use as references
 )
 
 // ContentTagPattern is the one rule for a content component tag: lower-case

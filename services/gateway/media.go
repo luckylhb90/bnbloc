@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"encoding/binary"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -50,11 +48,13 @@ func (s *Service) mediaSettings() *media.Settings {
 // mediaProvider resolves the capability's provider for claims'
 // organization: its own while set and allowed (media.Settings.Provider), a
 // configured provider, and an organization that has not turned AI off (the
-// assist switch's meaning: no data leaving to a model). The caller's
-// Authorization header is pinned for an auth-"caller" provider (the
-// provider bills the caller, like the platform's own LLM gateway); the
-// header value never reaches a key-auth provider.
-func (s *Service) mediaProvider(ctx context.Context, claims auth.Claims, cap media.Capability, callerAuth string) (media.Provider, bool, error) {
+// assist switch's meaning: no data leaving to a model). ownAuth is the
+// request's Authorization only when it is the acting member's own
+// (ownAuthOf): an auth-"caller" provider bills the caller, so it is pinned
+// there, and a call acting for someone else (a job grant) finds no
+// provider rather than forwarding the bridge owner's session. The header
+// value never reaches a key-auth provider.
+func (s *Service) mediaProvider(ctx context.Context, claims auth.Claims, cap media.Capability, ownAuth string) (media.Provider, bool, error) {
 	if s.PlatformSettings == nil {
 		return media.Provider{}, false, nil
 	}
@@ -71,27 +71,38 @@ func (s *Service) mediaProvider(ctx context.Context, claims auth.Claims, cap med
 	}
 	if p.AuthForward != "" {
 		// An auth-"caller" provider: pin the caller's own Authorization.
-		if strings.TrimSpace(callerAuth) == "" {
+		if strings.TrimSpace(ownAuth) == "" {
 			return media.Provider{}, false, nil
 		}
-		p = p.WithCallerAuth(strings.TrimSpace(callerAuth))
+		p = p.WithCallerAuth(strings.TrimSpace(ownAuth))
 	}
 	return p, true, nil
 }
 
-// mediaCaller resolves who a media call acts as: the caller themself, or
-// with ?job=&room= the bridge running the job as the job's requester
-// (contentGrant, the content routes' admission).
-func (s *Service) mediaCaller(w http.ResponseWriter, r *http.Request, caller auth.Claims) (auth.Claims, bool) {
+// mediaCaller resolves who a model call (media, decisions) acts as: the
+// caller themself, or with ?job=&room= the bridge running the job as the
+// job's requester (contentGrant, the content routes' admission; Job set).
+func (s *Service) mediaCaller(w http.ResponseWriter, r *http.Request, caller auth.Claims) (contentActor, bool) {
 	if strings.TrimSpace(r.URL.Query().Get("job")) == "" {
-		return caller, true
+		return contentActor{Claims: caller}, true
 	}
 	actor, err := s.contentGrant(r, caller)
 	if err != nil {
 		writeGrantErr(w, err)
-		return auth.Claims{}, false
+		return contentActor{}, false
 	}
-	return actor.Claims, true
+	return actor, true
+}
+
+// ownAuthOf is the request's Authorization when the call acts as the
+// bearer's own subject, "" when it acts for someone else (a job grant: the
+// bearer is the bridge owner's). A caller-auth provider is only ever sent
+// the acting member's own session.
+func ownAuthOf(r *http.Request, actor contentActor) string {
+	if actor.Job != nil {
+		return ""
+	}
+	return headerAuth(r)
 }
 
 // headerAuth is the request's Authorization header value, for pinning into
@@ -140,7 +151,7 @@ func (s *Service) handleMediaTranscribe(w http.ResponseWriter, r *http.Request, 
 	if !ok {
 		return
 	}
-	claims = actor
+	claims = actor.Claims
 	if !s.assistLimiter.get(assistRate, assistBurst, s.Peers.Size).allow(claims.Tenant + "/" + claims.Subject) {
 		httpx.Error(w, "too many requests: try again in a minute", http.StatusTooManyRequests)
 		return
@@ -179,7 +190,7 @@ func (s *Service) handleMediaTranscribe(w http.ResponseWriter, r *http.Request, 
 		}
 		filename = filenameQuery(r)
 	}
-	p, has, err := s.mediaProvider(ctx, claims, media.CapTranscribe, headerAuth(r))
+	p, has, err := s.mediaProvider(ctx, claims, media.CapTranscribe, ownAuthOf(r, actor))
 	if err != nil {
 		obs.ServerError(w, "read the media provider failed", err)
 		httpx.Error(w, "read the media provider failed", http.StatusInternalServerError)
@@ -192,7 +203,7 @@ func (s *Service) handleMediaTranscribe(w http.ResponseWriter, r *http.Request, 
 	start := time.Now()
 	text, err := p.Transcribe(ctx, audio, mimeType, filename)
 	usage := wire.AssistUsage{Model: p.Model.Model, LatencyMs: timeSinceMs(s, start)}
-	s.auditMediaRun(ctx, claims, "transcribe", usage, err)
+	s.auditMediaRun(ctx, claims, "transcribe", "", usage, err)
 	if err != nil {
 		writeMediaErr(w, err)
 		return
@@ -210,7 +221,7 @@ func (s *Service) handleMediaImage(w http.ResponseWriter, r *http.Request, claim
 	if !ok {
 		return
 	}
-	s.runMediaImage(w, r, actor, readJSONMediaImage, "image")
+	s.runMediaImage(w, r, actor, jobImagePlace(actor.Job), readJSONMediaImage, "image")
 }
 
 // readJSONMediaImage reads a member route's JSON body.
@@ -231,9 +242,12 @@ func readJSONMediaImage(w http.ResponseWriter, r *http.Request) (wire.MediaImage
 // route and an app's ~app/ai/image): the caller's assist rate, the request's
 // validation, the organization's provider, the generation (Count images in
 // one provider call; an edit of the request's inline image), the audit row
-// (never the prompt, never the images) and the reply.
-func (s *Service) runMediaImage(w http.ResponseWriter, r *http.Request, claims auth.Claims, read func(http.ResponseWriter, *http.Request) (wire.MediaImageRequest, bool), auditName string) {
+// (never the prompt, never the images) and the reply. actor is who the call
+// acts as; place, when set (an agent's job, a room app), is where the
+// images may be published and whose room pictures the call may read.
+func (s *Service) runMediaImage(w http.ResponseWriter, r *http.Request, actor contentActor, place *imagePlace, read func(http.ResponseWriter, *http.Request) (wire.MediaImageRequest, bool), auditName string) {
 	ctx := r.Context()
+	claims := actor.Claims
 	if !s.assistLimiter.get(assistRate, assistBurst, s.Peers.Size).allow(claims.Tenant + "/" + claims.Subject) {
 		httpx.Error(w, "too many requests: try again in a minute", http.StatusTooManyRequests)
 		return
@@ -254,16 +268,22 @@ func (s *Service) runMediaImage(w http.ResponseWriter, r *http.Request, claims a
 		httpx.Error(w, "aspect must be one of "+strings.Join(wire.MediaImageAspects, ", "), http.StatusBadRequest)
 		return
 	}
-	var input *media.ImageInput
+	gen := media.ImageRequest{Prompt: req.Prompt, Model: req.Model, Aspect: req.Aspect, Count: req.Count}
 	if req.Image != "" {
 		b, mimeType, err := decodeDataURLImage(req.Image)
 		if err != nil {
 			httpx.Error(w, "image must be a data URL of a PNG, JPEG or WebP image", http.StatusBadRequest)
 			return
 		}
-		input = &media.ImageInput{Bytes: b, MimeType: mimeType}
+		gen.Input = &media.ImageInput{Bytes: b, MimeType: mimeType}
 	}
-	p, has, err := s.mediaProvider(ctx, claims, media.CapImage, headerAuth(r))
+	// The room's pictures (an agent's call): the file to edit and the
+	// references, read as the job's requester.
+	edit, ok := s.imageRoomInputs(w, r, actor.Claims, place, req, &gen)
+	if !ok {
+		return
+	}
+	p, has, err := s.mediaProvider(ctx, claims, media.CapImage, ownAuthOf(r, actor))
 	if err != nil {
 		obs.ServerError(w, "read the media provider failed", err)
 		httpx.Error(w, "read the media provider failed", http.StatusInternalServerError)
@@ -281,29 +301,38 @@ func (s *Service) runMediaImage(w http.ResponseWriter, r *http.Request, claims a
 		return
 	}
 	start := time.Now()
-	imgs, err := p.Generate(ctx, media.ImageRequest{Prompt: req.Prompt, Model: req.Model, Aspect: req.Aspect, Count: req.Count, Input: input})
+	gen.Count = req.Count
+	imgs, err := p.Generate(ctx, gen)
 	usage := wire.AssistUsage{Model: p.Model.Model, LatencyMs: timeSinceMs(s, start)}
-	s.auditMediaRun(ctx, claims, auditName, usage, err)
+	s.auditMediaRun(ctx, claims, auditName, imageAuditDetail(gen, edit), usage, err)
 	if err != nil {
 		writeMediaErr(w, err)
 		return
 	}
 	// Publish, when asked under a job grant: each image becomes a room
-	// artifact version (the image then is not also inlined).
-	roomID := strings.TrimSpace(r.URL.Query().Get("room"))
-	publish := req.Publish && roomID != "" && strings.TrimSpace(r.URL.Query().Get("job")) != ""
+	// artifact, an edit the edited file's next version (the image then is
+	// not also inlined).
+	publish := (req.Publish || edit != nil) && place != nil
 	out := wire.MediaImageReply{Images: make([]wire.MediaImage, 0, len(imgs))}
 	for i, img := range imgs {
-		width, height := pngSize(img.Bytes)
+		width, height, _ := media.ImageSize(img.Bytes)
 		row := wire.MediaImage{MimeType: img.MimeType, Width: width, Height: height, RevisedPrompt: img.RevisedPrompt}
 		if publish {
-			id, err := s.publishGeneratedImage(ctx, claims, roomID, fileNameOf(req.FileName, i, img.MimeType), img)
+			target := edit
+			if i > 0 {
+				target = nil // one edit is one version; the rest of a batch are files beside it
+			}
+			name := fileNameOf(req.FileName, i, img.MimeType)
+			if edit != nil {
+				name = fileNameOf(edit.FileName, i, img.MimeType)
+			}
+			pub, err := s.publishGeneratedImage(ctx, claims, *place, name, img, target)
 			if err != nil {
 				obs.ServerError(w, "publish the generated image failed", err)
 				httpx.Error(w, "the image is drawn, but publishing it into the room failed: try again", http.StatusBadGateway)
 				return
 			}
-			row.ArtifactID = id
+			row.ArtifactID, row.Version, row.FileName, row.Note = pub.ArtifactID, pub.Version, name, pub.Note
 		} else {
 			row.DataURL = "data:" + img.MimeType + ";base64," + base64Of(img.Bytes)
 		}
@@ -312,48 +341,191 @@ func (s *Service) runMediaImage(w http.ResponseWriter, r *http.Request, claims a
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
-// publishGeneratedImage publishes one drawn image into the room's Docs as
-// the member in claims (a job grant's requester): a file artifact of one
-// version, through the room service's own multipart publish route — the
-// same contract the bridge's deliverable publishing drives. It answers the
-// artifact id.
-func (s *Service) publishGeneratedImage(ctx context.Context, claims auth.Claims, roomID, name string, img media.Image) (string, error) {
+// publishedImage is where one drawn image landed: the artifact, its
+// version, and a note when it is not what was asked.
+type publishedImage struct {
+	ArtifactID string
+	Version    int
+	Note       string
+}
+
+// imagePlace is where drawn images land and whose pictures a call reads:
+// a room, its channel, and the source a version records (an agent's job
+// and its request; an app records none).
+type imagePlace struct {
+	RoomID, ChannelID string
+	SourceJobID       string
+	SourceSeq         int64
+	Summary           string
+}
+
+// jobImagePlace is an agent job's place: its room and channel, sourced to
+// the job and its request.
+func jobImagePlace(job *store.AgentJob) *imagePlace {
+	if job == nil {
+		return nil
+	}
+	return &imagePlace{RoomID: job.RoomID, ChannelID: job.ChannelID, SourceJobID: job.JobID, SourceSeq: job.MessageSeq, Summary: "generated by the AI"}
+}
+
+// publishGeneratedImage is the one owner of "a drawn image becomes room
+// content", as the member in claims (a job's requester, an app's
+// participant), in the place's room and channel, with its source. With
+// edit it publishes the edited file's
+// next version (editedFrom the version read), and when the file changed
+// meanwhile (409) a new file beside it, saying so; otherwise a new file of
+// one version, the room service minting its id.
+func (s *Service) publishGeneratedImage(ctx context.Context, claims auth.Claims, place imagePlace, name string, img media.Image, edit *imageEdit) (publishedImage, error) {
+	room := "/v1/rooms/" + url.PathEscape(place.RoomID) + "/artifacts"
+	if edit != nil {
+		v, err := s.publishImageVersion(ctx, claims, place, room, edit.ArtifactID, edit.Version, edit.Version, name, img)
+		var rbe *roomBackendError
+		if !errors.As(err, &rbe) || rbe.Status != http.StatusConflict {
+			pub := publishedImage{ArtifactID: edit.ArtifactID, Version: v}
+			if err == nil && v == edit.Version {
+				pub.Note = "the provider returned the image unchanged: no new version"
+			}
+			return pub, err
+		}
+		pub, err := s.publishGeneratedImage(ctx, claims, place, name, img, nil)
+		pub.Note = "the file changed meanwhile: saved as a new file"
+		return pub, err
+	}
 	kind := "file"
 	if strings.HasPrefix(img.MimeType, "image/") {
 		kind = "image"
 	}
-	artifactID := "artf_" + hexOf([]byte(roomID + "\x00" + claims.Subject + "\x00" + name))[:24]
-	create := map[string]any{"artifactId": artifactID, "kind": kind, "title": name, "fileName": name}
-	if err := s.roomBackendDo(ctx, backendHTTP, http.MethodPost, "/v1/rooms/"+url.PathEscape(roomID)+"/artifacts", "application/json", mustRaw(create), claims.Subject, claims.Tenant, nil); err != nil {
-		return "", fmt.Errorf("create the artifact: %w", err)
+	create := map[string]any{"kind": kind, "title": name, "fileName": name, "channelId": place.ChannelID}
+	var created wire.ArtifactReply
+	if err := s.roomBackendDo(ctx, backendHTTP, http.MethodPost, room, "application/json", mustRaw(create), claims.Subject, claims.Tenant, &created); err != nil {
+		return publishedImage{}, fmt.Errorf("create the artifact: %w", err)
 	}
-	// One blob version, like the bridge's own publish path.
+	artifactID := created.Artifact.ArtifactID
+	if artifactID == "" {
+		return publishedImage{}, errors.New("create the artifact: the reply names no artifact")
+	}
+	v, err := s.publishImageVersion(ctx, claims, place, room, artifactID, 0, 0, name, img)
+	return publishedImage{ArtifactID: artifactID, Version: v}, err
+}
+
+// publishImageVersion publishes one blob version of artifactID on top of
+// base (editedFrom 0: not an edit), like the bridge's own publish path.
+// It answers the version published.
+func (s *Service) publishImageVersion(ctx context.Context, claims auth.Claims, place imagePlace, room, artifactID string, base, editedFrom int, name string, img media.Image) (int, error) {
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
-	_ = mw.WriteField("baseVersion", "0")
-	_ = mw.WriteField("summary", "generated by the AI")
+	_ = mw.WriteField("baseVersion", strconv.Itoa(base))
+	_ = mw.WriteField("summary", place.Summary)
+	if place.SourceJobID != "" {
+		_ = mw.WriteField("sourceJobId", place.SourceJobID)
+	}
+	if place.SourceSeq > 0 {
+		_ = mw.WriteField("sourceSeq", strconv.FormatInt(place.SourceSeq, 10))
+	}
+	if editedFrom > 0 {
+		_ = mw.WriteField("editedFrom", strconv.Itoa(editedFrom))
+	}
 	h := textproto.MIMEHeader{}
 	h.Set("Content-Disposition", mime.FormatMediaType("form-data", map[string]string{"name": "file", "filename": name}))
 	h.Set("Content-Type", img.MimeType)
 	part, err := mw.CreatePart(h)
 	if err != nil {
-		return "", err
+		return 0, err
 	}
 	if _, err := part.Write(img.Bytes); err != nil {
-		return "", err
+		return 0, err
 	}
 	if err := mw.Close(); err != nil {
-		return "", err
+		return 0, err
 	}
-	path := "/v1/rooms/" + url.PathEscape(roomID) + "/artifacts/" + url.PathEscape(artifactID) + "/versions"
-	var reply struct {
-		Unchanged bool                  `json:"unchanged"`
-		Version   *wire.ArtifactVersion `json:"version"`
+	var reply wire.ArtifactReply
+	if err := s.roomBackendDo(ctx, backendHTTP, http.MethodPost, room+"/"+url.PathEscape(artifactID)+"/versions", mw.FormDataContentType(), buf.Bytes(), claims.Subject, claims.Tenant, &reply); err != nil {
+		return 0, fmt.Errorf("publish the version: %w", err)
 	}
-	if err := s.roomBackendDo(ctx, backendHTTP, http.MethodPost, path, mw.FormDataContentType(), buf.Bytes(), claims.Subject, claims.Tenant, &reply); err != nil {
-		return "", fmt.Errorf("publish the version: %w", err)
+	if reply.Version != nil {
+		return reply.Version.Version, nil
 	}
-	return artifactID, nil
+	return reply.Artifact.CurrentVersion, nil // the bytes were already the current version
+}
+
+// imageRoomInputs reads the place's room pictures into gen, as the member
+// in claims: the file to edit (req.ArtifactID; its next version is the
+// result) or, without one, the first input as the image to change, the
+// rest as references; and the region's mask. A call with no place (a
+// member's own) may not name room pictures. false: refused, answered.
+func (s *Service) imageRoomInputs(w http.ResponseWriter, r *http.Request, claims auth.Claims, place *imagePlace, req wire.MediaImageRequest, gen *media.ImageRequest) (*imageEdit, bool) {
+	if req.ArtifactID == "" && len(req.Inputs) == 0 && req.Region == nil {
+		return nil, true
+	}
+	if place == nil {
+		httpx.Error(w, "artifactId, region and inputs name a room's pictures (an agent's or a room app's call): send the image itself", http.StatusBadRequest)
+		return nil, false
+	}
+	ctx, roomID := r.Context(), place.RoomID
+	var edit *imageEdit
+	if id := strings.TrimSpace(req.ArtifactID); id != "" {
+		e, err := s.readEditTarget(ctx, claims, roomID, id)
+		if !imageInputOK(w, err) {
+			return nil, false
+		}
+		edit, gen.Input = &e, &e.Input
+	}
+	refs, err := s.readImageInputs(ctx, claims, roomID, req.Inputs)
+	if !imageInputOK(w, err) {
+		return nil, false
+	}
+	if gen.Input == nil && len(refs) > 0 {
+		gen.Input, refs = &refs[0], refs[1:]
+	}
+	gen.References = refs
+	if req.Region != nil {
+		if gen.Input == nil {
+			httpx.Error(w, "region needs an image to change (artifactId)", http.StatusBadRequest)
+			return nil, false
+		}
+		mask, err := media.EditMask(gen.Input.Bytes, media.Region{X: req.Region.X, Y: req.Region.Y, W: req.Region.W, H: req.Region.H})
+		if err != nil {
+			httpx.Error(w, "region: "+err.Error(), http.StatusBadRequest)
+			return nil, false
+		}
+		gen.Mask = mask
+	}
+	return edit, true
+}
+
+// imageInputOK answers a failed input read: a refused input 400 with its
+// sentence, anything else 502.
+func imageInputOK(w http.ResponseWriter, err error) bool {
+	var refused errImageInput
+	switch {
+	case err == nil:
+		return true
+	case errors.As(err, &refused):
+		httpx.Error(w, refused.Error(), http.StatusBadRequest)
+	default:
+		obs.ServerError(w, "read an image input failed", err)
+		httpx.Error(w, "reading the image failed: try again", http.StatusBadGateway)
+	}
+	return false
+}
+
+// imageAuditDetail is the audit detail's note on an edit: what kind of
+// call it was, never the content.
+func imageAuditDetail(gen media.ImageRequest, edit *imageEdit) string {
+	var parts []string
+	if edit != nil {
+		parts = append(parts, "edit")
+	}
+	if len(gen.Mask) > 0 {
+		parts = append(parts, "region")
+	}
+	if n := len(gen.References); n > 0 {
+		parts = append(parts, strconv.Itoa(n)+" references")
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return " (" + strings.Join(parts, ", ") + ")"
 }
 
 // mustRaw is a map's JSON bytes (a create body).
@@ -364,10 +536,6 @@ func mustRaw(v any) []byte {
 	}
 	return raw
 }
-
-// hexOf is the bytes' hex (an artifact id derivation; ids.Hex would work
-// too — this keeps the derivation local and uninteresting).
-func hexOf(b []byte) string { return hex.EncodeToString(b) }
 
 // fileNameOf names the i-th image of a batch: the asked name (the first),
 // else a name derived from nothing but the index and the MIME type.
@@ -400,7 +568,7 @@ func decodeDataURLImage(dataURL string) ([]byte, string, error) {
 	if err != nil || len(b) == 0 || len(b) > wire.MaxMediaImageBytes {
 		return nil, "", errBadDataURL
 	}
-	mimeType := sniffMIME(b)
+	mimeType := media.SniffImage(b)
 	if mimeType == "" {
 		return nil, "", errBadDataURL
 	}
@@ -409,20 +577,6 @@ func decodeDataURLImage(dataURL string) ([]byte, string, error) {
 
 // errBadDataURL: an input image that is not an inline PNG, JPEG or WebP.
 var errBadDataURL = errors.New("not an inline image")
-
-// sniffMIME is the image sniff of the gateway's media path (media.Image's
-// sniff spelled here; the owner is the adapter's).
-func sniffMIME(b []byte) string {
-	switch {
-	case len(b) >= 8 && string(b[:8]) == "\x89PNG\r\n\x1a\n":
-		return "image/png"
-	case len(b) >= 3 && b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF:
-		return "image/jpeg"
-	case len(b) >= 12 && string(b[:4]) == "RIFF" && string(b[8:12]) == "WEBP":
-		return "image/webp"
-	}
-	return ""
-}
 
 // readRoomAttachmentAudio reads a room attachment's bytes as the member in
 // claims, refusing anything that is not audio. It answers the bytes, the
@@ -445,9 +599,9 @@ func (s *Service) readRoomAttachmentAudio(ctx context.Context, claims auth.Claim
 // auditMediaRun records one media model call: the capability's name, the
 // model and the latency, never the audio, the prompt, the transcript or the
 // image (auditModelRun's shape, kind assist).
-func (s *Service) auditMediaRun(ctx context.Context, claims auth.Claims, name string, usage wire.AssistUsage, runErr error) {
+func (s *Service) auditMediaRun(ctx context.Context, claims auth.Claims, name, kind string, usage wire.AssistUsage, runErr error) {
 	modelName := firstNonEmpty(usage.Model, "")
-	detail := "media " + name + ", model " + modelName + ", " + itoa(usage.LatencyMs) + " ms"
+	detail := "media " + name + kind + ", model " + modelName + ", " + itoa(usage.LatencyMs) + " ms"
 	outcome := wire.AuditOutcomeAllow
 	if runErr != nil {
 		outcome, detail = "failed", detail+", failed: "+mediaErrClass(runErr)
@@ -516,13 +670,6 @@ func timeSinceMs(s *Service, start time.Time) int64 { return time.Since(start).M
 func base64Of(b []byte) string { return base64.StdEncoding.EncodeToString(b) }
 
 // pngSize reads a PNG's IHDR dimensions; 0, 0 when the bytes are not a PNG
-// (the client sizes the image from its own load).
-func pngSize(b []byte) (int, int) {
-	if len(b) < 24 || string(b[:8]) != "\x89PNG\r\n\x1a\n" || string(b[12:16]) != "IHDR" {
-		return 0, 0
-	}
-	return int(binary.BigEndian.Uint32(b[16:20])), int(binary.BigEndian.Uint32(b[20:24]))
-}
 
 // itoa is strconv.Itoa, spelled for the audit detail lines.
 func itoa(n int64) string { return fmt.Sprintf("%d", n) }

@@ -148,11 +148,49 @@ declare global {
      *  width, height, revisedPrompt?}]), never a link out. With image (a
      *  previous reply's dataUrl) the provider changes that image instead of
      *  drawing a new one. aspect: "square" (default) | "landscape" |
-     *  "portrait". Signed-in callers only, like ai itself. */
-    ai.image(req: { prompt: string; aspect?: "square" | "landscape" | "portrait"; count?: number; image?: string }): Promise<{ images: { dataUrl: string; mimeType: string; width: number; height: number; revisedPrompt?: string }[] }>;
+     *  "portrait". publish: true puts the pictures in the room's Docs as
+     *  the caller's files (each image then carries artifactId, version and
+     *  fileName instead of dataUrl); artifactId edits a room picture as its
+     *  next version, region changes only that part (image pixels), inputs
+     *  are room pictures (art_…) or attachments (att_…) to use as
+     *  references. Signed-in callers only, like ai itself. */
+    ai.image(req: {
+      prompt: string;
+      aspect?: "square" | "landscape" | "portrait";
+      count?: number;
+      image?: string;
+      publish?: boolean;
+      fileName?: string;
+      artifactId?: string;
+      region?: { x: number; y: number; w: number; h: number };
+      inputs?: string[];
+    }): Promise<{ images: { dataUrl?: string; artifactId?: string; version?: number; fileName?: string; note?: string; mimeType: string; width: number; height: number; revisedPrompt?: string }[] }>;
     /** Turns spoken audio (a Blob or File from getUserMedia or an input) into
      *  text. Signed-in callers only, like ai itself. */
     ai.voice(blob: Blob, filename?: string): Promise<{ text: string }>;
+    /** Asks the organization's decision model calibrated questions about an
+     *  input (a string, or user messages of input_text / input_image parts
+     *  with data URLs): 1 to 128 questions, answered in order. predicate:
+     *  {probability} of yes; choice (2 to 255 choices): {choice, confidence,
+     *  probabilities: [{value, probability}]}; score (2 to 10 levels, lowest
+     *  first): {score (a level index, fractional), confidence,
+     *  probabilities: [{value (the level index), label, probability}]}; an
+     *  answer of type "refusal" is the model declining that one question.
+     *  For routing, triage and classification where a number beats free
+     *  text. Signed-in callers only, like ai itself. */
+    ai.decide(req: {
+      input: string | { role: "user"; content: ({ type: "input_text"; text: string } | { type: "input_image"; image_url: string })[] }[];
+      questions: (
+        | { type: "predicate"; name?: string; instructions: string }
+        | { type: "choice"; name?: string; instructions: string; choices: { value: string; description?: string }[] }
+        | { type: "score"; name?: string; instructions: string; levels: { label: string; description?: string }[] }
+      )[];
+      model?: string;
+    }): Promise<{
+      model: string;
+      answers: { type: "predicate" | "choice" | "score" | "refusal"; name?: string; probability?: number; choice?: string; score?: number; confidence?: number; probabilities?: { value: string | number; label?: string; probability: number }[] }[];
+      usage: { input_tokens: number; output_tokens: number };
+    }>;
     /** Sends a notice through the organization's notifications (its chat
      *  bot, desktop, browser push: whatever each person uses). to: "room"
      *  is the room's members (any signed-in caller); a list of logins (the

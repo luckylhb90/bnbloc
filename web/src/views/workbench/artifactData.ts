@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api, type Artifact, type ArtifactVersion } from "@/lib/api";
-import { inferMime, versionFacts } from "@/lib/artifactFiles";
+import { copyName, inferMime, versionFacts } from "@/lib/artifactFiles";
 import { workGalleryApi } from "@/lib/workGalleryApi";
 import { myAppsApi } from "@/lib/myAppsApi";
 import { fileInfoFromFacts } from "@/views/artifact/fileInfo";
@@ -255,4 +255,27 @@ export async function restoreVersion(roomId: string, artifact: Artifact, version
       : await api.publishArtifactVersion(roomId, artifact.artifactId, { baseVersion: base, content: await bytes.text(), summary });
   invalidateArtifacts(roomId, artifact.artifactId);
   return res.artifact.currentVersion;
+}
+
+/** Copies a file's version into a new file of the same room, kind and
+ *  channel ("<name> copy"): the one copy, for the workbench's Copy and for
+ *  any file kind (docs/prd/2026-10-17-image-generation-redesign.md §2.4).
+ *  Its first version's summary says where it came from. Resolves to the
+ *  new file's id. */
+export async function copyArtifact(roomId: string, artifact: Artifact, version: number, meta: ArtifactVersion | undefined): Promise<string> {
+  const bytes = await loadVersionBlob(roomId, artifact, version, meta);
+  const name = copyName(artifact.fileName || artifact.title);
+  const summary = `Copied from ${artifact.fileName || artifact.title} v${version}`;
+  const created = await api.createArtifact(roomId, {
+    kind: artifact.kind,
+    title: copyName(artifact.title),
+    fileName: artifact.fileName ? name : undefined,
+    channelId: artifact.channelId || undefined,
+    language: artifact.language,
+    ...(meta?.storage === "blob" ? {} : { content: await bytes.text(), summary }),
+  });
+  const id = created.artifact.artifactId;
+  if (meta?.storage === "blob") await api.publishArtifactFile(roomId, id, { file: bytes, fileName: name, baseVersion: 0, summary });
+  invalidateArtifacts(roomId);
+  return id;
 }

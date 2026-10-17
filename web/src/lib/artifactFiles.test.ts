@@ -1,4 +1,4 @@
-import { SITE_MIME, artifactExtension, artifactFileName, deliverableTypeLabel, downloadFileName, fileCategory, fileExtension, fileTypeLabel, inferMime, isPreviewableImage, isTextual } from "./artifactFiles.ts";
+import { SITE_MIME, artifactExtension, copyName, artifactFileName, deliverableTypeLabel, downloadFileName, fileCategory, fileExtension, fileTypeLabel, inferMime, isPreviewableImage, isTextual } from "./artifactFiles.ts";
 
 function test(name: string, fn: () => void): void {
   try {
@@ -77,4 +77,10 @@ test("a web app (site) is named by its title, labelled Website, saved as .tar", 
   eq(isTextual(site), false, "an archive is not text");
   eq(downloadFileName({ name: "Todo app", mimeType: SITE_MIME }), "Todo app.tar", "archive download name");
   eq(downloadFileName({ name: "a.png", mimeType: "image/png" }), "a.png", "other files keep their name");
+});
+
+test("a copy keeps the extension", () => {
+  eq(copyName("poster.png"), "poster copy.png", "file");
+  eq(copyName("Notes"), "Notes copy", "no extension");
+  eq(copyName(".env"), ".env copy", "a leading dot is the name");
 });

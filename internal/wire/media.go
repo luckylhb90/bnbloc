@@ -125,14 +125,35 @@ type MediaImageRequest struct {
 	// new one: a data URL the caller holds (a previous reply's, an
 	// attachment's bytes the caller may read). At most MaxMediaImageBytes.
 	Image string `json:"image,omitempty"`
-	// Publish, when true under a job grant (?job=&room=), publishes each
-	// drawn image into the room's Docs as a deliverable of the job: the
-	// reply carries each image's artifactId. A member's or an app's call
+	// Publish, when true in a room (an agent's job grant, ?job=&room=, or a
+	// room app's page), publishes each drawn image into the room's Docs: the
+	// reply carries each image's artifactId. A member's own call (no room)
 	// never publishes.
 	Publish bool `json:"publish,omitempty"`
 	// FileName, with Publish, names the first image (poster.png); the rest
 	// are numbered (poster-2.png…).
 	FileName string `json:"fileName,omitempty"`
+	// ArtifactID, in a room (as Publish), is the room image to edit: it is
+	// read as the caller (a job's requester, an app's participant), and the
+	// result is published as its next version
+	// (docs/prd/2026-10-17-image-generation-redesign.md §2.2).
+	ArtifactID string `json:"artifactId,omitempty"`
+	// Region, with an edit, is the part of the image to change, in its own
+	// pixels: the provider gets a mask.
+	Region *MediaImageRegion `json:"region,omitempty"`
+	// Inputs, in a room, are room files (art_…) and attachments (att_…) the
+	// prompt uses as references, at most MaxMediaImageInputs, read as the
+	// caller. Without ArtifactID the first is the image to change.
+	Inputs []string `json:"inputs,omitempty"`
+}
+
+// MediaImageRegion is a rectangle of an image in its own pixels, origin at
+// the top-left.
+type MediaImageRegion struct {
+	X int `json:"x"`
+	Y int `json:"y"`
+	W int `json:"w"`
+	H int `json:"h"`
 }
 
 // MediaImageReply is POST /v1/media/image's answer: the images inline
@@ -145,8 +166,13 @@ type MediaImageReply struct {
 type MediaImage struct {
 	DataURL string `json:"dataUrl,omitempty"`
 	// ArtifactID, when the call published, is the room artifact the image
-	// became (and DataURL is empty: the image is not also inlined).
+	// became (and DataURL is empty: the image is not also inlined); Version
+	// its version (above 1 for an edit), FileName its name, and Note what
+	// happened when it is not what was asked (an edit saved as a new file).
 	ArtifactID string `json:"artifactId,omitempty"`
+	Version    int    `json:"version,omitempty"`
+	FileName   string `json:"fileName,omitempty"`
+	Note       string `json:"note,omitempty"`
 	MimeType   string `json:"mimeType"`
 	Width      int    `json:"width"`
 	Height     int    `json:"height"`

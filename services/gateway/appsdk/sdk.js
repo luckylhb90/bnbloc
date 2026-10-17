@@ -289,21 +289,41 @@
   // count?, image?} to {images: [{dataUrl, mimeType, width, height}]}, the
   // images inline, never a link out. count draws several in one call (at
   // most 4); image (a previous reply's dataUrl) asks the provider to change
-  // that image instead of drawing a new one. For signed-in callers only,
-  // like ai itself.
+  // that image instead of drawing a new one. publish: true puts them in the
+  // room's Docs as the caller's files instead (images: [{artifactId,
+  // version, fileName}]); artifactId edits a room picture as its next
+  // version, region {x, y, w, h} changes only that part, inputs are room
+  // pictures to use as references. For signed-in callers only, like ai
+  // itself.
   ai.image = function (req) {
     if (!req || typeof req.prompt !== "string" || !req.prompt.trim()) return Promise.reject(appError(400, "", "ai.image needs a prompt"));
     var body = { prompt: req.prompt };
     if (req.aspect) body.aspect = req.aspect;
     if (req.count) body.count = req.count;
     if (req.image) body.image = req.image;
-    if (memory) return memory.aiImage(body);
+    if (req.publish) body.publish = true;
+    if (req.fileName) body.fileName = req.fileName;
+    if (req.artifactId) body.artifactId = req.artifactId;
+    if (req.region) body.region = req.region;
+    if (req.inputs) body.inputs = req.inputs;
+    if (memory) return memory.ai.image(body);
     return call("POST", "ai/image", body);
+  };
+  // ai.decide asks the organization's decision model: {input, questions,
+  // model?} to {answers, usage}, one answer per question in order — a
+  // probability for a predicate, a choice with a probability per value, a
+  // score on a scale. For signed-in callers only, like ai itself.
+  ai.decide = function (req) {
+    if (!req || req.input === undefined || !Array.isArray(req.questions) || !req.questions.length) return Promise.reject(appError(400, "", "ai.decide needs an input and questions"));
+    var body = { input: req.input, questions: req.questions };
+    if (req.model) body.model = req.model;
+    if (memory) return memory.ai.decide();
+    return call("POST", "ai/decide", body);
   };
   ai.voice = function (blob, filename) {
     if (!blob || typeof blob.size !== "number" || !blob.size) return Promise.reject(appError(400, "", "ai.voice takes audio (a Blob or File)"));
     if (blob.size > MAX_FILE_BYTES) return Promise.reject(appError(413, "", "ai.voice takes at most " + MAX_FILE_BYTES + " bytes of audio"));
-    if (memory) return memory.aiVoice();
+    if (memory) return memory.ai.voice();
     var path = "ai/voice" + (filename ? "?filename=" + enc(filename) : "");
     return send(path, { method: "POST", headers: { "Content-Type": blob.type || "application/octet-stream" }, body: blob }).then(parse);
   };
@@ -627,6 +647,7 @@
     }
     demoAI.image = function () { return refuse(409, "the demo does not draw images"); };
     demoAI.voice = function () { return refuse(409, "the demo does not transcribe audio"); };
+    demoAI.decide = function () { return refuse(409, "the demo does not ask a decision model"); };
 
     return { call: call, subscribe: subscribe, upload: upload, fileURL: fileURL, ai: demoAI };
   }

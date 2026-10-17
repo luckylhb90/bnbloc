@@ -152,9 +152,15 @@ type ImageRequest struct {
 	// Input, when set, is the image to change (an edit): its bytes and MIME
 	// type. The caller checks the caller may read it.
 	Input *ImageInput
+	// Mask, with Input, is the edit's mask (EditMask): a PNG the size of
+	// Input, transparent where the image may change.
+	Mask []byte
+	// References are further images the prompt names (a style, a logo),
+	// sent beside Input as more image parts; an edit needs Input.
+	References []ImageInput
 }
 
-// ImageInput is the image an edit changes.
+// ImageInput is the image an edit changes, or a reference.
 type ImageInput struct {
 	Bytes    []byte
 	MimeType string

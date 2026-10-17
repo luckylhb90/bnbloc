@@ -107,14 +107,33 @@ func (s *Service) serveAppAI(w http.ResponseWriter, r *http.Request, c appCapabi
 // 2026-10-16-voice-and-image-generation.md §5): an app's page draws images
 // on the organization's media provider — runMediaImage, the same rails as
 // app.ai (a signed-in caller, the caller's assist rate, audited with the
-// app's id, the images never audited).
+// app's id, the images never audited). The app's room is its place: with
+// publish the pictures become room files the participant authored, and
+// the page may edit or reference the room's pictures
+// (docs/prd/2026-10-17-image-generation-redesign.md §2.7).
 func (s *Service) serveAppAIImage(w http.ResponseWriter, r *http.Request, c appCapability) {
 	w.Header().Set("Cache-Control", "no-store")
 	if c.scope.Kind != svcauth.AppMember {
 		writeAppErr(w, errAppAIVisitor)
 		return
 	}
-	s.runMediaImage(w, r, auth.Claims{Subject: c.scope.Participant, Tenant: c.tenant}, readJSONMediaImage, "app:"+c.scope.AppID+":image")
+	place := &imagePlace{RoomID: c.scope.RoomID, Summary: "drawn in an app"}
+	s.runMediaImage(w, r, contentActor{Claims: auth.Claims{Subject: c.scope.Participant, Tenant: c.tenant}}, place, readJSONMediaImage, "app:"+c.scope.AppID+":image")
+}
+
+// serveAppAIDecide answers POST ~app/ai/decide (docs/prd/
+// 2026-10-17-decision-models.md): an app's page asks the organization's
+// decision model — runDecision, the same rails as the member route (the
+// caller's assist rate, audited with the app's id, never the content). A
+// signed-in participant only; the frame carries no member session, so a
+// caller-auth provider refuses.
+func (s *Service) serveAppAIDecide(w http.ResponseWriter, r *http.Request, c appCapability) {
+	w.Header().Set("Cache-Control", "no-store")
+	if c.scope.Kind != svcauth.AppMember {
+		writeAppErr(w, errAppAIVisitor)
+		return
+	}
+	s.runDecision(w, r, auth.Claims{Subject: c.scope.Participant, Tenant: c.tenant}, "", "app:"+c.scope.AppID+":decide", decisionList)
 }
 
 // serveAppAIVoice answers POST ~app/ai/voice: an app's page turns spoken

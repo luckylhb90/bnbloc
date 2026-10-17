@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { MEDIA_ADAPTER_KINDS, mediaProviderApi } from "@/lib/media";
+import { MEDIA_ADAPTER_KINDS, mediaProviderApi, type MediaProviderApi } from "@/lib/media";
+import { DECISION_ADAPTER_KINDS, decisionProviderApi } from "@/lib/decisions";
 import { errorText } from "@/lib/errors";
 import { relativeTime } from "@/lib/format";
 import { Button } from "@/ui/Button";
@@ -16,11 +17,19 @@ import { useToast } from "@/ui/Toast";
 // protocol family (kind), the endpoint, the model and a sealed key, with
 // the adapter's own knobs as params. Test makes one real short call.
 
-function MediaProviderFields({ cap, label, hint }: { readonly cap: "transcribe" | "image"; readonly label: string; readonly hint: string }) {
+// ProviderFields is one provider's form: the media capabilities' and the
+// decision model's share it (the same settings shape). id keys the reload.
+function ProviderFields({ id, api, kinds, label, hint, modelsPlaceholder }: {
+  readonly id: string;
+  readonly api: MediaProviderApi;
+  readonly kinds: readonly string[];
+  readonly label: string;
+  readonly hint: string;
+  readonly modelsPlaceholder: string;
+}) {
   const toast = useToast();
-  const api = mediaProviderApi(cap);
   const [saved, setSaved] = useState<Awaited<ReturnType<typeof api.get>> | null>(null);
-  const [kind, setKind] = useState<string>(MEDIA_ADAPTER_KINDS[0]);
+  const [kind, setKind] = useState<string>(kinds[0]);
   const [baseUrl, setBaseUrl] = useState("");
   const [models, setModels] = useState("");
   const [orgHosts, setOrgHosts] = useState("");
@@ -33,7 +42,7 @@ function MediaProviderFields({ cap, label, hint }: { readonly cap: "transcribe" 
 
   const adopt = (c: Awaited<ReturnType<typeof api.get>>) => {
     setSaved(c);
-    setKind(c.kind || MEDIA_ADAPTER_KINDS[0]);
+    setKind(c.kind || kinds[0]);
     setBaseUrl(c.baseUrl);
     setModels((c.models ?? []).join(", "));
     setOrgHosts((c.orgHosts ?? []).join(", "));
@@ -48,7 +57,8 @@ function MediaProviderFields({ cap, label, hint }: { readonly cap: "transcribe" 
     } catch (e) {
       setError(errorText(e, "Could not load the provider"));
     }
-  }, [cap]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
 
   useEffect(() => {
     void load();
@@ -123,7 +133,7 @@ function MediaProviderFields({ cap, label, hint }: { readonly cap: "transcribe" 
         <div className="mt-4 grid gap-4 md:grid-cols-2">
           <Field label="Wire protocol" hint="The provider's API family.">
             <Select value={kind} onChange={(e) => setKind(e.target.value)}>
-              {MEDIA_ADAPTER_KINDS.map((k) => (
+              {kinds.map((k) => (
                 <option key={k} value={k}>
                   {k}
                 </option>
@@ -134,7 +144,7 @@ function MediaProviderFields({ cap, label, hint }: { readonly cap: "transcribe" 
             <Input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://llm.example.com/v1" />
           </Field>
           <Field label="Models" hint="The models the provider serves (comma-separated; the first is the default callers get).">
-            <Input value={models} onChange={(e) => setModels(e.target.value)} placeholder="gemini-nano-banana-2.1, gpt-image-2" />
+            <Input value={models} onChange={(e) => setModels(e.target.value)} placeholder={modelsPlaceholder} />
           </Field>
           <Field label="Organization hosts" hint="Hosts organizations may use for their own provider (comma or one per line). None: organizations use this provider.">
             <Input value={orgHosts} onChange={(e) => setOrgHosts(e.target.value)} placeholder="llm.example.com" />
@@ -195,25 +205,40 @@ function orgHostList(text: string): string[] {
     .filter(Boolean);
 }
 
-// PlatformMediaProviders is the two capability cards.
+// PlatformMediaProviders is the media capabilities' cards and the decision
+// model's.
 export function PlatformMediaProviders() {
   return (
     <section className="flex flex-col gap-4">
       <div>
         <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--color-fg)]">Media providers</h2>
         <p className="mt-1 text-sm text-[var(--color-fg-muted)]">
-          The models behind voice input in the composer (speech to text) and image generation in rooms and apps. Any provider whose API follows one of the wire protocol families below.
+          The models behind voice input in the composer (speech to text), image generation in rooms and apps, and decisions (calibrated answers for routing and triage). Any provider whose API follows one of the wire protocol families below.
         </p>
       </div>
-      <MediaProviderFields
-        cap="transcribe"
+      <ProviderFields
+        id="transcribe"
+        api={mediaProviderApi("transcribe")}
+        kinds={MEDIA_ADAPTER_KINDS}
         label="Speech to text"
         hint="Voice input in the composer and app.ai.voice send audio here; agents read recordings through the transcribe_audio tool."
+        modelsPlaceholder="whisper-1"
       />
-      <MediaProviderFields
-        cap="image"
+      <ProviderFields
+        id="image"
+        api={mediaProviderApi("image")}
+        kinds={MEDIA_ADAPTER_KINDS}
         label="Image generation"
         hint="Agents' generate_image and app.ai.image draw here; the image lands in the room's Docs."
+        modelsPlaceholder="image-model-a, image-model-b"
+      />
+      <ProviderFields
+        id="decide"
+        api={decisionProviderApi()}
+        kinds={DECISION_ADAPTER_KINDS}
+        label="Decision model"
+        hint="Calibrated answers (a yes/no probability, a choice, a score) for apps' app.ai.decide, components and POST /v1/decisions. Test asks one yes/no question."
+        modelsPlaceholder="judge-a, judge-b"
       />
     </section>
   );

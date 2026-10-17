@@ -161,9 +161,12 @@ type Service struct {
 	// appLimiters an interactive app's data calls per IP, link and
 	// participant, reads and writes apart (appRates).
 	visitorLimiter lazyLimiter
-	// assistLimiter throttles a member's AI assist runs (assistRate).
-	assistLimiter lazyLimiter
-	appLimiters   [appDims]struct{ read, write lazyLimiter }
+	// assistLimiter throttles a member's AI assist runs (assistRate);
+	// decisionLimiter their decision calls (decisionRate), a step loop's
+	// pace rather than a person's.
+	assistLimiter   lazyLimiter
+	decisionLimiter lazyLimiter
+	appLimiters     [appDims]struct{ read, write lazyLimiter }
 	// appNotifyLimiters bound app notices per app and per caller
 	// (app_notify.go).
 	appNotifyLimiters struct{ app, caller lazyLimiter }

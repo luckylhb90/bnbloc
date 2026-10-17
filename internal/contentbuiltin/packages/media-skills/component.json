@@ -1,7 +1,7 @@
 {
   "kind": "bnbloc.skill.package/v1",
   "name": "media-skills",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "displayName": "Media skills",
   "description": "Drawing images and reading recordings through the room's media tools, when the deployment provides them.",
   "category": "general",

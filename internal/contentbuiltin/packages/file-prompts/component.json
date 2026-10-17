@@ -1,7 +1,7 @@
 {
   "kind": "bnbloc.prompt.package/v1",
   "name": "file-prompts",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "displayName": "File prompts",
   "description": "Suggested requests for a file, offered in its Ask AI panel and in a room whose workbench shows it (decks, documents, sheets, PDFs, Markdown, tables, images, video and audio), and for the part of it a member selects (a slide, cells, an image area, a time range, a passage of a PDF).",
   "category": "general",
@@ -355,7 +355,7 @@
     {
       "id": "image-variants",
       "title": "Make variations",
-      "body": "Make two variations of this image with the same subject and a different style.",
+      "body": "Draw two variations of this image as new files, with the same subject and a different style. Leave this file as it is.",
       "starter": true,
       "files": {
         "mimeTypes": [
@@ -538,7 +538,7 @@
     {
       "id": "sel-region-remove",
       "title": "Remove this",
-      "body": "Remove what is in the selected area and fill it to match its surroundings. Leave the rest of the image as it is.",
+      "body": "Edit this image with the image tool: remove what is in the selected area and fill it to match its surroundings. Publish it as this file's next version; leave the rest of the image as it is.",
       "starter": true,
       "files": {
         "mimeTypes": [
@@ -552,21 +552,7 @@
     {
       "id": "sel-region-enhance",
       "title": "Enhance this part",
-      "body": "Sharpen and clean up the selected area. Leave the rest of the image as it is.",
-      "starter": true,
-      "files": {
-        "mimeTypes": [
-          "image/*"
-        ]
-      },
-      "selection": [
-        "region"
-      ]
-    },
-    {
-      "id": "sel-region-crop",
-      "title": "Crop to this",
-      "body": "Crop the image to the selected area.",
+      "body": "Edit this image with the image tool: sharpen and clean up the selected area. Publish it as this file's next version; leave the rest of the image as it is.",
       "starter": true,
       "files": {
         "mimeTypes": [

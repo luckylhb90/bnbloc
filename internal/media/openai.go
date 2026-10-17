@@ -116,9 +116,9 @@ func (a *openAICompatible) Generate(ctx context.Context, p Provider, req ImageRe
 			body[strings.TrimPrefix(k, paramImagePrefix)] = v
 		}
 	}
-	imgs, err := postImages(ctx, p, body, req.Input, true)
+	imgs, err := postImages(ctx, p, body, req, true)
 	if errors.Is(err, errBadRequest) { // the provider refused the parameters: retry once plainly
-		imgs, err = postImages(ctx, p, body, req.Input, false)
+		imgs, err = postImages(ctx, p, body, req, false)
 	}
 	if err != nil {
 		return nil, err
@@ -128,7 +128,8 @@ func (a *openAICompatible) Generate(ctx context.Context, p Provider, req ImageRe
 
 // postImages posts the generation (or edit) body, asking for b64_json when
 // asked, and decodes every inline image of the reply.
-func postImages(ctx context.Context, p Provider, body map[string]any, input *ImageInput, b64 bool) ([]Image, error) {
+func postImages(ctx context.Context, p Provider, body map[string]any, ir ImageRequest, b64 bool) ([]Image, error) {
+	input := ir.Input
 	if b64 {
 		body["response_format"] = "b64_json"
 	} else {
@@ -137,9 +138,11 @@ func postImages(ctx context.Context, p Provider, body map[string]any, input *Ima
 	var req *http.Request
 	var err error
 	if input != nil {
-		// An edit: the model, the prompt and the input image as parts. The
-		// body's fields ride along as parts too; the extra JSON-only knobs
-		// (size, n) stay fields.
+		// An edit: the model, the prompt and the input image as parts (the
+		// image to change, then the references: "image" for one, "image[]"
+		// for several, the edits endpoint's two spellings), and the mask.
+		// The body's fields ride along as parts too; the extra JSON-only
+		// knobs (size, n) stay fields.
 		var buf bytes.Buffer
 		mw := multipart.NewWriter(&buf)
 		for k, v := range body {
@@ -152,17 +155,22 @@ func postImages(ctx context.Context, p Provider, body map[string]any, input *Ima
 				}
 			}
 		}
-		fh := textproto.MIMEHeader{}
-		fh.Set("Content-Disposition", mime.FormatMediaType("form-data", map[string]string{"name": "image", "filename": "image"}))
-		fh.Set("Content-Type", input.MimeType)
-		part, werr := mw.CreatePart(fh)
-		if werr != nil {
-			return nil, werr
+		images := append([]ImageInput{*input}, ir.References...)
+		field := "image"
+		if len(images) > 1 {
+			field = "image[]"
 		}
-		if _, werr = part.Write(input.Bytes); werr != nil {
-			return nil, werr
+		for i, img := range images {
+			if werr := writeImagePart(mw, field, fmt.Sprintf("image-%d", i+1), img); werr != nil {
+				return nil, werr
+			}
 		}
-		if werr = mw.Close(); werr != nil {
+		if len(ir.Mask) > 0 {
+			if werr := writeImagePart(mw, "mask", "mask.png", ImageInput{Bytes: ir.Mask, MimeType: "image/png"}); werr != nil {
+				return nil, werr
+			}
+		}
+		if werr := mw.Close(); werr != nil {
 			return nil, werr
 		}
 		req, err = http.NewRequestWithContext(ctx, http.MethodPost,
@@ -217,7 +225,7 @@ func postImages(ctx context.Context, p Provider, body map[string]any, input *Ima
 		if err != nil || len(b) == 0 || len(b) > wire.MaxMediaImageBytes {
 			return nil, fmt.Errorf("%w: the reply's image is not readable base64 within %d bytes", ErrProviderUnreachable, wire.MaxMediaImageBytes)
 		}
-		mime := sniffImage(b)
+		mime := SniffImage(b)
 		if mime == "" {
 			return nil, fmt.Errorf("%w: the reply's image is not a PNG, JPEG or WebP", ErrProviderUnreachable)
 		}
@@ -289,9 +297,9 @@ func capText(text string, max int) string {
 	return string(cut)
 }
 
-// sniffImage reports the image's MIME type from its magic bytes (PNG, JPEG
+// SniffImage reports the image's MIME type from its magic bytes (PNG, JPEG
 // or WebP), "" when it is none of them.
-func sniffImage(b []byte) string {
+func SniffImage(b []byte) string {
 	switch {
 	case len(b) >= 8 && string(b[:8]) == "\x89PNG\r\n\x1a\n":
 		return "image/png"
@@ -323,4 +331,17 @@ func providerError(resp *http.Response) *ProviderError {
 		msg = string(r[:300]) + "…"
 	}
 	return &ProviderError{Status: resp.StatusCode, Message: msg}
+}
+
+// writeImagePart writes one image as a multipart file part.
+func writeImagePart(mw *multipart.Writer, field, filename string, img ImageInput) error {
+	h := textproto.MIMEHeader{}
+	h.Set("Content-Disposition", mime.FormatMediaType("form-data", map[string]string{"name": field, "filename": filename}))
+	h.Set("Content-Type", img.MimeType)
+	part, err := mw.CreatePart(h)
+	if err != nil {
+		return err
+	}
+	_, err = part.Write(img.Bytes)
+	return err
 }

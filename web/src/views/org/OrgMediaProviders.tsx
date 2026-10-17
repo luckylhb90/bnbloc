@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { mediaProviderApi, type MediaProviderUpdateBody, type OrgMediaProviderView } from "@/lib/media";
+import { mediaProviderApi, type MediaProviderApi, type MediaProviderUpdateBody, type OrgMediaProviderView } from "@/lib/media";
+import { decisionProviderApi } from "@/lib/decisions";
 import { errorText } from "@/lib/errors";
 import { Button } from "@/ui/Button";
 import { Badge } from "@/ui/Card";
@@ -13,7 +14,9 @@ import { useToast } from "@/ui/Toast";
 // platform allows. Hidden when the platform allows none. An empty base URL
 // goes back to the platform's provider.
 
-function OrgProviderFields({ cap, label }: { readonly cap: "transcribe" | "image"; readonly label: string }) {
+// OrgProviderFields is one provider (a media capability or the decision
+// model: the same settings shape). id keys the reload.
+function OrgProviderFields({ id, api, label }: { readonly id: string; readonly api: MediaProviderApi; readonly label: string }) {
   const toast = useToast();
   const [saved, setSaved] = useState<OrgMediaProviderView | null>(null);
   const [baseUrl, setBaseUrl] = useState("");
@@ -23,7 +26,6 @@ function OrgProviderFields({ cap, label }: { readonly cap: "transcribe" | "image
   const [replacing, setReplacing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const api = mediaProviderApi(cap, "org");
 
   const load = useCallback(async () => {
     try {
@@ -40,7 +42,7 @@ function OrgProviderFields({ cap, label }: { readonly cap: "transcribe" | "image
       setSaved(null); // no org provider surface (an older gateway, or none allowed)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cap]);
+  }, [id]);
 
   useEffect(() => {
     void load();
@@ -122,12 +124,14 @@ function OrgProviderFields({ cap, label }: { readonly cap: "transcribe" | "image
   );
 }
 
-// OrgMediaProviders is the two capability cards.
+// OrgMediaProviders is the media capabilities' cards and the decision
+// model's.
 export function OrgMediaProviders() {
   return (
     <div className="mt-2 flex flex-col gap-3">
-      <OrgProviderFields cap="transcribe" label="Speech to text" />
-      <OrgProviderFields cap="image" label="Image generation" />
+      <OrgProviderFields id="transcribe" api={mediaProviderApi("transcribe", "org")} label="Speech to text" />
+      <OrgProviderFields id="image" api={mediaProviderApi("image", "org")} label="Image generation" />
+      <OrgProviderFields id="decide" api={decisionProviderApi("org")} label="Decision model" />
     </div>
   );
 }

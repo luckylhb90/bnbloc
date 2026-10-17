@@ -4,6 +4,7 @@ import {
   ArrowCounterClockwiseIcon,
   ArrowSquareOutIcon,
   CheckIcon,
+  CopyIcon,
   CornersInIcon,
   CornersOutIcon,
   DownloadSimpleIcon,
@@ -31,6 +32,7 @@ import { preferredViewerFor } from "@/lib/viewerPreference";
 import type { SiteSource, ViewerSelection, ViewerToolbarItem, ViewerToolbarValue } from "@/views/artifact/registry";
 import { ViewerToolbar } from "@/views/artifact/toolbar";
 import {
+  copyArtifact,
   fileInfoFor,
   invalidateArtifacts,
   loadVersionBlob,
@@ -276,6 +278,24 @@ export function ArtifactTabView({
       setBusy(false);
     }
   };
+  // A viewer's exact edit (a crop) as the next version, on the shown one.
+  const publishEdit = async (bytes: Blob, summary: string): Promise<number> => {
+    const res = await api.publishArtifactFile(roomId, artifactId, { file: bytes, fileName: artifact.fileName || artifact.title, baseVersion: shown, summary });
+    refreshed();
+    return res.artifact.currentVersion;
+  };
+  // Make a copy: a new file of the shown version; the toast opens it.
+  const copyFile = async () => {
+    setBusy(true);
+    try {
+      const id = await copyArtifact(roomId, artifact, shown, meta);
+      toast.success(`Copied as a new file`, [{ label: "Open", onClick: () => window.location.assign(artifactShareUrl(roomId, id)) }]);
+    } catch (e) {
+      toast.error(errorText(e, "Copy failed"));
+    } finally {
+      setBusy(false);
+    }
+  };
   const publish = async () => {
     setBusy(true);
     try {
@@ -354,6 +374,9 @@ export function ArtifactTabView({
             )}
             <button type="button" className={ACTION} onClick={() => void download()} title="Download" aria-label="Download">
               <DownloadSimpleIcon size={16} />
+            </button>
+            <button type="button" className={ACTION} onClick={() => void copyFile()} disabled={busy} title="Make a copy" aria-label="Make a copy of this file">
+              <CopyIcon size={16} />
             </button>
             <button type="button" className={ACTION} onClick={copyLink} title="Copy link" aria-label="Copy link to this deliverable">
               <LinkIcon size={16} />
@@ -489,6 +512,7 @@ export function ArtifactTabView({
             remoteState={liveStates?.[artifactId]}
             onSelection={setSelection}
             reveal={reveal}
+            onPublish={latest && artifactId && meta?.storage === "blob" ? publishEdit : undefined}
           />
         )}
         {mode === "view" && canAsk && selection?.rect && (

@@ -1905,6 +1905,167 @@ export interface CoresReply {
   cores: Core[];
 }
 
+// ---- wire/decisions.go ----
+
+// Decision question types.
+// DecisionPredicate: a yes/no question; the answer is the probability
+// of yes.
+export const DecisionPredicate = "predicate";
+// DecisionChoice: one of Choices; the answer is the choice, its
+// confidence and a probability per choice.
+export const DecisionChoice = "choice";
+// DecisionScore: a level of Levels (lowest first); the answer is a level
+// index (fractional), its confidence and a probability per level.
+export const DecisionScore = "score";
+
+// DecisionRefusal is an answer's type when the model declined that one
+// question (its other answers stand).
+export const DecisionRefusal = "refusal";
+
+// Decision bounds (the provider's own, so a refusal is ours and says why).
+export const MaxDecisionQuestions = 128;
+export const MaxDecisionChoices = 255;
+export const MaxDecisionLevels = 10;
+export const MaxDecisionInputText = 65536;
+export const MaxDecisionImages = 8;
+export const MaxDecisionImageBytes = 4194304;
+export const MaxDecisionInstructions = 4096;
+export const MaxDecisionLabel = 512;
+export const MaxDecisionDescription = 2048;
+
+// DecisionRequest is POST /v1/decisions: Input (Text, or Messages) and the
+// questions. Answers come back in question order.
+export interface DecisionRequest {
+  // Model is one of the provider's models (the first is the default; an
+  // unknown name falls back to it).
+  model?: string;
+  // Input is the thing to judge: a JSON string, or a list of
+  // DecisionMessage (user messages whose parts are input_text /
+  // input_image, a data URL). internal/decision.ParseInput reads it.
+  input: unknown;
+  // Questions are 1…MaxDecisionQuestions questions; names, when set, are
+  // unique and come back in the answers.
+  questions: DecisionQuestion[];
+}
+
+// DecisionMessage is one user message of an input.
+export interface DecisionMessage {
+  role: string;
+  content: DecisionPart[];
+}
+
+// DecisionPart is one part of a message: input_text (Text) or input_image
+// (ImageURL, a data URL of a PNG, JPEG, WebP or GIF image).
+export interface DecisionPart {
+  type: string;
+  text?: string;
+  image_url?: string;
+}
+
+// DecisionQuestion is one question.
+export interface DecisionQuestion {
+  type: DecisionQuestionType;
+  name?: string;
+  instructions: string;
+  // Choices, for a choice question: 2…MaxDecisionChoices values.
+  choices?: DecisionChoiceOption[];
+  // Levels, for a score question: 2…MaxDecisionLevels, lowest first.
+  levels?: DecisionLevel[];
+}
+
+// DecisionChoiceOption is one value a choice question may answer.
+export interface DecisionChoiceOption {
+  value: string;
+  description?: string;
+}
+
+// DecisionLevel is one level of a score question.
+export interface DecisionLevel {
+  label: string;
+  description?: string;
+}
+
+// DecisionReply is POST /v1/decisions' answer: one answer per question, in
+// question order, and the provider's usage.
+export interface DecisionReply {
+  // Model is the model the provider says answered.
+  model: string;
+  answers: DecisionAnswer[];
+  usage: DecisionUsage;
+}
+
+// DecisionAnswer is one question's answer: its question's type, or
+// DecisionRefusal. Probability is a predicate's (the probability of yes);
+// Choice a choice's; Score a score's (a level index, possibly fractional).
+// Probabilities is per choice value or per level, Confidence the model's
+// for the choice or the score.
+export interface DecisionAnswer {
+  type: string;
+  name?: string;
+  probability?: number;
+  choice?: string;
+  score?: number;
+  confidence?: number;
+  probabilities?: DecisionProbability[];
+}
+
+// DecisionProbability is the probability of one choice value (Value, a
+// string) or one level (Value, its index, and Label).
+export interface DecisionProbability {
+  value: unknown;
+  label?: string;
+  probability: number;
+}
+
+// DecisionUsage is the provider's token count for the call (the upstream
+// formats' own field names).
+export interface DecisionUsage {
+  input_tokens: number;
+  output_tokens: number;
+}
+
+// SystemOneRequest is POST /v1/systemone: State is the thing to judge (a
+// string, or any JSON value, judged as its JSON text); Questions is a map
+// of question name to SystemOneQuestion, read in its written order
+// (internal/decision.FromSystemOne).
+export interface SystemOneRequest {
+  model?: string;
+  state: unknown;
+  questions: unknown;
+}
+
+// SystemOne question types: SystemOneNoul is the yes/no question (a
+// DecisionPredicate); choice and score are named as in the list format.
+export const SystemOneNoul = "noul";
+
+// SystemOneReply is POST /v1/systemone's answer: one answer per question,
+// keyed by its name.
+export interface SystemOneReply {
+  model: string;
+  answers: Record<string, SystemOneAnswer>;
+  usage: DecisionUsage;
+}
+
+// SystemOneAnswer is one answer: noul (Noul, the probability of yes),
+// choice (Choice, Confidence, Probabilities per label), score (Score,
+// Confidence, Legend and Probabilities per level index), or refusal.
+export interface SystemOneAnswer {
+  type: string;
+  noul?: number;
+  choice?: string;
+  score?: number;
+  confidence?: number;
+  legend?: Record<string, string>;
+  probabilities?: Record<string, number>;
+}
+
+// DecisionCapability is GET /v1/decisions: whether decisions run for the
+// caller, and the models they may pick from (the first the default).
+export interface DecisionCapability {
+  available: boolean;
+  models?: string[];
+}
+
 // ---- wire/dispatch.go ----
 
 // Dispatch guard limits. They are protocol safety constants, not deployment
@@ -2431,6 +2592,7 @@ export const MaxMediaImagePrompt = 4000;
 export const MaxMediaImageReplyBytes = 16777216;
 export const MaxMediaImageBytes = 12582912;
 export const MaxMediaImages = 4;
+export const MaxMediaImageInputs = 4;
 
 // ContentTagPattern is the one rule for a content component tag: lower-case
 // letters of any script (CJK and other caseless letters included), digits,
@@ -2501,6 +2663,36 @@ export const MaxWorkReferenceBytes = 26214400;
 export interface ContentMCPRequirement {
   name: string;
   env?: string[];
+}
+
+// RoomRelayRoutes are the gateway routes a room-credential MCP tool reaches
+// through the bridge's room relay ("METHOD /path"; pkgmeta.MCPCredentialsRoom):
+// each admits a job grant (?room=&job=) and acts as the job's requester. A
+// route joins the list only with that admission; the relay refuses the
+// rest.
+export const RoomRelayRoutes: readonly string[] = ["POST /v1/decisions", "POST /v1/systemone", "POST /v1/media/image", "POST /v1/media/transcriptions"];
+
+// RoomRelaySessionPath is the relay's own route that answers the bound
+// turn (GET <relay>/session): RoomRelaySession. It is the bridge's, never
+// a gateway route.
+export const RoomRelaySessionPath = "/session";
+
+// RoomRelaySession is the turn a room-credential tool's session is driving
+// now, as the relay knows it: who the calls act for (Requester), whose
+// machine and agent it is (Owner), where the turn was asked (Room,
+// Channel) and by which message (MessageSeq, increasing in the room).
+// ByRequester marks a turn its requester opened with their own typed
+// message (not a schedule's post, not another agent's dispatch): a tool
+// that paused for a person's answer accepts it only in such a turn, newer
+// than the pause.
+export interface RoomRelaySession {
+  jobId: string;
+  roomId: string;
+  channelId?: string;
+  requester: string;
+  owner: string;
+  messageSeq: number;
+  byRequester: boolean;
 }
 
 // MCP transports of a resolved tool (ContentMCPTool.Transport).
@@ -2705,14 +2897,35 @@ export interface MediaImageRequest {
   // new one: a data URL the caller holds (a previous reply's, an
   // attachment's bytes the caller may read). At most MaxMediaImageBytes.
   image?: string;
-  // Publish, when true under a job grant (?job=&room=), publishes each
-  // drawn image into the room's Docs as a deliverable of the job: the
-  // reply carries each image's artifactId. A member's or an app's call
+  // Publish, when true in a room (an agent's job grant, ?job=&room=, or a
+  // room app's page), publishes each drawn image into the room's Docs: the
+  // reply carries each image's artifactId. A member's own call (no room)
   // never publishes.
   publish?: boolean;
   // FileName, with Publish, names the first image (poster.png); the rest
   // are numbered (poster-2.png…).
   fileName?: string;
+  // ArtifactID, in a room (as Publish), is the room image to edit: it is
+  // read as the caller (a job's requester, an app's participant), and the
+  // result is published as its next version
+  // (docs/prd/2026-10-17-image-generation-redesign.md §2.2).
+  artifactId?: string;
+  // Region, with an edit, is the part of the image to change, in its own
+  // pixels: the provider gets a mask.
+  region?: MediaImageRegion;
+  // Inputs, in a room, are room files (art_…) and attachments (att_…) the
+  // prompt uses as references, at most MaxMediaImageInputs, read as the
+  // caller. Without ArtifactID the first is the image to change.
+  inputs?: string[];
+}
+
+// MediaImageRegion is a rectangle of an image in its own pixels, origin at
+// the top-left.
+export interface MediaImageRegion {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
 }
 
 // MediaImageReply is POST /v1/media/image's answer: the images inline
@@ -2725,8 +2938,13 @@ export interface MediaImageReply {
 export interface MediaImage {
   dataUrl?: string;
   // ArtifactID, when the call published, is the room artifact the image
-  // became (and DataURL is empty: the image is not also inlined).
+  // became (and DataURL is empty: the image is not also inlined); Version
+  // its version (above 1 for an edit), FileName its name, and Note what
+  // happened when it is not what was asked (an edit saved as a new file).
   artifactId?: string;
+  version?: number;
+  fileName?: string;
+  note?: string;
   mimeType: string;
   width: number;
   height: number;
@@ -4830,6 +5048,8 @@ export type ContentUseScope = "member" | "room" | "room-expert";
 export const ContentUseScopeValues: readonly ContentUseScope[] = ["member", "room", "room-expert"];
 export type ContentSavedAction = "saved" | "submitted" | "published";
 export const ContentSavedActionValues: readonly ContentSavedAction[] = ["saved", "submitted", "published"];
+export type DecisionQuestionType = "predicate" | "choice" | "score";
+export const DecisionQuestionTypeValues: readonly DecisionQuestionType[] = ["predicate", "choice", "score"];
 export type RoomEventKind = "chat_message" | "agent_messages" | "agent_job_created" | "agent_job_updated" | "agent_job_progress" | "agent_session_state" | "agent_roster" | "presence_join" | "presence_leave" | "presence_snapshot" | "presence_typing" | "message_deleted" | "message_edited" | "task_updated" | "artifact_updated" | "artifact_state" | "member_joined" | "member_removed" | "room_deleted" | "content_saved" | "content_uses_changed" | "app_changed";
 export const RoomEventKindValues: readonly RoomEventKind[] = ["chat_message", "agent_messages", "agent_job_created", "agent_job_updated", "agent_job_progress", "agent_session_state", "agent_roster", "presence_join", "presence_leave", "presence_snapshot", "presence_typing", "message_deleted", "message_edited", "task_updated", "artifact_updated", "artifact_state", "member_joined", "member_removed", "room_deleted", "content_saved", "content_uses_changed", "app_changed"];
 export type JobActivityKind = "tool" | "thinking" | "text";

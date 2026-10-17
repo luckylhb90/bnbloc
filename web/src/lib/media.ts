@@ -1,14 +1,15 @@
 // Media model calls (docs/prd/2026-10-16-voice-and-image-generation.md):
 // the one owner of the media requests in the web (the boundary rule beside
-// B2): what runs for the caller (GET /v1/media), a transcription (POST
-// /v1/media/transcriptions) and an image generation (POST /v1/media/image).
-// No other file names a media route. The microphone and the WAV encoder are
+// B2): what runs for the caller (GET /v1/media) and a transcription (POST
+// /v1/media/transcriptions). Drawing is the room agent's (the media tools,
+// docs/prd/2026-10-17-image-generation-redesign.md), so the web calls no
+// image route. No other file names a media route. The microphone and the WAV encoder are
 // lib/voice.ts.
 
 import { useEffect, useState } from "react";
 import { req } from "./api.ts";
 import { useAuth } from "./auth";
-import type { MediaCapabilities, MediaImageAspect, MediaImageReply } from "./wire.gen.ts";
+import type { MediaCapabilities } from "./wire.gen.ts";
 
 const TTL_MS = 5 * 60 * 1000;
 let cached: { tenant: string; at: number; caps: Promise<MediaCapabilities> } | null = null;
@@ -31,13 +32,6 @@ function loadCaps(tenant: string | null): Promise<MediaCapabilities> {
 export function invalidateMediaCaps(): void {
   cached = null;
   for (const l of listeners) l();
-}
-
-/** One capability as the caller sees it: whether it runs, and (image) the
- *  models the caller may pick from. */
-export interface MediaCapabilityView {
-  available: boolean;
-  models?: string[];
 }
 
 /** Whether the caller can transcribe: null while loading or on a failure
@@ -70,36 +64,6 @@ export function useMediaCapability(cap: "transcribe" | "image"): boolean | null 
   return cap === "transcribe" ? caps.transcribe.available : caps.image.available;
 }
 
-/** One capability's full view (availability and models); null while loading
- *  or on a failure (the entry hides). */
-export function useMediaCapabilityView(cap: "transcribe" | "image"): MediaCapabilityView | null {
-  const { tenant } = useAuth();
-  const [rev, setRev] = useState(0);
-  const [caps, setCaps] = useState<MediaCapabilities | null>(null);
-  useEffect(() => {
-    const listener = () => setRev((n) => n + 1);
-    listeners.add(listener);
-    return () => {
-      listeners.delete(listener);
-    };
-  }, []);
-  useEffect(() => {
-    let cancelled = false;
-    loadCaps(tenant)
-      .then((c) => {
-        if (!cancelled) setCaps(c);
-      })
-      .catch(() => {
-        if (!cancelled) setCaps(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [tenant, rev]);
-  if (!caps) return null;
-  return cap === "transcribe" ? caps.transcribe : caps.image;
-}
-
 /** Transcribes one audio blob (16 kHz mono WAV from lib/voice.ts) into text. */
 export function transcribeAudio(blob: Blob, filename = "voice.wav", signal?: AbortSignal): Promise<{ text: string }> {
   return req<{ text: string }>(`/v1/media/transcriptions?filename=${encodeURIComponent(filename)}`, {
@@ -108,16 +72,6 @@ export function transcribeAudio(blob: Blob, filename = "voice.wav", signal?: Abo
     body: blob,
     signal,
   });
-}
-
-/** Generates images (count of them in one call, at most
- *  wire.MaxMediaImages). */
-export function generateImage(
-  prompt: string,
-  opts: { aspect?: MediaImageAspect; count?: number; image?: string } = {},
-  signal?: AbortSignal,
-): Promise<MediaImageReply> {
-  return req<MediaImageReply>("/v1/media/image", { method: "POST", body: JSON.stringify({ prompt, ...opts }), signal });
 }
 
 // ---- The platform console's media providers ----
@@ -151,9 +105,17 @@ export interface MediaProviderUpdateBody {
   params?: Record<string, string>;
 }
 
+/** A provider's console API: read (never the key), save, one real test
+ *  call. The media capabilities and the decision model share it. */
+export interface MediaProviderApi {
+  get(): Promise<MediaProviderConfigView>;
+  put(body: MediaProviderUpdateBody): Promise<MediaProviderConfigView>;
+  test(): Promise<{ ok: boolean; error?: string; reply?: string; latencyMs: number }>;
+}
+
 /** The console's provider API per capability (never the key): the
  *  platform's (super admin) and the organization's own (org admin). */
-export function mediaProviderApi(cap: "transcribe" | "image", scope: "platform" | "org" = "platform") {
+export function mediaProviderApi(cap: "transcribe" | "image", scope: "platform" | "org" = "platform"): MediaProviderApi {
   const base = scope === "org" ? `/v1/tenant/media/${cap}` : `/v1/platform/media/${cap}`;
   return {
     get: () => req<MediaProviderConfigView>(base),

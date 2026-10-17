@@ -41,10 +41,18 @@ extend it" references.
   entry points (the composer's "enhance prompt", a form's "Fill with AI"):
   the model's settings and client, assist tasks as content resolved by name,
   the context a run reads and the fenced prompt.
+- [Decision models](decision-models.md) — calibrated answers (a yes/no
+  probability, a choice, a score) through an admin-configured provider:
+  `POST /v1/decisions`, `app.ai.decide`, the room relay; the request rules,
+  caller auth, budget and audit.
 - [Room tools](room-tools.md) — how an agent lists the room's agents and
   dispatches work to them (`ask_agent`): the bridge's loopback MCP server and
   its per-session bearers, the realtime dispatch route, its authority (the
   parent job's requester) and its guards.
+- [Browser component](browser-component.md) — a room agent operates web
+  pages in the owner's dedicated Chrome profile: the three tools, a step
+  (observe, decide, check, execute), checkpoints, who may run it and who
+  confirms, the browser host.
 
 ## Local Bridge
 

@@ -1,4 +1,4 @@
-import { centered, fitScale, regionRect, regionSelection, spanRegion, toImage, visibleGrid, zoomAt } from "./imageView.ts";
+import { centered, cropMimeType, fitScale, regionRect, regionSelection, spanRegion, toImage, visibleGrid, zoomAt } from "./imageView.ts";
 
 function eq(a: unknown, b: unknown, message: string): void {
   if (JSON.stringify(a) !== JSON.stringify(b)) {
@@ -35,3 +35,6 @@ eq(visibleGrid({ scale: 4, x: 500, y: 0 }, { w: 10, h: 10 }, { w: 200, h: 200 })
   if (!named.detail.startsWith(plain.detail) || !named.detail.endsWith(" Labels in it: “Start”, “P2P check passed?”.")) throw new Error(named.detail);
   if (regionSelection(r, { w: 100, h: 50 }, []).detail !== plain.detail) throw new Error("no labels, no sentence");
 }
+
+// A crop keeps the image's type where the browser encodes it, else PNG.
+eq(["image/jpeg", "image/webp", "image/png", "image/gif", "image/svg+xml"].map(cropMimeType), ["image/jpeg", "image/webp", "image/png", "image/png", "image/png"], "crop type");

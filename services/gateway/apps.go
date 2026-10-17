@@ -119,6 +119,7 @@ var appAPI = []struct {
 	{http.MethodPost, "/ai", false, true, (*Service).serveAppAI},
 	{http.MethodPost, "/ai/image", false, true, (*Service).serveAppAIImage},
 	{http.MethodPost, "/ai/voice", false, true, (*Service).serveAppAIVoice},
+	{http.MethodPost, "/ai/decide", false, true, (*Service).serveAppAIDecide},
 	{http.MethodPost, "/notify", false, false, (*Service).serveAppNotify},
 	{http.MethodGet, "/groups", false, false, forwardAppPath("/groups")},
 	{http.MethodGet, "/events", false, false, (*Service).forwardAppEvents},

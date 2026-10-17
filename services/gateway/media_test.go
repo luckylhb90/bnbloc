@@ -1,9 +1,13 @@
 package gateway
 
 import (
+	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/png"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -64,7 +68,16 @@ func (f *mediaProviderFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			f.last["__image"] = fmt.Sprintf("%d bytes", len(b))
 			_ = file.Close()
 		}
-		b64 := base64.StdEncoding.EncodeToString(tinyTestPNG)
+		f.last["__images"] = fmt.Sprint(len(r.MultipartForm.File["image[]"]))
+		if file, _, err := r.FormFile("mask"); err == nil {
+			b, _ := io.ReadAll(file)
+			f.last["__mask"] = fmt.Sprintf("%d bytes", len(b))
+			_ = file.Close()
+		}
+		b64 := f.imageB64
+		if b64 == "" {
+			b64 = base64.StdEncoding.EncodeToString(tinyTestPNG)
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]any{"b64_json": b64, "revised_prompt": "a nicer one"}}})
 	case "/v1/images/generations":
 		var body map[string]any
@@ -323,6 +336,29 @@ func TestAppAIMedia(t *testing.T) {
 		t.Fatalf("size = %v", fake.last)
 	}
 
+	// A room app publishes: the picture is a room file the participant
+	// authored (no job source), and the page may edit it as a version.
+	r = e.call(http.MethodPost, jack+"~app/ai/image", wire.MediaImageRequest{Prompt: "a sticker", Publish: true, FileName: "sticker.png"})
+	var pub wire.MediaImageReply
+	if err := json.Unmarshal(r.body, &pub); err != nil || r.status != http.StatusOK || len(pub.Images) != 1 || pub.Images[0].ArtifactID == "" || pub.Images[0].DataURL != "" {
+		t.Fatalf("app publish = %d %s", r.status, r.body)
+	}
+	sticker := pub.Images[0].ArtifactID
+	art, err := e.b.Artifacts.GetArtifact(e.ctx(), sticker)
+	if err != nil || art.RoomID != e.roomID || art.CreatedBy != "jack" {
+		t.Fatalf("app artifact = %+v %v", art, err)
+	}
+	fake.imageB64 = base64.StdEncoding.EncodeToString(png8x6(t))
+	r = e.call(http.MethodPost, jack+"~app/ai/image", wire.MediaImageRequest{Prompt: "bluer", ArtifactID: sticker})
+	if err := json.Unmarshal(r.body, &pub); err != nil || r.status != http.StatusOK || pub.Images[0].ArtifactID != sticker || pub.Images[0].Version != 2 {
+		t.Fatalf("app edit = %d %s", r.status, r.body)
+	}
+	if v, err := e.b.Artifacts.GetArtifactVersion(e.ctx(), sticker, 2); err != nil || v.SourceJobID != "" || v.AuthorUserID != "jack" || v.Summary != "drawn in an app" {
+		t.Fatalf("app version = %+v %v", v, err)
+	}
+	fake.imageB64 = ""
+	sink.take()
+
 	fake.transcript = "hello from the app"
 	r = e.callRaw(http.MethodPost, jack+"~app/ai/voice?filename=clip.wav", "audio/wav", []byte("WAVBYTES"), "Authorization: Bearer "+e.session("jack"))
 	var voice wire.MediaTranscribeReply
@@ -428,4 +464,188 @@ func fakeBaseOf(t *testing.T, e *appGW) string {
 		t.Fatalf("read the provider = %s", r.body)
 	}
 	return view.BaseURL
+}
+
+// An agent's image call (the room relay's ?job=&room=) publishes each image
+// as its own room artifact, minted by the room service, in the job's
+// channel and sourced to the job; a caller-auth provider is never sent the
+// bridge owner's session for it.
+func TestMediaImagePublishUnderJobGrant(t *testing.T) {
+	fake := &mediaProviderFake{}
+	e := mediaGW(t, fake)
+	if err := e.jobs.PutBridgeHeartbeat(e.ctx(), store.BridgeHeartbeat{BridgeID: "br-jack", OwnerUserID: "jack", Status: store.BridgeOnline, LastSeenAtMs: time.Now().UnixMilli()}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.jobs.PutAgentJob(e.ctx(), store.AgentJob{JobID: "job-1", RoomID: e.roomID, ChannelID: "ch-1", MessageSeq: 4, RequesterUserID: "maya", OwnerUserID: "jack", Provider: "codex",
+		Status: store.AgentJobRunning, LeaseBridgeID: "br-jack", CreatedAtMs: 1}); err != nil {
+		t.Fatal(err)
+	}
+	bridge := "Authorization: Bearer " + e.session("jack")
+	path := "/v1/media/image?room=" + e.roomID + "&job=job-1"
+	r := e.call(http.MethodPost, path, wire.MediaImageRequest{Prompt: "two posters", Count: 2, Publish: true, FileName: "poster.png"}, bridge)
+	if r.status != http.StatusOK {
+		t.Fatalf("publish = %d %s", r.status, r.body)
+	}
+	var reply wire.MediaImageReply
+	if err := json.Unmarshal(r.body, &reply); err != nil || len(reply.Images) != 2 {
+		t.Fatalf("reply = %s %v", r.body, err)
+	}
+	a, b := reply.Images[0], reply.Images[1]
+	if a.ArtifactID == "" || b.ArtifactID == "" || a.ArtifactID == b.ArtifactID || a.DataURL != "" {
+		t.Fatalf("two images publish two artifacts, not inlined: %+v", reply.Images)
+	}
+	for _, img := range reply.Images {
+		art, err := e.b.Artifacts.GetArtifact(e.ctx(), img.ArtifactID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if art.RoomID != e.roomID || art.ChannelID != "ch-1" || art.CreatedBy != "maya" || art.CurrentVersion != 1 {
+			t.Fatalf("artifact = %+v", art)
+		}
+		v, err := e.b.Artifacts.GetArtifactVersion(e.ctx(), img.ArtifactID, 1)
+		if err != nil || v.SourceJobID != "job-1" || v.SourceSeq != 4 || v.MimeType != "image/png" {
+			t.Fatalf("version = %+v %v", v, err)
+		}
+	}
+
+	// A caller-auth provider: the member's own call forwards their session;
+	// the agent's call (the bearer is jack's, the call maya's) finds none.
+	model := httptest.NewServer(fake)
+	t.Cleanup(model.Close)
+	if r := e.call(http.MethodPut, "/v1/platform/media/image", wire.MediaProviderUpdate{
+		Kind: "openai-compatible", BaseURL: model.URL + "/v1", Model: "media-model", Auth: "caller"}, e.superAdmin()); r.status != http.StatusOK {
+		t.Fatalf("configure caller auth = %d %s", r.status, r.body)
+	}
+	if r := e.call(http.MethodPost, "/v1/media/image", wire.MediaImageRequest{Prompt: "mine"}, e.as("maya")); r.status != http.StatusOK {
+		t.Fatalf("own call = %d %s", r.status, r.body)
+	}
+	if r := e.call(http.MethodPost, path, wire.MediaImageRequest{Prompt: "theirs", Publish: true}, bridge); r.status != http.StatusConflict {
+		t.Fatalf("a job grant forwarded the bridge owner's session: %d %s", r.status, r.body)
+	}
+}
+
+// An agent edits a room picture (docs/prd/2026-10-17-image-generation-redesign.md
+// §2.2–2.3): the file is read as the requester and sent as the image to
+// change, a region becomes a mask, references ride as more image parts,
+// and the result is the file's next version with editedFrom; a version
+// published meanwhile makes the edit a new file, said so; another room's
+// file, a region outside the image and a member's own call naming room
+// pictures are refused before any spend.
+func TestMediaImageEditUnderJobGrant(t *testing.T) {
+	fake := &mediaProviderFake{}
+	e := mediaGW(t, fake)
+	if err := e.jobs.PutBridgeHeartbeat(e.ctx(), store.BridgeHeartbeat{BridgeID: "br-jack", OwnerUserID: "jack", Status: store.BridgeOnline, LastSeenAtMs: time.Now().UnixMilli()}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.jobs.PutAgentJob(e.ctx(), store.AgentJob{JobID: "job-1", RoomID: e.roomID, ChannelID: "ch-1", MessageSeq: 4, RequesterUserID: "maya", OwnerUserID: "jack", Provider: "codex",
+		Status: store.AgentJobRunning, LeaseBridgeID: "br-jack", CreatedAtMs: 1}); err != nil {
+		t.Fatal(err)
+	}
+	bridge := "Authorization: Bearer " + e.session("jack")
+	path := "/v1/media/image?room=" + e.roomID + "&job=job-1"
+	draw := func(req wire.MediaImageRequest) (int, wire.MediaImageReply, string) {
+		t.Helper()
+		r := e.call(http.MethodPost, path, req, bridge)
+		var reply wire.MediaImageReply
+		_ = json.Unmarshal(r.body, &reply)
+		return r.status, reply, string(r.body)
+	}
+	// The poster the agent drew earlier (v1), 8×6.
+	_, first, _ := draw(wire.MediaImageRequest{Prompt: "a poster", Publish: true, FileName: "poster.png"})
+	poster := first.Images[0].ArtifactID
+	fake.imageB64 = base64.StdEncoding.EncodeToString(png8x6(t))
+	_, redraw, _ := draw(wire.MediaImageRequest{Prompt: "a poster, 8 by 6", ArtifactID: poster})
+	if len(redraw.Images) != 1 || redraw.Images[0].Version != 2 {
+		t.Fatalf("whole edit = %+v", redraw)
+	}
+	// The provider answering the same picture: no new version, and said so.
+	_, same, _ := draw(wire.MediaImageRequest{Prompt: "the same", ArtifactID: poster})
+	if same.Images[0].Version != 2 || !strings.Contains(same.Images[0].Note, "unchanged") {
+		t.Fatalf("unchanged edit = %+v", same)
+	}
+
+	// A region edit with a reference: the next version, editedFrom the one read.
+	_, logoReply, _ := draw(wire.MediaImageRequest{Prompt: "the logo", Publish: true, FileName: "logo.png"})
+	logo := logoReply.Images[0].ArtifactID
+	fake.imageB64 = base64.StdEncoding.EncodeToString(append(png8x6(t), 0)) // a different picture
+	code, reply, raw := draw(wire.MediaImageRequest{Prompt: "put the logo top left", ArtifactID: poster, Region: &wire.MediaImageRegion{X: 0, Y: 0, W: 4, H: 3}, Inputs: []string{logo}})
+	if code != http.StatusOK || len(reply.Images) != 1 {
+		t.Fatalf("region edit = %d %s", code, raw)
+	}
+	got := reply.Images[0]
+	if got.ArtifactID != poster || got.Version != 3 || got.FileName != "poster.png" || got.Note != "" || got.DataURL != "" {
+		t.Fatalf("edit result = %+v", got)
+	}
+	if fake.paths[len(fake.paths)-1] != "/v1/images/edits" || fake.last["__images"] != "2" || fake.last["__mask"] == "" {
+		t.Fatalf("provider got %v %v", fake.paths[len(fake.paths)-1], fake.last)
+	}
+	v, err := e.b.Artifacts.GetArtifactVersion(e.ctx(), poster, 3)
+	if err != nil || v.EditedFrom != 2 || v.SourceJobID != "job-1" || v.SourceSeq != 4 || v.AuthorUserID != "maya" {
+		t.Fatalf("version = %+v %v", v, err)
+	}
+
+	// A version published between the read and the publish: the edit is a new file.
+	fake.imageB64 = base64.StdEncoding.EncodeToString(append(png8x6(t), 0, 0))
+	e.room.Artifacts = racingArtifacts{ArtifactStore: e.b.Artifacts, poster: poster}
+	code, reply, raw = draw(wire.MediaImageRequest{Prompt: "warmer", ArtifactID: poster})
+	e.room.Artifacts = e.b.Artifacts
+	if code != http.StatusOK || reply.Images[0].ArtifactID == poster || !strings.Contains(reply.Images[0].Note, "saved as a new file") {
+		t.Fatalf("race = %d %s", code, raw)
+	}
+
+	// Refused before any spend.
+	calls := len(fake.paths)
+	away := e.artifact("room-elsewhere", store.ArtifactKindImage)
+	for name, req := range map[string]wire.MediaImageRequest{
+		"another room's file": {Prompt: "x", ArtifactID: away},
+		"region outside":      {Prompt: "x", ArtifactID: poster, Region: &wire.MediaImageRegion{X: 6, Y: 0, W: 4, H: 2}},
+		"region, no image":    {Prompt: "x", Region: &wire.MediaImageRegion{X: 0, Y: 0, W: 1, H: 1}},
+		"too many inputs":     {Prompt: "x", Inputs: []string{logo, logo, logo, logo, logo}},
+	} {
+		if code, _, raw := draw(req); code != http.StatusBadRequest {
+			t.Errorf("%s = %d %s", name, code, raw)
+		}
+	}
+	if r := e.call(http.MethodPost, "/v1/media/image", wire.MediaImageRequest{Prompt: "x", ArtifactID: poster}, e.as("maya")); r.status != http.StatusBadRequest {
+		t.Errorf("a member's call named a room picture: %d %s", r.status, r.body)
+	}
+	if len(fake.paths) != calls {
+		t.Fatalf("the provider was called for a refused request")
+	}
+}
+
+// png8x6 is an opaque 8×6 PNG.
+func png8x6(t *testing.T) []byte {
+	t.Helper()
+	img := image.NewNRGBA(image.Rect(0, 0, 8, 6))
+	for i := range img.Pix {
+		img.Pix[i] = 0xFF
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+// racingArtifacts publishes a version of poster just before the edit's own
+// publish, as another member would between the read and the write.
+type racingArtifacts struct {
+	store.ArtifactStore
+	poster string
+}
+
+func (a racingArtifacts) PublishArtifactVersion(ctx context.Context, id string, v store.ArtifactVersion, base int) (store.Artifact, store.ArtifactVersion, error) {
+	if id == a.poster {
+		cur, err := a.ArtifactStore.GetArtifact(ctx, id)
+		if err != nil {
+			return store.Artifact{}, store.ArtifactVersion{}, err
+		}
+		theirs := v
+		theirs.AuthorUserID, theirs.SourceJobID, theirs.EditedFrom = "jack", "", 0
+		if _, _, err := a.ArtifactStore.PublishArtifactVersion(ctx, id, theirs, cur.CurrentVersion); err != nil {
+			return store.Artifact{}, store.ArtifactVersion{}, err
+		}
+	}
+	return a.ArtifactStore.PublishArtifactVersion(ctx, id, v, base)
 }
