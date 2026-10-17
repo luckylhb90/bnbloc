@@ -3,7 +3,30 @@
 Status: M1–M6 built (2026-10-16/17); the app surfaces hardened 2026-10-17
 (the member-opened app frame may use the microphone; a share link's visitor
 frame may not — recording an anonymous visitor is an abuse surface, and the
-demo SDK answers refusal-shaped stubs). Decided while building:
+demo SDK answers refusal-shaped stubs).
+
+Revised 2026-10-17 (the agent surfaces are components, not built-ins): the
+generate_image and transcribe_audio room tools were built as built-in room
+tools in M3/M4 and are REPLACED by an installable MCP component. A
+deployment that does not install it keeps a zero-footprint agent surface:
+nothing in tools/list, nothing in the session prefix. The built-in tools
+and the bridge Publish seam are deleted (commit history keeps them).
+
+- **bnbloc-media-tools** (packages/media-tools, cmd/bnbloc-media-tools):
+  a stdio MCP component (credentials "member": the member connects it to
+  their own gateway in Settings → Tools with an API token of theirs). Its
+  two tools call the same /v1/media routes; generate_image asks the
+  gateway to publish into the room's Docs (publish under a job grant, or
+  as the member when the tool calls without one); transcribe_audio reads a
+  room attachment by id (?attachment=, the gateway reads it as the
+  caller).
+- **media-skills** (a built-in skill pack) requires the media-tools MCP
+  component and teaches the two tools' use; without the component
+  installed it is an unmet requirement, not dead weight.
+- The gateway gained the publish path the component needs (one owner: the
+  room service's multipart artifact version route, driven as the caller).
+
+Decided while building:
 
 - **The ai routes of the app data API spend none of the app data
   budgets** (apps.go): their limit is the caller's per-member assist rate,

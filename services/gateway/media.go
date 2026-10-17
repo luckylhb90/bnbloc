@@ -1,14 +1,21 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"mime"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"net/url"
+	"path"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -115,17 +122,39 @@ func (s *Service) handleMediaTranscribe(w http.ResponseWriter, r *http.Request, 
 		httpx.Error(w, "too many requests: try again in a minute", http.StatusTooManyRequests)
 		return
 	}
-	audio, ok := readBody(w, r, wire.MaxMediaAudioBytes)
-	if !ok {
-		return
-	}
-	if len(audio) == 0 {
-		httpx.Error(w, "the request body is the audio: it is empty", http.StatusBadRequest)
-		return
-	}
-	mimeType := strings.TrimSpace(r.Header.Get("Content-Type"))
-	if mimeType == "" {
-		mimeType = "application/octet-stream"
+	// ?attachment= names a room attachment to transcribe (the media tools
+	// component's transcribe_audio): its bytes are read as the caller
+	// reads them, then transcribed. Without it the body is the audio.
+	var (
+		audio    []byte
+		mimeType string
+		filename string
+	)
+	if id := strings.TrimSpace(r.URL.Query().Get("attachment")); id != "" {
+		roomID := strings.TrimSpace(r.URL.Query().Get("room"))
+		if roomID == "" {
+			httpx.Error(w, "attachment is a room's: name the room (room)", http.StatusBadRequest)
+			return
+		}
+		audio, mimeType, filename, ok = s.readRoomAttachmentAudio(ctx, claims, roomID, id)
+		if !ok {
+			httpx.Error(w, "no such audio attachment in this room", http.StatusNotFound)
+			return
+		}
+	} else {
+		audio, ok = readBody(w, r, wire.MaxMediaAudioBytes)
+		if !ok {
+			return
+		}
+		if len(audio) == 0 {
+			httpx.Error(w, "the request body is the audio: it is empty", http.StatusBadRequest)
+			return
+		}
+		mimeType = strings.TrimSpace(r.Header.Get("Content-Type"))
+		if mimeType == "" {
+			mimeType = "application/octet-stream"
+		}
+		filename = filenameQuery(r)
 	}
 	p, has, err := s.mediaProvider(ctx, claims, media.CapTranscribe)
 	if err != nil {
@@ -138,7 +167,7 @@ func (s *Service) handleMediaTranscribe(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	start := time.Now()
-	text, err := p.Transcribe(ctx, audio, mimeType, filenameQuery(r))
+	text, err := p.Transcribe(ctx, audio, mimeType, filename)
 	usage := wire.AssistUsage{Model: p.Model.Model, LatencyMs: timeSinceMs(s, start)}
 	s.auditMediaRun(ctx, claims, "transcribe", usage, err)
 	if err != nil {
@@ -236,18 +265,105 @@ func (s *Service) runMediaImage(w http.ResponseWriter, r *http.Request, claims a
 		writeMediaErr(w, err)
 		return
 	}
+	// Publish, when asked under a job grant: each image becomes a room
+	// artifact version (the image then is not also inlined).
+	roomID := strings.TrimSpace(r.URL.Query().Get("room"))
+	publish := req.Publish && roomID != "" && strings.TrimSpace(r.URL.Query().Get("job")) != ""
 	out := wire.MediaImageReply{Images: make([]wire.MediaImage, 0, len(imgs))}
-	for _, img := range imgs {
+	for i, img := range imgs {
 		width, height := pngSize(img.Bytes)
-		out.Images = append(out.Images, wire.MediaImage{
-			DataURL:       "data:" + img.MimeType + ";base64," + base64Of(img.Bytes),
-			MimeType:      img.MimeType,
-			Width:         width,
-			Height:        height,
-			RevisedPrompt: img.RevisedPrompt,
-		})
+		row := wire.MediaImage{MimeType: img.MimeType, Width: width, Height: height, RevisedPrompt: img.RevisedPrompt}
+		if publish {
+			id, err := s.publishGeneratedImage(ctx, claims, roomID, fileNameOf(req.FileName, i, img.MimeType), img)
+			if err != nil {
+				obs.ServerError(w, "publish the generated image failed", err)
+				httpx.Error(w, "the image is drawn, but publishing it into the room failed: try again", http.StatusBadGateway)
+				return
+			}
+			row.ArtifactID = id
+		} else {
+			row.DataURL = "data:" + img.MimeType + ";base64," + base64Of(img.Bytes)
+		}
+		out.Images = append(out.Images, row)
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+// publishGeneratedImage publishes one drawn image into the room's Docs as
+// the member in claims (a job grant's requester): a file artifact of one
+// version, through the room service's own multipart publish route — the
+// same contract the bridge's deliverable publishing drives. It answers the
+// artifact id.
+func (s *Service) publishGeneratedImage(ctx context.Context, claims auth.Claims, roomID, name string, img media.Image) (string, error) {
+	kind := "file"
+	if strings.HasPrefix(img.MimeType, "image/") {
+		kind = "image"
+	}
+	artifactID := "artf_" + hexOf([]byte(roomID + "\x00" + claims.Subject + "\x00" + name))[:24]
+	create := map[string]any{"artifactId": artifactID, "kind": kind, "title": name, "fileName": name}
+	if err := s.roomBackendDo(ctx, backendHTTP, http.MethodPost, "/v1/rooms/"+url.PathEscape(roomID)+"/artifacts", "application/json", mustRaw(create), claims.Subject, claims.Tenant, nil); err != nil {
+		return "", fmt.Errorf("create the artifact: %w", err)
+	}
+	// One blob version, like the bridge's own publish path.
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	_ = mw.WriteField("baseVersion", "0")
+	_ = mw.WriteField("summary", "generated by the AI")
+	h := textproto.MIMEHeader{}
+	h.Set("Content-Disposition", mime.FormatMediaType("form-data", map[string]string{"name": "file", "filename": name}))
+	h.Set("Content-Type", img.MimeType)
+	part, err := mw.CreatePart(h)
+	if err != nil {
+		return "", err
+	}
+	if _, err := part.Write(img.Bytes); err != nil {
+		return "", err
+	}
+	if err := mw.Close(); err != nil {
+		return "", err
+	}
+	path := "/v1/rooms/" + url.PathEscape(roomID) + "/artifacts/" + url.PathEscape(artifactID) + "/versions"
+	var reply struct {
+		Unchanged bool                  `json:"unchanged"`
+		Version   *wire.ArtifactVersion `json:"version"`
+	}
+	if err := s.roomBackendDo(ctx, backendHTTP, http.MethodPost, path, mw.FormDataContentType(), buf.Bytes(), claims.Subject, claims.Tenant, &reply); err != nil {
+		return "", fmt.Errorf("publish the version: %w", err)
+	}
+	return artifactID, nil
+}
+
+// mustRaw is a map's JSON bytes (a create body).
+func mustRaw(v any) []byte {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return []byte("{}")
+	}
+	return raw
+}
+
+// hexOf is the bytes' hex (an artifact id derivation; ids.Hex would work
+// too — this keeps the derivation local and uninteresting).
+func hexOf(b []byte) string { return hex.EncodeToString(b) }
+
+// fileNameOf names the i-th image of a batch: the asked name (the first),
+// else a name derived from nothing but the index and the MIME type.
+func fileNameOf(asked string, i int, mimeType string) string {
+	ext := ".png"
+	switch mimeType {
+	case "image/jpeg":
+		ext = ".jpg"
+	case "image/webp":
+		ext = ".webp"
+	}
+	name := strings.TrimSpace(asked)
+	if name == "" {
+		name = "image" + ext
+	}
+	if i == 0 {
+		return name
+	}
+	return strings.TrimSuffix(name, path.Ext(name)) + "-" + strconv.Itoa(i+1) + ext
 }
 
 // decodeDataURLImage splits a data:…;base64,<bytes> URL into sniffed image
@@ -283,6 +399,24 @@ func sniffMIME(b []byte) string {
 		return "image/webp"
 	}
 	return ""
+}
+
+// readRoomAttachmentAudio reads a room attachment's bytes as the member in
+// claims, refusing anything that is not audio. It answers the bytes, the
+// content type and the file name.
+func (s *Service) readRoomAttachmentAudio(ctx context.Context, claims auth.Claims, roomID, id string) ([]byte, string, string, bool) {
+	meta, found, err := s.attachmentMeta(ctx, claims, roomID, id)
+	if err != nil || !found {
+		return nil, "", "", false
+	}
+	if !strings.HasPrefix(meta.ContentType, "audio/") {
+		return nil, "", "", false
+	}
+	data, found, err := s.attachmentRead(ctx, claims, roomID, id, "", wire.MaxMediaAudioBytes)
+	if err != nil || !found || len(data) == 0 {
+		return nil, "", "", false
+	}
+	return data, meta.ContentType, meta.Filename, true
 }
 
 // auditMediaRun records one media model call: the capability's name, the

@@ -107,6 +107,14 @@ type MediaImageRequest struct {
 	// new one: a data URL the caller holds (a previous reply's, an
 	// attachment's bytes the caller may read). At most MaxMediaImageBytes.
 	Image string `json:"image,omitempty"`
+	// Publish, when true under a job grant (?job=&room=), publishes each
+	// drawn image into the room's Docs as a deliverable of the job: the
+	// reply carries each image's artifactId. A member's or an app's call
+	// never publishes.
+	Publish bool `json:"publish,omitempty"`
+	// FileName, with Publish, names the first image (poster.png); the rest
+	// are numbered (poster-2.png…).
+	FileName string `json:"fileName,omitempty"`
 }
 
 // MediaImageReply is POST /v1/media/image's answer: the images inline
@@ -117,10 +125,13 @@ type MediaImageReply struct {
 
 // MediaImage is one generated (or edited) image.
 type MediaImage struct {
-	DataURL  string `json:"dataUrl"`
-	MimeType string `json:"mimeType"`
-	Width    int    `json:"width"`
-	Height   int    `json:"height"`
+	DataURL string `json:"dataUrl,omitempty"`
+	// ArtifactID, when the call published, is the room artifact the image
+	// became (and DataURL is empty: the image is not also inlined).
+	ArtifactID string `json:"artifactId,omitempty"`
+	MimeType   string `json:"mimeType"`
+	Width      int    `json:"width"`
+	Height     int    `json:"height"`
 	// RevisedPrompt is the provider's own rewording, when it sends one: data
 	// the provider wrote, fenced wherever an agent reads it.
 	RevisedPrompt string `json:"revisedPrompt,omitempty"`

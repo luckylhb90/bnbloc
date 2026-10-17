@@ -194,3 +194,19 @@ func TestBuiltinExpertResolvesForChatAndJob(t *testing.T) {
 		t.Fatal("the job's bundle grant misses the built-in bundle")
 	}
 }
+
+// The media-skills pack is built in, and its requires name the media-tools
+// MCP component (the installable surface of the media capabilities).
+func TestMediaSkillsRequireMediaTools(t *testing.T) {
+	c, ok := Get(IDPrefix + "media-skills")
+	if !ok || c.Component.Kind != contentpkg.KindSkill {
+		t.Fatalf("media-skills = %v %v", ok, c.Component.Kind)
+	}
+	var reqs []string
+	for _, m := range c.Validated.Manifest.Requires.MCP {
+		reqs = append(reqs, m.Name)
+	}
+	if len(reqs) != 1 || reqs[0] != "media-tools" {
+		t.Fatalf("requires.mcp = %v", reqs)
+	}
+}

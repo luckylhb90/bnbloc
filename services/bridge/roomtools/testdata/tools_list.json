@@ -501,63 +501,6 @@
     {
       "annotations": {
         "openWorldHint": false,
-        "readOnlyHint": false
-      },
-      "description": "Draw one image from a prompt and publish it into the room's Docs; agree with the person first what it is for.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "aspect": {
-            "description": "square (default), landscape or portrait.",
-            "enum": [
-              "square",
-              "landscape",
-              "portrait"
-            ],
-            "type": "string"
-          },
-          "fileName": {
-            "description": "A file name, e.g. poster.png; default from the prompt.",
-            "type": "string"
-          },
-          "prompt": {
-            "description": "What to draw, concretely.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "prompt"
-        ],
-        "type": "object"
-      },
-      "name": "generate_image",
-      "title": "Draw an image"
-    },
-    {
-      "annotations": {
-        "openWorldHint": false,
-        "readOnlyHint": true
-      },
-      "description": "Read one audio file of your workspace and return what it says, fenced as data (for when you cannot hear it).",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "path": {
-            "description": "A workspace file path from your file listing.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "path"
-        ],
-        "type": "object"
-      },
-      "name": "transcribe_audio",
-      "title": "Transcribe an audio file"
-    },
-    {
-      "annotations": {
-        "openWorldHint": false,
         "readOnlyHint": true
       },
       "description": "The full instructions of a room tool; topic is its name. Read it before using a tool you do not know. For you, not the person.",

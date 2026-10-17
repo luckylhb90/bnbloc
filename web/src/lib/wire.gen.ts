@@ -2686,6 +2686,14 @@ export interface MediaImageRequest {
   // new one: a data URL the caller holds (a previous reply's, an
   // attachment's bytes the caller may read). At most MaxMediaImageBytes.
   image?: string;
+  // Publish, when true under a job grant (?job=&room=), publishes each
+  // drawn image into the room's Docs as a deliverable of the job: the
+  // reply carries each image's artifactId. A member's or an app's call
+  // never publishes.
+  publish?: boolean;
+  // FileName, with Publish, names the first image (poster.png); the rest
+  // are numbered (poster-2.png…).
+  fileName?: string;
 }
 
 // MediaImageReply is POST /v1/media/image's answer: the images inline
@@ -2696,7 +2704,10 @@ export interface MediaImageReply {
 
 // MediaImage is one generated (or edited) image.
 export interface MediaImage {
-  dataUrl: string;
+  dataUrl?: string;
+  // ArtifactID, when the call published, is the room artifact the image
+  // became (and DataURL is empty: the image is not also inlined).
+  artifactId?: string;
   mimeType: string;
   width: number;
   height: number;
