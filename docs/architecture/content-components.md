@@ -777,6 +777,18 @@ tool by name and can never inline a command.
     to another organization does not open), opened only into the effective
     resolution of a job of that organization, and deleted with the tool.
     Without the key connectors are off.
+  - `room` (stdio only, no `env`): the room is the credential. The bridge
+    gives the server the session's **room relay**:
+    `BNBLOC_ROOM_RELAY_URL` (the room tools server's loopback `/relay`)
+    and `BNBLOC_ROOM_RELAY_TOKEN` (the session's room tools bearer). The
+    relay forwards only `wire.RoomRelayRoutes`, gateway routes that admit
+    a job grant, through the bridge's own client, and sets `?room=&job=`
+    itself from the job bound at each turn's start. So a call acts as the
+    requester of the turn being driven, on any drive (own, borrowed,
+    platform); the gateway session never leaves the bridge; the bearer is
+    revoked with the session binding. A route joins the list only with
+    job-grant admission. Platform content (a built-in pack) requiring a
+    stdio tool does not force the sandbox; another member's still does.
 - **Distribution (stdio).** The member catalog (`GET /v1/components`, kind
   `mcp`) carries the pins; artifacts are entitled like every catalog
   kind's. The desktop's sidecar manager does not supervise a tool: for each

@@ -37,6 +37,7 @@ import (
 	corepkg "github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/internal/coreset"
 	"github.com/luckylhb90/bnbloc/internal/roomlog"
+	"github.com/luckylhb90/bnbloc/internal/schedule"
 	"github.com/luckylhb90/bnbloc/internal/shareagent"
 	"github.com/luckylhb90/bnbloc/internal/sse"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -632,18 +633,23 @@ type jobRef struct {
 }
 
 type bridgeJob struct {
-	JobID           string   `json:"jobId"`
-	TenantID        string   `json:"tenantId"`
-	RoomID          string   `json:"roomId"`
-	ChannelID       string   `json:"channelId"`
-	MessageSeq      int64    `json:"messageSeq"` // the prompting chat message
-	RequesterUserID string   `json:"requesterUserId"`
-	OwnerUserID     string   `json:"ownerUserId"`
-	Core            string   `json:"core"`
-	Provider        string   `json:"provider"`
-	TargetID        string   `json:"targetId"`
-	MessageText     string   `json:"messageText"`
-	AttachmentIDs   []string `json:"attachmentIds"`
+	JobID           string `json:"jobId"`
+	TenantID        string `json:"tenantId"`
+	RoomID          string `json:"roomId"`
+	ChannelID       string `json:"channelId"`
+	MessageSeq      int64  `json:"messageSeq"` // the prompting chat message
+	RequesterUserID string `json:"requesterUserId"`
+	OwnerUserID     string `json:"ownerUserId"`
+	// ClientMsgID / DispatchedByJobID tell how the prompting message was
+	// posted: typed by the requester, by a schedule on their behalf
+	// (schedule.IsRunSlotClientMsgID), or by another agent's dispatch.
+	ClientMsgID       string   `json:"clientMsgId"`
+	DispatchedByJobID string   `json:"dispatchedByJobId"`
+	Core              string   `json:"core"`
+	Provider          string   `json:"provider"`
+	TargetID          string   `json:"targetId"`
+	MessageText       string   `json:"messageText"`
+	AttachmentIDs     []string `json:"attachmentIds"`
 	// FileRef is the room file the request edits (nil = none).
 	FileRef         *wire.FileRef `json:"fileRef,omitempty"`
 	Model           string        `json:"model"`
@@ -653,6 +659,12 @@ type bridgeJob struct {
 	ExpertID      string `json:"expertId"`
 	ExpertVersion string `json:"expertVersion"`
 	ExpertName    string `json:"expertName"`
+}
+
+// byRequester reports a job its requester prompted with their own typed
+// message: neither a schedule's post nor another agent's dispatch.
+func (j bridgeJob) byRequester() bool {
+	return j.DispatchedByJobID == "" && !schedule.IsRunSlotClientMsgID(j.ClientMsgID)
 }
 
 func (b *Bridge) claimOnce(ctx context.Context) bool {
@@ -1613,7 +1625,7 @@ func (b *Bridge) noticeContextReset(ctx context.Context, d *drive) {
 // turnInfo is the turn this drive runs in session rs (the session
 // contributors' turn hooks: the room tools bind it).
 func (b *Bridge) turnInfo(d *drive, rs *roomSession) TurnInfo {
-	return TurnInfo{JobID: d.job.JobID, RequesterUserID: d.job.RequesterUserID, ChannelID: d.job.ChannelID, MessageSeq: d.job.MessageSeq, Workspace: sessionWorkspace{b: b, rs: rs, room: d.job.RoomID, channel: d.job.ChannelID, turn: deliverableTurn{JobID: d.job.JobID, SourceSeq: d.job.MessageSeq}}, Team: d.content.teamRoster()}
+	return TurnInfo{JobID: d.job.JobID, RequesterUserID: d.job.RequesterUserID, ChannelID: d.job.ChannelID, MessageSeq: d.job.MessageSeq, ByRequester: d.job.byRequester(), Workspace: sessionWorkspace{b: b, rs: rs, room: d.job.RoomID, channel: d.job.ChannelID, turn: deliverableTurn{JobID: d.job.JobID, SourceSeq: d.job.MessageSeq}}, Team: d.content.teamRoster()}
 }
 
 type ensureResult struct {
@@ -1822,6 +1834,7 @@ func (b *Bridge) sessionInfo(d *drive, opts corepkg.SessionOptions) SessionInfo 
 		TenantID: d.job.TenantID, RoomID: d.job.RoomID, ChannelID: d.job.ChannelID, Owner: d.owner, Core: d.core, Provider: d.job.Provider,
 		Sandboxed: opts.Execution != nil, MCPTransports: b.targetTransports(d.core, d.target, d.job.Provider),
 		JobID: d.job.JobID, RequesterUserID: d.job.RequesterUserID,
+		RoomRelayServers: d.content.relayedMCP(),
 	}
 }
 

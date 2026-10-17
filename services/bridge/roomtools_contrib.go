@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 
 	corepkg "github.com/luckylhb90/bnbloc/core"
+	"github.com/luckylhb90/bnbloc/core/pkgmeta"
 	"github.com/luckylhb90/bnbloc/services/bridge/roomtools"
 )
 
@@ -146,7 +147,7 @@ func (c *roomToolsContributor) bearer(nonce string) string {
 // hooks are a session's turn and release callbacks.
 func (c *roomToolsContributor) hooks(sess *roomtools.Session) (func(TurnInfo), func()) {
 	return func(t TurnInfo) {
-			sess.Bind(roomtools.Job{JobID: t.JobID, RequesterUserID: t.RequesterUserID, ChannelID: t.ChannelID, MessageSeq: t.MessageSeq, Workspace: t.Workspace, Team: t.Team})
+			sess.Bind(roomtools.Job{JobID: t.JobID, RequesterUserID: t.RequesterUserID, ChannelID: t.ChannelID, MessageSeq: t.MessageSeq, ByRequester: t.ByRequester, Workspace: t.Workspace, Team: t.Team})
 		}, func() {
 			c.srv.Revoke(sess)
 		}
@@ -206,5 +207,15 @@ func (c *roomToolsContributor) ContributeSession(_ context.Context, info Session
 		server.Env = []corepkg.NameValue{{Name: roomtools.TokenEnv, Value: token}}
 	}
 	turn, release := c.hooks(sess)
-	return SessionContribution{MCPServers: []corepkg.MCPServer{server}, RoomTools: true, Turn: turn, Release: release, State: state}, nil
+	part := SessionContribution{MCPServers: []corepkg.MCPServer{server}, RoomTools: true, Turn: turn, Release: release, State: state}
+	if len(info.RoomRelayServers) > 0 {
+		// The session's room-credential tools reach the gateway through
+		// this server's relay with the same bearer: bound to each turn's
+		// job, revoked with the session, never the gateway session.
+		part.RelayEnv = []corepkg.NameValue{
+			{Name: pkgmeta.RoomRelayURLEnv, Value: c.srv.RelayURL()},
+			{Name: pkgmeta.RoomRelayTokenEnv, Value: token},
+		}
+	}
+	return part, nil
 }

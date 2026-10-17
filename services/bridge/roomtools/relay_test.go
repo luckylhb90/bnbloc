@@ -1,0 +1,112 @@
+package roomtools
+
+import (
+	"bytes"
+	"encoding/json"
+	"io"
+	"net/http"
+	"strings"
+	"testing"
+
+	"github.com/luckylhb90/bnbloc/internal/wire"
+)
+
+// relayPost posts one relayed call with the session's bearer.
+func relayPost(t *testing.T, srv *Server, token, path string, body []byte) (int, string) {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodPost, srv.RelayURL()+path, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(raw)
+}
+
+// The room relay reaches only its routes, as the job the session drives
+// NOW: the grant follows each turn's Bind (a session's second turn acts for
+// its own job, not the first's), the tool can neither name nor change it,
+// and a revoked bearer is refused.
+func TestRoomRelay(t *testing.T) {
+	gw := &fakeGateway{handle: func(method, path string, body []byte) (int, any) {
+		return 200, map[string]any{"images": []any{}}
+	}}
+	srv, token, sess := startServer(t, gw)
+
+	if code, _ := relayPost(t, srv, "", "/v1/media/image", []byte(`{}`)); code != http.StatusUnauthorized {
+		t.Fatalf("no bearer = %d", code)
+	}
+	if code, _ := relayPost(t, srv, token, "/v1/media/image", []byte(`{}`)); code != http.StatusConflict {
+		t.Fatalf("unbound = %d; want 409 (no turn running)", code)
+	}
+	sess.Bind(Job{JobID: "job-1", RequesterUserID: "maya"})
+	if code, _ := relayPost(t, srv, token, "/v1/rooms/room-1/messages", []byte(`{}`)); code != http.StatusNotFound {
+		t.Fatalf("a route off the list = %d; want 404", code)
+	}
+	// A query the tool sets is not the grant: the relay sets room and job.
+	if code, _ := relayPost(t, srv, token, "/v1/media/image?job=other", []byte(`{}`)); code != http.StatusOK {
+		t.Fatalf("relayed = %d", code)
+	}
+	sess.Bind(Job{JobID: "job-2", RequesterUserID: "maya"})
+	if code, _ := relayPost(t, srv, token, "/v1/media/image", []byte(`{"prompt":"a cat"}`)); code != http.StatusOK {
+		t.Fatalf("second turn = %d", code)
+	}
+	calls := gw.callsTo(http.MethodPost, "/v1/media/image")
+	if len(calls) != 2 {
+		t.Fatalf("calls = %+v", calls)
+	}
+	if !strings.HasSuffix(calls[0].Path, "?job=job-1&room=room-1") || !strings.HasSuffix(calls[1].Path, "?job=job-2&room=room-1") {
+		t.Fatalf("grants = %s ; %s", calls[0].Path, calls[1].Path)
+	}
+	var sent RawBody
+	if err := json.Unmarshal(calls[1].Body, &sent); err != nil || sent.ContentType != "application/json" || !strings.Contains(string(sent.Data), "a cat") {
+		t.Fatalf("body = %s (%v)", calls[1].Body, err)
+	}
+	srv.Revoke(sess)
+	if code, _ := relayPost(t, srv, token, "/v1/media/image", []byte(`{}`)); code != http.StatusUnauthorized {
+		t.Fatalf("revoked = %d", code)
+	}
+}
+
+// GET <relay>/session answers the bound turn's facts from the bridge
+// itself (never the gateway): who the calls act for, whose agent it is, the
+// prompting message and whether its requester typed it. Unbound: 409.
+func TestRoomRelaySession(t *testing.T) {
+	gw := &fakeGateway{handle: func(method, path string, body []byte) (int, any) { return 200, map[string]any{} }}
+	srv, token, sess := startServer(t, gw)
+	get := func(tok string) (int, wire.RoomRelaySession) {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodGet, srv.RelayURL()+wire.RoomRelaySessionPath, nil)
+		if tok != "" {
+			req.Header.Set("Authorization", "Bearer "+tok)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var out wire.RoomRelaySession
+		_ = json.NewDecoder(resp.Body).Decode(&out)
+		return resp.StatusCode, out
+	}
+	if code, _ := get(""); code != http.StatusUnauthorized {
+		t.Fatalf("no bearer = %d", code)
+	}
+	if code, _ := get(token); code != http.StatusConflict {
+		t.Fatalf("unbound = %d; want 409", code)
+	}
+	sess.Bind(Job{JobID: "job-1", RequesterUserID: "maya", ChannelID: "ch-1", MessageSeq: 7, ByRequester: true})
+	code, got := get(token)
+	want := wire.RoomRelaySession{JobID: "job-1", RoomID: "room-1", ChannelID: "ch-1", Requester: "maya", Owner: "jack", MessageSeq: 7, ByRequester: true}
+	if code != http.StatusOK || got != want {
+		t.Fatalf("session = %d %+v; want %+v", code, got, want)
+	}
+	if len(gw.callsTo(http.MethodGet, wire.RoomRelaySessionPath)) != 0 {
+		t.Fatal("the session route reached the gateway")
+	}
+}

@@ -104,6 +104,7 @@ func Start(cfg Config) (*Server, error) {
 	s.tools = DefaultRegistry()
 	mux := http.NewServeMux()
 	mux.HandleFunc(Endpoint, s.handle)
+	mux.HandleFunc(RelayPath+"/", s.handleRelay)
 	s.srv = &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		if err := s.srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {

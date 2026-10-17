@@ -57,6 +57,14 @@ reply in the room; deliverables published with sourceSeq = the dispatch's seq
 - **The agent never sees the bridge's session.** Every gateway call is made
   by the bridge's own authenticated client; the bearer is meaningless
   outside the bridge process.
+- **The room relay** (`relay.go`, `/relay/<gateway path>`): the same
+  server, the same bearer, for MCP tool components whose credentials are
+  the room (`mcp.credentials: "room"`, content-components.md). The bridge
+  sets `BNBLOC_ROOM_RELAY_URL` and `BNBLOC_ROOM_RELAY_TOKEN` on those
+  servers only (`SessionInfo.RoomRelayServers`). A relayed call reaches
+  only `wire.RoomRelayRoutes` (routes that admit a job grant); the relay
+  sets `?room=&job=` from the bound job, so it acts as the turn's
+  requester and is refused (409) between turns.
 - **Protocol:** MCP Streamable HTTP, dual-era. Legacy clients
   (2025-03-26 … 2025-11-25) open with `initialize`; modern clients
   (2026-07-28) carry `_meta.io.modelcontextprotocol/protocolVersion` per

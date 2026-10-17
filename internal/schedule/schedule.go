@@ -167,8 +167,15 @@ func NextRun(rec wire.ScheduleRecurrence, loc *time.Location, prev, now time.Tim
 // so realtime's clientMsgId dedupe answers with the original message instead
 // of a duplicate.
 func RunSlotClientMsgID(scheduleID string, slot time.Time) string {
-	return "sched:" + scheduleID + ":" + strconv.FormatInt(slot.UnixMilli(), 10)
+	return runSlotPrefix + scheduleID + ":" + strconv.FormatInt(slot.UnixMilli(), 10)
 }
+
+// runSlotPrefix opens every scheduled run's client id.
+const runSlotPrefix = "sched:"
+
+// IsRunSlotClientMsgID reports a client id RunSlotClientMsgID made: a
+// message a schedule posted on its creator's behalf, not one they typed.
+func IsRunSlotClientMsgID(id string) bool { return strings.HasPrefix(id, runSlotPrefix) }
 
 // compile turns a validated, normalized recurrence into a spec.
 func compile(rec wire.ScheduleRecurrence) (*spec, error) {

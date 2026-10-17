@@ -5,9 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
+	"time"
 
 	corepkg "github.com/luckylhb90/bnbloc/core"
+	"github.com/luckylhb90/bnbloc/core/pkgmeta"
+	"github.com/luckylhb90/bnbloc/internal/schedule"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/services/bridge/roomtools"
 )
@@ -106,6 +110,47 @@ func TestRoomToolsContribution(t *testing.T) {
 	}
 }
 
+// A room-credential MCP tool (the room is its credential) gets the room
+// relay's address and the session's own bearer in its env, nothing else:
+// never the bridge's gateway session. Servers that are not room-credential
+// tools get nothing.
+func TestRoomRelayReachesRoomCredentialTools(t *testing.T) {
+	g := newActivityGateway(t, "room-1")
+	b := New(Config{GatewayBaseURL: g.srv.URL, GatewayToken: "gateway-session", OwnerSubject: "alice"})
+	stop, err := b.EnableRoomTools("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	info := SessionInfo{RoomID: "room-1", Owner: "alice", Core: "core-a", Provider: "codex", JobID: "job-1", RequesterUserID: "alice",
+		MCPTransports: []string{corepkg.MCPStdio, corepkg.MCPHTTP}, RoomRelayServers: []string{"media"}}
+	p := &corepkg.AgentProfile{MCPServers: []corepkg.MCPServer{
+		{Name: "media", Type: corepkg.MCPStdio, Command: "/tools/media"},
+		{Name: "codeword", Type: corepkg.MCPStdio, Command: "/tools/codeword"},
+	}}
+	b.contribute(context.Background(), info, p)
+	media, other := serverNamed(p, "media"), serverNamed(p, "codeword")
+	env := map[string]string{}
+	for _, e := range media.Env {
+		env[e.Name] = e.Value
+	}
+	room := serverNamed(p, roomtools.ServerName)
+	if room == nil || len(room.Headers) != 1 {
+		t.Fatalf("room tools = %+v", room)
+	}
+	bearer := room.Headers[0].Value[len("Bearer "):]
+	if len(env) != 2 || env[pkgmeta.RoomRelayTokenEnv] != bearer || !strings.HasSuffix(env[pkgmeta.RoomRelayURLEnv], roomtools.RelayPath) {
+		t.Fatalf("media env = %+v", media.Env)
+	}
+	if len(other.Env) != 0 {
+		t.Fatalf("codeword got the relay: %+v", other.Env)
+	}
+	raw, _ := json.Marshal(p)
+	if strings.Contains(string(raw), "gateway-session") {
+		t.Fatal("the gateway session reached the session's profile")
+	}
+}
+
 // A dispatched job reaches the target bridge as the requester's job: the
 // requester is the human the dispatch ran under, so the drive is a borrow
 // and reserves against the owner's authorization before anything runs,
@@ -131,5 +176,27 @@ func TestDispatchedJobStillReservesTheBorrow(t *testing.T) {
 	defer g.mu.Unlock()
 	if len(g.reserves) != 1 || g.reserves[0]["borrower"] != "maya" {
 		t.Fatalf("reservations = %v; want one for borrower maya", g.reserves)
+	}
+}
+
+// A turn its requester typed is ByRequester; a schedule's post (its slot
+// client id) or another agent's dispatch is not, though both run as the
+// requester. The room tools session carries it (the relay's session route).
+func TestTurnByRequester(t *testing.T) {
+	typed := bridgeJob{JobID: "j1", RequesterUserID: "maya", ClientMsgID: "c-123"}
+	scheduled := bridgeJob{JobID: "j2", RequesterUserID: "maya", ClientMsgID: schedule.RunSlotClientMsgID("sch_1", time.UnixMilli(1000))}
+	dispatched := bridgeJob{JobID: "j3", RequesterUserID: "maya", DispatchedByJobID: "j1"}
+	if !typed.byRequester() || scheduled.byRequester() || dispatched.byRequester() {
+		t.Fatalf("typed %v scheduled %v dispatched %v", typed.byRequester(), scheduled.byRequester(), dispatched.byRequester())
+	}
+	var raw struct {
+		ClientMsgID       string `json:"clientMsgId"`
+		DispatchedByJobID string `json:"dispatchedByJobId"`
+	}
+	// The claim reply's job carries both fields under these names
+	// (wire.AgentJob / store.AgentJob).
+	b, _ := json.Marshal(store.AgentJob{ClientMsgID: "c-1", DispatchedByJobID: "j0"})
+	if err := json.Unmarshal(b, &raw); err != nil || raw.ClientMsgID != "c-1" || raw.DispatchedByJobID != "j0" {
+		t.Fatalf("claim fields = %+v %v", raw, err)
 	}
 }

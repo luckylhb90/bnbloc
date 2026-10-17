@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 
@@ -46,6 +47,10 @@ type SessionInfo struct {
 	// SessionContribution.Turn.
 	JobID           string
 	RequesterUserID string
+	// RoomRelayServers are the session's room-credential MCP servers
+	// (pkgmeta.MCPCredentialsRoom): the contributor holding the room relay
+	// sets its env on them (SessionContribution.RelayEnv).
+	RoomRelayServers []string
 }
 
 // TurnInfo is one turn driven in a session: the claimed job and the human
@@ -55,6 +60,9 @@ type TurnInfo struct {
 	RequesterUserID string
 	ChannelID       string
 	MessageSeq      int64
+	// ByRequester: the requester typed the prompting message themself
+	// (bridgeJob.byRequester).
+	ByRequester bool
 	// Workspace reads the session's workspace through the core's
 	// session-files seam; it reports an error when the core offers none.
 	Workspace SessionWorkspace
@@ -161,6 +169,10 @@ type SessionContribution struct {
 	// tools: the session guidance then says how to use them
 	// (roomlog.Guidance.HasTools). No contributor words guidance itself.
 	RoomTools bool
+	// RelayEnv is the room relay's environment (pkgmeta.RoomRelayURLEnv,
+	// RoomRelayTokenEnv), set on the session's room-credential MCP servers
+	// (SessionInfo.RoomRelayServers).
+	RelayEnv []corepkg.NameValue
 	// Turn, when set, is called at the start of every turn driven in the
 	// session (the first one included), before the turn's input reaches
 	// the core.
@@ -239,7 +251,7 @@ type sessionHooks struct {
 
 // granted reports whether a contribution grants the session anything.
 func (part SessionContribution) granted() bool {
-	return len(part.MCPServers) > 0 || len(part.Env) > 0 || part.Turn != nil || part.Release != nil || part.RoomTools
+	return len(part.MCPServers) > 0 || len(part.Env) > 0 || len(part.RelayEnv) > 0 || part.Turn != nil || part.Release != nil || part.RoomTools
 }
 
 // contribute asks every contributor for its part of a new session's profile
@@ -256,6 +268,13 @@ func (b *Bridge) contribute(ctx context.Context, info SessionInfo, p *corepkg.Ag
 			continue
 		}
 		p.MCPServers = append(p.MCPServers, part.MCPServers...)
+		if len(part.RelayEnv) > 0 {
+			for i := range p.MCPServers {
+				if slices.Contains(info.RoomRelayServers, p.MCPServers[i].Name) {
+					p.MCPServers[i].Env = append(p.MCPServers[i].Env, part.RelayEnv...)
+				}
+			}
+		}
 		if len(part.Env) > 0 {
 			if p.Env == nil {
 				p.Env = map[string]string{}

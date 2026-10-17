@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -58,15 +59,19 @@ func mcpPlatform() string { return runtime.GOOS + "-" + runtime.GOARCH }
 // jobMCP is a turn's resolved MCP servers.
 type jobMCP struct {
 	servers []corepkg.MCPServer
+	// relayed names the servers whose credentials are the room
+	// (pkgmeta.MCPCredentialsRoom): each gets the session's room relay.
+	relayed []string
 }
 
 // resolveMCP builds the MCP servers of a job's tools. refs are the packages
 // in effect (to tell whose content requires a tool); own reports a drive
 // the requester asked of their own agent. It returns the servers, the unmet
 // tools, and the packages that are not the agent owner's own and require a
-// stdio tool (they force the sandboxed drive). The job names the drive for
-// the bridge-injected values (its room and id).
-func (b *Bridge) resolveMCP(tools []wire.ContentMCPTool, refs []wire.ContentRef, owner string, own bool, job bridgeJob) (jobMCP, []string, []string) {
+// stdio tool (they force the sandboxed drive). Platform content (a
+// built-in, Owner "") is no one else's: the platform signs both it and the
+// tool.
+func (b *Bridge) resolveMCP(tools []wire.ContentMCPTool, refs []wire.ContentRef, owner string, own bool) (jobMCP, []string, []string) {
 	var out jobMCP
 	var missing, foreign []string
 	byID := map[string]wire.ContentRef{}
@@ -80,7 +85,7 @@ func (b *Bridge) resolveMCP(tools []wire.ContentMCPTool, refs []wire.ContentRef,
 			missing = append(missing, "MCP tool "+t.Name+" (invalid name)")
 			continue
 		}
-		values, why := b.mcpValues(t, own, job)
+		values, why := b.mcpValues(t, own)
 		if why == "" && t.Auth != nil && t.Auth.Scheme == pkgmeta.MCPAuthOAuth {
 			values, why = b.mcpOAuthToken(t, own)
 		}
@@ -107,12 +112,17 @@ func (b *Bridge) resolveMCP(tools []wire.ContentMCPTool, refs []wire.ContentRef,
 					server.Env = append(server.Env, corepkg.NameValue{Name: e.Name, Value: v})
 				}
 			}
+			if t.Credentials == pkgmeta.MCPCredentialsRoom {
+				// The session's room relay is its credential, granted when
+				// the session is created (roomtools contributor).
+				out.relayed = append(out.relayed, t.Name)
+			}
 			// A stdio server runs on this machine: someone else's content
 			// asking for one forces the sandboxed drive, whether or not it
 			// declared mcp.stdio.
 			for _, id := range t.RequiredBy {
 				r, ok := byID[id]
-				if ok && r.Owner != owner && !foreignSeen[id] {
+				if ok && r.Owner != "" && r.Owner != owner && !foreignSeen[id] {
 					foreignSeen[id] = true
 					foreign = append(foreign, firstNonEmpty(r.DisplayName, r.Name))
 				}
@@ -144,7 +154,7 @@ func (b *Bridge) resolveMCP(tools []wire.ContentMCPTool, refs []wire.ContentRef,
 }
 
 // mcpValues returns a tool's env values, or why they are not available.
-func (b *Bridge) mcpValues(t wire.ContentMCPTool, own bool, job bridgeJob) (map[string]string, string) {
+func (b *Bridge) mcpValues(t wire.ContentMCPTool, own bool) (map[string]string, string) {
 	if len(t.Env) == 0 {
 		return nil, ""
 	}
@@ -157,16 +167,6 @@ func (b *Bridge) mcpValues(t wire.ContentMCPTool, own bool, job bridgeJob) (map[
 			return nil, "member credentials are not lent to someone else's drive"
 		}
 		values = b.mcpMemberSettings(t.Name)
-	case pkgmeta.MCPCredentialsBridge:
-		// The bridge itself is the credential: it injects its own gateway
-		// session and the room of the drive (the media-tools component),
-		// so no person configures anything. Per-drive, like the bridge's
-		// other calls; a borrowed drive never lends the owner's session.
-		var bridgeWhy string
-		values, bridgeWhy = b.mcpBridgeValues(t, own, job)
-		if bridgeWhy != "" {
-			return nil, bridgeWhy
-		}
 	default:
 		return nil, "unknown credentials source"
 	}
@@ -177,28 +177,6 @@ func (b *Bridge) mcpValues(t wire.ContentMCPTool, own bool, job bridgeJob) (map[
 		return nil, "its organization connector is not configured"
 	}
 	return values, ""
-}
-
-// mcpBridgeValues are the env values the bridge itself provides (the
-// "bridge" credentials source): its gateway base URL, a session token for
-// that drive (acting as the requester of the job the agent answers), the
-// room and the job. A borrowed or platform drive never lends the owner's
-// session: the token is minted per drive from the requester's authority.
-func (b *Bridge) mcpBridgeValues(t wire.ContentMCPTool, own bool, job bridgeJob) (map[string]string, string) {
-	if !own {
-		return nil, "the bridge's session is not lent to someone else's drive"
-	}
-	for _, name := range t.RequiredEnv() {
-		if name != "MEDIA_TOOLS_URL" && name != "MEDIA_TOOLS_TOKEN" && name != "MEDIA_TOOLS_ROOM" && name != "MEDIA_TOOLS_JOB" {
-			return nil, "the bridge does not provide " + name
-		}
-	}
-	return map[string]string{
-		"MEDIA_TOOLS_URL":   strings.TrimRight(b.cfg.GatewayBaseURL, "/"),
-		"MEDIA_TOOLS_TOKEN": b.gatewayAuth(context.Background()),
-		"MEDIA_TOOLS_ROOM":  job.RoomID,
-		"MEDIA_TOOLS_JOB":   job.JobID,
-	}, ""
 }
 
 // mcpOAuthDir is the subdirectory of MCPSettingsDir holding the member's
@@ -348,6 +326,20 @@ func (c *jobContent) fitMCPToTarget(profile bool, transports []string) {
 		}
 	}
 	c.mcp.servers = kept
+}
+
+// relayedMCP names the content's room-credential servers still attached.
+func (c *jobContent) relayedMCP() []string {
+	if c == nil {
+		return nil
+	}
+	var out []string
+	for _, s := range c.mcp.servers {
+		if slices.Contains(c.mcp.relayed, s.Name) {
+			out = append(out, s.Name)
+		}
+	}
+	return out
 }
 
 // mcpAttach reports whether a core's sessions can carry a profile, and the

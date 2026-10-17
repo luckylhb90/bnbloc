@@ -37,10 +37,20 @@ const (
 	// MCPCredentialsOrg: an org admin configures one connector per
 	// organization, stored sealed server-side.
 	MCPCredentialsOrg = "org"
-	// MCPCredentialsBridge: the bridge itself provides the values (its own
-	// gateway session, the drive's room and job): nothing for a person to
-	// configure, nothing stored anywhere.
-	MCPCredentialsBridge = "bridge"
+	// MCPCredentialsRoom: the room the agent works in is the credential. The
+	// package declares no env; the bridge gives the server the room relay
+	// (RoomRelayURLEnv, RoomRelayTokenEnv): a loopback address and the
+	// agent session's bearer, through which the server calls the gateway
+	// routes that act as the requester of the turn being driven. The
+	// gateway session never reaches the server. Stdio servers only.
+	MCPCredentialsRoom = "room"
+)
+
+// The room relay's variables (MCPCredentialsRoom), set by the bridge. They
+// carry the reserved prefix: no package declares them.
+const (
+	RoomRelayURLEnv   = "BNBLOC_ROOM_RELAY_URL"
+	RoomRelayTokenEnv = "BNBLOC_ROOM_RELAY_TOKEN"
 )
 
 // HTTP auth schemes of an endpoint MCP component (MCPHTTPAuth.Scheme).
@@ -172,6 +182,11 @@ func validateMCPPackage(pkg Package) error {
 		if err := requireGuardedEndpoint(pkg, "mcp"); err != nil {
 			return err
 		}
+		if m.Credentials == MCPCredentialsRoom {
+			// The relay is a loopback address on the member's machine and
+			// its bearer acts in their rooms: never sent to a remote server.
+			return fmt.Errorf(`mcp.credentials %q is for runtime "stdio" only`, MCPCredentialsRoom)
+		}
 		if m.Stdio != nil {
 			return fmt.Errorf(`mcp runtime "endpoint" must not declare mcp.stdio`)
 		}
@@ -230,14 +245,18 @@ func validateMCPEnv(m MCP) error {
 	switch m.Credentials {
 	case "":
 		if len(m.Env) > 0 {
-			return fmt.Errorf("mcp.credentials is required with mcp.env (%q, %q or %q)", MCPCredentialsMember, MCPCredentialsOrg, MCPCredentialsBridge)
+			return fmt.Errorf("mcp.credentials is required with mcp.env (%q or %q)", MCPCredentialsMember, MCPCredentialsOrg)
 		}
-	case MCPCredentialsMember, MCPCredentialsOrg, MCPCredentialsBridge:
+	case MCPCredentialsMember, MCPCredentialsOrg:
 		if len(m.Env) == 0 {
 			return fmt.Errorf("mcp.credentials needs mcp.env naming the variables")
 		}
+	case MCPCredentialsRoom:
+		if len(m.Env) > 0 {
+			return fmt.Errorf("mcp.credentials %q takes no mcp.env: the bridge sets %s and %s", MCPCredentialsRoom, RoomRelayURLEnv, RoomRelayTokenEnv)
+		}
 	default:
-		return fmt.Errorf("mcp.credentials must be %q, %q or %q, got %q", MCPCredentialsMember, MCPCredentialsOrg, MCPCredentialsBridge, m.Credentials)
+		return fmt.Errorf("mcp.credentials must be %q, %q or %q, got %q", MCPCredentialsMember, MCPCredentialsOrg, MCPCredentialsRoom, m.Credentials)
 	}
 	return nil
 }

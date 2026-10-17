@@ -30,12 +30,14 @@ nothing in tools/list, nothing in the session prefix. The built-in tools
 and the bridge Publish seam are deleted (commit history keeps them).
 
 - **bnbloc-media-tools** (packages/media-tools, cmd/bnbloc-media-tools):
-  a stdio MCP component with a new credentials source, **"bridge"**: the
-  bridge injects its own gateway address, a session token for the drive,
-  and the drive's room and job as the server's environment — nothing for
-  any person to configure, nothing stored, a borrowed drive never lent.
-  Its two tools call the same /v1/media routes under the job grant
-  (?job=&room=), so a call acts as the requester and the image is
+  a stdio MCP component whose credentials are **the room**
+  (`mcp.credentials: "room"`, replacing the first cut's "bridge" source,
+  see docs/bugs/2026-10-17-media-tools-never-reach-the-gateway.md): the
+  bridge gives it the session's room relay (a loopback address and the
+  session's room tools bearer), which sends each call to the gateway under
+  the grant of the turn being driven now. Nothing to configure, nothing
+  stored, no gateway session in a child process. Its two tools call the
+  same /v1/media routes, so a call acts as the requester and the image is
   attributed to the job; transcribe_audio reads a room attachment by id
   (?attachment=, the gateway reads it as the caller). The organization's
   media providers (M6) are the models the tools draw and hear with — an
@@ -52,10 +54,10 @@ Decided while building:
 - **The ai routes of the app data API spend none of the app data
   budgets** (apps.go): their limit is the caller's per-member assist rate,
   the assist routes' rule — the app budgets are the data API's.
-- **generate_image publishes through a new roomtools Config.Publish seam**
-  the bridge injects (publishArtifactNow): the one publish path, with the
-  job's channel and seq; the tool's result carries the artifact id, never
-  the image.
+- **generate_image publishes through the gateway** (the M3 roomtools
+  Publish seam is deleted): the room service mints the artifact id and the
+  version carries the job's channel, `sourceJobId` and `sourceSeq`; the
+  tool's result carries the artifact id, never the image.
 - **transcribe_audio is read-only**: it posts the workspace file's bytes
   and fences the transcript; nothing is published.
 - **The interactive-apps skill's budget rose to 1870** with the two SDK
@@ -213,17 +215,19 @@ the `orgHosts` allowlist. Not in round 1.
 
 | Lens | Answer |
 |---|---|
-| Actors | A member dictates (their own composer, their rate); an agent generates as the requester of the job it answers (contentGrant admission, the requester's budget). An org admin turns media off (`assistDisabled`); a super admin sets providers; a visitor or an agent session gets nothing (agents reach media only through their room tools). |
+| Actors | A member dictates (their own composer, their rate); an agent generates as the requester of the job it answers (contentGrant admission, the requester's budget). An org admin turns media off (`assistDisabled`); a super admin sets providers; a visitor or an agent session gets nothing (agents reach media only through the media-tools component, as the requester of the turn, through the room relay). |
 | Time and lifecycle | A call is stateless; a provider config change applies to the next call (settings are read per call, like the assist model's). A recording is capped at 120 s client-side and 20 MiB server-side; no persisted state anywhere. |
 | Scale and cost | Calls share the member's assist rate (20/min) and the cost budget; every call is audited with the model and latency. A generated image is one room artifact version under the room's own caps. Reply bytes bounded (16 MiB image, 32 KiB transcript). |
 | Failure and recovery | Provider unreachable → one plain 502 sentence; a content refusal → 4xx with the provider's message; a reply that is not the expected shape → 502 (`unreadable reply`). No retries that repeat a side effect: the only write is the M3 artifact publish, and a re-run makes a new version, like any re-run deliverable. |
-| Boundaries and privacy | Keys sealed per setting key, never returned. Audio, prompts, transcripts and images are never audited or logged (only the model name, latency and failure class). The page-side SDK routes stay under the app capability; the room tool acts as the requester through the job grant. |
+| Boundaries and privacy | Keys sealed per setting key, never returned. Audio, prompts, transcripts and images are never audited or logged (only the model name, latency and failure class). The page-side SDK routes stay under the app capability; the media-tools component acts as the requester through the room relay: the relay sets the job grant per turn, the gateway session never leaves the bridge, and a caller-auth provider is used only when the bearer is the acting member's own (never the bridge owner's token forwarded for someone else). |
 | Abuse and untrusted input | Rate + budget per member; the provider's own moderation is the authority for what it will draw (we do not build a second classifier — the owner of the rule is the provider). `revisedPrompt` and transcripts are fenced as provider/user data wherever an agent reads them. The web hides both entries when the capability is off. |
-| One owner | `internal/media` owns every provider call (nothing else calls a media API); `internal/modelsettings` owns the shared endpoint-setting rules (extracted from assist); `lib/voice.ts` owns recording/encoding; `lib/media.ts` owns the web routes (a new boundary rule beside B2); the bridge's publish path owns artifact publication. |
+| One owner | `internal/media` owns every provider call (nothing else calls a media API); `internal/modelsettings` owns the shared endpoint-setting rules (extracted from assist); `lib/voice.ts` owns recording/encoding; `lib/media.ts` owns the web routes (a new boundary rule beside B2); `runMediaImage` owns a generation and its publish; the room relay (`wire.RoomRelayRoutes`) owns which routes a room-credential tool reaches. |
 | Defaults and fallbacks | No provider → the routes answer a clear 409 sentence and the web hides the buttons; the tool result says the deployment has no image model. `params` absent → adapter defaults (sizes 1024², 1536×1024, 1024×1536). An org without its own provider uses the platform's (M6). |
 | External contracts | The OpenAI-compatible shapes are verified per adapter with in-repo fakes pinning the wire (multipart fields, `b64_json`, error bodies); a real proxy is exercised by the admin "Test" button at configure time, not assumed. |
-| Load on users and agents | One new room tool in M3 with a one-line brief; M4 adds one more. No session guidance changes; the composer gains one button. The SDK grows two calls documented in the skill. |
-| Release and compatibility | Additive routes, settings and SDK methods; pre-launch, no migrations. The room tool appears with the bridge deploy; `tools_list.json` and the brief test are updated in the same change. |
+| Load on users and agents | Agents: nothing unless the deployment installs media-tools and content requires it (two tools, described by the component). No session guidance changes. Members: the composer's draw entry (§9 redesigns it). The SDK grows two calls documented in the skill. |
+| Release and compatibility | Additive routes, settings and SDK methods; pre-launch, no migrations. `mcp.credentials: "room"` replaces the unreleased "bridge" source outright; media-tools 0.2.0 needs a bridge with the room relay (a desktop release), an older bridge reports it as an unknown credentials source (missing, the turn still runs). |
+| AI capability | The feature IS the model call. The entry for members is §9 (the composer's image mode with a prompt-enhance step on the assist seam); agents reach it only through the installable component. |
+| Component or platform | Platform: provider settings, admission, budget, audit, the publish, the room relay (generic: any room-credential tool, routes listed in one place). Component: the agent tools (media-tools), their teaching (media-skills). Nothing in the bridge names media. |
 | Observability | Every call audited (kind `assist`, name `transcribe`/`image`, model, latency, failure class); provider failures surface as `obs.ServerError` with the class; settings changes audited like a model change. |
 
 **Pre-mortem.**
@@ -231,10 +235,13 @@ the `orgHosts` allowlist. Not in round 1.
 1. **"The mic button does nothing for some members."** An org without a
    provider, or with AI off: `GET /v1/media` is the one status the web
    reads; the button hides; a direct call answers 409 with a sentence.
-2. **"The generated image never reached Docs."** The M3 seam is the
-   bridge's existing publish path, tested end to end against a fake room
-   service (artifact created, version published, `sourceJobId` carried).
-3. **"The agent burned the budget on twenty pictures."** One image per
+2. **"The generated image never reached Docs."** It happened (the first
+   cut: unauthenticated calls, one artifact id per room). The gateway
+   publish is tested against a fake room service that refuses what the
+   real one does (a stale base, an id taken): a batch of two publishes two
+   artifacts, with `sourceJobId`/`sourceSeq`/channel carried; the tool
+   is tested against a relay that requires the bearer.
+3. **"The agent burned the budget on twenty pictures."** At most four per
    call, the member's rate and budget, and a brief that says to confirm
    with the person what to make.
 4. **"Audio or a prompt leaked into a log."** The audit row and the slog

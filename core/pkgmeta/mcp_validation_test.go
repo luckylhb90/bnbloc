@@ -94,6 +94,13 @@ func TestMCPPackageValid(t *testing.T) {
 	if a := pkg.MCP.HTTP.Auth; a.Scheme != MCPAuthOAuth || a.ClientID != "bnbloc-desktop" || len(a.Scopes) != 2 {
 		t.Fatalf("oauth payload = %+v", a)
 	}
+	// The room as the credential: a stdio server declaring no env.
+	if _, err := ParsePackage(mcpStdioBody(t, func(b map[string]any) {
+		delete(mcpBlock(b), "env")
+		mcpBlock(b)["credentials"] = MCPCredentialsRoom
+	})); err != nil {
+		t.Fatalf("room credentials: %v", err)
+	}
 }
 
 func TestMCPPackageRefusals(t *testing.T) {
@@ -119,6 +126,12 @@ func TestMCPPackageRefusals(t *testing.T) {
 		{"env without credentials", mcpStdioBody, func(b map[string]any) { delete(mcpBlock(b), "credentials") }, "mcp.credentials is required"},
 		{"credentials without env", mcpStdioBody, func(b map[string]any) { delete(mcpBlock(b), "env") }, "needs mcp.env"},
 		{"unknown credentials", mcpStdioBody, func(b map[string]any) { mcpBlock(b)["credentials"] = "everyone" }, "mcp.credentials must be"},
+		// The room relay's variables are the bridge's: a room-credential
+		// package declares none, and an endpoint never receives them.
+		{"room credentials with env", mcpStdioBody, func(b map[string]any) { mcpBlock(b)["credentials"] = "room" }, "takes no mcp.env"},
+		{"room credentials on an endpoint", mcpEndpointBody, func(b map[string]any) {
+			b["mcp"] = map[string]any{"tools": []map[string]any{{"name": "t"}}, "credentials": "room"}
+		}, `for runtime "stdio" only`},
 		{"stdio without artifacts", mcpStdioBody, func(b map[string]any) { delete(b, "artifacts") }, "requires artifacts"},
 		{"stdio extra file", mcpStdioBody, func(b map[string]any) {
 			b["artifacts"].(map[string]any)["darwin-arm64/helper"] = sandboxArtifact('c')
