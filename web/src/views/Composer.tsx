@@ -621,6 +621,28 @@ export function Composer({
           attachments={attachments.chipItems}
           onRemove={attachments.removeFile}
         />
+        {/* The input row: mic left, the text field, send right. Voice and
+            sending are what the text field is FOR, so they sit beside it,
+            not in the tool tray below. */}
+        <div className="flex items-end gap-1">
+        {canVoice && (
+          <button
+            type="button"
+            onClick={() => void voice.toggle()}
+            disabled={disabled || sending || enhancing || (voice.state !== "idle" && voice.state !== "recording")}
+            className={cn(toolButton, "mb-1 shrink-0")}
+            title={voice.state === "recording" ? "Stop and transcribe" : voice.state === "idle" ? "Speak to text" : "Transcribing…"}
+            aria-label={voice.state === "recording" ? "Stop recording" : "Speak"}
+          >
+            {voice.state === "recording" ? (
+              <MicrophoneSlashIcon size={18} className="animate-pulse text-[var(--color-danger)]" />
+            ) : voice.state === "idle" ? (
+              <MicrophoneIcon size={18} />
+            ) : (
+              <SpinnerIcon size={18} className="animate-spin" />
+            )}
+          </button>
+        )}
         <textarea
           ref={taRef}
           // The people chat's placeholder states who can read it; two lines
@@ -687,9 +709,26 @@ export function Composer({
               void send();
             }
           }}
-          className="block max-h-40 min-h-[2.5rem] w-full resize-none bg-transparent px-4 pb-1 pt-2.5 text-sm text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none"
+          className="block max-h-40 min-h-[2.5rem] w-full flex-1 resize-none bg-transparent px-4 pb-1 pt-2.5 text-sm text-[var(--color-fg)] placeholder:text-[var(--color-fg-subtle)] focus:outline-none"
         />
-        {/* Bottom toolbar, directly under the textarea: ONE row at every
+        <Button
+          variant="primary"
+          size="icon"
+          onClick={() => void send()}
+          disabled={
+            disabled ||
+            sending ||
+            enhancing ||
+            attachments.isUploading ||
+            (!text.trim() && refs.length === 0 && attachments.files.length === 0)
+          }
+          title="Send"
+          className="mb-1 shrink-0"
+        >
+          <PaperPlaneRightIcon size={16} weight="fill" />
+        </Button>
+        </div>
+        {/* Bottom toolbar, directly under the input row: ONE row at every
             width. Narrow: [+] [Agent|People icons] [agent] [model icon] …
             [send]; wide adds labels and splits attach / reference. */}
         <div className="flex items-center gap-1 px-2 pb-1.5">
@@ -832,39 +871,6 @@ export function Composer({
               <ImageIcon size={18} />
             </button>
           )}
-          {canVoice && (
-            <button
-              type="button"
-              onClick={() => void voice.toggle()}
-              disabled={disabled || sending || enhancing || (voice.state !== "idle" && voice.state !== "recording")}
-              className={cn(toolButton, "shrink-0")}
-              title={voice.state === "recording" ? "Stop and transcribe" : voice.state === "idle" ? "Speak to text" : "Transcribing…"}
-              aria-label={voice.state === "recording" ? "Stop recording" : "Speak"}
-            >
-              {voice.state === "recording" ? (
-                <MicrophoneSlashIcon size={18} className="animate-pulse text-[var(--color-danger)]" />
-              ) : voice.state === "idle" ? (
-                <MicrophoneIcon size={18} />
-              ) : (
-                <SpinnerIcon size={18} className="animate-spin" />
-              )}
-            </button>
-          )}
-          <Button
-            variant="primary"
-            size="icon"
-            onClick={() => void send()}
-            disabled={
-              disabled ||
-              sending ||
-              enhancing ||
-              attachments.isUploading ||
-              (!text.trim() && refs.length === 0 && attachments.files.length === 0)
-            }
-            title="Send"
-          >
-            <PaperPlaneRightIcon size={16} weight="fill" />
-          </Button>
         </div>
       </div>
       <ExpertPermissionDialog expert={exp.confirming} onAnswer={exp.resolveConfirm} />
