@@ -2600,6 +2600,9 @@ export interface MediaCapabilities {
 export interface MediaCapability {
   // Available: a provider is configured for the caller's organization.
   available: boolean;
+  // Models are the provider's models the caller may pick from (the first
+  // the default); empty when the provider serves one.
+  models?: string[];
 }
 
 // MediaProviderConfig is GET /v1/platform/media/{capability}: the

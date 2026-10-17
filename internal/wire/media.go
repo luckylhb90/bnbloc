@@ -16,6 +16,9 @@ type MediaCapabilities struct {
 type MediaCapability struct {
 	// Available: a provider is configured for the caller's organization.
 	Available bool `json:"available"`
+	// Models are the provider's models the caller may pick from (the first
+	// the default); empty when the provider serves one.
+	Models []string `json:"models,omitempty"`
 }
 
 // MediaProviderConfig is GET /v1/platform/media/{capability}: the

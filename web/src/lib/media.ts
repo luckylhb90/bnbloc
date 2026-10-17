@@ -33,6 +33,13 @@ export function invalidateMediaCaps(): void {
   for (const l of listeners) l();
 }
 
+/** One capability as the caller sees it: whether it runs, and (image) the
+ *  models the caller may pick from. */
+export interface MediaCapabilityView {
+  available: boolean;
+  models?: string[];
+}
+
 /** Whether the caller can transcribe: null while loading or on a failure
  *  (the entry hides). */
 export function useMediaCapability(cap: "transcribe" | "image"): boolean | null {
@@ -61,6 +68,36 @@ export function useMediaCapability(cap: "transcribe" | "image"): boolean | null 
   }, [tenant, rev]);
   if (!caps) return null;
   return cap === "transcribe" ? caps.transcribe.available : caps.image.available;
+}
+
+/** One capability's full view (availability and models); null while loading
+ *  or on a failure (the entry hides). */
+export function useMediaCapabilityView(cap: "transcribe" | "image"): MediaCapabilityView | null {
+  const { tenant } = useAuth();
+  const [rev, setRev] = useState(0);
+  const [caps, setCaps] = useState<MediaCapabilities | null>(null);
+  useEffect(() => {
+    const listener = () => setRev((n) => n + 1);
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  }, []);
+  useEffect(() => {
+    let cancelled = false;
+    loadCaps(tenant)
+      .then((c) => {
+        if (!cancelled) setCaps(c);
+      })
+      .catch(() => {
+        if (!cancelled) setCaps(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tenant, rev]);
+  if (!caps) return null;
+  return cap === "transcribe" ? caps.transcribe : caps.image;
 }
 
 /** Transcribes one audio blob (16 kHz mono WAV from lib/voice.ts) into text. */

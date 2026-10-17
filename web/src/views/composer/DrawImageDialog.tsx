@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { generateImage } from "@/lib/media";
+import { generateImage, useMediaCapabilityView } from "@/lib/media";
 import { errorText } from "@/lib/errors";
 import { Button } from "@/ui/Button";
 import { Dialog } from "@/ui/Dialog";
@@ -32,13 +32,19 @@ export function DrawImageDialog({
   const [count, setCount] = useState(1);
   const [drawing, setDrawing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [model, setModel] = useState("");
   const promptRef = useRef<HTMLTextAreaElement>(null);
+  // The provider's models, when it serves more than one: the picker shows
+  // them (the first the default). One model: nothing to choose.
+  const imageView = useMediaCapabilityView("image");
+  const models = imageView?.models?.length ? imageView.models : [];
 
   useEffect(() => {
     if (open) {
       setPrompt("");
       setAspect("square");
       setCount(1);
+      setModel("");
       setError(null);
       requestAnimationFrame(() => promptRef.current?.focus());
     }
@@ -50,7 +56,7 @@ export function DrawImageDialog({
     setDrawing(true);
     setError(null);
     try {
-      const reply = await generateImage(p, { aspect, count });
+      const reply = await generateImage(p, { aspect, count, ...(model ? { model } : {}) });
       if (!reply.images || reply.images.length === 0) {
         throw new Error("The provider drew nothing");
       }
@@ -126,6 +132,18 @@ export function DrawImageDialog({
             </Select>
           </Field>
         </div>
+        {models.length > 1 && (
+          <Field label="Model" hint="The provider serves these; the first is the default.">
+            <Select value={model} onChange={(e) => setModel(e.target.value)}>
+              <option value="">Default ({models[0]})</option>
+              {models.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        )}
       </div>
     </Dialog>
   );

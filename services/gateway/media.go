@@ -99,7 +99,8 @@ func (s *Service) mediaCaller(w http.ResponseWriter, r *http.Request, caller aut
 func headerAuth(r *http.Request) string { return strings.TrimSpace(r.Header.Get("Authorization")) }
 
 // handleMediaCapabilities answers GET /v1/media: which media calls run for
-// the caller (the entries the web shows).
+// the caller (the entries the web shows) and, for image, the models the
+// caller may pick from (the first the default).
 func (s *Service) handleMediaCapabilities(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	out := wire.MediaCapabilities{}
 	for _, cap := range media.Capabilities {
@@ -109,11 +110,15 @@ func (s *Service) handleMediaCapabilities(w http.ResponseWriter, r *http.Request
 			httpx.Error(w, "read the media provider failed", http.StatusInternalServerError)
 			return
 		}
-		if cap == media.CapImage {
-			out.Image.Available = ok && p.Model.Configured()
+		if !ok || !p.Model.Configured() {
 			continue
 		}
-		out.Transcribe.Available = ok && p.Model.Configured()
+		if cap == media.CapImage {
+			out.Image.Available = true
+			out.Image.Models = p.Models
+			continue
+		}
+		out.Transcribe.Available = true
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
