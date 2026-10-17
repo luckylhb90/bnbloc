@@ -5,6 +5,14 @@ Status: M1–M6 built (2026-10-16/17); the app surfaces hardened 2026-10-17
 frame may not — recording an anonymous visitor is an abuse surface, and the
 demo SDK answers refusal-shaped stubs).
 
+Revised 2026-10-17 (the room's draw entry): the composer gains a draw
+button beside the mic — a prompt, a shape and a count, and the drawn images
+join the message as attachments the member checks before sending (the
+ordinary attachment path: preview, caption, send). Nothing new to learn:
+both entries sit where text is made, not in a tool tray. The studio
+surface it mirrors is its page-side generate (one prompt, inline images),
+re-built on the room's own rails.
+
 Revised again 2026-10-17 (multi-model, caller auth): a provider carries a
 models list (every model it serves; the first is the default callers get)
 and an auth kind — "key" (the sealed deployment key) or "caller" (each

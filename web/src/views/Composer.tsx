@@ -11,6 +11,7 @@ import {
   MicrophoneSlashIcon,
   MicrophoneIcon,
   SpinnerIcon,
+  ImageIcon,
 } from "@phosphor-icons/react";
 import { cn } from "@/lib/cn";
 import type { LocalAgent } from "@/lib/useLocalAgent";
@@ -46,6 +47,7 @@ import { PromptPickerButton, PromptVariablesDialog, SlashMenu } from "@/views/co
 import { explicitRecipient, resolveRecipient } from "@/views/composer/recipient";
 import { useEnhancePrompt } from "@/views/composer/useEnhancePrompt";
 import { useVoiceInput } from "@/views/composer/useVoiceInput";
+import { DrawImageDialog } from "@/views/composer/DrawImageDialog";
 import { useMediaCapability } from "@/lib/media";
 import { AssistButton } from "@/views/AssistButton";
 
@@ -185,11 +187,13 @@ export function Composer({
   // Voice input: press to record, press again to transcribe into the caret.
   // Hidden when the deployment has no transcription provider (or AI is off).
   const canVoice = useMediaCapability("transcribe");
+  const canDraw = useMediaCapability("image");
   function applyTextForVoice(next: string) {
     setText(next);
     requestAnimationFrame(() => taRef.current?.focus());
   }
   const voice = useVoiceInput({ setText: applyTextForVoice, taRef });
+  const [drawing, setDrawing] = useState(false);
   // Prompts of the member's packs and the room's: the picker, /commands
   // and expert quick prompts that point at a pack's prompt.
   const prompts = useComposerPrompts(roomId, !people, setText, taRef);
@@ -816,6 +820,18 @@ export function Composer({
               disabled={disabled || sending || (!enhancing && !text.trim())}
             />
           )}
+          {canDraw && (
+            <button
+              type="button"
+              onClick={() => setDrawing(true)}
+              disabled={disabled || sending}
+              className={cn(toolButton, "shrink-0")}
+              title="Draw an image"
+              aria-label="Draw an image"
+            >
+              <ImageIcon size={18} />
+            </button>
+          )}
           {canVoice && (
             <button
               type="button"
@@ -853,6 +869,14 @@ export function Composer({
       </div>
       <ExpertPermissionDialog expert={exp.confirming} onAnswer={exp.resolveConfirm} />
       <PromptVariablesDialog choice={prompts.filling} onCancel={prompts.cancelFill} onInsert={prompts.submitFill} />
+      <DrawImageDialog
+        open={drawing}
+        onClose={() => setDrawing(false)}
+        onImages={(images) => {
+          attachments.addFiles(images.map((i) => i.file));
+          requestAnimationFrame(() => taRef.current?.focus());
+        }}
+      />
     </div>
   );
 }
