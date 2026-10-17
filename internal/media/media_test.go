@@ -242,6 +242,58 @@ func TestGenerateEditWire(t *testing.T) {
 	}
 }
 
+// A caller-auth provider is called with the caller's forwarded Authorization
+// (the gateway's pin), never a sealed key.
+func TestCallerAuthWire(t *testing.T) {
+	s := settings(t)
+	var gotAuth, gotModel string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		if err := r.ParseMultipartForm(32 << 20); err == nil {
+			gotModel = r.FormValue("model")
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"text": "hi"})
+	}))
+	defer srv.Close()
+	if _, err := s.Put(context.Background(), CapTranscribe, "", wire.MediaProviderUpdate{
+		Kind: AdapterKindOpenAICompatible, BaseURL: srv.URL + "/v1", Model: "asr-a", Auth: AuthCaller,
+	}, "ops"); err != nil {
+		t.Fatal(err)
+	}
+	provider(t, s, CapTranscribe).WithCallerAuth("Bearer the-callers-token").Transcribe(context.Background(), []byte("A"), "audio/wav", "a.wav")
+	if gotAuth != "Bearer the-callers-token" {
+		t.Fatalf("auth = %q", gotAuth)
+	}
+	if gotModel != "asr-a" {
+		t.Fatalf("model = %q", gotModel)
+	}
+}
+
+// The models list rides the stored row; Choose falls back to the first.
+func TestModelChoice(t *testing.T) {
+	s := settings(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"text":"hi"}`))
+	}))
+	defer srv.Close()
+	if _, err := s.Put(context.Background(), CapTranscribe, "", wire.MediaProviderUpdate{
+		Kind: AdapterKindOpenAICompatible, BaseURL: srv.URL + "/v1",
+		Model: "asr-a", Models: []string{"asr-a", "asr-b"},
+	}, "ops"); err != nil {
+		t.Fatal(err)
+	}
+	p := provider(t, s, CapTranscribe)
+	if got := p.Choose("asr-b"); got != "asr-b" {
+		t.Fatalf("choose asr-b = %q", got)
+	}
+	if got := p.Choose("no-such"); got != "asr-a" {
+		t.Fatalf("choose unknown = %q", got)
+	}
+	if got := p.Choose(""); got != "asr-a" {
+		t.Fatalf("choose default = %q", got)
+	}
+}
+
 // The aspect presets: the params' own size for an aspect, the defaults.
 func TestAspectSize(t *testing.T) {
 	params := map[string]string{"image.size.portrait": "999x777"}

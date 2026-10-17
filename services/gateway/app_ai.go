@@ -145,7 +145,7 @@ func (s *Service) serveAppAIVoice(w http.ResponseWriter, r *http.Request, c appC
 		mimeType = "application/octet-stream"
 	}
 	ctx := r.Context()
-	p, has, err := s.mediaProvider(ctx, claims, media.CapTranscribe)
+	p, has, err := s.mediaProvider(ctx, claims, media.CapTranscribe, headerAuth(r))
 	if err != nil {
 		obs.ServerError(w, "read the media provider failed", err)
 		httpx.Error(w, "read the media provider failed", http.StatusInternalServerError)

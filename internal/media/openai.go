@@ -40,7 +40,7 @@ func (a *openAICompatible) Transcribe(ctx context.Context, p Provider, audio []b
 	if filename == "" {
 		filename = "audio"
 	}
-	if err := mw.WriteField("model", p.Model.Model); err != nil {
+	if err := mw.WriteField("model", p.Choose("")); err != nil {
 		return "", err
 	}
 	for k, v := range p.Params {
@@ -69,9 +69,7 @@ func (a *openAICompatible) Transcribe(ctx context.Context, p Provider, audio []b
 		return "", err
 	}
 	req.Header.Set("Content-Type", mw.FormDataContentType())
-	if p.Model.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+p.Model.APIKey)
-	}
+	p.setAuth(req)
 	resp, err := p.client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrProviderUnreachable, err)
@@ -106,7 +104,7 @@ func (a *openAICompatible) Generate(ctx context.Context, p Provider, req ImageRe
 		n = 1
 	}
 	body := map[string]any{
-		"model":  p.Model.Model,
+		"model":  p.Choose(req.Model),
 		"prompt": req.Prompt,
 		"n":      n,
 	}
@@ -185,9 +183,7 @@ func postImages(ctx context.Context, p Provider, body map[string]any, input *Ima
 		}
 		req.Header.Set("Content-Type", "application/json")
 	}
-	if p.Model.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+p.Model.APIKey)
-	}
+	p.setAuth(req)
 	resp, err := p.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrProviderUnreachable, err)
@@ -231,6 +227,18 @@ func postImages(ctx context.Context, p Provider, body map[string]any, input *Ima
 		}
 	}
 	return out, nil
+}
+
+// setAuth sets the provider's Authorization header: the sealed key, or the
+// caller's own token the gateway pinned (auth "caller").
+func (p Provider) setAuth(req *http.Request) {
+	if p.AuthForward != "" {
+		req.Header.Set("Authorization", p.AuthForward)
+		return
+	}
+	if p.Model.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+p.Model.APIKey)
+	}
 }
 
 // errBadRequest: the provider refused the parameters (400); the caller

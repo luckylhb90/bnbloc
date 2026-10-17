@@ -50,8 +50,11 @@ func (s *Service) mediaSettings() *media.Settings {
 // mediaProvider resolves the capability's provider for claims'
 // organization: its own while set and allowed (media.Settings.Provider), a
 // configured provider, and an organization that has not turned AI off (the
-// assist switch's meaning: no data leaving to a model).
-func (s *Service) mediaProvider(ctx context.Context, claims auth.Claims, cap media.Capability) (media.Provider, bool, error) {
+// assist switch's meaning: no data leaving to a model). The caller's
+// Authorization header is pinned for an auth-"caller" provider (the
+// provider bills the caller, like the platform's own LLM gateway); the
+// header value never reaches a key-auth provider.
+func (s *Service) mediaProvider(ctx context.Context, claims auth.Claims, cap media.Capability, callerAuth string) (media.Provider, bool, error) {
 	if s.PlatformSettings == nil {
 		return media.Provider{}, false, nil
 	}
@@ -62,7 +65,18 @@ func (s *Service) mediaProvider(ctx context.Context, claims auth.Claims, cap med
 	if t.AssistDisabled {
 		return media.Provider{}, false, nil
 	}
-	return s.mediaSettings().Provider(ctx, cap, claims.Tenant)
+	p, ok, err := s.mediaSettings().Provider(ctx, cap, claims.Tenant)
+	if err != nil || !ok {
+		return p, ok, err
+	}
+	if p.AuthForward != "" {
+		// An auth-"caller" provider: pin the caller's own Authorization.
+		if strings.TrimSpace(callerAuth) == "" {
+			return media.Provider{}, false, nil
+		}
+		p = p.WithCallerAuth(strings.TrimSpace(callerAuth))
+	}
+	return p, true, nil
 }
 
 // mediaCaller resolves who a media call acts as: the caller themself, or
@@ -80,12 +94,16 @@ func (s *Service) mediaCaller(w http.ResponseWriter, r *http.Request, caller aut
 	return actor.Claims, true
 }
 
+// headerAuth is the request's Authorization header value, for pinning into
+// a caller-auth provider.
+func headerAuth(r *http.Request) string { return strings.TrimSpace(r.Header.Get("Authorization")) }
+
 // handleMediaCapabilities answers GET /v1/media: which media calls run for
 // the caller (the entries the web shows).
 func (s *Service) handleMediaCapabilities(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	out := wire.MediaCapabilities{}
 	for _, cap := range media.Capabilities {
-		p, ok, err := s.mediaProvider(r.Context(), claims, cap)
+		p, ok, err := s.mediaProvider(r.Context(), claims, cap, headerAuth(r))
 		if err != nil {
 			obs.ServerError(w, "read the media provider failed", err)
 			httpx.Error(w, "read the media provider failed", http.StatusInternalServerError)
@@ -156,7 +174,7 @@ func (s *Service) handleMediaTranscribe(w http.ResponseWriter, r *http.Request, 
 		}
 		filename = filenameQuery(r)
 	}
-	p, has, err := s.mediaProvider(ctx, claims, media.CapTranscribe)
+	p, has, err := s.mediaProvider(ctx, claims, media.CapTranscribe, headerAuth(r))
 	if err != nil {
 		obs.ServerError(w, "read the media provider failed", err)
 		httpx.Error(w, "read the media provider failed", http.StatusInternalServerError)
@@ -240,7 +258,7 @@ func (s *Service) runMediaImage(w http.ResponseWriter, r *http.Request, claims a
 		}
 		input = &media.ImageInput{Bytes: b, MimeType: mimeType}
 	}
-	p, has, err := s.mediaProvider(ctx, claims, media.CapImage)
+	p, has, err := s.mediaProvider(ctx, claims, media.CapImage, headerAuth(r))
 	if err != nil {
 		obs.ServerError(w, "read the media provider failed", err)
 		httpx.Error(w, "read the media provider failed", http.StatusInternalServerError)
@@ -258,7 +276,7 @@ func (s *Service) runMediaImage(w http.ResponseWriter, r *http.Request, claims a
 		return
 	}
 	start := time.Now()
-	imgs, err := p.Generate(ctx, media.ImageRequest{Prompt: req.Prompt, Aspect: req.Aspect, Count: req.Count, Input: input})
+	imgs, err := p.Generate(ctx, media.ImageRequest{Prompt: req.Prompt, Model: req.Model, Aspect: req.Aspect, Count: req.Count, Input: input})
 	usage := wire.AssistUsage{Model: p.Model.Model, LatencyMs: timeSinceMs(s, start)}
 	s.auditMediaRun(ctx, claims, auditName, usage, err)
 	if err != nil {

@@ -5,6 +5,15 @@ Status: M1–M6 built (2026-10-16/17); the app surfaces hardened 2026-10-17
 frame may not — recording an anonymous visitor is an abuse surface, and the
 demo SDK answers refusal-shaped stubs).
 
+Revised again 2026-10-17 (multi-model, caller auth): a provider carries a
+models list (every model it serves; the first is the default callers get)
+and an auth kind — "key" (the sealed deployment key) or "caller" (each
+call forwards the caller's own session token to the provider: a proxy
+that bills the caller, like the platform's own LLM gateway; nothing to
+seal, no key to leak). A call may name a model; an unknown name falls
+back to the default. The composer's mic button moved beside Send (voice
+is a way to type, not a tool).
+
 Revised 2026-10-17 (the agent surfaces are components, not built-ins): the
 generate_image and transcribe_audio room tools were built as built-in room
 tools in M3/M4 and are REPLACED by an installable MCP component. A

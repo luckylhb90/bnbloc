@@ -763,24 +763,6 @@ export function Composer({
               <PaperclipIcon size={18} />
             </button>
           )}
-          {main && canVoice && (
-            <button
-              type="button"
-              onClick={() => void voice.toggle()}
-              disabled={disabled || sending || enhancing || (voice.state !== "idle" && voice.state !== "recording")}
-              className={toolButton}
-              title={voice.state === "recording" ? "Stop and transcribe" : voice.state === "idle" ? "Speak to text" : "Transcribing…"}
-              aria-label={voice.state === "recording" ? "Stop recording" : "Speak"}
-            >
-              {voice.state === "recording" ? (
-                <MicrophoneSlashIcon size={18} className="animate-pulse text-[var(--color-danger)]" />
-              ) : voice.state === "idle" ? (
-                <MicrophoneIcon size={18} />
-              ) : (
-                <SpinnerIcon size={18} className="animate-spin" />
-              )}
-            </button>
-          )}
           {main && (
             <PromptPickerButton choices={prompts.choices} onPick={prompts.pick} disabled={disabled || sending} className={toolButton} />
           )}
@@ -833,6 +815,24 @@ export function Composer({
               onStop={enhance.stop}
               disabled={disabled || sending || (!enhancing && !text.trim())}
             />
+          )}
+          {canVoice && (
+            <button
+              type="button"
+              onClick={() => void voice.toggle()}
+              disabled={disabled || sending || enhancing || (voice.state !== "idle" && voice.state !== "recording")}
+              className={cn(toolButton, "shrink-0")}
+              title={voice.state === "recording" ? "Stop and transcribe" : voice.state === "idle" ? "Speak to text" : "Transcribing…"}
+              aria-label={voice.state === "recording" ? "Stop recording" : "Speak"}
+            >
+              {voice.state === "recording" ? (
+                <MicrophoneSlashIcon size={18} className="animate-pulse text-[var(--color-danger)]" />
+              ) : voice.state === "idle" ? (
+                <MicrophoneIcon size={18} />
+              ) : (
+                <SpinnerIcon size={18} className="animate-spin" />
+              )}
+            </button>
           )}
           <Button
             variant="primary"

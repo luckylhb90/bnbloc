@@ -19,14 +19,21 @@ type MediaCapability struct {
 }
 
 // MediaProviderConfig is GET /v1/platform/media/{capability}: the
-// capability's provider. The key is never returned, only whether one is set.
-// kind names the wire protocol adapter (media.AdapterKind*).
+// capability's providers. The key is never returned, only whether one is
+// set. kind names the wire protocol adapter (media.AdapterKind*); auth is
+// "key" (a sealed deployment key) or "caller" (each caller's own session
+// token is forwarded — a proxy that bills the caller, like the platform's
+// own LLM gateway).
 type MediaProviderConfig struct {
 	Configurable bool   `json:"configurable"`
 	Kind         string `json:"kind"`
 	BaseURL      string `json:"baseUrl"`
 	Model        string `json:"model"`
-	KeySet       bool   `json:"keySet"`
+	// Models are the models a call may name (the provider serves them all);
+	// Model is the first of them, the default.
+	Models []string `json:"models,omitempty"`
+	Auth   string   `json:"auth"`
+	KeySet bool     `json:"keySet"`
 	// OrgHosts are the hosts an organization's own provider may name (the
 	// platform row only; none = organizations cannot set their own).
 	OrgHosts []string `json:"orgHosts"`
@@ -53,9 +60,14 @@ type MediaOrgProvider struct {
 // keeps the stored one, ClearKey removes it, an empty BaseURL turns the
 // capability off. Kind must name a registered adapter.
 type MediaProviderUpdate struct {
-	Kind     string `json:"kind"`
-	BaseURL  string `json:"baseUrl"`
-	Model    string `json:"model"`
+	Kind    string `json:"kind"`
+	BaseURL string `json:"baseUrl"`
+	Model   string `json:"model"`
+	// Models are the models a call may name; Model is the first of them.
+	Models []string `json:"models,omitempty"`
+	// Auth is "key" (default: a sealed API key) or "caller" (forward the
+	// caller's own session token).
+	Auth     string `json:"auth,omitempty"`
 	APIKey   string `json:"apiKey,omitempty"`
 	ClearKey bool   `json:"clearKey,omitempty"`
 	// OrgHosts is the platform's to set (the hosts organizations may name);
@@ -98,6 +110,9 @@ var MediaImageAspects = []string{MediaImageAspectSquare, MediaImageAspectLandsca
 type MediaImageRequest struct {
 	// Prompt is what to draw, at most MaxMediaImagePrompt characters.
 	Prompt string `json:"prompt"`
+	// Model is one of the provider's models (MediaProviderConfig.Models);
+	// the first is the default.
+	Model string `json:"model,omitempty"`
 	// Aspect defaults to MediaImageAspectSquare.
 	Aspect string `json:"aspect,omitempty" tstype:"MediaImageAspect"`
 	// Count is how many images to draw in one provider call (1…MaxMediaImages,

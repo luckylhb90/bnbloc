@@ -22,7 +22,7 @@ function MediaProviderFields({ cap, label, hint }: { readonly cap: "transcribe" 
   const [saved, setSaved] = useState<Awaited<ReturnType<typeof api.get>> | null>(null);
   const [kind, setKind] = useState<string>(MEDIA_ADAPTER_KINDS[0]);
   const [baseUrl, setBaseUrl] = useState("");
-  const [model, setModel] = useState("");
+  const [models, setModels] = useState("");
   const [orgHosts, setOrgHosts] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [replacing, setReplacing] = useState(false);
@@ -35,7 +35,7 @@ function MediaProviderFields({ cap, label, hint }: { readonly cap: "transcribe" 
     setSaved(c);
     setKind(c.kind || MEDIA_ADAPTER_KINDS[0]);
     setBaseUrl(c.baseUrl);
-    setModel(c.model);
+    setModels((c.models ?? []).join(", "));
     setOrgHosts((c.orgHosts ?? []).join(", "));
     setApiKey("");
     setReplacing(false);
@@ -58,8 +58,9 @@ function MediaProviderFields({ cap, label, hint }: { readonly cap: "transcribe" 
     return error ? <ErrorBox>{error}</ErrorBox> : <p className="text-sm text-[var(--color-fg-muted)]">Loading…</p>;
   }
   const dirty =
-    kind !== saved.kind || baseUrl.trim() !== saved.baseUrl || model.trim() !== saved.model || !!apiKey.trim() ||
-    orgHostList(orgHosts).join(",") !== (saved.orgHosts ?? []).join(",");
+    kind !== saved.kind || baseUrl.trim() !== saved.baseUrl || !!apiKey.trim() ||
+    orgHostList(orgHosts).join(",") !== (saved.orgHosts ?? []).join(",") ||
+    orgHostList(models).join(",") !== (saved.models ?? []).join(",");
   const on = !!saved.baseUrl && !!saved.model;
 
   const save = async (clearKey = false) => {
@@ -72,11 +73,14 @@ function MediaProviderFields({ cap, label, hint }: { readonly cap: "transcribe" 
         if (k !== "image.size.square" && k !== "image.size.landscape" && k !== "image.size.portrait" && !k.startsWith("transcribe.")) continue;
         if (v) params[k] = v;
       }
+      const modelList = orgHostList(models);
       adopt(
         await api.put({
           kind,
           baseUrl: baseUrl.trim(),
-          model: model.trim(),
+          model: modelList[0] ?? "",
+          models: modelList,
+          orgHosts: orgHostList(orgHosts),
           params,
           ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
           ...(clearKey ? { clearKey: true } : {}),
@@ -129,8 +133,8 @@ function MediaProviderFields({ cap, label, hint }: { readonly cap: "transcribe" 
           <Field label="Base URL" hint="Up to the version path, e.g. https://llm.example.com/v1. Empty turns this capability off.">
             <Input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://llm.example.com/v1" />
           </Field>
-          <Field label="Model" hint="The model name the provider serves this capability with.">
-            <Input value={model} onChange={(e) => setModel(e.target.value)} />
+          <Field label="Models" hint="The models the provider serves (comma-separated; the first is the default callers get).">
+            <Input value={models} onChange={(e) => setModels(e.target.value)} placeholder="gemini-nano-banana-2.1, gpt-image-2" />
           </Field>
           <Field label="Organization hosts" hint="Hosts organizations may use for their own provider (comma or one per line). None: organizations use this provider.">
             <Input value={orgHosts} onChange={(e) => setOrgHosts(e.target.value)} placeholder="llm.example.com" />

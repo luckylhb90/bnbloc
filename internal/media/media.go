@@ -51,6 +51,16 @@ const settingKey = "media."
 // {base}/images/generations (JSON).
 const AdapterKindOpenAICompatible = "openai-compatible"
 
+// How a provider is authenticated (the stored row's own "auth" field).
+const (
+	// AuthKey: a sealed API key the admin configured (the default).
+	AuthKey = "key"
+	// AuthCaller: each call forwards the caller's own session token
+	// (Authorization) — a proxy that bills the caller, like the platform's
+	// own LLM gateway; nothing to seal.
+	AuthCaller = "caller"
+)
+
 // ErrProviderUnreachable: the provider did not answer or answered garbage.
 var ErrProviderUnreachable = errors.New("the media provider could not be reached")
 
@@ -100,21 +110,43 @@ func AdapterKinds() []string {
 	return out
 }
 
-// Provider is one resolved provider: the endpoint, its model, the opened
-// key, the adapter's own params, and the HTTP client held to the endpoint's
-// host. The gateway resolves it from the settings per call; nothing else
-// builds one.
+// Provider is one resolved provider: the endpoint, its models (the first
+// the default), the opened key (or the caller's own token to forward,
+// Auth "caller"), the adapter's own params, and the HTTP client held to
+// the endpoint's host. The gateway resolves it from the settings per call;
+// nothing else builds one.
 type Provider struct {
-	Model   modelsettings.Model
-	Params  map[string]string
-	adapter Adapter
-	client  *http.Client
+	Model  modelsettings.Model
+	Models []string
+	// AuthForward names the header a "caller"-auth provider is called with:
+	// the caller's own Authorization header (the gateway pins it per call).
+	AuthForward string
+	Params      map[string]string
+	adapter     Adapter
+	client      *http.Client
+}
+
+// Choose returns the model to call: the asked one when the provider serves
+// it, else the default (the first).
+func (p Provider) Choose(asked string) string {
+	asked = strings.TrimSpace(asked)
+	if asked == "" {
+		return p.Model.Model
+	}
+	for _, m := range p.Models {
+		if m == asked {
+			return asked
+		}
+	}
+	return p.Model.Model
 }
 
 // ImageRequest is one generation ask: Count images drawn from Prompt (an
-// edit of Input when set), in one provider call.
+// edit of Input when set), in one provider call. Model names one of the
+// provider's Models (the first is the default).
 type ImageRequest struct {
 	Prompt string
+	Model  string
 	Aspect string // wire.MediaImageAspect*
 	Count  int
 	// Input, when set, is the image to change (an edit): its bytes and MIME
@@ -178,14 +210,36 @@ func (s *Settings) View(ctx context.Context, cap Capability, tenant string) (wir
 		if k == ownKind {
 			out.Kind = val
 		}
+		if k == ownModels {
+			out.Models = splitList(val)
+		}
+		if k == ownAuth {
+			out.Auth = val
+		}
+	}
+	if len(out.Models) == 0 && out.Model != "" {
+		out.Models = []string{out.Model}
 	}
 	return out, err
 }
 
-// ownKind and ownParamsPrefix are the provider row's own fields beside the
-// shared endpoint fields (modelsettings.Own).
+// splitList splits a comma-separated own field.
+func splitList(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+// ownKind, ownModels, ownAuth and ownParamsPrefix are the provider row's
+// own fields beside the shared endpoint fields (modelsettings.Own).
 const (
 	ownKind         = "kind"
+	ownModels       = "models"
+	ownAuth         = "auth"
 	ownParamsPrefix = "params."
 )
 
@@ -204,7 +258,26 @@ func (s *Settings) Put(ctx context.Context, cap Capability, tenant string, u wir
 	if err := modelsettings.ValidateOwn(u.Params); err != nil {
 		return wire.MediaProviderConfig{}, modelsettings.Invalid("%s", err.Error())
 	}
-	own := map[string]string{ownKind: kind}
+	auth := strings.TrimSpace(u.Auth)
+	if auth == "" {
+		auth = AuthKey
+	}
+	if auth != AuthKey && auth != AuthCaller {
+		return wire.MediaProviderConfig{}, modelsettings.Invalid("auth must be %q or %q", AuthKey, AuthCaller)
+	}
+	models := u.Models
+	if len(models) == 0 && strings.TrimSpace(u.Model) != "" {
+		models = []string{strings.TrimSpace(u.Model)}
+	}
+	for _, m := range models {
+		if len(m) > modelsettings.MaxModel || strings.ContainsAny(m, "\r\n") {
+			return wire.MediaProviderConfig{}, modelsettings.Invalid("models must be one line of at most %d characters each", modelsettings.MaxModel)
+		}
+	}
+	own := map[string]string{ownKind: kind, ownAuth: auth}
+	if len(models) > 0 {
+		own[ownModels] = strings.Join(models, ",")
+	}
 	for k, v := range u.Params {
 		own[ownParamsPrefix+k] = v
 	}
@@ -243,26 +316,39 @@ func (s *Settings) Provider(ctx context.Context, cap Capability, tenant string) 
 	row := set
 	if m.Org {
 		row = s.settings(cap, tenant)
-		if kind, err = row.Own(ctx, ownKind); err != nil || strings.TrimSpace(kind) == "" {
-			// An organization's row without its own kind follows the
-			// platform's adapter.
-			_ = err
+		if k, kerr := row.Own(ctx, ownKind); kerr == nil && strings.TrimSpace(k) != "" {
+			kind = k
 		}
 	}
 	v, err := row.View(ctx)
 	if err != nil {
 		return Provider{}, false, err
 	}
+	models := []string{}
+	auth := ""
 	for k, val := range v.Own {
 		if strings.HasPrefix(k, ownParamsPrefix) {
 			params[strings.TrimPrefix(k, ownParamsPrefix)] = val
 		}
+		if k == ownModels {
+			models = splitList(val)
+		}
+		if k == ownAuth {
+			auth = val
+		}
+	}
+	if len(models) == 0 {
+		models = []string{m.Model}
 	}
 	base, err := guardedClient(m)
 	if err != nil {
 		return Provider{}, false, err
 	}
-	return Provider{Model: m, Params: params, adapter: adapter, client: base}, true, nil
+	forward := ""
+	if auth == AuthCaller {
+		forward = AuthCaller
+	}
+	return Provider{Model: m, Models: models, AuthForward: forward, Params: params, adapter: adapter, client: base}, true, nil
 }
 
 // guardedClient is an HTTP client held to m's host (never follows a
@@ -289,6 +375,15 @@ func (p Provider) Transcribe(ctx context.Context, audio []byte, mimeType, filena
 		return "", ErrProviderUnreachable
 	}
 	return p.adapter.Transcribe(ctx, p, audio, mimeType, filename)
+}
+
+// WithCallerAuth returns p with the caller's Authorization header pinned
+// (an auth-"caller" provider): the gateway calls this per request.
+func (p Provider) WithCallerAuth(header string) Provider {
+	if p.AuthForward != "" {
+		p.AuthForward = header
+	}
+	return p
 }
 
 // Generate draws (or edits) images through the capability's provider.

@@ -91,6 +91,8 @@ export interface MediaProviderConfigView {
   kind: string;
   baseUrl: string;
   model: string;
+  models?: string[];
+  auth: string;
   keySet: boolean;
   orgHosts?: string[];
   params?: Record<string, string>;
@@ -103,6 +105,8 @@ export interface MediaProviderUpdateBody {
   kind: string;
   baseUrl: string;
   model: string;
+  models?: string[];
+  auth?: string;
   apiKey?: string;
   clearKey?: boolean;
   /** The platform's to set: the hosts organizations may name for their own. */

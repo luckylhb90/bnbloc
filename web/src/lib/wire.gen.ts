@@ -1105,7 +1105,8 @@ export interface ComponentMCP {
   // Env are the variables the server needs; values never ship in a
   // package (Credentials says where they come from).
   env?: ComponentMCPEnv[];
-  // Credentials is member or org; required exactly when Env is declared.
+  // Credentials is member, org or bridge; required exactly when Env is
+  // declared.
   credentials?: string;
   stdio?: ComponentMCPStdio;
   http?: ComponentMCPHTTP;
@@ -2602,13 +2603,20 @@ export interface MediaCapability {
 }
 
 // MediaProviderConfig is GET /v1/platform/media/{capability}: the
-// capability's provider. The key is never returned, only whether one is set.
-// kind names the wire protocol adapter (media.AdapterKind*).
+// capability's providers. The key is never returned, only whether one is
+// set. kind names the wire protocol adapter (media.AdapterKind*); auth is
+// "key" (a sealed deployment key) or "caller" (each caller's own session
+// token is forwarded — a proxy that bills the caller, like the platform's
+// own LLM gateway).
 export interface MediaProviderConfig {
   configurable: boolean;
   kind: string;
   baseUrl: string;
   model: string;
+  // Models are the models a call may name (the provider serves them all);
+  // Model is the first of them, the default.
+  models?: string[];
+  auth: string;
   keySet: boolean;
   // OrgHosts are the hosts an organization's own provider may name (the
   // platform row only; none = organizations cannot set their own).
@@ -2639,6 +2647,11 @@ export interface MediaProviderUpdate {
   kind: string;
   baseUrl: string;
   model: string;
+  // Models are the models a call may name; Model is the first of them.
+  models?: string[];
+  // Auth is "key" (default: a sealed API key) or "caller" (forward the
+  // caller's own session token).
+  auth?: string;
   apiKey?: string;
   clearKey?: boolean;
   // OrgHosts is the platform's to set (the hosts organizations may name);
@@ -2677,6 +2690,9 @@ export const MediaImageAspects: readonly string[] = ["square", "landscape", "por
 export interface MediaImageRequest {
   // Prompt is what to draw, at most MaxMediaImagePrompt characters.
   prompt: string;
+  // Model is one of the provider's models (MediaProviderConfig.Models);
+  // the first is the default.
+  model?: string;
   // Aspect defaults to MediaImageAspectSquare.
   aspect?: MediaImageAspect;
   // Count is how many images to draw in one provider call (1…MaxMediaImages,
