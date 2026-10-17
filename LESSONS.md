@@ -348,7 +348,20 @@ keeps only what a component cannot do.
 
 Evidence: docs/prd/2026-10-17-room-knowledge-component.md (supersedes
 2026-10-16-room-memory-and-evolution.md); commits fe416c71, cf2ae7df.. (stage 1);
-design-review lens 14.
+design-review lens 14. The same day the media room tools went the same way:
+built in, then moved to an installable MCP component (de4f5bae).
+Seen 1× (2026-10-17).
+
+### Before a component asks a person for a setting, check what the platform already holds
+
+The media MCP component first shipped asking each member to connect it to
+their own gateway with an API token in Settings → Tools. An hour later it was
+rebuilt so the bridge injects its gateway address, a session token and the
+drive's room and job: nothing for anyone to configure, and the call acts as
+the requester under the job grant. Every setting is a step a member can get
+wrong or skip; ask only for what the platform cannot know.
+
+Evidence: commits de4f5bae, e8ee14e3 (and private 499b177).
 Seen 1× (2026-10-17).
 
 ## Done right
