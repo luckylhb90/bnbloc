@@ -119,7 +119,8 @@ type ComponentMCP struct {
 	// Env are the variables the server needs; values never ship in a
 	// package (Credentials says where they come from).
 	Env []ComponentMCPEnv `json:"env,omitempty"`
-	// Credentials is member or org; required exactly when Env is declared.
+	// Credentials is member, org or bridge; required exactly when Env is
+	// declared.
 	Credentials string             `json:"credentials,omitempty"`
 	Stdio       *ComponentMCPStdio `json:"stdio,omitempty"`
 	HTTP        *ComponentMCPHTTP  `json:"http,omitempty"`

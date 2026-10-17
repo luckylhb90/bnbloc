@@ -184,7 +184,7 @@ func TestMCPMemberCredentialsAreNotLent(t *testing.T) {
 	f.setMember(t, "codeword", map[string]string{"CODEWORD_SALT": "owner-salt"})
 	b := &Bridge{cfg: Config{MCPToolsDir: f.tools, MCPSettingsDir: f.settings}}
 	refs := []wire.ContentRef{{ComponentID: "cc_reviewer", Owner: "maya", Name: "reviewer"}}
-	mcp, missing, foreign := b.resolveMCP([]wire.ContentMCPTool{codewordTool(f.sha), searchTool()}, refs, "maya", false)
+	mcp, missing, foreign := b.resolveMCP([]wire.ContentMCPTool{codewordTool(f.sha), searchTool()}, refs, "maya", false, bridgeJob{JobID: "job-1", RoomID: "r1"})
 	if len(mcp.servers) != 1 || mcp.servers[0].Name != "search" || len(foreign) != 0 {
 		t.Fatalf("servers = %+v foreign = %v", mcp.servers, foreign)
 	}
@@ -194,7 +194,7 @@ func TestMCPMemberCredentialsAreNotLent(t *testing.T) {
 	// A tool taking no env runs for anyone.
 	open := codewordTool(f.sha)
 	open.Env, open.Credentials = nil, ""
-	if mcp, missing, _ := b.resolveMCP([]wire.ContentMCPTool{open}, refs, "maya", false); len(mcp.servers) != 1 || len(missing) != 0 {
+	if mcp, missing, _ := b.resolveMCP([]wire.ContentMCPTool{open}, refs, "maya", false, bridgeJob{JobID: "job-1", RoomID: "r1"}); len(mcp.servers) != 1 || len(missing) != 0 {
 		t.Fatalf("servers = %+v missing = %v", mcp.servers, missing)
 	}
 }
@@ -311,16 +311,16 @@ func TestMCPOAuthSignIn(t *testing.T) {
 	b := &Bridge{cfg: Config{MCPToolsDir: f.tools, MCPSettingsDir: f.settings}}
 	refs := []wire.ContentRef{{ComponentID: "cc_reviewer", Owner: "maya", Name: "reviewer"}}
 
-	_, missing, _ := b.resolveMCP([]wire.ContentMCPTool{driveTool()}, refs, "maya", true)
+	_, missing, _ := b.resolveMCP([]wire.ContentMCPTool{driveTool()}, refs, "maya", true, bridgeJob{JobID: "job-1", RoomID: "r1"})
 	if len(missing) != 1 || !strings.Contains(missing[0], "sign in to drive in Settings → Tools") {
 		t.Fatalf("not signed in: missing = %v", missing)
 	}
 	f.setSignIn(t, "drive", "old-token", time.Now().Add(10*time.Second).UnixMilli())
-	if _, missing, _ := b.resolveMCP([]wire.ContentMCPTool{driveTool()}, refs, "maya", true); len(missing) != 1 || !strings.Contains(missing[0], "expired") {
+	if _, missing, _ := b.resolveMCP([]wire.ContentMCPTool{driveTool()}, refs, "maya", true, bridgeJob{JobID: "job-1", RoomID: "r1"}); len(missing) != 1 || !strings.Contains(missing[0], "expired") {
 		t.Fatalf("expiring: missing = %v", missing)
 	}
 	f.setSignIn(t, "drive", "member-token", time.Now().Add(time.Hour).UnixMilli())
-	mcp, missing, _ := b.resolveMCP([]wire.ContentMCPTool{driveTool()}, refs, "maya", true)
+	mcp, missing, _ := b.resolveMCP([]wire.ContentMCPTool{driveTool()}, refs, "maya", true, bridgeJob{JobID: "job-1", RoomID: "r1"})
 	if len(missing) != 0 || len(mcp.servers) != 1 {
 		t.Fatalf("servers = %+v missing = %v", mcp.servers, missing)
 	}
@@ -332,12 +332,12 @@ func TestMCPOAuthSignIn(t *testing.T) {
 		t.Fatal("token in the checksum")
 	}
 	f.setSignIn(t, "drive", "rotated-token", 0)
-	again, _, _ := b.resolveMCP([]wire.ContentMCPTool{driveTool()}, refs, "maya", true)
+	again, _, _ := b.resolveMCP([]wire.ContentMCPTool{driveTool()}, refs, "maya", true, bridgeJob{JobID: "job-1", RoomID: "r1"})
 	if mcpSum(again) != mcpSum(mcp) {
 		t.Fatal("a refreshed token must not churn the session")
 	}
 	// Never lent: a borrowed or platform drive does not get it.
-	if mcp, missing, _ := b.resolveMCP([]wire.ContentMCPTool{driveTool()}, refs, "maya", false); len(mcp.servers) != 0 || len(missing) != 1 || !strings.Contains(missing[0], "not lent") {
+	if mcp, missing, _ := b.resolveMCP([]wire.ContentMCPTool{driveTool()}, refs, "maya", false, bridgeJob{JobID: "job-1", RoomID: "r1"}); len(mcp.servers) != 0 || len(missing) != 1 || !strings.Contains(missing[0], "not lent") {
 		t.Fatalf("lent: servers = %+v missing = %v", mcp.servers, missing)
 	}
 }

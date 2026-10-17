@@ -13,13 +13,17 @@ nothing in tools/list, nothing in the session prefix. The built-in tools
 and the bridge Publish seam are deleted (commit history keeps them).
 
 - **bnbloc-media-tools** (packages/media-tools, cmd/bnbloc-media-tools):
-  a stdio MCP component (credentials "member": the member connects it to
-  their own gateway in Settings → Tools with an API token of theirs). Its
-  two tools call the same /v1/media routes; generate_image asks the
-  gateway to publish into the room's Docs (publish under a job grant, or
-  as the member when the tool calls without one); transcribe_audio reads a
-  room attachment by id (?attachment=, the gateway reads it as the
-  caller).
+  a stdio MCP component with a new credentials source, **"bridge"**: the
+  bridge injects its own gateway address, a session token for the drive,
+  and the drive's room and job as the server's environment — nothing for
+  any person to configure, nothing stored, a borrowed drive never lent.
+  Its two tools call the same /v1/media routes under the job grant
+  (?job=&room=), so a call acts as the requester and the image is
+  attributed to the job; transcribe_audio reads a room attachment by id
+  (?attachment=, the gateway reads it as the caller). The organization's
+  media providers (M6) are the models the tools draw and hear with — an
+  org admin configures those, and that is the only configuration there
+  is.
 - **media-skills** (a built-in skill pack) requires the media-tools MCP
   component and teaches the two tools' use; without the component
   installed it is an unmet requirement, not dead weight.

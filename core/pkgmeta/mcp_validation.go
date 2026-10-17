@@ -37,6 +37,10 @@ const (
 	// MCPCredentialsOrg: an org admin configures one connector per
 	// organization, stored sealed server-side.
 	MCPCredentialsOrg = "org"
+	// MCPCredentialsBridge: the bridge itself provides the values (its own
+	// gateway session, the drive's room and job): nothing for a person to
+	// configure, nothing stored anywhere.
+	MCPCredentialsBridge = "bridge"
 )
 
 // HTTP auth schemes of an endpoint MCP component (MCPHTTPAuth.Scheme).
@@ -226,14 +230,14 @@ func validateMCPEnv(m MCP) error {
 	switch m.Credentials {
 	case "":
 		if len(m.Env) > 0 {
-			return fmt.Errorf("mcp.credentials is required with mcp.env (%q or %q)", MCPCredentialsMember, MCPCredentialsOrg)
+			return fmt.Errorf("mcp.credentials is required with mcp.env (%q, %q or %q)", MCPCredentialsMember, MCPCredentialsOrg, MCPCredentialsBridge)
 		}
-	case MCPCredentialsMember, MCPCredentialsOrg:
+	case MCPCredentialsMember, MCPCredentialsOrg, MCPCredentialsBridge:
 		if len(m.Env) == 0 {
 			return fmt.Errorf("mcp.credentials needs mcp.env naming the variables")
 		}
 	default:
-		return fmt.Errorf("mcp.credentials must be %q or %q, got %q", MCPCredentialsMember, MCPCredentialsOrg, m.Credentials)
+		return fmt.Errorf("mcp.credentials must be %q, %q or %q, got %q", MCPCredentialsMember, MCPCredentialsOrg, MCPCredentialsBridge, m.Credentials)
 	}
 	return nil
 }
