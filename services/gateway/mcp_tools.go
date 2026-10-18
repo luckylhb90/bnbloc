@@ -74,10 +74,12 @@ func (s *Service) saveContentOptions(w http.ResponseWriter, r *http.Request, cla
 	}}, true
 }
 
-// resolveEffectiveMCP adds the MCP tools the job's content requires: each
-// must be an installed MCP component the requester may use; an org
-// credential tool brings the job's organization connector values. Unmet
-// requirements join eff.Missing (the turn still runs).
+// resolveEffectiveMCP adds the job's MCP tools: the ones its content
+// requires and every one its requester installed
+// (docs/prd/2026-10-17-browser-component.md §3.6), each an installed MCP
+// component the requester may use; an org credential tool brings the job's
+// organization connector values. Unmet requirements join eff.Missing (the
+// turn still runs).
 func (s *Service) resolveEffectiveMCP(ctx context.Context, job store.AgentJob, eff *wire.ContentEffective) error {
 	refs := append([]wire.ContentRef(nil), eff.SkillPacks...)
 	for _, r := range []*wire.ContentRef{eff.Expert, eff.RoomExpert} {
@@ -85,19 +87,19 @@ func (s *Service) resolveEffectiveMCP(ctx context.Context, job store.AgentJob, e
 			refs = append(refs, *r)
 		}
 	}
-	needs := false
-	for _, r := range refs {
-		needs = needs || len(r.MCP) > 0
-	}
-	if !needs {
-		return nil
-	}
 	cands, err := s.mcpCandidates(ctx, auth.Claims{Subject: job.RequesterUserID, Tenant: job.TenantID})
 	if err != nil {
 		return err
 	}
+	var installed []string
+	for name, c := range cands {
+		if c.Visibility.Installed {
+			installed = append(installed, name)
+		}
+	}
+	sort.Strings(installed)
 	connectors := s.mcpConnectors()
-	tools, missing, err := mcptool.Resolve(refs,
+	tools, missing, err := mcptool.Resolve(refs, installed,
 		func(name string) (mcptool.Candidate, bool) { c, ok := cands[name]; return c, ok },
 		func(name string) (map[string]string, bool, error) {
 			c, ok, err := connectors.Get(ctx, job.TenantID, name)

@@ -162,6 +162,32 @@ func TestMCPToolsMissingDoNotFailTheTurn(t *testing.T) {
 	}
 }
 
+// A tool the requester installed and no content requires (RequiredBy
+// empty) attaches with no content at all; one that cannot be attached is
+// left out without a missing line (docs/prd/2026-10-17-browser-component.md
+// §3.6).
+func TestMCPOfferedToolsAttachQuietly(t *testing.T) {
+	g := newContentFixtureGateway(t)
+	f := newMCPFixture(t)
+	room := codewordTool(f.sha)
+	room.Env, room.Credentials, room.RequiredBy = nil, pkgmeta.MCPCredentialsRoom, nil
+	notHere := codewordTool(strings.Repeat("0", 64))
+	notHere.Name, notHere.RequiredBy = "salted", nil
+	httpOnly := searchTool()
+	httpOnly.RequiredBy = nil
+	g.setEffective("job-1", wire.ContentEffective{MCP: []wire.ContentMCPTool{room, notHere, httpOnly}})
+	prov := &profileProv{}
+	f.bridge(g, prov /* stdio only */).runBridgeJob(context.Background(), contentJob("job-1", ""))
+
+	ps := prov.recordedProfiles()
+	if len(ps) != 1 || ps[0] == nil || len(ps[0].MCPServers) != 1 || serverNamed(ps[0], "codeword") == nil {
+		t.Fatalf("profiles = %+v", ps)
+	}
+	if d := runningDiagnostics(g); d["contentMissing"] != nil {
+		t.Fatalf("an offered tool showed as missing: %+v", d)
+	}
+}
+
 // A core without agentProfile cannot attach MCP tools: they are missing.
 func TestMCPToolsMissingOnACoreWithoutProfile(t *testing.T) {
 	g := newContentFixtureGateway(t)

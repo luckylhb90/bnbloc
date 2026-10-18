@@ -2,9 +2,9 @@
 
 Status: slice 1 built (2026-10-17): `cmd/bnbloc-browser`,
 `packages/browser`, the relay's `GET /session` (§3.1), the decision rate
-(§3.5); a non-owner's request is `needs_human` until slice 3's grants.
-How it works: `docs/architecture/browser-component.md`. Slices 2–6 are
-next. Decided with the product owner: the
+(§3.5); a non-owner's request is `needs_human` until slice 3 runs it on
+the requester's machine. How it works:
+`docs/architecture/browser-component.md`. Slice 2 is next. Decided with the product owner: the
 browser is a dedicated, visible Chrome profile on the member's machine;
 an irreversible step is confirmed in conversation, with quick replies as
 a shortcut on the same path; the agent supplies every typed value; live
@@ -15,6 +15,15 @@ channel's visibility, like the job's other events; a browser grant is per
 room by default and the owner may narrow it to sites; the irreversibility
 threshold starts at 0.3; procedures saved from runs are part of this end
 state (§5), built last.
+
+Decided 2026-10-18 (§9, decision 5), after the first QA run found the
+component installed but never attached: **a tool runs on the machine of
+the person who asked**, wherever the agent runs, and **a turn gets every
+tool its requester installed**, with no skill pack needed (§3.6). The
+browser is therefore always the requester's own: a borrowed or platform
+agent drives the requester's browser, never its owner's. A member who
+uses only the web gets the same through a browser extension. `browse`
+and `browse_continue` are one tool (§2.3).
 
 This PRD describes the end state. The build order (§6) is the order its
 slices are built and tested; they ship together, and none is replaced
@@ -62,9 +71,9 @@ maya in the room: "file last week's three expense receipts in the
                    expense portal and submit them"
     │
 room agent (any core) ── browse(goal, url, values) ──► browser component
-    ▲                                                   (stdio MCP, on the
-    │   checkpoint (done / needs_input /                 machine of the
-    │   needs_confirmation / …) + screenshot + text      agent's owner)
+    ▲                                                   (stdio MCP, on
+    │   checkpoint (done / needs_input /                 maya's machine:
+    │   needs_confirmation / …) + screenshot + text      §3.6)
     │                                                      │
     │                                    observe ─► number the controls
     │                                       │
@@ -80,7 +89,9 @@ room agent (any core) ── browse(goal, url, values) ──► browser compone
 - **The component** `browser` is a `bnbloc.mcp.package/v1` package:
   - stdio, `credentials: "room"`, one Go binary per platform.
   - It is materialized and pinned by the desktop like every stdio tool
-    (`services/bridge/mcp_tools.go:20-39`).
+    (`services/bridge/mcp_tools.go:20-39`), and runs on the requester's
+    machine (§3.6): their desktop, or the browser extension of a member
+    who uses only the web.
   - It reaches the gateway only through the session's room relay
     (`services/bridge/roomtools/relay.go`).
 - **The platform** adds only generic pieces (§3): facts about the bound
@@ -90,8 +101,9 @@ room agent (any core) ── browse(goal, url, values) ──► browser compone
 
 ### 2.2 The browser host
 
-- **The member's dedicated profile.** One visible Chrome on the machine
-  of the agent's owner.
+- **The requester's dedicated profile.** One visible Chrome on the
+  machine of the person who asked (§3.6). Their sign-ins and their
+  network (an intranet only their machine reaches) are what a run needs.
   - The desktop launches and supervises it as the package's sidecar
     (§7, finding 2). Every session's component attaches to it.
   - The profile is its own directory under the desktop's data directory.
@@ -104,6 +116,12 @@ room agent (any core) ── browse(goal, url, values) ──► browser compone
     the desktop relaunches Chrome when the next run asks for it.
 - **The member signs in once**, in that window, to the sites they want
   agents to use. Logins persist in the dedicated profile.
+- **Web only: the browser extension.** A member without the desktop
+  installs the bnbloc extension (an organization can push it by browser
+  policy). It opens runs in a window of its own and drives them with the
+  `chrome.debugger` API, which speaks the same CDP; the executor is the
+  same code, built for the extension. A web page alone cannot operate
+  other sites, so this one install cannot be avoided.
 - **The executor is host-agnostic.** It speaks CDP to "a browser", so
   more hosts are just more endpoints behind the same executor:
   - a headless Chromium in the member's sandbox machine (public sites,
@@ -112,18 +130,20 @@ room agent (any core) ── browse(goal, url, values) ──► browser compone
   - another member's dedicated profile, with that member's grant (§2.6)
 
   The host is chosen per run (`browse(…, host)`; the default is the
-  owner's profile). §6 lists the order the hosts are built in.
+  requester's profile). §6 lists the order the hosts are built in.
 
 ### 2.3 The agent's tools
 
 | Tool | Does |
 |---|---|
 | `browse(goal, url, values?, host?)` | Starts a run: opens `url` in a new tab and works toward `goal`. `values` maps field descriptions to the text the agent wants typed (it names the value, never a selector). Returns at the next checkpoint. |
-| `browse_continue(run, reply)` | Resumes a run from its checkpoint with the agent's answer: a value for `needs_input`, the member's confirmation, "the member signed in", a new instruction ("change the amount to 200 and submit"), or a new goal. |
+| `browse(run, value? \| confirmed? \| file? \| reply?)` | The same tool with a run id resumes that run from its checkpoint with the agent's answer: a value for `needs_input`, the member's confirmation, a file to upload, "the member signed in", a new instruction ("change the amount to 200 and submit"), or nothing to keep a `running` run going. |
 | `browser_look(run)` | The run's current page: a screenshot (MCP image content, `roomtools/tools.go:48-79`) and its visible text, fenced as untrusted. |
 
-A run lives as long as its tab. It survives across turns and agents: a
-later turn, or another agent the requester asks, continues it by its id.
+Two tools, and their descriptions say all an agent needs: no skill pack
+teaches them. A run lives as long as its tab. It survives across turns
+and agents: a later turn, or another agent the requester asks, continues
+it by its id.
 
 ### 2.4 Checkpoints
 
@@ -138,10 +158,10 @@ A run works until something needs the agent or a person, then returns:
 | `needs_human` | A sign-in, second factor, CAPTCHA, or a secret field (§2.7). | Tells the room. A person completes it in the window (local) or through remote control (§2.8), then the agent continues. |
 | `leaving_site` | The next step would leave the run's declared site (the registrable domain of `url`, plus any sites added at a checkpoint). | Asks the requester whether to go on. A yes adds the site to the run. |
 | `upload` / `download` | A file input wants a file, or a download starts (§2.7). | Upload: names the room attachment or artifact and confirms with the requester. Download: the file lands as a room artifact and the agent is told its id. |
-| `running` | The run is still progressing, but the agent CLI's tool call is near its timeout (§7, finding 1). | Calls `browse_continue(run, "")` to keep going. The live view keeps showing the run in between. |
+| `running` | The run is still progressing, but the agent CLI's tool call is near its timeout (§7, finding 1). | Calls `browse(run)` to keep going. The live view keeps showing the run in between. |
 
 Every pause is the same mechanism: return a checkpoint, then resume with
-`browse_continue`. A run is never ended because of time or a step count.
+`browse(run, …)`. A run is never ended because of time or a step count.
 It stops making calls when it stalls (no progress, judged by the page
 fingerprint as in `jev_ultrafast/browser.py:289-291`), and it waits at a
 checkpoint as long as nobody answers.
@@ -165,7 +185,7 @@ checkpoint as long as nobody answers.
     the requester opened with their own message, after the pause. The
     relay's bound-job facts (§3.1) carry the requester and the turn's
     message sequence. The run records the sequence at the pause.
-    `browse_continue` with a confirmation is accepted only if the bound
+    `browse(run, confirmed)` is accepted only if the bound
     turn's requester is the run's requester and its sequence is greater.
   - So a page that convinces the agent "the user already agreed" in the
     same turn changes nothing. The agent can resume only by asking, and
@@ -178,10 +198,12 @@ checkpoint as long as nobody answers.
 
 ### 2.6 Who may run it, and on whose browser
 
-- The browser belongs to the **owner** of the machine (the bridge's
-  owner). Their dedicated profile holds their sign-ins.
-- **The owner** may always run it from their own turns.
-- **Another member** may run it with the owner's grant, the same grant
+- A run uses the **requester's** browser (§3.6): every tool of a turn
+  runs on the machine of the person who asked, so whoever's agent
+  answers, it acts with the requester's sign-ins and never its owner's.
+  This needs no grant.
+- **Another member's browser** (`browse(…, host)`, a later host of
+  §2.2) is used only with that member's grant, the same grant
   model as borrowing the owner's agent. A refused borrow already records
   an access request the owner approves in the room
   (`services/bridge/bridge.go:2576-2579`, `internal/notify/borrow.go:38`).
@@ -190,14 +212,14 @@ checkpoint as long as nobody answers.
     browser only on `tickets.example.com`): a run's declared and
     reached sites are checked against it, and leaving them is
     `leaving_site` for the owner to allow.
-  - Without it, `browse` on the owner's profile returns `needs_human`
-    with "ask <owner> to let you use their browser", and records the
-    request.
+  - Without it, `browse` on that member's profile returns
+    `needs_human` with "ask <member> to let you use their browser", and
+    records the request.
   - The grant never extends to anything else: it is a grant for this
     browser, separate from the agent borrow itself.
 - A run's requester is fixed when it starts. Only that requester confirms
-  its steps (§2.5). The owner can stop or take over any run on their
-  browser at any time (§2.8).
+  its steps (§2.5). The browser's owner can stop or take over any run on
+  it at any time (§2.8).
 
 ### 2.7 Files and secrets
 
@@ -350,6 +372,40 @@ checkpoint as long as nobody answers.
 - They still spend the cost budget and keep their audit row
   (`services/gateway/decisions.go`).
 
+### 3.6 A turn's tools: the requester's, on the requester's machine
+
+Generic for every MCP tool component; nothing here names the browser.
+
+- **Which tools a turn gets.** The tools its content requires (as
+  before), plus **every MCP tool its requester installed**: an opt-in
+  tool they added in the Library, or one the organization rolled out to
+  everyone. No skill pack is needed to switch a tool on, and members who
+  did not install a tool never see it in their turns.
+  - A tool only installed (no content requires it) that cannot be
+    attached (an unconfigured org connector, member values not set, no
+    binary on the machine) is left out quietly: nobody asked for it in
+    this turn, so it is not a missing requirement.
+  - The set is part of the session binding like any other tool set, so
+    installing or removing a tool starts a new session on the next turn.
+- **Where a tool runs.** On the machine of the person who asked, wherever
+  the agent runs:
+  - The requester's own agent on their desktop: the bridge spawns it, as
+    today.
+  - A borrowed or platform agent: the agent's bridge forwards each call
+    through the gateway to the requester's machine, which runs the tool
+    there under that turn's room relay and answers. The agent sees one MCP
+    server either way.
+  - The requester's machine is their desktop, or the browser extension of
+    a member who uses only the web (a tool built for it).
+  - When the requester has no machine connected, the tool runs on the
+    agent's machine as before. The tool itself knows whose machine it is
+    on (§3.1 `owner` against `requester`) and decides what it may do
+    there: the browser answers `needs_human` rather than use someone
+    else's sign-ins.
+- So member credentials and sign-ins follow the member too: a tool that
+  needs the requester's own accounts works on a borrowed agent, because
+  it runs where those accounts are.
+
 ## 4. The component
 
 - **Language and shape.** One Go binary (`cmd/bnbloc-browser`, built per
@@ -410,17 +466,23 @@ with the room watching.
 
 ## 6. Build order (slices of §2, shipped together)
 
-1. **Run loop on the owner's profile.**
+1. **Run loop on the owner's profile.** (Built 2026-10-17.)
    - The component: observe, step, execute, every checkpoint, uploads,
      downloads, secrets as `needs_human`.
    - Platform: §3.1 relay facts and §3.5 decision rate.
    - Conversation confirmations by turn sequence.
-2. **Live view.** §3.2 and the web's thumbnail and large view.
-3. **Remote control and grants.** §3.3, the browser and control grants
+2. **The requester's tools** (§3.6): installed tools attach without a
+   skill pack; `browse` and `browse_continue` merge. Tested with a real
+   page from the desktop on the requester's own agent.
+3. **Calls routed to the requester's machine** (§3.6): borrowed and
+   platform agents reach the requester's desktop.
+4. **The browser extension** (§2.2) for members who use only the web.
+5. **Live view.** §3.2 and the web's thumbnail and large view.
+6. **Remote control and grants.** §3.3, the browser and control grants
    (§2.6), the owner's secret prompt (§2.7).
-4. **Quick replies.** §3.4 and the `ask` room tool.
-5. **Procedures from runs** (§5): save, list, run as a plan.
-6. **More hosts.**
+7. **Quick replies.** §3.4 and the `ask` room tool.
+8. **Procedures from runs** (§5): save, list, run as a plan.
+9. **More hosts.**
    - the sandbox machine's headless Chromium (the guest publishes its CDP
      port, `docs/architecture/sandbox-protocol.md:155-157`),
    - an organization's remote browser endpoint,
@@ -444,7 +506,7 @@ with the room watching.
    - Design consequence: a run never depends on one tool call lasting.
      The component answers `running` before a conservative budget per
      call (default 45 s, set per core in the package's args). The agent
-     resumes with `browse_continue`; the live view shows the run
+     resumes with `browse(run)`; the live view shows the run
      throughout.
 2. **Stdio tools run on the host, also in sandboxed turns.**
    - In a sandboxed turn only the agent CLI's shell commands go into the
@@ -483,9 +545,9 @@ with the room watching.
 | Boundaries and privacy | The owner's sign-ins are used only by the owner and by members they grant (§2.6). Secret values never reach the model or the agent (§2.7). The everyday browser profiles stay read-denied. Live frames follow the run's channel (decided): a run's pages are exactly as visible as its messages. The audit holds counts and tokens, never page content. |
 | Abuse and untrusted input | Page content is fenced data, never instructions and never a confirmation. Only code-assigned indices can be chosen; every input is re-checked for freshness, visibility, enabled state and occlusion. Irreversible clicks, leaving the site, uploads and secret fields are checkpoints. A confirmation needs a newer turn opened by the requester (§2.5). Remote input is admitted only for the owner and granted members, checked at the gateway and again at the bridge. |
 | One owner | The component owns the run loop, checkpoints and the CDP executor. `internal/decision` owns the decision call. The relay owns which routes a tool reaches and what it knows of its turn (§3.1). `job_live_frame` / `job_live_input` own live media and input for every tool. Quick replies own one-tap answers for every feature. The borrow-grant model owns who may use the owner's things. |
-| Defaults and fallbacks | The default host is the owner's dedicated profile. The default irreversibility threshold is 0.3 (more confirmations until the audit shows the predicate's calibration), set by the org and per run. Without a decision model: `blocked` with the reason, and people drive. An unknown field value: `needs_input`, never a guess. No silent fallback to a chat model for steps. |
+| Defaults and fallbacks | The default host is the requester's dedicated profile. The default irreversibility threshold is 0.3 (more confirmations until the audit shows the predicate's calibration), set by the org and per run. Without a decision model: `blocked` with the reason, and people drive. An unknown field value: `needs_input`, never a guess. No silent fallback to a chat model for steps. |
 | External contracts | CDP (screencast, input, file inputs, download behavior) is pinned by tests against a real headless Chromium in CI, with fixture pages (the reference ships one, `jev_ultrafast/static/fixture.html`, and 19 tests, `tests/test_agent.py`). `/v1/systemone` is pinned by the decision PRD's fake. Each CLI's tool-call behavior is covered by the `running` checkpoint rather than assumed. |
-| Load on users and agents | For agents: three tools and checkpoints that say what to do next, with no browser knowledge needed. For members: sign in once in a dedicated window; answer confirmations in chat (one tap with quick replies); watch or take over when they want. No new settings to start: the owner's own runs work at once; grants appear only when someone else asks. |
+| Load on users and agents | For agents: two tools and checkpoints that say what to do next, with no browser knowledge and no skill pack needed; only turns of members who installed the browser carry them. For members: sign in once in a dedicated window; answer confirmations in chat (one tap with quick replies); watch or take over when they want. No new settings to start: installing the component is the switch, and it works with any agent they ask; grants appear only when someone asks for another member's browser. |
 | Release and compatibility | Additive: a new component, relay facts, two transient events and their routes, quick replies on messages, a decision rate. Pre-launch, no migration. Opt-in by installing the component; the desktop launches Chrome only when the component is installed and a run asks for it. |
 | Observability | Each step is a job activity line. Each decision call has its audit row. Each run's checkpoints, upload, download and remote-control take-over and hand-back are audited (kind `tool`, the run id, never page content). A frame counter per run is in metrics. Failures carry their class (stale, occluded, blocked, decision unavailable, host lost). |
 | AI capability | §5. |
@@ -521,10 +583,11 @@ likely reasons, and what the design does about each:
 4. **A borrowed agent reached the owner's mailbox.** jack borrowed
    maya's agent and asked it to "look up the invoice in the portal",
    which was signed in as maya.
-   - A run on maya's profile needs maya's browser grant to jack (§2.6),
-     separate from the agent borrow.
-   - Without it the run answers `needs_human` and records the request;
-     maya decides in the room.
+   - The tool runs on jack's machine (§3.6): the run opens in jack's own
+     browser, signed in as jack, though the agent is maya's.
+   - When jack has no machine connected and the tool runs on maya's,
+     it sees requester ≠ owner and answers `needs_human`; it never uses
+     maya's sign-ins without her browser grant to jack (§2.6).
    - Remote control needs the same grant.
 5. **Nobody could tell why it stopped.** A run sat in `blocked` behind a
    cookie banner.
@@ -542,3 +605,12 @@ likely reasons, and what the design does about each:
 3. **The irreversibility threshold starts at 0.3**, tuned from the audit.
 4. **Procedures from runs are part of this end state** (§5), built after
    quick replies.
+5. **A tool runs on the requester's machine, and a turn gets every tool
+   its requester installed** (2026-10-18, §3.6). The first QA run found
+   the browser installed but never attached: only tools a content
+   package required were attached, and the browser ran on the agent's
+   machine, so a borrowed agent would have used its owner's sign-ins and
+   a platform agent a server's. Running browsers server-side was
+   rejected: sign-ins would live on a server, an intranet is out of its
+   reach, and every sign-in would need remote control. Web-only members
+   use the browser extension.

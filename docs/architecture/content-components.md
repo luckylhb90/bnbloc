@@ -614,7 +614,7 @@ Design: PRD §1 "Sources, scopes and trust" and "Status: step 4".
    bridge runs), verified against its sha256 and validated again.
 4. **Profile.** A core advertising `agentProfile` receives the profile
    (the room model, `roomlog.SessionGuidance`, first; instructions +
-   skills + the MCP tools the content requires + the session contributors'
+   skills + the MCP tools in effect (required or installed) + the session contributors'
    MCP servers) on
    session create and maps it natively (see
    [`core-providers.md`](core-providers.md)). Any other core gets the
@@ -789,6 +789,13 @@ tool by name and can never inline a command.
     revoked with the session binding. A route joins the list only with
     job-grant admission. Platform content (a built-in pack) requiring a
     stdio tool does not force the sandbox; another member's still does.
+- **Which tools a turn gets** (`mcptool.Resolve`, browser PRD §3.6): the
+  ones its content requires, plus every MCP tool its requester installed
+  (an opt-in tool they added, or one rolled out to everyone), with no
+  content needed. A tool only installed (`RequiredBy` empty) that cannot
+  be attached (connector unset, member values unset, no binary here, a
+  transport the agent lacks) is left out quietly, at the gateway and at
+  the bridge; a required one is `contentMissing`.
 - **Distribution (stdio).** The member catalog (`GET /v1/components`, kind
   `mcp`) carries the pins; artifacts are entitled like every catalog
   kind's. The desktop's sidecar manager does not supervise a tool: for each
@@ -881,7 +888,7 @@ store and the artifact entitlement). JSON shapes: `internal/wire/content_compone
 | `GET /v1/content-uses[?room=]` | The caller's member uses and a room's uses, each with its component at the version in effect and `updateAvailable`; `roomExpert` names the room's expert |
 | `PUT /v1/content-uses` | `{scope: member\|room\|room-expert, roomId?, componentId, version?}`: member scope takes the kinds with `MemberUse` (skill and prompt packs); room scopes need the room's owner or an admin; `room-expert` takes one of the room's pinned experts (never a team) and replaces the previous one |
 | `DELETE /v1/content-uses?scope=&roomId=&componentId=` | Remove a use (unpinning the room expert clears it) |
-| `GET /v1/content-components/effective?job=&room=` | The bridge running a job: what its turn wears, with the MCP tools its content requires (`mcp`, an org tool with its connector's values) |
+| `GET /v1/content-components/effective?job=&room=` | The bridge running a job: what its turn wears, with the MCP tools in effect, required or installed by the requester (`mcp`, an org tool with its connector's values) |
 | `GET /v1/components?kind=mcp` | The MCP tools visible to the caller (rollout, tenants, opt-in) with their tools, env, credentials source and, for org credentials, `orgConfigured` |
 | `GET /v1/tenant/mcp-connectors` | Org admins (`manage_org`): the org-credential MCP tools visible to the organization with their connector's state (secret values never returned); `available: false` without the secret store key |
 | `PUT /v1/tenant/mcp-connectors/{name}` | `{values}`: store the organization's connector (an empty secret keeps the stored one; required variables must end set); 409 without the secret store key |

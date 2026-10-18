@@ -24,17 +24,33 @@ type Lookup func(name string) (Candidate, bool)
 // (ok=false: not configured; err: the store failed or connectors are off).
 type OrgValues func(name string) (map[string]string, bool, error)
 
-// Resolve turns the MCP requirements of the packages in effect for a turn
-// into the tools the bridge attaches, and names the unmet ones (the turn
-// still runs; they show as missing). A requirement is met by an installed
-// MCP component the requester may use (Lookup's visibility is the
-// requester's) that declares every env name the package needs; an org
-// credential tool also needs its organization connector configured. Member
-// credentials are resolved by the bridge, on the member's machine.
-func Resolve(refs []wire.ContentRef, lookup Lookup, org OrgValues) ([]wire.ContentMCPTool, []string, error) {
+// Resolve turns the MCP tools in effect for a turn into the tools the
+// bridge attaches, and names the unmet requirements (the turn still runs;
+// they show as missing). Two things put a tool in effect
+// (docs/prd/2026-10-17-browser-component.md §3.6):
+//
+//   - a package in effect requires it (refs): met by an installed MCP
+//     component the requester may use (Lookup's visibility is the
+//     requester's) that declares every env name the package needs;
+//   - the requester installed it (installed, names in order): offered with
+//     no requirement, so one that cannot be attached is left out quietly
+//     rather than reported missing.
+//
+// An org credential tool also needs its organization connector
+// configured. Member credentials are resolved by the bridge, on the
+// member's machine.
+func Resolve(refs []wire.ContentRef, installed []string, lookup Lookup, org OrgValues) ([]wire.ContentMCPTool, []string, error) {
 	type need struct {
 		env        map[string]bool
 		requiredBy []string
+	}
+	// unmet records a requirement no tool meets; an offered tool (nothing
+	// requires it) is dropped without a word.
+	var missing []string
+	unmet := func(n *need, why string) {
+		if len(n.requiredBy) > 0 {
+			missing = append(missing, why)
+		}
 	}
 	needs := map[string]*need{}
 	var order []string
@@ -54,13 +70,18 @@ func Resolve(refs []wire.ContentRef, lookup Lookup, org OrgValues) ([]wire.Conte
 			}
 		}
 	}
+	for _, name := range installed {
+		if needs[name] == nil {
+			needs[name] = &need{env: map[string]bool{}}
+			order = append(order, name)
+		}
+	}
 	var tools []wire.ContentMCPTool
-	var missing []string
 	for _, name := range order {
 		n := needs[name]
 		cand, ok := lookup(name)
 		if !ok || !cand.Visibility.Installed || cand.Config.MCP == nil {
-			missing = append(missing, "MCP tool "+name)
+			unmet(n, "MCP tool "+name)
 			continue
 		}
 		cfg := cand.Config
@@ -75,7 +96,7 @@ func Resolve(refs []wire.ContentRef, lookup Lookup, org OrgValues) ([]wire.Conte
 			}
 		}
 		if undeclared {
-			missing = append(missing, "MCP tool "+name+" (it no longer takes the variables the content needs)")
+			unmet(n, "MCP tool "+name+" (it no longer takes the variables the content needs)")
 			continue
 		}
 		tool := wire.ContentMCPTool{
@@ -106,13 +127,13 @@ func Resolve(refs []wire.ContentRef, lookup Lookup, org OrgValues) ([]wire.Conte
 			values, ok, err := org(name)
 			if err != nil {
 				if errors.Is(err, ErrConnectorsOff) {
-					missing = append(missing, "MCP tool "+name+" (organization connectors are off on this deployment)")
+					unmet(n, "MCP tool "+name+" (organization connectors are off on this deployment)")
 					continue
 				}
 				return nil, nil, err
 			}
 			if !ok || len(pkgmeta.UnsetEnv(tool.RequiredEnv(), values)) > 0 {
-				missing = append(missing, "MCP tool "+name+" (an organization admin has not configured its connector)")
+				unmet(n, "MCP tool "+name+" (an organization admin has not configured its connector)")
 				continue
 			}
 			tool.Values = values

@@ -217,7 +217,7 @@ func TestResolve(t *testing.T) {
 		}
 		return map[string]string{"TOOLS_TOKEN": "tok"}, true, nil
 	}
-	tools, missing, err := Resolve(refs, lookup, org)
+	tools, missing, err := Resolve(refs, nil, lookup, org)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,7 +251,7 @@ func TestResolveOAuthNeedsNoConnector(t *testing.T) {
 	pkg.MCP.Env, pkg.MCP.Credentials = nil, ""
 	pkg.MCP.HTTP = &pkgmeta.MCPHTTP{Auth: pkgmeta.MCPHTTPAuth{Scheme: pkgmeta.MCPAuthOAuth, ClientID: "c", Scopes: []string{"files:read"}}}
 	refs := []wire.ContentRef{{ComponentID: "cc", MCP: []wire.ContentMCPRequirement{{Name: "drive"}}}}
-	tools, missing, err := Resolve(refs, lookupOf(t, candidate(t, pkg, true)), func(string) (map[string]string, bool, error) {
+	tools, missing, err := Resolve(refs, nil, lookupOf(t, candidate(t, pkg, true)), func(string) (map[string]string, bool, error) {
 		t.Fatal("an oauth tool has no organization connector")
 		return nil, false, nil
 	})
@@ -271,7 +271,7 @@ func TestResolveMissingConnectorAndUndeclaredEnv(t *testing.T) {
 		func(string) (map[string]string, bool, error) { return map[string]string{}, true, nil },
 		func(string) (map[string]string, bool, error) { return nil, false, ErrConnectorsOff },
 	} {
-		tools, missing, err := Resolve(refs, lookup, org)
+		tools, missing, err := Resolve(refs, nil, lookup, org)
 		if err != nil || len(tools) != 0 || len(missing) != 2 {
 			t.Fatalf("tools=%+v missing=%v err=%v", tools, missing, err)
 		}
@@ -347,5 +347,27 @@ func TestMergeValues(t *testing.T) {
 	}
 	if !Configured(env, second) || Configured(env, map[string]string{}) {
 		t.Fatal("Configured")
+	}
+}
+
+// A tool the requester installed is in effect without any content
+// requiring it (docs/prd/2026-10-17-browser-component.md §3.6); one that
+// cannot be attached is left out without a missing line, unless content
+// requires it too.
+func TestResolveOffersInstalledTools(t *testing.T) {
+	lookup := lookupOf(t,
+		candidate(t, stdioPackage("codeword"), true),
+		candidate(t, httpPackage("search", "https://tools.example.com/mcp"), true),
+		candidate(t, stdioPackage("optin"), false),
+	)
+	noConnector := func(string) (map[string]string, bool, error) { return nil, false, nil }
+	tools, missing, err := Resolve(nil, []string{"codeword", "search", "optin"}, lookup, noConnector)
+	if err != nil || len(missing) != 0 || len(tools) != 1 || tools[0].Name != "codeword" || len(tools[0].RequiredBy) != 0 {
+		t.Fatalf("tools=%+v missing=%v err=%v", tools, missing, err)
+	}
+	refs := []wire.ContentRef{{ComponentID: "cc", MCP: []wire.ContentMCPRequirement{{Name: "search"}}}}
+	tools, missing, err = Resolve(refs, []string{"codeword", "search"}, lookup, noConnector)
+	if err != nil || len(tools) != 1 || !reflect.DeepEqual(missing, []string{"MCP tool search (an organization admin has not configured its connector)"}) {
+		t.Fatalf("tools=%+v missing=%v err=%v", tools, missing, err)
 	}
 }

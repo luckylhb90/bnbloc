@@ -15,11 +15,13 @@ import { errorText } from "@/lib/errors";
 import { LoadFailed } from "@/ui/QueryState";
 
 // ToolsTab is the Library's MCP tools: the tool servers published by the
-// platform that experts and skill packs can require, as the member may use
-// them (rollout, tenants, opt-in). Each card shows the tools it offers,
-// whether its credentials are in place for the member (their own on this
-// desktop, or the organization's connector) and which experts and skill
-// packs use it. Credentials are entered in Settings → Tools (own) or by an
+// platform, as the member may use them (rollout, tenants, opt-in). A tool
+// that is on for the member reaches every conversation they start, with
+// any agent; experts and skill packs can also require one
+// (docs/prd/2026-10-17-browser-component.md §3.6). Each card shows the
+// tools it offers, whether its credentials are in place for the member
+// (their own on this desktop, or the organization's connector) and which
+// experts and skill packs use it. Credentials are entered in Settings → Tools (own) or by an
 // org admin (Organization → Tool connectors).
 export function ToolsTab({ tabs }: { readonly tabs: React.ReactNode }) {
   const toast = useToast();
@@ -88,7 +90,7 @@ export function ToolsTab({ tabs }: { readonly tabs: React.ReactNode }) {
           <EmptyState
             icon={<WrenchIcon size={26} />}
             title={q ? "Nothing matches" : "No tools yet"}
-            hint={q ? undefined : "MCP tools are published by your platform admin. Experts and skill packs that need one show it as missing until it is here."}
+            hint={q ? undefined : "MCP tools are published by your platform admin. A tool that is on for you reaches every conversation you start, with any agent."}
           />
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -128,7 +130,8 @@ export function ToolsTab({ tabs }: { readonly tabs: React.ReactNode }) {
                     <p className="text-xs text-[var(--color-fg-subtle)]">{download.state === "ready" ? "Downloaded on this computer" : download.message || "Downloading on this computer…"}</p>
                   )}
                   <p className="text-xs text-[var(--color-fg-subtle)]">
-                    {users.length === 0 ? "Not used by your experts or skill packs yet" : `Used by ${users.map(contentLabel).join(", ")}`}
+                    {t.installed ? "Your agents get it in the conversations you start" : "Turn it on to give it to your agents"}
+                    {users.length > 0 && ` · Used by ${users.map(contentLabel).join(", ")}`}
                   </p>
                   {t.rollout === "optin" && (
                     <div className="mt-auto pt-1">

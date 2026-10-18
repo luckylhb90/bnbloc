@@ -63,8 +63,8 @@ type jobContent struct {
 	// scripts or stdio MCP, or requires a stdio MCP tool: it forces a
 	// sandboxed drive.
 	foreign []string
-	// mcp are the MCP servers of the tools the content requires
-	// (mcp_tools.go).
+	// mcp are the MCP servers of the tools in effect: required by the
+	// content or installed by the requester (mcp_tools.go).
 	mcp jobMCP
 }
 

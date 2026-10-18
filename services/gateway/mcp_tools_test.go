@@ -341,3 +341,47 @@ func TestMemberCatalogListsOAuthMCPTool(t *testing.T) {
 	}
 	t.Fatalf("drive not listed: %s", body)
 }
+
+// A job whose content requires no tool still gets the tools its requester
+// installed (an auto rollout installs for everyone), and not the ones they
+// did not (docs/prd/2026-10-17-browser-component.md §3.6).
+func TestContentEffectiveOffersInstalledMCP(t *testing.T) {
+	g, _ := mcpGateway(t, true)
+	g.svc.ComponentInstalls = store.NewMemoryComponentInstall()
+	ctx := tenant.NewContext(context.Background(), "home")
+	_ = g.jobs.PutBridgeHeartbeat(ctx, store.BridgeHeartbeat{BridgeID: "br-jack", OwnerUserID: "jack", Status: store.BridgeOnline, LastSeenAtMs: time.Now().UnixMilli()})
+	job, err := g.jobs.PutAgentJob(ctx, store.AgentJob{JobID: "job-1", RoomID: "room-1", MessageSeq: 3, RequesterUserID: "maya", OwnerUserID: "jack", Provider: "codex",
+		Status: store.AgentJobRunning, LeaseBridgeID: "br-jack", CreatedAtMs: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	effective := func() wire.ContentEffective {
+		t.Helper()
+		code, raw := g.do("jack", http.MethodGet, "/v1/content-components/effective?job="+job.JobID+"&room=room-1", "", nil)
+		if code != http.StatusOK {
+			t.Fatalf("effective = %d %s", code, raw)
+		}
+		var eff wire.ContentEffective
+		_ = json.Unmarshal(raw, &eff)
+		return eff
+	}
+	// search's connector is unset: offered, not attachable, not missing.
+	eff := effective()
+	if len(eff.MCP) != 1 || eff.MCP[0].Name != "codeword" || len(eff.MCP[0].RequiredBy) != 0 || len(eff.Missing) != 0 {
+		t.Fatalf("mcp = %+v missing = %v", eff.MCP, eff.Missing)
+	}
+	// Opt-in: only once the requester added it.
+	g.tokens["root"] = superAdminToken(t, g)
+	if code, raw := g.json("root", http.MethodPut, "/v1/platform/components/codeword/rollout?kind=mcp", map[string]string{"rollout": "optin"}); code != http.StatusOK && code != http.StatusNoContent {
+		t.Fatalf("rollout = %d %s", code, raw)
+	}
+	if eff = effective(); len(eff.MCP) != 0 || len(eff.Missing) != 0 {
+		t.Fatalf("an opt-in tool maya did not add: mcp = %+v missing = %v", eff.MCP, eff.Missing)
+	}
+	if code, raw := g.do("maya", http.MethodPost, "/v1/components/codeword/install?kind=mcp", "", nil); code != http.StatusNoContent {
+		t.Fatalf("install = %d %s", code, raw)
+	}
+	if eff = effective(); len(eff.MCP) != 1 || eff.MCP[0].Name != "codeword" {
+		t.Fatalf("after maya added it: mcp = %+v missing = %v", eff.MCP, eff.Missing)
+	}
+}

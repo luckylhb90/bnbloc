@@ -18,10 +18,11 @@ import (
 )
 
 // MCP tool components (docs/prd/2026-10-12-experts-and-teams.md §6): the
-// gateway resolves the MCP tools a job's content requires (the requester
-// may use them; an org-credential tool brings its organization connector's
-// values). The bridge turns each into an MCP server of the session's
-// profile:
+// gateway resolves the MCP tools of a job, the ones its content requires
+// and the ones its requester installed (the requester may use them; an
+// org-credential tool brings its organization connector's values;
+// docs/prd/2026-10-17-browser-component.md §3.6). The bridge turns each
+// into an MCP server of the session's profile:
 //
 //   - stdio: the binary the member's desktop materialized and verified
 //     (MCPToolsDir/index.json must carry the gateway's sha256 pin for this
@@ -62,6 +63,9 @@ type jobMCP struct {
 	// relayed names the servers whose credentials are the room
 	// (pkgmeta.MCPCredentialsRoom): each gets the session's room relay.
 	relayed []string
+	// offered names the servers no content requires (the requester
+	// installed them): one the session cannot attach is dropped quietly.
+	offered []string
 }
 
 // resolveMCP builds the MCP servers of a job's tools. refs are the packages
@@ -81,8 +85,18 @@ func (b *Bridge) resolveMCP(tools []wire.ContentMCPTool, refs []wire.ContentRef,
 	foreignSeen := map[string]bool{}
 	var index *mcpIndex
 	for _, t := range tools {
+		// A tool nobody's content requires was offered because the
+		// requester installed it: not attaching it is no unmet requirement.
+		unmet := func(why string) {
+			if len(t.RequiredBy) > 0 {
+				missing = append(missing, "MCP tool "+t.Name+" ("+why+")")
+			} else {
+				slog.Info("bnbloc bridge installed MCP tool not attached",
+					"event", "bnbloc.bridge.mcp_offered_skipped", "tool", t.Name, "why", why)
+			}
+		}
 		if pkgmeta.ValidMCPToolName(t.Name) != nil {
-			missing = append(missing, "MCP tool "+t.Name+" (invalid name)")
+			unmet("invalid name")
 			continue
 		}
 		values, why := b.mcpValues(t, own)
@@ -90,7 +104,7 @@ func (b *Bridge) resolveMCP(tools []wire.ContentMCPTool, refs []wire.ContentRef,
 			values, why = b.mcpOAuthToken(t, own)
 		}
 		if why != "" {
-			missing = append(missing, "MCP tool "+t.Name+" ("+why+")")
+			unmet(why)
 			continue
 		}
 		server := corepkg.MCPServer{Name: t.Name}
@@ -101,7 +115,7 @@ func (b *Bridge) resolveMCP(tools []wire.ContentMCPTool, refs []wire.ContentRef,
 			}
 			path, why := b.mcpBinary(index, t)
 			if why != "" {
-				missing = append(missing, "MCP tool "+t.Name+" ("+why+")")
+				unmet(why)
 				continue
 			}
 			server.Type = corepkg.MCPStdio
@@ -129,7 +143,7 @@ func (b *Bridge) resolveMCP(tools []wire.ContentMCPTool, refs []wire.ContentRef,
 			}
 		case wire.MCPTransportHTTP:
 			if t.URL == "" {
-				missing = append(missing, "MCP tool "+t.Name+" (no URL)")
+				unmet("no URL")
 				continue
 			}
 			server.Type = corepkg.MCPHTTP
@@ -145,8 +159,11 @@ func (b *Bridge) resolveMCP(tools []wire.ContentMCPTool, refs []wire.ContentRef,
 				}
 			}
 		default:
-			missing = append(missing, "MCP tool "+t.Name+" (unknown transport "+t.Transport+")")
+			unmet("unknown transport " + t.Transport)
 			continue
+		}
+		if len(t.RequiredBy) == 0 {
+			out.offered = append(out.offered, t.Name)
 		}
 		out.servers = append(out.servers, server)
 	}
@@ -308,7 +325,7 @@ func (b *Bridge) mcpBinary(idx *mcpIndex, t wire.ContentMCPTool) (string, string
 
 // fitMCPToTarget drops the MCP servers the session cannot attach: none on a
 // core without agentProfile, http ones on a target that accepts only stdio.
-// They join the turn's missing requirements.
+// The required ones join the turn's missing requirements.
 func (c *jobContent) fitMCPToTarget(profile bool, transports []string) {
 	if c == nil || len(c.mcp.servers) == 0 {
 		return
@@ -316,13 +333,18 @@ func (c *jobContent) fitMCPToTarget(profile bool, transports []string) {
 	target := corepkg.Target{MCPTransports: transports}
 	kept := c.mcp.servers[:0]
 	for _, s := range c.mcp.servers {
+		why := ""
 		switch {
 		case !profile:
-			c.missing = append(c.missing, "MCP tool "+s.Name+" (the agent's core cannot attach MCP tools)")
+			why = "the agent's core cannot attach MCP tools"
 		case !target.TransportSupported(s.Transport()):
-			c.missing = append(c.missing, "MCP tool "+s.Name+" (the agent accepts no "+s.Transport()+" MCP server)")
+			why = "the agent accepts no " + s.Transport() + " MCP server"
 		default:
 			kept = append(kept, s)
+			continue
+		}
+		if !slices.Contains(c.mcp.offered, s.Name) {
+			c.missing = append(c.missing, "MCP tool "+s.Name+" ("+why+")")
 		}
 	}
 	c.mcp.servers = kept
