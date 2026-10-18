@@ -2209,7 +2209,7 @@ export interface EventKindSpec {
 // RoomEventKinds is the registry of room event kinds. The web's
 // RoomEventKind union (and RoomEventKindValues) is generated from the Name
 // of each row: a kind registered here is a kind the web listens for.
-export const RoomEventKinds: readonly EventKindSpec[] = [{ name: "chat_message", durable: true, replay: true, channelScoped: true }, { name: "agent_messages", durable: true, replay: true, channelScoped: true }, { name: "agent_job_created", channelScoped: true }, { name: "agent_job_updated", channelScoped: true }, { name: "agent_job_progress", channelScoped: true }, { name: "agent_session_state" }, { name: "agent_roster" }, { name: "presence_join" }, { name: "presence_leave" }, { name: "presence_snapshot" }, { name: "presence_typing", channelScoped: true }, { name: "message_deleted", channelScoped: true }, { name: "message_edited", channelScoped: true }, { name: "task_updated", channelScoped: true }, { name: "artifact_updated" }, { name: "artifact_state" }, { name: "member_joined" }, { name: "member_removed", revocation: true }, { name: "room_deleted", revocation: true }, { name: "content_saved" }, { name: "content_uses_changed" }, { name: "app_changed" }];
+export const RoomEventKinds: readonly EventKindSpec[] = [{ name: "chat_message", durable: true, replay: true, channelScoped: true }, { name: "agent_messages", durable: true, replay: true, channelScoped: true }, { name: "agent_job_created", channelScoped: true }, { name: "agent_job_updated", channelScoped: true }, { name: "agent_job_progress", channelScoped: true }, { name: "job_live_frame", channelScoped: true }, { name: "agent_session_state" }, { name: "agent_roster" }, { name: "presence_join" }, { name: "presence_leave" }, { name: "presence_snapshot" }, { name: "presence_typing", channelScoped: true }, { name: "message_deleted", channelScoped: true }, { name: "message_edited", channelScoped: true }, { name: "task_updated", channelScoped: true }, { name: "artifact_updated" }, { name: "artifact_state" }, { name: "member_joined" }, { name: "member_removed", revocation: true }, { name: "room_deleted", revocation: true }, { name: "content_saved" }, { name: "content_uses_changed" }, { name: "app_changed" }];
 
 // ---- wire/handoff.go ----
 
@@ -2439,6 +2439,133 @@ export interface RoomImportResult {
   skippedAttachments: string[];
   handoff: RoomHandoffInfo;
 }
+
+// ---- wire/job_live.go ----
+
+// EventJobLiveFrame carries JobLiveFrame (realtime), scoped to the job's
+// channel: a job has a new frame.
+export const EventJobLiveFrame = "job_live_frame";
+
+// Bounds of a live frame post.
+// MaxLiveFrameBytes bounds one frame's image (decoded).
+export const MaxLiveFrameBytes = 1048576;
+// MaxLiveFrameSide bounds a frame's width and height in pixels.
+export const MaxLiveFrameSide = 4096;
+// MaxLiveTitle bounds a frame's title and URL (runes).
+export const MaxLiveTitle = 300;
+// MaxLiveInput bounds the input events queued for a job; the oldest
+// are dropped past it.
+export const MaxLiveInput = 256;
+
+// LiveFramePost is POST /v1/live: one frame of the job's live view, or an
+// empty post (no Data) that only collects the reply. Run names what is
+// shown (a browser run); Width and Height are the image's pixels; ViewWidth
+// and ViewHeight the page's own size, which input coordinates map to.
+export interface LiveFramePost {
+  run?: string;
+  seq?: number;
+  mimeType?: string;
+  data?: string;
+  width?: number;
+  height?: number;
+  title?: string;
+  url?: string;
+}
+
+// LiveFrameHeader carries, on the frame image's answer
+// (GET .../live/frame), the frame's JobLiveFrame as base64url JSON: a
+// viewer opened after the last job_live_frame event knows the view at once.
+export const LiveFrameHeader = "X-Bnbloc-Live-Frame";
+
+// LiveFrameReply answers a post: whether someone watches the large view
+// (the tool posts faster then), who holds control ("" nobody), and the
+// input queued since the last post, oldest first.
+export interface LiveFrameReply {
+  watching: boolean;
+  controller?: string;
+  input?: LiveInput[];
+}
+
+// LiveFrameIngest is the gateway's hand-off of a post to realtime
+// (POST /internal/v1/rooms/{roomId}/live/{jobId}): the frame, and the job's
+// facts realtime checks viewers and controllers against.
+export interface LiveFrameIngest {
+  channelId?: string;
+  owner: string;
+  requester: string;
+  frame: LiveFramePost;
+}
+
+// JobLiveFrame is EventJobLiveFrame: a job's newest frame, without the
+// image. Owner is whose machine shows it (the only member who may take
+// control, until control grants exist); Controller who holds control now.
+export interface JobLiveFrame {
+  jobId: string;
+  run?: string;
+  seq: number;
+  width: number;
+  height: number;
+  title?: string;
+  url?: string;
+  owner: string;
+  controller?: string;
+  atMs: number;
+}
+
+// Live input kinds (LiveInput.Type).
+// LiveInputMouse: a pointer press, release or move at X, Y.
+export const LiveInputMouse = "mouse";
+// LiveInputWheel: a scroll by DeltaX, DeltaY at X, Y.
+export const LiveInputWheel = "wheel";
+// LiveInputKey: a key pressed or released (Key, Code, Text).
+export const LiveInputKey = "key";
+// LiveInputText: text inserted as typed (a paste, an IME's result).
+export const LiveInputText = "text";
+// LiveInputFocus: bring the window showing the view to the front of
+// its machine (for what remote input cannot carry: a security key, a
+// system dialog).
+export const LiveInputFocus = "focus";
+
+// LiveInput is one input event. X and Y are fractions of the frame (0..1),
+// so they hold at any display size; Action is "down", "up" or "move" for
+// the pointer and "down" or "up" for keys; Modifiers is a bit set (1 Alt,
+// 2 Ctrl, 4 Meta, 8 Shift, CDP's).
+export interface LiveInput {
+  type: LiveInputType;
+  action?: string;
+  x?: number;
+  y?: number;
+  button?: string;
+  clicks?: number;
+  deltaX?: number;
+  deltaY?: number;
+  key?: string;
+  code?: string;
+  text?: string;
+  modifiers?: number;
+}
+
+// LiveInputPost is POST /v1/rooms/{roomId}/jobs/{jobId}/live/input: the
+// controller's input, in order.
+export interface LiveInputPost {
+  events: LiveInput[];
+}
+
+// LiveControlPost is POST /v1/rooms/{roomId}/jobs/{jobId}/live/control:
+// take control (Take) or hand it back. A controller repeats it while in
+// control: control lapses LiveControlLapse after the last one, so a closed
+// view hands it back by itself.
+export interface LiveControlPost {
+  take: boolean;
+}
+
+// LiveControlReply answers a control post: who holds control now.
+export interface LiveControlReply {
+  controller?: string;
+}
+
+// LiveControlLapseMs is how long control holds without a renewal.
+export const LiveControlLapseMs = 15000;
 
 // ---- wire/job_notice.go ----
 
@@ -2670,7 +2797,7 @@ export interface ContentMCPRequirement {
 // each admits a job grant (?room=&job=) and acts as the job's requester. A
 // route joins the list only with that admission; the relay refuses the
 // rest.
-export const RoomRelayRoutes: readonly string[] = ["POST /v1/decisions", "POST /v1/systemone", "POST /v1/media/image", "POST /v1/media/transcriptions"];
+export const RoomRelayRoutes: readonly string[] = ["POST /v1/decisions", "POST /v1/systemone", "POST /v1/media/image", "POST /v1/media/transcriptions", "POST /v1/live"];
 
 // RoomRelaySessionPath is the relay's own route that answers the bound
 // turn (GET <relay>/session): RoomRelaySession. It is the bridge's, never
@@ -5058,8 +5185,10 @@ export type ContentSavedAction = "saved" | "submitted" | "published";
 export const ContentSavedActionValues: readonly ContentSavedAction[] = ["saved", "submitted", "published"];
 export type DecisionQuestionType = "predicate" | "choice" | "score";
 export const DecisionQuestionTypeValues: readonly DecisionQuestionType[] = ["predicate", "choice", "score"];
-export type RoomEventKind = "chat_message" | "agent_messages" | "agent_job_created" | "agent_job_updated" | "agent_job_progress" | "agent_session_state" | "agent_roster" | "presence_join" | "presence_leave" | "presence_snapshot" | "presence_typing" | "message_deleted" | "message_edited" | "task_updated" | "artifact_updated" | "artifact_state" | "member_joined" | "member_removed" | "room_deleted" | "content_saved" | "content_uses_changed" | "app_changed";
-export const RoomEventKindValues: readonly RoomEventKind[] = ["chat_message", "agent_messages", "agent_job_created", "agent_job_updated", "agent_job_progress", "agent_session_state", "agent_roster", "presence_join", "presence_leave", "presence_snapshot", "presence_typing", "message_deleted", "message_edited", "task_updated", "artifact_updated", "artifact_state", "member_joined", "member_removed", "room_deleted", "content_saved", "content_uses_changed", "app_changed"];
+export type RoomEventKind = "chat_message" | "agent_messages" | "agent_job_created" | "agent_job_updated" | "agent_job_progress" | "job_live_frame" | "agent_session_state" | "agent_roster" | "presence_join" | "presence_leave" | "presence_snapshot" | "presence_typing" | "message_deleted" | "message_edited" | "task_updated" | "artifact_updated" | "artifact_state" | "member_joined" | "member_removed" | "room_deleted" | "content_saved" | "content_uses_changed" | "app_changed";
+export const RoomEventKindValues: readonly RoomEventKind[] = ["chat_message", "agent_messages", "agent_job_created", "agent_job_updated", "agent_job_progress", "job_live_frame", "agent_session_state", "agent_roster", "presence_join", "presence_leave", "presence_snapshot", "presence_typing", "message_deleted", "message_edited", "task_updated", "artifact_updated", "artifact_state", "member_joined", "member_removed", "room_deleted", "content_saved", "content_uses_changed", "app_changed"];
+export type LiveInputType = "mouse" | "wheel" | "key" | "text" | "focus";
+export const LiveInputTypeValues: readonly LiveInputType[] = ["mouse", "wheel", "key", "text", "focus"];
 export type JobActivityKind = "tool" | "thinking" | "text";
 export const JobActivityKindValues: readonly JobActivityKind[] = ["tool", "thinking", "text"];
 export type MediaImageAspect = "square" | "landscape" | "portrait";

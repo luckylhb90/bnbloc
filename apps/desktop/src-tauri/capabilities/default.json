@@ -1,11 +1,12 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "IPC for the shared web UI (main + preview and people-chat pop-outs): core event/window defaults only. The UI calls the shell's own commands (bridge, settings, sidecars, updater, open) via invoke; every plugin (updater, deep-link, dialog) is driven from Rust and exposes nothing to the webview.",
+  "description": "IPC for the shared web UI (main + preview, people-chat and live-page pop-outs): core event/window defaults only. The UI calls the shell's own commands (bridge, settings, sidecars, updater, open) via invoke; every plugin (updater, deep-link, dialog) is driven from Rust and exposes nothing to the webview.",
   "windows": [
     "main",
     "preview-*",
-    "people-*"
+    "people-*",
+    "live-*"
   ],
   "permissions": [
     "core:default"

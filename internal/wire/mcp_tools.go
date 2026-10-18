@@ -21,6 +21,7 @@ var RoomRelayRoutes = []string{
 	"POST /v1/systemone",
 	"POST /v1/media/image",
 	"POST /v1/media/transcriptions",
+	"POST /v1/live",
 }
 
 // RoomRelaySessionPath is the relay's own route that answers the bound

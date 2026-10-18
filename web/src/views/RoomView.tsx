@@ -14,6 +14,7 @@ import { useWorkbench } from "@/views/workbench/useWorkbench";
 import { applyAppChanged } from "@/views/workbench/AppDataLine";
 import { desktop } from "@/lib/desktop";
 import { inDesktopShell } from "@/lib/config";
+import { liveRouteHash } from "@/lib/previewRoute";
 import { useLocalAgent } from "@/lib/useLocalAgent";
 import { useToast } from "@/ui/Toast";
 import type { ChatRecipient, FeedItem } from "@/views/room/types";
@@ -50,7 +51,7 @@ import { AttachmentOpenerProvider } from "@/views/room/MessageAttachments";
 import { FileAskProvider } from "@/views/workbench/FileAskPanel";
 import { AutomateProvider, automateTaskSeed, type AutomateApp } from "@/views/room/automate";
 import { useRoomFileAsk } from "@/views/workbench/useRoomFileAsk";
-import { JobProgressProvider } from "@/views/room/JobProgressStrip";
+import { JobLiveProvider, JobProgressProvider } from "@/views/room/JobProgressStrip";
 import { SaveTemplateDialog } from "@/views/room/SaveTemplateDialog";
 import { TemplateStartCard } from "@/views/room/TemplateStartCard";
 import { SchedulesDialog } from "@/views/room/SchedulesDialog";
@@ -243,7 +244,22 @@ export function RoomView({
   const platformInRoom = data.platform.inRoom;
   const queueAhead = useCallback((job: AgentJob) => jobQueueAhead(job, platformInRoom), [platformInRoom]);
 
-  const { openArtifact: openWorkbenchTab, openDeliverables } = workbench;
+  const { openArtifact: openWorkbenchTab, openDeliverables, openLive } = workbench;
+  // A job's live view in its own window: the desktop's, or a browser tab
+  // at its deep link on the web (it works after the room is closed).
+  const popOutLive = useCallback(
+    async (jobId: string): Promise<boolean> => {
+      if (inDesktopShell()) return desktop.popOutLive(roomId, jobId);
+      return window.open(`${window.location.pathname}${window.location.search}${liveRouteHash(roomId, jobId)}`, "_blank", "noopener") !== null;
+    },
+    [roomId],
+  );
+  const liveRoom = useMemo(() => ({ roomId, live: activity.jobLive, open: openLive }), [roomId, activity.jobLive, openLive]);
+  // A live tab closes with its turn (the view ended).
+  const { state: wbState, dispatch: wbDispatch } = workbench;
+  useEffect(() => {
+    for (const t of wbState.tabs) if (t.liveJobId && !activity.jobLive[t.liveJobId]) wbDispatch({ type: "close", key: t.key });
+  }, [wbState.tabs, activity.jobLive, wbDispatch]);
   const openArtifactInFiles = useCallback(
     (artifactId: string) => {
       clearFilesBadge();
@@ -420,6 +436,8 @@ export function RoomView({
       onLocalState={relayArtifactState}
       onClose={workbench.closeWorkbench}
       onPopOut={inDesktopShell() ? (artifactId) => desktop.popOutPreview(roomId, artifactId) : undefined}
+      jobLive={activity.jobLive}
+      onPopOutLive={popOutLive}
       onStartDrag={startDockDrag}
     />
   ) : null;
@@ -526,6 +544,7 @@ export function RoomView({
               <div ref={scroller.contentRef}>
                 <MessageExtrasProvider value={team.extras}>
                 <JobProgressProvider value={activity.jobProgress}>
+                <JobLiveProvider value={liveRoom}>
                 <MessageFeed
                   loaded={!!room}
                   roomId={roomId}
@@ -554,6 +573,7 @@ export function RoomView({
                   onViewAllDeliverables={viewAllDeliverables}
                   agentReady={roomAgents.some((a) => !a.platform) || data.platform.choices.some((c) => c.inRoom && c.online)}
                 />
+                </JobLiveProvider>
                 </JobProgressProvider>
                 </MessageExtrasProvider>
               </div>

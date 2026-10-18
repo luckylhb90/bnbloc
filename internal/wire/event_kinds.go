@@ -70,6 +70,7 @@ var RoomEventKinds = []EventKindSpec{
 	{Name: EventAgentJobCreated, ChannelScoped: true},
 	{Name: EventAgentJobUpdated, ChannelScoped: true},
 	{Name: EventAgentJobProgress, ChannelScoped: true},
+	{Name: EventJobLiveFrame, ChannelScoped: true},
 	{Name: EventAgentSessionState},
 	{Name: EventAgentRoster},
 	{Name: EventPresenceJoin},

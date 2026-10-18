@@ -143,3 +143,12 @@ test("an attachment opens once as its own tab and persists", () => {
   });
   eq(parseWorkbench(dirty), EMPTY_WORKBENCH, "mismatched key, missing fields and null are dropped");
 });
+
+test("a live view opens as a tab and is never persisted", () => {
+  let s = r(EMPTY_WORKBENCH, { type: "open", artifactId: "a" });
+  s = r(s, { type: "openLive", jobId: "job-1" });
+  eq([keys(s), s.active], [["a:a", "l:job-1"], "l:job-1"], "opened beside the file");
+  s = r(s, { type: "openLive", jobId: "job-1" });
+  eq(keys(s).length, 2, "reopening only activates");
+  eq(parseWorkbench(serializeWorkbench(s)), { tabs: [{ key: "a:a", artifactId: "a", pinned: false }], active: "a:a" }, "the live tab ends with the turn");
+});

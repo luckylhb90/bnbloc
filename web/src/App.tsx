@@ -9,7 +9,7 @@ import { listenForPushNavigation } from "@/lib/webPush";
 import { Shell, type View } from "@/views/Shell";
 import { Plaza } from "@/views/Plaza";
 import { MyRooms } from "@/views/MyRooms";
-import { isPreviewRoute, peopleChatRoomFromHash } from "@/lib/previewRoute";
+import { isPreviewRoute, liveRouteFromHash, peopleChatRoomFromHash } from "@/lib/previewRoute";
 import { useDesktopUpdate } from "@/views/DesktopUpdateWatcher";
 import { DesktopPresenceProvider } from "@/lib/desktopPresence";
 import { DesktopConnectNotice } from "@/views/DesktopConnect";
@@ -36,6 +36,7 @@ const Organization = lazy(() => import("@/views/Organization").then((m) => ({ de
 const Directory = lazy(() => import("@/views/Directory").then((m) => ({ default: m.Directory })));
 const ReleaseHub = lazy(() => import("@/views/ReleaseHub").then((m) => ({ default: m.ReleaseHub })));
 const Settings = lazy(() => import("@/views/Settings").then((m) => ({ default: m.Settings })));
+const StandaloneLive = lazy(() => import("@/views/live/StandaloneLive").then((m) => ({ default: m.StandaloneLive })));
 const StandalonePreview = lazy(() =>
   import("@/views/StandalonePreview").then((m) => ({ default: m.StandalonePreview })),
 );
@@ -149,6 +150,16 @@ export function App() {
   // shares the app's stored session; a signed-out window lands on Login like
   // any other, and signs straight into its artifact from there. Checked
   // after the hooks and gates above so hook order never varies.
+  // A job's live view in its own window (desktop pop-out or web tab).
+  const liveRoute = liveRouteFromHash(window.location.hash);
+  if (liveRoute) {
+    return (
+      <Suspense fallback={<Spinner />}>
+        <StandaloneLive roomId={liveRoute.roomId} jobId={liveRoute.jobId} />
+      </Suspense>
+    );
+  }
+
   const preview = isPreviewRoute();
   if (preview) {
     return (

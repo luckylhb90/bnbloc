@@ -5,7 +5,8 @@
 // A tab is one artifact (optionally pinned to a version, optionally opened
 // with a specific viewer — the "Open with…" choice), one chat attachment
 // (a file a member attached to a message: one immutable version, no
-// history), or the room's "All deliverables" list. Pinned tabs form a group at the front: they are
+// history), the room's "All deliverables" list, or a running job's live
+// view (the page an agent works on; never persisted: it ends with the turn). Pinned tabs form a group at the front: they are
 // skipped by "close others", never evicted, and reorder only among
 // themselves.
 
@@ -29,10 +30,12 @@ export interface AttachmentTabFile {
 }
 
 export interface WorkbenchTab {
-  /** "a:<artifactId>", "f:<attachmentId>" or DELIVERABLES_TAB. */
+  /** "a:<artifactId>", "f:<attachmentId>", "l:<jobId>" or DELIVERABLES_TAB. */
   readonly key: string;
   readonly artifactId?: string;
   readonly attachment?: AttachmentTabFile;
+  /** A running job's live view. */
+  readonly liveJobId?: string;
   /** A specific version; absent = follow the current version. */
   readonly version?: number;
   readonly pinned: boolean;
@@ -52,6 +55,7 @@ export type WorkbenchAction =
   | { type: "open"; artifactId: string; version?: number }
   | { type: "openAttachment"; attachment: AttachmentTabFile }
   | { type: "openDeliverables"; filter?: DeliverablesFilter }
+  | { type: "openLive"; jobId: string }
   | { type: "activate"; key: string }
   | { type: "close"; key: string }
   | { type: "closeOthers"; key: string }
@@ -67,6 +71,10 @@ export function artifactTabKey(artifactId: string): string {
 
 export function attachmentTabKey(attachmentId: string): string {
   return `f:${attachmentId}`;
+}
+
+export function liveTabKey(jobId: string): string {
+  return `l:${jobId}`;
 }
 
 // Pinned tabs first, each group keeping its relative order.
@@ -123,6 +131,12 @@ export function workbenchReducer(state: WorkbenchState, action: WorkbenchAction)
       const key = attachmentTabKey(action.attachment.id);
       if (state.tabs.some((t) => t.key === key)) return { ...state, active: key };
       const tab: WorkbenchTab = { key, attachment: action.attachment, pinned: false };
+      return { tabs: evict(insertAfterActive(state, tab), key), active: key };
+    }
+    case "openLive": {
+      const key = liveTabKey(action.jobId);
+      if (state.tabs.some((t) => t.key === key)) return { ...state, active: key };
+      const tab: WorkbenchTab = { key, liveJobId: action.jobId, pinned: false };
       return { tabs: evict(insertAfterActive(state, tab), key), active: key };
     }
     case "openDeliverables": {
@@ -184,7 +198,9 @@ export function workbenchStorageKey(roomId: string): string {
 
 /** Serializes the persisted part of the state. */
 export function serializeWorkbench(state: WorkbenchState): string {
-  return JSON.stringify({ v: 1, tabs: state.tabs, active: state.active });
+  // A live view ends with its turn: it never comes back from storage.
+  const tabs = state.tabs.filter((t) => !t.liveJobId);
+  return JSON.stringify({ v: 1, tabs, active: tabs.some((t) => t.key === state.active) ? state.active : (tabs[0]?.key ?? null) });
 }
 
 /** Parses persisted state, dropping anything malformed (storage is user-

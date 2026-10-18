@@ -229,7 +229,14 @@ func (s *Service) route(p apiPath) string {
 		return s.Backends.Realtime
 	case "rooms":
 		switch p.RoomSub {
-		case "agent-jobs", "agent-activity", "jobs", "agent-catalogs", "team-plan":
+		case "jobs":
+			// A job's live view (frame, control, input) is held by the
+			// room's realtime owner; the run records are activity's.
+			if len(p.segs) >= 6 && p.segs[5] == "live" {
+				return s.Backends.Realtime
+			}
+			return s.Backends.Activity
+		case "agent-jobs", "agent-activity", "agent-catalogs", "team-plan":
 			// "jobs" are the room's agent run records (R10); "agent-catalogs"
 			// the model catalogs of the agents addressable in the room;
 			// "team-plan" staffs an expert team from those agents and

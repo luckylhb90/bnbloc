@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/luckylhb90/bnbloc/core"
@@ -138,6 +139,18 @@ type Service struct {
 	// HeartbeatEvery is the room stream's keep-alive and membership re-check
 	// interval (0 = 15s).
 	HeartbeatEvery time.Duration
+	// Now is the live views' clock (job_live.go); nil is time.Now.
+	Now func() time.Time
+
+	liveOnce sync.Once
+	liveJobs *liveStore
+}
+
+func (s *Service) now() time.Time {
+	if s.Now != nil {
+		return s.Now()
+	}
+	return time.Now()
 }
 
 func (s *Service) heartbeatEvery() time.Duration {
@@ -220,6 +233,10 @@ func (s *Service) Handler() http.Handler {
 	mux.HandleFunc("DELETE /v1/rooms/{roomId}/messages/{seq}", s.handleDeleteMessage)
 	mux.HandleFunc("PATCH /v1/rooms/{roomId}/messages/{seq}", s.handleEditMessage)
 	mux.HandleFunc("GET /v1/rooms-unread", s.handleUnread)
+	// A job's live view (job_live.go).
+	mux.HandleFunc("GET /v1/rooms/{roomId}/jobs/{jobId}/live/frame", s.handleLiveFrame)
+	mux.HandleFunc("POST /v1/rooms/{roomId}/jobs/{jobId}/live/control", s.handleLiveControl)
+	mux.HandleFunc("POST /v1/rooms/{roomId}/jobs/{jobId}/live/input", s.handleLiveInput)
 	s.registerTeamRoutes(mux)
 	s.registerScheduleRoutes(mux)
 	s.registerPluginRoutes(mux)
@@ -238,6 +255,8 @@ func (s *Service) Handler() http.Handler {
 	forMember := func(h http.HandlerFunc) http.Handler { return svcauth.RequireSigned(key, h) }
 	publishers := services("room", "activity", "gateway")
 	mux.Handle("POST /internal/v1/rooms/{roomId}/publish", publishers(s.handleInternalPublish))
+	// A job's live frame, after the gateway admitted the tool's job grant.
+	mux.Handle("POST /internal/v1/rooms/{roomId}/live/{jobId}", services("gateway")(s.handleInternalLiveFrame))
 	// Generic content-addressed blob store, room-less: the gateway (artifact
 	// distribution, content bundles) and the room service (blob artifact
 	// versions) call it after authorizing the read themselves. Distinct

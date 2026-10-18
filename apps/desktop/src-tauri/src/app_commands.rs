@@ -69,8 +69,36 @@ pub(crate) fn pop_out_people_chat(
     )
 }
 
+/// A running job's live view (the page an agent works on, with take over)
+/// in its own window: the web UI renders it for `#/live/<roomId>/<jobId>`.
+/// One window per job; asking again focuses it.
+#[tauri::command]
+pub(crate) fn pop_out_live(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    room_id: String,
+    job_id: String,
+) -> Result<(), String> {
+    open_aux_window(
+        &app,
+        &state,
+        AuxWindow {
+            label: format!("live-{}", window_label_part(&job_id)),
+            route: format!(
+                "live/{}/{}",
+                encode_segment(&room_id),
+                encode_segment(&job_id)
+            ),
+            title: "bnbloc live page",
+            size: (1120.0, 800.0),
+            min_size: (520.0, 420.0),
+        },
+    )
+}
+
 /// An auxiliary window of the shared web UI (a torn-out preview, the people
-/// chat): just a view — closing it never ends the app or touches supervision.
+/// chat, a live page): just a view — closing it never ends the app or
+/// touches supervision.
 struct AuxWindow {
     label: String,
     /// Hash route (without `#/`) the web UI renders for this window.

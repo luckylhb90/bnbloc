@@ -4,7 +4,8 @@ Status: slice 1 built (2026-10-17): `cmd/bnbloc-browser`,
 `packages/browser`, the relay's `GET /session` (§3.1), the decision rate
 (§3.5); a non-owner's request is `needs_human` until slice 3 runs it on
 the requester's machine. How it works:
-`docs/architecture/browser-component.md`. Slice 2 is next. Decided with the product owner: the
+`docs/architecture/browser-component.md`. Slices 2 and 3 built
+(2026-10-18); slice 4 is next. Decided with the product owner: the
 browser is a dedicated, visible Chrome profile on the member's machine;
 an irreversible step is confirmed in conversation, with quick replies as
 a shortcut on the same path; the agent supplies every typed value; live
@@ -246,10 +247,13 @@ checkpoint as long as nobody answers.
 
 ### 2.8 Live view and remote control
 
-- **Frames.** The component runs CDP `Page.startScreencast` on the run's
-  tab.
-  - Chrome sends a frame only when the page paints. The component acks
-    each frame, so the stream backs off when the consumer is slow.
+- **Frames.** While a call works, the component captures the run's tab
+  (`Page.captureScreenshot`, JPEG) and posts the picture only when it
+  changed (a hash of the image).
+  - Not the screencast: the window lives behind the member's other
+    windows, where Chrome stops painting a screencast but a capture
+    still renders (verified on Chrome 146, §7). A minimized window
+    renders neither, so the window is never minimized.
   - Frames go through the relay to the gateway as job live frames
     (§3.2). Whoever sees the job sees them: the room, or a private
     channel's members for a run started there.
@@ -262,30 +266,36 @@ checkpoint as long as nobody answers.
     own; on the web a new browser tab at the run's deep link. A pop-out
     is the same view and keeps working after the room is closed.
   - The live view is where people watch and take over, on any device,
-    so the dedicated Chrome window need not be in front: it starts in
-    the background, and "Open in the browser window" brings it forward
-    for what remote input cannot carry (a security key, a passkey, a
-    system dialog).
+    so the dedicated Chrome window need not be in front. Chrome starts
+    with no window (`--no-startup-window`) and each run opens its own
+    window in the background (`Target.createTarget {newWindow,
+    background}`), so a run never takes the member's focus. "Open in
+    the browser window" brings it forward for what remote input cannot
+    carry (a security key, a passkey, a system dialog), and so does a
+    `needs_human` checkpoint on its own.
   - The step titles keep using the existing activity
     (`wire.JobActivity`, kind `tool`), e.g. "Click [7] Submit
     expense".
-  - With nobody watching, the gateway tells the component to drop to
-    keyframes on change. With someone watching, it runs at the
-    screencast's own pace. The rate is backpressure, not a cap.
+  - The pace follows the viewers: every 250 ms while someone has the
+    large view open or holds control, every 2 s otherwise; a capture
+    that takes longer than 2 s is skipped, never waited on. The viewer
+    fetches only the newest frame, so a slow one skips frames, never
+    falls behind.
 - **Remote control.** A viewer with control can drive the tab from any
-  device: pointer, wheel and keys on the large view.
-  - Input travels gateway → bridge → component → CDP
-    `Input.dispatchMouseEvent` / `Input.dispatchKeyEvent`
-    `Input.insertText` (§3.3).
+  device: pointer, wheel, keys and paste on the large view.
+  - Input travels viewer → realtime → the tool, in the reply to its next
+    frame post → CDP `Input.dispatchMouseEvent` /
+    `Input.dispatchKeyEvent` / `Input.insertText` (§3.3).
   - The owner always may. Another member needs the owner's grant (§2.6,
-    the same grant, a "control" scope).
-  - When a person takes control, the AI pauses: the run goes to
-    `needs_human` and its decision loop stops calling. "Hand back"
-    resumes it; the agent learns what changed from a fresh
-    observation.
-  - Locally, the owner simply uses the visible window. The component
-    sees the page change and treats it the same way: any input it did
-    not send pauses the loop until the window is quiet again.
+    the same grant, a "control" scope; slice 6). One person holds control
+    at a time; it lapses 15 s after their view stops renewing it.
+  - When a person takes control, the AI pauses: the run's loop takes no
+    step while control is held. "Hand back" resumes it; the agent
+    learns what changed from a fresh observation. A call that reaches
+    its budget while held answers `running` with who is driving.
+  - Locally, the owner simply uses the visible window. Not built yet:
+    the loop does not notice input it did not send (a fingerprint
+    change between steps counts as the page moving on).
 
 ### 2.9 Untrusted pages
 
@@ -318,47 +328,48 @@ checkpoint as long as nobody answers.
 
 ### 3.2 Job live frames
 
-- A transient room event `job_live_frame` (channel-scoped, not stored,
-  not replayed, like `agent_job_progress`, `internal/wire/event_kinds.go:72`)
-  carries `{jobId, run, seq, mimeType, width, height, data}`.
-- **Producing frames.** The tool posts frames with `POST
-  /v1/jobs/{jobId}/live` through the relay (a room relay route); the
-  gateway checks the job grant.
-- **Delivery** is shaped to watchers:
-  - The gateway keeps the latest frame per run, so a member who opens the
-    view late sees the current page at once.
-  - It fans frames out only to subscribers who opened the large view (a
-    per-subscriber interest set by `POST /v1/rooms/{roomId}/live-interest`);
-    everyone else gets a thumbnail-sized keyframe on change.
-  - The producer learns whether anyone watches from the post's reply, and
-    adapts its rate.
-- **Size** follows bandwidth: frames are JPEG at the view's size, and a
-  slow subscriber drops intermediate frames (latest wins), never the
-  stream.
+(`internal/wire/job_live.go`, `services/realtime/job_live.go`.)
+
+- **Producing frames.** The tool posts a frame with `POST /v1/live`
+  through the relay (a room relay route): `{run, seq, mimeType, data,
+  width, height, title, url}`. The gateway checks the job grant (the
+  bound job, still running) and hands the frame to realtime with the
+  job's channel, owner and requester.
+- **The newest frame only.** Realtime keeps one frame per job, in memory
+  on the room's replica, dropped two minutes after the last post. A
+  member who opens the view late sees the current page at once; nothing
+  is stored.
+- **The event carries no image.** A transient channel-scoped room event
+  `job_live_frame` (not stored, not replayed, like `agent_job_progress`)
+  says a new frame exists: `{jobId, run, seq, width, height, title, url,
+  owner, controller}`. A viewer then fetches `GET
+  /v1/rooms/{roomId}/jobs/{jobId}/live/frame` (members of the channel),
+  with the facts in the `X-Bnbloc-Live-Frame` header. Images never
+  ride the event stream, so a room that is not looking pays nothing.
+- **Watching.** `?watch=1` on the fetch marks the job watched for 5 s;
+  the post's reply says so, and the producer speeds up.
 - Any tool that has something live to show (a terminal, a canvas, a
-  device screen) uses the same event.
+  device screen) uses the same route and event.
 
 ### 3.3 Input back to a tool
 
-- A viewer's input is `POST /v1/jobs/{jobId}/live/input`
-  `{run, events: [...]}`.
-  - The gateway checks who may control: the job's owner, or a member
-    holding the owner's control grant.
-  - It publishes the input as a transient room event
-    `job_live_input`, addressed to the job's owner.
-- **Transport.** The bridge already holds a server-sent event stream per
-  room it serves (`GET /v1/rooms/{room}/events?presence=0`,
-  `services/bridge/bridge.go:1233-1320`). It already reacts to transient
-  events there (`artifact_state`, `bridge.go:1316`).
-  - It forwards `job_live_input` for its own jobs to the session's
-    room-tools server.
-  - The tool reads its inputs from `GET /relay/live/input` (loopback, the
-    session bearer, a long-lived stream).
-  - This needs no new connection from the machine and no inbound port.
-    Latency is the event stream's: one gateway hop and one loopback hop.
-- Ownership is checked twice. The gateway admits only permitted
-  controllers; the bridge forwards only inputs for jobs it holds and
-  sessions bound to them.
+- **Control.** `POST /v1/rooms/{roomId}/jobs/{jobId}/live/control
+  {take}` takes or hands back control. Only a permitted controller may
+  (the job's owner; a member with the owner's control grant once
+  grants exist); one holder at a time (409 for a second); a take lapses
+  after 15 s unless renewed, so a closed tab hands back on its own.
+- **Input.** `POST .../live/input {events: [...]}` from the holder:
+  pointer (as fractions of the frame, so the viewer's size does not
+  matter), wheel, key, text. Realtime queues it (at most 256 events)
+  and the tool receives it **in the reply to its next frame post**.
+  `focus` (bring the window forward) is the owner's alone and needs no
+  control.
+- **Transport.** No new stream: the tool already posts every 250 ms
+  while someone controls, so input arrives within one post. No
+  connection to the machine, no inbound port, no bridge change.
+- Ownership is checked twice. Realtime admits only the controller's
+  input; the gateway hands it only to the relay of the bound, running
+  job.
 
 ### 3.4 Quick replies on agent messages
 
@@ -488,7 +499,12 @@ with the room watching.
    now carry the fields as filled, and only a look carries an image.)
 3. **Live view and take over** (moved up 2026-10-18, the product owner's
    ask): §3.2, §3.3, the workbench tab, pop-out, the window in the
-   background.
+   background. (Built 2026-10-18. The first design, a screencast and
+   input over the bridge's event stream, changed while building: a
+   window behind others gets no screencast, and input riding the frame
+   post's reply needs no bridge change. Frames flow only while a call
+   works; between calls the view shows the last frame until the job
+   ends.)
 4. **Calls routed to the requester's machine** (§3.6): borrowed and
    platform agents reach the requester's desktop.
 5. **The browser extension** (§2.2) for members who use only the web.
@@ -547,6 +563,21 @@ with the room watching.
    - The component, confined or not, only attaches to the loopback CDP
      endpoint the desktop publishes.
    - Run state lives in the session's writable state directory.
+3. **A window in the background still renders** (Chrome 146, macOS,
+   2026-10-18, `cmd/bnbloc-browser/visible_test.go`).
+   - A window behind other windows: `Page.captureScreenshot` renders the
+     current page; `Page.startScreencast` sends nothing until the window
+     comes forward. Hence screenshots, not the screencast (§2.8).
+   - A minimized window renders neither, so the run's window is never
+     minimized; `Browser.setWindowBounds {windowState: "normal"}` restores
+     one a member minimized.
+   - `Target.createTarget {newWindow: true, background: true}` opens a
+     window without taking focus; `--no-startup-window` keeps Chrome from
+     opening an empty one at launch.
+   - `--disable-backgrounding-occluded-windows`,
+     `--disable-renderer-backgrounding` and
+     `--disable-background-timer-throttling` keep a covered page's
+     timers and painting at full speed.
 
 ## 8. Design review
 

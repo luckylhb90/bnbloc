@@ -231,6 +231,10 @@ func (s *Service) routes() []route {
 		member("GET /v1/decisions", s.handleDecisionCapability),
 		gated("POST /v1/decisions", drive, s.handleDecide).spends(costBudget),
 		gated("POST /v1/systemone", drive, s.handleSystemOne).spends(costBudget),
+		// A job's live view (job_live.go): a tool's frames, through the room
+		// relay. Not a cost: the job is already running, and the frame
+		// rate is the tool's backpressure.
+		gated("POST /v1/live", drive, s.handleLiveFrame),
 
 		// Organization administration (manage_org in the acting tenant).
 		gated("GET /v1/tenant/mcp-connectors", org, s.handleListMCPConnectors),

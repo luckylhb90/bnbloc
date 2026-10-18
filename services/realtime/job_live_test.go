@@ -1,0 +1,146 @@
+package realtimehttp
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/luckylhb90/bnbloc/internal/membership"
+	"github.com/luckylhb90/bnbloc/internal/realtime"
+	"github.com/luckylhb90/bnbloc/internal/svcauth"
+	"github.com/luckylhb90/bnbloc/internal/wire"
+)
+
+// A job's live view end to end on realtime: the gateway's frame is held
+// (newest only) and announced without its image, a member fetches the
+// image, only the owner takes control, the controller's input reaches the
+// tool once in its next post's reply, and a stranger sees nothing.
+func TestJobLiveView(t *testing.T) {
+	const key = "internal-key"
+	t.Setenv("BNBLOC_INTERNAL_KEY", key)
+	mem := membership.NewStatic()
+	mem.Add("room-1", "maya")
+	mem.Add("room-1", "jack")
+	hub := realtime.NewHub(16, 8)
+	now := time.Unix(1_800_000_000, 0)
+	svc := &Service{Hub: hub, Membership: mem, Now: func() time.Time { return now }}
+	srv := httptest.NewServer(svcauth.Middleware(key, svc.Handler()))
+	defer srv.Close()
+	sub := hub.SubscribeLive("room-1")
+	defer hub.Unsubscribe("room-1", sub)
+
+	call := func(method, path, subject string, body any) (int, []byte) {
+		t.Helper()
+		var rd io.Reader
+		if body != nil {
+			raw, _ := json.Marshal(body)
+			rd = bytes.NewReader(raw)
+		}
+		req, err := svcauth.Key(key).NewRequest(context.Background(), method, srv.URL+path, rd, subject, "acme")
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		out, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, out
+	}
+	gateway := svcauth.ServiceSubject("gateway")
+	post := func(frame wire.LiveFramePost) wire.LiveFrameReply {
+		t.Helper()
+		code, out := call(http.MethodPost, "/internal/v1/rooms/room-1/live/job-1", gateway, wire.LiveFrameIngest{ChannelID: "ch-1", Owner: "maya", Requester: "maya", Frame: frame})
+		if code != http.StatusOK {
+			t.Fatalf("post frame = %d %s", code, out)
+		}
+		var reply wire.LiveFrameReply
+		_ = json.Unmarshal(out, &reply)
+		return reply
+	}
+	// Only the gateway posts frames.
+	if code, _ := call(http.MethodPost, "/internal/v1/rooms/room-1/live/job-1", "maya", wire.LiveFrameIngest{Owner: "maya"}); code != http.StatusForbidden {
+		t.Fatalf("a member's frame post = %d, want 403", code)
+	}
+
+	reply := post(wire.LiveFramePost{Run: "run-1", Seq: 1, MimeType: "image/jpeg", Data: []byte("jpeg-1"), Width: 800, Height: 600, Title: "Expenses"})
+	if reply.Watching || reply.Controller != "" || len(reply.Input) != 0 {
+		t.Fatalf("first reply = %+v", reply)
+	}
+	select {
+	case ev := <-sub.Events():
+		raw, _ := json.Marshal(ev)
+		if ev.Kind != wire.EventJobLiveFrame || ev.ChannelID != "ch-1" || strings.Contains(string(raw), "anBlZy0x") || !strings.Contains(string(raw), `"owner":"maya"`) {
+			t.Fatalf("event = %s", raw)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no job_live_frame event")
+	}
+
+	// A member reads the newest image; watching it shows in the next reply.
+	post(wire.LiveFramePost{Run: "run-1", Seq: 2, MimeType: "image/jpeg", Data: []byte("jpeg-2"), Width: 800, Height: 600})
+	code, img := call(http.MethodGet, "/v1/rooms/room-1/jobs/job-1/live/frame?watch=1", "jack", nil)
+	if code != http.StatusOK || string(img) != "jpeg-2" {
+		t.Fatalf("frame = %d %q", code, img)
+	}
+	if code, _ := call(http.MethodGet, "/v1/rooms/room-1/jobs/job-1/live/frame", "mallory", nil); code != http.StatusForbidden {
+		t.Fatalf("a stranger's frame = %d, want 403", code)
+	}
+	if !post(wire.LiveFramePost{}).Watching {
+		t.Fatal("a watched view did not say so")
+	}
+
+	// Control: not jack's (another member's machine), maya's own.
+	if code, _ := call(http.MethodPost, "/v1/rooms/room-1/jobs/job-1/live/control", "jack", wire.LiveControlPost{Take: true}); code != http.StatusForbidden {
+		t.Fatalf("jack took control: %d", code)
+	}
+	if code, _ := call(http.MethodPost, "/v1/rooms/room-1/jobs/job-1/live/input", "maya", wire.LiveInputPost{Events: []wire.LiveInput{{Type: wire.LiveInputText, Text: "x"}}}); code != http.StatusConflict {
+		t.Fatalf("input without control = %d, want 409", code)
+	}
+	if code, out := call(http.MethodPost, "/v1/rooms/room-1/jobs/job-1/live/control", "maya", wire.LiveControlPost{Take: true}); code != http.StatusOK || !strings.Contains(string(out), `"controller":"maya"`) {
+		t.Fatalf("maya take control = %d %s", code, out)
+	}
+	in := []wire.LiveInput{
+		{Type: wire.LiveInputMouse, Action: "down", X: 0.5, Y: 0.25},
+		{Type: wire.LiveInputText, Text: "120.50"},
+		{Type: wire.LiveInputMouse, X: 2, Y: 0.5}, // outside the frame: dropped
+		{Type: "script", Text: "alert(1)"},        // unknown: dropped
+	}
+	if code, _ := call(http.MethodPost, "/v1/rooms/room-1/jobs/job-1/live/input", "maya", wire.LiveInputPost{Events: in}); code != http.StatusNoContent {
+		t.Fatalf("input = %d", code)
+	}
+	reply = post(wire.LiveFramePost{})
+	if reply.Controller != "maya" || len(reply.Input) != 2 || reply.Input[1].Text != "120.50" {
+		t.Fatalf("reply with input = %+v", reply)
+	}
+	if again := post(wire.LiveFramePost{}); len(again.Input) != 0 {
+		t.Fatalf("input delivered twice: %+v", again)
+	}
+
+	// Control lapses without renewal; then input is refused again.
+	now = now.Add(wire.LiveControlLapseMs*time.Millisecond + time.Second)
+	if reply := post(wire.LiveFramePost{}); reply.Controller != "" {
+		t.Fatalf("control did not lapse: %+v", reply)
+	}
+	// Bringing the window forward is the owner's, without control.
+	if code, _ := call(http.MethodPost, "/v1/rooms/room-1/jobs/job-1/live/input", "maya", wire.LiveInputPost{Events: []wire.LiveInput{{Type: wire.LiveInputFocus}}}); code != http.StatusNoContent {
+		t.Fatalf("owner focus = %d", code)
+	}
+	if code, _ := call(http.MethodPost, "/v1/rooms/room-1/jobs/job-1/live/input", "jack", wire.LiveInputPost{Events: []wire.LiveInput{{Type: wire.LiveInputFocus}}}); code != http.StatusForbidden {
+		t.Fatalf("jack focus = %d, want 403", code)
+	}
+
+	// A view the tool stopped posting to is gone.
+	now = now.Add(liveIdleFor + time.Second)
+	if code, _ := call(http.MethodGet, "/v1/rooms/room-1/jobs/job-1/live/frame", "jack", nil); code != http.StatusNotFound {
+		t.Fatalf("idle view = %d, want 404", code)
+	}
+}

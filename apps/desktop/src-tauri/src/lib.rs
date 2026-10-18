@@ -521,6 +521,7 @@ pub fn run() {
             app_commands::open_url,
             app_commands::pop_out_preview,
             app_commands::pop_out_people_chat,
+            app_commands::pop_out_live,
             internal_ext::sandbox::sandbox_status,
             internal_ext::sandbox::sandbox_mode_get,
             internal_ext::sandbox::sandbox_mode_set,

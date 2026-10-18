@@ -20,3 +20,20 @@ export function peopleChatRoomFromHash(hash: string): string | null {
     return null;
   }
 }
+
+// liveRouteFromHash recognizes a job's live view in its own window (a
+// desktop pop-out, or a browser tab on the web): #/live/<roomId>/<jobId>.
+export function liveRouteFromHash(hash: string): { roomId: string; jobId: string } | null {
+  const m = /^#\/live\/([^/?]+)\/([^/?]+)$/.exec(hash);
+  if (!m) return null;
+  try {
+    return { roomId: decodeURIComponent(m[1]), jobId: decodeURIComponent(m[2]) };
+  } catch {
+    return null;
+  }
+}
+
+// liveRouteHash is that window's hash.
+export function liveRouteHash(roomId: string, jobId: string): string {
+  return `#/live/${encodeURIComponent(roomId)}/${encodeURIComponent(jobId)}`;
+}

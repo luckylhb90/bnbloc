@@ -12,13 +12,25 @@ import {
   type JobProgress,
   type JobStep,
 } from "@/lib/jobProgress";
+import type { JobLive } from "@/lib/jobLive";
 import { useVisiblePoll } from "@/lib/useVisiblePoll";
+import { JobLiveThumb } from "@/views/live/JobLiveView";
 
 // A live job's progress (live-turns PRD §3) reaches the job rows through
 // context, so the feed's row props stay as they are: the room's map by job
 // id (useRoomActivity owns it), empty outside a room.
 const JobProgressContext = createContext<Readonly<Record<string, JobProgress>>>({});
 export const JobProgressProvider = JobProgressContext.Provider;
+
+// A live job's live view (browser component PRD §2.8) reaches its row the
+// same way: the room's map by job id and how to open the large view.
+interface JobLiveRoom {
+  readonly roomId: string;
+  readonly live: Readonly<Record<string, JobLive>>;
+  readonly open?: (jobId: string) => void;
+}
+const JobLiveContext = createContext<JobLiveRoom | null>(null);
+export const JobLiveProvider = JobLiveContext.Provider;
 
 const STEP_ICONS: Record<JobStep["kind"], typeof TerminalIcon> = {
   tool: TerminalIcon,
@@ -46,6 +58,8 @@ function StepLine({ step, current }: { step: JobStep; current?: boolean }) {
 // or note so the feed never jumps.
 export function JobProgressStrip({ job }: { job: AgentJob }) {
   const progress = useContext(JobProgressContext)[job.jobId];
+  const liveRoom = useContext(JobLiveContext);
+  const live = liveRoom?.live[job.jobId];
   const [, setTick] = useState(0);
   const [open, setOpen] = useState(false);
   useVisiblePoll(() => setTick((t) => t + 1), 1000);
@@ -82,6 +96,9 @@ export function JobProgressStrip({ job }: { job: AgentJob }) {
           </button>
         )}
       </div>
+      {liveRoom && live && (
+        <JobLiveThumb roomId={liveRoom.roomId} live={live} onOpen={liveRoom.open ? () => liveRoom.open?.(job.jobId) : undefined} />
+      )}
       {open && earlier.length > 0 && (
         <div className="flex flex-col gap-0.5 border-l border-[var(--color-border)] pl-2">
           {/* While a note shows, the current step joins the list. */}

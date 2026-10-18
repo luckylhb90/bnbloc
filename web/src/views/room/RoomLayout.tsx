@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState, type ReactNode } from "react";
 import { ChatsCircleIcon, FilesIcon } from "@phosphor-icons/react";
 import { cn } from "@/lib/cn";
+import type { JobLive } from "@/lib/jobLive";
 import { ChannelRail } from "@/views/ChannelRail";
 import type { RoomChannels } from "@/views/room/useRoomChannels";
 import { LazyPreviewWorkbench } from "@/views/workbench/LazyWorkbench";
@@ -159,6 +160,8 @@ export function PreviewDock({
   onLocalState,
   onClose,
   onPopOut,
+  jobLive,
+  onPopOutLive,
   onStartDrag,
 }: {
   readonly mode: "inline" | "overlay" | "full";
@@ -173,6 +176,8 @@ export function PreviewDock({
   readonly onLocalState: (artifactId: string, state: unknown) => void;
   readonly onClose: () => void;
   readonly onPopOut?: (artifactId: string) => Promise<boolean>;
+  readonly jobLive?: Readonly<Record<string, JobLive>>;
+  readonly onPopOutLive?: (jobId: string) => Promise<boolean>;
   readonly onStartDrag: (e: React.PointerEvent) => void;
 }) {
   // In-app fullscreen: the same element grows to cover the window (no
@@ -202,6 +207,9 @@ export function PreviewDock({
         onLocalState={onLocalState}
         onClose={onClose}
         onPopOut={onPopOut}
+        jobLive={jobLive}
+        subject={actor ?? null}
+        onPopOutLive={onPopOutLive}
         fullscreen={fullscreen}
         onToggleFullscreen={() => setFullscreen((f) => !f)}
       />

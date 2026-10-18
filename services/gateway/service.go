@@ -369,7 +369,7 @@ func (s *Service) withCORS(next http.Handler) http.Handler {
 			// Response headers a cross-origin client (the desktop webview)
 			// reads beyond the safelisted ones: a download's file name and
 			// the audit export's truncation count.
-			h.Set("Access-Control-Expose-Headers", "Content-Disposition, "+wire.TruncatedHeader)
+			h.Set("Access-Control-Expose-Headers", "Content-Disposition, "+wire.TruncatedHeader+", "+wire.LiveFrameHeader)
 			h.Set("Access-Control-Max-Age", "600")
 		}
 		if r.Method == http.MethodOptions {

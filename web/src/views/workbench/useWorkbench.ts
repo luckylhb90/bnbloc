@@ -26,6 +26,7 @@ export interface Workbench {
   readonly openArtifact: (artifactId: string, version?: number) => void;
   readonly openAttachment: (attachment: AttachmentTabFile) => void;
   readonly openDeliverables: (filter?: DeliverablesFilter) => void;
+  readonly openLive: (jobId: string) => void;
   readonly closeWorkbench: () => void;
 }
 
@@ -61,6 +62,10 @@ export function useWorkbench(roomId: string): Workbench {
     dispatch({ type: "openDeliverables", filter });
     setOpen(true);
   }, []);
+  const openLive = useCallback((jobId: string) => {
+    dispatch({ type: "openLive", jobId });
+    setOpen(true);
+  }, []);
   const closeWorkbench = useCallback(() => setOpen(false), []);
 
   // Deep links: taken on mount (the link opened this room) and whenever one
@@ -76,5 +81,5 @@ export function useWorkbench(roomId: string): Workbench {
     });
   }, [roomId, openArtifact]);
 
-  return { state, open, dispatch, openArtifact, openAttachment, openDeliverables, closeWorkbench };
+  return { state, open, dispatch, openArtifact, openAttachment, openDeliverables, openLive, closeWorkbench };
 }

@@ -174,6 +174,9 @@ export const desktop = {
 
   // Open the room's people chat in its own OS window (desktop shell only).
   popOutPeopleChat: (roomId: string): Promise<boolean> => popOutWindow("pop_out_people_chat", { roomId }),
+  // A running job's live view (the page an agent works on) in its own
+  // window: #/live/<roomId>/<jobId>.
+  popOutLive: (roomId: string, jobId: string): Promise<boolean> => popOutWindow("pop_out_live", { roomId, jobId }),
 
   async status(): Promise<BridgeStatus | null> {
     const t = tauri();

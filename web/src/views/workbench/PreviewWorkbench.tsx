@@ -1,7 +1,8 @@
 import { useRef, useState } from "react";
-import { DotsThreeIcon, PushPinIcon, PushPinSlashIcon, SquaresFourIcon, XIcon, XSquareIcon } from "@phosphor-icons/react";
+import { BroadcastIcon, DotsThreeIcon, PushPinIcon, PushPinSlashIcon, SquaresFourIcon, XIcon, XSquareIcon } from "@phosphor-icons/react";
 import { fileCategory, versionFacts } from "@/lib/artifactFiles";
 import { cn } from "@/lib/cn";
+import type { JobLive } from "@/lib/jobLive";
 import { DELIVERABLES_TAB, type WorkbenchTab } from "@/lib/workbenchTabs";
 import { Menu, MenuItem } from "@/ui/Menu";
 import { fileInfoFor, useArtifactDetail, versionMeta } from "./artifactData";
@@ -9,6 +10,7 @@ import { ArtifactTabView } from "./ArtifactTabView";
 import { attachmentFacts, attachmentFileInfo } from "@/views/artifact/fileInfo";
 import { AttachmentTabView } from "./AttachmentTabView";
 import { DeliverablesView } from "./DeliverablesView";
+import { JobLiveView } from "@/views/live/JobLiveView";
 import { categoryIcons } from "./fileIcons";
 import type { Workbench } from "./useWorkbench";
 
@@ -22,8 +24,16 @@ import type { Workbench } from "./useWorkbench";
 const STRIP_BUTTON =
   "tap tactile grid size-8 shrink-0 place-items-center rounded-[var(--radius)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60";
 
-function TabLabel({ roomId, tab }: { readonly roomId: string; readonly tab: WorkbenchTab }) {
+function TabLabel({ roomId, tab, live }: { readonly roomId: string; readonly tab: WorkbenchTab; readonly live?: JobLive }) {
   const { detail } = useArtifactDetail(roomId, tab.artifactId ?? null);
+  if (tab.liveJobId) {
+    return (
+      <>
+        <BroadcastIcon size={14} className={cn("shrink-0", live ? "text-red-500" : "")} aria-hidden />
+        <span className="truncate">{live?.title || "Live page"}</span>
+      </>
+    );
+  }
   if (tab.attachment) {
     const file = attachmentFileInfo(tab.attachment);
     const Icon = categoryIcons[fileCategory(attachmentFacts(tab.attachment))];
@@ -64,6 +74,9 @@ export function PreviewWorkbench({
   onLocalState,
   onClose,
   onPopOut,
+  jobLive,
+  subject,
+  onPopOutLive,
   fullscreen,
   onToggleFullscreen,
 }: {
@@ -77,6 +90,11 @@ export function PreviewWorkbench({
   readonly onClose: () => void;
   // Desktop shell: move a tab into its own OS window.
   readonly onPopOut?: (artifactId: string) => Promise<boolean>;
+  // Running jobs' live views (a "live" tab shows one) and who is looking.
+  readonly jobLive?: Readonly<Record<string, JobLive>>;
+  readonly subject?: string | null;
+  // A live view in its own window (desktop shell) or browser tab.
+  readonly onPopOutLive?: (jobId: string) => Promise<boolean>;
   readonly fullscreen: boolean;
   readonly onToggleFullscreen: () => void;
 }) {
@@ -165,7 +183,7 @@ export function PreviewWorkbench({
                   className="flex h-full min-w-0 items-center gap-1.5 pl-2 pr-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]/60"
                 >
                   {tab.pinned && <PushPinIcon size={11} weight="fill" className="shrink-0 text-[var(--color-accent)]" aria-label="Pinned" />}
-                  <TabLabel roomId={roomId} tab={tab} />
+                  <TabLabel roomId={roomId} tab={tab} live={tab.liveJobId ? jobLive?.[tab.liveJobId] : undefined} />
                 </button>
                 {!tab.pinned && (
                   <button
@@ -223,6 +241,23 @@ export function PreviewWorkbench({
             sourceSeq={active.filter?.sourceSeq}
             onClearSourceSeq={() => dispatch({ type: "openDeliverables" })}
             onOpen={(id) => workbench.openArtifact(id)}
+          />
+        ) : active.liveJobId ? (
+          <JobLiveView
+            key={active.key}
+            roomId={roomId}
+            live={jobLive?.[active.liveJobId]}
+            subject={subject ?? null}
+            onPopOut={
+              onPopOutLive
+                ? () => {
+                    const id = active.liveJobId!;
+                    void onPopOutLive(id).then((ok) => {
+                      if (ok) dispatch({ type: "close", key: active.key });
+                    });
+                  }
+                : undefined
+            }
           />
         ) : active.attachment ? (
           <AttachmentTabView
