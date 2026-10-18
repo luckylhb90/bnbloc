@@ -3,6 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "description": "Frame-side SDK for bnbloc previewer components (bnbloc.previewer.contract/v1).",
+  "license": "Apache-2.0",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
