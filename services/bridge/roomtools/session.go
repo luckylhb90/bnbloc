@@ -111,8 +111,11 @@ type Session struct {
 	scope Scope
 	token string
 
-	mu         sync.Mutex
-	job        Job
+	mu  sync.Mutex
+	job Job
+	// ran are the jobs the session drove before the bound one, newest last
+	// (a tool's view that outlives its turn posts for its own: relay.go).
+	ran        []string
 	dispatched []dispatched
 	gone       bool
 	// notes holds the bound job's team guard and progress state.
@@ -131,8 +134,33 @@ type dispatched struct {
 // realtime admits it only while that job runs on this owner's bridge).
 func (s *Session) Bind(j Job) {
 	s.mu.Lock()
+	if s.job.JobID != "" && s.job.JobID != j.JobID {
+		s.ran = append(s.ran, s.job.JobID)
+		if len(s.ran) > maxRanJobs {
+			s.ran = s.ran[len(s.ran)-maxRanJobs:]
+		}
+	}
 	s.job = j
 	s.mu.Unlock()
+}
+
+// maxRanJobs bounds the earlier jobs a session remembers.
+const maxRanJobs = 16
+
+// drove reports whether the session drove jobID: the bound job or an
+// earlier one it remembers.
+func (s *Session) drove(jobID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if jobID == s.job.JobID {
+		return true
+	}
+	for _, id := range s.ran {
+		if id == jobID {
+			return true
+		}
+	}
+	return false
 }
 
 // Scope is the session's agent.
@@ -181,6 +209,7 @@ func (s *Session) revoke() {
 	s.mu.Lock()
 	s.gone = true
 	s.job = Job{}
+	s.ran = nil
 	s.mu.Unlock()
 }
 

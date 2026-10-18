@@ -41,6 +41,16 @@ func TestJobLeasedBy(t *testing.T) {
 	if err := jobLeasedBy(ctx, r, AgentJob{Status: AgentJobClaimed}, "maya"); !errors.Is(err, ErrJobNotLive) {
 		t.Fatalf("unleased = %v", err)
 	}
+	// What outlives a turn asks only whose bridge ran it last.
+	if err := jobRanBy(ctx, r, AgentJob{Status: AgentJobReplied, LeaseBridgeID: "br-maya"}, "maya"); err != nil {
+		t.Fatalf("ended, ran by the caller = %v", err)
+	}
+	if err := jobRanBy(ctx, r, AgentJob{Status: AgentJobReplied, LeaseBridgeID: "br-maya"}, "jack"); !errors.Is(err, ErrJobNotCallers) {
+		t.Fatalf("ended, ran by another = %v", err)
+	}
+	if err := jobRanBy(ctx, r, AgentJob{Status: AgentJobCancelled}, "maya"); !errors.Is(err, ErrJobNotLive) {
+		t.Fatalf("cancelled (lease cleared) = %v", err)
+	}
 }
 
 type fakeLeasedJobs struct {

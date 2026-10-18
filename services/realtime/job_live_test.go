@@ -139,7 +139,50 @@ func TestJobLiveView(t *testing.T) {
 		t.Fatalf("jack focus = %d, want 403", code)
 	}
 
+	// A view waiting for a person says so to the room and in the list a
+	// late viewer reads; a frame clears it until the tool says it again.
+	drain := func() wire.JobLiveFrame {
+		t.Helper()
+		var last wire.JobLiveFrame
+		for {
+			select {
+			case ev := <-sub.Events():
+				raw, _ := json.Marshal(ev.Payload)
+				_ = json.Unmarshal(raw, &last)
+			case <-time.After(200 * time.Millisecond):
+				return last
+			}
+		}
+	}
+	drain()
+	post(component.LiveFramePost{Waiting: "Sign in to continue"})
+	if ev := drain(); ev.Waiting != "Sign in to continue" || ev.Seq != 2 {
+		t.Fatalf("waiting event = %+v", ev)
+	}
+	code, out := call(http.MethodGet, "/v1/rooms/room-1/live", "jack", nil)
+	var list wire.JobLiveList
+	if code != http.StatusOK || json.Unmarshal(out, &list) != nil || len(list.Views) != 1 || list.Views[0].JobID != "job-1" || list.Views[0].Waiting == "" {
+		t.Fatalf("list = %d %s", code, out)
+	}
+	post(component.LiveFramePost{Waiting: "Sign in to continue", Ready: true})
+	if ev := drain(); !ev.Ready || ev.Waiting == "" {
+		t.Fatalf("ready event = %+v", ev)
+	}
+	if code, _ := call(http.MethodGet, "/v1/rooms/room-1/live", "mallory", nil); code != http.StatusForbidden {
+		t.Fatalf("a stranger's list = %d, want 403", code)
+	}
+
+	// The tool ends the view: gone for everyone, and the room is told.
+	post(component.LiveFramePost{End: true})
+	if ev := drain(); !ev.Ended || ev.JobID != "job-1" {
+		t.Fatalf("end event = %+v", ev)
+	}
+	if code, _ := call(http.MethodGet, "/v1/rooms/room-1/jobs/job-1/live/frame", "jack", nil); code != http.StatusNotFound {
+		t.Fatalf("ended view = %d, want 404", code)
+	}
+
 	// A view the tool stopped posting to is gone.
+	post(component.LiveFramePost{Run: "run-1", Seq: 3, MimeType: "image/jpeg", Data: []byte("jpeg-3"), Width: 800, Height: 600})
 	now = now.Add(liveIdleFor + time.Second)
 	if code, _ := call(http.MethodGet, "/v1/rooms/room-1/jobs/job-1/live/frame", "jack", nil); code != http.StatusNotFound {
 		t.Fatalf("idle view = %d, want 404", code)

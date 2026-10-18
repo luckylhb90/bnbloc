@@ -1,11 +1,16 @@
 package component
 
 // A job's live view, the tool's side (docs/prd/2026-10-17-browser-component.md
-// §3.2, §3.3): a tool with something live to show (a browser tab, a
+// §3.2, §3.3, §3.7): a tool with something live to show (a browser tab, a
 // terminal, a canvas) posts frames through the room relay (POST /v1/live)
 // while its turn runs; the reply says whether anyone watches, who holds
 // control, and brings the controller's input. The room's side (the event,
 // the viewer's routes) is internal/wire/job_live.go.
+//
+// A view that waits for a person (Waiting: a sign-in, a second factor)
+// outlives its turn: the tool keeps posting for that job (?job= on the
+// relay, a job its session ran) and the room keeps the view while the
+// posts carry Waiting. A post without it after the turn ends the view.
 
 // Bounds of a live frame post.
 const (
@@ -13,13 +18,21 @@ const (
 	MaxLiveFrameBytes = 1 << 20
 	// MaxLiveFrameSide bounds a frame's width and height in pixels.
 	MaxLiveFrameSide = 4096
-	// MaxLiveTitle bounds a frame's title and URL (runes).
+	// MaxLiveTitle bounds a frame's title, URL and Waiting (runes).
 	MaxLiveTitle = 300
+	// LiveKeepEverySec is how often a tool posts, at the least, to keep a
+	// view no frame changes (a waiting page standing still); the room drops
+	// a view a few of these after its posts stop.
+	LiveKeepEverySec = 20
 )
 
 // LiveFramePost is POST /v1/live: one frame of the job's live view, or an
 // empty post (no Data) that only collects the reply. Run names what is
-// shown (a browser run); Width and Height are the image's pixels.
+// shown (a browser run); Width and Height are the image's pixels. Waiting
+// says, in a sentence, what a person must do in the view before the work
+// can go on ("" nothing): while it is set the view stays after the turn,
+// as long as the tool keeps posting (an empty post every LiveKeepEverySec
+// at least).
 type LiveFramePost struct {
 	Run      string `json:"run,omitempty"`
 	Seq      int64  `json:"seq,omitempty"`
@@ -29,6 +42,13 @@ type LiveFramePost struct {
 	Height   int    `json:"height,omitempty"`
 	Title    string `json:"title,omitempty"`
 	URL      string `json:"url,omitempty"`
+	Waiting  string `json:"waiting,omitempty"`
+	// Ready says what the view waited for looks done (the page moved on):
+	// the room offers the person to let the work go on.
+	Ready bool `json:"ready,omitempty"`
+	// End closes the view now (what it showed is gone, or work resumed
+	// elsewhere); the post carries no frame.
+	End bool `json:"end,omitempty"`
 }
 
 // LiveFrameReply answers a post: whether someone watches the large view
@@ -56,6 +76,9 @@ const (
 	// its machine (for what remote input cannot carry: a security key, a
 	// system dialog).
 	LiveInputFocus = "focus"
+	// LiveInputClose: the owner closes a view that waits for them (they
+	// will not do it, or did it elsewhere); the tool ends it.
+	LiveInputClose = "close"
 )
 
 // LiveInput is one input event. X and Y are fractions of the frame (0..1),

@@ -1,4 +1,4 @@
-import { applyLiveFrame, endLive, frameKey, keyInput, pointAt } from "./jobLive.ts";
+import { applyLiveFrame, endLive, endTurnLive, frameKey, keyInput, liveList, pointAt, waitingFor } from "./jobLive.ts";
 import type { JobLiveFrame } from "./wire.gen.ts";
 
 // Local runner (the web tsconfig has no node types): a failure throws.
@@ -23,6 +23,22 @@ const frame = (seq: number, extra: Partial<JobLiveFrame> = {}): JobLiveFrame => 
   eq(frameKey(m.j1!), "r2:1", "frame key");
   eq(Object.keys(endLive(m, "j1")), [], "ended");
   eq(endLive(m, "other") === m, true, "ending another job keeps the map");
+}
+
+// A view waiting for a person outlives its turn; an ended view goes; a
+// late viewer's list fills the map; the owner's waiting view is found in
+// the channel shown.
+{
+  let m = applyLiveFrame({}, frame(2, { waiting: "Finish signing in", channelId: "ch-1" }));
+  eq(Object.keys(endTurnLive(m, "j1")), ["j1"], "a waiting view stays after its turn");
+  eq(Object.keys(endTurnLive(applyLiveFrame({}, frame(2)), "j1")), [], "a plain view ends with its turn");
+  eq(waitingFor(m, "maya", "ch-1")?.jobId, "j1", "the owner's waiting view");
+  eq(waitingFor(m, "jack", "ch-1"), undefined, "not another member's");
+  eq(waitingFor(m, "maya", "ch-2"), undefined, "not in another channel");
+  m = applyLiveFrame(m, frame(2, { ended: true }));
+  eq(Object.keys(m), [], "an ended view goes");
+  m = liveList({}, [frame(3, { jobId: "j2" }), frame(1)]);
+  eq(Object.keys(m).sort(), ["j1", "j2"], "the room's list");
 }
 
 // Pointer mapping honours the letterbox of object-fit: contain.

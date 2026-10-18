@@ -159,7 +159,7 @@ A run works until something needs the agent or a person, then returns:
 | `blocked` | No progress: the last steps changed nothing, or no operation is feasible (`jev_ultrafast/agent.py:153-158`). | Reads the page, then resumes with a new instruction, asks the room, or gives up. |
 | `needs_input` | The chosen step types into a field `values` does not cover. Returns the field (label, role, nearby text). | Supplies the text from the conversation, or asks the member. The text comes from the agent, per the owner's decision; there is no in-component text model. |
 | `needs_confirmation` | The chosen click is irreversible (§2.5). Returns the element, the page and the predicate's probability. | Asks the requester in the room; a confirmation counts only as §2.5 says. |
-| `needs_human` | A sign-in, second factor, CAPTCHA, or a secret field (§2.7). | Tells the room. A person completes it in the window (local) or through remote control (§2.8), then the agent continues. |
+| `needs_human` | A sign-in, second factor, CAPTCHA, a blank sign-in redirect, or a secret field (§2.7); the decision's `NEEDS_HUMAN` or a password page off the run's sites. | Tells the room. The live view stays in the room after the turn (§3.7) and opens in its owner's sidebar; they do it there, in a pop-out or in the window, then press Continue (or say so), and the agent resumes. |
 | `leaving_site` | The next step would leave the run's declared site (the registrable domain of `url`, plus any sites added at a checkpoint). | Asks the requester whether to go on. A yes adds the site to the run. |
 | `upload` / `download` | A file input wants a file, or a download starts (§2.7). | Upload: names the room attachment or artifact and confirms with the requester. Download: the file lands as a room artifact and the agent is told its id. |
 | `running` | The run is still progressing, but the agent CLI's tool call is near its timeout (§7, finding 1). | Calls `browse(run)` to keep going. The live view keeps showing the run in between. |
@@ -429,6 +429,52 @@ Generic for every MCP tool component; nothing here names the browser.
   needs the requester's own accounts works on a borrowed agent, because
   it runs where those accounts are.
 
+### 3.7 A live view that waits for a person outlives its turn
+
+(2026-10-18, from QA: a Workday run reached its SSO page, the run ended
+`blocked`, the agent asked the member to "sign in in the new tab", and the
+live view vanished with the turn, so the member had no way to sign in from
+the room.)
+
+- **The rule.** A view whose post says what a person must do in it
+  (`LiveFramePost.Waiting`, a sentence) stays after its turn ends, for as
+  long as its tool keeps posting. A post without `Waiting` after the turn
+  is refused as before; a post with `End` closes the view at once.
+- **Admission after the turn.** The gateway takes such a post for a job
+  whose turn ended only from the bridge that ran it last (the lease's
+  bridge, kept on a replied or failed job; a cancelled or requeued job has
+  none), for a requester who may still post in the room
+  (`store.LoadRanJob`). The relay names the job: a tool may post under an
+  earlier job of its own session (`?job=`, one the session drove), never
+  another.
+- **No clock.** Realtime drops a view two minutes after its tool stops
+  posting; a waiting view posts at least every 10 s
+  (`component.LiveKeepEverySec` = 20 s, at half the period). Nothing ends
+  it while someone may still be signing in.
+- **Ready.** A post may say what the view waited for looks done
+  (`Ready`, the tool's judgement); the room offers the person to let the
+  agent continue.
+- **The room's list.** `GET /v1/rooms/{roomId}/live` answers the views
+  now (members of the room, filtered to the channel on the web), so a
+  member who opens the room after the events still finds a waiting view.
+- **The owner's controls.** Opening a view that waits for them takes
+  control (the step is theirs to do); `close` input (owner only, like
+  `focus`) ends the view; "Continue" posts their own message to the same
+  agent ("Done, continue."), which opens the turn that resumes the run.
+  The view opens in the room's sidebar for its owner by itself, once.
+- **The browser's side.** A sign-in, second factor or captcha is the
+  decision's `NEEDS_HUMAN` operation (offered beside DONE and BLOCKED),
+  and a redirect to a password page off the run's sites (an identity
+  provider) pauses the same way before any decision there; both are
+  `needs_human`, never `blocked`. The call announces the view as waiting
+  before it returns, then a detached keeper (`bnbloc-browser keep`, the
+  same executable, detached like the browser) holds it: it posts frames
+  and runs the owner's input under the pausing turn's job, marks it ready
+  once the page is back on the run's site with no password field, and
+  posts `End` when the run is resumed (the resuming call stops it), the
+  owner closes the view, the tab is gone, or the relay refuses it (the
+  agent's session was released).
+
 ## 4. The component
 
 - **Language and shape.** One Go binary (`cmd/bnbloc-browser`, built per
@@ -644,6 +690,15 @@ likely reasons, and what the design does about each:
    - Anyone permitted can click it away, or the agent can resume with
      "dismiss the cookie banner".
    - Stall detection is by progress, so the run never spins on it.
+6. **The sign-in vanished with the turn.** (Happened on QA, 2026-10-18.)
+   A run reached an SSO page, ended `blocked`, and its view closed with
+   the turn, so the member could not sign in from the room.
+   - Sign-ins are `needs_human` (the decision's `NEEDS_HUMAN`, an
+     off-site password page), never `blocked`.
+   - The view outlives the turn while it waits (§3.7), held by a keeper
+     process, opened in the owner's sidebar, with Continue.
+   - It is still bounded by activity, not time: a gone tab, a released
+     session or a closed view ends it.
 
 ## 9. Decisions
 
@@ -662,3 +717,8 @@ likely reasons, and what the design does about each:
    rejected: sign-ins would live on a server, an intranet is out of its
    reach, and every sign-in would need remote control. Web-only members
    use the browser extension.
+6. **A waiting view outlives its turn, admitted by who ran the job**
+   (2026-10-18, §3.7). A generic "live hold" resource with its own lease
+   was considered and dropped: the job already names the room, channel,
+   owner and requester, and its last lease names the bridge, so the
+   admission is the job's, extended only while the post says it waits.

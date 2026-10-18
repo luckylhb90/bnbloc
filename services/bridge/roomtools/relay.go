@@ -24,6 +24,9 @@ import (
 //     outside this process and dies with the session binding);
 //   - every call acts as the requester of the turn being driven now, the
 //     job re-bound at each turn (Session.Bind), like the room tools' own;
+//     a call may name an earlier job of the session instead (?job=, one
+//     Session.drove), which the gateway admits only where a route allows
+//     a job whose turn ended (a live view waiting for a person, §3.7);
 //   - only the routes in wire.RoomRelayRoutes are reachable, each one a
 //     gateway route that admits a job grant;
 //   - GET <relay>/session answers the bound turn itself
@@ -71,8 +74,16 @@ func (s *Server) handleRelay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
+	jobID := job.JobID
+	if named := strings.TrimSpace(q.Get("job")); named != "" {
+		if !sess.drove(named) {
+			http.Error(w, "this session did not drive job "+named, http.StatusForbidden)
+			return
+		}
+		jobID = named
+	}
 	q.Set("room", sess.Scope().RoomID)
-	q.Set("job", job.JobID)
+	q.Set("job", jobID)
 	raw, err := s.cfg.Gateway.Do(r.Context(), r.Method, path+"?"+q.Encode(), RawBody{ContentType: r.Header.Get("Content-Type"), Data: body})
 	var se *StatusError
 	switch {

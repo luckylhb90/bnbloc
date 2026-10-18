@@ -2,7 +2,7 @@
 
 import { req } from "./api.ts";
 import { roomPath } from "./roomId.ts";
-import { LiveFrameHeader, type JobLiveFrame, type LiveControlReply, type LiveInput } from "./wire.gen.ts";
+import { LiveFrameHeader, type JobLiveFrame, type JobLiveList, type LiveControlReply, type LiveInput } from "./wire.gen.ts";
 
 export const jobLiveApi = {
   /** The newest image and its facts; with watch, marks the caller as
@@ -15,6 +15,8 @@ export const jobLiveApi = {
     req<LiveControlReply>(roomPath(roomId, "jobs", jobId, "live", "control"), { method: "POST", body: JSON.stringify({ take }) }),
   input: (roomId: string, jobId: string, events: readonly LiveInput[]): Promise<void> =>
     req<void>(roomPath(roomId, "jobs", jobId, "live", "input"), { method: "POST", body: JSON.stringify({ events }), as: "none" }),
+  /** The room's live views now (one opening the room after their events). */
+  list: (roomId: string): Promise<JobLiveList> => req<JobLiveList>(roomPath(roomId, "live")),
 };
 
 // decodeFacts reads the frame answer's facts header (base64url JSON).

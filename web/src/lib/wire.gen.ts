@@ -26,12 +26,20 @@ export const FenceMark = "untrusted-content";
 export const MaxLiveFrameBytes = 1048576;
 // MaxLiveFrameSide bounds a frame's width and height in pixels.
 export const MaxLiveFrameSide = 4096;
-// MaxLiveTitle bounds a frame's title and URL (runes).
+// MaxLiveTitle bounds a frame's title, URL and Waiting (runes).
 export const MaxLiveTitle = 300;
+// LiveKeepEverySec is how often a tool posts, at the least, to keep a
+// view no frame changes (a waiting page standing still); the room drops
+// a view a few of these after its posts stop.
+export const LiveKeepEverySec = 20;
 
 // LiveFramePost is POST /v1/live: one frame of the job's live view, or an
 // empty post (no Data) that only collects the reply. Run names what is
-// shown (a browser run); Width and Height are the image's pixels.
+// shown (a browser run); Width and Height are the image's pixels. Waiting
+// says, in a sentence, what a person must do in the view before the work
+// can go on ("" nothing): while it is set the view stays after the turn,
+// as long as the tool keeps posting (an empty post every LiveKeepEverySec
+// at least).
 export interface LiveFramePost {
   run?: string;
   seq?: number;
@@ -41,6 +49,13 @@ export interface LiveFramePost {
   height?: number;
   title?: string;
   url?: string;
+  waiting?: string;
+  // Ready says what the view waited for looks done (the page moved on):
+  // the room offers the person to let the work go on.
+  ready?: boolean;
+  // End closes the view now (what it showed is gone, or work resumed
+  // elsewhere); the post carries no frame.
+  end?: boolean;
 }
 
 // LiveFrameReply answers a post: whether someone watches the large view
@@ -65,6 +80,9 @@ export const LiveInputText = "text";
 // its machine (for what remote input cannot carry: a security key, a
 // system dialog).
 export const LiveInputFocus = "focus";
+// LiveInputClose: the owner closes a view that waits for them (they
+// will not do it, or did it elsewhere); the tool ends it.
+export const LiveInputClose = "close";
 
 // LiveInput is one input event. X and Y are fractions of the frame (0..1),
 // so they hold at any display size; Action is "down", "up" or "move" for
@@ -146,8 +164,8 @@ export interface RelaySession {
 }
 
 // ---- component unions (//wire:union) ----
-export type LiveInputType = "mouse" | "wheel" | "key" | "text" | "focus";
-export const LiveInputTypeValues: readonly LiveInputType[] = ["mouse", "wheel", "key", "text", "focus"];
+export type LiveInputType = "mouse" | "wheel" | "key" | "text" | "focus" | "close";
+export const LiveInputTypeValues: readonly LiveInputType[] = ["mouse", "wheel", "key", "text", "focus", "close"];
 export type MountFor = "own" | "borrowed" | "all";
 export const MountForValues: readonly MountFor[] = ["own", "borrowed", "all"];
 
@@ -2612,14 +2630,21 @@ export interface LiveFrameIngest {
   channelId?: string;
   owner: string;
   requester: string;
+  core?: string;
+  provider?: string;
   frame: LiveFramePost;
 }
 
 // JobLiveFrame is EventJobLiveFrame: a job's newest frame, without the
 // image. Owner is whose machine shows it (the only member who may take
 // control, until control grants exist); Controller who holds control now.
+// Waiting is what a person must do in it before the work goes on (the view
+// stays after the turn while it is set), Ready that it looks done; Ended
+// says the view closed. Core and Provider are the job's agent (with Owner,
+// whom a "continue" message addresses).
 export interface JobLiveFrame {
   jobId: string;
+  channelId?: string;
   run?: string;
   seq: number;
   width: number;
@@ -2627,8 +2652,19 @@ export interface JobLiveFrame {
   title?: string;
   url?: string;
   owner: string;
+  core?: string;
+  provider?: string;
   controller?: string;
+  waiting?: string;
+  ready?: boolean;
+  ended?: boolean;
   atMs: number;
+}
+
+// JobLiveList is GET /v1/rooms/{roomId}/live: the room's live views now
+// (their newest frames' facts), for a viewer that missed their events.
+export interface JobLiveList {
+  views: JobLiveFrame[];
 }
 
 // LiveInputPost is POST /v1/rooms/{roomId}/jobs/{jobId}/live/input: the

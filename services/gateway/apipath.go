@@ -247,6 +247,10 @@ func (s *Service) route(p apiPath) string {
 			return s.Backends.ShareAgent
 		case "events", "agents", "chat", "attachments", "history", "typing", "read", "messages", "tasks":
 			return s.Backends.Realtime
+		case "live":
+			// The room's live views now (wire.JobLiveList), beside each
+			// job's own.
+			return s.Backends.Realtime
 		case "dispatch":
 			// Agent dispatch (room tools): realtime's internal route, see
 			// isRoomDispatch.

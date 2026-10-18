@@ -162,6 +162,7 @@ export function PreviewDock({
   onPopOut,
   jobLive,
   onPopOutLive,
+  onContinueLive,
   onStartDrag,
 }: {
   readonly mode: "inline" | "overlay" | "full";
@@ -178,6 +179,7 @@ export function PreviewDock({
   readonly onPopOut?: (artifactId: string) => Promise<boolean>;
   readonly jobLive?: Readonly<Record<string, JobLive>>;
   readonly onPopOutLive?: (jobId: string) => Promise<boolean>;
+  readonly onContinueLive?: (live: JobLive) => void;
   readonly onStartDrag: (e: React.PointerEvent) => void;
 }) {
   // In-app fullscreen: the same element grows to cover the window (no
@@ -210,6 +212,7 @@ export function PreviewDock({
         jobLive={jobLive}
         subject={actor ?? null}
         onPopOutLive={onPopOutLive}
+        onContinueLive={onContinueLive}
         fullscreen={fullscreen}
         onToggleFullscreen={() => setFullscreen((f) => !f)}
       />

@@ -30,7 +30,17 @@ func JobLive(j AgentJob) bool { return j.Status.Live() }
 // caller: ErrJobNotLive, ErrJobNotCallers, or a store error reading the
 // bridge's owner.
 func jobLeasedBy(ctx context.Context, r BridgeOwnerReader, job AgentJob, caller string) error {
-	if !JobLive(job) || job.LeaseBridgeID == "" {
+	if !JobLive(job) {
+		return ErrJobNotLive
+	}
+	return jobRanBy(ctx, r, job, caller)
+}
+
+// jobRanBy checks that job's lease, live or the last one it held, is a
+// bridge registered to caller: ErrJobNotLive when it holds none (queued,
+// requeued, cancelled), ErrJobNotCallers, or a store error.
+func jobRanBy(ctx context.Context, r BridgeOwnerReader, job AgentJob, caller string) error {
+	if job.LeaseBridgeID == "" {
 		return ErrJobNotLive
 	}
 	owner, err := r.BridgeOwner(ctx, job.LeaseBridgeID)
@@ -66,6 +76,22 @@ func LoadLeasedJob(ctx context.Context, r LeasedJobReader, jobID, roomID, caller
 		return AgentJob{}, err
 	}
 	return job, jobLeasedBy(ctx, r, job, caller)
+}
+
+// LoadRanJob is LoadLeasedJob for what may outlive a turn (a live view
+// waiting for a person, wire/job_live.go): job jobID of the ctx tenant, in
+// roomID, whose last lease was a bridge of caller, running or not. A
+// cancelled or requeued job holds no lease, so it is refused like one never
+// claimed (ErrJobNotLive).
+func LoadRanJob(ctx context.Context, r LeasedJobReader, jobID, roomID, caller string) (AgentJob, error) {
+	job, err := r.GetAgentRun(ctx, jobID)
+	if errors.Is(err, ErrAgentJobNotFound) || (err == nil && job.RoomID != roomID) {
+		return AgentJob{}, ErrJobNotInRoom
+	}
+	if err != nil {
+		return AgentJob{}, err
+	}
+	return job, jobRanBy(ctx, r, job, caller)
 }
 
 // LeasedJobStatus is the HTTP status of a LoadLeasedJob error, the same at

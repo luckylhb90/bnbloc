@@ -63,3 +63,52 @@ func TestLiveFrameUnderJobGrant(t *testing.T) {
 		t.Fatalf("frame after the turn = %d %s", r.status, r.body)
 	}
 }
+
+// A view waiting for a person outlives its turn (§3.7): after the job
+// replied, its bridge may keep posting while the post waits (or ends the
+// view); a plain frame, another member's bridge and a cancelled job (its
+// lease cleared) are refused.
+func TestLiveFrameWaitingOutlivesTheTurn(t *testing.T) {
+	e := newAppGW(t)
+	if err := e.jobs.PutBridgeHeartbeat(e.ctx(), store.BridgeHeartbeat{BridgeID: "br-maya", OwnerUserID: "maya", Status: store.BridgeOnline, LastSeenAtMs: time.Now().UnixMilli()}); err != nil {
+		t.Fatal(err)
+	}
+	for _, j := range []store.AgentJob{
+		{JobID: "job-done", MessageSeq: 4, Status: store.AgentJobReplied},
+		{JobID: "job-cancelled", MessageSeq: 5, Status: store.AgentJobCancelled},
+	} {
+		j.RoomID, j.ChannelID, j.RequesterUserID, j.OwnerUserID, j.Provider, j.CreatedAtMs = e.roomID, "ch-1", "maya", "maya", "codex", 1
+		if j.Status == store.AgentJobReplied {
+			j.LeaseBridgeID = "br-maya"
+		}
+		if _, err := e.jobs.PutAgentJob(e.ctx(), j); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bridge := "Authorization: Bearer " + e.session("maya")
+	waiting := component.LiveFramePost{Run: "run-1", Seq: 1, MimeType: "image/jpeg", Data: []byte("jpeg-bytes"), Width: 800, Height: 600, Waiting: "Sign in to continue"}
+	if r := e.call(http.MethodPost, "/v1/live?room="+e.roomID+"&job=job-done", waiting, bridge); r.status != http.StatusOK {
+		t.Fatalf("waiting frame after the turn = %d %s", r.status, r.body)
+	}
+	member := "Authorization: Bearer " + e.session("jack")
+	if r := e.call(http.MethodGet, "/v1/rooms/"+e.roomID+"/live", nil, member); r.status != http.StatusOK || !strings.Contains(string(r.body), `"waiting":"Sign in to continue"`) {
+		t.Fatalf("room's views = %d %s", r.status, r.body)
+	}
+	plain := waiting
+	plain.Waiting = ""
+	if r := e.call(http.MethodPost, "/v1/live?room="+e.roomID+"&job=job-done", plain, bridge); r.status != http.StatusConflict {
+		t.Fatalf("a plain frame after the turn = %d %s", r.status, r.body)
+	}
+	if r := e.call(http.MethodPost, "/v1/live?room="+e.roomID+"&job=job-done", waiting, "Authorization: Bearer "+e.session("jack")); r.status != http.StatusForbidden {
+		t.Fatalf("another bridge = %d %s", r.status, r.body)
+	}
+	if r := e.call(http.MethodPost, "/v1/live?room="+e.roomID+"&job=job-cancelled", waiting, bridge); r.status != http.StatusConflict {
+		t.Fatalf("a cancelled job = %d %s", r.status, r.body)
+	}
+	if r := e.call(http.MethodPost, "/v1/live?room="+e.roomID+"&job=job-done", component.LiveFramePost{End: true}, bridge); r.status != http.StatusOK {
+		t.Fatalf("end = %d %s", r.status, r.body)
+	}
+	if r := e.call(http.MethodGet, "/v1/rooms/"+e.roomID+"/jobs/job-done/live/frame", nil, member); r.status != http.StatusNotFound {
+		t.Fatalf("ended view = %d %s", r.status, r.body)
+	}
+}

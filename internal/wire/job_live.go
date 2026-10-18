@@ -21,7 +21,11 @@ import "github.com/luckylhb90/bnbloc/component"
 //     room.
 //
 // All of it is transient: nothing is stored, and a job's live state ends
-// with its turn (posts are refused once the job is no longer running).
+// with its turn (posts are refused once the job is no longer running),
+// unless the view waits for a person (component.LiveFramePost.Waiting,
+// docs/prd/2026-10-17-browser-component.md §3.7): then the tool's bridge
+// may go on posting for the ended job while it waits, and the view ends
+// when a post ends it (End), stops waiting, or the posts stop.
 
 // EventJobLiveFrame carries JobLiveFrame (realtime), scoped to the job's
 // channel: a job has a new frame.
@@ -44,14 +48,21 @@ type LiveFrameIngest struct {
 	ChannelID string                  `json:"channelId,omitempty"`
 	Owner     string                  `json:"owner"`
 	Requester string                  `json:"requester"`
+	Core      string                  `json:"core,omitempty"`
+	Provider  string                  `json:"provider,omitempty"`
 	Frame     component.LiveFramePost `json:"frame"`
 }
 
 // JobLiveFrame is EventJobLiveFrame: a job's newest frame, without the
 // image. Owner is whose machine shows it (the only member who may take
 // control, until control grants exist); Controller who holds control now.
+// Waiting is what a person must do in it before the work goes on (the view
+// stays after the turn while it is set), Ready that it looks done; Ended
+// says the view closed. Core and Provider are the job's agent (with Owner,
+// whom a "continue" message addresses).
 type JobLiveFrame struct {
 	JobID      string `json:"jobId"`
+	ChannelID  string `json:"channelId,omitempty"`
 	Run        string `json:"run,omitempty"`
 	Seq        int64  `json:"seq"`
 	Width      int    `json:"width"`
@@ -59,8 +70,19 @@ type JobLiveFrame struct {
 	Title      string `json:"title,omitempty"`
 	URL        string `json:"url,omitempty"`
 	Owner      string `json:"owner"`
+	Core       string `json:"core,omitempty"`
+	Provider   string `json:"provider,omitempty"`
 	Controller string `json:"controller,omitempty"`
+	Waiting    string `json:"waiting,omitempty"`
+	Ready      bool   `json:"ready,omitempty"`
+	Ended      bool   `json:"ended,omitempty"`
 	AtMs       int64  `json:"atMs"`
+}
+
+// JobLiveList is GET /v1/rooms/{roomId}/live: the room's live views now
+// (their newest frames' facts), for a viewer that missed their events.
+type JobLiveList struct {
+	Views []JobLiveFrame `json:"views"`
 }
 
 // LiveInputPost is POST /v1/rooms/{roomId}/jobs/{jobId}/live/input: the

@@ -3,7 +3,8 @@ import { api, type AgentJob } from "@/lib/api";
 import type { RoomEvent } from "@/lib/roomEvents";
 import { onboardingEventFromRoomEvent, onboardingEvents } from "@/lib/onboardingEvents";
 import { applyProgress, endProgress, pruneProgress, type JobProgress } from "@/lib/jobProgress";
-import { applyLiveFrame, endLive, type JobLive } from "@/lib/jobLive";
+import { applyLiveFrame, endTurnLive, liveList, type JobLive } from "@/lib/jobLive";
+import { jobLiveApi } from "@/lib/jobLiveApi";
 import { isLiveJob } from "@/lib/agentRuns";
 import { useScopedState } from "@/lib/useScopedState";
 import type { AgentJobProgress, JobLiveFrame } from "@/lib/wire.gen";
@@ -74,7 +75,8 @@ export function useRoomActivity({
   // the job is live (pruned when an update ends it).
   const [jobProgress, setJobProgress] = useScopedState<Record<string, JobProgress>>(scope, () => ({}));
   // Live jobs' live views by job id (browser component PRD §2.8): the newest
-  // frame's facts, dropped when the job ends.
+  // frame's facts, dropped when the job ends, unless the view waits for a
+  // person (a sign-in, §3.7): that one stays until its tool ends it.
   const [jobLive, setJobLive] = useScopedState<Record<string, JobLive>>(scope, () => ({}));
   // Artifacts born from a chat message, keyed by that message's seq: the
   // cards render inline under the message whose turn produced the files. The
@@ -136,7 +138,16 @@ export function useRoomActivity({
       // A reload (reconnect) may have missed a job ending: keep only live ones.
       setJobProgress((cur) => pruneProgress(cur, Object.values(bySeq).flat()));
       const live = new Set(Object.values(bySeq).flat().filter(isLiveJob).map((j) => j.jobId));
-      setJobLive((cur) => Object.fromEntries(Object.entries(cur).filter(([id]) => live.has(id))));
+      setJobLive((cur) => Object.fromEntries(Object.entries(cur).filter(([id, l]) => live.has(id) || l.waiting)));
+      try {
+        // The views now, from the room's realtime: one waiting for a person
+        // outlived its turn, and its events came before this load.
+        const res = await jobLiveApi.list(roomId);
+        const views = (res.views ?? []).filter((v) => !v.channelId || !channelId || v.channelId === channelId);
+        if (!cancelled) setJobLive((cur) => liveList(cur, views));
+      } catch {
+        /* best-effort: live events still arrive */
+      }
       try {
         // The room already holds deliverables: the checklist can tell.
         const res = await api.artifacts(roomId, { limit: 1 });
@@ -189,13 +200,13 @@ export function useRoomActivity({
         if (j && typeof j.messageSeq === "number" && (!j.channelId || j.channelId === channelId)) {
           setAgentJobs((cur) => ({ ...cur, [j.messageSeq]: [j] }));
           setJobProgress((cur) => endProgress(cur, j));
-          if (!isLiveJob(j)) setJobLive((cur) => endLive(cur, j.jobId));
+          if (!isLiveJob(j)) setJobLive((cur) => endTurnLive(cur, j.jobId));
         }
         return true;
       }
       if (e.kind === "job_live_frame") {
         const f = e.payload as JobLiveFrame | undefined;
-        if (f && typeof f.jobId === "string") setJobLive((cur) => applyLiveFrame(cur, f));
+        if (f && typeof f.jobId === "string" && (!f.channelId || !channelId || f.channelId === channelId)) setJobLive((cur) => applyLiveFrame(cur, f));
         return true;
       }
       if (e.kind === "agent_job_progress") {

@@ -77,6 +77,7 @@ export function PreviewWorkbench({
   jobLive,
   subject,
   onPopOutLive,
+  onContinueLive,
   fullscreen,
   onToggleFullscreen,
 }: {
@@ -95,6 +96,8 @@ export function PreviewWorkbench({
   readonly subject?: string | null;
   // A live view in its own window (desktop shell) or browser tab.
   readonly onPopOutLive?: (jobId: string) => Promise<boolean>;
+  // Lets the agent continue a view waiting for its owner (a sign-in).
+  readonly onContinueLive?: (live: JobLive) => void;
   readonly fullscreen: boolean;
   readonly onToggleFullscreen: () => void;
 }) {
@@ -248,6 +251,7 @@ export function PreviewWorkbench({
             roomId={roomId}
             live={jobLive?.[active.liveJobId]}
             subject={subject ?? null}
+            onContinue={onContinueLive}
             onPopOut={
               onPopOutLive
                 ? () => {

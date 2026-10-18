@@ -52,6 +52,7 @@ import { FileAskProvider } from "@/views/workbench/FileAskPanel";
 import { AutomateProvider, automateTaskSeed, type AutomateApp } from "@/views/room/automate";
 import { useRoomFileAsk } from "@/views/workbench/useRoomFileAsk";
 import { JobLiveProvider, JobProgressProvider } from "@/views/room/JobProgressStrip";
+import { waitingFor, type JobLive } from "@/lib/jobLive";
 import { SaveTemplateDialog } from "@/views/room/SaveTemplateDialog";
 import { TemplateStartCard } from "@/views/room/TemplateStartCard";
 import { SchedulesDialog } from "@/views/room/SchedulesDialog";
@@ -254,12 +255,39 @@ export function RoomView({
     },
     [roomId],
   );
-  const liveRoom = useMemo(() => ({ roomId, live: activity.jobLive, open: openLive }), [roomId, activity.jobLive, openLive]);
-  // A live tab closes with its turn (the view ended).
+  // "Continue" on a view that waited for its owner (a sign-in, browser
+  // component PRD §3.7): the owner's own message to the same agent, which
+  // opens the turn that resumes the run.
+  const continueLive = useCallback(
+    (live: JobLive) => {
+      const recipient = roomAgents.find((a) => a.ownerId === live.owner && a.provider === live.provider && (!live.core || !a.core || a.core === live.core));
+      if (!recipient) {
+        toast.info("Tell the agent in the room that you are done");
+        return;
+      }
+      void send("Done, continue.", { peopleOnly: false, recipient });
+    },
+    [roomAgents, send, toast],
+  );
+  const liveRoom = useMemo(
+    () => ({ roomId, live: activity.jobLive, open: openLive, subject, onContinue: continueLive }),
+    [roomId, activity.jobLive, openLive, subject, continueLive],
+  );
+  // A live tab closes with its view (the turn ended, or the view waiting
+  // for a person was ended by its tool).
   const { state: wbState, dispatch: wbDispatch } = workbench;
   useEffect(() => {
     for (const t of wbState.tabs) if (t.liveJobId && !activity.jobLive[t.liveJobId]) wbDispatch({ type: "close", key: t.key });
   }, [wbState.tabs, activity.jobLive, wbDispatch]);
+  // A view waiting for this member (a sign-in on their machine) opens in
+  // the sidebar once, so they can do it here without hunting for a window.
+  const waitingLive = waitingFor(activity.jobLive, subject ?? null, channelId);
+  const openedWaiting = useRef("");
+  useEffect(() => {
+    if (!waitingLive || openedWaiting.current === waitingLive.jobId) return;
+    openedWaiting.current = waitingLive.jobId;
+    openLive(waitingLive.jobId);
+  }, [waitingLive, openLive]);
   const openArtifactInFiles = useCallback(
     (artifactId: string) => {
       clearFilesBadge();
@@ -438,6 +466,7 @@ export function RoomView({
       onPopOut={inDesktopShell() ? (artifactId) => desktop.popOutPreview(roomId, artifactId) : undefined}
       jobLive={activity.jobLive}
       onPopOutLive={popOutLive}
+      onContinueLive={continueLive}
       onStartDrag={startDockDrag}
     />
   ) : null;

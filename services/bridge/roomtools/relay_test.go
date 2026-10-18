@@ -48,20 +48,27 @@ func TestRoomRelay(t *testing.T) {
 	if code, _ := relayPost(t, srv, token, "/v1/rooms/room-1/messages", []byte(`{}`)); code != http.StatusNotFound {
 		t.Fatalf("a route off the list = %d; want 404", code)
 	}
-	// A query the tool sets is not the grant: the relay sets room and job.
-	if code, _ := relayPost(t, srv, token, "/v1/media/image?job=other", []byte(`{}`)); code != http.StatusOK {
+	// The tool names only a job its session drove; the relay sets the room.
+	if code, _ := relayPost(t, srv, token, "/v1/media/image?job=other&room=room-9", []byte(`{}`)); code != http.StatusForbidden {
+		t.Fatalf("another job = %d; want 403", code)
+	}
+	if code, _ := relayPost(t, srv, token, "/v1/media/image?room=room-9", []byte(`{}`)); code != http.StatusOK {
 		t.Fatalf("relayed = %d", code)
 	}
 	sess.Bind(Job{JobID: "job-2", RequesterUserID: "maya"})
 	if code, _ := relayPost(t, srv, token, "/v1/media/image", []byte(`{"prompt":"a cat"}`)); code != http.StatusOK {
 		t.Fatalf("second turn = %d", code)
 	}
+	// An earlier job of the session, named (a view outliving its turn).
+	if code, _ := relayPost(t, srv, token, "/v1/media/image?job=job-1", []byte(`{}`)); code != http.StatusOK {
+		t.Fatalf("an earlier job = %d", code)
+	}
 	calls := gw.callsTo(http.MethodPost, "/v1/media/image")
-	if len(calls) != 2 {
+	if len(calls) != 3 {
 		t.Fatalf("calls = %+v", calls)
 	}
-	if !strings.HasSuffix(calls[0].Path, "?job=job-1&room=room-1") || !strings.HasSuffix(calls[1].Path, "?job=job-2&room=room-1") {
-		t.Fatalf("grants = %s ; %s", calls[0].Path, calls[1].Path)
+	if !strings.HasSuffix(calls[0].Path, "?job=job-1&room=room-1") || !strings.HasSuffix(calls[1].Path, "?job=job-2&room=room-1") || !strings.HasSuffix(calls[2].Path, "?job=job-1&room=room-1") {
+		t.Fatalf("grants = %s ; %s ; %s", calls[0].Path, calls[1].Path, calls[2].Path)
 	}
 	var sent RawBody
 	if err := json.Unmarshal(calls[1].Body, &sent); err != nil || sent.ContentType != "application/json" || !strings.Contains(string(sent.Data), "a cat") {

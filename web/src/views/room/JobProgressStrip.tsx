@@ -1,6 +1,7 @@
 import { createContext, useContext, useState } from "react";
 import { BrainIcon, CaretDownIcon, PencilSimpleLineIcon, TerminalIcon } from "@phosphor-icons/react";
 import type { AgentJob } from "@/lib/api";
+import { isLiveJob } from "@/lib/agentRuns";
 import { cn } from "@/lib/cn";
 import {
   currentStep,
@@ -14,7 +15,7 @@ import {
 } from "@/lib/jobProgress";
 import type { JobLive } from "@/lib/jobLive";
 import { useVisiblePoll } from "@/lib/useVisiblePoll";
-import { JobLiveThumb } from "@/views/live/JobLiveView";
+import { JobLiveThumb, LiveWaitingNote } from "@/views/live/JobLiveView";
 
 // A live job's progress (live-turns PRD §3) reaches the job rows through
 // context, so the feed's row props stay as they are: the room's map by job
@@ -23,14 +24,42 @@ const JobProgressContext = createContext<Readonly<Record<string, JobProgress>>>(
 export const JobProgressProvider = JobProgressContext.Provider;
 
 // A live job's live view (browser component PRD §2.8) reaches its row the
-// same way: the room's map by job id and how to open the large view.
+// same way: the room's map by job id, how to open the large view, and, for
+// a view waiting for a person (§3.7), who is looking and how to let the
+// agent continue or close the view.
 interface JobLiveRoom {
   readonly roomId: string;
   readonly live: Readonly<Record<string, JobLive>>;
   readonly open?: (jobId: string) => void;
+  readonly subject?: string | null;
+  readonly onContinue?: (live: JobLive) => void;
 }
 const JobLiveContext = createContext<JobLiveRoom | null>(null);
 export const JobLiveProvider = JobLiveContext.Provider;
+
+// WaitingLive sits under a request whose turn ended while its live view
+// waits for a person (a sign-in only they can do, §3.7): the page, what it
+// waits for, and, for its owner, continue and close. A running job shows
+// its view in its progress strip instead.
+export function WaitingLive({ jobs }: { jobs: readonly AgentJob[] }) {
+  const liveRoom = useContext(JobLiveContext);
+  if (!liveRoom) return null;
+  const waiting = jobs.filter((j) => !isLiveJob(j) && liveRoom.live[j.jobId]?.waiting);
+  if (waiting.length === 0) return null;
+  return (
+    <div className="mt-1 flex flex-col gap-1 text-xs text-[var(--color-fg-subtle)]">
+      {waiting.map((j) => {
+        const live = liveRoom.live[j.jobId];
+        return (
+          <div key={j.jobId} className="flex flex-col gap-1 rounded-[var(--radius)] bg-[var(--color-surface-2)] px-2 py-1.5" data-live-waiting>
+            <LiveWaitingNote roomId={liveRoom.roomId} live={live} subject={liveRoom.subject ?? null} onContinue={liveRoom.onContinue} onOpen={liveRoom.open ? () => liveRoom.open?.(j.jobId) : undefined} />
+            <JobLiveThumb roomId={liveRoom.roomId} live={live} onOpen={liveRoom.open ? () => liveRoom.open?.(j.jobId) : undefined} />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 const STEP_ICONS: Record<JobStep["kind"], typeof TerminalIcon> = {
   tool: TerminalIcon,

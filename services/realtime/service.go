@@ -237,6 +237,7 @@ func (s *Service) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/rooms/{roomId}/jobs/{jobId}/live/frame", s.handleLiveFrame)
 	mux.HandleFunc("POST /v1/rooms/{roomId}/jobs/{jobId}/live/control", s.handleLiveControl)
 	mux.HandleFunc("POST /v1/rooms/{roomId}/jobs/{jobId}/live/input", s.handleLiveInput)
+	mux.HandleFunc("GET /v1/rooms/{roomId}/live", s.handleLiveList)
 	s.registerTeamRoutes(mux)
 	s.registerScheduleRoutes(mux)
 	s.registerPluginRoutes(mux)

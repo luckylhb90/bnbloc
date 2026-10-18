@@ -26,6 +26,10 @@ skill pack (`mcptool.Resolve`, PRD §3.6). Nothing in the platform names it.
   contract), `internal/wire/job_live.go` (the room's), `services/gateway/job_live.go`
   (`POST /v1/live` under the job grant), `services/realtime/job_live.go` (the
   newest frame per job, watching, control, input), `web/src/views/live/` and
-  `web/src/lib/jobLive.ts` (the thumbnail, the large view, pop-out).
+  `web/src/lib/jobLive.ts` (the thumbnail, the large view, pop-out). A view
+  that waits for a person (a sign-in) outlives its turn while its tool keeps
+  posting, admitted by `store.LoadRanJob` and a relay `?job=` the session
+  drove (PRD §3.7); the room lists the views now at `GET
+  /v1/rooms/{roomId}/live`.
 - **The fence** (`component.Fence`): page text in a tool result is fenced the
   way every room tool fences what someone else wrote.

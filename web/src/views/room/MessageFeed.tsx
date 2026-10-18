@@ -7,6 +7,7 @@ import { READING_MEASURE } from "@/views/room/types";
 import { Button } from "@/ui/Button";
 import { Skeleton } from "@/ui/Card";
 import { AgentJobStatus } from "@/views/AgentJobStatus";
+import { WaitingLive } from "@/views/room/JobProgressStrip";
 import { MessageDeliverables } from "@/views/workbench/MessageDeliverables";
 import { placeDeliverables } from "@/lib/deliverablePlacement";
 import { AgentWorking } from "@/views/room/AgentWorking";
@@ -319,6 +320,7 @@ function FeedRow({
           queueAhead={queueAhead}
         />
       )}
+      {typeof m.seq === "number" && <WaitingLive jobs={agentJobs[m.seq] || []} />}
       {placed.map((d) => (
         <MessageDeliverables
           key={d.seq}

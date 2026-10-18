@@ -15,9 +15,34 @@ export type JobLive = JobLiveFrame;
  *  one; a control change (same seq) does. */
 export function applyLiveFrame(cur: Readonly<Record<string, JobLive>>, ev: JobLiveFrame): Record<string, JobLive> {
   if (!ev || typeof ev.jobId !== "string" || !ev.jobId) return { ...cur };
+  if (ev.ended) return { ...endLive(cur, ev.jobId) };
   const prev = cur[ev.jobId];
   if (prev && prev.run === ev.run && ev.seq < prev.seq) return { ...cur };
   return { ...cur, [ev.jobId]: ev };
+}
+
+/** endTurnLive drops a job's view when its turn ends, unless the view
+ *  waits for a person (a sign-in): that one stays until its tool ends it
+ *  (browser component PRD §3.7). */
+export function endTurnLive(cur: Readonly<Record<string, JobLive>>, jobId: string): Readonly<Record<string, JobLive>> {
+  return cur[jobId]?.waiting ? cur : endLive(cur, jobId);
+}
+
+/** liveList folds the room's views (GET .../live) into the map; a view the
+ *  map already has at a newer frame keeps its own. */
+export function liveList(cur: Readonly<Record<string, JobLive>>, views: readonly JobLiveFrame[]): Record<string, JobLive> {
+  let next: Record<string, JobLive> = { ...cur };
+  for (const v of views) next = applyLiveFrame(next, v);
+  return next;
+}
+
+/** waitingFor answers the newest view the member must act on in the
+ *  channel shown: a sign-in on their own machine that only they can do. */
+export function waitingFor(live: Readonly<Record<string, JobLive>>, subject: string | null, channelId: string | null): JobLive | undefined {
+  if (!subject) return undefined;
+  return Object.values(live)
+    .filter((l) => l.waiting && l.owner === subject && (!channelId || !l.channelId || l.channelId === channelId))
+    .sort((a, b) => b.atMs - a.atMs)[0];
 }
 
 /** endLive drops a job's live view (its turn ended). */

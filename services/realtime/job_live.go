@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -34,12 +35,16 @@ import (
 //     control (the job's owner only, until control grants exist).
 //   - POST /v1/rooms/{roomId}/jobs/{jobId}/live/input: the controller's
 //     input, queued for the tool's next post.
+//   - GET  /v1/rooms/{roomId}/live: the room's views now (wire.JobLiveList),
+//     for a viewer that opens the room after their events (a view waiting
+//     for a person outlives its turn, §3.7).
 
 const (
 	// liveWatchFor is how long a large-view fetch counts as watching.
 	liveWatchFor = 5 * time.Second
 	// liveIdleFor drops a job's state when its tool has not posted for
-	// this long (the turn ended, the machine went away).
+	// this long (the turn ended, the machine went away); a view waiting
+	// for a person posts far more often (component.LiveKeepEverySec).
 	liveIdleFor = 2 * time.Minute
 )
 
@@ -49,6 +54,8 @@ type liveJob struct {
 	channel    string
 	owner      string
 	requester  string
+	core       string
+	provider   string
 	frame      component.LiveFramePost
 	atMs       int64
 	posted     time.Time
@@ -56,6 +63,15 @@ type liveJob struct {
 	controller string
 	controlTo  time.Time
 	input      []component.LiveInput
+	waiting    string
+	ready      bool
+}
+
+// factsLocked is the view's event (no image).
+func (j *liveJob) factsLocked(jobID string, now time.Time) wire.JobLiveFrame {
+	f := j.frame
+	return wire.JobLiveFrame{JobID: jobID, ChannelID: j.channel, Run: f.Run, Seq: f.Seq, Width: f.Width, Height: f.Height,
+		Title: f.Title, URL: f.URL, Owner: j.owner, Core: j.core, Provider: j.provider, Controller: j.controllerLocked(now), Waiting: j.waiting, Ready: j.ready, AtMs: j.atMs}
 }
 
 // liveStore holds every live job of the rooms this replica owns.
@@ -110,25 +126,41 @@ func (s *Service) handleInternalLiveFrame(w http.ResponseWriter, r *http.Request
 		return
 	}
 	f.Title, f.URL = cutRunes(f.Title, component.MaxLiveTitle), cutRunes(f.URL, component.MaxLiveTitle)
+	waiting := cutRunes(f.Waiting, component.MaxLiveTitle)
 	now := s.now()
 	l := s.live()
 	l.mu.Lock()
 	j := l.getLocked(roomID, jobID, now)
+	if f.End {
+		// The tool closed the view: gone for everyone at once.
+		delete(l.jobs, liveKey(roomID, jobID))
+		l.mu.Unlock()
+		if j != nil {
+			s.publishLive(r.Context(), roomID, j.channel, wire.JobLiveFrame{JobID: jobID, ChannelID: j.channel, Owner: j.owner, Ended: true, AtMs: now.UnixMilli()})
+		}
+		httpx.WriteJSON(w, http.StatusOK, component.LiveFrameReply{})
+		return
+	}
 	if j == nil {
 		j = &liveJob{}
 		l.jobs[liveKey(roomID, jobID)] = j
 	}
 	j.tenant, j.channel, j.owner, j.requester, j.posted = tenant.FromContext(r.Context()), in.ChannelID, in.Owner, in.Requester, now
+	j.core, j.provider = in.Core, in.Provider
 	fresh := len(f.Data) > 0
 	if fresh {
+		f.Waiting, f.Ready = "", false
 		j.frame, j.atMs = f, now.UnixMilli()
 	}
+	// A change of what the view waits for is news too (the room shows it).
+	ready := f.Ready && waiting != ""
+	changed := fresh || waiting != j.waiting || ready != j.ready
+	j.waiting, j.ready = waiting, ready
 	reply := component.LiveFrameReply{Watching: now.Before(j.watchedTo), Controller: j.controllerLocked(now), Input: j.input}
 	j.input = nil
-	event := wire.JobLiveFrame{JobID: jobID, Run: j.frame.Run, Seq: j.frame.Seq, Width: j.frame.Width, Height: j.frame.Height,
-		Title: j.frame.Title, URL: j.frame.URL, Owner: j.owner, Controller: reply.Controller, AtMs: j.atMs}
+	event := j.factsLocked(jobID, now)
 	l.mu.Unlock()
-	if fresh {
+	if changed && event.Seq > 0 {
 		s.publishLive(r.Context(), roomID, j.channel, event)
 	}
 	httpx.WriteJSON(w, http.StatusOK, reply)
@@ -162,8 +194,7 @@ func (s *Service) handleLiveFrame(w http.ResponseWriter, r *http.Request) {
 	// The frame's facts ride along (wire.JobLiveFrame as JSON): a viewer
 	// that opened after the last event (a pop-out, a reload) knows the
 	// view at once; the event is never replayed.
-	facts, _ := json.Marshal(wire.JobLiveFrame{JobID: r.PathValue("jobId"), Run: f.Run, Seq: f.Seq, Width: f.Width, Height: f.Height,
-		Title: f.Title, URL: f.URL, Owner: j.owner, Controller: j.controllerLocked(now), AtMs: j.atMs})
+	facts, _ := json.Marshal(j.factsLocked(r.PathValue("jobId"), now))
 	l.mu.Unlock()
 	w.Header().Set("Content-Type", f.MimeType)
 	w.Header().Set("Cache-Control", "no-store")
@@ -205,8 +236,7 @@ func (s *Service) handleLiveControl(w http.ResponseWriter, r *http.Request) {
 	case cur == userID:
 		j.controller = ""
 	}
-	event := wire.JobLiveFrame{JobID: r.PathValue("jobId"), Run: j.frame.Run, Seq: j.frame.Seq, Width: j.frame.Width, Height: j.frame.Height,
-		Title: j.frame.Title, URL: j.frame.URL, Owner: j.owner, Controller: j.controller, AtMs: j.atMs}
+	event := j.factsLocked(r.PathValue("jobId"), now)
 	channel := j.channel
 	l.mu.Unlock()
 	s.publishLive(r.Context(), roomID, channel, event)
@@ -233,11 +263,12 @@ func (s *Service) handleLiveInput(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, "no live view for this job", http.StatusNotFound)
 		return
 	}
-	// Bringing the window forward is the owner's, with or without control
-	// (it acts on their own screen); everything else needs control.
-	if focusOnly(events) {
+	// Bringing the window forward and closing the view are the owner's,
+	// with or without control (they act on their own machine); everything
+	// else needs control.
+	if ownerOnly(events) {
 		if userID != j.owner {
-			httpx.Error(w, "only "+j.owner+" can bring the window forward on their machine", http.StatusForbidden)
+			httpx.Error(w, "only "+j.owner+" can do this on their machine", http.StatusForbidden)
 			return
 		}
 	} else if j.controllerLocked(now) != userID {
@@ -251,13 +282,39 @@ func (s *Service) handleLiveInput(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleLiveList answers the room's live views now, to a member of the
+// room (the same reach as a frame).
+func (s *Service) handleLiveList(w http.ResponseWriter, r *http.Request) {
+	roomID, _, _, ok := s.room(w, r, membership.Human)
+	if !ok {
+		return
+	}
+	now := s.now()
+	tid := tenant.FromContext(r.Context())
+	out := wire.JobLiveList{Views: []wire.JobLiveFrame{}}
+	l := s.live()
+	l.mu.Lock()
+	for key := range l.jobs {
+		room, jobID, _ := strings.Cut(key, "\x00")
+		if room != roomID {
+			continue
+		}
+		if j := l.getLocked(roomID, jobID, now); j != nil && j.tenant == tid && len(j.frame.Data) > 0 {
+			out.Views = append(out.Views, j.factsLocked(jobID, now))
+		}
+	}
+	l.mu.Unlock()
+	sort.Slice(out.Views, func(a, b int) bool { return out.Views[a].JobID < out.Views[b].JobID })
+	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
 // mayControl: the job's owner (their machine, their sign-ins). Another
 // member needs the owner's control grant (§2.6), which does not exist yet.
 func mayControl(j *liveJob, userID string) bool { return userID == j.owner }
 
-func focusOnly(events []component.LiveInput) bool {
+func ownerOnly(events []component.LiveInput) bool {
 	for _, e := range events {
-		if e.Type != component.LiveInputFocus {
+		if e.Type != component.LiveInputFocus && e.Type != component.LiveInputClose {
 			return false
 		}
 	}
@@ -270,7 +327,7 @@ func liveInput(in []component.LiveInput) []component.LiveInput {
 	out := make([]component.LiveInput, 0, len(in))
 	for _, e := range in {
 		switch e.Type {
-		case component.LiveInputMouse, component.LiveInputWheel, component.LiveInputKey, component.LiveInputText, component.LiveInputFocus:
+		case component.LiveInputMouse, component.LiveInputWheel, component.LiveInputKey, component.LiveInputText, component.LiveInputFocus, component.LiveInputClose:
 		default:
 			continue
 		}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AppWindowIcon, ArrowSquareOutIcon, HandGrabbingIcon, HandPalmIcon } from "@phosphor-icons/react";
+import { AppWindowIcon, ArrowSquareOutIcon, CheckCircleIcon, HandGrabbingIcon, HandPalmIcon, XIcon } from "@phosphor-icons/react";
 import { ApiError } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { frameKey, keyInput, modifiers, pointAt, type JobLive } from "@/lib/jobLive";
@@ -99,6 +99,52 @@ export function JobLiveThumb({ roomId, live, onOpen }: { roomId: string; live: J
   );
 }
 
+/** LiveWaitingNote says what a view waits for (a sign-in only its owner can
+ *  do, browser component PRD §3.7) and, for the owner, lets the agent
+ *  continue (once done) or closes the view. Others read who it waits on. */
+export function LiveWaitingNote({
+  roomId,
+  live,
+  subject,
+  onContinue,
+  onOpen,
+}: {
+  roomId: string;
+  live: JobLive;
+  subject: string | null;
+  onContinue?: (live: JobLive) => void;
+  onOpen?: () => void;
+}) {
+  const toast = useToast();
+  if (!live.waiting) return null;
+  const mine = !!subject && live.owner === subject;
+  const close = () =>
+    void jobLiveApi.input(roomId, live.jobId, [{ type: "close" }]).catch((e: unknown) => toast.error(e instanceof ApiError ? e.message : "Could not close the view"));
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-xs" data-live-waiting-note>
+      <span className={cn("size-2 shrink-0 rounded-full", live.ready ? "bg-[var(--color-accent)]" : "bg-[var(--color-warning)]")} aria-hidden />
+      <span className="min-w-0 flex-1 text-[var(--color-fg-muted)]">
+        {mine ? (live.ready ? "Looks done. Let the agent continue when you are ready." : live.waiting) : `Waiting for ${live.owner}: ${live.waiting}`}
+      </span>
+      {mine && onOpen && (
+        <Button size="sm" variant="outline" onClick={onOpen} title="Use the page here, in the room">
+          Open
+        </Button>
+      )}
+      {mine && onContinue && (
+        <Button size="sm" variant={live.ready ? "primary" : "outline"} onClick={() => onContinue(live)} title="Tell the agent you are done, so it continues">
+          <CheckCircleIcon size={14} /> Continue
+        </Button>
+      )}
+      {mine && (
+        <Button size="icon" variant="ghost" onClick={close} title="Close the view (the agent's run stays paused)" aria-label="Close the view">
+          <XIcon size={14} />
+        </Button>
+      )}
+    </div>
+  );
+}
+
 // How often a held control is renewed (it lapses server-side after
 // LiveControlLapseMs without one).
 const RENEW_MS = 5_000;
@@ -114,11 +160,14 @@ export function JobLiveView({
   subject,
   onPopOut,
   bootstrap,
+  onContinue,
 }: {
   roomId: string;
   live: JobLive | undefined;
   subject: string | null;
   onPopOut?: () => void;
+  // Lets the agent continue a view waiting for its owner (§3.7).
+  onContinue?: (live: JobLive) => void;
   // A window opened without the room's events so far (a pop-out) asks for
   // the job's frame by id; its facts arrive with the image.
   bootstrap?: { jobId: string; onFacts: (f: JobLive) => void };
@@ -167,6 +216,16 @@ export function JobLiveView({
     };
   }, [driving, roomId, jobId]);
 
+  // A view waiting for its owner (a sign-in) is theirs to use: control is
+  // taken as they open it, once (handing it back stays theirs).
+  const waitingForMe = mine && !!live?.waiting && !live.controller;
+  const tookFor = useRef("");
+  useEffect(() => {
+    if (!waitingForMe || tookFor.current === jobId) return;
+    tookFor.current = jobId;
+    void jobLiveApi.control(roomId, jobId, true).catch(() => {});
+  }, [waitingForMe, roomId, jobId]);
+
   // The room's job_live_frame event (realtime publishes one on every
   // control change) moves live.controller; nothing is kept here.
   const setControl = (take: boolean) => {
@@ -201,7 +260,7 @@ export function JobLiveView({
             <HandGrabbingIcon size={14} /> Take over
           </Button>
         )}
-        {driving && (
+        {driving && !live.waiting && (
           <Button size="sm" variant="primary" onClick={() => setControl(false)} title="Let the agent continue from here">
             <HandPalmIcon size={14} /> Hand back
           </Button>
@@ -279,10 +338,17 @@ export function JobLiveView({
           <div className="grid h-full place-items-center text-sm text-[var(--color-fg-subtle)]">Loading the page…</div>
         )}
       </div>
-      {mine && !driving && (
-        <p className="shrink-0 border-t border-[var(--color-border)] px-3 py-1.5 text-[11px] text-[var(--color-fg-subtle)]">
-          Take over to use the page yourself: the agent waits until you hand it back.
-        </p>
+      {live.waiting ? (
+        <div className="shrink-0 border-t border-[var(--color-border)] px-3 py-1.5">
+          <LiveWaitingNote roomId={roomId} live={live} subject={subject} onContinue={onContinue} />
+        </div>
+      ) : (
+        mine &&
+        !driving && (
+          <p className="shrink-0 border-t border-[var(--color-border)] px-3 py-1.5 text-[11px] text-[var(--color-fg-subtle)]">
+            Take over to use the page yourself: the agent waits until you hand it back.
+          </p>
+        )
       )}
     </div>
   );
