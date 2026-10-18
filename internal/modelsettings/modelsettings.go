@@ -95,10 +95,10 @@ type Settings struct {
 
 // row is the whole stored JSON: shared fields beside the setting's own.
 type row struct {
-	BaseURL   string         `json:"baseUrl"`
-	Model     string         `json:"model"`
-	OrgHosts  []string       `json:"orgHosts,omitempty"`
-	SealedKey string         `json:"sealedKey,omitempty"`
+	BaseURL   string   `json:"baseUrl"`
+	Model     string   `json:"model"`
+	OrgHosts  []string `json:"orgHosts,omitempty"`
+	SealedKey string   `json:"sealedKey,omitempty"`
 	// Own holds the setting's own fields (media.kind, media.params.…):
 	// carried through unchanged, never interpreted here.
 	Own map[string]any `json:"own,omitempty"`

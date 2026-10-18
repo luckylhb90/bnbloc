@@ -455,7 +455,10 @@ CREATE TABLE IF NOT EXISTS artifact_versions (
 -- stored, and the link is found by it. version 0 follows the artifact's
 -- latest version. access is who may open it: 'org' (signed-in members of
 -- the organization), 'signed_in' (anyone signed in) or 'anyone'
--- (docs/prd/2026-10-13-share-link-sign-in.md). Not exported with the room.
+-- (docs/prd/2026-10-13-share-link-sign-in.md). token_sealed is the token
+-- sealed under the deployment key, so its creator can copy it again until it
+-- is revoked (docs/prd/2026-10-16-share-link-copy-again.md). Not exported
+-- with the room.
 CREATE TABLE IF NOT EXISTS artifact_shares (
   share_id          VARCHAR(32) PRIMARY KEY,
   token_hash        CHAR(64) NOT NULL,
@@ -471,6 +474,7 @@ CREATE TABLE IF NOT EXISTS artifact_shares (
   revoked_by        VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL,
   view_count        BIGINT NOT NULL DEFAULT 0,
   last_viewed_at_ms BIGINT NULL,
+  token_sealed      VARCHAR(128) NULL,
   UNIQUE KEY uq_artifact_shares_token (token_hash),
   KEY idx_artifact_shares_artifact (tenant_id, room_id, artifact_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -964,6 +968,45 @@ CREATE TABLE IF NOT EXISTS room_group_codes (
   created_by    VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   expires_at_ms BIGINT NOT NULL,
   KEY idx_room_group_codes_room (tenant_id, room_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- What a room (a project) knows (docs/prd/2026-10-16-room-memory-and-
+-- evolution.md): its brief, knowledge, dated memory and lessons. Every change
+-- appends a row to room_note_revisions (history and rollback); deleting a note
+-- deletes its revisions. Both are deleted with the room.
+CREATE TABLE IF NOT EXISTS room_notes (
+  tenant_id      VARCHAR(64) NOT NULL,
+  room_id        VARCHAR(64) NOT NULL,
+  note_id        VARCHAR(32) NOT NULL,
+  type           VARCHAR(16) NOT NULL,
+  title          VARCHAR(480) NOT NULL,
+  body           TEXT NOT NULL,
+  status         VARCHAR(16) NOT NULL,
+  supersedes     VARCHAR(32) NULL,
+  sources_json   TEXT NULL,
+  author         VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  pinned         TINYINT(1) NOT NULL DEFAULT 0,
+  revision       INT NOT NULL,
+  created_at_ms  BIGINT NOT NULL,
+  updated_at_ms  BIGINT NOT NULL,
+  verified_at_ms BIGINT NULL,
+  PRIMARY KEY (tenant_id, room_id, note_id),
+  KEY idx_room_notes_room (tenant_id, room_id, status, type)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS room_note_revisions (
+  tenant_id  VARCHAR(64) NOT NULL,
+  room_id    VARCHAR(64) NOT NULL,
+  note_id    VARCHAR(32) NOT NULL,
+  revision   INT NOT NULL,
+  type       VARCHAR(16) NOT NULL,
+  title      VARCHAR(480) NOT NULL,
+  body       TEXT NOT NULL,
+  status     VARCHAR(16) NOT NULL,
+  pinned     TINYINT(1) NOT NULL DEFAULT 0,
+  changed_by VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  at_ms      BIGINT NOT NULL,
+  PRIMARY KEY (tenant_id, room_id, note_id, revision)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Files an interactive app's pages uploaded (app.files): the bytes in the

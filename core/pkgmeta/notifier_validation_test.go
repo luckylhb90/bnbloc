@@ -56,8 +56,8 @@ func TestParsePackage_rejectsInvalidNotifier(t *testing.T) {
 		"missing endpoint": {func(b map[string]any) { delete(b, "endpoint") }, `notifier runtime "endpoint" requires endpoint.baseUrl`},
 		// Notifiers carry no member settings: personal delivery is a desktop
 		// plugin (localSettings), never a server-side secret.
-		"member settings": {func(b map[string]any) { b["memberSettings"] = []map[string]any{{"key": "a", "label": "A"}} }, "unknown field"},
-		"local settings":  {func(b map[string]any) { b["localSettings"] = []map[string]any{{"key": "a", "label": "A"}} }, "localSettings is only valid"},
+		"member settings":    {func(b map[string]any) { b["memberSettings"] = []map[string]any{{"key": "a", "label": "A"}} }, "unknown field"},
+		"local settings":     {func(b map[string]any) { b["localSettings"] = []map[string]any{{"key": "a", "label": "A"}} }, "localSettings is only valid"},
 		"unknown capability": {func(b map[string]any) { b["capabilities"] = []string{"broadcast"} }, `unknown notifier capability "broadcast"`},
 		"host permission": {func(b map[string]any) {
 			b["permissions"] = map[string]any{"network": []string{"notify.internal"}, "host": []string{"chat"}}
