@@ -147,11 +147,16 @@ func sameOrigin(u, base *url.URL) bool {
 	return strings.EqualFold(u.Scheme, base.Scheme) && strings.EqualFold(u.Host, base.Host)
 }
 
+// CarriesArtifacts reports whether a runtime ships downloadable artifacts: a
+// sidecar's or stdio MCP server's binaries, a previewer's bundle.
+func (r Runtime) CarriesArtifacts() bool {
+	return r == RuntimeSidecar || r == RuntimeBundle || r == RuntimeStdio
+}
+
 // ValidateCompleteArtifacts refuses a publish whose downloadable artifacts
-// (a sidecar's or stdio MCP server's binaries, a previewer's bundle) are
-// still upload placeholders.
+// are still upload placeholders.
 func ValidateCompleteArtifacts(pkg Package) error {
-	if pkg.Runtime != RuntimeSidecar && pkg.Runtime != RuntimeBundle && pkg.Runtime != RuntimeStdio {
+	if !pkg.Runtime.CarriesArtifacts() {
 		return nil
 	}
 	for platform, artifact := range pkg.Artifacts {
