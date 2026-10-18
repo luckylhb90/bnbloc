@@ -2920,12 +2920,16 @@ export interface MediaImageRequest {
 }
 
 // MediaImageRegion is a rectangle of an image in its own pixels, origin at
-// the top-left.
+// the top-left. With Mask, the area a member painted: Mask is the message's
+// mask attachment (att_…, a PNG of the image's size, transparent where it
+// may change), which is the edit's mask, and the rectangle is its bounding
+// box (docs/prd/2026-10-17-image-generation-redesign.md §2.7).
 export interface MediaImageRegion {
   x: number;
   y: number;
   w: number;
   h: number;
+  mask?: string;
 }
 
 // MediaImageReply is POST /v1/media/image's answer: the images inline
@@ -3289,6 +3293,10 @@ export interface FileSelection {
   // cell of a range), at most MaxFileSelectionKeys: the change card names
   // edits outside them (docs/prd/2026-10-14-select-edit-review.md rule 5).
   keys?: string[];
+  // Mask is an area painted on an image (kind region): a PNG attachment
+  // of the room (att_…) the image's size, transparent where it may change
+  // (docs/prd/2026-10-17-image-generation-redesign.md §2.7).
+  mask?: string;
 }
 
 // FileSelectionKinds is the code-owned vocabulary of selection kinds,

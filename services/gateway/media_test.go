@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/auth"
+	"github.com/luckylhb90/bnbloc/internal/media"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
@@ -584,6 +585,18 @@ func TestMediaImageEditUnderJobGrant(t *testing.T) {
 		t.Fatalf("version = %+v %v", v, err)
 	}
 
+	// A painted area: the message's mask attachment is the edit's mask, as sent.
+	painted, err := media.EditMask(png8x6(t), media.Region{X: 1, Y: 1, W: 3, H: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mask := e.attachment(e.roomID, "mask.png", "image/png", string(painted))
+	fake.imageB64 = base64.StdEncoding.EncodeToString(append(png8x6(t), 1))
+	code, reply, raw = draw(wire.MediaImageRequest{Prompt: "a hat", ArtifactID: poster, Region: &wire.MediaImageRegion{X: 1, Y: 1, W: 3, H: 2, Mask: mask}})
+	if code != http.StatusOK || reply.Images[0].Version != 4 || fake.last["__mask"] != fmt.Sprintf("%d bytes", len(painted)) {
+		t.Fatalf("painted edit = %d %s, provider mask %s", code, raw, fake.last["__mask"])
+	}
+
 	// A version published between the read and the publish: the edit is a new file.
 	fake.imageB64 = base64.StdEncoding.EncodeToString(append(png8x6(t), 0, 0))
 	e.room.Artifacts = racingArtifacts{ArtifactStore: e.b.Artifacts, poster: poster}
@@ -600,7 +613,10 @@ func TestMediaImageEditUnderJobGrant(t *testing.T) {
 		"another room's file": {Prompt: "x", ArtifactID: away},
 		"region outside":      {Prompt: "x", ArtifactID: poster, Region: &wire.MediaImageRegion{X: 6, Y: 0, W: 4, H: 2}},
 		"region, no image":    {Prompt: "x", Region: &wire.MediaImageRegion{X: 0, Y: 0, W: 1, H: 1}},
-		"too many inputs":     {Prompt: "x", Inputs: []string{logo, logo, logo, logo, logo}},
+		"mask of another size": {Prompt: "x", ArtifactID: poster, Region: &wire.MediaImageRegion{X: 0, Y: 0, W: 1, H: 1,
+			Mask: e.attachment(e.roomID, "small.png", "image/png", string(tinyTestPNG))}},
+		"mask not an attachment": {Prompt: "x", ArtifactID: poster, Region: &wire.MediaImageRegion{X: 0, Y: 0, W: 1, H: 1, Mask: "att_nope"}},
+		"too many inputs":        {Prompt: "x", Inputs: []string{logo, logo, logo, logo, logo}},
 	} {
 		if code, _, raw := draw(req); code != http.StatusBadRequest {
 			t.Errorf("%s = %d %s", name, code, raw)

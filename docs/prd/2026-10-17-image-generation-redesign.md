@@ -17,8 +17,18 @@ composer's dialog, button and `generateImage` deleted; the workbench's
 "Make a copy" (`copyArtifact`) and the viewer's exact crop (the generic
 `onPublish` viewer seam). The image filter in Docs already existed. Step 4:
 apps publishing and editing (`imagePlace`), styles as skill packs, and
-the gallery (Docs' image filter, which already existed) are built; the
-brush is next.
+the gallery (Docs' image filter, which already existed) are built.
+Built (2026-10-18): the brush. The image viewer's "Paint an area" (a
+raster image: PNG, JPEG, WebP; three brush sizes) reports a region
+selection whose exact shape is a mask made when the request is sent:
+the file panel uploads it as a room attachment and the selection names
+it (`FileSelection.mask`, checked by realtime: a PNG attachment of the
+room, on a region). The edit line tells the agent the mask's id; the
+agent passes it as `region.mask`, and the gateway reads it as the
+requester and sends it as the edit's mask after `media.PaintedMask`
+checks it (a PNG of the input's size with something painted). The
+mask is an attachment of the request, not of the message's visible
+attachments row: the selection chip names it.
 
 ## 1. Why
 
@@ -129,9 +139,9 @@ the inline draw an app makes through `~app/ai/image`), both through
 
 - **Brush masks.** The viewer's selection gains a brush beside the
   rectangle. The painted pixels become a mask PNG the size of the image
-  (transparent where it may change); sending the request uploads it as an
-  attachment of the message, and the selection's detail names it ("the
-  painted area is the mask att_…", with its bounding box). The agent passes
+  (transparent where it may change); sending the request uploads it as a
+  room attachment, and the selection names it (`mask`; its detail gives the
+  bounding box, the edit line the mask's id). The agent passes
   it as `region.mask`; the gateway reads it as the requester, checks it is
   a PNG of the input's size, and sends it as the edit's mask instead of
   building one from the rectangle.
@@ -156,7 +166,7 @@ the inline draw an app makes through `~app/ai/image`), both through
 | `prompt` | What to draw or change, concretely. |
 | `aspect`, `count`, `fileName` | As today (count ≤ `wire.MaxMediaImages`). |
 | `artifactId` | Edit this room file: the result is its next version. |
-| `region` | `{x, y, w, h}` in the file's pixels: change only this part (a mask). |
+| `region` | `{x, y, w, h}` in the file's pixels: change only this part (a mask); with `mask` (att_…), the painted area exactly. |
 | `inputs` | Room files (`art_…`) and attachments (`att_…`) to use as references. |
 
 `wire.MediaImageRequest` gains `ArtifactID`, `Region` and `Inputs`; they

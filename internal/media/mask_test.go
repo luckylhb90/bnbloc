@@ -27,6 +27,29 @@ func pngOf(t *testing.T, w, h int) []byte {
 	return buf.Bytes()
 }
 
+// A painted mask passes when it is a PNG of the input's size with a
+// transparent pixel; another size, another format or nothing painted is
+// refused.
+func TestPaintedMask(t *testing.T) {
+	in := pngOf(t, 8, 6)
+	painted, err := EditMask(in, Region{X: 1, Y: 1, W: 2, H: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := PaintedMask(in, painted); err != nil || !bytes.Equal(got, painted) {
+		t.Fatalf("painted mask = %v", err)
+	}
+	for name, mask := range map[string][]byte{
+		"another size":    pngOf(t, 4, 6),
+		"nothing painted": pngOf(t, 8, 6),
+		"not a png":       []byte("GIF89a"),
+	} {
+		if _, err := PaintedMask(in, mask); !errors.Is(err, ErrMaskShape) {
+			t.Errorf("%s = %v", name, err)
+		}
+	}
+}
+
 // The mask is the input's size, transparent exactly inside the region and
 // opaque elsewhere; a region outside the image is refused.
 func TestEditMask(t *testing.T) {

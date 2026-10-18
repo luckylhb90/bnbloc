@@ -1,4 +1,4 @@
-import { centered, cropMimeType, fitScale, regionRect, regionSelection, spanRegion, toImage, visibleGrid, zoomAt } from "./imageView.ts";
+import { brushSelection, brushWidth, centered, cropMimeType, fitScale, growRegion, regionRect, regionSelection, spanRegion, toImage, visibleGrid, zoomAt } from "./imageView.ts";
 
 function eq(a: unknown, b: unknown, message: string): void {
   if (JSON.stringify(a) !== JSON.stringify(b)) {
@@ -38,3 +38,15 @@ eq(visibleGrid({ scale: 4, x: 500, y: 0 }, { w: 10, h: 10 }, { w: 200, h: 200 })
 
 // A crop keeps the image's type where the browser encodes it, else PNG.
 eq(["image/jpeg", "image/webp", "image/png", "image/gif", "image/svg+xml"].map(cropMimeType), ["image/jpeg", "image/webp", "image/png", "image/png", "image/png"], "crop type");
+
+// A brush: its width follows the image's longer side; the painted area's
+// bounding box grows with each dab, clamped to the image.
+eq([brushWidth({ w: 1000, h: 500 }, "m"), brushWidth({ w: 10, h: 10 }, "s")], [40, 2], "brush width");
+{
+  const image = { w: 100, h: 50 };
+  const one = growRegion(null, { x: 10, y: 10 }, 4, image);
+  eq(one, { x: 6, y: 6, w: 8, h: 8 }, "first dab");
+  eq(growRegion(one, { x: 98, y: 48 }, 4, image), { x: 6, y: 6, w: 94, h: 44 }, "grown and clamped");
+  const s = brushSelection({ x: 6, y: 6, w: 94, h: 44 }, image);
+  if (s.label !== "Painted area in 94×44 at (6, 6)" || !s.detail.includes("painted with a brush") || !s.detail.includes("100×50 image")) throw new Error(JSON.stringify(s));
+}

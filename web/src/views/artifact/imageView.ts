@@ -86,6 +86,40 @@ export function regionRect(view: ImageView, r: Region): Region {
   return { x: view.x + r.x * view.scale, y: view.y + r.y * view.scale, w: r.w * view.scale, h: r.h * view.scale };
 }
 
+/** Brush sizes: the stroke's width as a share of the image's longer side,
+ *  so a size paints alike on a small and a large picture. */
+export const BRUSH_SIZES = { s: 0.015, m: 0.04, l: 0.08 } as const;
+export type BrushSize = keyof typeof BRUSH_SIZES;
+
+/** A brush's stroke width in image pixels. */
+export function brushWidth(image: Size, size: BrushSize): number {
+  return Math.max(2, Math.round(Math.max(image.w, image.h) * BRUSH_SIZES[size]));
+}
+
+/** The painted area's bounding box grown by a dab of radius at p, clamped
+ *  to the image. */
+export function growRegion(r: Region | null, p: { x: number; y: number }, radius: number, image: Size): Region {
+  const x0 = Math.max(0, Math.floor(p.x - radius));
+  const y0 = Math.max(0, Math.floor(p.y - radius));
+  const x1 = Math.min(image.w, Math.ceil(p.x + radius));
+  const y1 = Math.min(image.h, Math.ceil(p.y + radius));
+  if (!r) return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  const left = Math.min(r.x, x0);
+  const top = Math.min(r.y, y0);
+  return { x: left, y: top, w: Math.max(r.x + r.w, x1) - left, h: Math.max(r.y + r.h, y1) - top };
+}
+
+/** The selection a painted area makes: its bounding box, and that its exact
+ *  shape is a mask the request carries (docs/prd/2026-10-17-image-generation-redesign.md §2.7). */
+export function brushSelection(r: Region, image: Size): { label: string; detail: string } {
+  return {
+    label: `Painted area in ${r.w}×${r.h} at (${r.x}, ${r.y})`,
+    detail:
+      `An area painted with a brush, inside the rectangle from (${r.x}, ${r.y}) to (${r.x + r.w}, ${r.y + r.h}) in image pixels, ` +
+      `${r.w}×${r.h}, of the ${image.w}×${image.h} image (origin at the top-left).`,
+  };
+}
+
 /** The selection an area makes: a short label, and the coordinates the
  *  agent works from. */
 export function regionSelection(r: Region, image: Size, labels: readonly string[] = []): { label: string; detail: string } {

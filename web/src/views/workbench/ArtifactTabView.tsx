@@ -15,6 +15,7 @@ import {
   SparkleIcon,
 } from "@phosphor-icons/react";
 import { api } from "@/lib/api";
+import type { FileRef } from "@/lib/wire.gen";
 import { downloadFileName, fileCategory, fileTypeLabel, isSite, isTextual, versionFacts } from "@/lib/artifactFiles";
 import { cn } from "@/lib/cn";
 import { appLinkBase } from "@/lib/config";
@@ -284,6 +285,22 @@ export function ArtifactTabView({
     refreshed();
     return res.artifact.currentVersion;
   };
+  // A painted area travels as its mask: uploaded as the request is sent,
+  // named by the selection (docs/prd/2026-10-17-image-generation-redesign.md §2.7).
+  const paintedMask = selection?.mask;
+  const prepareRef = paintedMask
+    ? async (ref: FileRef): Promise<FileRef | null> => {
+        if (!ref.selection) return ref;
+        try {
+          const mask = await paintedMask();
+          const att = await api.uploadAttachment(roomId, new File([mask], "mask.png", { type: "image/png" }));
+          return { ...ref, selection: { ...ref.selection, mask: att.id } };
+        } catch (e) {
+          toast.error(errorText(e, "The painted area could not be attached"));
+          return null;
+        }
+      }
+    : undefined;
   // Make a copy: a new file of the shown version; the toast opens it.
   const copyFile = async () => {
     setBusy(true);
@@ -533,6 +550,7 @@ export function ArtifactTabView({
           fileRef={{ artifactId, version: shown, name: file.name, ...(selection ? { selection: requestSelection(selection) } : {}) }}
           file={file}
           pick={pick}
+          prepare={prepareRef}
           artifact={artifact}
           detail={detail}
           onShow={show}

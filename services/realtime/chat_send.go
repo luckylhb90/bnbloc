@@ -311,6 +311,29 @@ type ArtifactReader interface {
 	GetArtifactVersion(ctx context.Context, artifactID string, version int) (store.ArtifactVersion, error)
 }
 
+// selectionMask validates a selection's painted mask: a PNG attachment of
+// the room, on an image region. "" for none.
+func (s *Service) selectionMask(ctx context.Context, roomID string, sel *wire.FileSelection) (string, error) {
+	id := strings.TrimSpace(sel.Mask)
+	if id == "" {
+		return "", nil
+	}
+	if sel.Kind != "region" {
+		return "", errBadFileRef{"only an image region carries a painted mask"}
+	}
+	if !s.attachmentsReady() {
+		return "", errors.New("attachments not configured")
+	}
+	att, ok, err := s.Attachments.GetAttachment(ctx, roomID, id)
+	if err != nil {
+		return "", err
+	}
+	if !ok || att.ContentType != "image/png" {
+		return "", errBadFileRef{"the painted mask must be a PNG attachment of this room"}
+	}
+	return att.ID, nil
+}
+
 // resolveFileRef validates the file a message names and completes it: one
 // of the room's deliverables (never a web app: its snapshot is not a file
 // an agent edits), at a version it has (0 = its current one), named as its
@@ -361,7 +384,11 @@ func (s *Service) resolveFileRef(ctx context.Context, roomID string, ref *wire.F
 				return nil, errBadFileRef{fmt.Sprintf("a selection key is 1-%d characters", wire.MaxFileSelectionKey)}
 			}
 		}
-		out.Selection = &wire.FileSelection{Label: label, Detail: sel.Detail, Kind: sel.Kind, Keys: sel.Keys}
+		mask, err := s.selectionMask(ctx, roomID, sel)
+		if err != nil {
+			return nil, err
+		}
+		out.Selection = &wire.FileSelection{Label: label, Detail: sel.Detail, Kind: sel.Kind, Keys: sel.Keys, Mask: mask}
 	}
 	return out, nil
 }

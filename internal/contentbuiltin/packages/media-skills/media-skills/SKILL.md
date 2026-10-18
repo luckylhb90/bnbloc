@@ -31,7 +31,8 @@ which the room shows as a change they can compare and undo; never draw a
 fresh picture instead.
 
 - An area they selected (its rectangle in the image's pixels) goes in
-  region: only that part changes.
+  region: only that part changes. An area they painted comes with its
+  mask (att_…): pass it as region.mask with the rectangle around it.
 - Room images or attachments to borrow from (a style, a logo) go in
   inputs.
 - If the result says the file changed meanwhile, it was saved as a new

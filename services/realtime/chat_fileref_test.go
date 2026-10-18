@@ -57,18 +57,37 @@ func TestChatFileRefValidatedAndCarried(t *testing.T) {
 		posted.Job.FileRef.Selection == nil || !reflect.DeepEqual(*posted.Job.FileRef.Selection, wire.FileSelection{Label: "Slide 4", Detail: "Q3 revenue up 18%", Kind: "slide", Keys: []string{"slide-259"}}) {
 		t.Fatalf("selection = %+v, %v", posted.Job, err)
 	}
+	// A painted area's mask: a PNG attachment of the room, on an image region.
+	svc.Attachments, svc.Blobs = store.NewMemoryAttachments(), &memBlobs{m: map[string][]byte{}}
+	for _, a := range []store.Attachment{
+		{ID: "att_mask", RoomID: "room-1", ContentType: "image/png"},
+		{ID: "att_note", RoomID: "room-1", ContentType: "text/plain"},
+		{ID: "att_away", RoomID: "room-2", ContentType: "image/png"},
+	} {
+		if err := svc.Attachments.PutAttachment(dctx(), a); err != nil {
+			t.Fatal(err)
+		}
+	}
+	painted := &wire.FileSelection{Label: "Painted area", Kind: "region", Mask: "att_mask"}
+	if posted, err = svc.PostChat(dctx(), ChatPost{RoomID: "room-1", Author: "maya", Text: "a hat", Recipient: toJackCodex(), FileRef: &wire.FileRef{ArtifactID: "deck", Selection: painted}}); err != nil ||
+		posted.Job.FileRef.Selection == nil || posted.Job.FileRef.Selection.Mask != "att_mask" {
+		t.Fatalf("painted selection = %+v, %v", posted.Job, err)
+	}
 	for name, ref := range map[string]*wire.FileRef{
-		"another room's": {ArtifactID: "other"},
-		"unknown":        {ArtifactID: "gone"},
-		"version beyond": {ArtifactID: "deck", Version: 4},
-		"negative":       {ArtifactID: "deck", Version: -1},
-		"a web app":      {ArtifactID: "site"},
-		"no id":          {},
-		"empty label":    {ArtifactID: "deck", Selection: &wire.FileSelection{Label: " "}},
-		"long detail":    {ArtifactID: "deck", Selection: &wire.FileSelection{Label: "x", Detail: strings.Repeat("y", wire.MaxFileSelectionDetail+1)}},
-		"unknown kind":   {ArtifactID: "deck", Selection: &wire.FileSelection{Label: "x", Kind: "galaxy"}},
-		"too many keys":  {ArtifactID: "deck", Selection: &wire.FileSelection{Label: "x", Keys: make([]string, wire.MaxFileSelectionKeys+1)}},
-		"an empty key":   {ArtifactID: "deck", Selection: &wire.FileSelection{Label: "x", Keys: []string{""}}},
+		"mask not a png":      {ArtifactID: "deck", Selection: &wire.FileSelection{Label: "x", Kind: "region", Mask: "att_note"}},
+		"another room's mask": {ArtifactID: "deck", Selection: &wire.FileSelection{Label: "x", Kind: "region", Mask: "att_away"}},
+		"mask on a slide":     {ArtifactID: "deck", Selection: &wire.FileSelection{Label: "x", Kind: "slide", Mask: "att_mask"}},
+		"another room's":      {ArtifactID: "other"},
+		"unknown":             {ArtifactID: "gone"},
+		"version beyond":      {ArtifactID: "deck", Version: 4},
+		"negative":            {ArtifactID: "deck", Version: -1},
+		"a web app":           {ArtifactID: "site"},
+		"no id":               {},
+		"empty label":         {ArtifactID: "deck", Selection: &wire.FileSelection{Label: " "}},
+		"long detail":         {ArtifactID: "deck", Selection: &wire.FileSelection{Label: "x", Detail: strings.Repeat("y", wire.MaxFileSelectionDetail+1)}},
+		"unknown kind":        {ArtifactID: "deck", Selection: &wire.FileSelection{Label: "x", Kind: "galaxy"}},
+		"too many keys":       {ArtifactID: "deck", Selection: &wire.FileSelection{Label: "x", Keys: make([]string, wire.MaxFileSelectionKeys+1)}},
+		"an empty key":        {ArtifactID: "deck", Selection: &wire.FileSelection{Label: "x", Keys: []string{""}}},
 	} {
 		if _, err := svc.PostChat(dctx(), ChatPost{RoomID: "room-1", Author: "maya", Text: "x", Recipient: toJackCodex(), FileRef: ref}); !errors.As(err, new(errBadFileRef)) {
 			t.Errorf("%s: err = %v", name, err)

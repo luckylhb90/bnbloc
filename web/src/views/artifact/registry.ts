@@ -96,7 +96,12 @@ export interface ArtifactViewerProps {
 /** What a viewer reports as selected: the frame protocol's Selection
  *  (a label, the content it covers, and optionally its kind, place and unit
  *  keys), whether a previewer or a built-in viewer reports it. */
-export type ViewerSelection = Selection;
+export type ViewerSelection = Selection & {
+  /** A painted area's exact shape (a built-in viewer's brush): a PNG the
+   *  image's size, transparent where it may change, made when the request
+   *  is sent (docs/prd/2026-10-17-image-generation-redesign.md §2.7). */
+  readonly mask?: () => Promise<Blob>;
+};
 
 
 export interface ArtifactViewer extends FileClaimant {

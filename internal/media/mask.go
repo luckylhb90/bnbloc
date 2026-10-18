@@ -57,6 +57,39 @@ func EditMask(input []byte, r Region) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// ErrMaskShape: a painted mask that is not a PNG of the input's size with
+// an area that may change.
+var ErrMaskShape = errors.New("the mask must be a PNG of the image's size, transparent where it may change")
+
+// PaintedMask checks a member's painted mask against the image it edits
+// and returns it as the edit's mask (EditMask's convention: transparent
+// where the provider may change the image).
+func PaintedMask(input, mask []byte) ([]byte, error) {
+	w, h, err := ImageSize(input)
+	if err != nil {
+		return nil, err
+	}
+	if SniffImage(mask) != "image/png" {
+		return nil, ErrMaskShape
+	}
+	m, err := png.Decode(bytes.NewReader(mask))
+	if err != nil {
+		return nil, ErrMaskShape
+	}
+	b := m.Bounds()
+	if b.Dx() != w || b.Dy() != h {
+		return nil, ErrMaskShape
+	}
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			if _, _, _, a := m.At(x, y).RGBA(); a == 0 {
+				return mask, nil
+			}
+		}
+	}
+	return nil, ErrMaskShape // nothing painted: nothing may change
+}
+
 // webpSize reads a WebP's canvas size from its first chunk: VP8X (the
 // extended header), VP8L (lossless) or VP8 (lossy).
 func webpSize(b []byte) (int, int, error) {

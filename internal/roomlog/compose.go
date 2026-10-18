@@ -52,6 +52,9 @@ type EditTarget struct {
 	// fenced as data under the line.
 	SelectionLabel  string
 	SelectionDetail string
+	// SelectionMask is the attachment id of an area painted on an image
+	// (its exact shape; the detail names its bounding box).
+	SelectionMask string
 }
 
 // EditsDir is where a room file to edit is placed: .room/edits/<artifact
@@ -75,7 +78,11 @@ func writeEditLine(b *strings.Builder, e *EditTarget) {
 	}
 	fmt.Fprintf(b, "[edit %s v%d: it is at %s; save your version as %s, which updates the room's file]\n", e.Name, e.Version, e.Source, e.Path)
 	if e.SelectionLabel != "" {
-		b.WriteString("[the part of it they point at]\n")
+		if e.SelectionMask != "" {
+			fmt.Fprintf(b, "[the part of it they point at; its painted mask is %s]\n", e.SelectionMask)
+		} else {
+			b.WriteString("[the part of it they point at]\n")
+		}
 		body := e.SelectionLabel
 		if d := strings.TrimSpace(e.SelectionDetail); d != "" {
 			body += "\n" + d

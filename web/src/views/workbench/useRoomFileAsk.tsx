@@ -67,7 +67,10 @@ export function useRoomFileAsk(i: RoomFileAskInputs): {
           online={online}
           feed={feed}
           joining={data.joining}
-          onSend={(text, opts) => send(text, { ...opts, fileRef: ref })}
+          onSend={async (text, opts) => {
+            const fileRef = options.prepare ? await options.prepare(ref) : ref;
+            return fileRef ? send(text, { ...opts, fileRef }) : false;
+          }}
           onJoin={() => void data.join()}
           platformAgents={data.platform}
           modelCatalogs={data.modelCatalogs}

@@ -148,12 +148,16 @@ type MediaImageRequest struct {
 }
 
 // MediaImageRegion is a rectangle of an image in its own pixels, origin at
-// the top-left.
+// the top-left. With Mask, the area a member painted: Mask is the message's
+// mask attachment (att_…, a PNG of the image's size, transparent where it
+// may change), which is the edit's mask, and the rectangle is its bounding
+// box (docs/prd/2026-10-17-image-generation-redesign.md §2.7).
 type MediaImageRegion struct {
-	X int `json:"x"`
-	Y int `json:"y"`
-	W int `json:"w"`
-	H int `json:"h"`
+	X    int    `json:"x"`
+	Y    int    `json:"y"`
+	W    int    `json:"w"`
+	H    int    `json:"h"`
+	Mask string `json:"mask,omitempty"`
 }
 
 // MediaImageReply is POST /v1/media/image's answer: the images inline

@@ -5,17 +5,21 @@ import { MAX_SVG_CHARS, svgLabelsIn } from "@/lib/svgLabels";
 import type { ArtifactFileInfo, ArtifactViewerProps } from "./registry";
 import { useViewerToolbar } from "./toolbar";
 import {
+  brushSelection,
+  brushWidth,
   centered,
   cropMimeType,
   clampScale,
   fitScale,
   GRID_MIN_SCALE,
+  growRegion,
   regionRect,
   regionSelection,
   spanRegion,
   toImage,
   visibleGrid,
   zoomAt,
+  type BrushSize,
   type ImageView,
   type Region,
   type Size,
@@ -29,7 +33,13 @@ import {
 // background for transparency. "Select an area" turns a drag into a
 // rectangle the Ask AI panel names (a region selection, image pixels;
 // docs/prd/2026-10-14-select-edit-review.md rule 7); where the host can
-// version the file, "Crop" cuts the image to it as the next version.
+// version the file, "Crop" cuts the image to it as the next version. On a
+// raster image, "Paint an area" marks an exact shape instead: the request
+// carries it as a mask (docs/prd/2026-10-17-image-generation-redesign.md
+// §2.7).
+
+// The raster types an edit reads (the gateway's media.SniffImage).
+const PAINTABLE = new Set(["image/png", "image/jpeg", "image/webp"]);
 
 // Older inline image artifacts carry a URL as text instead of bytes.
 const LEGACY_URL = /^(https:\/\/|data:image\/(png|jpe?g|gif|webp);base64,)/i;
@@ -96,6 +106,20 @@ export default function ImageViewer({ blob, file, toolbar, onSelection, onPublis
   const [selecting, setSelecting] = useState(false);
   const [region, setRegion] = useState<Region | null>(null);
   const dragFrom = useRef<{ x: number; y: number } | null>(null);
+  // Painting: the mode, the brush, the painted area's bounding box (image
+  // pixels), the strokes (a canvas the image's size) and the stroke's last
+  // point.
+  const paintable = PAINTABLE.has(blob.type);
+  const [painting, setPainting] = useState(false);
+  const [brush, setBrush] = useState<BrushSize>("m");
+  const [painted, setPainted] = useState<Region | null>(null);
+  const paintRef = useRef<HTMLCanvasElement | null>(null);
+  const strokeAt = useRef<{ x: number; y: number } | null>(null);
+  // Another picture (a new version) starts unpainted.
+  useEffect(() => {
+    clearCanvas(paintRef.current);
+    setPainted(null);
+  }, [blob]);
   const onSelectionRef = useRef(onSelection);
   onSelectionRef.current = onSelection;
 
@@ -105,14 +129,40 @@ export default function ImageViewer({ blob, file, toolbar, onSelection, onPublis
   // The text inside the area, for an SVG: found once per area, not per pan.
   const labels = useMemo(() => (region && natural && svgSource ? svgLabelsIn(svgSource, region, natural) : []), [region, natural, svgSource]);
   useEffect(() => {
-    if (region && natural) {
+    if (painted && natural) {
+      hadRegion.current = true;
+      onSelectionRef.current?.({ ...brushSelection(painted, natural), kind: "region", rect: regionRect(view, painted), mask: () => paintedMask(paintRef.current) });
+    } else if (region && natural) {
       hadRegion.current = true;
       onSelectionRef.current?.({ ...regionSelection(region, natural, labels), kind: "region", rect: regionRect(view, region) });
     } else if (hadRegion.current) {
       hadRegion.current = false;
       onSelectionRef.current?.(null);
     }
-  }, [region, view, natural, labels]);
+  }, [region, painted, view, natural, labels]);
+
+  const clearPaint = () => {
+    clearCanvas(paintRef.current);
+    setPainted(null);
+  };
+  // One dab or segment of the stroke, in image pixels.
+  const paintTo = (p: { x: number; y: number }) => {
+    const ctx = paintRef.current?.getContext("2d");
+    if (!ctx || !natural) return;
+    const width = brushWidth(natural, brush);
+    const from = strokeAt.current ?? p;
+    // The accent marks it on screen; the mask reads only where it is painted.
+    ctx.strokeStyle = getComputedStyle(ctx.canvas).getPropertyValue("--color-accent").trim() || "#3b82f6";
+    ctx.lineWidth = width;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    ctx.lineTo(p.x, p.y);
+    ctx.stroke();
+    strokeAt.current = p;
+    setPainted((r) => growRegion(growRegion(r, from, width / 2, natural), p, width / 2, natural));
+  };
 
   useEffect(() => {
     const el = boxRef.current;
@@ -162,9 +212,13 @@ export default function ImageViewer({ blob, file, toolbar, onSelection, onPublis
     if (e.button !== 0 && e.pointerType === "mouse") return;
     e.currentTarget.setPointerCapture(e.pointerId);
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    if (selecting && natural && pointers.current.size === 1) {
+    if ((selecting || painting) && natural && pointers.current.size === 1) {
       const rect = e.currentTarget.getBoundingClientRect();
-      dragFrom.current = toImage(viewRef.current, natural, e.clientX - rect.left, e.clientY - rect.top);
+      const p = toImage(viewRef.current, natural, e.clientX - rect.left, e.clientY - rect.top);
+      if (painting) {
+        strokeAt.current = null;
+        paintTo(p);
+      } else dragFrom.current = p;
     }
   };
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -172,7 +226,9 @@ export default function ImageViewer({ blob, file, toolbar, onSelection, onPublis
     const prev = map.get(e.pointerId);
     if (!prev) return;
     const rect = e.currentTarget.getBoundingClientRect();
-    if (map.size === 1 && dragFrom.current && natural) {
+    if (map.size === 1 && strokeAt.current && natural) {
+      paintTo(toImage(viewRef.current, natural, e.clientX - rect.left, e.clientY - rect.top));
+    } else if (map.size === 1 && dragFrom.current && natural) {
       setRegion(spanRegion(dragFrom.current, toImage(viewRef.current, natural, e.clientX - rect.left, e.clientY - rect.top)));
     } else if (map.size === 1) {
       setFit(false);
@@ -193,6 +249,7 @@ export default function ImageViewer({ blob, file, toolbar, onSelection, onPublis
   };
   const onPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
     pointers.current.delete(e.pointerId);
+    strokeAt.current = null;
     if (dragFrom.current) {
       dragFrom.current = null;
       // A click (no area) clears the selection.
@@ -209,6 +266,7 @@ export default function ImageViewer({ blob, file, toolbar, onSelection, onPublis
     else if (e.key === "-") zoomTo(view.scale / 1.25);
     else if (e.key === "0") actualSize();
     else if (e.key.toLowerCase() === "f") setFit(true);
+    else if (e.key === "Escape" && painted) clearPaint();
     else if (e.key === "Escape" && region) setRegion(null);
     else return;
     e.preventDefault();
@@ -248,6 +306,23 @@ export default function ImageViewer({ blob, file, toolbar, onSelection, onPublis
       { id: "grid", kind: "toggle", icon: "grid", label: "Pixel grid (from 400%)", active: grid && gridAvailable, disabled: !gridAvailable },
       { id: "background", kind: "toggle", icon: "background", label: "Checkerboard background", active: checker },
       { id: "select", kind: "toggle", icon: "crop", label: "Select an area", active: selecting, disabled: !natural },
+      ...(paintable ? [{ id: "paint", kind: "toggle" as const, icon: "brush", label: "Paint an area", active: painting, disabled: !natural }] : []),
+      ...(painting
+        ? [
+            {
+              id: "brush",
+              kind: "select" as const,
+              icon: "brush",
+              label: "Brush size",
+              selected: brush,
+              options: [
+                { value: "s", label: "Small" },
+                { value: "m", label: "Medium" },
+                { value: "l", label: "Large" },
+              ],
+            },
+          ]
+        : []),
       ...(onPublish ? [{ id: "cut", kind: "button" as const, icon: "cut", label: "Crop to the area (a new version)", disabled: !region || cropping }] : []),
     ],
     (id, value) => {
@@ -257,9 +332,17 @@ export default function ImageViewer({ blob, file, toolbar, onSelection, onPublis
       else if (id === "grid") setGrid(value === true);
       else if (id === "background") setChecker(value === true);
       else if (id === "cut") void crop().catch(() => setCropping(false));
+      else if (id === "brush" && (value === "s" || value === "m" || value === "l")) setBrush(value);
       else if (id === "select") {
         setSelecting(value === true);
-        if (value !== true) setRegion(null);
+        setRegion(null);
+        setPainting(false);
+        clearPaint();
+      } else if (id === "paint") {
+        setPainting(value === true);
+        setSelecting(false);
+        setRegion(null);
+        clearPaint();
       }
     },
   );
@@ -281,7 +364,7 @@ export default function ImageViewer({ blob, file, toolbar, onSelection, onPublis
         onKeyDown={onKeyDown}
         className={cn(
           "relative min-h-0 flex-1 touch-none select-none overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]/60",
-          selecting ? "cursor-crosshair" : "cursor-grab active:cursor-grabbing",
+          selecting || painting ? "cursor-crosshair" : "cursor-grab active:cursor-grabbing",
         )}
         style={{ background: checker ? CHECKER : undefined }}
       >
@@ -305,6 +388,17 @@ export default function ImageViewer({ blob, file, toolbar, onSelection, onPublis
             }}
           />
         ) : null}
+        {natural && paintable && (
+          <canvas
+            ref={paintRef}
+            aria-hidden
+            data-image-paint
+            width={natural.w}
+            height={natural.h}
+            className="pointer-events-none absolute left-0 top-0 max-w-none origin-top-left opacity-50"
+            style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}
+          />
+        )}
         {region && natural && (
           <div
             aria-hidden
@@ -345,4 +439,26 @@ export default function ImageViewer({ blob, file, toolbar, onSelection, onPublis
       </div>
     </div>
   );
+}
+
+function clearCanvas(c: HTMLCanvasElement | null): void {
+  c?.getContext("2d")?.clearRect(0, 0, c.width, c.height);
+}
+
+// paintedMask turns the strokes into the edit's mask: a PNG the image's
+// size, transparent where painted (may change), opaque elsewhere.
+async function paintedMask(strokes: HTMLCanvasElement | null): Promise<Blob> {
+  if (!strokes) throw new Error("nothing is painted");
+  const canvas = document.createElement("canvas");
+  canvas.width = strokes.width;
+  canvas.height = strokes.height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("the browser cannot draw the mask");
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.globalCompositeOperation = "destination-out";
+  ctx.drawImage(strokes, 0, 0);
+  const out = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+  if (!out) throw new Error("the browser could not encode the mask");
+  return out;
 }

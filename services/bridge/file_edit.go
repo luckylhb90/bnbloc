@@ -69,7 +69,7 @@ func (e *editTarget) line() *roomlog.EditTarget {
 	}
 	t := &roomlog.EditTarget{Path: e.path, Source: e.source, Name: e.name, Version: e.version, Problem: e.problem}
 	if e.selection != nil {
-		t.SelectionLabel, t.SelectionDetail = e.selection.Label, e.selection.Detail
+		t.SelectionLabel, t.SelectionDetail, t.SelectionMask = e.selection.Label, e.selection.Detail, e.selection.Mask
 	}
 	return t
 }

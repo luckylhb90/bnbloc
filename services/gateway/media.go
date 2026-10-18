@@ -483,14 +483,35 @@ func (s *Service) imageRoomInputs(w http.ResponseWriter, r *http.Request, claims
 			httpx.Error(w, "region needs an image to change (artifactId)", http.StatusBadRequest)
 			return nil, false
 		}
-		mask, err := media.EditMask(gen.Input.Bytes, media.Region{X: req.Region.X, Y: req.Region.Y, W: req.Region.W, H: req.Region.H})
-		if err != nil {
-			httpx.Error(w, "region: "+err.Error(), http.StatusBadRequest)
+		mask, ok := s.regionMask(ctx, w, claims, roomID, gen.Input.Bytes, *req.Region)
+		if !ok {
 			return nil, false
 		}
 		gen.Mask = mask
 	}
 	return edit, true
+}
+
+// regionMask is a region's mask for input: the member's painted mask (an
+// attachment of the room, read as the member in claims) when the region
+// names one, else the rectangle's. false: refused, answered.
+func (s *Service) regionMask(ctx context.Context, w http.ResponseWriter, claims auth.Claims, roomID string, input []byte, region wire.MediaImageRegion) ([]byte, bool) {
+	var mask []byte
+	var err error
+	if id := strings.TrimSpace(region.Mask); id != "" {
+		painted, readErr := s.readAttachmentImage(ctx, claims, roomID, id)
+		if !imageInputOK(w, readErr) {
+			return nil, false
+		}
+		mask, err = media.PaintedMask(input, painted.Bytes)
+	} else {
+		mask, err = media.EditMask(input, media.Region{X: region.X, Y: region.Y, W: region.W, H: region.H})
+	}
+	if err != nil {
+		httpx.Error(w, "region: "+err.Error(), http.StatusBadRequest)
+		return nil, false
+	}
+	return mask, true
 }
 
 // imageInputOK answers a failed input read: a refused input 400 with its

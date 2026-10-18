@@ -36,6 +36,9 @@ export interface FileComposerOptions {
   readonly threadLength: number;
   /** A suggestion handed over to insert (a new nonce inserts again). */
   readonly pick?: { readonly choice: PromptChoice; readonly nonce: number };
+  /** Completes the file reference as the request is sent (a painted
+   *  area's mask is uploaded then); null keeps the draft (it said why). */
+  readonly prepare?: (ref: FileRef) => Promise<FileRef | null>;
 }
 
 export interface FileAsk {
@@ -60,6 +63,7 @@ export function FileAskPanel({
   fileRef,
   file,
   pick,
+  prepare,
   artifact,
   detail,
   onViewChanges,
@@ -71,6 +75,7 @@ export function FileAskPanel({
   readonly fileRef: FileRef;
   readonly file: FileFacts;
   readonly pick?: FileComposerOptions["pick"];
+  readonly prepare?: FileComposerOptions["prepare"];
   /** The file's versions: each edit a request produced gets a change card. */
   readonly artifact: Artifact;
   readonly detail: ArtifactDetail;
@@ -149,7 +154,7 @@ export function FileAskPanel({
         </div>
       )}
       {/* Its own container: the composer lays out for the panel's width. */}
-      <div className="@container shrink-0">{ask.composer(fileRef, { file, selectionKind: fileRef.selection?.kind, threadLength: thread.length, pick })}</div>
+      <div className="@container shrink-0">{ask.composer(fileRef, { file, selectionKind: fileRef.selection?.kind, threadLength: thread.length, pick, prepare })}</div>
     </aside>
   );
 }

@@ -55,6 +55,10 @@ type FileSelection struct {
 	// cell of a range), at most MaxFileSelectionKeys: the change card names
 	// edits outside them (docs/prd/2026-10-14-select-edit-review.md rule 5).
 	Keys []string `json:"keys,omitempty"`
+	// Mask is an area painted on an image (kind region): a PNG attachment
+	// of the room (att_…) the image's size, transparent where it may change
+	// (docs/prd/2026-10-17-image-generation-redesign.md §2.7).
+	Mask string `json:"mask,omitempty"`
 }
 
 // FileSelectionKinds is the code-owned vocabulary of selection kinds,
