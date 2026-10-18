@@ -32,7 +32,7 @@ timeout="${BNBLOC_RELEASE_AGENT_TIMEOUT:-4m}"
 failed=0
 echo "==> bnbloc smoke"
 bnbloc smoke || failed=1
-for agent in "${agents[@]}"; do
+for agent in ${agents[@]+"${agents[@]}"}; do
   echo "==> bnbloc smoke --agent $agent"
   bnbloc smoke --agent "$agent" --timeout "$timeout" || failed=1
   if [ "${BNBLOC_RELEASE_SCENARIO:-}" = 1 ]; then
@@ -47,7 +47,7 @@ done
 # borrows the first agent (scripts/two-member-check.sh; the teammate's
 # provider in BNBLOC_RELEASE_TEAMMATE_AGENT).
 if [ "${BNBLOC_RELEASE_TWO_MEMBERS:-}" = 1 ]; then
-  if [ ${#agents[@]} -eq 0 ]; then
+  if [ -z "${agents[0]+set}" ]; then
     echo "BNBLOC_RELEASE_TWO_MEMBERS=1 needs an agent" >&2
     failed=1
   else
