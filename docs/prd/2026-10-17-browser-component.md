@@ -138,7 +138,7 @@ room agent (any core) ── browse(goal, url, values) ──► browser compone
 |---|---|
 | `browse(goal, url, values?, host?)` | Starts a run: opens `url` in a new tab and works toward `goal`. `values` maps field descriptions to the text the agent wants typed (it names the value, never a selector). Returns at the next checkpoint. |
 | `browse(run, value? \| confirmed? \| file? \| reply?)` | The same tool with a run id resumes that run from its checkpoint with the agent's answer: a value for `needs_input`, the member's confirmation, a file to upload, "the member signed in", a new instruction ("change the amount to 200 and submit"), or nothing to keep a `running` run going. |
-| `browser_look(run)` | The run's current page: a screenshot (MCP image content, `roomtools/tools.go:48-79`) and its visible text, fenced as untrusted. |
+| `browser_look(run)` | The run's current page: a screenshot (MCP image content, `roomtools/tools.go:48-79`) with its text and fields, fenced as untrusted. Every checkpoint already carries the text and the fields as filled now; the image is only for when they are not enough, since it costs far more. |
 
 Two tools, and their descriptions say all an agent needs: no skill pack
 teaches them. A run lives as long as its tab. It survives across turns
@@ -151,7 +151,7 @@ A run works until something needs the agent or a person, then returns:
 
 | Checkpoint | When | The agent then… |
 |---|---|---|
-| `done` | The decision model chose DONE. | Checks the page with `browser_look` and reports. The model's DONE is a claim, not proof. |
+| `done` | The decision model chose DONE. | Checks the page and fields in the result (a look when they are not enough) and reports. The model's DONE is a claim, not proof. |
 | `blocked` | No progress: the last steps changed nothing, or no operation is feasible (`jev_ultrafast/agent.py:153-158`). | Reads the page, then resumes with a new instruction, asks the room, or gives up. |
 | `needs_input` | The chosen step types into a field `values` does not cover. Returns the field (label, role, nearby text). | Supplies the text from the conversation, or asks the member. The text comes from the agent, per the owner's decision; there is no in-component text model. |
 | `needs_confirmation` | The chosen click is irreversible (§2.5). Returns the element, the page and the predicate's probability. | Asks the requester in the room; a confirmation counts only as §2.5 says. |
@@ -255,8 +255,17 @@ checkpoint as long as nobody answers.
     channel's members for a run started there.
   - The web shows the frame as a thumbnail in the turn's live progress
     strip (where `agent_job_progress` renders,
-    `web/src/views/room/useRoomActivity.ts:188`). Clicking it opens a
-    large view.
+    `web/src/views/room/useRoomActivity.ts:188`). Clicking it opens the
+    run as a **tab of the room's workbench**, beside its files and
+    previews: the large view, with take over and hand back.
+  - **Pop-out**, like a file's preview: in the desktop a window of its
+    own; on the web a new browser tab at the run's deep link. A pop-out
+    is the same view and keeps working after the room is closed.
+  - The live view is where people watch and take over, on any device,
+    so the dedicated Chrome window need not be in front: it starts in
+    the background, and "Open in the browser window" brings it forward
+    for what remote input cannot carry (a security key, a passkey, a
+    system dialog).
   - The step titles keep using the existing activity
     (`wire.JobActivity`, kind `tool`), e.g. "Click [7] Submit
     expense".
@@ -472,14 +481,19 @@ with the room watching.
    - Platform: §3.1 relay facts and §3.5 decision rate.
    - Conversation confirmations by turn sequence.
 2. **The requester's tools** (§3.6): installed tools attach without a
-   skill pack; `browse` and `browse_continue` merge. Tested with a real
-   page from the desktop on the requester's own agent.
-3. **Calls routed to the requester's machine** (§3.6): borrowed and
+   skill pack; `browse` and `browse_continue` merge. (Built 2026-10-18;
+   tested on QA with a real page from the desktop on the requester's own
+   agent. That run showed the agent could not read what it had typed,
+   and that a screenshot per checkpoint cost most of the turn: results
+   now carry the fields as filled, and only a look carries an image.)
+3. **Live view and take over** (moved up 2026-10-18, the product owner's
+   ask): §3.2, §3.3, the workbench tab, pop-out, the window in the
+   background.
+4. **Calls routed to the requester's machine** (§3.6): borrowed and
    platform agents reach the requester's desktop.
-4. **The browser extension** (§2.2) for members who use only the web.
-5. **Live view.** §3.2 and the web's thumbnail and large view.
-6. **Remote control and grants.** §3.3, the browser and control grants
-   (§2.6), the owner's secret prompt (§2.7).
+5. **The browser extension** (§2.2) for members who use only the web.
+6. **Grants.** The browser and control grants (§2.6), the owner's
+   secret prompt (§2.7).
 7. **Quick replies.** §3.4 and the `ask` room tool.
 8. **Procedures from runs** (§5): save, list, run as a plan.
 9. **More hosts.**
