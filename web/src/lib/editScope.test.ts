@@ -1,5 +1,5 @@
 import { outsideSelection, overlaps } from "./editScope.ts";
-import type { UnitChange } from "./compareUnits.ts";
+import type { UnitChange } from "../../previewer-sdk/src/compare.ts";
 
 function eq(a: unknown, b: unknown, message: string): void {
   if (JSON.stringify(a) !== JSON.stringify(b)) throw new Error(`${message}: got ${JSON.stringify(a)}, want ${JSON.stringify(b)}`);

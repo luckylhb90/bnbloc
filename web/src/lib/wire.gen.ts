@@ -2,6 +2,155 @@
 // The JSON shapes, constants and rule tables the web shares with the Go
 // server. Regenerate: go generate ./internal/wire (scripts/ci.sh go fails on drift).
 
+// ---- component/content.go ----
+
+// MaxNameLen bounds a content component's or a skill's name.
+export const MaxNameLen = 63;
+
+// The content bundle caps (experts and skill packs,
+// docs/prd/2026-10-12-experts-and-teams.md): mostly text, with room for a
+// skill's scripts and reference files. A component that hands the library a
+// skill packs it within them.
+export const ContentMaxBytes = 8388608;
+export const ContentMaxFiles = 512;
+
+// ---- component/fence.go ----
+
+// FenceMark is the fence's opening and closing word.
+export const FenceMark = "untrusted-content";
+
+// ---- component/live.go ----
+
+// Bounds of a live frame post.
+// MaxLiveFrameBytes bounds one frame's image (decoded).
+export const MaxLiveFrameBytes = 1048576;
+// MaxLiveFrameSide bounds a frame's width and height in pixels.
+export const MaxLiveFrameSide = 4096;
+// MaxLiveTitle bounds a frame's title and URL (runes).
+export const MaxLiveTitle = 300;
+
+// LiveFramePost is POST /v1/live: one frame of the job's live view, or an
+// empty post (no Data) that only collects the reply. Run names what is
+// shown (a browser run); Width and Height are the image's pixels.
+export interface LiveFramePost {
+  run?: string;
+  seq?: number;
+  mimeType?: string;
+  data?: string;
+  width?: number;
+  height?: number;
+  title?: string;
+  url?: string;
+}
+
+// LiveFrameReply answers a post: whether someone watches the large view
+// (the tool posts faster then), who holds control ("" nobody), and the
+// input queued since the last post, oldest first.
+export interface LiveFrameReply {
+  watching: boolean;
+  controller?: string;
+  input?: LiveInput[];
+}
+
+// Live input kinds (LiveInput.Type).
+// LiveInputMouse: a pointer press, release or move at X, Y.
+export const LiveInputMouse = "mouse";
+// LiveInputWheel: a scroll by DeltaX, DeltaY at X, Y.
+export const LiveInputWheel = "wheel";
+// LiveInputKey: a key pressed or released (Key, Code, Text).
+export const LiveInputKey = "key";
+// LiveInputText: text inserted as typed (a paste, an IME's result).
+export const LiveInputText = "text";
+// LiveInputFocus: bring the window showing the view to the front of
+// its machine (for what remote input cannot carry: a security key, a
+// system dialog).
+export const LiveInputFocus = "focus";
+
+// LiveInput is one input event. X and Y are fractions of the frame (0..1),
+// so they hold at any display size; Action is "down", "up" or "move" for
+// the pointer and "down" or "up" for keys; Modifiers is a bit set (1 Alt,
+// 2 Ctrl, 4 Meta, 8 Shift, CDP's).
+export interface LiveInput {
+  type: LiveInputType;
+  action?: string;
+  x?: number;
+  y?: number;
+  button?: string;
+  clicks?: number;
+  deltaX?: number;
+  deltaY?: number;
+  key?: string;
+  code?: string;
+  text?: string;
+  modifiers?: number;
+}
+
+// ---- component/mounts.go ----
+
+// SandboxMountsContract names the descriptor a component writes to put
+// read-only folders into the sandbox space a turn runs in
+// (docs/architecture/sandbox-mounts.md): MountsFile, as MountsFileName in
+// its own folder of the bridge's mounts directory. The bridge validates
+// every entry; the component is untrusted.
+export const SandboxMountsContract = "bnbloc.sandbox.mounts/v1";
+
+// MountsFileName is the descriptor's file name.
+export const MountsFileName = "mounts.json";
+
+// MountsFile is the descriptor, replaced whole on every change.
+export interface MountsFile {
+  contract: string;
+  mounts: Mount[];
+}
+
+// Mount is one folder: Host under the component's own folder of the
+// workspaces root, Guest an absolute path in the guest, For whose runs see
+// it (MountForOwn when empty).
+export interface Mount {
+  host: string;
+  guest: string;
+  for?: MountFor;
+}
+
+// Whose runs a mount is for (Mount.For).
+// MountForOwn: the agent's owner's own runs (the default).
+export const MountForOwn = "own";
+// MountForBorrowed: runs another member borrows.
+export const MountForBorrowed = "borrowed";
+// MountForAll: both.
+export const MountForAll = "all";
+
+// ---- component/relay.go ----
+
+// RelaySessionPath is the relay's own route that answers the bound turn
+// (GET <relay>/session): RelaySession. It is the bridge's, never a gateway
+// route. The relay's address and bearer reach the tool in
+// pkgmeta.RoomRelayURLEnv and pkgmeta.RoomRelayTokenEnv.
+export const RelaySessionPath = "/session";
+
+// RelaySession is the turn a room-credential tool's session is driving now,
+// as the relay knows it: who the calls act for (Requester), whose machine
+// and agent it is (Owner), where the turn was asked (Room, Channel) and by
+// which message (MessageSeq, increasing in the room). ByRequester marks a
+// turn its requester opened with their own typed message (not a schedule's
+// post, not another agent's dispatch): a tool that paused for a person's
+// answer accepts it only in such a turn, newer than the pause.
+export interface RelaySession {
+  jobId: string;
+  roomId: string;
+  channelId?: string;
+  requester: string;
+  owner: string;
+  messageSeq: number;
+  byRequester: boolean;
+}
+
+// ---- component unions (//wire:union) ----
+export type LiveInputType = "mouse" | "wheel" | "key" | "text" | "focus";
+export const LiveInputTypeValues: readonly LiveInputType[] = ["mouse", "wheel", "key", "text", "focus"];
+export type MountFor = "own" | "borrowed" | "all";
+export const MountForValues: readonly MountFor[] = ["own", "borrowed", "all"];
+
 // ---- wire/agent_catalogs.go ----
 
 // AgentModelOptions is one agent's model catalog as its core reports it.
@@ -2446,45 +2595,15 @@ export interface RoomImportResult {
 // channel: a job has a new frame.
 export const EventJobLiveFrame = "job_live_frame";
 
-// Bounds of a live frame post.
-// MaxLiveFrameBytes bounds one frame's image (decoded).
-export const MaxLiveFrameBytes = 1048576;
-// MaxLiveFrameSide bounds a frame's width and height in pixels.
-export const MaxLiveFrameSide = 4096;
-// MaxLiveTitle bounds a frame's title and URL (runes).
-export const MaxLiveTitle = 300;
-// MaxLiveInput bounds the input events queued for a job; the oldest
-// are dropped past it.
+// MaxLiveInput bounds the input events queued for a job; the oldest are
+// dropped past it. The post's own bounds are the tool's contract
+// (component.MaxLiveFrameBytes and the rest).
 export const MaxLiveInput = 256;
-
-// LiveFramePost is POST /v1/live: one frame of the job's live view, or an
-// empty post (no Data) that only collects the reply. Run names what is
-// shown (a browser run); Width and Height are the image's pixels; ViewWidth
-// and ViewHeight the page's own size, which input coordinates map to.
-export interface LiveFramePost {
-  run?: string;
-  seq?: number;
-  mimeType?: string;
-  data?: string;
-  width?: number;
-  height?: number;
-  title?: string;
-  url?: string;
-}
 
 // LiveFrameHeader carries, on the frame image's answer
 // (GET .../live/frame), the frame's JobLiveFrame as base64url JSON: a
 // viewer opened after the last job_live_frame event knows the view at once.
 export const LiveFrameHeader = "X-Bnbloc-Live-Frame";
-
-// LiveFrameReply answers a post: whether someone watches the large view
-// (the tool posts faster then), who holds control ("" nobody), and the
-// input queued since the last post, oldest first.
-export interface LiveFrameReply {
-  watching: boolean;
-  controller?: string;
-  input?: LiveInput[];
-}
 
 // LiveFrameIngest is the gateway's hand-off of a post to realtime
 // (POST /internal/v1/rooms/{roomId}/live/{jobId}): the frame, and the job's
@@ -2510,39 +2629,6 @@ export interface JobLiveFrame {
   owner: string;
   controller?: string;
   atMs: number;
-}
-
-// Live input kinds (LiveInput.Type).
-// LiveInputMouse: a pointer press, release or move at X, Y.
-export const LiveInputMouse = "mouse";
-// LiveInputWheel: a scroll by DeltaX, DeltaY at X, Y.
-export const LiveInputWheel = "wheel";
-// LiveInputKey: a key pressed or released (Key, Code, Text).
-export const LiveInputKey = "key";
-// LiveInputText: text inserted as typed (a paste, an IME's result).
-export const LiveInputText = "text";
-// LiveInputFocus: bring the window showing the view to the front of
-// its machine (for what remote input cannot carry: a security key, a
-// system dialog).
-export const LiveInputFocus = "focus";
-
-// LiveInput is one input event. X and Y are fractions of the frame (0..1),
-// so they hold at any display size; Action is "down", "up" or "move" for
-// the pointer and "down" or "up" for keys; Modifiers is a bit set (1 Alt,
-// 2 Ctrl, 4 Meta, 8 Shift, CDP's).
-export interface LiveInput {
-  type: LiveInputType;
-  action?: string;
-  x?: number;
-  y?: number;
-  button?: string;
-  clicks?: number;
-  deltaX?: number;
-  deltaY?: number;
-  key?: string;
-  code?: string;
-  text?: string;
-  modifiers?: number;
 }
 
 // LiveInputPost is POST /v1/rooms/{roomId}/jobs/{jobId}/live/input: the
@@ -2796,31 +2882,8 @@ export interface ContentMCPRequirement {
 // through the bridge's room relay ("METHOD /path"; pkgmeta.MCPCredentialsRoom):
 // each admits a job grant (?room=&job=) and acts as the job's requester. A
 // route joins the list only with that admission; the relay refuses the
-// rest.
+// rest. The relay's own answer about the turn is component.RelaySession.
 export const RoomRelayRoutes: readonly string[] = ["POST /v1/decisions", "POST /v1/systemone", "POST /v1/media/image", "POST /v1/media/transcriptions", "POST /v1/live"];
-
-// RoomRelaySessionPath is the relay's own route that answers the bound
-// turn (GET <relay>/session): RoomRelaySession. It is the bridge's, never
-// a gateway route.
-export const RoomRelaySessionPath = "/session";
-
-// RoomRelaySession is the turn a room-credential tool's session is driving
-// now, as the relay knows it: who the calls act for (Requester), whose
-// machine and agent it is (Owner), where the turn was asked (Room,
-// Channel) and by which message (MessageSeq, increasing in the room).
-// ByRequester marks a turn its requester opened with their own typed
-// message (not a schedule's post, not another agent's dispatch): a tool
-// that paused for a person's answer accepts it only in such a turn, newer
-// than the pause.
-export interface RoomRelaySession {
-  jobId: string;
-  roomId: string;
-  channelId?: string;
-  requester: string;
-  owner: string;
-  messageSeq: number;
-  byRequester: boolean;
-}
 
 // MCP transports of a resolved tool (ContentMCPTool.Transport).
 export const MCPTransportStdio = "stdio";
@@ -5187,8 +5250,6 @@ export type DecisionQuestionType = "predicate" | "choice" | "score";
 export const DecisionQuestionTypeValues: readonly DecisionQuestionType[] = ["predicate", "choice", "score"];
 export type RoomEventKind = "chat_message" | "agent_messages" | "agent_job_created" | "agent_job_updated" | "agent_job_progress" | "job_live_frame" | "agent_session_state" | "agent_roster" | "presence_join" | "presence_leave" | "presence_snapshot" | "presence_typing" | "message_deleted" | "message_edited" | "task_updated" | "artifact_updated" | "artifact_state" | "member_joined" | "member_removed" | "room_deleted" | "content_saved" | "content_uses_changed" | "app_changed";
 export const RoomEventKindValues: readonly RoomEventKind[] = ["chat_message", "agent_messages", "agent_job_created", "agent_job_updated", "agent_job_progress", "job_live_frame", "agent_session_state", "agent_roster", "presence_join", "presence_leave", "presence_snapshot", "presence_typing", "message_deleted", "message_edited", "task_updated", "artifact_updated", "artifact_state", "member_joined", "member_removed", "room_deleted", "content_saved", "content_uses_changed", "app_changed"];
-export type LiveInputType = "mouse" | "wheel" | "key" | "text" | "focus";
-export const LiveInputTypeValues: readonly LiveInputType[] = ["mouse", "wheel", "key", "text", "focus"];
 export type JobActivityKind = "tool" | "thinking" | "text";
 export const JobActivityKindValues: readonly JobActivityKind[] = ["tool", "thinking", "text"];
 export type MediaImageAspect = "square" | "landscape" | "portrait";

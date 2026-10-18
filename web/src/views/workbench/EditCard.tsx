@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowCounterClockwiseIcon, CrosshairSimpleIcon, GitDiffIcon, WarningIcon } from "@phosphor-icons/react";
-import { changeCounts, type UnitChange } from "@/lib/compareUnits";
+import { changeCounts, type UnitChange } from "../../../previewer-sdk/src/compare.ts";
 import { outsideSelection } from "@/lib/editScope";
 import { errorText } from "@/lib/errors";
 import type { Artifact, ArtifactDetail, ArtifactVersion, FileSelection } from "@/lib/wire.gen";

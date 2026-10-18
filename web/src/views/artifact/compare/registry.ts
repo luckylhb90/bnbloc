@@ -1,5 +1,5 @@
 import type React from "react";
-import type { CompareUnit } from "../../../lib/compareUnits.ts";
+import type { CompareUnit } from "../../../../previewer-sdk/src/compare.ts";
 import { createFileRegistry, useRegistryRevision, type FileClaimant } from "../../../lib/fileRegistry.ts";
 import type { ArtifactFileInfo } from "../registry.ts";
 

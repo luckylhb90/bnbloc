@@ -3,7 +3,7 @@
 Status: proposed (2026-10-16). Builds on
 `docs/architecture/previewer-components.md` (previewers are Components),
 `docs/prd/2026-10-14-select-edit-review.md` (selections, `region`, units,
-Compare) and `docs/prd/2026-10-14-file-prompts-and-compare.md`.
+Compare) and `docs/prd/2026-10-14-file-prompts-and-compare.md`. Since 2026-10-18 the component is its own repository, `luckylhb90/bnbloc-previewers` (`docs/prd/2026-10-18-components-in-own-repos.md`).
 
 ## 1. Why
 

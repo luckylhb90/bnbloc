@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/luckylhb90/bnbloc/component"
 	corepkg "github.com/luckylhb90/bnbloc/core"
 	sandbox "github.com/luckylhb90/bnbloc/sandbox/protocol"
 )
@@ -28,11 +29,10 @@ import (
 // guest roots, and nothing else. A mount that fails is dropped and logged; the
 // turn never fails because of a component.
 
-// SandboxMountsContract names the descriptor file format.
-const SandboxMountsContract = "bnbloc.sandbox.mounts/v1"
-
+// The descriptor (component.MountsFile) is the component contract's.
 const (
-	mountsFileName        = "mounts.json"
+	SandboxMountsContract = component.SandboxMountsContract
+	mountsFileName        = component.MountsFileName
 	maxMountComponents    = 16
 	maxMountsPerComponent = 256
 	maxMountsFileBytes    = 256 << 10
@@ -42,17 +42,6 @@ const (
 )
 
 var componentName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)
-
-type mountsFile struct {
-	Contract string       `json:"contract"`
-	Mounts   []mountEntry `json:"mounts"`
-}
-
-type mountEntry struct {
-	Host  string `json:"host"`
-	Guest string `json:"guest"`
-	For   string `json:"for"`
-}
 
 // mountDrop is a mount that did not pass, and why.
 type mountDrop struct {
@@ -105,11 +94,11 @@ func overlaps(a, b string) bool { return within(a, b) || within(b, a) }
 
 func selects(forWhom string, borrowed bool) (bool, bool) {
 	switch forWhom {
-	case "", "own":
+	case "", component.MountForOwn:
 		return !borrowed, true
-	case "borrowed":
+	case component.MountForBorrowed:
 		return borrowed, true
-	case "all":
+	case component.MountForAll:
 		return true, true
 	}
 	return false, false
@@ -168,7 +157,7 @@ func readComponentMounts(dir, name, workspacesRoot, workdir string, guestRoots [
 		drop("", "", "the descriptor cannot be read")
 		return
 	}
-	var f mountsFile
+	var f component.MountsFile
 	if err := json.Unmarshal(raw, &f); err != nil || f.Contract != SandboxMountsContract {
 		drop("", "", "the descriptor is not "+SandboxMountsContract)
 		return

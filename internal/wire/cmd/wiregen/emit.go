@@ -25,8 +25,12 @@ type emitter struct {
 	info  *types.Info
 	files []*ast.File
 	// foreign are TS type names defined outside the package (the external
-	// enums) that a `tstype` tag may name.
+	// enums, a sibling package's types and unions) that a `tstype` tag may
+	// name.
 	foreign map[string]bool
+	// siblings are packages rendered earlier into the same output: their
+	// exported types are named, never inlined.
+	siblings map[string]bool
 	// declared are the TS type names this package defines.
 	declared map[string]bool
 	// unions collects `//wire:union` members, in order of appearance.
@@ -36,8 +40,10 @@ type emitter struct {
 }
 
 // emitPackage type-checks the package in dir and renders it. foreign names
-// the TS types defined elsewhere in the output that tstype tags may use.
-func emitPackage(dir, importPath string, foreign []string) ([]byte, error) {
+// the TS types defined elsewhere in the output that tstype tags may use;
+// siblings are the import paths of packages rendered earlier into the same
+// output, whose exported types this one names.
+func emitPackage(dir, importPath string, foreign []string, siblings ...string) ([]byte, error) {
 	fset := token.NewFileSet()
 	paths, err := filepath.Glob(filepath.Join(dir, "*.go"))
 	if err != nil {
@@ -61,7 +67,10 @@ func emitPackage(dir, importPath string, foreign []string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	e := &emitter{fset: fset, pkg: pkg, info: info, files: files, foreign: map[string]bool{}, declared: map[string]bool{}, unions: map[string][]string{}}
+	e := &emitter{fset: fset, pkg: pkg, info: info, files: files, foreign: map[string]bool{}, siblings: map[string]bool{}, declared: map[string]bool{}, unions: map[string][]string{}}
+	for _, p := range siblings {
+		e.siblings[p] = true
+	}
 	for _, n := range foreign {
 		e.foreign[n] = true
 	}
@@ -374,7 +383,7 @@ func (e *emitter) tsType(t types.Type, indent string) (string, error) {
 		return e.tsType(types.Unalias(t), indent)
 	case *types.Named:
 		obj := t.Obj()
-		if obj.Pkg() == e.pkg && obj.Exported() {
+		if obj.Exported() && (obj.Pkg() == e.pkg || e.siblings[obj.Pkg().Path()]) {
 			return obj.Name(), nil
 		}
 		switch obj.Pkg().Path() + "." + obj.Name() {

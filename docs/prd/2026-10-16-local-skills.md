@@ -2,7 +2,7 @@
 
 Status: implemented (2026-10-16) except the end-to-end check on a real sandboxed
 run (milestone F); revised the same day to make it an installable component
-behind two small contracts. How it is built: `docs/architecture/local-skills.md`. Builds on `docs/prd/2026-10-09-agent-vm-sandbox.md`
+behind two small contracts. Since 2026-10-18 the component is its own repository, `luckylhb90/bnbloc-local-skills` (`docs/prd/2026-10-18-components-in-own-repos.md`). How it is built: `docs/architecture/local-skills.md`. Builds on `docs/prd/2026-10-09-agent-vm-sandbox.md`
 (the hybrid execution: the agent CLI on the host, its shell commands in one
 Linux VM), `docs/architecture/sandbox-protocol.md` (spaces and mounts),
 `docs/architecture/content-components.md` (skills as content) and

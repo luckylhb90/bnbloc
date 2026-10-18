@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/luckylhb90/bnbloc/internal/wire"
+	"github.com/luckylhb90/bnbloc/component"
 )
 
 // relayPost posts one relayed call with the session's bearer.
@@ -79,9 +79,9 @@ func TestRoomRelay(t *testing.T) {
 func TestRoomRelaySession(t *testing.T) {
 	gw := &fakeGateway{handle: func(method, path string, body []byte) (int, any) { return 200, map[string]any{} }}
 	srv, token, sess := startServer(t, gw)
-	get := func(tok string) (int, wire.RoomRelaySession) {
+	get := func(tok string) (int, component.RelaySession) {
 		t.Helper()
-		req, _ := http.NewRequest(http.MethodGet, srv.RelayURL()+wire.RoomRelaySessionPath, nil)
+		req, _ := http.NewRequest(http.MethodGet, srv.RelayURL()+component.RelaySessionPath, nil)
 		if tok != "" {
 			req.Header.Set("Authorization", "Bearer "+tok)
 		}
@@ -90,7 +90,7 @@ func TestRoomRelaySession(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer resp.Body.Close()
-		var out wire.RoomRelaySession
+		var out component.RelaySession
 		_ = json.NewDecoder(resp.Body).Decode(&out)
 		return resp.StatusCode, out
 	}
@@ -102,11 +102,11 @@ func TestRoomRelaySession(t *testing.T) {
 	}
 	sess.Bind(Job{JobID: "job-1", RequesterUserID: "maya", ChannelID: "ch-1", MessageSeq: 7, ByRequester: true})
 	code, got := get(token)
-	want := wire.RoomRelaySession{JobID: "job-1", RoomID: "room-1", ChannelID: "ch-1", Requester: "maya", Owner: "jack", MessageSeq: 7, ByRequester: true}
+	want := component.RelaySession{JobID: "job-1", RoomID: "room-1", ChannelID: "ch-1", Requester: "maya", Owner: "jack", MessageSeq: 7, ByRequester: true}
 	if code != http.StatusOK || got != want {
 		t.Fatalf("session = %d %+v; want %+v", code, got, want)
 	}
-	if len(gw.callsTo(http.MethodGet, wire.RoomRelaySessionPath)) != 0 {
+	if len(gw.callsTo(http.MethodGet, component.RelaySessionPath)) != 0 {
 		t.Fatal("the session route reached the gateway")
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/luckylhb90/bnbloc/component"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
@@ -26,7 +27,7 @@ import (
 //   - only the routes in wire.RoomRelayRoutes are reachable, each one a
 //     gateway route that admits a job grant;
 //   - GET <relay>/session answers the bound turn itself
-//     (wire.RoomRelaySession), never reaching the gateway.
+//     (component.RelaySession), never reaching the gateway.
 
 // RelayPath prefixes the relay's routes: <server>/relay/<gateway path>.
 const RelayPath = "/relay"
@@ -51,7 +52,7 @@ func (s *Server) handleRelay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	path := strings.TrimPrefix(r.URL.Path, RelayPath)
-	if r.Method == http.MethodGet && path == wire.RoomRelaySessionPath {
+	if r.Method == http.MethodGet && path == component.RelaySessionPath {
 		s.relaySession(w, sess)
 		return
 	}
@@ -89,7 +90,7 @@ func (s *Server) handleRelay(w http.ResponseWriter, r *http.Request) {
 }
 
 // relaySession answers the turn the session is driving now
-// (wire.RoomRelaySession): the facts a tool needs to tell who it acts for,
+// (component.RelaySession): the facts a tool needs to tell who it acts for,
 // whose machine it runs on, and whether this turn is newer than one it
 // recorded. 409 when no turn is bound.
 func (s *Server) relaySession(w http.ResponseWriter, sess *Session) {
@@ -99,7 +100,7 @@ func (s *Server) relaySession(w http.ResponseWriter, sess *Session) {
 		return
 	}
 	scope := sess.Scope()
-	raw, _ := json.Marshal(wire.RoomRelaySession{
+	raw, _ := json.Marshal(component.RelaySession{
 		JobID: job.JobID, RoomID: scope.RoomID, ChannelID: job.ChannelID,
 		Requester: job.RequesterUserID, Owner: scope.Owner,
 		MessageSeq: job.MessageSeq, ByRequester: job.ByRequester,

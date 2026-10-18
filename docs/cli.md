@@ -251,7 +251,7 @@ them, pins them in the package, signs and installs it (a sidecar file a package
 declares is `--binary <platform>/<file>=<path>`):
 
 ```sh
-bnbloc components publish-package --package packages/local-skills/package.json \
+bnbloc components publish-package --package package.json \
   --binary darwin-arm64=dist/bnbloc-local-skills-darwin-arm64 --rollout optin
 ```
 

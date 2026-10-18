@@ -6,11 +6,12 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 	"testing"
 
+	"github.com/luckylhb90/bnbloc/component"
 	corepkg "github.com/luckylhb90/bnbloc/core"
-	"github.com/luckylhb90/bnbloc/internal/localskills"
 	sandbox "github.com/luckylhb90/bnbloc/sandbox/protocol"
 )
 
@@ -328,79 +329,49 @@ func TestSandbox_componentMountsNeedTheBackendToEnforceReadOnly(t *testing.T) {
 	}
 }
 
-// The descriptor the local-skills component writes passes the bridge's
-// validation as it is: own runs get every ticked skill at the paths it is
-// reached by, a borrowed run only the ones ticked for borrowers, all read-only.
-// (The component is untrusted by the bridge; this checks the two agree on the
-// contract, not that the bridge knows the component.)
-func TestContributedMounts_localSkillsComponentDescriptorIsAccepted(t *testing.T) {
+// A descriptor written with the component contract's own types
+// (component.MountsFile, the shape a component outside this repository
+// marshals) passes the bridge's validation as it is: own runs get the "own"
+// and "all" folders, a borrowed run the "borrowed" and "all" ones, all
+// read-only. (The component is untrusted; this checks the two sides agree
+// on the contract.)
+func TestContributedMounts_theContractTypesAreAccepted(t *testing.T) {
 	f := newMountFixture(t)
-	home := t.TempDir()
-	if real, err := filepath.EvalSymlinks(home); err == nil {
-		home = real
+	desc := component.MountsFile{Contract: component.SandboxMountsContract, Mounts: []component.Mount{
+		{Host: f.folder(t, "skills", "alpha"), Guest: f.guestRoot + "/.agents/skills/alpha"},
+		{Host: f.folder(t, "skills", "beta"), Guest: f.guestRoot + "/.agents/skills/beta", For: component.MountForAll},
+		{Host: f.folder(t, "skills", "gamma"), Guest: f.guestRoot + "/.claude/skills/gamma", For: component.MountForBorrowed},
+	}}
+	raw, err := json.Marshal(desc)
+	if err != nil {
+		t.Fatal(err)
 	}
-	canon := filepath.Join(home, ".agents", "skills")
-	for _, name := range []string{"alpha", "beta"} {
-		if err := os.MkdirAll(filepath.Join(canon, name, "scripts"), 0o755); err != nil {
-			t.Fatal(err)
+	dir := filepath.Join(f.mountsDir, "skills")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, component.MountsFileName), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	guests := func(borrowed bool) []string {
+		mounts, dropped := f.read(borrowed)
+		if len(dropped) != 0 {
+			t.Fatalf("the bridge refused a contract descriptor: %v", dropped)
 		}
-		for file, body := range map[string]string{"SKILL.md": "---\nname: " + name + "\ndescription: d\n---\n", "scripts/run.sh": "#!/bin/sh\n"} {
-			if err := os.WriteFile(filepath.Join(canon, name, file), []byte(body), 0o755); err != nil {
-				t.Fatal(err)
+		var out []string
+		for _, m := range mounts {
+			if !m.ReadOnly {
+				t.Errorf("mounts are read-only: %+v", m)
 			}
+			out = append(out, strings.TrimPrefix(m.GuestPath, f.guestRoot))
 		}
+		sort.Strings(out)
+		return out
 	}
-	if err := os.MkdirAll(filepath.Join(home, ".claude", "skills"), 0o755); err != nil {
-		t.Fatal(err)
+	if got := strings.Join(guests(false), " "); got != "/.agents/skills/alpha /.agents/skills/beta" {
+		t.Errorf("own runs got %s", got)
 	}
-	if err := os.Symlink(filepath.Join(canon, "beta"), filepath.Join(home, ".claude", "skills", "beta")); err != nil {
-		t.Fatal(err)
-	}
-	svc := &localskills.Service{
-		Home:         home,
-		SettingsFile: filepath.Join(t.TempDir(), "local-skills.json"),
-		MountsFile:   filepath.Join(f.mountsDir, "local-skills", mountsFileName),
-		MirrorRoot:   MountsHostRoot(f.root, "local-skills"),
-	}
-	if _, err := svc.Apply(localskills.Settings{Enabled: true, Sources: []string{canon}, Skills: map[string]localskills.Choice{
-		"alpha": {VM: true},
-		"beta":  {VM: true, Borrowers: true},
-	}}); err != nil {
-		t.Fatal(err)
-	}
-
-	read := func(borrowed bool) ([]sandbox.SpaceMount, []mountDrop) {
-		return readContributedMounts(f.mountsDir, f.root, f.workdir, []string{home}, borrowed)
-	}
-	own, dropped := read(false)
-	if len(dropped) != 0 {
-		t.Fatalf("the bridge refused what the component wrote: %v", dropped)
-	}
-	guests := map[string]bool{}
-	for _, m := range own {
-		guests[strings.TrimPrefix(m.GuestPath, home)] = true
-		if !m.ReadOnly {
-			t.Errorf("mounts are read-only: %+v", m)
-		}
-		if raw, err := os.ReadFile(filepath.Join(m.HostPath, "SKILL.md")); err != nil || !strings.Contains(string(raw), "description") {
-			t.Errorf("the mounted folder is the skill: %s %v", m.HostPath, err)
-		}
-	}
-	for _, want := range []string{"/.agents/skills/alpha", "/.agents/skills/beta", "/.claude/skills/beta"} {
-		if !guests[want] {
-			t.Errorf("own run lacks %s: %v", want, guests)
-		}
-	}
-	borrowed, dropped := read(true)
-	if len(dropped) != 0 || len(borrowed) != 2 {
-		t.Fatalf("a borrowed run gets only beta, at both its paths: %+v %v", borrowed, dropped)
-	}
-	for _, m := range borrowed {
-		if !strings.Contains(m.GuestPath, "beta") {
-			t.Errorf("a borrowed run got %s", m.GuestPath)
-		}
-	}
-	if st, err := os.Stat(filepath.Join(MountsHostRoot(f.root, "local-skills"), "alpha", "scripts", "run.sh")); err != nil || st.Mode()&0o111 == 0 {
-		t.Errorf("the mirror keeps a script executable: %v", err)
+	if got := strings.Join(guests(true), " "); got != "/.agents/skills/beta /.claude/skills/gamma" {
+		t.Errorf("borrowed runs got %s", got)
 	}
 }

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"unicode/utf8"
 
+	"github.com/luckylhb90/bnbloc/component"
 	"github.com/luckylhb90/bnbloc/internal/tarbundle"
 )
 
@@ -171,57 +171,8 @@ func sortedKeys(m map[string]bool) []string {
 	return out
 }
 
-// ParseFrontmatter reads a SKILL.md / agent .md YAML frontmatter block:
-// "key: value" lines between a leading "---" and the next "---", with
-// quoted values and ">"/"|" block scalars. It returns the keys and the body
-// after the block (the whole text when there is none).
+// ParseFrontmatter reads a SKILL.md / agent .md YAML frontmatter block
+// (component.ParseFrontmatter): the keys and the body after the block.
 func ParseFrontmatter(text string) (map[string]string, string) {
-	out := map[string]string{}
-	t := strings.TrimPrefix(text, "\ufeff")
-	t = strings.ReplaceAll(t, "\r\n", "\n")
-	if !strings.HasPrefix(t, "---\n") {
-		return out, text
-	}
-	rest := t[4:]
-	end := strings.Index(rest, "\n---")
-	if end < 0 {
-		return out, text
-	}
-	block := rest[:end]
-	body := strings.TrimPrefix(rest[end+4:], "\n")
-	lines := strings.Split(block, "\n")
-	for i := 0; i < len(lines); i++ {
-		line := lines[i]
-		if strings.TrimSpace(line) == "" || strings.HasPrefix(strings.TrimSpace(line), "#") || line[0] == ' ' || line[0] == '\t' {
-			continue
-		}
-		key, val, ok := strings.Cut(line, ":")
-		if !ok {
-			continue
-		}
-		key = strings.TrimSpace(key)
-		val = strings.TrimSpace(val)
-		if strings.HasPrefix(val, ">") || strings.HasPrefix(val, "|") {
-			folded := strings.HasPrefix(val, ">")
-			var parts []string
-			for i+1 < len(lines) && (strings.HasPrefix(lines[i+1], " ") || strings.HasPrefix(lines[i+1], "\t") || strings.TrimSpace(lines[i+1]) == "") {
-				i++
-				parts = append(parts, strings.TrimSpace(lines[i]))
-			}
-			sep := "\n"
-			if folded {
-				sep = " "
-			}
-			val = strings.TrimSpace(strings.Join(parts, sep))
-		} else if len(val) >= 2 && (val[0] == '"' && val[len(val)-1] == '"' || val[0] == '\'' && val[len(val)-1] == '\'') {
-			val = val[1 : len(val)-1]
-			if strings.HasPrefix(line[strings.Index(line, ":")+1:], " \"") {
-				val = strings.ReplaceAll(val, `\"`, `"`)
-			}
-		}
-		if utf8.ValidString(val) {
-			out[key] = val
-		}
-	}
-	return out, body
+	return component.ParseFrontmatter(text)
 }

@@ -33,6 +33,14 @@ import (
 // output is the generated file, relative to the module root.
 const output = "web/src/lib/wire.gen.ts"
 
+// componentPkg is the public component contract (component/), rendered into
+// the same file: the web shares its shapes too.
+const componentPkg = "github.com/luckylhb90/bnbloc/component"
+
+// contractNames are the component contract's unions internal/wire's tstype
+// tags may name.
+var contractNames = []string{"LiveInputType", "MountFor"}
+
 func main() {
 	check := flag.Bool("check", false, "fail (exit 1) when "+output+" differs from what would be generated, instead of writing it")
 	flag.Parse()
@@ -71,7 +79,14 @@ func generate(root string) ([]byte, error) {
 		return nil, err
 	}
 	enums = append(enums, registryEnums()...)
-	pkg, err := emitPackage(filepath.Join(root, "internal", "wire"), "github.com/luckylhb90/bnbloc/internal/wire", enums.names())
+	// The component contract first (its names are the web's too), then
+	// internal/wire, which names its types.
+	contract, err := emitPackage(filepath.Join(root, "component"), componentPkg, nil)
+	if err != nil {
+		return nil, err
+	}
+	b.Write(contract)
+	pkg, err := emitPackage(filepath.Join(root, "internal", "wire"), "github.com/luckylhb90/bnbloc/internal/wire", append(enums.names(), contractNames...), componentPkg)
 	if err != nil {
 		return nil, err
 	}

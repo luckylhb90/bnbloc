@@ -243,51 +243,29 @@ sendSelection({ label: "Frame 7", detail: "walk_cycle_07: 64×64 at 448,0" });
 onUnits(async (bytes) => frames(bytes).map((f) => ({ key: f.name, label: f.name, text: f.rect })));
 ```
 
+It also exports `@bnbloc/previewer-sdk/compare` (`diffUnits`, the alignment
+the host's Compare uses), so a previewer tests its units the way the host will
+read them. A previewer built outside this repository depends on the SDK from
+it, pinned to a commit (pnpm:
+`"@bnbloc/previewer-sdk": "github:luckylhb90/bnbloc#<commit>&path:/web/previewer-sdk"`).
+
 Bundle it into a classic script (or modules) with relative URLs and an
-`index.html` without inline script. The reference previewer,
-[`examples/previewers/sprite-sheet`](../../examples/previewers/sprite-sheet),
-renders images and sprite-sheet / texture-atlas JSON with zoom, fit, grid,
-checkerboard and frame-boundary controls, live layer state and a thumbnail:
+`index.html` without inline script. The bnbloc previewers live in their own
+repository, [`luckylhb90/bnbloc-previewers`](https://github.com/luckylhb90/bnbloc-previewers)
+(docs/prd/2026-10-18-components-in-own-repos.md): the reference `sprite-sheet`
+(images and sprite-sheet / texture-atlas JSON with zoom, fit, grid,
+checkerboard, frame boundaries, live layer state and a thumbnail), the Office
+previewers `pptx`, `docx` and `xlsx` (`docs/prd/2026-10-14-office-previewers.md`)
+and the diagram previewers `mermaid` and `drawio`
+(`docs/prd/2026-10-16-diagram-previewers.md`). Their shared build makes the
+deterministic archive, the package placeholder and `NOTICES.txt` (the license
+files of every third-party package esbuild inlined; a bundled package without
+one fails the build):
 
 ```sh
-pnpm --dir web install                         # esbuild comes with the web toolchain
-node examples/previewers/sprite-sheet/build.mjs
+pnpm install && node sprite-sheet/build.mjs     # in a bnbloc-previewers checkout
 # dist/site/ (the bundle files), dist/bundle.tar, dist/bundle.tar.sha256, dist/package.json
 ```
-
-Three production previewers are built the same way, each bundling a
-third-party renderer (`docs/prd/2026-10-14-office-previewers.md`):
-[`examples/previewers/pptx`](../../examples/previewers/pptx) (PowerPoint),
-[`docx`](../../examples/previewers/docx) (Word) and
-[`xlsx`](../../examples/previewers/xlsx) (Excel):
-
-```sh
-pnpm --dir examples/previewers/pptx install --frozen-lockfile
-node examples/previewers/pptx/build.mjs
-```
-
-Two diagram previewers follow (`docs/prd/2026-10-16-diagram-previewers.md`):
-[`mermaid`](../../examples/previewers/mermaid) (`.mmd`, `.mermaid`; mermaid in
-strict mode, a syntax error shown with its line) and
-[`drawio`](../../examples/previewers/drawio) (`.drawio`, `.dio`; maxGraph over
-draw.io's own geometry, every page as a tab). Both let the member point at a
-box or an arrow (`kind: "block"`, the label and the source lines or cell id),
-and both declare `units` for Compare. In `drawio`, `src/model.ts` is the one
-reader of the file (what a cell is, the cell/page/inflate bounds, the clean
-model maxGraph draws, HTML labels through DOMPurify) and `src/shapeTable.ts`
-is draw.io's stylesheet and shape library as data: adding a shape is adding a
-row. `examples/previewers/lib/zoom.ts` is their shared zoom and fit.
-
-All builds share `examples/previewers/lib/bundle.mjs`: esbuild, the
-deterministic archive, the package placeholder, and `NOTICES.txt` with the
-license files of every third-party package esbuild inlined (a bundled
-package without one fails the build). `examples/previewers/lib/selection.ts`
-is the Office previewers' pointing: a click picks a slide, a paragraph, a
-table or a page, selected text is quoted, Escape clears; the xlsx previewer
-picks cell ranges itself (drag, shift-click, row and column headers).
-`examples/previewers/lib/ooxml.ts` reads an Office package's parts and
-paragraph text for the pptx and docx units (each previewer brings its own
-jszip); the xlsx units come from ExcelJS.
 
 ## Publishing
 

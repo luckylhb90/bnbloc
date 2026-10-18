@@ -251,6 +251,20 @@ Library).
   is pure data, installed as a package), `core/protocol` + `core/conformance`
   (Core Protocol v1 client, wire types, conformance suite), `core/pkgmeta`
   (package validation). No concrete core is compiled in.
+- `component/` — the public contract an installable component built outside
+  this module uses (the relay's session, the live view, the fence, the content
+  name rule and caps, the sandbox mounts descriptor). Standard library and
+  `core` only (`TestComponentContractIsPublic`); additive changes only.
+- **No component code here.** Every installable component (MCP tool, plugin
+  sidecar, previewer, core adapter, sandbox runtime) lives in its own
+  repository: `bnbloc-browser`, `bnbloc-media-tools`, `bnbloc-local-skills`,
+  `bnbloc-previewers`, `bnbloc-acp`
+  (`docs/prd/2026-10-18-components-in-own-repos.md`). This repository keeps
+  the platform, the host side of each contract and the contracts. A component
+  needs something from `internal/`? That is a contract: move it to
+  `component/` (or `core/`, `web/previewer-sdk`) with one owner, never copy
+  it. `TestNoComponentCodeInThePlatform` refuses a component tree or package
+  manifest coming back.
 - `deploy/` — `compose.prod.yml` (prod overlay), `Caddyfile`, `k8s/` (Helm),
   `prod/` (generated per-service + all-in-one + web Dockerfiles),
   `healthcheck/` (the static probe binary in every image), `schema.sql`.

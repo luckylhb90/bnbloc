@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/component"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/svcauth"
@@ -56,13 +57,13 @@ func TestJobLiveView(t *testing.T) {
 		return resp.StatusCode, out
 	}
 	gateway := svcauth.ServiceSubject("gateway")
-	post := func(frame wire.LiveFramePost) wire.LiveFrameReply {
+	post := func(frame component.LiveFramePost) component.LiveFrameReply {
 		t.Helper()
 		code, out := call(http.MethodPost, "/internal/v1/rooms/room-1/live/job-1", gateway, wire.LiveFrameIngest{ChannelID: "ch-1", Owner: "maya", Requester: "maya", Frame: frame})
 		if code != http.StatusOK {
 			t.Fatalf("post frame = %d %s", code, out)
 		}
-		var reply wire.LiveFrameReply
+		var reply component.LiveFrameReply
 		_ = json.Unmarshal(out, &reply)
 		return reply
 	}
@@ -71,7 +72,7 @@ func TestJobLiveView(t *testing.T) {
 		t.Fatalf("a member's frame post = %d, want 403", code)
 	}
 
-	reply := post(wire.LiveFramePost{Run: "run-1", Seq: 1, MimeType: "image/jpeg", Data: []byte("jpeg-1"), Width: 800, Height: 600, Title: "Expenses"})
+	reply := post(component.LiveFramePost{Run: "run-1", Seq: 1, MimeType: "image/jpeg", Data: []byte("jpeg-1"), Width: 800, Height: 600, Title: "Expenses"})
 	if reply.Watching || reply.Controller != "" || len(reply.Input) != 0 {
 		t.Fatalf("first reply = %+v", reply)
 	}
@@ -86,7 +87,7 @@ func TestJobLiveView(t *testing.T) {
 	}
 
 	// A member reads the newest image; watching it shows in the next reply.
-	post(wire.LiveFramePost{Run: "run-1", Seq: 2, MimeType: "image/jpeg", Data: []byte("jpeg-2"), Width: 800, Height: 600})
+	post(component.LiveFramePost{Run: "run-1", Seq: 2, MimeType: "image/jpeg", Data: []byte("jpeg-2"), Width: 800, Height: 600})
 	code, img := call(http.MethodGet, "/v1/rooms/room-1/jobs/job-1/live/frame?watch=1", "jack", nil)
 	if code != http.StatusOK || string(img) != "jpeg-2" {
 		t.Fatalf("frame = %d %q", code, img)
@@ -94,7 +95,7 @@ func TestJobLiveView(t *testing.T) {
 	if code, _ := call(http.MethodGet, "/v1/rooms/room-1/jobs/job-1/live/frame", "mallory", nil); code != http.StatusForbidden {
 		t.Fatalf("a stranger's frame = %d, want 403", code)
 	}
-	if !post(wire.LiveFramePost{}).Watching {
+	if !post(component.LiveFramePost{}).Watching {
 		t.Fatal("a watched view did not say so")
 	}
 
@@ -102,39 +103,39 @@ func TestJobLiveView(t *testing.T) {
 	if code, _ := call(http.MethodPost, "/v1/rooms/room-1/jobs/job-1/live/control", "jack", wire.LiveControlPost{Take: true}); code != http.StatusForbidden {
 		t.Fatalf("jack took control: %d", code)
 	}
-	if code, _ := call(http.MethodPost, "/v1/rooms/room-1/jobs/job-1/live/input", "maya", wire.LiveInputPost{Events: []wire.LiveInput{{Type: wire.LiveInputText, Text: "x"}}}); code != http.StatusConflict {
+	if code, _ := call(http.MethodPost, "/v1/rooms/room-1/jobs/job-1/live/input", "maya", wire.LiveInputPost{Events: []component.LiveInput{{Type: component.LiveInputText, Text: "x"}}}); code != http.StatusConflict {
 		t.Fatalf("input without control = %d, want 409", code)
 	}
 	if code, out := call(http.MethodPost, "/v1/rooms/room-1/jobs/job-1/live/control", "maya", wire.LiveControlPost{Take: true}); code != http.StatusOK || !strings.Contains(string(out), `"controller":"maya"`) {
 		t.Fatalf("maya take control = %d %s", code, out)
 	}
-	in := []wire.LiveInput{
-		{Type: wire.LiveInputMouse, Action: "down", X: 0.5, Y: 0.25},
-		{Type: wire.LiveInputText, Text: "120.50"},
-		{Type: wire.LiveInputMouse, X: 2, Y: 0.5}, // outside the frame: dropped
-		{Type: "script", Text: "alert(1)"},        // unknown: dropped
+	in := []component.LiveInput{
+		{Type: component.LiveInputMouse, Action: "down", X: 0.5, Y: 0.25},
+		{Type: component.LiveInputText, Text: "120.50"},
+		{Type: component.LiveInputMouse, X: 2, Y: 0.5}, // outside the frame: dropped
+		{Type: "script", Text: "alert(1)"},             // unknown: dropped
 	}
 	if code, _ := call(http.MethodPost, "/v1/rooms/room-1/jobs/job-1/live/input", "maya", wire.LiveInputPost{Events: in}); code != http.StatusNoContent {
 		t.Fatalf("input = %d", code)
 	}
-	reply = post(wire.LiveFramePost{})
+	reply = post(component.LiveFramePost{})
 	if reply.Controller != "maya" || len(reply.Input) != 2 || reply.Input[1].Text != "120.50" {
 		t.Fatalf("reply with input = %+v", reply)
 	}
-	if again := post(wire.LiveFramePost{}); len(again.Input) != 0 {
+	if again := post(component.LiveFramePost{}); len(again.Input) != 0 {
 		t.Fatalf("input delivered twice: %+v", again)
 	}
 
 	// Control lapses without renewal; then input is refused again.
 	now = now.Add(wire.LiveControlLapseMs*time.Millisecond + time.Second)
-	if reply := post(wire.LiveFramePost{}); reply.Controller != "" {
+	if reply := post(component.LiveFramePost{}); reply.Controller != "" {
 		t.Fatalf("control did not lapse: %+v", reply)
 	}
 	// Bringing the window forward is the owner's, without control.
-	if code, _ := call(http.MethodPost, "/v1/rooms/room-1/jobs/job-1/live/input", "maya", wire.LiveInputPost{Events: []wire.LiveInput{{Type: wire.LiveInputFocus}}}); code != http.StatusNoContent {
+	if code, _ := call(http.MethodPost, "/v1/rooms/room-1/jobs/job-1/live/input", "maya", wire.LiveInputPost{Events: []component.LiveInput{{Type: component.LiveInputFocus}}}); code != http.StatusNoContent {
 		t.Fatalf("owner focus = %d", code)
 	}
-	if code, _ := call(http.MethodPost, "/v1/rooms/room-1/jobs/job-1/live/input", "jack", wire.LiveInputPost{Events: []wire.LiveInput{{Type: wire.LiveInputFocus}}}); code != http.StatusForbidden {
+	if code, _ := call(http.MethodPost, "/v1/rooms/room-1/jobs/job-1/live/input", "jack", wire.LiveInputPost{Events: []component.LiveInput{{Type: component.LiveInputFocus}}}); code != http.StatusForbidden {
 		t.Fatalf("jack focus = %d, want 403", code)
 	}
 

@@ -50,9 +50,14 @@ extend it" references.
   its per-session bearers, the realtime dispatch route, its authority (the
   parent job's requester) and its guards.
 - [Browser component](browser-component.md) — a room agent operates web
-  pages in the owner's dedicated Chrome profile: the three tools, a step
-  (observe, decide, check, execute), checkpoints, who may run it and who
-  confirms, the browser host.
+  pages in the requester's dedicated Chrome profile: what the platform gives
+  it (the relay's facts, the decision rate, the live view, the fence); the
+  component itself is in its own repository.
+- Components live in their own repositories
+  ([PRD](../prd/2026-10-18-components-in-own-repos.md)): `bnbloc-browser`,
+  `bnbloc-media-tools`, `bnbloc-local-skills`, `bnbloc-previewers`,
+  `bnbloc-acp`. They build against the public contract package `component`
+  (and `core`, `core/pkgmeta`, `web/previewer-sdk`).
 
 ## Local Bridge
 

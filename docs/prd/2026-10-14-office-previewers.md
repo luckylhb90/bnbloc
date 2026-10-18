@@ -1,7 +1,7 @@
 # Office previewers: PowerPoint, Word, Excel (2026-10-14)
 
 Status: implemented and published to QA (2026-10-14; optin, checked in a
-room's workbench, then auto). Builds on
+room's workbench, then auto). Since 2026-10-18 the component is its own repository, `luckylhb90/bnbloc-previewers` (`docs/prd/2026-10-18-components-in-own-repos.md`). Builds on
 `docs/prd/2026-10-09-preview-workbench-and-previewer-components.md`.
 
 ## 1. Why

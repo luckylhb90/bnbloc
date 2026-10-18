@@ -3,7 +3,7 @@
 Status: M1–M6 built (2026-10-16/17); the app surfaces hardened 2026-10-17
 (the member-opened app frame may use the microphone; a share link's visitor
 frame may not — recording an anonymous visitor is an abuse surface, and the
-demo SDK answers refusal-shaped stubs).
+demo SDK answers refusal-shaped stubs). Since 2026-10-18 the component is its own repository, `luckylhb90/bnbloc-media-tools` (`docs/prd/2026-10-18-components-in-own-repos.md`).
 
 Revised 2026-10-17 (the room's draw entry): the composer gains a draw
 button beside the mic — a prompt, a shape and a count, and the drawn images

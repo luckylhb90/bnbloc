@@ -9,7 +9,7 @@ contract.
 ## The contract: `bnbloc.sandbox.mounts/v1`
 
 A component writes one file, replaced whole, in its own folder of the bridge's
-state directory:
+state directory (in Go: `component.MountsFile`, the public contract package):
 
 ```
 <BNBLOC_BRIDGE_STATE_DIR>/mounts/<component>/mounts.json

@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/luckylhb90/bnbloc/component"
 	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
@@ -29,9 +30,9 @@ func (s *Service) handleLiveFrame(w http.ResponseWriter, r *http.Request, claims
 		writeGrantErr(w, err)
 		return
 	}
-	var frame wire.LiveFramePost
+	var frame component.LiveFramePost
 	// JSON carries the image base64: a third larger than the bytes.
-	if !httpx.DecodeJSON(w, r, int64(wire.MaxLiveFrameBytes)*4/3+64<<10, &frame) {
+	if !httpx.DecodeJSON(w, r, int64(component.MaxLiveFrameBytes)*4/3+64<<10, &frame) {
 		return
 	}
 	if s.Backends.Realtime == "" {

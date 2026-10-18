@@ -157,7 +157,7 @@ super-admin installs from the Platform console or the CLI.
 |---|---|
 | **Core** | Connects an agent runtime (manifest or Core Protocol v1 daemon). |
 | **Plugin** | A desktop-supervised sidecar that reacts to room events and notifications. |
-| **Previewer** | A viewer for a file type, sandboxed in an iframe ([guide](docs/architecture/previewer-components.md), [example](examples/previewers/sprite-sheet)). |
+| **Previewer** | A viewer for a file type, sandboxed in an iframe ([guide](docs/architecture/previewer-components.md), [examples](https://github.com/luckylhb90/bnbloc-previewers)). |
 | **Sandbox** | An isolation runtime implementing the [Sandbox Protocol](docs/architecture/sandbox-protocol.md), such as a local microVM. |
 | **Notifier** | Delivers notifications to your chat or alerting system ([docs](docs/notifications.md)). |
 | **Auth provider** | Plugs in an enterprise identity provider. |

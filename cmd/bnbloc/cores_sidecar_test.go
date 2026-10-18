@@ -192,8 +192,23 @@ func TestPublishPackageUploadsBinariesAndPinsThem(t *testing.T) {
 		t.Fatal(err)
 	}
 	gw := newPublishGateway(t)
-	bin := writeTemp(t, "local-skills", "binary")
-	pkgFile := filepath.Join("..", "..", "packages", "local-skills", "package.json")
+	bin := writeTemp(t, "skills", "binary")
+	pkgFile := writeTemp(t, "package.json", `{
+  "kind": "bnbloc.plugin.package/v1",
+  "contract": "bnbloc.plugin.contract/v1",
+  "name": "skills",
+  "version": "0.1.0",
+  "publisher": "acme",
+  "runtime": "sidecar",
+  "capabilities": ["skills-provider", "sandbox-mounts"],
+  "sidecar": {
+    "localUrl": "http://127.0.0.1:7192",
+    "listenEnv": "SKILLS_LISTEN_ADDR",
+    "tokenEnv": "SKILLS_TOKEN",
+    "mountsEnv": "SKILLS_MOUNTS_FILE",
+    "mountRootEnv": "SKILLS_MOUNT_ROOT"
+  }
+}`)
 	if err := componentsPublishPackage([]string{"--gateway", gw.URL, "--token", "admin", "--package", pkgFile, "--binary", "darwin-arm64=" + bin, "--rollout", "optin"}); err != nil {
 		t.Fatal(err)
 	}

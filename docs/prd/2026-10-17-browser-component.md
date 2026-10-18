@@ -5,7 +5,10 @@ Status: slice 1 built (2026-10-17): `cmd/bnbloc-browser`,
 (§3.5); a non-owner's request is `needs_human` until slice 3 runs it on
 the requester's machine. How it works:
 `docs/architecture/browser-component.md`. Slices 2 and 3 built
-(2026-10-18); slice 4 is next. Decided with the product owner: the
+(2026-10-18); slice 4 is next. Since 2026-10-18 the component is its own
+repository, `luckylhb90/bnbloc-browser`
+(`docs/prd/2026-10-18-components-in-own-repos.md`); the paths below under
+`cmd/bnbloc-browser` are that repository's root. Decided with the product owner: the
 browser is a dedicated, visible Chrome profile on the member's machine;
 an irreversible step is confirmed in conversation, with quick replies as
 a shortcut on the same path; the agent supplies every typed value; live

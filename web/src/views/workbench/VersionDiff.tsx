@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
-import { changeCounts, type UnitChange } from "@/lib/compareUnits";
-import { diffLines } from "@/lib/diff";
+import { changeCounts, type UnitChange } from "../../../previewer-sdk/src/compare.ts";
+import { diffLines } from "../../../previewer-sdk/src/diff.ts";
 import { cn } from "@/lib/cn";
 
 // The units view of Compare (docs/prd/2026-10-14-file-prompts-and-compare.md

@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/luckylhb90/bnbloc/component"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
@@ -48,13 +49,13 @@ type liveJob struct {
 	channel    string
 	owner      string
 	requester  string
-	frame      wire.LiveFramePost
+	frame      component.LiveFramePost
 	atMs       int64
 	posted     time.Time
 	watchedTo  time.Time
 	controller string
 	controlTo  time.Time
-	input      []wire.LiveInput
+	input      []component.LiveInput
 }
 
 // liveStore holds every live job of the rooms this replica owns.
@@ -92,7 +93,7 @@ func (s *Service) handleInternalLiveFrame(w http.ResponseWriter, r *http.Request
 	}
 	jobID := strings.TrimSpace(r.PathValue("jobId"))
 	var in wire.LiveFrameIngest
-	if !httpx.DecodeJSON(w, r, maxInternalPublishBytes+wire.MaxLiveFrameBytes, &in) {
+	if !httpx.DecodeJSON(w, r, maxInternalPublishBytes+component.MaxLiveFrameBytes, &in) {
 		return
 	}
 	if jobID == "" || in.Owner == "" {
@@ -100,7 +101,7 @@ func (s *Service) handleInternalLiveFrame(w http.ResponseWriter, r *http.Request
 		return
 	}
 	f := in.Frame
-	if len(f.Data) > wire.MaxLiveFrameBytes || f.Width < 0 || f.Height < 0 || f.Width > wire.MaxLiveFrameSide || f.Height > wire.MaxLiveFrameSide {
+	if len(f.Data) > component.MaxLiveFrameBytes || f.Width < 0 || f.Height < 0 || f.Width > component.MaxLiveFrameSide || f.Height > component.MaxLiveFrameSide {
 		httpx.Error(w, "frame too large", http.StatusRequestEntityTooLarge)
 		return
 	}
@@ -108,7 +109,7 @@ func (s *Service) handleInternalLiveFrame(w http.ResponseWriter, r *http.Request
 		httpx.Error(w, "frame must be a jpeg, png or webp image", http.StatusBadRequest)
 		return
 	}
-	f.Title, f.URL = cutRunes(f.Title, wire.MaxLiveTitle), cutRunes(f.URL, wire.MaxLiveTitle)
+	f.Title, f.URL = cutRunes(f.Title, component.MaxLiveTitle), cutRunes(f.URL, component.MaxLiveTitle)
 	now := s.now()
 	l := s.live()
 	l.mu.Lock()
@@ -122,7 +123,7 @@ func (s *Service) handleInternalLiveFrame(w http.ResponseWriter, r *http.Request
 	if fresh {
 		j.frame, j.atMs = f, now.UnixMilli()
 	}
-	reply := wire.LiveFrameReply{Watching: now.Before(j.watchedTo), Controller: j.controllerLocked(now), Input: j.input}
+	reply := component.LiveFrameReply{Watching: now.Before(j.watchedTo), Controller: j.controllerLocked(now), Input: j.input}
 	j.input = nil
 	event := wire.JobLiveFrame{JobID: jobID, Run: j.frame.Run, Seq: j.frame.Seq, Width: j.frame.Width, Height: j.frame.Height,
 		Title: j.frame.Title, URL: j.frame.URL, Owner: j.owner, Controller: reply.Controller, AtMs: j.atMs}
@@ -254,9 +255,9 @@ func (s *Service) handleLiveInput(w http.ResponseWriter, r *http.Request) {
 // member needs the owner's control grant (§2.6), which does not exist yet.
 func mayControl(j *liveJob, userID string) bool { return userID == j.owner }
 
-func focusOnly(events []wire.LiveInput) bool {
+func focusOnly(events []component.LiveInput) bool {
 	for _, e := range events {
-		if e.Type != wire.LiveInputFocus {
+		if e.Type != component.LiveInputFocus {
 			return false
 		}
 	}
@@ -265,11 +266,11 @@ func focusOnly(events []wire.LiveInput) bool {
 
 // liveInput keeps the known kinds, coordinates inside the frame, and short
 // text.
-func liveInput(in []wire.LiveInput) []wire.LiveInput {
-	out := make([]wire.LiveInput, 0, len(in))
+func liveInput(in []component.LiveInput) []component.LiveInput {
+	out := make([]component.LiveInput, 0, len(in))
 	for _, e := range in {
 		switch e.Type {
-		case wire.LiveInputMouse, wire.LiveInputWheel, wire.LiveInputKey, wire.LiveInputText, wire.LiveInputFocus:
+		case component.LiveInputMouse, component.LiveInputWheel, component.LiveInputKey, component.LiveInputText, component.LiveInputFocus:
 		default:
 			continue
 		}

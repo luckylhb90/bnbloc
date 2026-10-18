@@ -149,7 +149,7 @@ agent 接到你的房间里。想让同事不装任何东西就能试？在 Plat
 |---|---|
 | **核心（Core）** | 接入一个 agent 运行时（JSON 配置或 Core Protocol v1 守护进程）。 |
 | **插件（Plugin）** | 由桌面端托管的 sidecar，响应房间事件和通知。 |
-| **预览器（Previewer）** | 某种文件类型的查看器，运行在沙箱 iframe 里（[指南](docs/architecture/previewer-components.md)、[示例](examples/previewers/sprite-sheet)）。 |
+| **预览器（Previewer）** | 某种文件类型的查看器，运行在沙箱 iframe 里（[指南](docs/architecture/previewer-components.md)、[示例](https://github.com/luckylhb90/bnbloc-previewers)）。 |
 | **沙箱（Sandbox）** | 实现 [Sandbox Protocol](docs/architecture/sandbox-protocol.md) 的隔离运行时，比如本地微型虚拟机。 |
 | **通知器（Notifier）** | 把通知投递到你的聊天或告警系统（[文档](docs/notifications.md)）。 |
 | **身份提供方（Auth provider）** | 接入企业身份系统。 |

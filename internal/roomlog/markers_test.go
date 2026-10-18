@@ -71,6 +71,11 @@ func TestLiveGolden(t *testing.T) {
 // twice, and only read_artifact fenced what others wrote).
 func TestModelTextMarkersSingleOwner(t *testing.T) {
 	const owner = "internal/roomlog/markers.go"
+	// The fence itself is the component contract's (component.Fence, which
+	// Fence renders through), so a tool outside this repository fences the
+	// same way: that file spells the fence and nothing else.
+	const fenceOwner = "component/fence.go"
+	fence := map[string]bool{`untrusted-content`: true, `(^|[^<])<<<[^<]`: true}
 	forbidden := []*regexp.Regexp{
 		regexp.MustCompile(`RECORDS`),
 		regexp.MustCompile(`untrusted-content`),
@@ -84,6 +89,9 @@ func TestModelTextMarkersSingleOwner(t *testing.T) {
 		}
 		for _, lit := range stringLiterals(src) {
 			for _, re := range forbidden {
+				if rel == fenceOwner && fence[re.String()] {
+					continue
+				}
 				if m := re.FindString(lit); m != "" {
 					t.Errorf("%s spells %q in a string: render model-facing scaffolding through roomlog (RecordsHeader, Fence, Line, the [now] marker in %s; guidance in guidance.tmpl)", rel, m, owner)
 				}

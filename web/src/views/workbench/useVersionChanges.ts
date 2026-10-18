@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { diffUnits, type UnitChange } from "@/lib/compareUnits";
+import { diffUnits, type UnitChange } from "../../../previewer-sdk/src/compare.ts";
 import { errorText } from "@/lib/errors";
 import type { Artifact, ArtifactDetail } from "@/lib/wire.gen";
 import "@/views/artifact/compare/builtin";

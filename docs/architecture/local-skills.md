@@ -19,7 +19,7 @@ component that speaks the same two contracts. Design record and review:
  desktop (Rust, internal_ext/skills_provider.rs)
         │  loopback HTTP + per-launch bearer              bnbloc.skills.provider/v1
         ▼
- plugin sidecar  (cmd/bnbloc-local-skills, internal/localskills)
+ plugin sidecar  (luckylhb90/bnbloc-local-skills)
         │  copies the ticked skills into  <workspaces root>/.mounts/<plugin>/
         │  writes  <member>/bridge/mounts/<plugin>/mounts.json   bnbloc.sandbox.mounts/v1
         ▼
@@ -59,7 +59,7 @@ changes".
   `agentDirs` added to the policy's, per-skill `{vm, borrowers, published}`, and
   an optional `policyFile`. Borrowers are only ever skills also ticked for the
   member's own sandbox.
-- **Policy** (`internal/localskills/policy.default.json`, data, merged with the
+- **Policy** (`localskills/policy.default.json` in the component, data, merged with the
   member's own file): which agent folders exist, which files a skill never
   carries (credentials, `.git`, …), size and count limits, how deep a source is
   searched. A skill that holds a credential file, a link out of its folder or
@@ -94,13 +94,19 @@ sweeps its descriptor (its mounts vanish from the next turn), data dir and
 copies.
 
 The component reads `BNBLOC_LOCAL_SKILLS_LISTEN_ADDR`, `_TOKEN`, `_DATA_DIR`,
-`_MOUNTS_FILE`, `_MOUNT_ROOT` and `_SUPERVISED` (`packages/local-skills/package.json`).
+`_MOUNTS_FILE`, `_MOUNT_ROOT` and `_SUPERVISED` (its `package.json`).
 
 ## Installing it
 
+The component lives in its own repository,
+[`luckylhb90/bnbloc-local-skills`](https://github.com/luckylhb90/bnbloc-local-skills)
+(docs/prd/2026-10-18-components-in-own-repos.md); it builds against the public
+contract package `component` (the mounts descriptor, the skill name rule and
+frontmatter, the library's bundle caps). From its checkout:
+
 ```sh
-go build -o dist/bnbloc-local-skills-darwin-arm64 ./cmd/bnbloc-local-skills   # GOOS/GOARCH per platform
-bnbloc components publish-package --package packages/local-skills/package.json \
+go build -o dist/bnbloc-local-skills-darwin-arm64 .   # GOOS/GOARCH per platform
+bnbloc components publish-package --package package.json \
   --binary darwin-arm64=dist/bnbloc-local-skills-darwin-arm64 --rollout optin
 ```
 

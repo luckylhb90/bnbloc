@@ -15,7 +15,7 @@ import (
 // signs it and installs it. The file is the package without `artifacts`; the
 // flags of publish-sidecar are the same for the signing and the rollout.
 //
-//	bnbloc components publish-package --package packages/local-skills/package.json \
+//	bnbloc components publish-package --package package.json \
 //	    --binary darwin-arm64=dist/bnbloc-local-skills-darwin-arm64 --rollout optin
 //
 // A file the sidecar needs beside its executable (sidecar.files) is a

@@ -27,6 +27,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/luckylhb90/bnbloc/component"
 	"github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/internal/digest"
 )
@@ -47,7 +48,7 @@ var SiteLimits = Limits{MaxBytes: 64 << 20, MaxFiles: 2000}
 // ContentLimits are the content component bundle caps (experts and skill
 // packs, docs/prd/2026-10-12-experts-and-teams.md): mostly text, with room
 // for a skill's scripts and reference files.
-var ContentLimits = Limits{MaxBytes: 8 << 20, MaxFiles: 512}
+var ContentLimits = Limits{MaxBytes: component.ContentMaxBytes, MaxFiles: component.ContentMaxFiles}
 
 // SiteMIME is the media type of a site snapshot version's blob (a bundle
 // within SiteLimits).

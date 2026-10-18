@@ -76,3 +76,31 @@ func TestRegistryUnionNeedsFieldAndConstants(t *testing.T) {
 		}
 	}
 }
+
+// A sibling package's types (one rendered earlier into the same output) are
+// named, never inlined, so the web has one interface per Go type.
+func TestSiblingTypesAreNamed(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com\n\ngo 1.24\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for dir, src := range map[string]string{
+		"a": "package a\ntype Shared struct {\n\tN string `json:\"n\"`\n}\n",
+		"b": "package b\nimport \"example.com/a\"\ntype Uses struct {\n\tS a.Shared `json:\"s\"`\n\tL []a.Shared `json:\"l\"`\n}\n",
+	} {
+		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, dir, dir+".go"), []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Chdir(root)
+	got, err := emitPackage("b", "example.com/b", nil, "example.com/a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(got, []byte("  s: Shared;")) || !bytes.Contains(got, []byte("  l: Shared[];")) {
+		t.Errorf("a sibling's type is named:\n%s", got)
+	}
+}

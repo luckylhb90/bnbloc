@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/component"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
@@ -25,7 +26,7 @@ func TestLiveFrameUnderJobGrant(t *testing.T) {
 		t.Fatal(err)
 	}
 	bridge := "Authorization: Bearer " + e.session("maya")
-	frame := wire.LiveFramePost{Run: "run-1", Seq: 1, MimeType: "image/jpeg", Data: []byte("jpeg-bytes"), Width: 800, Height: 600, Title: "Expenses"}
+	frame := component.LiveFramePost{Run: "run-1", Seq: 1, MimeType: "image/jpeg", Data: []byte("jpeg-bytes"), Width: 800, Height: 600, Title: "Expenses"}
 
 	// No grant, or another member's bridge: refused.
 	if r := e.call(http.MethodPost, "/v1/live", frame, bridge); r.status != http.StatusBadRequest {
@@ -45,11 +46,11 @@ func TestLiveFrameUnderJobGrant(t *testing.T) {
 	if r := e.call(http.MethodPost, "/v1/rooms/"+e.roomID+"/jobs/job-1/live/control", wire.LiveControlPost{Take: true}, owner); r.status != http.StatusOK {
 		t.Fatalf("take control = %d %s", r.status, r.body)
 	}
-	if r := e.call(http.MethodPost, "/v1/rooms/"+e.roomID+"/jobs/job-1/live/input", wire.LiveInputPost{Events: []wire.LiveInput{{Type: wire.LiveInputText, Text: "hello"}}}, owner); r.status != http.StatusNoContent {
+	if r := e.call(http.MethodPost, "/v1/rooms/"+e.roomID+"/jobs/job-1/live/input", wire.LiveInputPost{Events: []component.LiveInput{{Type: component.LiveInputText, Text: "hello"}}}, owner); r.status != http.StatusNoContent {
 		t.Fatalf("input = %d %s", r.status, r.body)
 	}
-	r := e.call(http.MethodPost, "/v1/live?room="+e.roomID+"&job=job-1", wire.LiveFramePost{}, bridge)
-	var reply wire.LiveFrameReply
+	r := e.call(http.MethodPost, "/v1/live?room="+e.roomID+"&job=job-1", component.LiveFramePost{}, bridge)
+	var reply component.LiveFrameReply
 	if r.status != http.StatusOK || json.Unmarshal(r.body, &reply) != nil || reply.Controller != "maya" || len(reply.Input) != 1 || reply.Input[0].Text != "hello" {
 		t.Fatalf("reply = %d %s", r.status, r.body)
 	}

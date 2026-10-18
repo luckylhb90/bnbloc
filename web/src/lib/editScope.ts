@@ -8,7 +8,7 @@
 //     inserting next to the selection is how "expand this" works.
 // Pure, unit-tested under node.
 
-import type { UnitChange } from "./compareUnits.ts";
+import type { UnitChange } from "../../previewer-sdk/src/compare.ts";
 
 export interface EditSelection {
   readonly detail?: string;

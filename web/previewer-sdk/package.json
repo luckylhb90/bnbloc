@@ -6,6 +6,10 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./protocol": "./src/protocol.ts"
+    "./protocol": "./src/protocol.ts",
+    "./cover": "./src/cover.ts",
+    "./pointing": "./src/pointing.ts",
+    "./compare": "./src/compare.ts",
+    "./diff": "./src/diff.ts"
   }
 }

@@ -2,7 +2,7 @@
 // its address ("B3"), labelled with its column header when the first row
 // reads as one ("B3 · Q2"). Pure, unit-tested under node.
 
-import type { CompareUnit } from "../../../lib/compareUnits.ts";
+import type { CompareUnit } from "../../../../previewer-sdk/src/compare.ts";
 import { detectDelimiter, parseDelimited } from "../tableData.ts";
 
 /** 1 → "A", 27 → "AA". */

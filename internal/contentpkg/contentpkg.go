@@ -18,6 +18,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/luckylhb90/bnbloc/component"
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
 	"github.com/luckylhb90/bnbloc/internal/tarbundle"
 	"github.com/luckylhb90/bnbloc/internal/wire"
@@ -48,7 +49,7 @@ const (
 
 // Text bounds of the envelope.
 const (
-	maxName         = 63
+	maxName         = component.MaxNameLen
 	maxDisplayName  = 120
 	maxDescription  = 1000
 	maxCategory     = 40
@@ -66,15 +67,15 @@ const (
 )
 
 var (
-	nameRE = regexp.MustCompile(fmt.Sprintf(`^[a-z0-9][a-z0-9-]{0,%d}$`, maxName-1))
 	tagRE  = regexp.MustCompile(wire.ContentTagPattern)
 	hostRE = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*(:[0-9]{1,5})?$`)
 )
 
 // ValidName reports whether s is a valid component or skill name: lower-case
 // letters, digits and hyphens, starting with a letter or digit, at most
-// maxName.
-func ValidName(s string) bool { return nameRE.MatchString(s) }
+// maxName (component.ValidName, the rule a component outside this
+// repository checks too).
+func ValidName(s string) bool { return component.ValidName(s) }
 
 // Manifest is component.json, the envelope shared by every content kind
 // plus the kind-specific fields (each kind's validator refuses the fields
