@@ -62,8 +62,11 @@ argv, environment and prompt reproduced it.
 
 Evidence: the desktop core's fix of 2026-10-14 (the prompt goes on stdin);
 `bnbloc smoke --agent <core>/<provider>` reproduced it where manual runs
-did not.
-Seen 1× (2026-10-14).
+did not. On 2026-10-19 a browser component's restart was tested from an
+unconfined test process only; the real calls ran inside the agent's sandbox,
+which could not write the browser's profile, and the member's browser was
+closed and never came back (docs/bugs/2026-10-19-browser-closed-from-the-sandbox.md).
+Seen 2× (2026-10-14, 2026-10-19).
 
 ### What an agent cannot see in this turn, it cannot act on: let a tool take what the agent has
 
@@ -87,8 +90,11 @@ returns is read as how to proceed: review them with the tool's parameters,
 in the same change.
 
 Evidence: docs/bugs/2026-10-14-work-save-misses-new-files.md (follow-up);
-commit 349926c7.
-Seen 1× (2026-10-14).
+commit 349926c7. On 2026-10-19 a browser tool refused a click on a control
+hidden under a fixed bar with "the page changed", so the agent re-read the
+page and tried the same click again
+(docs/bugs/2026-10-19-covered-control-reported-as-changed-page.md).
+Seen 2× (2026-10-14, 2026-10-19).
 
 ### Write public text with neutral names from the first draft, not at push time
 
@@ -297,8 +303,12 @@ component.
 
 Evidence: bridge commits aca462fc, 034e273d, f9347809, 0fc730a4 and their
 removal 2c7f511c; docs/architecture/core-providers.md (c3381b26); 031265d7,
-7497cecc.
-Seen 1× (2026-10-16).
+7497cecc. On 2026-10-19 a page that shrank in a background window got a
+recovery (a one-pixel resize) in browser 0.5.5 while its cause was written
+down as unknown; the cause, two scaled captures restoring each other's size,
+was found that evening and fixed in 0.6.1
+(docs/bugs/2026-10-19-run-window-page-shrinks.md).
+Seen 2× (2026-10-16, 2026-10-19).
 
 ### Report what happened, not what was attempted
 
@@ -444,9 +454,14 @@ Seen 1× (2026-10-16).
   tasks; 2026-10-14 a mirror cap below the attachment cap; 2026-10-16 an 8 MiB
   cap refused a skill folder the member needed to sync). Promoted 2026-10-17
   → `docs/design-review.md`, lens 3 (a cap below a promise made one layer up).
+  Recurred 2026-10-19: the room relay forwarded on a 20 s client, so a
+  relayed image or video call was cut at 20 s (fixed in e0c66127).
 - **Prove an upgrade keeps what is in use: the same session, its files, its
   conversation and its tools, on a live session before and after.** Seen 3×
   (2026-10-13 workspace bindings lost; 2026-10-14 room tools lost on
   restore; 2026-10-16 new guidance and tools never reached kept sessions,
   proven only on new ones). Promoted 2026-10-17 → AGENTS.md "Releases" (a
   change to what an agent is told or given is proven on a resumed session).
+  Recurred 2026-10-19: a tool named by its versioned binary changed every
+  session's binding on each release and restarted the conversations using it
+  (docs/bugs/2026-10-19-tool-update-resets-sessions.md; lens 2 now asks).
