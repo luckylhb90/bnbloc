@@ -117,7 +117,7 @@ func (s *Service) serveAppAIImage(w http.ResponseWriter, r *http.Request, c appC
 		writeAppErr(w, errAppAIVisitor)
 		return
 	}
-	place := &imagePlace{RoomID: c.scope.RoomID, Summary: "drawn in an app"}
+	place := &mediaPlace{RoomID: c.scope.RoomID, Summary: "drawn in an app"}
 	s.runMediaImage(w, r, contentActor{Claims: auth.Claims{Subject: c.scope.Participant, Tenant: c.tenant}}, place, readJSONMediaImage, "app:"+c.scope.AppID+":image")
 }
 

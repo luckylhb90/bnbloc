@@ -1,6 +1,7 @@
 // Package media is the one owner of the media model calls
-// (docs/prd/2026-10-16-voice-and-image-generation.md): speech-to-text and
-// image generation through admin-configured providers. Nothing here names
+// (docs/prd/2026-10-16-voice-and-image-generation.md,
+// docs/prd/2026-10-19-video-generation.md): speech-to-text, image and video
+// generation through admin-configured providers. Nothing here names
 // a vendor or hardcodes a deployment's model catalog: a provider is a
 // platform setting (base URL, model, sealed key) whose `kind` selects a
 // wire protocol adapter from the registry, and whose `params` are the
@@ -9,7 +10,7 @@
 //
 // The shared endpoint-setting rules (base URL, model, sealed key, the
 // platform/organization split) are internal/modelsettings'; this package
-// adds the adapter registry and the two calls. Every outbound request goes
+// adds the adapter registry and the calls. Every outbound request goes
 // through the guarded client of the stored provider (extgov.NetGuard: only
 // the configured host, no redirects, no link-local or metadata address).
 package media
@@ -22,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/internal/extgov"
 	"github.com/luckylhb90/bnbloc/internal/modelsettings"
 	"github.com/luckylhb90/bnbloc/internal/sealbox"
@@ -37,18 +39,22 @@ const (
 	CapTranscribe Capability = "transcribe"
 	// CapImage: text to image.
 	CapImage Capability = "image"
+	// CapVideo: text to video, asynchronous (the provider renders it; the
+	// caller polls its id).
+	CapVideo Capability = "video"
 )
 
 // Capabilities is the capability list, in a stable order.
-var Capabilities = []Capability{CapTranscribe, CapImage}
+var Capabilities = []Capability{CapTranscribe, CapImage, CapVideo}
 
 // settingKey is the platform setting holding a capability's provider; an
 // organization's own is settingKey + "/" + its tenant id (M6).
 const settingKey = "media."
 
 // AdapterKindOpenAICompatible is the `kind` of the OpenAI-compatible wire
-// family: POST {base}/audio/transcriptions (multipart) and POST
-// {base}/images/generations (JSON).
+// family: POST {base}/audio/transcriptions (multipart), POST
+// {base}/images/generations (JSON) and POST {base}/videos (JSON, then
+// polled).
 const AdapterKindOpenAICompatible = "openai-compatible"
 
 // How a provider is authenticated (the stored row's own "auth" field).
@@ -63,6 +69,10 @@ const (
 
 // ErrProviderUnreachable: the provider did not answer or answered garbage.
 var ErrProviderUnreachable = errors.New("the media provider could not be reached")
+
+// ErrTooLarge: the provider's file is larger than the caller may take (a
+// video over the room's file cap). The error's text says both sizes.
+var ErrTooLarge = errors.New("the file is too large")
 
 // ProviderError is a provider's refusal: its HTTP status and its own
 // message (bounded), so the caller can surface why it refused.
@@ -91,6 +101,17 @@ type Adapter interface {
 	// Generate draws (or, with Input set, edits) images in one provider call
 	// (Serves(CapImage) adapters): Count images, 1…MaxMediaImages.
 	Generate(ctx context.Context, p Provider, req ImageRequest) ([]Image, error)
+	// SubmitVideo starts one video (Serves(CapVideo) adapters) and answers
+	// at once: the provider's id names it from then on.
+	SubmitVideo(ctx context.Context, p Provider, req VideoRequest) (VideoStatus, error)
+	// VideoStatus answers a submitted video's state.
+	VideoStatus(ctx context.Context, p Provider, id string) (VideoStatus, error)
+	// VideoContent reads a done video's file, at most max bytes (ErrTooLarge
+	// beyond): its bytes and MIME type.
+	VideoContent(ctx context.Context, p Provider, id string, max int64) ([]byte, string, error)
+	// ListModels lists the provider's model ids: a cheap call that bills
+	// nothing (a video provider's test).
+	ListModels(ctx context.Context, p Provider) ([]string, error)
 }
 
 // adapters is the registry: every wire protocol family the platform can
@@ -165,6 +186,49 @@ type ImageInput struct {
 	Bytes    []byte
 	MimeType string
 }
+
+// VideoRequest is one video ask: Prompt filmed by Model (one of the
+// provider's Models; the first is the default), Seconds long (0 = the
+// provider's default), at Aspect (wire.MediaVideoAspect*).
+type VideoRequest struct {
+	Prompt  string
+	Model   string
+	Seconds int
+	Aspect  string
+}
+
+// VideoStatus is a video as the provider reports it: its id, its State
+// (wire.MediaVideoRendering, Done or Failed), the model filming it, and
+// the provider's reason when it failed (bounded).
+type VideoStatus struct {
+	ID    string
+	State string
+	Model string
+	Error string
+}
+
+// ValidVideoID reports an id a caller may name: the provider's own, one
+// path segment of URL-safe characters (base64url and its padding included),
+// never a dot segment (core.CleanRelPath). It is sent to the provider
+// path-escaped as well.
+func ValidVideoID(id string) bool {
+	if clean, ok := core.CleanRelPath(id); !ok || clean != id || len(id) > maxVideoID {
+		return false
+	}
+	for i := 0; i < len(id); i++ {
+		c := id[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		case strings.IndexByte("-_.~:=+", c) >= 0:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// maxVideoID bounds a video id (a proxy may encode its route into it).
+const maxVideoID = 512
 
 // Image is one generated image: the bytes, sniffed MIME type and the
 // provider's revised prompt (data the provider wrote).
@@ -398,4 +462,37 @@ func (p Provider) Generate(ctx context.Context, req ImageRequest) ([]Image, erro
 		return nil, ErrProviderUnreachable
 	}
 	return p.adapter.Generate(ctx, p, req)
+}
+
+// SubmitVideo starts one video through the capability's provider.
+func (p Provider) SubmitVideo(ctx context.Context, req VideoRequest) (VideoStatus, error) {
+	if p.adapter == nil || !p.adapter.Serves(CapVideo) {
+		return VideoStatus{}, ErrProviderUnreachable
+	}
+	return p.adapter.SubmitVideo(ctx, p, req)
+}
+
+// VideoStatus answers a submitted video's state (an id ValidVideoID
+// refuses never reaches the provider).
+func (p Provider) VideoStatus(ctx context.Context, id string) (VideoStatus, error) {
+	if p.adapter == nil || !p.adapter.Serves(CapVideo) || !ValidVideoID(id) {
+		return VideoStatus{}, ErrProviderUnreachable
+	}
+	return p.adapter.VideoStatus(ctx, p, id)
+}
+
+// VideoContent reads a done video's file, at most max bytes.
+func (p Provider) VideoContent(ctx context.Context, id string, max int64) ([]byte, string, error) {
+	if p.adapter == nil || !p.adapter.Serves(CapVideo) || !ValidVideoID(id) {
+		return nil, "", ErrProviderUnreachable
+	}
+	return p.adapter.VideoContent(ctx, p, id, max)
+}
+
+// ListModels lists the provider's model ids.
+func (p Provider) ListModels(ctx context.Context) ([]string, error) {
+	if p.adapter == nil {
+		return nil, ErrProviderUnreachable
+	}
+	return p.adapter.ListModels(ctx, p)
 }

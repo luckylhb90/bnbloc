@@ -31,7 +31,7 @@ const (
 	// web reads them here to say why before it sends.
 	MaxMediaAudioBytes      = 20 << 20 // one transcription's uploaded audio
 	MaxMediaTranscriptChars = 32_768   // a transcript's characters
-	MaxMediaImagePrompt     = 4000     // a generation's prompt, in characters
+	MaxMediaPrompt          = 4000     // a generation's prompt (an image's or a video's), in characters
 	MaxMediaImageReplyBytes = 16 << 20 // read of one generation's reply body
 	MaxMediaImageBytes      = 12 << 20 // one generated image, decoded
 	MaxMediaImages          = 4        // images one generation call may draw

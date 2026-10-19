@@ -12,8 +12,9 @@ import { useToast } from "@/ui/Toast";
 
 // PlatformMediaProviders is the platform console's "Media providers" card
 // (docs/prd/2026-10-16-voice-and-image-generation.md §2): one provider per
-// capability — transcribe (speech to text in the composer, app.ai.voice)
-// and image (agents' generate_image, app.ai.image). A provider is a wire
+// capability — transcribe (speech to text in the composer, app.ai.voice),
+// image (agents' generate_image, app.ai.image) and video (agents'
+// generate_video, docs/prd/2026-10-19-video-generation.md). A provider is a wire
 // protocol family (kind), the endpoint, the model and a sealed key, with
 // the adapter's own knobs as params. Test makes one real short call.
 
@@ -80,7 +81,7 @@ function ProviderFields({ id, api, kinds, label, hint, modelsPlaceholder }: {
     try {
       const params: Record<string, string> = {};
       for (const [k, v] of Object.entries(saved.params ?? {})) {
-        if (k !== "image.size.square" && k !== "image.size.landscape" && k !== "image.size.portrait" && !k.startsWith("transcribe.")) continue;
+        if (k !== "image.size.square" && k !== "image.size.landscape" && k !== "image.size.portrait" && !k.startsWith("video.size.") && !k.startsWith("transcribe.")) continue;
         if (v) params[k] = v;
       }
       const modelList = orgHostList(models);
@@ -213,7 +214,7 @@ export function PlatformMediaProviders() {
       <div>
         <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--color-fg)]">Media providers</h2>
         <p className="mt-1 text-sm text-[var(--color-fg-muted)]">
-          The models behind voice input in the composer (speech to text), image generation in rooms and apps, and decisions (calibrated answers for routing and triage). Any provider whose API follows one of the wire protocol families below.
+          The models behind voice input in the composer (speech to text), image and video generation in rooms and apps, and decisions (calibrated answers for routing and triage). Any provider whose API follows one of the wire protocol families below.
         </p>
       </div>
       <ProviderFields
@@ -231,6 +232,14 @@ export function PlatformMediaProviders() {
         label="Image generation"
         hint="Agents' generate_image and app.ai.image draw here; the image lands in the room's Docs."
         modelsPlaceholder="image-model-a, image-model-b"
+      />
+      <ProviderFields
+        id="video"
+        api={mediaProviderApi("video")}
+        kinds={MEDIA_ADAPTER_KINDS}
+        label="Video generation"
+        hint="Agents' generate_video films here; the video lands in the room's Docs. Test reads the provider's model list (it never films: a video bills)."
+        modelsPlaceholder="video-model-a, video-model-b"
       />
       <ProviderFields
         id="decide"

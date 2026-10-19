@@ -15,12 +15,15 @@ type ContentMCPRequirement struct {
 // through the bridge's room relay ("METHOD /path"; pkgmeta.MCPCredentialsRoom):
 // each admits a job grant (?room=&job=) and acts as the job's requester. A
 // route joins the list only with that admission; the relay refuses the
-// rest. The relay's own answer about the turn is component.RelaySession.
+// rest. A {name} segment matches one path segment (a video's id). The
+// relay's own answer about the turn is component.RelaySession.
 var RoomRelayRoutes = []string{
 	"POST /v1/decisions",
 	"POST /v1/systemone",
 	"POST /v1/media/image",
 	"POST /v1/media/transcriptions",
+	"POST /v1/media/video",
+	"GET /v1/media/video/{id}",
 	"POST /v1/live",
 }
 

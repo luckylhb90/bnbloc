@@ -111,7 +111,7 @@ func (g roomToolsGateway) Do(ctx context.Context, method, path string, body any)
 			header.Set("Content-Type", rb.ContentType)
 			data = bytes.NewReader(rb.Data)
 		}
-		raw, _, err = g.b.send(ctx, g.b.http, method, g.b.cfg.GatewayBaseURL+path, g.b.gatewayAuth(ctx), header, data)
+		raw, _, err = g.b.send(ctx, g.client(rb), method, g.b.cfg.GatewayBaseURL+path, g.b.gatewayAuth(ctx), header, data)
 	} else {
 		raw, err = g.b.do(ctx, method, g.b.cfg.GatewayBaseURL+path, g.b.gatewayAuth(ctx), body)
 	}
@@ -120,6 +120,18 @@ func (g roomToolsGateway) Do(ctx context.Context, method, path string, body any)
 		return nil, &roomtools.StatusError{Status: ge.Status, Body: ge.Body}
 	}
 	return raw, err
+}
+
+// client is the HTTP client a call goes on: a room relay's call on the
+// bridge's client without a total timeout, so it lasts as long as the tool
+// call that made it (ctx; docs/prd/2026-10-19-video-generation.md §2.4:
+// an image or a video's publish may take longer than any fixed limit),
+// every other room tool's on the bridge's short-call client.
+func (g roomToolsGateway) client(rb roomtools.RawBody) *http.Client {
+	if rb.Relay {
+		return g.b.stream
+	}
+	return g.b.http
 }
 
 // roomToolsContributor attaches the server to one session.

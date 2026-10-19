@@ -13,6 +13,7 @@ import (
 	"net/textproto"
 	"net/url"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -28,14 +29,16 @@ import (
 )
 
 // Media model calls (docs/prd/2026-10-16-voice-and-image-generation.md):
-// speech to text for the composer and image generation for agents, through
-// admin-configured providers (internal/media). internal/media owns the
-// provider call; this file admits the caller and relays the reply, exactly
-// as the assist routes do (the rate, the budget, the audit kind).
+// speech to text for the composer, image and video generation for agents,
+// through admin-configured providers (internal/media). internal/media owns
+// the provider call; this file admits the caller and relays the reply,
+// exactly as the assist routes do (the rate, the budget, the audit kind).
 //
 //	GET  /v1/media                          which media calls run for the caller
 //	POST /v1/media/transcriptions           one transcription (raw audio body)
 //	POST /v1/media/image                    one image generation
+//	POST /v1/media/video                    submit one video (media_video.go)
+//	GET  /v1/media/video/{id}               its status; done, its room file
 //	GET  /v1/platform/media/{capability}    the capability's provider (never its key)
 //	PUT  /v1/platform/media/{capability}    set it (super admin)
 //	POST /v1/platform/media/{capability}/test   one real short call through it
@@ -110,10 +113,11 @@ func ownAuthOf(r *http.Request, actor contentActor) string {
 func headerAuth(r *http.Request) string { return strings.TrimSpace(r.Header.Get("Authorization")) }
 
 // handleMediaCapabilities answers GET /v1/media: which media calls run for
-// the caller (the entries the web shows) and, for image, the models the
-// caller may pick from (the first the default).
+// the caller (the entries the web shows) and, for a generation (image,
+// video), the models the caller may pick from (the first the default).
 func (s *Service) handleMediaCapabilities(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	out := wire.MediaCapabilities{}
+	slots := map[media.Capability]*wire.MediaCapability{media.CapTranscribe: &out.Transcribe, media.CapImage: &out.Image, media.CapVideo: &out.Video}
 	for _, cap := range media.Capabilities {
 		p, ok, err := s.mediaProvider(r.Context(), claims, cap, headerAuth(r))
 		if err != nil {
@@ -124,12 +128,11 @@ func (s *Service) handleMediaCapabilities(w http.ResponseWriter, r *http.Request
 		if !ok || !p.Model.Configured() {
 			continue
 		}
-		if cap == media.CapImage {
-			out.Image.Available = true
-			out.Image.Models = p.Models
-			continue
+		slot := slots[cap]
+		slot.Available = true
+		if cap != media.CapTranscribe {
+			slot.Models = p.Models // a transcription names no model
 		}
-		out.Transcribe.Available = true
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
@@ -221,7 +224,7 @@ func (s *Service) handleMediaImage(w http.ResponseWriter, r *http.Request, claim
 	if !ok {
 		return
 	}
-	s.runMediaImage(w, r, actor, jobImagePlace(actor.Job), readJSONMediaImage, "image")
+	s.runMediaImage(w, r, actor, jobMediaPlace(actor.Job), readJSONMediaImage, "image")
 }
 
 // readJSONMediaImage reads a member route's JSON body.
@@ -245,7 +248,7 @@ func readJSONMediaImage(w http.ResponseWriter, r *http.Request) (wire.MediaImage
 // (never the prompt, never the images) and the reply. actor is who the call
 // acts as; place, when set (an agent's job, a room app), is where the
 // images may be published and whose room pictures the call may read.
-func (s *Service) runMediaImage(w http.ResponseWriter, r *http.Request, actor contentActor, place *imagePlace, read func(http.ResponseWriter, *http.Request) (wire.MediaImageRequest, bool), auditName string) {
+func (s *Service) runMediaImage(w http.ResponseWriter, r *http.Request, actor contentActor, place *mediaPlace, read func(http.ResponseWriter, *http.Request) (wire.MediaImageRequest, bool), auditName string) {
 	ctx := r.Context()
 	claims := actor.Claims
 	if !s.assistLimiter.get(assistRate, assistBurst, s.Peers.Size).allow(claims.Tenant + "/" + claims.Subject) {
@@ -256,15 +259,10 @@ func (s *Service) runMediaImage(w http.ResponseWriter, r *http.Request, actor co
 	if !ok {
 		return
 	}
-	req.Prompt = strings.TrimSpace(req.Prompt)
-	switch {
-	case req.Prompt == "":
-		httpx.Error(w, "image needs a prompt", http.StatusBadRequest)
+	if req.Prompt, ok = mediaPrompt(w, req.Prompt, "image"); !ok {
 		return
-	case !utf8.ValidString(req.Prompt) || utf8.RuneCountInString(req.Prompt) > wire.MaxMediaImagePrompt:
-		httpx.Error(w, fmt.Sprintf("the prompt is at most %d characters", wire.MaxMediaImagePrompt), http.StatusBadRequest)
-		return
-	case req.Aspect != "" && !aspectAllowed(req.Aspect):
+	}
+	if req.Aspect != "" && !slices.Contains(wire.MediaImageAspects, req.Aspect) {
 		httpx.Error(w, "aspect must be one of "+strings.Join(wire.MediaImageAspects, ", "), http.StatusBadRequest)
 		return
 	}
@@ -326,7 +324,7 @@ func (s *Service) runMediaImage(w http.ResponseWriter, r *http.Request, actor co
 			if edit != nil {
 				name = fileNameOf(edit.FileName, i, img.MimeType)
 			}
-			pub, err := s.publishGeneratedImage(ctx, claims, *place, name, img, target)
+			pub, err := s.publishMediaFile(ctx, claims, *place, mediaFile{Name: name, Bytes: img.Bytes, MimeType: img.MimeType}, target)
 			if err != nil {
 				obs.ServerError(w, "publish the generated image failed", err)
 				httpx.Error(w, "the image is drawn, but publishing it into the room failed: try again", http.StatusBadGateway)
@@ -341,77 +339,93 @@ func (s *Service) runMediaImage(w http.ResponseWriter, r *http.Request, actor co
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
-// publishedImage is where one drawn image landed: the artifact, its
+// publishedFile is where one generated file landed: the artifact, its
 // version, and a note when it is not what was asked.
-type publishedImage struct {
+type publishedFile struct {
 	ArtifactID string
 	Version    int
 	Note       string
 }
 
-// imagePlace is where drawn images land and whose pictures a call reads:
-// a room, its channel, and the source a version records (an agent's job
-// and its request; an app records none).
-type imagePlace struct {
+// mediaPlace is where generated files land and whose pictures a call
+// reads: a room, its channel, and the source a version records (an agent's
+// job and its request; an app records none).
+type mediaPlace struct {
 	RoomID, ChannelID string
 	SourceJobID       string
 	SourceSeq         int64
 	Summary           string
 }
 
-// jobImagePlace is an agent job's place: its room and channel, sourced to
+// jobMediaPlace is an agent job's place: its room and channel, sourced to
 // the job and its request.
-func jobImagePlace(job *store.AgentJob) *imagePlace {
+func jobMediaPlace(job *store.AgentJob) *mediaPlace {
 	if job == nil {
 		return nil
 	}
-	return &imagePlace{RoomID: job.RoomID, ChannelID: job.ChannelID, SourceJobID: job.JobID, SourceSeq: job.MessageSeq, Summary: "generated by the AI"}
+	return &mediaPlace{RoomID: job.RoomID, ChannelID: job.ChannelID, SourceJobID: job.JobID, SourceSeq: job.MessageSeq, Summary: "generated by the AI"}
 }
 
-// publishGeneratedImage is the one owner of "a drawn image becomes room
-// content", as the member in claims (a job's requester, an app's
-// participant), in the place's room and channel, with its source. With
-// edit it publishes the edited file's
-// next version (editedFrom the version read), and when the file changed
-// meanwhile (409) a new file beside it, saying so; otherwise a new file of
-// one version, the room service minting its id.
-func (s *Service) publishGeneratedImage(ctx context.Context, claims auth.Claims, place imagePlace, name string, img media.Image, edit *imageEdit) (publishedImage, error) {
+// mediaFile is one generated file to publish: its name, bytes and MIME
+// type, and the id it is published under ("" = the room service mints
+// one; a stable id makes a repeated publish the same file: a video's).
+type mediaFile struct {
+	Name       string
+	Bytes      []byte
+	MimeType   string
+	ArtifactID string
+}
+
+// publishMediaFile is the one owner of "a generated file (a drawn image, a
+// filmed video) becomes room content", as the member in claims (a job's
+// requester, an app's participant), in the place's room and channel, with
+// its source. With edit it publishes the edited file's next version
+// (editedFrom the version read), and when the file changed meanwhile (409)
+// a new file beside it, saying so; otherwise a new file of one version
+// (the room keeps an existing file of f.ArtifactID's history: its first
+// version is then refused as a conflict, which the caller reads as
+// published already).
+func (s *Service) publishMediaFile(ctx context.Context, claims auth.Claims, place mediaPlace, f mediaFile, edit *imageEdit) (publishedFile, error) {
 	room := "/v1/rooms/" + url.PathEscape(place.RoomID) + "/artifacts"
 	if edit != nil {
-		v, err := s.publishImageVersion(ctx, claims, place, room, edit.ArtifactID, edit.Version, edit.Version, name, img)
+		v, err := s.publishMediaVersion(ctx, claims, place, room, edit.ArtifactID, edit.Version, edit.Version, f)
 		var rbe *roomBackendError
 		if !errors.As(err, &rbe) || rbe.Status != http.StatusConflict {
-			pub := publishedImage{ArtifactID: edit.ArtifactID, Version: v}
+			pub := publishedFile{ArtifactID: edit.ArtifactID, Version: v}
 			if err == nil && v == edit.Version {
 				pub.Note = "the provider returned the image unchanged: no new version"
 			}
 			return pub, err
 		}
-		pub, err := s.publishGeneratedImage(ctx, claims, place, name, img, nil)
+		pub, err := s.publishMediaFile(ctx, claims, place, f, nil)
 		pub.Note = "the file changed meanwhile: saved as a new file"
 		return pub, err
 	}
 	kind := "file"
-	if strings.HasPrefix(img.MimeType, "image/") {
+	if strings.HasPrefix(f.MimeType, "image/") {
 		kind = "image"
 	}
-	create := map[string]any{"kind": kind, "title": name, "fileName": name, "channelId": place.ChannelID}
+	create := map[string]any{"kind": kind, "title": f.Name, "fileName": f.Name, "channelId": place.ChannelID}
+	if f.ArtifactID != "" {
+		create["artifactId"] = f.ArtifactID
+	}
 	var created wire.ArtifactReply
 	if err := s.roomBackendDo(ctx, backendHTTP, http.MethodPost, room, "application/json", mustRaw(create), claims.Subject, claims.Tenant, &created); err != nil {
-		return publishedImage{}, fmt.Errorf("create the artifact: %w", err)
+		return publishedFile{}, fmt.Errorf("create the artifact: %w", err)
 	}
 	artifactID := created.Artifact.ArtifactID
 	if artifactID == "" {
-		return publishedImage{}, errors.New("create the artifact: the reply names no artifact")
+		return publishedFile{}, errors.New("create the artifact: the reply names no artifact")
 	}
-	v, err := s.publishImageVersion(ctx, claims, place, room, artifactID, 0, 0, name, img)
-	return publishedImage{ArtifactID: artifactID, Version: v}, err
+	v, err := s.publishMediaVersion(ctx, claims, place, room, artifactID, 0, 0, f)
+	return publishedFile{ArtifactID: artifactID, Version: v}, err
 }
 
-// publishImageVersion publishes one blob version of artifactID on top of
+// publishMediaVersion publishes one blob version of artifactID on top of
 // base (editedFrom 0: not an edit), like the bridge's own publish path.
-// It answers the version published.
-func (s *Service) publishImageVersion(ctx context.Context, claims auth.Claims, place imagePlace, room, artifactID string, base, editedFrom int, name string, img media.Image) (int, error) {
+// It answers the version published. The upload is bounded by ctx, never a
+// client timeout: a video's file outlives a short call's.
+func (s *Service) publishMediaVersion(ctx context.Context, claims auth.Claims, place mediaPlace, room, artifactID string, base, editedFrom int, f mediaFile) (int, error) {
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 	_ = mw.WriteField("baseVersion", strconv.Itoa(base))
@@ -426,20 +440,20 @@ func (s *Service) publishImageVersion(ctx context.Context, claims auth.Claims, p
 		_ = mw.WriteField("editedFrom", strconv.Itoa(editedFrom))
 	}
 	h := textproto.MIMEHeader{}
-	h.Set("Content-Disposition", mime.FormatMediaType("form-data", map[string]string{"name": "file", "filename": name}))
-	h.Set("Content-Type", img.MimeType)
+	h.Set("Content-Disposition", mime.FormatMediaType("form-data", map[string]string{"name": "file", "filename": f.Name}))
+	h.Set("Content-Type", f.MimeType)
 	part, err := mw.CreatePart(h)
 	if err != nil {
 		return 0, err
 	}
-	if _, err := part.Write(img.Bytes); err != nil {
+	if _, err := part.Write(f.Bytes); err != nil {
 		return 0, err
 	}
 	if err := mw.Close(); err != nil {
 		return 0, err
 	}
 	var reply wire.ArtifactReply
-	if err := s.roomBackendDo(ctx, backendHTTP, http.MethodPost, room+"/"+url.PathEscape(artifactID)+"/versions", mw.FormDataContentType(), buf.Bytes(), claims.Subject, claims.Tenant, &reply); err != nil {
+	if err := s.roomBackendDo(ctx, backendStreamHTTP, http.MethodPost, room+"/"+url.PathEscape(artifactID)+"/versions", mw.FormDataContentType(), buf.Bytes(), claims.Subject, claims.Tenant, &reply); err != nil {
 		return 0, fmt.Errorf("publish the version: %w", err)
 	}
 	if reply.Version != nil {
@@ -453,7 +467,7 @@ func (s *Service) publishImageVersion(ctx context.Context, claims auth.Claims, p
 // result) or, without one, the first input as the image to change, the
 // rest as references; and the region's mask. A call with no place (a
 // member's own) may not name room pictures. false: refused, answered.
-func (s *Service) imageRoomInputs(w http.ResponseWriter, r *http.Request, claims auth.Claims, place *imagePlace, req wire.MediaImageRequest, gen *media.ImageRequest) (*imageEdit, bool) {
+func (s *Service) imageRoomInputs(w http.ResponseWriter, r *http.Request, claims auth.Claims, place *mediaPlace, req wire.MediaImageRequest, gen *media.ImageRequest) (*imageEdit, bool) {
 	if req.ArtifactID == "" && len(req.Inputs) == 0 && req.Region == nil {
 		return nil, true
 	}
@@ -640,6 +654,12 @@ func mediaErrClass(err error) string {
 	switch {
 	case errors.As(err, &pe):
 		return "provider answered " + itoa(int64(pe.Status))
+	case errors.Is(err, errVideoFailed):
+		return "the provider failed the video"
+	case errors.Is(err, errVideoPublish):
+		return "publishing into the room failed"
+	case errors.Is(err, media.ErrTooLarge):
+		return "over the room's file cap"
 	case errors.Is(err, media.ErrProviderUnreachable):
 		return "unreadable reply"
 	case errors.Is(err, context.Canceled):
@@ -665,6 +685,10 @@ func writeMediaErr(w http.ResponseWriter, err error) {
 		httpx.WriteStatus(w, status, "the media provider refused the call: "+pe.Message, err)
 		return
 	}
+	if errors.Is(err, media.ErrTooLarge) {
+		httpx.Error(w, err.Error(), http.StatusRequestEntityTooLarge) // the sizes, said plainly
+		return
+	}
 	httpx.WriteStatus(w, http.StatusBadGateway, "the media provider could not be reached", err)
 }
 
@@ -674,14 +698,20 @@ func filenameQuery(r *http.Request) string {
 	return strings.TrimSpace(r.URL.Query().Get("filename"))
 }
 
-// aspectAllowed reports an aspect the request may name.
-func aspectAllowed(aspect string) bool {
-	for _, a := range wire.MediaImageAspects {
-		if a == aspect {
-			return true
-		}
+// mediaPrompt is a generation's prompt, trimmed: present, valid UTF-8 and
+// at most wire.MaxMediaPrompt characters (what names the generation in the
+// refusal). false: refused, answered.
+func mediaPrompt(w http.ResponseWriter, prompt, what string) (string, bool) {
+	prompt = strings.TrimSpace(prompt)
+	switch {
+	case prompt == "":
+		httpx.Error(w, what+" needs a prompt", http.StatusBadRequest)
+		return "", false
+	case !utf8.ValidString(prompt) || utf8.RuneCountInString(prompt) > wire.MaxMediaPrompt:
+		httpx.Error(w, fmt.Sprintf("the prompt is at most %d characters", wire.MaxMediaPrompt), http.StatusBadRequest)
+		return "", false
 	}
-	return false
+	return prompt, true
 }
 
 // timeSinceMs is start's elapsed milliseconds.
@@ -695,13 +725,14 @@ func base64Of(b []byte) string { return base64.StdEncoding.EncodeToString(b) }
 // itoa is strconv.Itoa, spelled for the audit detail lines.
 func itoa(n int64) string { return fmt.Sprintf("%d", n) }
 
-// mediaCapability is the path's capability (a route's {capability}).
+// mediaCapability is the path's capability (a route's {capability}): one
+// of media.Capabilities.
 func mediaCapability(r *http.Request) (media.Capability, bool) {
-	switch strings.TrimSpace(r.PathValue("capability")) {
-	case string(media.CapTranscribe):
-		return media.CapTranscribe, true
-	case string(media.CapImage):
-		return media.CapImage, true
+	name := strings.TrimSpace(r.PathValue("capability"))
+	for _, c := range media.Capabilities {
+		if string(c) == name {
+			return c, true
+		}
 	}
 	return "", false
 }
@@ -875,6 +906,16 @@ func (s *Service) testMediaProvider(w http.ResponseWriter, r *http.Request, tena
 			break
 		}
 		out.OK, out.Reply = true, firstNonEmpty(strings.TrimSpace(text), "(no speech)")
+	case media.CapVideo:
+		// Filming one would bill a video: the test reads the provider's
+		// model list instead (the address, the key, and the model listed).
+		models, err := p.ListModels(ctx)
+		out.LatencyMs = time.Since(start).Milliseconds()
+		if err != nil {
+			out.Error = mediaErrText(err)
+			break
+		}
+		out.OK, out.Reply = true, videoTestReply(p.Model.Model, models)
 	default:
 		imgs, err := p.Generate(ctx, media.ImageRequest{Prompt: "A small solid blue square on white.", Aspect: wire.MediaImageAspectSquare})
 		out.LatencyMs = time.Since(start).Milliseconds()

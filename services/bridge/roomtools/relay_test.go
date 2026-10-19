@@ -71,8 +71,8 @@ func TestRoomRelay(t *testing.T) {
 		t.Fatalf("grants = %s ; %s ; %s", calls[0].Path, calls[1].Path, calls[2].Path)
 	}
 	var sent RawBody
-	if err := json.Unmarshal(calls[1].Body, &sent); err != nil || sent.ContentType != "application/json" || !strings.Contains(string(sent.Data), "a cat") {
-		t.Fatalf("body = %s (%v)", calls[1].Body, err)
+	if err := json.Unmarshal(calls[1].Body, &sent); err != nil || sent.ContentType != "application/json" || !strings.Contains(string(sent.Data), "a cat") || !sent.Relay {
+		t.Fatalf("body = %s (%v); want the tool's body, sent as a relay call (no fixed limit)", calls[1].Body, err)
 	}
 	srv.Revoke(sess)
 	if code, _ := relayPost(t, srv, token, "/v1/media/image", []byte(`{}`)); code != http.StatusUnauthorized {
@@ -152,5 +152,50 @@ func TestRoomRelayRetiredSessionKeepsItsLiveView(t *testing.T) {
 	refuse = false
 	if code, _ := relayPost(t, srv, token, "/v1/live?job=job-1", []byte(`{"waiting":"sign in"}`)); code != http.StatusUnauthorized {
 		t.Fatalf("after the refusal = %d; want 401", code)
+	}
+}
+
+// relayGet sends one relayed GET with the session's bearer.
+func relayGet(t *testing.T, srv *Server, token, path string) int {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodGet, srv.RelayURL()+path, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	return resp.StatusCode
+}
+
+// A route's {id} segment matches one path segment (a video's status),
+// with the tool's own query kept and the grant set; an empty, a dot or a
+// nested segment, or another method, is off the list.
+func TestRoomRelayParameterizedRoute(t *testing.T) {
+	gw := &fakeGateway{handle: func(method, path string, body []byte) (int, any) {
+		return 200, map[string]any{"id": "video_abc", "status": "rendering"}
+	}}
+	srv, token, sess := startServer(t, gw)
+	sess.Bind(Job{JobID: "job-1", RequesterUserID: "maya"})
+	if code := relayGet(t, srv, token, "/v1/media/video/video_ZXhh==?publish=true&fileName=boat.mp4"); code != http.StatusOK {
+		t.Fatalf("status poll = %d", code)
+	}
+	calls := gw.callsTo(http.MethodGet, "/v1/media/video/")
+	if len(calls) != 1 || calls[0].Path != "/v1/media/video/video_ZXhh==?fileName=boat.mp4&job=job-1&publish=true&room=room-1" {
+		t.Fatalf("calls = %+v", calls)
+	}
+	for _, path := range []string{"/v1/media/video/", "/v1/media/video/a/b", "/v1/media/video/%2E%2E", "/v1/media/video/a%2Fb"} {
+		if code := relayGet(t, srv, token, path); code != http.StatusNotFound {
+			t.Errorf("GET %s = %d; want 404", path, code)
+		}
+	}
+	if code, _ := relayPost(t, srv, token, "/v1/media/video/video_abc", []byte(`{}`)); code != http.StatusNotFound {
+		t.Errorf("POST to a GET route = %d; want 404", code)
+	}
+	if code, _ := relayPost(t, srv, token, "/v1/media/video", []byte(`{"prompt":"a boat"}`)); code != http.StatusOK {
+		t.Errorf("submit = %d", code)
+	}
+	if len(gw.callsTo(http.MethodGet, "/v1/media/video/")) != 1 {
+		t.Fatal("a refused path reached the gateway")
 	}
 }

@@ -22,12 +22,18 @@ import (
 )
 
 // mediaProviderFake is an OpenAI-compatible media provider: it answers a
-// transcription from a multipart form and an image from b64_json, recording
-// what it was asked.
+// transcription from a multipart form, an image from b64_json and a video
+// through the videos API (serveVideo), recording what it was asked.
 type mediaProviderFake struct {
 	transcript string
 	// imageB64 is the reply's inline image (a 1x1 PNG when empty).
 	imageB64 string
+	// videoPolls is how many status reads a video renders before it is
+	// videoFinal ("completed" when empty); videoContent is its file (an
+	// MP4's head when empty).
+	videoPolls   int
+	videoFinal   string
+	videoContent []byte
 	// status, when set, answers every request with it and this body.
 	status int
 	body   string
@@ -42,7 +48,13 @@ func (f *mediaProviderFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, f.body, f.status)
 		return
 	}
+	if strings.HasPrefix(r.URL.Path, "/v1/videos") {
+		f.serveVideo(w, r)
+		return
+	}
 	switch r.URL.Path {
+	case "/v1/models":
+		_ = json.NewEncoder(w).Encode(map[string]any{"object": "list", "data": []any{map[string]any{"id": "media-model"}}})
 	case "/v1/audio/transcriptions":
 		if err := r.ParseMultipartForm(32 << 20); err != nil {
 			tFail(w, "multipart: %v", err)
@@ -111,6 +123,43 @@ func (f *mediaProviderFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// serveVideo is the videos API: a submit answers video_abc queued, a status
+// read renders videoPolls times and then answers videoFinal, the content
+// is videoContent; video_gone is no video.
+func (f *mediaProviderFake) serveVideo(w http.ResponseWriter, r *http.Request) {
+	rest := strings.TrimPrefix(r.URL.Path, "/v1/videos")
+	switch {
+	case r.Method == http.MethodPost && rest == "":
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		f.last = map[string]string{}
+		for k, v := range body {
+			f.last[k] = fmt.Sprint(v)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "video_abc", "object": "video", "status": "queued", "model": body["model"]})
+	case strings.HasPrefix(rest, "/video_gone"):
+		http.Error(w, `{"error":{"message":"no such video"}}`, http.StatusNotFound)
+	case strings.HasSuffix(rest, "/content"):
+		content := f.videoContent
+		if content == nil {
+			content = append([]byte{0, 0, 0, 0x18, 'f', 't', 'y', 'p', 'i', 's', 'o', 'm'}, make([]byte, 100)...)
+		}
+		w.Header().Set("Content-Type", "video/mp4")
+		_, _ = w.Write(content)
+	default:
+		status := firstNonEmpty(f.videoFinal, "completed")
+		if f.videoPolls > 0 {
+			status = "in_progress"
+			f.videoPolls--
+		}
+		reply := map[string]any{"id": strings.TrimPrefix(rest, "/"), "object": "video", "status": status, "model": "media-model"}
+		if status == "failed" {
+			reply["error"] = map[string]any{"code": "moderation", "message": "the prompt was refused"}
+		}
+		_ = json.NewEncoder(w).Encode(reply)
+	}
+}
+
 func tFail(w http.ResponseWriter, format string, args ...any) {
 	http.Error(w, fmt.Sprintf(format, args...), http.StatusBadRequest)
 }
@@ -129,7 +178,7 @@ func mediaGW(t *testing.T, fake *mediaProviderFake) *appGW {
 	defer func() { sink.take() }()
 	model := httptest.NewServer(fake)
 	t.Cleanup(model.Close)
-	for _, cap := range []string{"transcribe", "image"} {
+	for _, cap := range []string{"transcribe", "image", "video"} {
 		r := e.call(http.MethodPut, "/v1/platform/media/"+cap, wire.MediaProviderUpdate{
 			Kind: "openai-compatible", BaseURL: model.URL + "/v1", Model: "media-model", APIKey: "sk-media"}, e.superAdmin())
 		if r.status != http.StatusOK {
@@ -171,7 +220,7 @@ func TestMediaCapabilities(t *testing.T) {
 	if err := json.Unmarshal([]byte(r.body), &caps); err != nil {
 		t.Fatal(err)
 	}
-	if !caps.Transcribe.Available || !caps.Image.Available {
+	if !caps.Transcribe.Available || !caps.Image.Available || !caps.Video.Available || len(caps.Video.Models) != 1 || caps.Transcribe.Models != nil {
 		t.Fatalf("caps = %+v", caps)
 	}
 	off := true
@@ -180,7 +229,7 @@ func TestMediaCapabilities(t *testing.T) {
 	}
 	r = e.call(http.MethodGet, "/v1/media", nil, e.as("maya"))
 	_ = json.Unmarshal([]byte(r.body), &caps)
-	if caps.Transcribe.Available || caps.Image.Available {
+	if caps.Transcribe.Available || caps.Image.Available || caps.Video.Available {
 		t.Fatalf("an organization with AI off: %+v", caps)
 	}
 }

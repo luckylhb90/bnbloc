@@ -1,15 +1,19 @@
 // Media model calls (docs/prd/2026-10-16-voice-and-image-generation.md):
 // the one owner of the media requests in the web (the boundary rule beside
 // B2): what runs for the caller (GET /v1/media) and a transcription (POST
-// /v1/media/transcriptions). Drawing is the room agent's (the media tools,
-// docs/prd/2026-10-17-image-generation-redesign.md), so the web calls no
-// image route. No other file names a media route. The microphone and the WAV encoder are
+// /v1/media/transcriptions). Drawing and filming are the room agent's (the
+// media tools, docs/prd/2026-10-17-image-generation-redesign.md,
+// docs/prd/2026-10-19-video-generation.md), so the web calls no image or
+// video route. No other file names a media route. The microphone and the WAV encoder are
 // lib/voice.ts.
 
 import { useEffect, useState } from "react";
 import { req } from "./api.ts";
 import { useAuth } from "./auth";
 import type { MediaCapabilities } from "./wire.gen.ts";
+
+/** A media capability: one provider each (GET /v1/media's keys). */
+type MediaCap = keyof MediaCapabilities;
 
 const TTL_MS = 5 * 60 * 1000;
 let cached: { tenant: string; at: number; caps: Promise<MediaCapabilities> } | null = null;
@@ -34,9 +38,9 @@ export function invalidateMediaCaps(): void {
   for (const l of listeners) l();
 }
 
-/** Whether the caller can transcribe: null while loading or on a failure
- *  (the entry hides). */
-export function useMediaCapability(cap: "transcribe" | "image"): boolean | null {
+/** Whether the caller can use the capability: null while loading or on a
+ *  failure (the entry hides). */
+export function useMediaCapability(cap: MediaCap): boolean | null {
   const { tenant } = useAuth();
   const [rev, setRev] = useState(0);
   const [caps, setCaps] = useState<MediaCapabilities | null>(null);
@@ -61,7 +65,7 @@ export function useMediaCapability(cap: "transcribe" | "image"): boolean | null 
     };
   }, [tenant, rev]);
   if (!caps) return null;
-  return cap === "transcribe" ? caps.transcribe.available : caps.image.available;
+  return caps[cap]?.available ?? false; // a gateway without the capability answers no key
 }
 
 /** Transcribes one audio blob (16 kHz mono WAV from lib/voice.ts) into text. */
@@ -115,7 +119,7 @@ export interface MediaProviderApi {
 
 /** The console's provider API per capability (never the key): the
  *  platform's (super admin) and the organization's own (org admin). */
-export function mediaProviderApi(cap: "transcribe" | "image", scope: "platform" | "org" = "platform"): MediaProviderApi {
+export function mediaProviderApi(cap: MediaCap, scope: "platform" | "org" = "platform"): MediaProviderApi {
   const base = scope === "org" ? `/v1/tenant/media/${cap}` : `/v1/platform/media/${cap}`;
   return {
     get: () => req<MediaProviderConfigView>(base),

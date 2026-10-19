@@ -18,16 +18,19 @@ import (
 )
 
 // openAICompatible is the OpenAI-compatible wire family: the shapes
-// POST {base}/audio/transcriptions (multipart, a `text` reply) and POST
-// {base}/images/generations (JSON, an inline b64_json image) answer with.
+// POST {base}/audio/transcriptions (multipart, a `text` reply), POST
+// {base}/images/generations (JSON, an inline b64_json image) and the videos
+// API (openai_video.go) answer with.
 // Providers that follow these shapes configure kind "openai-compatible";
 // their knobs (a size preset name, a language hint) arrive as params.
 type openAICompatible struct{}
 
 func (*openAICompatible) Kind() string { return AdapterKindOpenAICompatible }
 
-// Serves: the OpenAI-compatible family has both shapes.
-func (*openAICompatible) Serves(cap Capability) bool { return cap == CapTranscribe || cap == CapImage }
+// Serves: the OpenAI-compatible family has every shape.
+func (*openAICompatible) Serves(cap Capability) bool {
+	return cap == CapTranscribe || cap == CapImage || cap == CapVideo
+}
 
 // maxReplyBody bounds what is read of one provider answer.
 const maxReplyBody = wire.MaxMediaImageReplyBytes
@@ -63,21 +66,16 @@ func (a *openAICompatible) Transcribe(ctx context.Context, p Provider, audio []b
 	if err := mw.Close(); err != nil {
 		return "", err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		strings.TrimRight(p.Model.BaseURL, "/")+"/audio/transcriptions", bytes.NewReader(body.Bytes()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.url("/audio/transcriptions"), bytes.NewReader(body.Bytes()))
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Content-Type", mw.FormDataContentType())
-	p.setAuth(req)
-	resp, err := p.client.Do(req)
+	resp, err := p.do(req)
 	if err != nil {
-		return "", fmt.Errorf("%w: %v", ErrProviderUnreachable, err)
+		return "", err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", providerError(resp)
-	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxReplyBody))
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrProviderUnreachable, err)
@@ -173,8 +171,7 @@ func postImages(ctx context.Context, p Provider, body map[string]any, ir ImageRe
 		if werr := mw.Close(); werr != nil {
 			return nil, werr
 		}
-		req, err = http.NewRequestWithContext(ctx, http.MethodPost,
-			strings.TrimRight(p.Model.BaseURL, "/")+"/images/edits", bytes.NewReader(buf.Bytes()))
+		req, err = http.NewRequestWithContext(ctx, http.MethodPost, p.url("/images/edits"), bytes.NewReader(buf.Bytes()))
 		if err != nil {
 			return nil, err
 		}
@@ -184,25 +181,21 @@ func postImages(ctx context.Context, p Provider, body map[string]any, ir ImageRe
 		if merr != nil {
 			return nil, merr
 		}
-		req, err = http.NewRequestWithContext(ctx, http.MethodPost,
-			strings.TrimRight(p.Model.BaseURL, "/")+"/images/generations", bytes.NewReader(raw))
+		req, err = http.NewRequestWithContext(ctx, http.MethodPost, p.url("/images/generations"), bytes.NewReader(raw))
 		if err != nil {
 			return nil, err
 		}
 		req.Header.Set("Content-Type", "application/json")
 	}
-	p.setAuth(req)
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrProviderUnreachable, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusBadRequest {
+	resp, err := p.do(req)
+	var pe *ProviderError
+	if errors.As(err, &pe) && pe.Status == http.StatusBadRequest {
 		return nil, errBadRequest
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, providerError(resp)
+	if err != nil {
+		return nil, err
 	}
+	defer resp.Body.Close()
 	rraw, err := io.ReadAll(io.LimitReader(resp.Body, maxReplyBody))
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrProviderUnreachable, err)
@@ -235,6 +228,26 @@ func postImages(ctx context.Context, p Provider, body map[string]any, ir ImageRe
 		}
 	}
 	return out, nil
+}
+
+// url is the provider's address of path (below the base URL's version
+// path).
+func (p Provider) url(path string) string { return strings.TrimRight(p.Model.BaseURL, "/") + path }
+
+// do sends one request to the provider, authenticated (setAuth), through
+// its guarded client: a 2xx answer is returned for the caller to read and
+// close, a refusal is a *ProviderError, no answer ErrProviderUnreachable.
+func (p Provider) do(req *http.Request) (*http.Response, error) {
+	p.setAuth(req)
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrProviderUnreachable, err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		defer resp.Body.Close()
+		return nil, providerError(resp)
+	}
+	return resp, nil
 }
 
 // setAuth sets the provider's Authorization header: the sealed key, or the
@@ -319,18 +332,27 @@ func providerError(resp *http.Response) *ProviderError {
 	}
 	msg := ""
 	if json.Unmarshal(raw, &e) == nil {
-		switch v := e.Error.(type) {
-		case string:
-			msg = v
-		case map[string]any:
-			msg, _ = v["message"].(string)
-		}
+		msg = errorMessage(e.Error)
+	}
+	return &ProviderError{Status: resp.StatusCode, Message: msg}
+}
+
+// errorMessage is a provider's `error` field as one bounded line: the
+// string itself, or an error object's message. It is the provider's text,
+// shown to the caller, never audited (it may quote the request).
+func errorMessage(field any) string {
+	msg := ""
+	switch v := field.(type) {
+	case string:
+		msg = v
+	case map[string]any:
+		msg, _ = v["message"].(string)
 	}
 	msg = strings.TrimSpace(msg)
 	if r := []rune(msg); len(r) > 300 {
 		msg = string(r[:300]) + "…"
 	}
-	return &ProviderError{Status: resp.StatusCode, Message: msg}
+	return msg
 }
 
 // writeImagePart writes one image as a multipart file part.

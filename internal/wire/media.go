@@ -1,15 +1,17 @@
 package wire
 
-// Media model calls (docs/prd/2026-10-16-voice-and-image-generation.md):
-// speech-to-text and image generation through admin-configured providers
-// (internal/media). A provider is configuration (kind selects the wire
-// protocol adapter), never a hardcoded vendor.
+// Media model calls (docs/prd/2026-10-16-voice-and-image-generation.md,
+// docs/prd/2026-10-19-video-generation.md): speech-to-text, image and video
+// generation through admin-configured providers (internal/media). A
+// provider is configuration (kind selects the wire protocol adapter), never
+// a hardcoded vendor.
 
 // MediaCapabilities is GET /v1/media: which media calls run for the caller
 // (a configured provider and an organization that has not turned AI off).
 type MediaCapabilities struct {
 	Transcribe MediaCapability `json:"transcribe"`
 	Image      MediaCapability `json:"image"`
+	Video      MediaCapability `json:"video"`
 }
 
 // MediaCapability is one media ability as the caller sees it.
@@ -111,7 +113,7 @@ var MediaImageAspects = []string{MediaImageAspectSquare, MediaImageAspectLandsca
 
 // MediaImageRequest is POST /v1/media/image.
 type MediaImageRequest struct {
-	// Prompt is what to draw, at most MaxMediaImagePrompt characters.
+	// Prompt is what to draw, at most MaxMediaPrompt characters.
 	Prompt string `json:"prompt"`
 	// Model is one of the provider's models (MediaProviderConfig.Models);
 	// the first is the default.
@@ -183,4 +185,60 @@ type MediaImage struct {
 	// RevisedPrompt is the provider's own rewording, when it sends one: data
 	// the provider wrote, fenced wherever an agent reads it.
 	RevisedPrompt string `json:"revisedPrompt,omitempty"`
+}
+
+// Video aspect ratios a generation may ask for (the provider's size: 16:9
+// is 1280x720, 9:16 is 720x1280, unless the provider's params say
+// otherwise).
+//
+//wire:union MediaVideoAspect
+const (
+	MediaVideoAspectLandscape = "16:9"
+	MediaVideoAspectPortrait  = "9:16"
+)
+
+// MediaVideoAspects are the aspects a video may ask for.
+var MediaVideoAspects = []string{MediaVideoAspectLandscape, MediaVideoAspectPortrait}
+
+// A video's states (MediaVideoReply.Status): rendering until the provider
+// answers it done or failed. Both of those are final.
+//
+//wire:union MediaVideoStatus
+const (
+	MediaVideoRendering = "rendering"
+	MediaVideoDone      = "done"
+	MediaVideoFailed    = "failed"
+)
+
+// MediaVideoRequest is POST /v1/media/video: one video submitted to the
+// provider, answered at once (docs/prd/2026-10-19-video-generation.md §2.2).
+type MediaVideoRequest struct {
+	// Prompt is what to film, at most MaxMediaPrompt characters.
+	Prompt string `json:"prompt"`
+	// Model is one of the provider's models (MediaProviderConfig.Models);
+	// the first is the default.
+	Model string `json:"model,omitempty"`
+	// Seconds is the clip's length, passed to the provider as is (the
+	// lengths a model takes are the provider's: 4, 6 or 8 for some); 0 =
+	// the provider's default.
+	Seconds int `json:"seconds,omitempty"`
+	// Aspect defaults to MediaVideoAspectLandscape.
+	Aspect string `json:"aspect,omitempty" tstype:"MediaVideoAspect"`
+}
+
+// MediaVideoReply answers POST /v1/media/video and GET
+// /v1/media/video/{id}: the video's id (the provider's own: the gateway
+// keeps no job, any replica answers for it) and its status. Once done and
+// published into the job's room (?publish=true under a job grant), it names
+// the room file; a video is never inlined.
+type MediaVideoReply struct {
+	ID     string `json:"id"`
+	Status string `json:"status" tstype:"MediaVideoStatus"`
+	Model  string `json:"model,omitempty"`
+	// Error is the provider's reason for a failed video, bounded.
+	Error string `json:"error,omitempty"`
+	// ArtifactID, FileName and Bytes name the room file a done video became.
+	ArtifactID string `json:"artifactId,omitempty"`
+	FileName   string `json:"fileName,omitempty"`
+	Bytes      int64  `json:"bytes,omitempty"`
 }

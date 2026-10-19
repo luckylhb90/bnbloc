@@ -220,12 +220,15 @@ func (s *Service) routes() []route {
 		member("GET /v1/assist", s.handleAssistStatus).with(needContent),
 		gated("POST /v1/assist/{task}", drive, s.handleAssist).spends(costBudget).with(needContent),
 		member("GET /v1/rooms/{roomId}/artifacts/{artifactId}/recipe", s.handleDeliverableRecipe).with(needContent),
-		// Media model calls (media.go): speech to text and image generation
-		// through admin-configured providers. They feed message composition,
-		// so they follow the assist routes' permission rule.
+		// Media model calls (media.go): speech to text, image and video
+		// generation through admin-configured providers. They feed message
+		// composition, so they follow the assist routes' permission rule. A
+		// video's status poll is not a cost: its submit spent the budget.
 		member("GET /v1/media", s.handleMediaCapabilities),
 		gated("POST /v1/media/transcriptions", drive, s.handleMediaTranscribe).spends(costBudget),
 		gated("POST /v1/media/image", drive, s.handleMediaImage).spends(costBudget),
+		gated("POST /v1/media/video", drive, s.handleMediaVideo).spends(costBudget),
+		gated("GET /v1/media/video/{id}", drive, s.handleMediaVideoStatus),
 		// Decision models (decisions.go): calibrated answers to bounded
 		// questions, the same rules as the media calls.
 		member("GET /v1/decisions", s.handleDecisionCapability),
@@ -288,7 +291,8 @@ func (s *Service) routes() []route {
 		gated("GET /v1/platform/assist-model", platform, s.handleAssistModel),
 		gated("PUT /v1/platform/assist-model", platform, s.handlePutAssistModel),
 		gated("POST /v1/platform/assist-model/test", platform, s.handleTestAssistModel),
-		// Media providers (media.go): speech-to-text and image generation.
+		// Media providers (media.go): speech-to-text, image and video
+		// generation.
 		gated("GET /v1/platform/media/{capability}", platform, s.handleMediaProvider),
 		gated("PUT /v1/platform/media/{capability}", platform, s.handlePutMediaProvider),
 		gated("POST /v1/platform/media/{capability}/test", platform, s.handleTestMediaProvider),

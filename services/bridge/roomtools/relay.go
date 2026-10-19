@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/luckylhb90/bnbloc/component"
+	"github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
@@ -29,6 +30,10 @@ import (
 //     a job whose turn ended (a live view waiting for a person, §3.7);
 //   - only the routes in wire.RoomRelayRoutes are reachable, each one a
 //     gateway route that admits a job grant;
+//   - a relayed call lasts as long as the tool's call that made it (its
+//     request's context), never a fixed limit: a picture or a video's
+//     publish takes what it takes (docs/prd/2026-10-19-video-generation.md
+//     §2.4), and a stalled gateway ends with the agent's tool call;
 //   - GET <relay>/session answers the bound turn itself
 //     (component.RelaySession), never reaching the gateway;
 //   - once the session is revoked its bearer still posts the live view of
@@ -125,10 +130,11 @@ func (s *Server) relayRetired(w http.ResponseWriter, r *http.Request, path strin
 // liveRelayPath is the one route a retired session reaches.
 const liveRelayPath = "/v1/live"
 
-// forward sends one relayed call with the bridge's client and copies the
-// gateway's answer; it returns the answer's status.
+// forward sends one relayed call with the bridge's client, bound to the
+// tool's request alone (RawBody.Relay), and copies the gateway's answer; it
+// returns the answer's status.
 func (s *Server) forward(w http.ResponseWriter, r *http.Request, path string, q url.Values, body []byte) int {
-	raw, err := s.cfg.Gateway.Do(r.Context(), r.Method, path+"?"+q.Encode(), RawBody{ContentType: r.Header.Get("Content-Type"), Data: body})
+	raw, err := s.cfg.Gateway.Do(r.Context(), r.Method, path+"?"+q.Encode(), RawBody{ContentType: r.Header.Get("Content-Type"), Data: body, Relay: true})
 	var se *StatusError
 	switch {
 	case errors.As(err, &se):
@@ -169,13 +175,30 @@ func (s *Server) relaySession(w http.ResponseWriter, sess *Session) {
 }
 
 // relayed reports a route the relay reaches: one of wire.RoomRelayRoutes,
-// its path exact (no query, no traversal).
+// its path exact (no query, no escapes, no traversal) but for a route's
+// {name} segment, which matches one path segment that is not empty or a
+// dot segment (core.CleanRelPath; a video's id).
 func relayed(method, path string) bool {
 	if u, err := url.Parse(path); err != nil || u.Path != path || u.RawQuery != "" {
 		return false
 	}
+	got := strings.Split(path, "/")
 	for _, rt := range wire.RoomRelayRoutes {
-		if rt == method+" "+path {
+		m, pattern, _ := strings.Cut(rt, " ")
+		want := strings.Split(pattern, "/")
+		if m != method || len(want) != len(got) {
+			continue
+		}
+		match := true
+		for i, seg := range want {
+			if strings.HasPrefix(seg, "{") && strings.HasSuffix(seg, "}") {
+				clean, ok := core.CleanRelPath(got[i])
+				match = match && ok && clean == got[i]
+				continue
+			}
+			match = match && seg == got[i]
+		}
+		if match {
 			return true
 		}
 	}

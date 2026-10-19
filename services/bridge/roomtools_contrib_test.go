@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -198,5 +200,35 @@ func TestTurnByRequester(t *testing.T) {
 	b, _ := json.Marshal(store.AgentJob{ClientMsgID: "c-1", DispatchedByJobID: "j0"})
 	if err := json.Unmarshal(b, &raw); err != nil || raw.ClientMsgID != "c-1" || raw.DispatchedByJobID != "j0" {
 		t.Fatalf("claim fields = %+v %v", raw, err)
+	}
+}
+
+// A room relay's call lasts as long as the tool call that made it
+// (docs/prd/2026-10-19-video-generation.md §2.4): it outlives the bridge's
+// short-call limit, which still ends every other room tool's call, and its
+// context still ends it.
+func TestRoomRelayCallHasNoFixedLimit(t *testing.T) {
+	gw := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(300 * time.Millisecond) // a picture still drawing
+		_, _ = w.Write([]byte(`{"images":[]}`))
+	}))
+	defer gw.Close()
+	b := New(Config{GatewayBaseURL: gw.URL, GatewayToken: "t", OwnerSubject: "alice"})
+	b.http = &http.Client{Timeout: 100 * time.Millisecond} // the short-call limit, shortened
+	g := roomToolsGateway{b}
+	call := func(ctx context.Context, relay bool) error {
+		_, err := g.Do(ctx, http.MethodPost, "/v1/media/image?room=room-1&job=job-1", roomtools.RawBody{ContentType: "application/json", Data: []byte(`{}`), Relay: relay})
+		return err
+	}
+	if err := call(context.Background(), true); err != nil {
+		t.Fatalf("a relayed call longer than the short-call limit was cut: %v", err)
+	}
+	if err := call(context.Background(), false); err == nil {
+		t.Fatal("a room tool's own call must keep the short-call limit")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if err := call(ctx, true); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("the tool call's end must end the relayed call: %v", err)
 	}
 }

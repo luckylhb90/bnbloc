@@ -62,9 +62,14 @@ reply in the room; deliverables published with sourceSeq = the dispatch's seq
   the room (`mcp.credentials: "room"`, content-components.md). The bridge
   sets `BNBLOC_ROOM_RELAY_URL` and `BNBLOC_ROOM_RELAY_TOKEN` on those
   servers only (`SessionInfo.RoomRelayServers`). A relayed call reaches
-  only `wire.RoomRelayRoutes` (routes that admit a job grant); the relay
-  sets `?room=&job=` from the bound job, so it acts as the turn's
-  requester and is refused (409) between turns.
+  only `wire.RoomRelayRoutes` (routes that admit a job grant; a `{id}`
+  segment matches one path segment); the relay sets `?room=&job=` from
+  the bound job, so it acts as the turn's requester and is refused (409)
+  between turns. A relayed call has no fixed time limit: it is bound to
+  the tool's request alone (`RawBody.Relay`, the bridge's client without
+  a total timeout), so a slow picture or a video's publish finishes, and a
+  stalled gateway ends with the agent's tool call
+  (`docs/prd/2026-10-19-video-generation.md` §2.4).
 - **Protocol:** MCP Streamable HTTP, dual-era. Legacy clients
   (2025-03-26 … 2025-11-25) open with `initialize`; modern clients
   (2026-07-28) carry `_meta.io.modelcontextprotocol/protocolVersion` per

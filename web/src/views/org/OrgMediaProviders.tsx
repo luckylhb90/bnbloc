@@ -131,6 +131,7 @@ export function OrgMediaProviders() {
     <div className="mt-2 flex flex-col gap-3">
       <OrgProviderFields id="transcribe" api={mediaProviderApi("transcribe", "org")} label="Speech to text" />
       <OrgProviderFields id="image" api={mediaProviderApi("image", "org")} label="Image generation" />
+      <OrgProviderFields id="video" api={mediaProviderApi("video", "org")} label="Video generation" />
       <OrgProviderFields id="decide" api={decisionProviderApi("org")} label="Decision model" />
     </div>
   );

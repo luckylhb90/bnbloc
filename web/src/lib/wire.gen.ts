@@ -2889,7 +2889,7 @@ export const MaxContentTagRunes = 32;
 // web reads them here to say why before it sends.
 export const MaxMediaAudioBytes = 20971520;
 export const MaxMediaTranscriptChars = 32768;
-export const MaxMediaImagePrompt = 4000;
+export const MaxMediaPrompt = 4000;
 export const MaxMediaImageReplyBytes = 16777216;
 export const MaxMediaImageBytes = 12582912;
 export const MaxMediaImages = 4;
@@ -2970,8 +2970,9 @@ export interface ContentMCPRequirement {
 // through the bridge's room relay ("METHOD /path"; pkgmeta.MCPCredentialsRoom):
 // each admits a job grant (?room=&job=) and acts as the job's requester. A
 // route joins the list only with that admission; the relay refuses the
-// rest. The relay's own answer about the turn is component.RelaySession.
-export const RoomRelayRoutes: readonly string[] = ["POST /v1/decisions", "POST /v1/systemone", "POST /v1/media/image", "POST /v1/media/transcriptions", "POST /v1/live"];
+// rest. A {name} segment matches one path segment (a video's id). The
+// relay's own answer about the turn is component.RelaySession.
+export const RoomRelayRoutes: readonly string[] = ["POST /v1/decisions", "POST /v1/systemone", "POST /v1/media/image", "POST /v1/media/transcriptions", "POST /v1/media/video", "GET /v1/media/video/{id}", "POST /v1/live"];
 
 // MCP transports of a resolved tool (ContentMCPTool.Transport).
 export const MCPTransportStdio = "stdio";
@@ -3064,6 +3065,7 @@ export interface MCPConnectorUpdate {
 export interface MediaCapabilities {
   transcribe: MediaCapability;
   image: MediaCapability;
+  video: MediaCapability;
 }
 
 // MediaCapability is one media ability as the caller sees it.
@@ -3161,7 +3163,7 @@ export const MediaImageAspects: readonly string[] = ["square", "landscape", "por
 
 // MediaImageRequest is POST /v1/media/image.
 export interface MediaImageRequest {
-  // Prompt is what to draw, at most MaxMediaImagePrompt characters.
+  // Prompt is what to draw, at most MaxMediaPrompt characters.
   prompt: string;
   // Model is one of the provider's models (MediaProviderConfig.Models);
   // the first is the default.
@@ -3233,6 +3235,54 @@ export interface MediaImage {
   // RevisedPrompt is the provider's own rewording, when it sends one: data
   // the provider wrote, fenced wherever an agent reads it.
   revisedPrompt?: string;
+}
+
+// Video aspect ratios a generation may ask for (the provider's size: 16:9
+// is 1280x720, 9:16 is 720x1280, unless the provider's params say
+// otherwise).
+export const MediaVideoAspectLandscape = "16:9";
+export const MediaVideoAspectPortrait = "9:16";
+
+// MediaVideoAspects are the aspects a video may ask for.
+export const MediaVideoAspects: readonly string[] = ["16:9", "9:16"];
+
+// A video's states (MediaVideoReply.Status): rendering until the provider
+// answers it done or failed. Both of those are final.
+export const MediaVideoRendering = "rendering";
+export const MediaVideoDone = "done";
+export const MediaVideoFailed = "failed";
+
+// MediaVideoRequest is POST /v1/media/video: one video submitted to the
+// provider, answered at once (docs/prd/2026-10-19-video-generation.md §2.2).
+export interface MediaVideoRequest {
+  // Prompt is what to film, at most MaxMediaPrompt characters.
+  prompt: string;
+  // Model is one of the provider's models (MediaProviderConfig.Models);
+  // the first is the default.
+  model?: string;
+  // Seconds is the clip's length, passed to the provider as is (the
+  // lengths a model takes are the provider's: 4, 6 or 8 for some); 0 =
+  // the provider's default.
+  seconds?: number;
+  // Aspect defaults to MediaVideoAspectLandscape.
+  aspect?: MediaVideoAspect;
+}
+
+// MediaVideoReply answers POST /v1/media/video and GET
+// /v1/media/video/{id}: the video's id (the provider's own: the gateway
+// keeps no job, any replica answers for it) and its status. Once done and
+// published into the job's room (?publish=true under a job grant), it names
+// the room file; a video is never inlined.
+export interface MediaVideoReply {
+  id: string;
+  status: MediaVideoStatus;
+  model?: string;
+  // Error is the provider's reason for a failed video, bounded.
+  error?: string;
+  // ArtifactID, FileName and Bytes name the room file a done video became.
+  artifactId?: string;
+  fileName?: string;
+  bytes?: number;
 }
 
 // ---- wire/my_agents.go ----
@@ -5342,6 +5392,10 @@ export type JobActivityKind = "tool" | "thinking" | "text";
 export const JobActivityKindValues: readonly JobActivityKind[] = ["tool", "thinking", "text"];
 export type MediaImageAspect = "square" | "landscape" | "portrait";
 export const MediaImageAspectValues: readonly MediaImageAspect[] = ["square", "landscape", "portrait"];
+export type MediaVideoAspect = "16:9" | "9:16";
+export const MediaVideoAspectValues: readonly MediaVideoAspect[] = ["16:9", "9:16"];
+export type MediaVideoStatus = "rendering" | "done" | "failed";
+export const MediaVideoStatusValues: readonly MediaVideoStatus[] = ["rendering", "done", "failed"];
 export type ScheduleRecipientKind = "room" | "agent" | "ai" | "notice";
 export const ScheduleRecipientKindValues: readonly ScheduleRecipientKind[] = ["room", "agent", "ai", "notice"];
 export type RecurrenceKind = "once" | "daily" | "weekly" | "cron";

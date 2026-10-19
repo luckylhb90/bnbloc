@@ -40,11 +40,13 @@ type Workspace interface {
 // RawBody is a request body sent as-is (a package archive, an app data
 // write) instead of JSON-encoded, with the request headers it needs (an
 // app write's If-Match / If-None-Match). An empty ContentType sends no
-// body.
+// body. Relay marks a room relay's call (relay.go): bound only to its
+// context, never to the client's fixed request limit.
 type RawBody struct {
 	ContentType string
 	Data        []byte
 	Header      http.Header
+	Relay       bool
 }
 
 // Content tool bounds.
