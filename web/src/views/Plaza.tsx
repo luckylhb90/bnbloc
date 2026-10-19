@@ -39,7 +39,7 @@ export function Plaza({ onOpen }: { onOpen: (id: string) => void }) {
   const [loadingMore, setLoadingMore] = useState(false);
   const [creating, setCreating] = useState(false);
   const [fromTemplate, setFromTemplate] = useState(false);
-  const [section, setSection] = useState<PlazaSection>("rooms");
+  const [section, setSection] = useState<PlazaSection>("works");
   const toast = useToast();
   const { reauth, role } = useAuth();
   // A read-only (viewer) organization role creates no rooms.

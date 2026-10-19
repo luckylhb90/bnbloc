@@ -21,6 +21,8 @@ const fails = [];
 const ck = (cond, label, detail) => { if (!cond) fails.push(`${label}: ${detail}`); };
 
 async function enterRoom(pg, roomId) {
+  // The Plaza opens on Works; the room cards live under the Rooms tab.
+  await pg.getByRole("tab", { name: "Rooms" }).click().catch(() => {});
   // The Plaza renders room cards; click the card whose text contains roomId.
   // Poll for the room row rather than assuming the click landed immediately —
   // this is exactly what earlier attempts got wrong.
