@@ -35,6 +35,28 @@ And the two that do work have gaps:
 The AGENTS rule already points here: never grow a component-specific path,
 env name or default in public code; extend the manifest schema instead.
 
+### 1.1 What uses settings today (QA, 2026-10-19)
+
+Fifteen components are installed on QA; nine need settings, and some
+outside QA too. Each is a migration of a slice (§5):
+
+| Component | Kind | Its settings today | Slice |
+|---|---|---|---|
+| browser | MCP tool | Chrome binary, profile and state directories, endpoint, model, call budget: env and flags nobody can set | 1 |
+| a chat bot plugin | plugin | app id, app key, bot id (`localSettings`); its API and websocket URLs baked into `sidecar.args` at publish | 1 |
+| local skills | plugin | data directory, mounts; a shipped default policy; a hand-written page here | 1, 2 |
+| acp | core | a config file: the agent list (command, args, env, models, permissions, profile) | 2, 5 |
+| a SAML auth provider | auth provider | IdP metadata URL, SP entity, ACS and login URLs, attribute mapping, SP certificate and key, allowed redirects: deployment env | 3 |
+| a chat notifier | notifier | API URL, app id and key, bot id, tenants, recipient map, signing secret: deployment env | 3 |
+| media-tools | MCP tool | none of its own: its providers are the platform's media settings | provider components |
+| sandbox | sandbox | mode and env as fixed desktop fields; guest CPUs and memory | 5 |
+| other cores (a CLI-fronting sidecar, an adapter daemon, a manifest core) | core | their own CLI's or daemon's configuration; an upstream URL; a listener path | 5 |
+| six previewers | previewer | none | — |
+
+Env names: components read their own as `BNBLOC_<THEIR NAME>_*`, so a
+setting may be delivered under its component's own prefix; every other
+`BNBLOC_*` name stays the platform's (§2.1).
+
 ## 2. What it is (the end state)
 
 ### 2.1 One declaration: `settings`
@@ -68,8 +90,9 @@ fields:
 - `deliver` says how the value reaches the component (§2.3); without it,
   the component reads its settings file.
 - Bounds: at most 24 settings; an env name matches `[A-Z][A-Z0-9_]*`, never
-  `BNBLOC_*` (the platform's) and never a variable that changes how a
-  process runs (`PATH`, `HOME`, `LD_*`, `DYLD_*`, `NODE_OPTIONS`, …: one
+  `BNBLOC_*` except the component's own `BNBLOC_<NAME>_` prefix (the rest
+  is the platform's), and never a variable that changes how a process
+  runs (`PATH`, `HOME`, `LD_*`, `DYLD_*`, `NODE_OPTIONS`, …: one
   deny list, owned by `pkgmeta`).
 
 `mcp.env` and `localSettings` are removed: a setting is a setting
@@ -150,17 +173,12 @@ would be (decided 2026-10-19).
 A value changes without a reinstall: a process gets it at its next start
 (the form says so), an endpoint component on its next ask.
 
-### 2.4 Built-in providers declare theirs too
+### 2.4 Model providers are components
 
-A media, decision or assist adapter is Go code, not a package, but it
-declares its fields the same way: `Adapter.Settings() []Setting` (the base
-URL, models, key and the adapter's own params). The provider routes answer
-the declaration with the values, and the console renders the one form. The
-web's copies of the adapter kinds and its params allow list are deleted. A
-new adapter, or a new param, is then a Go change in the adapter only.
-
-Later: an adapter as an installable component (a provider over a wire
-protocol), when a second family needs one.
+The assist, decision and media models become provider components that
+declare their settings like any component, installed by the platform, an
+organization or a member (decided 2026-10-20):
+`docs/prd/2026-10-20-model-provider-components.md`.
 
 ### 2.5 AI
 
@@ -220,7 +238,6 @@ protocol), when a second family needs one.
 3. **Endpoint components ask.** `GET /v1/component-settings`; the notifier
    and the auth provider move their deployment environment into
    `settings`.
-4. **Built-in adapters declare.** `Adapter.Settings()`; the console's
-   provider cards become the one form; the web's copies go.
+4. **Model providers.** `docs/prd/2026-10-20-model-provider-components.md`.
 5. **The rest.** The sandbox's and core connection's desktop fields as
    their components' settings; Fill with AI and Check.
