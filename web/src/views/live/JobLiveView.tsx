@@ -148,8 +148,13 @@ export function LiveWaitingNote({
 // How often a held control is renewed (it lapses server-side after
 // LiveControlLapseMs without one).
 const RENEW_MS = 5_000;
-// Pointer moves are sent at most this often (a drag, a hover menu).
+// Pointer moves of a drag are sent at most this often.
 const MOVE_MS = 50;
+
+// isPasteKey: Cmd+V / Ctrl+V, left to the browser's paste event.
+function isPasteKey(e: { readonly key: string; readonly metaKey: boolean; readonly ctrlKey: boolean }): boolean {
+  return (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "v";
+}
 
 /** JobLiveView is the large view: the picture, who drives, take over /
  *  hand back for the owner, and "Open in the browser window" on their
@@ -281,11 +286,14 @@ export function JobLiveView({
         tabIndex={driving ? 0 : -1}
         onKeyDown={(e) => {
           if (!driving) return;
+          // Paste stays the browser's own: its paste event below carries
+          // this computer's clipboard to the page.
+          if (isPasteKey(e)) return;
           e.preventDefault();
           send(keyInput("down", e));
         }}
         onKeyUp={(e) => {
-          if (!driving) return;
+          if (!driving || isPasteKey(e)) return;
           e.preventDefault();
           send(keyInput("up", e));
         }}
@@ -321,7 +329,9 @@ export function JobLiveView({
               send({ type: "mouse", action: "up", ...p, button: button(e.button), clicks: e.detail || 1, modifiers: modifiers(e) });
             }}
             onPointerMove={(e) => {
-              if (!driving || Date.now() - lastMove.current < MOVE_MS) return;
+              // Only a drag moves the page's pointer: hover moves would queue
+              // ahead of the keys and slow typing to a crawl.
+              if (!driving || e.buttons === 0 || Date.now() - lastMove.current < MOVE_MS) return;
               const p = point(e);
               if (!p) return;
               lastMove.current = Date.now();

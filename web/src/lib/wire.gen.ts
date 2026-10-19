@@ -56,6 +56,10 @@ export interface LiveFramePost {
   // End closes the view now (what it showed is gone, or work resumed
   // elsewhere); the post carries no frame.
   end?: boolean;
+  // WaitInput: an empty post while someone controls the view waits a
+  // moment for their input before it answers (a long poll), so input
+  // reaches the tool as it is sent rather than at the next post.
+  waitInput?: boolean;
 }
 
 // LiveFrameReply answers a post: whether someone watches the large view

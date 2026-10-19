@@ -42,6 +42,9 @@ import (
 const (
 	// liveWatchFor is how long a large-view fetch counts as watching.
 	liveWatchFor = 5 * time.Second
+	// liveInputWait is how long a WaitInput post waits for input: short
+	// enough that the tool still captures the page between polls.
+	liveInputWait = 500 * time.Millisecond
 	// liveIdleFor drops a job's state when its tool has not posted for
 	// this long (the turn ended, the machine went away); a view waiting
 	// for a person posts far more often (component.LiveKeepEverySec).
@@ -65,6 +68,9 @@ type liveJob struct {
 	input      []component.LiveInput
 	waiting    string
 	ready      bool
+	// inputReady is closed when input is queued (a WaitInput post waits
+	// on it); nil while nobody waits.
+	inputReady chan struct{}
 }
 
 // factsLocked is the view's event (no image).
@@ -156,9 +162,29 @@ func (s *Service) handleInternalLiveFrame(w http.ResponseWriter, r *http.Request
 	ready := f.Ready && waiting != ""
 	changed := fresh || waiting != j.waiting || ready != j.ready
 	j.waiting, j.ready = waiting, ready
+	event := j.factsLocked(jobID, now)
+	if !fresh && f.WaitInput && len(j.input) == 0 && event.Controller != "" {
+		// The controller is typing: answer as their input arrives.
+		if j.inputReady == nil {
+			j.inputReady = make(chan struct{})
+		}
+		ready := j.inputReady
+		l.mu.Unlock()
+		t := time.NewTimer(liveInputWait)
+		select {
+		case <-ready:
+		case <-t.C:
+		case <-r.Context().Done():
+		}
+		t.Stop()
+		now = s.now()
+		l.mu.Lock()
+		if cur := l.getLocked(roomID, jobID, now); cur != nil {
+			j = cur
+		}
+	}
 	reply := component.LiveFrameReply{Watching: now.Before(j.watchedTo), Controller: j.controllerLocked(now), Input: j.input}
 	j.input = nil
-	event := j.factsLocked(jobID, now)
 	l.mu.Unlock()
 	if changed && event.Seq > 0 {
 		s.publishLive(r.Context(), roomID, j.channel, event)
@@ -278,6 +304,10 @@ func (s *Service) handleLiveInput(w http.ResponseWriter, r *http.Request) {
 	j.input = append(j.input, events...)
 	if len(j.input) > wire.MaxLiveInput {
 		j.input = j.input[len(j.input)-wire.MaxLiveInput:]
+	}
+	if j.inputReady != nil {
+		close(j.inputReady)
+		j.inputReady = nil
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

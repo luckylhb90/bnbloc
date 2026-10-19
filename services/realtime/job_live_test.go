@@ -126,6 +126,22 @@ func TestJobLiveView(t *testing.T) {
 		t.Fatalf("input delivered twice: %+v", again)
 	}
 
+	// An empty post waiting for input answers as soon as it is queued.
+	got := make(chan component.LiveFrameReply, 1)
+	go func() { got <- post(component.LiveFramePost{WaitInput: true}) }()
+	time.Sleep(100 * time.Millisecond)
+	if code, _ := call(http.MethodPost, "/v1/rooms/room-1/jobs/job-1/live/input", "maya", wire.LiveInputPost{Events: []component.LiveInput{{Type: component.LiveInputText, Text: "fast"}}}); code != http.StatusNoContent {
+		t.Fatalf("input = %d", code)
+	}
+	select {
+	case r := <-got:
+		if len(r.Input) != 1 || r.Input[0].Text != "fast" {
+			t.Fatalf("long poll = %+v", r)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the waiting post did not answer with the input")
+	}
+
 	// Control lapses without renewal; then input is refused again.
 	now = now.Add(wire.LiveControlLapseMs*time.Millisecond + time.Second)
 	if reply := post(component.LiveFramePost{}); reply.Controller != "" {
