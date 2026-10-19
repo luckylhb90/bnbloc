@@ -504,6 +504,10 @@ the room.)
   - The room shows one view per job: the newest keeper of a job holds
     it, and an older one leaves without posting `End` (which would close
     the newer view).
+  - The agent ends runs: `browse {stop}` with `run` ends that one, and
+    without it every run of the room it started for the person; each
+    one's view ends, its tab closes and it is forgotten (QA, 2026-10-19:
+    asked to stop the bouncing tabs, the agent had no way to).
 
 ## 4. The component
 
