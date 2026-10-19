@@ -86,8 +86,8 @@ func Validate(in wire.DecisionRequest) (Request, error) {
 				return Request{}, invalid("%s: a predicate takes no choices or levels", at)
 			}
 		case wire.DecisionChoice:
-			if len(q.Choices) < component.MinDecisionChoices || len(q.Choices) > wire.MaxDecisionChoices || len(q.Levels) > 0 {
-				return Request{}, invalid("%s.choices: %d to %d choices", at, component.MinDecisionChoices, wire.MaxDecisionChoices)
+			if len(q.Choices) < component.MinDecisionChoices || len(q.Choices) > component.MaxDecisionChoices || len(q.Levels) > 0 {
+				return Request{}, invalid("%s.choices: %d to %d choices", at, component.MinDecisionChoices, component.MaxDecisionChoices)
 			}
 			values := map[string]bool{}
 			for j, c := range q.Choices {

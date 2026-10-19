@@ -2,6 +2,8 @@ import {
   applyProgress,
   endProgress,
   currentStep,
+  currentStepFor,
+  LONG_STEP_MS,
   earlierSteps,
   formatElapsed,
   NOTE_EVERY_MS,
@@ -51,17 +53,17 @@ eq(formatElapsed(185_000), "3m 05s", "minutes");
 eq(formatElapsed(3_720_000), "1h 02m", "hours");
 eq(formatElapsed(8_040_000), "2h 14m", "a turn of hours");
 eq(formatElapsed(-5), "0s", "never negative");
-eq(turnStart({ createdAtMs: 1, claimedAtMs: 2, startedAtMs: 3 }, { jobId: "j", startedAtMs: 4, steps: [], changedAtMs: 0 }), 4, "the turn's own start first");
+eq(turnStart({ createdAtMs: 1, claimedAtMs: 2, startedAtMs: 3 }, { jobId: "j", startedAtMs: 4, steps: [], changedAtMs: 0, stepSinceMs: 0 }), 4, "the turn's own start first");
 eq(turnStart({ createdAtMs: 1, claimedAtMs: 2 }), 2, "else when a bridge took it");
 eq(turnStart({ createdAtMs: 1 }), 1, "else when it was asked");
 
 // The steps shown: the newest, then up to five before it, newest first.
 {
   const steps = Array.from({ length: 8 }, (_, i) => step("tool", `s${i}`, i));
-  const p = { jobId: "j", steps, changedAtMs: 0 };
+  const p = { jobId: "j", steps, changedAtMs: 0, stepSinceMs: 0 };
   eq(currentStep(p)?.title, "s7", "current = newest");
   eq(earlierSteps(p).map((s) => s.title), ["s6", "s5", "s4", "s3", "s2"], "five earlier, newest first");
-  eq(earlierSteps({ jobId: "j", steps: [steps[0]!], changedAtMs: 0 }), [], "one step: nothing earlier");
+  eq(earlierSteps({ jobId: "j", steps: [steps[0]!], changedAtMs: 0, stepSinceMs: 0 }), [], "one step: nothing earlier");
   eq(currentStep(undefined), undefined, "no progress yet");
 }
 eq(stepLabel(step("thinking", undefined, 0)), "Thinking", "an untitled thought");
@@ -72,7 +74,7 @@ eq(stepLabel(step("tool", "Bash: ls", 0)), "Bash: ls", "a title as given");
 // naming the agent by provider and model, never its core.
 {
   const job = { provider: "claude-code", model: "opus", createdAtMs: 0, startedAtMs: 0 };
-  const p = { jobId: "j", steps: [step("tool", "x", 0)], changedAtMs: 40_000 };
+  const p = { jobId: "j", steps: [step("tool", "x", 0)], changedAtMs: 40_000, stepSinceMs: 40_000 };
   eq(quietNote(job, p, 40_000 + QUIET_AFTER_MS - 1), null, "not yet quiet");
   const at = (k: number) => quietNote(job, p, 40_000 + QUIET_AFTER_MS + k * NOTE_EVERY_MS);
   eq(at(0), "Complex tasks can take several minutes", "first note");
@@ -86,4 +88,20 @@ eq(stepLabel(step("tool", "Bash: ls", 0)), "Bash: ls", "a title as given");
   eq(quietNote(job, p, 40_000 + LONG_QUIET_MS - 1) === null, false, "still rotating just before");
   eq(quietNote(job, p, 40_000 + LONG_QUIET_MS), "No new step for 10 min — still running", "long quiet");
   eq(quietNote(job, p, 40_000 + 47 * 60_000), "No new step for 47 min — still running", "it says how long");
+}
+
+// A step the agent keeps streaming into (reasoning for minutes) is one
+// step: its refreshed time does not restart it, and once it has lasted
+// LONG_STEP_MS the strip says how long.
+{
+  const a = applyProgress({}, { jobId: "j", startedAtMs: 1, activity: [step("tool", "Read", 10), step("thinking", undefined, 20)] }, 1_000);
+  eq(a.j?.stepSinceMs, 1_000, "a new step starts now");
+  const streamed = applyProgress(a, { jobId: "j", startedAtMs: 1, activity: [step("tool", "Read", 10), step("thinking", undefined, 90_000)] }, 91_000);
+  eq(streamed.j?.stepSinceMs, 1_000, "streaming into the step keeps its start");
+  eq(streamed.j?.changedAtMs, 91_000, "and still counts as activity");
+  eq(currentStepFor(streamed.j, 1_000 + LONG_STEP_MS - 1), null, "a short step shows no time");
+  eq(currentStepFor(streamed.j, 1_000 + 5 * 60_000 + 12_000), "5m 12s", "a long one says how long");
+  const next = applyProgress(streamed, { jobId: "j", startedAtMs: 1, activity: [step("tool", "Read", 10), step("thinking", undefined, 90_000), step("tool", "browser_act", 95_000)] }, 95_000);
+  eq(next.j?.stepSinceMs, 95_000, "the next step starts anew");
+  eq(currentStepFor(undefined, 10 * 60_000), null, "no progress: nothing");
 }

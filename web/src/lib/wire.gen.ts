@@ -2139,7 +2139,6 @@ export const DecisionRefusal = "refusal";
 
 // Decision bounds (the provider's own, so a refusal is ours and says why).
 export const MaxDecisionQuestions = 128;
-export const MaxDecisionChoices = 255;
 export const MaxDecisionLevels = 10;
 export const MaxDecisionInputText = 65536;
 export const MaxDecisionImages = 8;
@@ -2182,7 +2181,8 @@ export interface DecisionQuestion {
   type: DecisionQuestionType;
   name?: string;
   instructions: string;
-  // Choices, for a choice question: 2…MaxDecisionChoices values.
+  // Choices, for a choice question: component.MinDecisionChoices…
+  // component.MaxDecisionChoices values.
   choices?: DecisionChoiceOption[];
   // Levels, for a score question: 2…MaxDecisionLevels, lowest first.
   levels?: DecisionLevel[];

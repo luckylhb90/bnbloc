@@ -12,13 +12,16 @@ import { JobActivityKindValues, type AgentJob, type AgentJobProgress, type JobAc
 /** One step of a running turn: a command run, a file read, reasoning, writing. */
 export type JobStep = JobActivity;
 
-/** A live job's progress: its turn's start and latest steps, and when the
- *  web last saw them change (receivedAtMs, its clock). */
+/** A live job's progress: its turn's start and latest steps, when the web
+ *  last saw them change, and when its current step began (both its clock). */
 export interface JobProgress {
   readonly jobId: string;
   readonly startedAtMs?: number;
   readonly steps: readonly JobStep[];
   readonly changedAtMs: number;
+  /** When the current step began: a step the agent keeps streaming into
+   *  (reasoning, writing) refreshes its time, not this. */
+  readonly stepSinceMs: number;
 }
 
 /** The steps a live job lists before its current one. */
@@ -31,9 +34,18 @@ export const NOTE_EVERY_MS = 8_000;
  *  suite can run an hour as one step): it is still running, and only the
  *  member stops it. */
 export const LONG_QUIET_MS = 10 * 60_000;
+/** A current step this long shows how long it has lasted (QA 2026-10-19:
+ *  a model reasoned for minutes on one step, its chunks keeping the turn
+ *  from ever reading quiet, and the member saw only "Thinking"). */
+export const LONG_STEP_MS = 60_000;
 
 const sameSteps = (a: readonly JobStep[], b: readonly JobStep[]) =>
   a.length === b.length && a.every((s, i) => s.kind === b[i]!.kind && s.title === b[i]!.title && s.atMs === b[i]!.atMs);
+
+/** sameCurrentStep: the same steps, the current one perhaps refreshed (its
+ *  time moves while the agent streams into it). */
+const sameCurrentStep = (a: readonly JobStep[], b: readonly JobStep[]) =>
+  a.length === b.length && a.every((s, i) => s.kind === b[i]!.kind && s.title === b[i]!.title && (i === a.length - 1 || s.atMs === b[i]!.atMs));
 
 /** applyProgress folds an update into the room's map (by job id). An update
  *  repeating what the web already shows keeps its changedAtMs, so a quiet
@@ -54,6 +66,7 @@ export function applyProgress(
       ...(u.startedAtMs ? { startedAtMs: u.startedAtMs } : {}),
       steps,
       changedAtMs: changed ? nowMs : prev.changedAtMs,
+      stepSinceMs: prev && sameCurrentStep(prev.steps, steps) && prev.startedAtMs === u.startedAtMs ? prev.stepSinceMs : nowMs,
     },
   };
 }
@@ -107,6 +120,14 @@ export function stepLabel(s: JobStep): string {
  *  and up to SHOWN_STEPS before it, newest first. */
 export function currentStep(p?: JobProgress): JobStep | undefined {
   return p?.steps.at(-1);
+}
+
+/** currentStepFor is how long the current step has lasted, when that is at
+ *  least LONG_STEP_MS (else null): shown beside it. */
+export function currentStepFor(p: JobProgress | undefined, nowMs: number): string | null {
+  if (!p || p.steps.length === 0) return null;
+  const ms = nowMs - p.stepSinceMs;
+  return ms >= LONG_STEP_MS ? formatElapsed(ms) : null;
 }
 
 export function earlierSteps(p?: JobProgress): JobStep[] {

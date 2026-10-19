@@ -5,6 +5,7 @@ import { isLiveJob } from "@/lib/agentRuns";
 import { cn } from "@/lib/cn";
 import {
   currentStep,
+  currentStepFor,
   earlierSteps,
   formatElapsed,
   quietNote,
@@ -67,7 +68,7 @@ const STEP_ICONS: Record<JobStep["kind"], typeof TerminalIcon> = {
   text: PencilSimpleLineIcon,
 };
 
-function StepLine({ step, current }: { step: JobStep; current?: boolean }) {
+function StepLine({ step, current, lasted }: { step: JobStep; current?: boolean; lasted?: string | null }) {
   const Icon = STEP_ICONS[step.kind];
   const label = stepLabel(step);
   return (
@@ -76,6 +77,11 @@ function StepLine({ step, current }: { step: JobStep; current?: boolean }) {
       <span className="min-w-0 truncate" title={label}>
         {label}
       </span>
+      {lasted && (
+        <span className="shrink-0 tabular-nums" aria-label="This step for">
+          · {lasted}
+        </span>
+      )}
     </span>
   );
 }
@@ -96,6 +102,7 @@ export function JobProgressStrip({ job }: { job: AgentJob }) {
   const step = currentStep(progress);
   const earlier = earlierSteps(progress);
   const note = quietNote(job, progress, now);
+  const lasted = currentStepFor(progress, now);
   return (
     <div className="flex flex-col gap-0.5" data-job-progress>
       <div className="flex h-4 min-w-0 items-center gap-2">
@@ -108,7 +115,7 @@ export function JobProgressStrip({ job }: { job: AgentJob }) {
               {note}
             </span>
           ) : step ? (
-            <StepLine step={step} current />
+            <StepLine step={step} current lasted={lasted} />
           ) : (
             <span className="block truncate">Starting…</span>
           )}
@@ -131,7 +138,7 @@ export function JobProgressStrip({ job }: { job: AgentJob }) {
       {open && earlier.length > 0 && (
         <div className="flex flex-col gap-0.5 border-l border-[var(--color-border)] pl-2">
           {/* While a note shows, the current step joins the list. */}
-          {note && step && <StepLine step={step} current />}
+          {note && step && <StepLine step={step} current lasted={lasted} />}
           {earlier.map((s, i) => (
             <StepLine key={`${s.atMs}-${i}`} step={s} />
           ))}

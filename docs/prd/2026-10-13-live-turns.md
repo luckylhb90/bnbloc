@@ -44,6 +44,15 @@ note. Decided while building:
   it).
 - **Long quiet**: after 10 minutes without a new step the strip says "No
   new step for N min — still running" instead of rotating notes.
+- **A long step says how long (added 2026-10-19).** A step the agent keeps
+  streaming into (reasoning, writing) refreshes its time, so the turn is
+  never quiet while it lasts. Once the current step has lasted a minute,
+  its line shows how long ("Thinking · 5m 12s"), counted from when the
+  step began, not from its latest chunk. QA: a model reasoned for minutes
+  on one step of a browser quiz and the member saw only "Thinking".
+  - No automatic retry: rerunning a job that already acted could repeat
+    what it did (a click, a submit). The member stops it and sends
+    "continue" in the same session, which resumes from where it was.
 
 ## 1. Why
 
