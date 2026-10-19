@@ -71,6 +71,9 @@ export interface LiveFramePost {
   // picture cannot show, which the page waits on. Every post says it
   // while it is open; the controller answers it (LiveInputDialog).
   dialog?: LiveDialog;
+  // Crashed: the page crashed in the browser (its picture is the last one
+  // before); the owner reloads it (LiveInputReload).
+  crashed?: boolean;
 }
 
 // Kinds of a page's dialog (LiveDialog.Kind), as the browser names them.
@@ -115,6 +118,8 @@ export const LiveInputClose = "close";
 // LiveInputDialog: answers the page's open dialog (LiveDialog): Action
 // "accept" or "dismiss", Text a prompt's answer.
 export const LiveInputDialog = "dialog";
+// LiveInputReload: the owner reloads the page (one that crashed).
+export const LiveInputReload = "reload";
 
 // LiveInput is one input event. X and Y are fractions of the frame (0..1),
 // so they hold at any display size; Action is "down", "up" or "move" for
@@ -198,8 +203,8 @@ export interface RelaySession {
 // ---- component unions (//wire:union) ----
 export type LiveDialogKind = "alert" | "confirm" | "prompt" | "beforeunload";
 export const LiveDialogKindValues: readonly LiveDialogKind[] = ["alert", "confirm", "prompt", "beforeunload"];
-export type LiveInputType = "mouse" | "wheel" | "key" | "text" | "focus" | "close" | "dialog";
-export const LiveInputTypeValues: readonly LiveInputType[] = ["mouse", "wheel", "key", "text", "focus", "close", "dialog"];
+export type LiveInputType = "mouse" | "wheel" | "key" | "text" | "focus" | "close" | "dialog" | "reload";
+export const LiveInputTypeValues: readonly LiveInputType[] = ["mouse", "wheel", "key", "text", "focus", "close", "dialog", "reload"];
 export type MountFor = "own" | "borrowed" | "all";
 export const MountForValues: readonly MountFor[] = ["own", "borrowed", "all"];
 
@@ -2694,6 +2699,8 @@ export interface JobLiveFrame {
   ended?: boolean;
   // Dialog is the page's open dialog the controller answers (nil none).
   dialog?: LiveDialog;
+  // Crashed: the page crashed in the browser; its owner reloads it.
+  crashed?: boolean;
   atMs: number;
 }
 

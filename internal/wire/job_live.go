@@ -78,7 +78,9 @@ type JobLiveFrame struct {
 	Ended      bool   `json:"ended,omitempty"`
 	// Dialog is the page's open dialog the controller answers (nil none).
 	Dialog *component.LiveDialog `json:"dialog,omitempty"`
-	AtMs   int64                 `json:"atMs"`
+	// Crashed: the page crashed in the browser; its owner reloads it.
+	Crashed bool  `json:"crashed,omitempty"`
+	AtMs    int64 `json:"atMs"`
 }
 
 // JobLiveList is GET /v1/rooms/{roomId}/live: the room's live views now

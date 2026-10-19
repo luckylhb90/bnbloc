@@ -64,6 +64,9 @@ type LiveFramePost struct {
 	// picture cannot show, which the page waits on. Every post says it
 	// while it is open; the controller answers it (LiveInputDialog).
 	Dialog *LiveDialog `json:"dialog,omitempty"`
+	// Crashed: the page crashed in the browser (its picture is the last one
+	// before); the owner reloads it (LiveInputReload).
+	Crashed bool `json:"crashed,omitempty"`
 }
 
 // Kinds of a page's dialog (LiveDialog.Kind), as the browser names them.
@@ -115,6 +118,8 @@ const (
 	// LiveInputDialog: answers the page's open dialog (LiveDialog): Action
 	// "accept" or "dismiss", Text a prompt's answer.
 	LiveInputDialog = "dialog"
+	// LiveInputReload: the owner reloads the page (one that crashed).
+	LiveInputReload = "reload"
 )
 
 // LiveInput is one input event. X and Y are fractions of the frame (0..1),

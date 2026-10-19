@@ -68,8 +68,10 @@ type liveJob struct {
 	input      []component.LiveInput
 	waiting    string
 	ready      bool
-	// dialog is the page's open dialog, as the tool's last post said.
-	dialog *component.LiveDialog
+	// dialog is the page's open dialog, as the tool's last post said;
+	// crashed that the page crashed.
+	dialog  *component.LiveDialog
+	crashed bool
 	// inputReady is closed when input is queued (a WaitInput post waits
 	// on it); nil while nobody waits.
 	inputReady chan struct{}
@@ -79,7 +81,7 @@ type liveJob struct {
 func (j *liveJob) factsLocked(jobID string, now time.Time) wire.JobLiveFrame {
 	f := j.frame
 	return wire.JobLiveFrame{JobID: jobID, ChannelID: j.channel, Run: f.Run, Seq: f.Seq, Width: f.Width, Height: f.Height,
-		Title: f.Title, URL: f.URL, Owner: j.owner, Core: j.core, Provider: j.provider, Controller: j.controllerLocked(now), Waiting: j.waiting, Ready: j.ready, Dialog: j.dialog, AtMs: j.atMs}
+		Title: f.Title, URL: f.URL, Owner: j.owner, Core: j.core, Provider: j.provider, Controller: j.controllerLocked(now), Waiting: j.waiting, Ready: j.ready, Dialog: j.dialog, Crashed: j.crashed, AtMs: j.atMs}
 }
 
 // liveStore holds every live job of the rooms this replica owns.
@@ -164,8 +166,8 @@ func (s *Service) handleInternalLiveFrame(w http.ResponseWriter, r *http.Request
 	// and so is a dialog opening or closing.
 	ready := f.Ready && waiting != ""
 	dialog := liveDialog(f.Dialog)
-	changed := fresh || waiting != j.waiting || ready != j.ready || !sameDialog(dialog, j.dialog)
-	j.waiting, j.ready, j.dialog = waiting, ready, dialog
+	changed := fresh || waiting != j.waiting || ready != j.ready || !sameDialog(dialog, j.dialog) || f.Crashed != j.crashed
+	j.waiting, j.ready, j.dialog, j.crashed = waiting, ready, dialog, f.Crashed
 	event := j.factsLocked(jobID, now)
 	if !fresh && f.WaitInput && len(j.input) == 0 && event.Controller != "" {
 		// The controller is typing: answer as their input arrives.
@@ -295,9 +297,9 @@ func (s *Service) handleLiveInput(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, "no live view for this job", http.StatusNotFound)
 		return
 	}
-	// Bringing the window forward and closing the view are the owner's,
-	// with or without control (they act on their own machine); everything
-	// else needs control.
+	// Bringing the window forward, reloading a crashed page and closing
+	// the view are the owner's, with or without control (they act on their
+	// own machine); everything else needs control.
 	if ownerOnly(events) {
 		if userID != j.owner {
 			httpx.Error(w, "only "+j.owner+" can do this on their machine", http.StatusForbidden)
@@ -350,7 +352,7 @@ func mayControl(j *liveJob, userID string) bool { return userID == j.owner }
 
 func ownerOnly(events []component.LiveInput) bool {
 	for _, e := range events {
-		if e.Type != component.LiveInputFocus && e.Type != component.LiveInputClose {
+		if e.Type != component.LiveInputFocus && e.Type != component.LiveInputClose && e.Type != component.LiveInputReload {
 			return false
 		}
 	}
@@ -363,7 +365,7 @@ func liveInput(in []component.LiveInput) []component.LiveInput {
 	out := make([]component.LiveInput, 0, len(in))
 	for _, e := range in {
 		switch e.Type {
-		case component.LiveInputMouse, component.LiveInputWheel, component.LiveInputKey, component.LiveInputText, component.LiveInputFocus, component.LiveInputClose, component.LiveInputDialog:
+		case component.LiveInputMouse, component.LiveInputWheel, component.LiveInputKey, component.LiveInputText, component.LiveInputFocus, component.LiveInputClose, component.LiveInputDialog, component.LiveInputReload:
 		default:
 			continue
 		}

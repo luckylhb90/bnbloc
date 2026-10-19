@@ -170,6 +170,9 @@ dropped without a word; an agent's decks under `out/` never published
 - What does it do on error — does it signal failure the way we expect?
 - Does each test fake check what the real side checks (auth, conflicts,
   uniqueness)? A fake that accepts what production refuses proves nothing.
+- When the external side dies (a browser tab crashes, a daemon exits), does
+  the person see that, in words, or a frozen picture? Read its own crash
+  reports before guessing at causes.
 
 *Test:* a conformance check against the real component; a probe in a
 throwaway environment; read the spec of the version actually negotiated.

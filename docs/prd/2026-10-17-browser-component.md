@@ -328,6 +328,24 @@ checkpoint as long as nobody answers.
     the run dismisses it and pauses at `needs_confirmation` with its
     message, and the confirmed resume redoes the step and accepts that
     dialog.
+- **Hands off at the computer, and a crash said as such** (QA,
+  2026-10-19). The member's sign-ins crashed the page's renderer six times
+  in a day ("Aw, Snap!", error 11), each time while this component was
+  attached to the page, never in their own browser; with nothing attached
+  the same sign-in went through. Until the exact trigger is known:
+  - "Open on this computer" brings the window forward and the keeper lets
+    go of the page: nothing of the component is on it while the person
+    works there. The view keeps its last picture, says the person is
+    doing it in the browser window, and is marked ready from the address
+    alone (the browser's target info, never the page). The person's next
+    action in the room's view takes the page back.
+  - A crash (`Inspector.targetCrashed`) is kept per session; calls to the
+    crashed page fail at once. The view says it (`LiveFramePost.Crashed`,
+    `JobLiveFrame.Crashed`) and its owner reloads it without control
+    (`LiveInputReload`). A run reloads a crashed page once and stops at
+    `blocked` if it crashes again.
+  - No focus emulation: the component changes no more of the browser than
+    a run needs.
 - **The browser runs this version's flags.** The launcher records the
   flags it started the browser with (`endpointRecord.Flags`). A browser
   started by an older version (QA, 2026-10-19: started the day before,

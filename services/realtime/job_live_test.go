@@ -219,6 +219,40 @@ func TestJobLiveView(t *testing.T) {
 		t.Fatalf("the answer did not reach the tool: %+v", r)
 	}
 
+	// A crashed page says so to the room; its owner reloads it without
+	// control, nobody else can.
+	drain()
+	post(component.LiveFramePost{Waiting: "Sign in to continue", Crashed: true})
+	if ev := drain(); !ev.Crashed {
+		t.Fatalf("crash event = %+v", ev)
+	}
+	if code, _ := call(http.MethodPost, "/v1/rooms/room-1/jobs/job-1/live/control", "maya", wire.LiveControlPost{Take: false}); code != http.StatusOK {
+		t.Fatalf("hand back = %d", code)
+	}
+	if code, _ := call(http.MethodPost, "/v1/rooms/room-1/jobs/job-1/live/input", "jack", wire.LiveInputPost{Events: []component.LiveInput{{Type: component.LiveInputReload}}}); code != http.StatusForbidden {
+		t.Fatalf("jack reload = %d, want 403", code)
+	}
+	if code, _ := call(http.MethodPost, "/v1/rooms/room-1/jobs/job-1/live/input", "maya", wire.LiveInputPost{Events: []component.LiveInput{{Type: component.LiveInputReload}}}); code != http.StatusNoContent {
+		t.Fatalf("owner reload = %d", code)
+	}
+	if r := post(component.LiveFramePost{Waiting: "Sign in to continue"}); len(r.Input) != 1 || r.Input[0].Type != component.LiveInputReload {
+		t.Fatalf("the reload did not reach the tool: %+v", r)
+	}
+	var seen []string
+	for {
+		select {
+		case ev := <-sub.Events():
+			raw, _ := json.Marshal(ev.Payload)
+			seen = append(seen, string(raw))
+			continue
+		case <-time.After(300 * time.Millisecond):
+		}
+		break
+	}
+	if len(seen) == 0 || strings.Contains(seen[len(seen)-1], `"crashed":true`) {
+		t.Fatalf("a post without the crash still says crashed: %v", seen)
+	}
+
 	// The tool ends the view: gone for everyone, and the room is told.
 	post(component.LiveFramePost{End: true})
 	if ev := drain(); !ev.Ended || ev.JobID != "job-1" {

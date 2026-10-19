@@ -128,21 +128,21 @@ export function LiveWaitingNote({
   return (
     <div className="flex flex-wrap items-center gap-2 text-xs" data-live-waiting-note>
       <span className={cn("size-2 shrink-0 rounded-full", live.ready ? "bg-[var(--color-accent)]" : "bg-[var(--color-warning)]")} aria-hidden />
-      <span className="min-w-0 flex-1 text-[var(--color-fg-muted)]">
+      <span className="min-w-0 grow basis-48 text-[var(--color-fg-muted)]">
         {mine ? (live.ready ? "Looks done. Let the agent continue when you are ready." : live.waiting) : `Waiting for ${live.owner}: ${live.waiting}`}
       </span>
       {mine && inDesktopShell() && (
-        <Button size="sm" variant="outline" onClick={focus} title="Bring the browser window forward on the computer it runs on: every sign-in method works there">
+        <Button size="sm" variant="outline" className="shrink-0" onClick={focus} title="Bring the browser window forward on the computer it runs on: every sign-in method works there">
           <AppWindowIcon size={14} /> Open on this computer
         </Button>
       )}
       {mine && onOpen && (
-        <Button size="sm" variant="outline" onClick={onOpen} title="Use the page here, in the room">
+        <Button size="sm" variant="outline" className="shrink-0" onClick={onOpen} title="Use the page here, in the room">
           Open
         </Button>
       )}
       {mine && onContinue && (
-        <Button size="sm" variant={live.ready ? "primary" : "outline"} onClick={() => onContinue(live)} title="Tell the agent you are done, so it continues">
+        <Button size="sm" variant={live.ready ? "primary" : "outline"} className="shrink-0" onClick={() => onContinue(live)} title="Tell the agent you are done, so it continues">
           <CheckCircleIcon size={14} /> Continue
         </Button>
       )}
@@ -151,6 +151,32 @@ export function LiveWaitingNote({
           <XIcon size={14} />
         </Button>
       )}
+    </div>
+  );
+}
+
+/** LiveCrashedCard says the page crashed in the browser (its picture is the
+ *  last one before) and, for its owner, reloads it or brings the window
+ *  forward on the computer it runs on. */
+function LiveCrashedCard({ mine, onReload, onFocus }: { mine: boolean; onReload: () => void; onFocus: () => void }) {
+  return (
+    <div className="absolute inset-0 z-20 grid place-items-center bg-black/50 p-4" data-live-crashed>
+      <div role="alert" className="w-full max-w-sm rounded-[var(--radius-lg)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] p-4 text-sm shadow-[var(--shadow-diffuse)]">
+        <p>The page crashed in the browser.</p>
+        <p className="mt-1 text-xs text-[var(--color-fg-muted)]">{mine ? "Reload it here, or open it in the browser window on your computer." : "Its owner can reload it."}</p>
+        {mine && (
+          <div className="mt-3 flex flex-wrap justify-end gap-2">
+            {inDesktopShell() && (
+              <Button size="sm" variant="outline" className="shrink-0" onClick={onFocus}>
+                <AppWindowIcon size={14} /> Open on this computer
+              </Button>
+            )}
+            <Button size="sm" variant="primary" className="shrink-0" onClick={onReload}>
+              Reload
+            </Button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -391,7 +417,14 @@ export function JobLiveView({
             }}
           />
         )}
-        {live.dialog && <LiveDialogCard key={live.dialog.kind + live.dialog.message} dialog={live.dialog} canAnswer={driving} onAnswer={(accept, text) => send({ type: "dialog", action: accept ? "accept" : "dismiss", ...(text !== undefined ? { text } : {}) })} />}
+        {live.crashed && (
+          <LiveCrashedCard
+            mine={mine}
+            onReload={() => void jobLiveApi.input(roomId, jobId, [{ type: "reload" }]).catch((e: unknown) => toast.error(e instanceof ApiError ? e.message : "Could not reload the page"))}
+            onFocus={() => void jobLiveApi.input(roomId, jobId, [{ type: "focus" }]).catch((e: unknown) => toast.error(e instanceof ApiError ? e.message : "Could not bring the browser window forward"))}
+          />
+        )}
+        {!live.crashed && live.dialog && <LiveDialogCard key={live.dialog.kind + live.dialog.message} dialog={live.dialog} canAnswer={driving} onAnswer={(accept, text) => send({ type: "dialog", action: accept ? "accept" : "dismiss", ...(text !== undefined ? { text } : {}) })} />}
         {url ? (
           <img
             ref={imgRef}
