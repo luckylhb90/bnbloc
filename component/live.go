@@ -20,6 +20,8 @@ const (
 	MaxLiveFrameSide = 4096
 	// MaxLiveTitle bounds a frame's title, URL and Waiting (runes).
 	MaxLiveTitle = 300
+	// MaxLiveDialogText bounds a dialog's message and default (runes).
+	MaxLiveDialogText = 1000
 	// LiveKeepEverySec is how often a tool posts, at the least, to keep a
 	// view no frame changes (a waiting page standing still); the room drops
 	// a view a few of these after its posts stop.
@@ -58,6 +60,28 @@ type LiveFramePost struct {
 	// sets it on the frames, so input runs as it arrives, in order, never
 	// behind a capture and its upload.
 	LeaveInput bool `json:"leaveInput,omitempty"`
+	// Dialog is the dialog the page has open (nil none): browser UI the
+	// picture cannot show, which the page waits on. Every post says it
+	// while it is open; the controller answers it (LiveInputDialog).
+	Dialog *LiveDialog `json:"dialog,omitempty"`
+}
+
+// Kinds of a page's dialog (LiveDialog.Kind), as the browser names them.
+//
+//wire:union LiveDialogKind
+const (
+	LiveDialogAlert        = "alert"
+	LiveDialogConfirm      = "confirm"
+	LiveDialogPrompt       = "prompt"
+	LiveDialogBeforeUnload = "beforeunload"
+)
+
+// LiveDialog is a dialog a page opened: its kind, its message, and a
+// prompt's default text.
+type LiveDialog struct {
+	Kind    string `json:"kind" tstype:"LiveDialogKind"`
+	Message string `json:"message"`
+	Default string `json:"default,omitempty"`
 }
 
 // LiveFrameReply answers a post: whether someone watches the large view
@@ -88,6 +112,9 @@ const (
 	// LiveInputClose: the owner closes a view that waits for them (they
 	// will not do it, or did it elsewhere); the tool ends it.
 	LiveInputClose = "close"
+	// LiveInputDialog: answers the page's open dialog (LiveDialog): Action
+	// "accept" or "dismiss", Text a prompt's answer.
+	LiveInputDialog = "dialog"
 )
 
 // LiveInput is one input event. X and Y are fractions of the frame (0..1),

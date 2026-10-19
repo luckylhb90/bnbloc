@@ -4,7 +4,8 @@ import { ApiError } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { frameKey, keyInput, modifiers, pointAt, type JobLive } from "@/lib/jobLive";
 import { jobLiveApi } from "@/lib/jobLiveApi";
-import type { LiveInput } from "@/lib/wire.gen";
+import type { LiveDialog, LiveInput } from "@/lib/wire.gen";
+import { inDesktopShell } from "@/lib/config";
 import { Button } from "@/ui/Button";
 import { useVisiblePoll } from "@/lib/useVisiblePoll";
 import { useToast } from "@/ui/Toast";
@@ -120,12 +121,21 @@ export function LiveWaitingNote({
   const mine = !!subject && live.owner === subject;
   const close = () =>
     void jobLiveApi.input(roomId, live.jobId, [{ type: "close" }]).catch((e: unknown) => toast.error(e instanceof ApiError ? e.message : "Could not close the view"));
+  // At the computer the browser runs on, its real window is the surest
+  // place for a sign-in (every method works there).
+  const focus = () =>
+    void jobLiveApi.input(roomId, live.jobId, [{ type: "focus" }]).catch((e: unknown) => toast.error(e instanceof ApiError ? e.message : "Could not bring the browser window forward"));
   return (
     <div className="flex flex-wrap items-center gap-2 text-xs" data-live-waiting-note>
       <span className={cn("size-2 shrink-0 rounded-full", live.ready ? "bg-[var(--color-accent)]" : "bg-[var(--color-warning)]")} aria-hidden />
       <span className="min-w-0 flex-1 text-[var(--color-fg-muted)]">
         {mine ? (live.ready ? "Looks done. Let the agent continue when you are ready." : live.waiting) : `Waiting for ${live.owner}: ${live.waiting}`}
       </span>
+      {mine && inDesktopShell() && (
+        <Button size="sm" variant="outline" onClick={focus} title="Bring the browser window forward on the computer it runs on: every sign-in method works there">
+          <AppWindowIcon size={14} /> Open on this computer
+        </Button>
+      )}
       {mine && onOpen && (
         <Button size="sm" variant="outline" onClick={onOpen} title="Use the page here, in the room">
           Open
@@ -141,6 +151,47 @@ export function LiveWaitingNote({
           <XIcon size={14} />
         </Button>
       )}
+    </div>
+  );
+}
+
+/** LiveDialogCard is the page's open dialog (browser UI the picture cannot
+ *  show; the page waits on it): its message, and for the controller the
+ *  answer. Others read who may answer. */
+function LiveDialogCard({ dialog, canAnswer, onAnswer }: { dialog: LiveDialog; canAnswer: boolean; onAnswer: (accept: boolean, text?: string) => void }) {
+  const [text, setText] = useState(dialog.default ?? "");
+  const question = dialog.kind === "beforeunload" ? "Leave this page? Changes you made may not be saved." : dialog.message;
+  return (
+    <div className="absolute inset-0 z-20 grid place-items-center bg-black/40 p-4" data-live-dialog>
+      <div role="alertdialog" aria-label="The page asks" className="w-full max-w-sm rounded-[var(--radius-lg)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] p-4 text-sm shadow-[var(--shadow-diffuse)]">
+        <p className="mb-1 text-xs text-[var(--color-fg-subtle)]">The page asks</p>
+        <p className="whitespace-pre-wrap break-words">{question || "(no message)"}</p>
+        {canAnswer ? (
+          <form
+            className="mt-3 flex flex-col gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              onAnswer(true, dialog.kind === "prompt" ? text : undefined);
+            }}
+          >
+            {dialog.kind === "prompt" && (
+              <input autoFocus value={text} onChange={(e) => setText(e.target.value)} className="rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5" aria-label="Your answer" />
+            )}
+            <div className="flex justify-end gap-2">
+              {dialog.kind !== "alert" && (
+                <Button type="button" size="sm" variant="outline" onClick={() => onAnswer(false)}>
+                  {dialog.kind === "beforeunload" ? "Stay" : "Cancel"}
+                </Button>
+              )}
+              <Button type="submit" size="sm" variant="primary">
+                {dialog.kind === "beforeunload" ? "Leave" : "OK"}
+              </Button>
+            </div>
+          </form>
+        ) : (
+          <p className="mt-3 text-xs text-[var(--color-fg-muted)]">Whoever drives the page answers it.</p>
+        )}
+      </div>
     </div>
   );
 }
@@ -340,6 +391,7 @@ export function JobLiveView({
             }}
           />
         )}
+        {live.dialog && <LiveDialogCard key={live.dialog.kind + live.dialog.message} dialog={live.dialog} canAnswer={driving} onAnswer={(accept, text) => send({ type: "dialog", action: accept ? "accept" : "dismiss", ...(text !== undefined ? { text } : {}) })} />}
         {url ? (
           <img
             ref={imgRef}

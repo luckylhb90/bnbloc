@@ -199,6 +199,26 @@ func TestJobLiveView(t *testing.T) {
 		t.Fatalf("a stranger's list = %d, want 403", code)
 	}
 
+	// The page's dialog rides with the view's facts while the tool says it
+	// is open (an unknown kind is dropped), and is answered as input.
+	post(component.LiveFramePost{Waiting: "Sign in to continue", Dialog: &component.LiveDialog{Kind: component.LiveDialogConfirm, Message: "Leave the sign-in?"}})
+	if ev := drain(); ev.Dialog == nil || ev.Dialog.Kind != component.LiveDialogConfirm || ev.Dialog.Message != "Leave the sign-in?" {
+		t.Fatalf("dialog event = %+v", ev)
+	}
+	post(component.LiveFramePost{Waiting: "Sign in to continue", Dialog: &component.LiveDialog{Kind: "print", Message: "x"}})
+	if ev := drain(); ev.Dialog != nil {
+		t.Fatalf("an unknown dialog kind was kept: %+v", ev.Dialog)
+	}
+	if code, _ := call(http.MethodPost, "/v1/rooms/room-1/jobs/job-1/live/control", "maya", wire.LiveControlPost{Take: true}); code != http.StatusOK {
+		t.Fatalf("take control = %d", code)
+	}
+	if code, _ := call(http.MethodPost, "/v1/rooms/room-1/jobs/job-1/live/input", "maya", wire.LiveInputPost{Events: []component.LiveInput{{Type: component.LiveInputDialog, Action: "accept"}}}); code != http.StatusNoContent {
+		t.Fatalf("dialog answer = %d", code)
+	}
+	if r := post(component.LiveFramePost{Waiting: "Sign in to continue"}); len(r.Input) != 1 || r.Input[0].Type != component.LiveInputDialog {
+		t.Fatalf("the answer did not reach the tool: %+v", r)
+	}
+
 	// The tool ends the view: gone for everyone, and the room is told.
 	post(component.LiveFramePost{End: true})
 	if ev := drain(); !ev.Ended || ev.JobID != "job-1" {

@@ -299,6 +299,45 @@ checkpoint as long as nobody answers.
   - Locally, the owner simply uses the visible window. Not built yet:
     the loop does not notice input it did not send (a fingerprint
     change between steps counts as the page moving on).
+- **Two ways to do a person's step** (2026-10-19, from QA: sign-ins
+  through the picture kept getting stuck where the owner's own browser
+  never does).
+  - At the computer the browser runs on, the real window is the
+    surest: the waiting view offers "Open on this computer", which
+    brings it forward. Every sign-in method works there (passkeys,
+    security keys, the system's own dialogs).
+  - Anywhere else (a phone, another computer) the room's view is the
+    way, and it carries the browser's own UI that a picture cannot show
+    (below). A step bound to the computer's hardware (a passkey, Touch
+    ID, a security key) cannot be done remotely; the person picks
+    another way on the page (a code, a push).
+- **The page's dialogs** (alert, confirm, prompt, leave-page).
+  - Verified on Chrome 146 (2026-10-19): while one is open the page
+    runs no script (an observation or capture hangs), and only the CDP
+    session that had the Page domain enabled when it opened can answer
+    it. No later session can, not even after that one disables Page or
+    detaches: a dialog its session left behind blocks the page for
+    good. So no process leaves one behind.
+  - The view carries the open dialog (`LiveFramePost.Dialog`: kind,
+    message, a prompt's default text; realtime keeps it with the
+    view's facts, `JobLiveFrame.Dialog`) and the controller answers it
+    (`LiveInputDialog`: accept or dismiss, a prompt's text).
+  - A keeper dismisses a dialog still open when it ends. During a run,
+    an alert is accepted and recorded in the step's history; a confirm,
+    prompt or leave-page dialog is the page asking for a decision, so
+    the run dismisses it and pauses at `needs_confirmation` with its
+    message, and the confirmed resume redoes the step and accepts that
+    dialog.
+- **The browser runs this version's flags.** The launcher records the
+  flags it started the browser with (`endpointRecord.Flags`). A browser
+  started by an older version (QA, 2026-10-19: started the day before,
+  without the flags that keep background windows painting, so a hand-off
+  page's own script never ran) is closed and started again by the next
+  call that finds it showing no web page; while it shows one, it is used
+  as it is.
+- Not built yet: following a window the page opens (window.open),
+  HTTP authentication prompts, file choosers, permission prompts, and
+  frames pushed on paint (the screencast) instead of captured.
 
 ### 2.9 Untrusted pages
 

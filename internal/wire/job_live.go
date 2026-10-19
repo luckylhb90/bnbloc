@@ -76,7 +76,9 @@ type JobLiveFrame struct {
 	Waiting    string `json:"waiting,omitempty"`
 	Ready      bool   `json:"ready,omitempty"`
 	Ended      bool   `json:"ended,omitempty"`
-	AtMs       int64  `json:"atMs"`
+	// Dialog is the page's open dialog the controller answers (nil none).
+	Dialog *component.LiveDialog `json:"dialog,omitempty"`
+	AtMs   int64                 `json:"atMs"`
 }
 
 // JobLiveList is GET /v1/rooms/{roomId}/live: the room's live views now

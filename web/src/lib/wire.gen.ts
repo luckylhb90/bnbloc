@@ -28,6 +28,8 @@ export const MaxLiveFrameBytes = 1048576;
 export const MaxLiveFrameSide = 4096;
 // MaxLiveTitle bounds a frame's title, URL and Waiting (runes).
 export const MaxLiveTitle = 300;
+// MaxLiveDialogText bounds a dialog's message and default (runes).
+export const MaxLiveDialogText = 1000;
 // LiveKeepEverySec is how often a tool posts, at the least, to keep a
 // view no frame changes (a waiting page standing still); the room drops
 // a view a few of these after its posts stop.
@@ -65,6 +67,24 @@ export interface LiveFramePost {
   // sets it on the frames, so input runs as it arrives, in order, never
   // behind a capture and its upload.
   leaveInput?: boolean;
+  // Dialog is the dialog the page has open (nil none): browser UI the
+  // picture cannot show, which the page waits on. Every post says it
+  // while it is open; the controller answers it (LiveInputDialog).
+  dialog?: LiveDialog;
+}
+
+// Kinds of a page's dialog (LiveDialog.Kind), as the browser names them.
+export const LiveDialogAlert = "alert";
+export const LiveDialogConfirm = "confirm";
+export const LiveDialogPrompt = "prompt";
+export const LiveDialogBeforeUnload = "beforeunload";
+
+// LiveDialog is a dialog a page opened: its kind, its message, and a
+// prompt's default text.
+export interface LiveDialog {
+  kind: LiveDialogKind;
+  message: string;
+  default?: string;
 }
 
 // LiveFrameReply answers a post: whether someone watches the large view
@@ -92,6 +112,9 @@ export const LiveInputFocus = "focus";
 // LiveInputClose: the owner closes a view that waits for them (they
 // will not do it, or did it elsewhere); the tool ends it.
 export const LiveInputClose = "close";
+// LiveInputDialog: answers the page's open dialog (LiveDialog): Action
+// "accept" or "dismiss", Text a prompt's answer.
+export const LiveInputDialog = "dialog";
 
 // LiveInput is one input event. X and Y are fractions of the frame (0..1),
 // so they hold at any display size; Action is "down", "up" or "move" for
@@ -173,8 +196,10 @@ export interface RelaySession {
 }
 
 // ---- component unions (//wire:union) ----
-export type LiveInputType = "mouse" | "wheel" | "key" | "text" | "focus" | "close";
-export const LiveInputTypeValues: readonly LiveInputType[] = ["mouse", "wheel", "key", "text", "focus", "close"];
+export type LiveDialogKind = "alert" | "confirm" | "prompt" | "beforeunload";
+export const LiveDialogKindValues: readonly LiveDialogKind[] = ["alert", "confirm", "prompt", "beforeunload"];
+export type LiveInputType = "mouse" | "wheel" | "key" | "text" | "focus" | "close" | "dialog";
+export const LiveInputTypeValues: readonly LiveInputType[] = ["mouse", "wheel", "key", "text", "focus", "close", "dialog"];
 export type MountFor = "own" | "borrowed" | "all";
 export const MountForValues: readonly MountFor[] = ["own", "borrowed", "all"];
 
@@ -2667,6 +2692,8 @@ export interface JobLiveFrame {
   waiting?: string;
   ready?: boolean;
   ended?: boolean;
+  // Dialog is the page's open dialog the controller answers (nil none).
+  dialog?: LiveDialog;
   atMs: number;
 }
 
