@@ -395,6 +395,43 @@ checkpoint as long as nobody answers.
   HTTP authentication prompts, file choosers, permission prompts, and
   frames pushed on paint (the screencast) instead of captured.
 
+### 2.8a Run replay (added 2026-10-19)
+
+A run leaves a replay in the room: what the agent did, step by step, with
+the page after each step. Someone who asked for a quiz to be taken, or a
+form to be filed, can check what was clicked without having watched.
+
+- **A room file, not a platform feature.** After each call the component
+  writes `browser-runs/<run>.html` into the agent's workspace (the tool's
+  working directory). The bridge publishes it like any file the agent
+  made (§`services/bridge/artifacts.go`): a page with a script is an
+  `app`, opened in the room's sandboxed runner. Who sees it is the room's
+  file rule. The platform does not change.
+- **What it holds.** One entry per action that ran (open, click, type,
+  select, press, scroll, back, upload): the action, the control's label,
+  the text typed or option chosen, the address, the time, and a JPEG of
+  the page after the step settled. Refused and paused actions are not
+  steps (the history records only what ran). Steps play one by one or in
+  sequence.
+- **What it never holds.**
+  - No frame of a sign-in: a page with a password field, an identity
+    provider's page, or a run paused for a person (`needs_human`). The
+    step reads "a person signed in here".
+  - No frame while a person drives from the room; their actions are
+    theirs, not the run's.
+  - Secret fields are never typed (§2.7), so no secret is in a step.
+- **Size.** The room keeps a script page inline up to 2 MiB. Frames are
+  kept newest first within a budget (1.6 MB of base64); an older step
+  past it keeps its text and drops its picture. One file per run,
+  rewritten each call, so a run is one room file with versions.
+- **Page content is the site's.** Labels, typed text and addresses are
+  HTML-escaped and carried as data, never as markup.
+- **The frames live with the run** (the run store), and go when the run
+  is closed or its tab is gone; the replay file in the workspace stays.
+- **AI.** The replay's steps are plain data the room's agents read like
+  any room file: "what did the run do on question 7" is answered from it,
+  and it is the record a procedure is drawn from (§5).
+
 ### 2.9 Untrusted pages
 
 - Page text, labels and values are untrusted data:
