@@ -176,33 +176,29 @@ async fn internal_adapter_login(
     state.login(&name).await
 }
 
-/// Installed plugins with desktop-local settings (Settings → Notifications).
-/// Secret values are never returned.
+/// Installed components with settings (Settings → Components): every MCP
+/// tool (its binary's state, its sign-in) and every plugin that declares
+/// settings. Secret values, and platform or organization values, are never
+/// returned.
 #[tauri::command]
-fn plugin_local_settings(
+fn component_settings(
     state: State<'_, internal_ext::Adapter>,
-) -> Result<Vec<internal_ext::PluginLocalSettings>, String> {
-    state.plugin_local_settings()
+) -> Result<Vec<internal_ext::ComponentSettingsView>, String> {
+    state.component_settings()
 }
 
-/// Store a plugin's local settings on this machine (an empty secret keeps
-/// the stored one) and restart its sidecar. Never sent to the gateway.
+/// Store the member's own values of a component's settings on this machine
+/// (an absent key is left, an empty secret keeps the stored one, `clear`
+/// clears keys) and restart a plugin with them. Never sent to the gateway.
 #[tauri::command]
-fn plugin_local_settings_save(
+fn component_settings_save(
     state: State<'_, internal_ext::Adapter>,
-    plugin: String,
+    kind: String,
+    name: String,
     values: std::collections::BTreeMap<String, String>,
+    clear: Vec<String>,
 ) -> Result<(), String> {
-    state.save_plugin_local_settings(&plugin, values)
-}
-
-/// Forget a plugin's local settings (the plugin stops when it requires them).
-#[tauri::command]
-fn plugin_local_settings_clear(
-    state: State<'_, internal_ext::Adapter>,
-    plugin: String,
-) -> Result<(), String> {
-    state.clear_plugin_local_settings(&plugin)
+    state.save_component_settings(&kind, &name, values, clear)
 }
 
 /// Installed plugins that provide skills (Settings → Skills), with their state.
@@ -262,36 +258,6 @@ async fn skills_pick_folder(app: tauri::AppHandle) -> Result<Option<String>, Str
     let Some(path) = picked else { return Ok(None) };
     let path = path.into_path().map_err(|e| e.to_string())?;
     Ok(Some(path.to_string_lossy().into_owned()))
-}
-
-/// Installed MCP tools with this desktop's state (Settings → Tools): the
-/// stdio binary's download state and the member credentials. Secret values
-/// are never returned.
-#[tauri::command]
-fn mcp_tool_settings(
-    state: State<'_, internal_ext::Adapter>,
-) -> Result<Vec<internal_ext::McpToolSettings>, String> {
-    state.mcp_tool_settings()
-}
-
-/// Store the member's credentials for an MCP tool on this machine (an empty
-/// secret keeps the stored one). Never sent to the gateway.
-#[tauri::command]
-fn mcp_tool_settings_save(
-    state: State<'_, internal_ext::Adapter>,
-    tool: String,
-    values: std::collections::BTreeMap<String, String>,
-) -> Result<(), String> {
-    state.save_mcp_tool_settings(&tool, values)
-}
-
-/// Forget the member's credentials for an MCP tool.
-#[tauri::command]
-fn mcp_tool_settings_clear(
-    state: State<'_, internal_ext::Adapter>,
-    tool: String,
-) -> Result<(), String> {
-    state.clear_mcp_tool_settings(&tool)
 }
 
 /// Sign the member in to an MCP tool that takes an OAuth sign-in: the tool's
@@ -502,17 +468,13 @@ pub fn run() {
             internal_adapter_targets,
             internal_adapter_login,
             internal_adapter_auth_status,
-            plugin_local_settings,
-            plugin_local_settings_save,
-            plugin_local_settings_clear,
+            component_settings,
+            component_settings_save,
             skills_providers,
             skills_provider_state,
             skills_provider_settings,
             skills_provider_pack,
             skills_pick_folder,
-            mcp_tool_settings,
-            mcp_tool_settings_save,
-            mcp_tool_settings_clear,
             mcp_tool_sign_in,
             mcp_tool_sign_out,
             app_info,

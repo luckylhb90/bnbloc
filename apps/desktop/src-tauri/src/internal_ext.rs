@@ -8,6 +8,7 @@ mod reconcile_tests;
 #[cfg(test)]
 mod sandbox_live_tests;
 
+pub(super) mod component_settings;
 pub(super) mod gateway_client;
 pub(super) mod kind_runtime;
 pub(super) mod loopback;
@@ -16,7 +17,6 @@ pub(super) mod member_dir;
 pub(super) mod pin;
 pub(super) mod plugin_events;
 pub(super) mod plugin_host;
-pub(super) mod plugin_settings;
 pub(super) mod previewer_bundle;
 pub(super) mod previewer_cache;
 pub(super) mod sandbox;
@@ -41,9 +41,8 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use tauri::{AppHandle, Manager};
 
+pub use component_settings::ComponentSettingsView;
 use gateway_client::GatewayClient;
-pub use mcp_tools::McpToolSettings;
-pub use plugin_settings::PluginLocalSettings;
 pub use sidecar_model::AdapterStatus;
 use sidecar_model::{GatewayAccess, Inner, ManagedSidecar, SidecarSpec};
 pub use sidecar_targets::SidecarAuthStatus;
@@ -103,7 +102,7 @@ impl Adapter {
     /// until the web hands one over (`update_gateway`).
     pub fn new(app: AppHandle, dirs: Result<crate::dirs::Dirs, String>, gateway_url: &str) -> Self {
         if let Ok(dirs) = &dirs {
-            member_dir::remove_unkeyed_dirs(dirs.config(), dirs.data());
+            member_dir::remove_retired_dirs(dirs.config(), dirs.data());
         }
         let gateway = GatewayClient::new(gateway_url);
         Self {
@@ -131,7 +130,7 @@ impl Adapter {
     /// which leaves the manager no session at all. A session of another
     /// member scope (member, tenant or gateway, or none) switches the member
     /// directory, and the sidecars that read their scope's state (plugins
-    /// with local settings, the sandbox with its data dir) restart with the
+    /// with settings, the sandbox with its data dir) restart with the
     /// new scope's.
     pub fn update_gateway(&self, gateway_url: &str, gateway_token: String) {
         let before = self.member_dir().ok();
@@ -195,7 +194,7 @@ impl Adapter {
     }
 
     /// Restart every sidecar that reads its member scope's state: plugins
-    /// with local settings and the sandbox (its data dir).
+    /// with settings and the sandbox (its data dir).
     fn restart_member_sidecars(&self) {
         let ids: Vec<String> = self
             .inner
@@ -376,7 +375,7 @@ impl Adapter {
     }
 
     /// Stop `id`'s sidecar and start it again with fresh launch inputs (its
-    /// local settings changed). A plugin whose required settings are now
+    /// settings changed). A plugin whose required settings are now
     /// missing stays stopped (start_known).
     pub(super) fn restart_sidecar(&self, id: &str) {
         let (child, generation) = {
@@ -595,7 +594,7 @@ struct AppliedSpecs {
 }
 
 /// Extend the bridge env (bridge::env_for) with the managed cores and MCP
-/// tools. The bridge's MCP credentials are its owner's in its tenant
+/// tools. The bridge's MCP settings and sign-ins are its owner's in its tenant
 /// (`Adapter::bridge_member_dir`); the bridge-stabilizing watcher restarts
 /// the bridge when that directory changes (a member or tenant switch).
 pub fn extend_core_env(
@@ -614,8 +613,9 @@ pub fn extend_core_env(
     if let Some(manifest_dir) = adapter.manifest_dir() {
         env.insert("BNBLOC_CORE_MANIFESTS_DIR".into(), manifest_dir);
     }
-    // MCP tools: the materialized stdio binaries and the member's own tool
-    // credentials, read by the bridge per session (no restart on change).
+    // MCP tools: the materialized stdio binaries, and the member's own
+    // settings values and sign-ins, read by the bridge per session (no
+    // restart on change).
     if let Ok(dirs) = adapter.dirs() {
         env.insert(
             mcp_tools::TOOLS_DIR_ENV.into(),
@@ -624,8 +624,14 @@ pub fn extend_core_env(
     }
     if let Some(dir) = adapter.bridge_member_dir_for(settings) {
         env.insert(
-            mcp_tools::SETTINGS_DIR_ENV.into(),
-            dir.join(member_dir::MCP_SETTINGS_DIR)
+            component_settings::SETTINGS_DIR_ENV.into(),
+            dir.join(member_dir::COMPONENT_SETTINGS_DIR)
+                .to_string_lossy()
+                .into_owned(),
+        );
+        env.insert(
+            mcp_tools::SIGN_INS_DIR_ENV.into(),
+            dir.join(member_dir::MCP_SIGN_INS_DIR)
                 .to_string_lossy()
                 .into_owned(),
         );

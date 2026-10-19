@@ -505,10 +505,10 @@ async fn refresh_rotates_or_keeps_the_refresh_token() {
 }
 
 #[test]
-fn sign_in_is_stored_owner_only_beside_the_tool_settings() {
+fn sign_in_is_stored_owner_only_in_the_sign_ins_dir() {
     let dir = std::env::temp_dir().join(format!("bnbloc-mcp-oauth-test-{}", std::process::id()));
     let path = sign_in_path(&dir, "drive").unwrap();
-    assert_eq!(path, dir.join("oauth").join("drive.json"));
+    assert_eq!(path, dir.join("drive.json"));
     assert!(sign_in_path(&dir, "../x").is_err());
     let s = SignIn {
         access_token: "secret-at".into(),

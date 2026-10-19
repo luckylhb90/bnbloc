@@ -24,10 +24,10 @@ use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
 
+use crate::internal_ext::component_settings::forget_unlisted;
 use crate::internal_ext::mcp_tools::SignIns;
-use crate::internal_ext::member_dir::{MCP_SETTINGS_DIR, PLUGIN_SETTINGS_DIR, SANDBOX_DATA_DIR};
+use crate::internal_ext::member_dir::{MCP_SIGN_INS_DIR, SANDBOX_DATA_DIR};
 use crate::internal_ext::plugin_host::{self, PluginHost};
-use crate::internal_ext::plugin_settings::{self, forget_unlisted};
 use crate::internal_ext::sandbox_bundle;
 use crate::internal_ext::sidecar_fetch::FetchError;
 use crate::internal_ext::sidecar_model::{ComponentKind, ComponentsResponse, SidecarSpec};
@@ -189,14 +189,15 @@ impl KindRuntime for Core {
     }
 }
 
-/// A plugin sidecar: host API grants and member-local settings.
+/// A plugin sidecar: host API grants and its settings.
 struct Plugin;
 
 impl KindRuntime for Plugin {
     fn sweep(&self, dirs: &SweepDirs, live: &Live, _sign_ins: &SignIns) {
         if let Some(member) = &dirs.member {
             forget_unlisted(
-                &member.join(PLUGIN_SETTINGS_DIR),
+                member,
+                ComponentKind::Plugin,
                 live.names(ComponentKind::Plugin),
             );
             skills_provider::sweep_member(member, live.names(ComponentKind::Plugin));
@@ -206,16 +207,18 @@ impl KindRuntime for Plugin {
     /// A plugin that reads the member's directory (its settings, its data dir,
     /// its mount descriptor) restarts with the member scope.
     fn member_scoped(&self, spec: &SidecarSpec) -> bool {
-        !spec.plugin.local_settings.is_empty()
+        !spec.plugin.settings.is_empty()
             || !spec.plugin.data_dir_env.is_empty()
             || spec.plugin.has(skills_provider::CAP_MOUNTS)
             || spec.plugin.has(skills_provider::CAP_PROVIDER)
     }
 
-    /// A plugin missing required local settings is not launched: the member
-    /// enters them in Settings → Notifications (which restarts it).
+    /// A plugin whose required settings are not all set (needs setup) is
+    /// not launched: the member enters theirs in Settings → Components
+    /// (which restarts it); a platform or organization one waits for the
+    /// catalog to say it is set (a new spec restarts it).
     fn blocker(&self, adapter: &Adapter, spec: &SidecarSpec) -> Option<String> {
-        adapter.plugin_settings_blocker(&spec.name, &spec.plugin.local_settings)
+        adapter.plugin_settings_blocker(spec)
     }
 
     fn launch<'a>(
@@ -227,11 +230,8 @@ impl KindRuntime for Plugin {
     ) -> BoxFuture<'a, Result<LaunchGuard, String>> {
         Box::pin(async move {
             let mut guard = LaunchGuard::default();
-            if !spec.plugin.local_settings.is_empty() {
-                cmd.env(
-                    plugin_settings::SETTINGS_FILE_ENV,
-                    adapter.plugin_settings_file(&spec.name)?,
-                );
+            if !spec.plugin.settings.is_empty() {
+                adapter.plugin_settings_launch(spec, cmd).await?;
             }
             if !spec.plugin.host.is_empty() {
                 grant_host(
@@ -370,9 +370,8 @@ impl KindRuntime for Mcp {
 
     fn sweep(&self, dirs: &SweepDirs, live: &Live, sign_ins: &SignIns) {
         if let Some(member) = &dirs.member {
-            let mcp = member.join(MCP_SETTINGS_DIR);
-            forget_unlisted(&mcp, &live.mcp().settings);
-            sign_ins.retain(&mcp, &live.mcp().sign_ins);
+            forget_unlisted(member, ComponentKind::Mcp, &live.mcp().tools);
+            sign_ins.retain(&member.join(MCP_SIGN_INS_DIR), &live.mcp().sign_ins);
         }
     }
 }

@@ -2,7 +2,7 @@
 //! (docs/prd/2026-10-12-experts-and-teams.md, "Runtime gap closure" item 7).
 //!
 //! An endpoint MCP component may declare `mcp.http.auth.scheme = "oauth"`.
-//! The member then signs in from Settings → Tools and this module runs the
+//! The member then signs in from Settings → Components and this module runs the
 //! MCP authorization flow (specification 2026-07-28) against the tool's own
 //! server; nothing about the authorization server is declared or baked in:
 //!
@@ -22,9 +22,8 @@
 //!    member's browser; the response's `iss` is checked (RFC 9207) before
 //!    anything else in it is used.
 //! 5. The code is exchanged (again with `resource`); the tokens are stored
-//!    owner-only (0600) in `<mcp-settings>/oauth/<tool>.json`, next to the
-//!    member's other tool credentials. The bridge reads the access token
-//!    from there for the member's own drives only.
+//!    owner-only (0600) in `<member>/mcp-sign-ins/<tool>.json`. The bridge
+//!    reads the access token from there for the member's own drives only.
 //!
 //! Tokens are refreshed shortly before they expire (the refresh token
 //! rotates when the server returns a new one); a refused refresh forgets
@@ -44,11 +43,8 @@ use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
-use crate::internal_ext::plugin_settings::{settings_path, stored_files};
+use crate::internal_ext::component_settings::{name_path, stored_files};
 
-/// Sub-directory of the MCP settings dir holding sign-ins (the bridge
-/// reads `<dir>/oauth/<tool>.json`; services/bridge/mcp_tools.go).
-pub(super) const OAUTH_DIR: &str = "oauth";
 /// How long the browser step may take before the sign-in gives up.
 pub(super) const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(300);
 /// A token expiring within this window is refreshed (the catalog refresh
@@ -125,9 +121,10 @@ impl SignIn {
     }
 }
 
-/// The sign-in file of `tool` under the MCP settings dir.
-fn sign_in_path(settings_dir: &Path, tool: &str) -> Result<PathBuf, String> {
-    settings_path(&settings_dir.join(OAUTH_DIR), tool)
+/// The sign-in file of `tool` in the member's sign-ins dir (the bridge
+/// reads `<dir>/<tool>.json`; services/bridge/mcp_tools.go).
+fn sign_in_path(sign_ins_dir: &Path, tool: &str) -> Result<PathBuf, String> {
+    name_path(sign_ins_dir, tool)
 }
 
 /// The stored sign-in (an unreadable file is moved aside and reads as
@@ -202,7 +199,7 @@ impl SignIns {
     /// Forget every stored sign-in whose tool is not in `keep` (the tools of
     /// the live catalog that take a sign-in). Blocking.
     pub(in crate::internal_ext) fn retain(&self, dir: &Path, keep: &HashSet<String>) {
-        for (tool, path) in stored_files(&dir.join(OAUTH_DIR)) {
+        for (tool, path) in stored_files(dir) {
             if keep.contains(&tool) {
                 continue;
             }

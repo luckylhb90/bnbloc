@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::child_process::Child;
+pub(super) use crate::internal_ext::component_settings::Setting;
 use crate::internal_ext::pin::Sha256Pin;
 
 pub(super) struct Inner {
@@ -183,15 +184,20 @@ pub(super) struct GuestProfile {
 
 /// What a plugin sidecar is launched with beyond the common sidecar fields:
 /// the host API capabilities it may use (`permissions.host`: it then gets
-/// `BNBLOC_PLUGIN_HOST_URL`/`_TOKEN`), its desktop-local settings schema
-/// (`localSettings`: the values are passed in `BNBLOC_PLUGIN_SETTINGS_FILE`),
-/// and what its capabilities earn it (skills_provider.rs): a bearer for the
-/// `skills-provider` job, a data dir, and for `sandbox-mounts` the descriptor
-/// file and mirror folder, each in the env var the package names.
+/// `BNBLOC_PLUGIN_HOST_URL`/`_TOKEN`), its settings (the declaration, and
+/// which platform and organization ones are set or missing for the member's
+/// organization; component_settings.rs hands it the values in its settings
+/// file and each `deliver.env`), and what its
+/// capabilities earn it (skills_provider.rs): a bearer for the
+/// `skills-provider` job, a data dir, and for `sandbox-mounts` the
+/// descriptor file and mirror folder, each in the env var the package names.
+/// A change to any of it restarts the plugin (the spec differs).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) struct PluginLaunch {
     pub(super) host: Vec<String>,
-    pub(super) local_settings: Vec<LocalSettingField>,
+    pub(super) settings: Vec<Setting>,
+    pub(super) settings_set: Vec<String>,
+    pub(super) settings_missing: Vec<String>,
     pub(super) capabilities: Vec<String>,
     pub(super) token_env: String,
     pub(super) data_dir_env: String,
@@ -203,20 +209,6 @@ impl PluginLaunch {
     pub(super) fn has(&self, capability: &str) -> bool {
         self.capabilities.iter().any(|c| c == capability)
     }
-}
-
-/// One field of a plugin's desktop-local settings schema (pkgmeta.LocalSetting).
-#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LocalSettingField {
-    pub key: String,
-    pub label: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub help: Option<String>,
-    #[serde(default)]
-    pub secret: bool,
-    #[serde(default)]
-    pub required: bool,
 }
 
 impl SidecarSpec {
@@ -354,8 +346,15 @@ pub(super) struct ComponentEntry {
     pub(super) manifest: Option<serde_json::Value>,
     #[serde(default)]
     pub(super) permissions: Option<ComponentPermissions>,
+    /// The component's settings declaration, and which platform and
+    /// organization settings are set or missing for the member's
+    /// organization (never their values).
     #[serde(default)]
-    pub(super) local_settings: Option<Vec<LocalSettingField>>,
+    pub(super) settings: Vec<Setting>,
+    #[serde(default)]
+    pub(super) settings_set: Vec<String>,
+    #[serde(default)]
+    pub(super) settings_missing: Vec<String>,
     /// What a plugin is for (`skills-provider`, `sandbox-mounts`, …).
     #[serde(default)]
     pub(super) capabilities: Vec<String>,
@@ -364,7 +363,7 @@ pub(super) struct ComponentEntry {
     /// Present for an installed previewer: its bundle pin.
     #[serde(default)]
     pub(super) previewer: Option<PreviewerEntry>,
-    /// Present for an installed MCP tool: its tools, env and credentials.
+    /// Present for an installed MCP tool: its tools, transport and auth.
     #[serde(default)]
     pub(super) mcp: Option<McpEntry>,
     /// An endpoint component's address (an http MCP tool's server URL).
@@ -389,10 +388,6 @@ pub(super) struct McpEntry {
     #[serde(default)]
     pub(super) transport: String,
     #[serde(default)]
-    pub(super) credentials: String,
-    #[serde(default)]
-    pub(super) env: Vec<McpEnvEntry>,
-    #[serde(default)]
     pub(super) tools: Vec<McpToolEntry>,
     /// An endpoint tool's auth (pkgmeta.MCPHTTP).
     #[serde(default)]
@@ -408,7 +403,7 @@ pub(super) struct McpHttpEntry {
 }
 
 /// pkgmeta.MCPHTTPAuth: the parts a member's sign-in needs (scheme
-/// "oauth"); bearer and header values come from the member settings.
+/// "oauth"); bearer and header values are settings the bridge delivers.
 #[derive(Clone, Default, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct McpAuthEntry {
@@ -418,19 +413,6 @@ pub(super) struct McpAuthEntry {
     pub(super) client_id: Option<String>,
     #[serde(default)]
     pub(super) scopes: Vec<String>,
-}
-
-/// One variable an MCP tool needs (pkgmeta.MCPEnv).
-#[derive(Clone, Default, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct McpEnvEntry {
-    pub(super) name: String,
-    #[serde(default)]
-    pub(super) description: Option<String>,
-    #[serde(default)]
-    pub(super) secret: bool,
-    #[serde(default)]
-    pub(super) required: bool,
 }
 
 /// One tool an MCP server offers (display only).
@@ -563,7 +545,9 @@ impl ComponentEntry {
                 .as_ref()
                 .and_then(|p| p.host.clone())
                 .unwrap_or_default(),
-            local_settings: self.local_settings.clone().unwrap_or_default(),
+            settings: self.settings.clone(),
+            settings_set: self.settings_set.clone(),
+            settings_missing: self.settings_missing.clone(),
         }
     }
 

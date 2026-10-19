@@ -1,5 +1,5 @@
-//! The one writer and reader of the shell's state files: settings, plugin
-//! local settings, MCP member credentials and sign-ins, core manifests, the
+//! The one writer and reader of the shell's state files: settings, component
+//! settings values and their launch files, MCP sign-ins, core manifests, the
 //! MCP tools index, spawn records.
 //!
 //! - `atomic_write`: owner-only (0600 on Unix), through a temp file with a

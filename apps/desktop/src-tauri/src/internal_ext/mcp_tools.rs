@@ -12,32 +12,33 @@
 //! Binaries of tools that left the catalog (uninstalled, rollout off, opt-in
 //! dropped) or were replaced by a new pin are deleted.
 //!
-//! Member credentials (`credentials: "member"`) are entered in Settings →
-//! Tools and stored like plugin `localSettings` (one 0600 JSON object per
-//! tool in the member's own directory, member_dir.rs;
-//! `BNBLOC_MCP_SETTINGS_DIR` hands the bridge its owner's); they never leave
-//! this machine. They are forgotten with the tool.
+//! A tool's member-scope settings are entered in Settings → Components and
+//! kept in the member store (component_settings.rs, one 0600 JSON object
+//! per component in the member's own directory, which the bridge reads for
+//! its owner's own drives); they never leave this
+//! machine and are forgotten with the tool. Its platform and organization
+//! values reach the bridge with each job, never through here.
 //!
 //! An http tool declaring `auth.scheme = "oauth"` takes a sign-in instead:
-//! the member signs in from Settings → Tools (mcp_oauth.rs runs the MCP
-//! authorization flow in their browser), the tokens are stored 0600 under
-//! `<mcp-settings>/oauth/<tool>.json` for the bridge and refreshed here on
-//! every catalog refresh shortly before they expire. Removing the tool
-//! forgets the sign-in.
-use std::collections::{BTreeMap, HashMap, HashSet};
+//! the member signs in from Settings → Components (mcp_oauth.rs runs the
+//! MCP authorization flow in their browser), the tokens are stored 0600 in
+//! `<member>/mcp-sign-ins/<tool>.json` (`BNBLOC_MCP_SIGN_INS_DIR` for the
+//! bridge) and refreshed here on every catalog refresh shortly before they
+//! expire. Removing the tool forgets the sign-in.
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
 
-use crate::internal_ext::pin::Sha256Pin;
-use crate::internal_ext::plugin_settings::{
-    load, merge, missing_required, save, settings_path, views, LocalSettingView, Values,
+use crate::internal_ext::component_settings::{
+    fields, load, missing, settings_path, ComponentSettingsView, Setting, Values,
 };
+use crate::internal_ext::pin::Sha256Pin;
 use crate::internal_ext::sidecar_cache::ensure_verified;
 use crate::internal_ext::sidecar_fetch::FetchError;
 use crate::internal_ext::sidecar_model::{
-    ComponentArtifact, ComponentKind, ComponentsResponse, LocalSettingField, McpToolEntry,
+    ComponentArtifact, ComponentKind, ComponentsResponse, McpToolEntry,
 };
 use crate::internal_ext::sidecar_status::component_id;
 use crate::internal_ext::sidecar_util::{cache_file_name, current_platform};
@@ -50,8 +51,8 @@ use mcp_oauth::{OAuthSpec, RefreshOutcome};
 
 /// The env var naming the tools dir the bridge reads.
 pub(super) const TOOLS_DIR_ENV: &str = "BNBLOC_MCP_TOOLS_DIR";
-/// The env var naming the member's MCP settings dir the bridge reads.
-pub(super) const SETTINGS_DIR_ENV: &str = "BNBLOC_MCP_SETTINGS_DIR";
+/// The env var naming the member's MCP sign-ins dir the bridge reads.
+pub(super) const SIGN_INS_DIR_ENV: &str = "BNBLOC_MCP_SIGN_INS_DIR";
 /// The index the bridge reads in the tools dir.
 const INDEX_FILE: &str = "index.json";
 
@@ -61,9 +62,12 @@ pub(super) struct McpTool {
     pub(super) name: String,
     pub(super) version: String,
     pub(super) transport: String,
-    pub(super) credentials: String,
-    /// The member-credential schema (empty unless credentials are "member").
-    pub(super) fields: Vec<LocalSettingField>,
+    /// The tool's settings declaration, and which platform and
+    /// organization settings are set or missing for the member's
+    /// organization.
+    pub(super) settings: Vec<Setting>,
+    pub(super) settings_set: Vec<String>,
+    pub(super) settings_missing: Vec<String>,
     pub(super) tools: Vec<McpToolEntry>,
     /// A stdio tool's binary for this platform.
     pub(super) binary: Option<ComponentArtifact>,
@@ -72,21 +76,17 @@ pub(super) struct McpTool {
 }
 
 /// What the uninstall sweep (sidecar_sweep) keeps of the member's MCP
-/// files: the tools whose member settings, and those whose sign-ins, the
-/// catalog still asks for.
+/// files: the installed tools' member settings, and the sign-ins of those
+/// that take one.
 #[derive(Default)]
 pub(super) struct McpKeep {
-    pub(super) settings: HashSet<String>,
+    pub(super) tools: HashSet<String>,
     pub(super) sign_ins: HashSet<String>,
 }
 
 pub(super) fn mcp_keep(tools: &[McpTool]) -> McpKeep {
     McpKeep {
-        settings: tools
-            .iter()
-            .filter(|t| !t.fields.is_empty())
-            .map(|t| t.name.clone())
-            .collect(),
+        tools: tools.iter().map(|t| t.name.clone()).collect(),
         sign_ins: tools
             .iter()
             .filter(|t| t.oauth.is_some())
@@ -113,32 +113,7 @@ pub(super) struct McpState {
     pub(super) sign_ins: mcp_oauth::SignIns,
 }
 
-/// One installed MCP tool as Settings → Tools renders it. Secret values are
-/// never returned.
-#[derive(Clone, Debug, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct McpToolSettings {
-    pub tool: String,
-    pub version: String,
-    pub transport: String,
-    pub credentials: String,
-    pub tools: Vec<McpToolEntry>,
-    /// Every required member setting is set, or the member is signed in
-    /// (always true for org or no credentials).
-    pub configured: bool,
-    /// "oauth" when the member signs in to the tool ("" otherwise).
-    pub auth: String,
-    /// The member's sign-in on this computer (oauth tools; never a token).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sign_in: Option<McpSignInView>,
-    /// The stdio binary's state on this machine ("ready", "downloading",
-    /// "failed", "unavailable"; "" for http tools) and its message.
-    pub state: String,
-    pub message: String,
-    pub fields: Vec<LocalSettingView>,
-}
-
-/// An oauth tool's sign-in as Settings → Tools shows it.
+/// An oauth tool's sign-in as Settings → Components shows it.
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpSignInView {
@@ -163,20 +138,6 @@ pub(super) fn installed_mcp_tools(catalog: &ComponentsResponse, platform: &str) 
                 .then(|| c.artifacts.as_ref()?.get(platform))
                 .flatten()
                 .cloned();
-            let fields = if mcp.credentials == "member" {
-                mcp.env
-                    .iter()
-                    .map(|e| LocalSettingField {
-                        key: e.name.clone(),
-                        label: e.name.clone(),
-                        help: e.description.clone().filter(|d| !d.trim().is_empty()),
-                        secret: e.secret,
-                        required: e.required,
-                    })
-                    .collect()
-            } else {
-                Vec::new()
-            };
             let oauth = mcp
                 .http
                 .as_ref()
@@ -194,8 +155,9 @@ pub(super) fn installed_mcp_tools(catalog: &ComponentsResponse, platform: &str) 
                 name: c.name.clone(),
                 version: c.version.clone(),
                 transport: mcp.transport.clone(),
-                credentials: mcp.credentials.clone(),
-                fields,
+                settings: c.settings.clone(),
+                settings_set: c.settings_set.clone(),
+                settings_missing: c.settings_missing.clone(),
                 tools: mcp.tools.clone(),
                 binary,
                 oauth,
@@ -261,18 +223,19 @@ pub(super) fn collect_garbage(dir: &Path, keep: &HashSet<PathBuf>) {
 }
 
 impl Adapter {
-    /// The directory holding the signed-in member's MCP tool credentials
-    /// and sign-ins (member_dir).
-    pub(super) fn mcp_settings_dir(&self) -> Result<PathBuf, String> {
+    /// The directory holding the signed-in member's MCP sign-ins
+    /// (member_dir).
+    pub(super) fn mcp_sign_ins_dir(&self) -> Result<PathBuf, String> {
         Ok(self
             .member_dir()?
-            .join(crate::internal_ext::member_dir::MCP_SETTINGS_DIR))
+            .join(crate::internal_ext::member_dir::MCP_SIGN_INS_DIR))
     }
 
     /// Follow a freshly fetched catalog: remember its MCP tools and
     /// materialize the stdio binaries in the background (a large download
-    /// never holds up the reconcile). The credentials of tools no longer
-    /// installed are forgotten by the reconcile's sweep (sidecar_sweep).
+    /// never holds up the reconcile). The settings and sign-ins of tools no
+    /// longer installed are forgotten by the reconcile's sweep
+    /// (sidecar_sweep).
     pub(super) fn sync_mcp_tools(&self, catalog: &ComponentsResponse) {
         let tools = installed_mcp_tools(catalog, &current_platform());
         *self.mcp.tools.lock() = tools.clone();
@@ -380,20 +343,22 @@ impl Adapter {
             .insert(name.to_string(), (state.to_string(), message));
     }
 
-    /// Every installed MCP tool with this desktop's state for it.
-    pub fn mcp_tool_settings(&self) -> Result<Vec<McpToolSettings>, String> {
-        let dir = self.mcp_settings_dir()?;
+    /// Every installed MCP tool with this desktop's state for it (Settings →
+    /// Components; component_settings.rs adds the plugins).
+    pub(super) fn mcp_settings_views(&self) -> Result<Vec<ComponentSettingsView>, String> {
+        let settings_dir = self.component_settings_dir()?;
+        let sign_ins_dir = self.mcp_sign_ins_dir()?;
         let tools = self.mcp.tools.lock().clone();
         let local = self.mcp.local.lock().clone();
         let mut out = Vec::new();
         for tool in tools {
-            let (values, unreadable) = if tool.fields.is_empty() {
-                (Values::new(), None)
-            } else {
-                match load(&settings_path(&dir, &tool.name)?) {
-                    Ok(values) => (values, None),
-                    Err(e) => (Values::new(), Some(e)),
-                }
+            let (member, unreadable) = match load(&settings_path(
+                &settings_dir,
+                ComponentKind::Mcp,
+                &tool.name,
+            )?) {
+                Ok(values) => (values, None),
+                Err(e) => (Values::new(), Some(e)),
             };
             let (state, message) = if tool.transport == "stdio" {
                 local
@@ -403,36 +368,31 @@ impl Adapter {
             } else {
                 (String::new(), String::new())
             };
+            let now = mcp_oauth::now_ms();
             let sign_in = tool
                 .oauth
                 .as_ref()
-                .map(|_| self.mcp.sign_ins.load(&dir, &tool.name));
-            let now = mcp_oauth::now_ms();
-            let sign_in_view = sign_in.flatten().map(|s| McpSignInView {
-                server: s.issuer_host(),
-                signed_in_at_ms: s.signed_in_at_ms,
-                expires_at_ms: s.expires_at_ms,
-                valid: s.valid_at(now) || !s.refresh_token.is_empty(),
-            });
-            let configured = if tool.oauth.is_some() {
-                sign_in_view.as_ref().is_some_and(|v| v.valid)
-            } else {
-                missing_required(&tool.fields, &values).is_empty()
-            };
-            out.push(McpToolSettings {
-                configured,
+                .and_then(|_| self.mcp.sign_ins.load(&sign_ins_dir, &tool.name))
+                .map(|s| McpSignInView {
+                    server: s.issuer_host(),
+                    signed_in_at_ms: s.signed_in_at_ms,
+                    expires_at_ms: s.expires_at_ms,
+                    valid: s.valid_at(now) || !s.refresh_token.is_empty(),
+                });
+            out.push(ComponentSettingsView {
+                kind: ComponentKind::Mcp,
                 auth: if tool.oauth.is_some() {
                     "oauth".into()
                 } else {
                     String::new()
                 },
-                sign_in: sign_in_view,
-                fields: views(&tool.fields, &values),
-                tools: tool.tools,
-                tool: tool.name,
+                sign_in,
+                fields: fields(&tool.settings, &member, &tool.settings_set),
+                missing: missing(&tool.settings, &member, &tool.settings_missing),
+                tools: Some(tool.tools),
+                transport: Some(tool.transport),
+                name: tool.name,
                 version: tool.version,
-                transport: tool.transport,
-                credentials: tool.credentials,
                 state,
                 message: unreadable.unwrap_or(message),
             });
@@ -440,29 +400,14 @@ impl Adapter {
         Ok(out)
     }
 
-    /// Validate and store the member's values for `tool` (an empty secret
-    /// keeps the stored one). The bridge reads them per session: nothing
-    /// restarts.
-    pub fn save_mcp_tool_settings(
-        &self,
-        tool: &str,
-        update: BTreeMap<String, String>,
-    ) -> Result<(), String> {
-        let schema = self.mcp_schema(tool)?;
-        let path = settings_path(&self.mcp_settings_dir()?, tool)?;
-        let next = merge(&schema, &load(&path).unwrap_or_default(), update)?;
-        save(&path, &next)
-    }
-
-    /// Delete the member's values for `tool`.
-    pub fn clear_mcp_tool_settings(&self, tool: &str) -> Result<(), String> {
-        self.mcp_schema(tool)?;
-        let path = settings_path(&self.mcp_settings_dir()?, tool)?;
-        match std::fs::remove_file(&path) {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(format!("delete settings: {e}")),
-        }
+    /// The settings declaration of installed tool `name`.
+    pub(super) fn mcp_settings_decl(&self, name: &str) -> Option<Vec<Setting>> {
+        self.mcp
+            .tools
+            .lock()
+            .iter()
+            .find(|t| t.name == name)
+            .map(|t| t.settings.clone())
     }
 
     /// Sign the member in to an oauth tool in their browser and store the
@@ -476,7 +421,7 @@ impl Adapter {
             .find(|t| t.name == tool)
             .and_then(|t| t.oauth.clone())
             .ok_or_else(|| format!("MCP tool {tool} is not installed or takes no sign-in"))?;
-        let dir = self.mcp_settings_dir()?;
+        let dir = self.mcp_sign_ins_dir()?;
         if !self.mcp.signing_in.lock().insert(tool.to_string()) {
             return Err(format!(
                 "A sign-in to {tool} is already open in your browser"
@@ -509,7 +454,7 @@ impl Adapter {
                 "MCP tool {tool} is not installed or takes no sign-in"
             ));
         }
-        self.mcp.sign_ins.forget(&self.mcp_settings_dir()?, tool)
+        self.mcp.sign_ins.forget(&self.mcp_sign_ins_dir()?, tool)
     }
 
     /// Refresh the sign-ins about to expire. A refresh the server refuses
@@ -517,7 +462,7 @@ impl Adapter {
     /// retried on the next catalog refresh; a sign-in that changed while the
     /// request ran (signed out, signed in again) is left as it is.
     async fn refresh_mcp_sign_ins(&self, tools: &[McpTool]) {
-        let Ok(dir) = self.mcp_settings_dir() else {
+        let Ok(dir) = self.mcp_sign_ins_dir() else {
             return;
         };
         let Ok(http) = mcp_oauth::oauth_client() else {
@@ -541,17 +486,6 @@ impl Adapter {
                 }
             }
         }
-    }
-
-    fn mcp_schema(&self, tool: &str) -> Result<Vec<LocalSettingField>, String> {
-        self.mcp
-            .tools
-            .lock()
-            .iter()
-            .find(|t| t.name == tool)
-            .map(|t| t.fields.clone())
-            .filter(|fields| !fields.is_empty())
-            .ok_or_else(|| format!("MCP tool {tool} is not installed or takes no member settings"))
     }
 }
 

@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::io::{BufRead, BufReader, Write};
 
 use super::*;
+use crate::internal_ext::component_settings::merge_settings;
 use crate::internal_ext::sidecar_model::GatewayAccess;
 
 fn catalog(json: serde_json::Value) -> ComponentsResponse {
@@ -12,11 +13,15 @@ fn sample_catalog() -> ComponentsResponse {
     catalog(serde_json::json!({"components": [
         {"kind": "mcp", "name": "codeword", "version": "1.0.0", "runtime": "stdio", "rollout": "auto", "installed": true,
          "artifacts": {"darwin-arm64": {"url": "/v1/artifacts/sha256/AA", "sha256": "AA00000000000000000000000000000000000000000000000000000000000000"}, "linux-amd64": {"url": "/v1/artifacts/sha256/bb", "sha256": "bb00000000000000000000000000000000000000000000000000000000000000"}},
-         "mcp": {"transport": "stdio", "credentials": "member",
-                 "tools": [{"name": "get_codeword", "description": "the codeword"}],
-                 "env": [{"name": "CODEWORD_SALT", "description": "salt", "secret": true, "required": true}, {"name": "CODEWORD_LANG"}]}},
+         "settings": [{"key": "salt", "label": "Salt", "help": "salt", "type": "secret", "scope": "member", "required": true, "deliver": {"env": "CODEWORD_SALT"}},
+                      {"key": "lang", "label": "Language", "type": "choice", "options": ["en", "fr"], "scope": "org", "default": "en"}],
+         "settingsSet": ["lang"],
+         "mcp": {"transport": "stdio",
+                 "tools": [{"name": "get_codeword", "description": "the codeword"}]}},
         {"kind": "mcp", "name": "search", "version": "2.0.0", "runtime": "endpoint", "rollout": "auto", "installed": true,
-         "mcp": {"transport": "http", "credentials": "org", "tools": [{"name": "search"}], "env": [{"name": "TOOLS_TOKEN", "secret": true, "required": true}]}},
+         "settings": [{"key": "token", "label": "Token", "type": "secret", "scope": "org", "required": true}],
+         "settingsMissing": ["token"],
+         "mcp": {"transport": "http", "tools": [{"name": "search"}], "http": {"auth": {"scheme": "bearer", "setting": "token"}}}},
         {"kind": "mcp", "name": "optin", "version": "1.0.0", "runtime": "stdio", "rollout": "optin", "installed": false},
         {"kind": "mcp", "name": "off", "version": "1.0.0", "runtime": "stdio", "rollout": "off", "installed": true,
          "mcp": {"transport": "stdio", "tools": [{"name": "x"}]}},
@@ -39,12 +44,18 @@ fn installed_tools_follow_the_catalog_gate() {
     );
     assert_eq!(cw.tools[0].name, "get_codeword");
     assert_eq!(cw.tools[0].description.as_deref(), Some("the codeword"));
-    assert_eq!(cw.fields.len(), 2);
-    assert!(cw.fields[0].secret && cw.fields[0].required);
-    assert_eq!(cw.fields[0].help.as_deref(), Some("salt"));
-    // Org credentials take no member settings; http tools have no binary.
+    assert_eq!(cw.settings.len(), 2);
+    assert!(cw.settings[0].kind == "secret" && cw.settings[0].required);
+    assert_eq!(
+        cw.settings[0].deliver.as_ref().unwrap().env,
+        "CODEWORD_SALT"
+    );
+    assert_eq!(cw.settings[1].options, vec!["en", "fr"]);
+    assert_eq!(cw.settings_set, vec!["lang"]);
+    // An http tool has no binary; the catalog says what it misses.
     let search = &tools[1];
-    assert!(search.fields.is_empty() && search.binary.is_none());
+    assert!(search.binary.is_none());
+    assert_eq!(search.settings_missing, vec!["token"]);
     // No binary for an unpublished platform.
     let other = installed_mcp_tools(&sample_catalog(), "windows-amd64");
     assert!(other[0].binary.is_none());
@@ -58,19 +69,35 @@ fn an_unknown_mcp_block_never_fails_the_catalog() {
     ]}));
     let tools = installed_mcp_tools(&c, "darwin-arm64");
     assert_eq!(tools.len(), 1);
-    assert!(tools[0].fields.is_empty());
+    assert!(tools[0].settings.is_empty());
+    // An odd settings entry is defaulted, never a failed catalog.
+    let c = catalog(serde_json::json!({"components": [
+        {"kind": "mcp", "name": "odd", "version": "1.0.0", "runtime": "stdio", "rollout": "auto", "installed": true,
+         "settings": [{"surprise": true}], "mcp": {"transport": "stdio"}}
+    ]}));
+    assert_eq!(installed_mcp_tools(&c, "darwin-arm64")[0].settings.len(), 1);
 }
 
 #[test]
-fn member_settings_views_never_return_secrets() {
+fn settings_views_never_return_secrets_or_org_values() {
     let tools = installed_mcp_tools(&sample_catalog(), "darwin-arm64");
-    let schema = &tools[0].fields;
-    let mut update = std::collections::BTreeMap::new();
-    update.insert("CODEWORD_SALT".to_string(), "s3cr3t".to_string());
-    let values = merge(schema, &Values::new(), update).expect("valid");
-    assert!(missing_required(schema, &values).is_empty());
-    let json = serde_json::to_string(&views(schema, &values)).unwrap();
+    let cw = &tools[0];
+    let update: Values = [("salt".to_string(), "s3cr3t".to_string())].into();
+    let (values, changed) =
+        merge_settings(&cw.settings, "member", &Values::new(), &update, &[]).expect("valid");
+    assert_eq!(changed, vec!["salt"]);
+    assert!(missing(&cw.settings, &values, &cw.settings_missing).is_empty());
+    let view = fields(&cw.settings, &values, &cw.settings_set);
+    assert!(view[0].set && view[0].value.is_none());
+    assert!(
+        view[1].set && view[1].value.is_none(),
+        "an org setting: set, never its value"
+    );
+    let json = serde_json::to_string(&view).unwrap();
     assert!(!json.contains("s3cr3t"), "{json}");
+    // An org value is never the member's to set.
+    let org: Values = [("lang".to_string(), "fr".to_string())].into();
+    assert!(merge_settings(&cw.settings, "member", &Values::new(), &org, &[]).is_err());
 }
 
 fn temp_dir(tag: &str) -> PathBuf {
@@ -205,9 +232,9 @@ fn an_oauth_tool_carries_its_sign_in_spec() {
                  "http": {"auth": {"scheme": "oauth", "clientId": "bnbloc", "scopes": ["files:read"]}}}},
         {"kind": "mcp", "name": "search", "version": "2.0.0", "runtime": "endpoint", "rollout": "auto", "installed": true,
          "endpoint": {"baseUrl": "https://tools.example.com/search"},
-         "mcp": {"transport": "http", "credentials": "member", "tools": [{"name": "search"}],
-                 "env": [{"name": "TOOLS_TOKEN", "secret": true, "required": true}],
-                 "http": {"auth": {"scheme": "bearer", "env": "TOOLS_TOKEN"}}}}
+         "settings": [{"key": "token", "label": "Token", "type": "secret", "scope": "member", "required": true}],
+         "mcp": {"transport": "http", "tools": [{"name": "search"}],
+                 "http": {"auth": {"scheme": "bearer", "setting": "token"}}}}
     ]}));
     let tools = installed_mcp_tools(&c, "darwin-arm64");
     let drive = &tools[0];
@@ -219,11 +246,11 @@ fn an_oauth_tool_carries_its_sign_in_spec() {
             scopes: vec!["files:read".into()],
         })
     );
-    // The sweep keeps the oauth tool's sign-in; a bearer tool keeps member
-    // settings, not a sign-in.
+    // The sweep keeps every installed tool's settings and the oauth tool's
+    // sign-in; a bearer tool keeps no sign-in.
     let keep = mcp_keep(&tools);
-    assert!(keep.sign_ins.contains("drive") && !keep.settings.contains("drive"));
-    assert!(keep.settings.contains("search") && !keep.sign_ins.contains("search"));
+    assert!(keep.sign_ins.contains("drive") && keep.tools.contains("drive"));
+    assert!(keep.tools.contains("search") && !keep.sign_ins.contains("search"));
 }
 
 /// Catalog refreshes during a slow pass never queue passes: one runs, at

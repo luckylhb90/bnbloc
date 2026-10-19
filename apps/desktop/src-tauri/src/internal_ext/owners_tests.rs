@@ -85,8 +85,14 @@ fn core_env_vars_are_named_only_by_core_env_var() {
 
 #[test]
 fn member_secret_dirs_are_named_only_by_member_dir() {
-    only_in("\"plugin-settings\"", "internal_ext/member_dir.rs");
-    only_in("\"mcp-settings\"", "internal_ext/member_dir.rs");
+    for name in [
+        "\"component-settings\"",
+        "\"mcp-sign-ins\"",
+        "\"plugin-settings\"",
+        "\"mcp-settings\"",
+    ] {
+        only_in(name, "internal_ext/member_dir.rs");
+    }
 }
 
 #[test]
@@ -262,5 +268,22 @@ fn sign_in_files_are_reached_only_through_sign_ins() {
     // Every read, write and delete of a sign-in file goes through SignIns
     // (mcp_oauth.rs): nothing else resolves a sign-in path.
     only_in("sign_in_path(", "internal_ext/mcp_oauth.rs");
-    only_in("OAUTH_DIR", "internal_ext/mcp_oauth.rs");
+}
+
+/// The setting value rules and the member store have one owner
+/// (component_settings.rs, pinned to core/pkgmeta): no other module merges,
+/// checks or resolves a setting, or names the settings file variable.
+#[test]
+fn component_settings_have_one_owner() {
+    for needle in [
+        "fn merge_settings",
+        "fn check_setting_value",
+        "fn effective_settings",
+        "fn unset_settings",
+        "BNBLOC_COMPONENT_SETTINGS_FILE",
+        "BNBLOC_COMPONENT_SETTINGS_DIR",
+        "/settings/resolved",
+    ] {
+        only_in(needle, "internal_ext/component_settings.rs");
+    }
 }

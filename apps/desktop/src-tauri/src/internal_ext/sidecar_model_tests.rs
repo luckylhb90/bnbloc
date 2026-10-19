@@ -198,7 +198,7 @@ fn resolve_component_specs_selects_manifest_core_data_without_binary() {
 }
 
 #[test]
-fn plugin_spec_carries_host_permissions_and_local_settings() {
+fn plugin_spec_carries_host_permissions_and_settings() {
     let response: ComponentsResponse = serde_json::from_str(
         r#"{
         "components":[{
@@ -206,7 +206,8 @@ fn plugin_spec_carries_host_permissions_and_local_settings() {
             "requiresDesktop":true,"rollout":"optin","installed":true,"managed":true,
             "hooks":["notification.v1"],
             "permissions":{"network":["127.0.0.1"],"host":["chat"]},
-            "localSettings":[{"key":"appKey","label":"App key","secret":true,"required":true},{"key":"note","label":"Note"}],
+            "settings":[{"key":"appKey","label":"App key","type":"secret","scope":"member","required":true,"deliver":{"env":"PB_APP_KEY"}},{"key":"apiBase","label":"API base","type":"url","scope":"platform","required":true}],
+            "settingsMissing":["apiBase"],
             "artifacts":{"darwin-arm64":{"url":"http://gw/v1/artifacts/sha256/abc","sha256":"abc0000000000000000000000000000000000000000000000000000000000000"}},
             "sidecar":{"localUrl":"http://127.0.0.1:7193","supervisedEnv":"PB_SUPERVISED"}
         },{
@@ -226,9 +227,17 @@ fn plugin_spec_carries_host_permissions_and_local_settings() {
         .find(|s| s.kind == ComponentKind::Plugin)
         .expect("plugin spec");
     assert_eq!(plugin.plugin.host, vec!["chat".to_string()]);
-    assert_eq!(plugin.plugin.local_settings.len(), 2);
-    assert!(plugin.plugin.local_settings[0].secret && plugin.plugin.local_settings[0].required);
-    assert!(!plugin.plugin.local_settings[1].required);
+    assert_eq!(plugin.plugin.settings.len(), 2);
+    assert!(plugin.plugin.settings[0].kind == "secret" && plugin.plugin.settings[0].required);
+    assert_eq!(
+        plugin.plugin.settings[0].deliver.as_ref().unwrap().env,
+        "PB_APP_KEY"
+    );
+    assert_eq!(plugin.plugin.settings_missing, vec!["apiBase".to_string()]);
+    // The platform setting set later is a new spec: the plugin restarts.
+    let mut set = plugin.clone();
+    set.plugin.settings_missing.clear();
+    assert!(set != *plugin);
     let core = resolved
         .specs
         .iter()

@@ -2,8 +2,8 @@
 //!
 //! Uninstalling a component (or flipping it to off, or dropping an opt-in)
 //! removes what this desktop keeps for it: cached binaries, a sandbox's
-//! bundles and data dir, a plugin's local settings, an MCP tool's member
-//! credentials and sign-in. Each successful reconcile sweeps the disk against
+//! bundles and data dir, a plugin's or MCP tool's member settings and its
+//! launch file, an MCP tool's sign-in. Each successful reconcile sweeps the disk against
 //! the live catalog it just fetched, never against what this app session saw
 //! before, so a component uninstalled while the app was closed is forgotten
 //! as well. Each kind sweeps what it keeps (`KindRuntime::sweep`); the
@@ -67,7 +67,7 @@ impl Live {
             .unwrap_or_else(|| NONE.get_or_init(HashSet::new))
     }
 
-    /// The MCP tools whose member settings and sign-ins the catalog still
+    /// The installed MCP tools, and those whose sign-ins the catalog still
     /// asks for.
     pub(super) fn mcp(&self) -> &McpKeep {
         &self.mcp
@@ -92,8 +92,8 @@ pub(super) struct SweepDirs {
     /// Machine-wide, rebuildable: the previewer bundle archives.
     pub(super) previewers: Option<PathBuf>,
     /// The member directory (member_dir) of the SAME session the catalog
-    /// was fetched with: its plugin settings, MCP settings and sign-ins,
-    /// and sandbox data.
+    /// was fetched with: its component settings, MCP sign-ins and sandbox
+    /// data.
     pub(super) member: Option<PathBuf>,
 }
 
@@ -199,8 +199,8 @@ mod tests {
                  "requiresDesktop": true, "rollout": "auto", "installed": true},
                 {"kind": "mcp", "name": format!("{p}kept"), "version": "1", "runtime": "stdio",
                  "rollout": "auto", "installed": true,
-                 "mcp": {"transport": "stdio", "credentials": "member",
-                         "env": [{"name": "TOKEN", "secret": true, "required": true}]}},
+                 "settings": [{"key": "token", "label": "Token", "type": "secret", "scope": "member", "required": true}],
+                 "mcp": {"transport": "stdio"}},
                 {"kind": "mcp", "name": format!("{p}drive"), "version": "1", "runtime": "endpoint",
                  "rollout": "auto", "installed": true,
                  "endpoint": {"baseUrl": "https://tools.example.com/mcp"},
@@ -213,9 +213,10 @@ mod tests {
     /// What a tenant's catalog leaves in the member directory.
     fn member_state(member: &Path, p: &str) -> Vec<PathBuf> {
         vec![
-            member.join(format!("plugin-settings/{p}bot.json")),
-            member.join(format!("mcp-settings/{p}kept.json")),
-            member.join(format!("mcp-settings/oauth/{p}drive.json")),
+            member.join(format!("component-settings/plugin@{p}bot.json")),
+            member.join(format!("component-settings/launch/plugin@{p}bot.json")),
+            member.join(format!("component-settings/mcp@{p}kept.json")),
+            member.join(format!("mcp-sign-ins/{p}drive.json")),
             member.join(format!("sandbox/{p}vm/disk.img")),
         ]
     }
@@ -235,11 +236,12 @@ mod tests {
         // member settings and a sign-in), z (core), s (sandbox) were
         // uninstalled; the a* components are still installed.
         let gone = [
-            member.join("plugin-settings/x.json"),
-            member.join("plugin-settings/.x.json.0123456789abcdef.tmp"),
-            member.join("plugin-settings/x.json.corrupt-1700000000000"),
-            member.join("mcp-settings/y.json"),
-            member.join("mcp-settings/oauth/y.json"),
+            member.join("component-settings/plugin@x.json"),
+            member.join("component-settings/.plugin@x.json.0123456789abcdef.tmp"),
+            member.join("component-settings/plugin@x.json.corrupt-1700000000000"),
+            member.join("component-settings/launch/plugin@x.json"),
+            member.join("component-settings/mcp@y.json"),
+            member.join("mcp-sign-ins/y.json"),
             member.join("sandbox/s/disk.img"),
             cores.join(cache_file_name("z", SHA)),
             root.join(format!("cache/previewers/{}.tar", view_pin("gone"))),

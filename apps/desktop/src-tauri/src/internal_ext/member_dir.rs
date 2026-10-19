@@ -1,7 +1,7 @@
 //! The signed-in member's private directory on this computer.
 //!
-//! What a member keeps on a desktop (plugin `localSettings`, MCP tool member
-//! credentials, MCP OAuth sign-ins, the sandbox's data dir with its VM
+//! What a member keeps on a desktop (the member-scope values of component
+//! settings, MCP OAuth sign-ins, the sandbox's data dir with its VM
 //! disks, the bridge's workspace bindings) belongs to one member acting in one tenant of one gateway, and the
 //! catalog that installs those components is scoped the same way: a
 //! super-admin's tenant switch hands the desktop a whole other catalog.
@@ -19,7 +19,10 @@
 //!
 //! The locations that predate this layout (`<app config>/plugin-settings`,
 //! `<app config>/mcp-settings`, `<app data>/sandbox`) held the state of
-//! whichever member signed in; they are deleted at startup, not migrated.
+//! whichever member signed in, and the per-member `plugin-settings` and
+//! `mcp-settings` dirs held plugin and MCP values before component settings
+//! (component_settings.rs) had one store; they are deleted at startup, not
+//! migrated.
 use std::path::{Path, PathBuf};
 
 use reqwest::Url;
@@ -29,10 +32,14 @@ use crate::internal_ext::sidecar_util::hex_lower;
 
 /// `<app config>/members`: one directory per (gateway, member, tenant).
 const MEMBERS_DIR: &str = "members";
-/// A member's plugin `localSettings` (`<member>/plugin-settings/<plugin>.json`).
-pub(super) const PLUGIN_SETTINGS_DIR: &str = "plugin-settings";
-/// A member's MCP tool credentials and sign-ins (`<member>/mcp-settings/`).
-pub(super) const MCP_SETTINGS_DIR: &str = "mcp-settings";
+/// A member's values of component settings
+/// (`<member>/component-settings/<kind>@<name>.json`, component_settings.rs).
+pub(super) const COMPONENT_SETTINGS_DIR: &str = "component-settings";
+/// A member's MCP OAuth sign-ins (`<member>/mcp-sign-ins/<tool>.json`).
+pub(super) const MCP_SIGN_INS_DIR: &str = "mcp-sign-ins";
+/// Retired settings dirs: under the app config dir (member-unkeyed) and
+/// under each member dir, deleted at startup (remove_retired_dirs).
+const RETIRED_SETTINGS_DIRS: [&str; 2] = ["plugin-settings", "mcp-settings"];
 /// A member's sandbox data dirs (`<member>/sandbox/<name>`: VM disks).
 pub(super) const SANDBOX_DATA_DIR: &str = "sandbox";
 /// A plugin's private data dir (`<member>/plugin-data/<plugin>`), for a
@@ -105,17 +112,27 @@ pub(super) fn token_member(token: &str) -> Option<SessionMember> {
     })
 }
 
-/// Delete the member-unkeyed state of earlier builds: the secret dirs under
-/// the app config dir and the sandbox data base under the app data dir.
-/// Blocking, best-effort.
-pub(super) fn remove_unkeyed_dirs(config_dir: &Path, data_dir: &Path) {
-    for dir in [
-        config_dir.join(PLUGIN_SETTINGS_DIR),
-        config_dir.join(MCP_SETTINGS_DIR),
-        data_dir.join(SANDBOX_DATA_DIR),
-    ] {
+/// Delete the state of earlier layouts: the member-unkeyed secret dirs under
+/// the app config dir, the sandbox data base under the app data dir, and the
+/// retired settings dirs of every member dir. Blocking, best-effort.
+pub(super) fn remove_retired_dirs(config_dir: &Path, data_dir: &Path) {
+    let mut dirs: Vec<PathBuf> = RETIRED_SETTINGS_DIRS
+        .iter()
+        .map(|dir| config_dir.join(dir))
+        .collect();
+    dirs.push(data_dir.join(SANDBOX_DATA_DIR));
+    if let Ok(members) = std::fs::read_dir(config_dir.join(MEMBERS_DIR)) {
+        for member in members.flatten() {
+            dirs.extend(
+                RETIRED_SETTINGS_DIRS
+                    .iter()
+                    .map(|dir| member.path().join(dir)),
+            );
+        }
+    }
+    for dir in dirs {
         match std::fs::remove_dir_all(&dir) {
-            Ok(()) => eprintln!("[sidecar-manager] removed unkeyed {}", dir.display()),
+            Ok(()) => eprintln!("[sidecar-manager] removed retired {}", dir.display()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => eprintln!("[sidecar-manager] could not remove {}: {e}", dir.display()),
         }
@@ -228,29 +245,44 @@ mod tests {
     }
 
     #[test]
-    fn unkeyed_state_dirs_are_deleted() {
+    fn retired_state_dirs_are_deleted() {
         // One dir for config and data, as on macOS: the keyed members/ tree
-        // under it stays.
+        // under it stays, but for its retired settings dirs.
         let base =
             std::env::temp_dir().join(format!("bnbloc-member-dir-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
-        for dir in [PLUGIN_SETTINGS_DIR, MCP_SETTINGS_DIR, SANDBOX_DATA_DIR] {
+        let unkeyed = [
+            RETIRED_SETTINGS_DIRS[0],
+            RETIRED_SETTINGS_DIRS[1],
+            SANDBOX_DATA_DIR,
+        ];
+        for dir in unkeyed {
             std::fs::create_dir_all(base.join(dir).join("sub")).unwrap();
             std::fs::write(base.join(dir).join("x.json"), b"{}").unwrap();
         }
         let member = member_dir(&base, "https://gw.example.com", "maya", "t1").unwrap();
-        for dir in [PLUGIN_SETTINGS_DIR, SANDBOX_DATA_DIR] {
+        for dir in [
+            RETIRED_SETTINGS_DIRS[0],
+            RETIRED_SETTINGS_DIRS[1],
+            COMPONENT_SETTINGS_DIR,
+            MCP_SIGN_INS_DIR,
+            SANDBOX_DATA_DIR,
+        ] {
             std::fs::create_dir_all(member.join(dir)).unwrap();
         }
 
-        remove_unkeyed_dirs(&base, &base);
-        remove_unkeyed_dirs(&base, &base);
+        remove_retired_dirs(&base, &base);
+        remove_retired_dirs(&base, &base);
 
-        for dir in [PLUGIN_SETTINGS_DIR, MCP_SETTINGS_DIR, SANDBOX_DATA_DIR] {
+        for dir in unkeyed {
             assert!(!base.join(dir).exists(), "{dir} survived");
         }
-        assert!(member.join(PLUGIN_SETTINGS_DIR).exists(), "keyed dirs stay");
-        assert!(member.join(SANDBOX_DATA_DIR).exists(), "keyed dirs stay");
+        for dir in RETIRED_SETTINGS_DIRS {
+            assert!(!member.join(dir).exists(), "member {dir} survived");
+        }
+        for dir in [COMPONENT_SETTINGS_DIR, MCP_SIGN_INS_DIR, SANDBOX_DATA_DIR] {
+            assert!(member.join(dir).exists(), "keyed {dir} stays");
+        }
         std::fs::remove_dir_all(&base).unwrap();
     }
 }
