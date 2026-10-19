@@ -165,9 +165,9 @@ Guards stay inside `browser_act`, whatever the agent asks:
 - A secret field is never typed into: a person fills it.
 - A click the decision model judges likely irreversible (§2.5), a click
   leading off the run's sites, an upload and a question a page's dialog
-  asks pause at `needs_confirmation`, held until the requester's own newer
-  message (the consent rule is unchanged); the agent repeats the action
-  with `confirmed`.
+  asks pause at `needs_confirmation`. The agent repeats the action with
+  `confirmed` when the requester's own message in this turn asked for it
+  (§2.5); otherwise it asks them first.
 - A page that settles on a sign-in (a password field, or an identity
   provider's page still there after its own redirects had time to finish)
   pauses at `needs_human`, with the keeper (§3.7).
@@ -213,15 +213,25 @@ checkpoint as long as nobody answers.
     (`snapshot.js`'s `guard` scope), never the whole page.
 - **Conversation is the confirmation.** The agent asks in the room; the
   requester answers.
-  - The component accepts a confirmation only when it holds in a turn
-    the requester opened with their own message, after the pause. The
-    relay's bound-job facts (§3.1) carry the requester and the turn's
-    message sequence. The run records the sequence at the pause.
-    `browse(run, confirmed)` is accepted only if the bound
-    turn's requester is the run's requester and its sequence is greater.
-  - So a page that convinces the agent "the user already agreed" in the
-    same turn changes nothing. The agent can resume only by asking, and
-    a person must answer.
+  - The component accepts `confirmed` only in a turn the run's
+    requester opened with their own message. The relay's bound-job facts
+    (§3.1) carry the requester and whether the turn's message is theirs.
+    A turn a schedule or another agent opened never confirms, and a page
+    cannot open a turn.
+  - The confirmation may come before the pause (revised 2026-10-19). A
+    requester who says "do all fifteen questions, don't ask me" has
+    agreed to each submit; the agent passes `confirmed` on the actions
+    their words cover, without a pause first, and on whichever number the
+    control has now (numbers change as a page redraws).
+    - QA 2026-10-19: the earlier rule (the confirmation from a turn newer
+      than the pause, on the paused control's number) never let a quiz
+      submit through. Each unconfirmed retry paused again and moved the
+      marker to the current turn, and a redrawn page renumbered the
+      button, so the person's repeated "go ahead" never counted.
+    - Residual risk, accepted: a page that convinces the agent its
+      requester's words cover a step it does not. The agent judges the
+      words, the decision model still flags the step, and the person sees
+      every action in the run's live view and record.
 - **Quick replies.**
   - The agent's question can carry reply options ("Submit", "Don't
     submit", "Change …"). They appear as buttons on the message (§3.4).
@@ -756,7 +766,7 @@ with the room watching.
 | Scale and cost | Each step costs one decision call and one more on clicks. Decisions have their own rate (§3.5) and spend the cost budget; each call is audited with its tokens. Frames are produced on paint, acknowledged, and fanned out only to watchers; latest-wins drops for slow subscribers; the gateway keeps one frame per run. One Chrome per machine, a tab per run. |
 | Failure and recovery | A stale page: re-observe, never act on a stale target. An interrupted native select stops at a checkpoint, since its change event may have fired (`browser.py:304-306`). No progress: `blocked`, and the agent or a person resumes. No progress is three steps in a row that change nothing, or (QA 2026-10-19, a comment box clicked open and shut) the same operation on the same element three times in four steps coming back to a page it was on; the same step leading somewhere new each time (Next, Load more) is progress. The decision model unreachable or off: `blocked` with the reason. Chrome gone: the desktop restarts it and the run reports its tab lost. The component restarted: runs reload from state by tab. The tool-call timeout: the `running` checkpoint. |
 | Boundaries and privacy | The owner's sign-ins are used only by the owner and by members they grant (§2.6). Secret values never reach the model or the agent (§2.7). The everyday browser profiles stay read-denied. Live frames follow the run's channel (decided): a run's pages are exactly as visible as its messages. The audit holds counts and tokens, never page content. |
-| Abuse and untrusted input | Page content is fenced data, never instructions and never a confirmation. Only code-assigned indices can be chosen; every input is re-checked for freshness, visibility, enabled state and occlusion. Irreversible clicks, leaving the site, uploads and secret fields are checkpoints. A confirmation needs a newer turn opened by the requester (§2.5). Remote input is admitted only for the owner and granted members, checked at the gateway and again at the bridge. |
+| Abuse and untrusted input | Page content is fenced data, never instructions and never a confirmation. Only code-assigned indices can be chosen; every input is re-checked for freshness, visibility, enabled state and occlusion. Irreversible clicks, leaving the site, uploads and secret fields are checkpoints. A confirmation needs a turn opened by the requester's own message (§2.5). Remote input is admitted only for the owner and granted members, checked at the gateway and again at the bridge. |
 | One owner | The component owns the run loop, checkpoints and the CDP executor. `internal/decision` owns the decision call. The relay owns which routes a tool reaches and what it knows of its turn (§3.1). `job_live_frame` / `job_live_input` own live media and input for every tool. Quick replies own one-tap answers for every feature. The borrow-grant model owns who may use the owner's things. |
 | Defaults and fallbacks | The default host is the requester's dedicated profile. The default irreversibility threshold is 0.3 (more confirmations until the audit shows the predicate's calibration), set by the org and per run. Without a decision model: `blocked` with the reason, and people drive. An unknown field value: `needs_input`, never a guess. No silent fallback to a chat model for steps. |
 | External contracts | CDP (screencast, input, file inputs, download behavior) is pinned by tests against a real headless Chromium in CI, with fixture pages (the reference ships one, `jev_ultrafast/static/fixture.html`, and 19 tests, `tests/test_agent.py`). `/v1/systemone` is pinned by the decision PRD's fake. Each CLI's tool-call behavior is covered by the `running` checkpoint rather than assumed. |
@@ -775,8 +785,9 @@ likely reasons, and what the design does about each:
      every tool result.
    - The Confirm click scores high on the irreversibility predicate, so
      the run pauses at `needs_confirmation`.
-   - The agent can resume only with a confirmation from a newer turn
-     opened by the requester's own message. The page cannot open a turn.
+   - The agent can confirm only in a turn opened by the requester's own
+     message, and only what those words asked for. The page cannot open
+     a turn.
 2. **A wrong irreversible click went through.** The predicate scored a
    "Send now" link at 0.3 because its label was an icon.
    - The predicate sees the element's form/dialog scope, not just its
