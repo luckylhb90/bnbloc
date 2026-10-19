@@ -10,8 +10,12 @@ M3 implemented (2026-10-14, not yet released; desktop
 `LocalSaveChip`). Its decisions against §4 below:
 
 - Entry points: the Open dialog (sidebar "Open a file…", ⌘O), Open With
-  (`fileAssociations` for pptx, docx, xlsx, pdf, md, csv at rank
-  Alternate, so the app is offered, never made the default), and
+  (`fileAssociations` at rank Alternate, so the app is offered, never
+  made the default: Office files, PDF, markdown, tables, JSON, text and
+  logs, YAML/XML, web pages, images, video, audio, source code and
+  config, diagrams; widened 2026-10-19 from pptx, docx, xlsx, pdf, md and
+  csv. `TestDesktopOpenWithClaimsOnlyRoomFormats` holds the list to the
+  formats the room knows), and
   `bnbloc-desktop <file>` (cold start and second launch).
 - Drop-with-path is deferred. The window hands drops to the web
   (`disable_drag_drop_handler`, for HTML5 attachment drops), and an HTML5

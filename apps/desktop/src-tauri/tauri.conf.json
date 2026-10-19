@@ -51,7 +51,19 @@
       { "ext": ["xlsx"], "name": "Excel workbook", "contentTypes": ["org.openxmlformats.spreadsheetml.sheet"], "role": "Editor", "rank": "Alternate" },
       { "ext": ["pdf"], "name": "PDF document", "contentTypes": ["com.adobe.pdf"], "role": "Viewer", "rank": "Alternate" },
       { "ext": ["md", "markdown"], "name": "Markdown document", "contentTypes": ["net.daringfireball.markdown"], "role": "Editor", "rank": "Alternate" },
-      { "ext": ["csv"], "name": "CSV table", "contentTypes": ["public.comma-separated-values-text"], "role": "Editor", "rank": "Alternate" }
+      { "ext": ["csv"], "name": "CSV table", "contentTypes": ["public.comma-separated-values-text"], "role": "Editor", "rank": "Alternate" },
+      { "ext": ["json"], "name": "JSON", "contentTypes": ["public.json"], "role": "Editor", "rank": "Alternate" },
+      { "ext": ["txt", "log"], "name": "Text", "contentTypes": ["public.plain-text", "public.log"], "role": "Editor", "rank": "Alternate" },
+      { "ext": ["yaml", "yml"], "name": "YAML", "contentTypes": ["public.yaml"], "role": "Editor", "rank": "Alternate" },
+      { "ext": ["xml"], "name": "XML", "contentTypes": ["public.xml"], "role": "Editor", "rank": "Alternate" },
+      { "ext": ["tsv"], "name": "TSV table", "contentTypes": ["public.tab-separated-values-text"], "role": "Editor", "rank": "Alternate" },
+      { "ext": ["html", "htm"], "name": "Web page", "contentTypes": ["public.html"], "role": "Viewer", "rank": "Alternate" },
+      { "ext": ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "avif"], "name": "Image", "contentTypes": ["public.png", "public.jpeg", "com.compuserve.gif", "org.webmproject.webp", "public.svg-image", "com.microsoft.bmp", "public.avif"], "role": "Viewer", "rank": "Alternate" },
+      { "ext": ["mp4", "mov", "webm"], "name": "Video", "contentTypes": ["public.mpeg-4", "com.apple.quicktime-movie", "org.webmproject.webm"], "role": "Viewer", "rank": "Alternate" },
+      { "ext": ["mp3", "wav", "m4a", "ogg"], "name": "Audio", "contentTypes": ["public.mp3", "com.microsoft.waveform-audio", "com.apple.m4a-audio", "org.xiph.ogg-audio"], "role": "Viewer", "rank": "Alternate" },
+      { "ext": ["py", "sh", "swift", "c", "h", "cpp", "cc", "hpp", "js", "rb", "php", "pl", "java"], "name": "Source code", "contentTypes": ["public.python-script", "public.shell-script", "public.swift-source", "public.c-source", "public.c-header", "public.c-plus-plus-source", "public.c-plus-plus-header", "com.netscape.javascript-source", "public.ruby-script", "public.php-script", "public.perl-script", "com.sun.java-source"], "role": "Editor", "rank": "Alternate" },
+      { "ext": ["ts", "tsx", "jsx", "mjs", "cjs", "go", "rs", "kt", "scala", "cs", "lua", "r", "sql", "vue", "svelte", "css", "scss", "less", "proto", "graphql", "tf", "toml", "ini", "cfg", "conf"], "name": "Code and config", "role": "Editor", "rank": "Alternate" },
+      { "ext": ["mmd", "mermaid", "drawio", "dio"], "name": "Diagram", "role": "Editor", "rank": "Alternate" }
     ],
     "macOS": {
       "entitlements": "./Entitlements.plist",
