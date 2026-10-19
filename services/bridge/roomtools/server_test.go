@@ -384,7 +384,9 @@ func TestAskAgentFlow(t *testing.T) {
 	if !isErr || !strings.Contains(text, "only while you are answering") {
 		t.Fatalf("unbound ask_agent = %s", text)
 	}
-	sess.Bind(Job{JobID: "job_parent", RequesterUserID: "maya", ChannelID: "ch_general", MessageSeq: 30})
+	// The caller's workspace gets the deliverables' copies as the task is
+	// reported: a file it reads mid-turn.
+	sess.Bind(Job{JobID: "job_parent", RequesterUserID: "maya", ChannelID: "ch_general", MessageSeq: 30, Workspace: copyingWorkspace{}})
 
 	params := call["params"].(map[string]any)
 	params["_meta"] = map[string]any{"progressToken": "p1"}
@@ -411,7 +413,7 @@ func TestAskAgentFlow(t *testing.T) {
 	if len(dl) != 1 {
 		t.Fatalf("deliverables = %v", sc["deliverables"])
 	}
-	if d := dl[0].(map[string]any); d["name"] != "parser.go" || d["kind"] != "code" || d["artifactId"] != "art_1" || d["version"] != float64(2) || d["link"] != "https://bnbloc.example.com/v1/rooms/room-1/artifacts/art_1/versions/2/content" {
+	if d := dl[0].(map[string]any); d["name"] != "parser.go" || d["kind"] != "code" || d["artifactId"] != "art_1" || d["version"] != float64(2) || d["path"] != ".room/deliverables/art_1/" || d["link"] != "https://bnbloc.example.com/v1/rooms/room-1/artifacts/art_1/versions/2/content" {
 		t.Fatalf("deliverable = %v", d)
 	}
 
@@ -604,4 +606,11 @@ func TestReadRoomNamesPeople(t *testing.T) {
 	if text, isErr := toolText(t, r); isErr || !strings.Contains(text, `#40 Maya Lee (maya): earlier`) {
 		t.Fatalf("read_room = %s", text)
 	}
+}
+
+// copyingWorkspace copies every deliverable into .room/deliverables/.
+type copyingWorkspace struct{ fakeWorkspace }
+
+func (copyingWorkspace) CopyDeliverables(context.Context) map[string]string {
+	return map[string]string{"art_1": ".room/deliverables/art_1/"}
 }

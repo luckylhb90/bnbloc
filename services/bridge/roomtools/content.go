@@ -31,6 +31,10 @@ type Workspace interface {
 	// Deliverable is the room deliverable id of a workspace file, published
 	// now when its content is not yet.
 	Deliverable(ctx context.Context, rel string) (string, error)
+	// CopyDeliverables copies the room's deliverables into the workspace
+	// now (.room/deliverables/, as at a turn's start) and answers each
+	// copy's directory by artifact id (nil: the core writes no files).
+	CopyDeliverables(ctx context.Context) map[string]string
 }
 
 // RawBody is a request body sent as-is (a package archive, an app data

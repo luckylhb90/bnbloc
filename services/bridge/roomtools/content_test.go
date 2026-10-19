@@ -35,6 +35,8 @@ func (w fakeWorkspace) ReadFile(_ context.Context, rel string) ([]byte, error) {
 
 // Deliverable names a file's deliverable id after "publishing" it; a file
 // that is not there cannot be one.
+func (w fakeWorkspace) CopyDeliverables(context.Context) map[string]string { return nil }
+
 func (w fakeWorkspace) Deliverable(_ context.Context, rel string) (string, error) {
 	if _, ok := w[rel]; !ok {
 		return "", errors.New(rel + " cannot be a deliverable: no such file")

@@ -37,13 +37,16 @@ type outcome struct {
 }
 
 // deliverable is one file the dispatched agent published for the task:
-// read_artifact reads it by ArtifactID (a session without .room/ files has
-// no other source of the id), the person opens Link.
+// Path is its copy in the caller's workspace (made when the task is
+// reported, so it is there mid-turn), read_artifact reads it by ArtifactID
+// (a session without .room/ files has no other source of the id), the
+// person opens Link.
 type deliverable struct {
 	Name       string `json:"name"`
 	Kind       string `json:"kind"`
 	ArtifactID string `json:"artifactId"`
 	Version    int    `json:"version,omitempty"`
+	Path       string `json:"path,omitempty"`
 	Link       string `json:"link"`
 }
 
@@ -61,7 +64,7 @@ func askAgentTool() Tool {
 		Title: "Ask another agent of the room",
 		Description: "Send a task to another agent of this room and wait for it to finish. It is posted in the room for the person who asked you " +
 			"(visible to everyone, attributed to you) and runs under their authority. Returns the agent's reply and the files it delivered " +
-			"(read one with read_artifact by its artifactId); if the agent is still working when the wait ends, its handle for room_status.",
+			"(each with its copy's path in your workspace when it has one; read_artifact reads one by its artifactId); if the agent is still working when the wait ends, its handle for room_status.",
 		InputSchema: objectSchema(map[string]any{
 			"handle":       map[string]any{"type": "string", "description": `The agent's handle from list_room_agents, e.g. "jack/codex"; when you lead a team, a role of your roster (e.g. "reviewer").`},
 			"task":         map[string]any{"type": "string", "description": "A self-contained task: the agent sees the room's conversation, not your private context."},
@@ -312,6 +315,10 @@ func deliverables(ctx context.Context, env *Env, run wire.AgentRun) []deliverabl
 	if json.Unmarshal(raw, &parsed) != nil {
 		return nil
 	}
+	var copies map[string]string
+	if ws := env.Session.current().Workspace; ws != nil && len(parsed.Artifacts) > 0 {
+		copies = ws.CopyDeliverables(ctx)
+	}
 	out := make([]deliverable, 0, len(parsed.Artifacts))
 	for _, a := range parsed.Artifacts {
 		name := a.FileName
@@ -322,7 +329,7 @@ func deliverables(ctx context.Context, env *Env, run wire.AgentRun) []deliverabl
 		if a.CurrentVersion > 0 {
 			link += "/versions/" + strconv.Itoa(a.CurrentVersion) + "/content"
 		}
-		out = append(out, deliverable{Name: name, Kind: a.Kind, ArtifactID: a.ArtifactID, Version: a.CurrentVersion, Link: link})
+		out = append(out, deliverable{Name: name, Kind: a.Kind, ArtifactID: a.ArtifactID, Version: a.CurrentVersion, Path: copies[a.ArtifactID], Link: link})
 	}
 	return out
 }

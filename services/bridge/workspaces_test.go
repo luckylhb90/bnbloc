@@ -501,3 +501,34 @@ func TestRecordsStateSurvivesARestart(t *testing.T) {
 		t.Fatalf("cleared records restored = %+v", third)
 	}
 }
+
+// A deliverable published during a turn (an ask_agent task's) is copied
+// into the workspace when the turn asks (sessionWorkspace.CopyDeliverables),
+// not only at the next turn's start.
+func TestDeliverablesCopiedMidTurn(t *testing.T) {
+	g := newPullGateway(t)
+	c := newFSCore(t)
+	b := fsBridge(t, g, c, "")
+	var ws SessionWorkspace
+	b.AddSessionContributor(SessionContributorFunc(func(context.Context, SessionInfo) (SessionContribution, error) {
+		return SessionContribution{Turn: func(t TurnInfo) { ws = t.Workspace }}, nil
+	}))
+	fsDrive(t, b, "job-1", nil)
+	if ws == nil {
+		t.Fatal("no turn workspace")
+	}
+	// Another agent publishes an image while this turn runs.
+	g.mu.Lock()
+	g.artifacts = `{"maxBytes":1048576,"artifacts":[{"artifactId":"art_shot","title":"shot","kind":"image","fileName":"1-menu.png","currentVersion":1,"createdBy":"maya","updatedAtMs":1}]}`
+	g.versions["art_shot/1"] = `{"version":{"artifactId":"art_shot","version":1,"storage":"blob","mimeType":"image/png","sizeBytes":4,"authorUserId":"maya"}}`
+	g.contents["art_shot/1"] = "\x89PNG"
+	g.mu.Unlock()
+	copies := ws.CopyDeliverables(context.Background())
+	dir := copies["art_shot"]
+	if dir != ".room/deliverables/art_shot/" {
+		t.Fatalf("copies = %v", copies)
+	}
+	if got, err := os.ReadFile(filepath.Join(c.root, "ws1", dir, "1-menu.png")); err != nil || string(got) != "\x89PNG" {
+		t.Fatalf("the image's copy = %q, %v", got, err)
+	}
+}

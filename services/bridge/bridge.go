@@ -702,10 +702,14 @@ func (b *Bridge) claimOnce(ctx context.Context) bool {
 // renewLeaseLoop keeps this bridge's lease on a running job alive until the
 // drive finishes and the caller cancels ctx.
 //
-// A failed renewal means this worker no longer owns the job: it was cancelled by
-// a member, or taken over after the lease lapsed. Either way the local turn is
-// now unwanted work, so the loop stops driving and reports the loss to its
-// caller, which interrupts the core.
+// A refused renewal means this worker no longer owns the job: it was cancelled
+// by a member, or taken over after the lease lapsed. Either way the local turn
+// is now unwanted work, so the loop stops driving and reports the loss to its
+// caller, which interrupts the core. A renewal that failed in transit (the
+// network, a gateway restarting) loses nothing: the lease is the server's, and
+// it refuses a renewal only once it took the job back, so the loop tries again
+// sooner (found on QA, 2026-10-19: one failed renewal ended a 26-minute turn,
+// and its job ran again from the start).
 func (b *Bridge) renewLeaseLoop(ctx context.Context, jobID string, lost func()) {
 	if strings.TrimSpace(jobID) == "" {
 		return
@@ -714,24 +718,39 @@ func (b *Bridge) renewLeaseLoop(ctx context.Context, jobID string, lost func()) 
 	if b.leaseRenewOverride > 0 {
 		every = b.leaseRenewOverride
 	}
-	ticker := time.NewTicker(every)
-	defer ticker.Stop()
+	next := every
 	for {
+		timer := time.NewTimer(next)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return
-		case <-ticker.C:
-			if _, err := b.gatewayPOST(ctx, "/v1/bridge/jobs/"+url.PathEscape(jobID)+"/lease", map[string]any{"bridgeId": b.bridgeID()}); err != nil {
-				slog.Info("bnbloc bridge job lease lost, interrupting turn",
-					"event", "bnbloc.bridge.job_lease_lost", "job", jobID, "error", err)
-				if lost != nil {
-					lost()
-				}
-				return
+		case <-timer.C:
+		}
+		_, err := b.gatewayPOST(ctx, "/v1/bridge/jobs/"+url.PathEscape(jobID)+"/lease", map[string]any{"bridgeId": b.bridgeID()})
+		switch {
+		case err == nil:
+			next = every
+		case ctx.Err() != nil:
+			return
+		case permanentGatewayError(err):
+			slog.Info("bnbloc bridge job lease lost, interrupting turn",
+				"event", "bnbloc.bridge.job_lease_lost", "job", jobID, "error", err)
+			if lost != nil {
+				lost()
 			}
+			return
+		default:
+			slog.Warn("bnbloc bridge job lease renewal failed, retrying",
+				"event", "bnbloc.bridge.job_lease_retry", "job", jobID, "error", err)
+			next = max(every/leaseRetriesPerRenewal, time.Millisecond)
 		}
 	}
 }
+
+// leaseRetriesPerRenewal: a renewal that failed in transit is tried again
+// this many times as often.
+const leaseRetriesPerRenewal = 10
 
 // interruptTurn stops an in-flight turn on the core that is running it. Cores
 // that cannot be interrupted keep running; the job is no longer ours either way,
@@ -1625,7 +1644,11 @@ func (b *Bridge) noticeContextReset(ctx context.Context, d *drive) {
 // turnInfo is the turn this drive runs in session rs (the session
 // contributors' turn hooks: the room tools bind it).
 func (b *Bridge) turnInfo(d *drive, rs *roomSession) TurnInfo {
-	return TurnInfo{JobID: d.job.JobID, RequesterUserID: d.job.RequesterUserID, ChannelID: d.job.ChannelID, MessageSeq: d.job.MessageSeq, ByRequester: d.job.byRequester(), Workspace: sessionWorkspace{b: b, rs: rs, room: d.job.RoomID, channel: d.job.ChannelID, turn: deliverableTurn{JobID: d.job.JobID, SourceSeq: d.job.MessageSeq}}, Team: d.content.teamRoster()}
+	ws := sessionWorkspace{b: b, rs: rs, room: d.job.RoomID, channel: d.job.ChannelID, turn: deliverableTurn{JobID: d.job.JobID, SourceSeq: d.job.MessageSeq}}
+	if entry, ok := b.coreEntry(d.core); ok && d.caps.bytesWriter != nil {
+		ws.copier = &deliverableCopier{key: d.key(), w: d.caps.bytesWriter, ep: entry.endpoint, maxInput: d.caps.maxInput}
+	}
+	return TurnInfo{JobID: d.job.JobID, RequesterUserID: d.job.RequesterUserID, ChannelID: d.job.ChannelID, MessageSeq: d.job.MessageSeq, ByRequester: d.job.byRequester(), Workspace: ws, Team: d.content.teamRoster()}
 }
 
 type ensureResult struct {

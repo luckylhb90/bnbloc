@@ -75,6 +75,7 @@ type SessionWorkspace interface {
 	ListFiles(ctx context.Context) ([]corepkg.SessionFile, error)
 	ReadFile(ctx context.Context, rel string) ([]byte, error)
 	Deliverable(ctx context.Context, rel string) (string, error)
+	CopyDeliverables(ctx context.Context) map[string]string
 }
 
 // sessionWorkspace is a session's workspace as the core exposes it
@@ -86,6 +87,9 @@ type sessionWorkspace struct {
 	room    string
 	channel string
 	turn    deliverableTurn
+	// copier copies the room's deliverables into the workspace (nil when
+	// the core writes no bytes); its workspace is the session's at the call.
+	copier *deliverableCopier
 }
 
 func (w sessionWorkspace) ids() (core, ws, sess string) {
@@ -116,6 +120,35 @@ func (w sessionWorkspace) ReadFile(ctx context.Context, rel string) ([]byte, err
 		return nil, errors.New("the session has not started yet")
 	}
 	return files.ReadSessionFile(ctx, ep, ws, sess, rel)
+}
+
+// CopyDeliverables makes now the pass a turn makes at its start
+// (copyDeliverables): the room's deliverables into the workspace's
+// .room/deliverables/, so one another agent published during this turn (an
+// ask_agent task's) is a file the agent reads. It answers each copied
+// deliverable's directory by artifact id.
+func (w sessionWorkspace) CopyDeliverables(ctx context.Context) map[string]string {
+	_, ws, _ := w.ids()
+	if w.copier == nil || ws == "" {
+		return nil
+	}
+	list, err := roomlog.ReadDeliverables(ctx, w.b.gatewayGET, w.room, &w.b.producers)
+	if err != nil {
+		return nil
+	}
+	cp := *w.copier
+	cp.workspaceID = ws
+	// One pass at a time per workspace, as at a turn's start.
+	shared := w.b.workspaces.shared(cp.key, ws)
+	shared.pass.Lock()
+	defer shared.pass.Unlock()
+	out := map[string]string{}
+	for id, c := range w.b.copyDeliverables(ctx, w.room, list, &cp) {
+		if c.Dir != "" {
+			out[id] = c.Dir
+		}
+	}
+	return out
 }
 
 // Deliverable is the room deliverable of workspace file rel, published now
