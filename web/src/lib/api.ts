@@ -152,8 +152,8 @@ async function fetchArtifactBlob(path: string): Promise<Blob> {
 
 // A component is addressed by name AND kind: a core and a plugin may share a
 // name, and an unqualified name that matches two kinds is a 409.
-type ComponentRef = { readonly name: string; readonly kind: string };
-function componentPath(base: string, c: ComponentRef, suffix = ""): string {
+export type ComponentRef = { readonly name: string; readonly kind: string };
+export function componentPath(base: string, c: ComponentRef, suffix = ""): string {
   return `${base}/${encodeURIComponent(c.name)}${suffix}?kind=${encodeURIComponent(c.kind)}`;
 }
 

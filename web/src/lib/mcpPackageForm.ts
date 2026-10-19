@@ -5,6 +5,8 @@
 // re-implements the package rules: these helpers only shape the request and
 // catch empty fields before a round trip. Everything here is pure.
 
+import type { ComponentSettingScope, ComponentSettingType } from "./wire.gen.ts";
+
 // The platforms a binary is built for (goos-goarch), as the component
 // wizard offers them.
 export const BINARY_PLATFORMS = ["darwin-arm64", "darwin-amd64", "linux-amd64", "linux-arm64", "windows-amd64"] as const;
@@ -17,11 +19,19 @@ export interface McpFormTool {
   readonly description: string;
 }
 
-export interface McpFormEnv {
-  readonly name: string;
-  readonly description: string;
-  readonly secret: boolean;
+// McpFormSetting is one setting the tool declares (core/pkgmeta
+// settings.go): who sets it and how its value reaches the server. `deliver`
+// is the env var a stdio server reads it from, or the request header an
+// http server gets it in (empty: the settings file only, for stdio; the
+// auth credential's setting takes none).
+export interface McpFormSetting {
+  readonly key: string;
+  readonly label: string;
+  readonly type: ComponentSettingType;
+  readonly scope: ComponentSettingScope;
   readonly required: boolean;
+  readonly help: string;
+  readonly deliver: string;
 }
 
 // McpFormBinary is one platform's staged binary (the key the artifact
@@ -39,24 +49,27 @@ export interface McpForm {
   readonly description: string;
   readonly runtime: McpFormRuntime;
   readonly tools: readonly McpFormTool[];
-  readonly env: readonly McpFormEnv[];
-  readonly credentials: "member" | "org";
+  readonly settings: readonly McpFormSetting[];
   // stdio
+  // roomCredential: the room the agent works in is the tool's credential
+  // (mcp.credentials "room": the bridge gives it the room relay).
+  readonly roomCredential: boolean;
   readonly binaries: readonly McpFormBinary[];
   readonly argsText: string; // one argument per line
   // http
   readonly url: string;
   readonly auth: McpFormAuth;
   readonly authHeader: string;
-  readonly authEnv: string;
+  // The key of the setting carrying the credential (bearer, header).
+  readonly authSetting: string;
   readonly networkText: string; // one host per line
 }
 
 export function emptyMcpForm(): McpForm {
   return {
     name: "", version: "1.0.0", publisher: "", description: "", runtime: "stdio",
-    tools: [{ name: "", description: "" }], env: [], credentials: "member",
-    binaries: [], argsText: "", url: "", auth: "none", authHeader: "", authEnv: "", networkText: "",
+    tools: [{ name: "", description: "" }], settings: [], roomCredential: false,
+    binaries: [], argsText: "", url: "", auth: "none", authHeader: "", authSetting: "", networkText: "",
   };
 }
 
@@ -83,14 +96,15 @@ export function mcpFormProblems(f: McpForm): string[] {
   if (!f.version.trim()) out.push("Give the tool a version.");
   if (!f.publisher.trim()) out.push("Name the publisher.");
   if (!f.tools.some((t) => t.name.trim())) out.push("List at least one tool the server offers.");
-  const envNames = f.env.map((e) => e.name.trim()).filter((n) => n !== "");
+  const keys = f.settings.map((x) => x.key.trim()).filter((k) => k !== "");
+  if (f.settings.some((x) => x.key.trim() && !x.label.trim())) out.push("Give every setting a label.");
   if (f.runtime === "stdio") {
     if (f.binaries.length === 0) out.push("Upload at least one platform binary.");
     const platforms = f.binaries.map((b) => b.platform);
     if (new Set(platforms).size !== platforms.length) out.push("Upload one binary per platform.");
   } else {
     if (!networkHost(f.url)) out.push("Enter the server's http(s) URL.");
-    if (f.auth !== "none" && !envNames.includes(f.authEnv.trim())) out.push("Pick the variable that holds the credential (add it under Environment).");
+    if (f.auth !== "none" && !keys.includes(f.authSetting.trim())) out.push("Pick the setting that holds the credential (add it under Settings).");
     if (f.auth === "header" && !f.authHeader.trim()) out.push("Name the header the credential goes in.");
   }
   return out;
@@ -98,12 +112,22 @@ export function mcpFormProblems(f: McpForm): string[] {
 
 // mcpDraftBody is the request body of POST /v1/platform/mcp-packages.
 export function mcpDraftBody(f: McpForm): Record<string, unknown> {
-  const env = f.env
-    .filter((e) => e.name.trim())
-    .map((e) => ({ name: e.name.trim(), ...(e.description.trim() ? { description: e.description.trim() } : {}), ...(e.secret ? { secret: true } : {}), ...(e.required ? { required: true } : {}) }));
+  const authKey = f.runtime === "endpoint" && f.auth !== "none" ? f.authSetting.trim() : "";
+  const settings = f.settings
+    .filter((x) => x.key.trim())
+    .map((x) => {
+      const deliver = x.deliver.trim();
+      const via = x.key.trim() === authKey || !deliver ? undefined : f.runtime === "stdio" ? { env: deliver } : { header: deliver };
+      return {
+        key: x.key.trim(), label: x.label.trim(), type: x.type, scope: x.scope,
+        ...(x.required ? { required: true } : {}),
+        ...(x.help.trim() ? { help: x.help.trim() } : {}),
+        ...(via ? { deliver: via } : {}),
+      };
+    });
   const mcp: Record<string, unknown> = {
     tools: f.tools.filter((t) => t.name.trim()).map((t) => ({ name: t.name.trim(), ...(t.description.trim() ? { description: t.description.trim() } : {}) })),
-    ...(env.length ? { env, credentials: f.credentials } : {}),
+    ...(f.runtime === "stdio" && f.roomCredential ? { credentials: "room" } : {}),
   };
   const body: Record<string, unknown> = {
     name: f.name.trim(), version: f.version.trim(), publisher: f.publisher.trim(),
@@ -115,13 +139,14 @@ export function mcpDraftBody(f: McpForm): Record<string, unknown> {
     if (args.length) mcp.stdio = { args };
     body.artifacts = Object.fromEntries(f.binaries.map((b) => [b.platform, { key: b.key }]));
   } else {
-    mcp.http = { auth: { scheme: f.auth, ...(f.auth === "header" ? { header: f.authHeader.trim() } : {}), ...(f.auth !== "none" ? { env: f.authEnv.trim() } : {}) } };
+    mcp.http = { auth: { scheme: f.auth, ...(f.auth === "header" ? { header: f.authHeader.trim() } : {}), ...(authKey ? { setting: authKey } : {}) } };
     body.endpoint = { baseUrl: f.url.trim() };
     const network = lines(f.networkText);
     const hosts = network.length ? network : [networkHost(f.url)].filter((h) => h !== "");
     if (hosts.length) body.permissions = { network: hosts };
   }
   body.mcp = mcp;
+  if (settings.length) body.settings = settings;
   return body;
 }
 

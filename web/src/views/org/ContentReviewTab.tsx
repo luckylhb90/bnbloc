@@ -310,7 +310,7 @@ function ReviewDialog({
                 {c.requires.mcp?.map((m) => (
                   <li key={`mcp:${m.name}`}>
                     MCP tool <span className="font-mono">{m.name}</span>
-                    {m.env && m.env.length > 0 ? ` (needs ${m.env.join(", ")})` : ""}
+                    {m.settings && m.settings.length > 0 ? ` (needs ${m.settings.join(", ")})` : ""}
                   </li>
                 ))}
                 {c.requires.skills?.map((s) => (

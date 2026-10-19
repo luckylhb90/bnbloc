@@ -114,21 +114,30 @@ export function PreviewerFacts({ component }: { readonly component: PlatformComp
   );
 }
 
-// MCPFacts: what an MCP tool offers and needs: its tools, transport, the
-// variables it takes and where their values come from.
+// MCPFacts: what an MCP tool offers: its tools, its transport and whether
+// the room is its credential (its settings are SettingsFacts).
 export function MCPFacts({ component }: { readonly component: PlatformComponent }) {
   const m = component.mcp;
   if (!m) return null;
   const transport = component.runtime === "endpoint" ? `http · ${component.endpoint?.baseUrl ?? ""}` : "stdio · spawned by the agent per session";
-  const credentials = m.credentials === "org" ? "org admins configure one connector per organization" : m.credentials === "member" ? "each member sets them on their desktop" : "none";
   return (
     <div className="mt-4 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">
       <div className="text-xs font-medium uppercase tracking-wide text-[var(--color-fg-subtle)]">MCP tool</div>
-      <p className="mt-1 break-all text-xs text-[var(--color-fg-muted)]">{transport}</p>
+      <p className="mt-1 break-all text-xs text-[var(--color-fg-muted)]">
+        {transport}
+        {m.credentials === "room" ? " · the room is its credential (room relay)" : ""}
+      </p>
       <ChipGroup label="Tools" values={m.tools.map((t) => t.name)} empty="None declared." compact />
-      <ChipGroup label={`Variables (${credentials})`} values={(m.env ?? []).map((e) => `${e.name}${e.secret ? " (secret)" : ""}${e.required ? " *" : ""}`)} empty="None." compact />
     </div>
   );
+}
+
+// SettingsFacts: the settings a component declares, each with its type and
+// who sets it (* required).
+export function SettingsFacts({ component }: { readonly component: PlatformComponent }) {
+  const settings = component.settings ?? [];
+  if (settings.length === 0) return null;
+  return <ChipGroup label="Settings" values={settings.map((s) => `${s.label} (${s.type}, ${s.scope})${s.required ? " *" : ""}`)} compact />;
 }
 
 export function memberMeta(component: MemberComponent): string {

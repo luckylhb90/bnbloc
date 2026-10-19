@@ -7,12 +7,12 @@
 import type {
   ComponentArtifact,
   ComponentEndpoint,
-  ComponentLocalSetting,
   ComponentMCP,
   ComponentPermissions,
   ComponentPreviewer,
   ComponentProtocolRange,
   ComponentRuntime,
+  ComponentSetting,
   ComponentSidecar,
 } from "./wire.gen.ts";
 import type { ComponentPackageKind } from "./componentKinds.ts";
@@ -23,15 +23,14 @@ export type {
   ComponentInstallRequest,
   ComponentKey,
   ComponentKeysReply,
-  ComponentLocalSetting,
   ComponentMCP,
-  ComponentMCPEnv,
   ComponentPermissions,
   ComponentPreviewer,
   ComponentProtocolRange,
   ComponentRollout,
   ComponentRolloutRequest,
   ComponentRuntime,
+  ComponentSetting,
   ComponentSidecar,
   ComponentSidecarFile,
   ComponentsReply,
@@ -61,7 +60,7 @@ export interface ComponentPackageEnvelope {
   readonly permissions?: ComponentPermissions;
   readonly contract?: string;
   readonly hooks?: readonly string[];
-  readonly localSettings?: readonly ComponentLocalSetting[];
+  readonly settings?: readonly ComponentSetting[];
   readonly previewer?: ComponentPreviewer;
   readonly mcp?: ComponentMCP;
 }

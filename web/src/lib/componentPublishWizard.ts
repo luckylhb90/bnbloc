@@ -1,4 +1,4 @@
-import type { ComponentMCP, ComponentPackageEnvelope, ComponentRuntime, ComponentLocalSetting } from "./apiTypes";
+import type { ComponentMCP, ComponentPackageEnvelope, ComponentRuntime, ComponentSetting } from "./apiTypes";
 import type { ComponentPackageKind } from "./componentKinds";
 import { COMPONENT_KINDS, componentKindOfPackage } from "./componentKinds.ts";
 
@@ -25,7 +25,7 @@ export interface PackageDraftFields {
   readonly contract?: string;
   readonly hooks?: readonly string[];
   readonly host?: readonly string[];
-  readonly localSettings?: readonly ComponentLocalSetting[];
+  readonly settings?: readonly ComponentSetting[];
   // An MCP tool's block, carried unchanged from the imported package.
   readonly mcp?: ComponentMCP;
 }
@@ -72,7 +72,7 @@ export function packageDraftFromEnvelope(envelope: ComponentPackageEnvelope): Pa
     endpointUrl: envelope.endpoint?.baseUrl ?? "", manifestText: envelope.manifest === undefined ? undefined : JSON.stringify(envelope.manifest, null, 2),
     localUrl: envelope.sidecar?.localUrl ?? "", listenEnv: envelope.sidecar?.listenEnv ?? "", supervisedEnv: envelope.sidecar?.supervisedEnv ?? "", args: envelope.sidecar?.args,
     platformArtifacts: Object.keys(envelope.artifacts ?? {}), network: envelope.permissions?.network, capabilities: envelope.capabilities,
-    contract: envelope.contract, hooks: envelope.hooks, host: envelope.permissions?.host, localSettings: envelope.localSettings,
+    contract: envelope.contract, hooks: envelope.hooks, host: envelope.permissions?.host, settings: envelope.settings,
     ...(envelope.mcp ? { mcp: envelope.mcp } : {}),
   };
 }

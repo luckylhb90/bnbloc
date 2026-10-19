@@ -3,12 +3,12 @@ import type { ContentComponent } from "./contentComponents.ts";
 import {
   addMcpTool,
   clearPromptRef,
-  envChoices,
   mcpPermission,
   packPromptOptions,
   pickPromptRef,
   removeMcpTool,
-  toggleEnv,
+  settingChoices,
+  toggleSetting,
   urlHost,
   withMcp,
 } from "./contentFormRefs.ts";
@@ -62,7 +62,7 @@ function pack(name: string, version: string, mine: boolean, prompts: { id: strin
   eq(clearPromptRef(picked.quickPrompts, 0)[0], { title: "Ship", prompt: "" }, "clearing drops the ref");
 }
 
-function tool(name: string, http: string | null, env: { name: string; required?: boolean }[] = []): MemberComponent {
+function tool(name: string, http: string | null, settings: { key: string; required?: boolean }[] = []): MemberComponent {
   return {
     kind: "mcp",
     name,
@@ -72,7 +72,8 @@ function tool(name: string, http: string | null, env: { name: string; required?:
     managed: true,
     runtime: http ? "endpoint" : "stdio",
     ...(http ? { endpoint: { baseUrl: http } } : {}),
-    mcp: { tools: [], env, transport: http ? "http" : "stdio" },
+    mcp: { tools: [], transport: http ? "http" : "stdio" },
+    settings: settings.map((x) => ({ ...x, label: x.key, type: "text", scope: "org" })),
   } as unknown as MemberComponent;
 }
 
@@ -80,7 +81,7 @@ function tool(name: string, http: string | null, env: { name: string; required?:
 {
   eq(urlHost("https://User@Tools.Example.com:8443/mcp?x=1"), "tools.example.com:8443", "host with port, no userinfo");
   eq(urlHost("http://tools.example.com"), "tools.example.com", "host without path");
-  const code = tool("codeword", null, [{ name: "SALT", required: true }, { name: "REGION" }, { name: "DEBUG" }]);
+  const code = tool("codeword", null, [{ key: "salt", required: true }, { key: "region" }, { key: "debug" }]);
   const search = tool("search", "https://Search.example.com/mcp");
   const tools = [code, search];
   eq(mcpPermission(code), "mcp.stdio", "stdio permission");
@@ -101,22 +102,22 @@ function tool(name: string, http: string | null, env: { name: string; required?:
   eq(stale.permissions, ["mcp.http:old.example.com", "mcp.stdio"], "an unknown tool keeps declared MCP permissions");
 }
 
-// Env: required always needed, optional ticked, unknown names dropped.
+// Settings: required always needed, optional ticked, unknown keys dropped.
 {
-  const code = tool("codeword", null, [{ name: "SALT", required: true }, { name: "REGION" }, { name: "DEBUG" }]);
-  let req = { mcp: [{ name: "codeword", env: ["DEBUG", "OLD"] }] };
+  const code = tool("codeword", null, [{ key: "salt", required: true }, { key: "region" }, { key: "debug" }]);
+  let req = { mcp: [{ name: "codeword", settings: ["debug", "old"] }] };
   eq(
-    envChoices(code, req.mcp[0]!).map((c) => [c.env.name, c.checked, c.locked]),
+    settingChoices(code, req.mcp[0]!).map((c) => [c.setting.key, c.checked, c.locked]),
     [
-      ["SALT", true, true],
-      ["REGION", false, false],
-      ["DEBUG", true, false],
+      ["salt", true, true],
+      ["region", false, false],
+      ["debug", true, false],
     ],
     "required locked on, listed optional on",
   );
-  req = toggleEnv(req, code, "REGION", true) as typeof req;
-  eq(req.mcp[0], { name: "codeword", env: ["REGION", "DEBUG"] }, "declared order, unknown dropped");
-  eq(toggleEnv(req, code, "SALT", false), req, "a required variable cannot be unticked");
-  req = toggleEnv(toggleEnv(req, code, "REGION", false), code, "DEBUG", false) as typeof req;
-  eq(req.mcp[0], { name: "codeword" }, "no optional variables: no env list");
+  req = toggleSetting(req, code, "region", true) as typeof req;
+  eq(req.mcp[0], { name: "codeword", settings: ["region", "debug"] }, "declared order, unknown dropped");
+  eq(toggleSetting(req, code, "salt", false), req, "a required setting cannot be unticked");
+  req = toggleSetting(toggleSetting(req, code, "region", false), code, "debug", false) as typeof req;
+  eq(req.mcp[0], { name: "codeword" }, "no optional settings: no list");
 }

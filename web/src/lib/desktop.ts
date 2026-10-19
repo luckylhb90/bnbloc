@@ -8,9 +8,8 @@
 
 import { inDesktopShell } from "./config";
 import { api, type AgentTarget, type UpdatePolicy } from "./api";
-import type { McpToolSettings } from "./mcpTools";
+import type { ComponentSettingsUpdate, DesktopComponentSettings } from "./componentSettings";
 import { unframePackedSkill, type SkillsProvider, type SkillsSettings, type SkillsState } from "./localSkills";
-import type { PluginLocalSettings } from "./pluginSettings";
 import type { SandboxMode, SandboxStatus, ShellEnvReload } from "./sandboxStatus";
 import { SESSION_KEY, parseSessionRecord, type SessionRecord } from "./sessionGrant";
 import { StorageKey, readStored, writeStored } from "./storageKeys.ts";
@@ -276,30 +275,26 @@ export const desktop = {
     return true;
   },
 
-  // Installed plugins with desktop-local settings (e.g. a personal bot).
-  // Secret values never come back; nothing here reaches the gateway.
-  async pluginLocalSettings(): Promise<PluginLocalSettings[]> {
+  // The installed components with settings on this computer (Settings →
+  // Components): every MCP tool and every plugin that declares settings,
+  // with the member's own values (a secret's never), the platform's and the
+  // organization's as set or not, and what keeps each in needs setup.
+  // Nothing here reaches the gateway. Null outside the shell.
+  async componentSettings(): Promise<DesktopComponentSettings[] | null> {
     const t = tauri();
-    if (!t) return [];
-    return (await t.invoke("plugin_local_settings").catch((e: unknown) => {
+    if (!t) return null;
+    return (await t.invoke("component_settings").catch((e: unknown) => {
       throw new Error(e instanceof Error ? e.message : String(e));
-    })) as PluginLocalSettings[];
+    })) as DesktopComponentSettings[];
   },
 
-  // Store a plugin's settings on this machine (an empty secret keeps the
-  // stored one); the shell restarts the plugin with them.
-  async savePluginLocalSettings(plugin: string, values: Record<string, string>): Promise<void> {
+  // Store the member's own values of a component on this computer (an
+  // empty secret keeps the stored one); a plugin restarts with them, an MCP
+  // tool's next session reads them.
+  async saveComponentSettings(kind: string, name: string, update: ComponentSettingsUpdate): Promise<void> {
     const t = tauri();
     if (!t) return;
-    await t.invoke("plugin_local_settings_save", { plugin, values }).catch((e: unknown) => {
-      throw new Error(e instanceof Error ? e.message : String(e));
-    });
-  },
-
-  async clearPluginLocalSettings(plugin: string): Promise<void> {
-    const t = tauri();
-    if (!t) return;
-    await t.invoke("plugin_local_settings_clear", { plugin }).catch((e: unknown) => {
+    await t.invoke("component_settings_save", { kind, name, values: update.values, clear: update.clear ?? [] }).catch((e: unknown) => {
       throw new Error(e instanceof Error ? e.message : String(e));
     });
   },
@@ -330,36 +325,6 @@ export const desktop = {
   // The folder picker for a skills source; null when cancelled.
   async pickSkillsFolder(): Promise<string | null> {
     return (await skillsInvoke("skills_pick_folder", {})) as string | null;
-  },
-
-  // Installed MCP tools with this computer's state (Settings → Tools): the
-  // stdio binary's download state and the member's own credentials. Secret
-  // values never come back; nothing here reaches the gateway. Null outside
-  // the shell.
-  async mcpToolSettings(): Promise<McpToolSettings[] | null> {
-    const t = tauri();
-    if (!t) return null;
-    return (await t.invoke("mcp_tool_settings").catch((e: unknown) => {
-      throw new Error(e instanceof Error ? e.message : String(e));
-    })) as McpToolSettings[];
-  },
-
-  // Store the member's credentials for an MCP tool on this computer (an
-  // empty secret keeps the stored one); the bridge reads them per session.
-  async saveMcpToolSettings(tool: string, values: Record<string, string>): Promise<void> {
-    const t = tauri();
-    if (!t) return;
-    await t.invoke("mcp_tool_settings_save", { tool, values }).catch((e: unknown) => {
-      throw new Error(e instanceof Error ? e.message : String(e));
-    });
-  },
-
-  async clearMcpToolSettings(tool: string): Promise<void> {
-    const t = tauri();
-    if (!t) return;
-    await t.invoke("mcp_tool_settings_clear", { tool }).catch((e: unknown) => {
-      throw new Error(e instanceof Error ? e.message : String(e));
-    });
   },
 
   // Sign in to an MCP tool that takes an OAuth sign-in: its sign-in page

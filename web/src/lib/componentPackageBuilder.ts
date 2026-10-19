@@ -1,4 +1,4 @@
-import type { ComponentMCP, ComponentPackageEnvelope, ComponentRuntime, ComponentLocalSetting } from "./apiTypes";
+import type { ComponentMCP, ComponentPackageEnvelope, ComponentRuntime, ComponentSetting } from "./apiTypes";
 import type { ComponentPackageKind } from "./componentKinds";
 import type { ArtifactRequirement } from "./componentArtifactRequirements";
 
@@ -22,10 +22,12 @@ export type ComponentPackageDraft = {
   readonly contract?: string;
   readonly hooks?: readonly string[];
   // Plugin-only, carried unchanged from an imported package: the desktop
-  // host API capabilities and the desktop-local settings schema.
+  // host API capabilities.
   readonly host?: readonly string[];
-  readonly localSettings?: readonly ComponentLocalSetting[];
-  // MCP-only, carried unchanged from an imported package: its tools, env,
+  // Plugins and MCP tools, carried unchanged from an imported package: the
+  // settings declaration (core/pkgmeta validates it at install).
+  readonly settings?: readonly ComponentSetting[];
+  // MCP-only, carried unchanged from an imported package: its tools,
   // credentials source and stdio args or http auth.
   readonly mcp?: ComponentMCP;
 };
@@ -120,7 +122,7 @@ export function buildComponentPackage(draft: ComponentPackageDraft): ComponentPa
         : {}),
       ...(draft.contract ? { contract: draft.contract } : {}),
       ...(draft.hooks?.length ? { hooks: draft.hooks } : {}),
-      ...(isPluginDraft(draft) && draft.localSettings?.length ? { localSettings: draft.localSettings } : {}),
+      ...((isPluginDraft(draft) || draft.kind === "bnbloc.mcp.package/v1") && draft.settings?.length ? { settings: draft.settings } : {}),
       ...(draft.kind === "bnbloc.mcp.package/v1" && draft.mcp ? { mcp: draft.mcp } : {}),
     },
     artifactRequirements,

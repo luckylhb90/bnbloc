@@ -34,12 +34,14 @@ const notifierJSON = JSON.stringify({
 });
 const notifier = parseComponentPackage(notifierJSON);
 assert(notifier.ok, "notifier endpoint package imports");
-const notifierWithSettings = parseComponentPackage(JSON.stringify({ ...JSON.parse(notifierJSON), localSettings: [{ key: "a", label: "A" }] }));
-assert(!notifierWithSettings.ok, "localSettings is refused on notifier packages (personal delivery is a desktop plugin)");
+const notifierWithSettings = parseComponentPackage(JSON.stringify({ ...JSON.parse(notifierJSON), settings: [{ key: "a", label: "A", type: "text", scope: "org" }] }));
+assert(!notifierWithSettings.ok, "settings are refused on notifier packages (slice 1: plugins and MCP tools)");
 const wrongNotifier = parseComponentPackage(notifierJSON.replace("bnbloc.notifier.contract/v1", "bnbloc.notifier.contract/v9"));
 assert(!wrongNotifier.ok, "an unknown notifier contract is refused");
-const settingsOnCore = parseComponentPackage(JSON.stringify({ ...JSON.parse(packageJSON), localSettings: [{ key: "a", label: "A" }] }));
-assert(!settingsOnCore.ok, "localSettings is refused on non-plugin packages");
+const settingsOnCore = parseComponentPackage(JSON.stringify({ ...JSON.parse(packageJSON), settings: [{ key: "a", label: "A", type: "text", scope: "member" }] }));
+assert(!settingsOnCore.ok, "settings are refused on core packages");
+const malformedSettings = parseComponentPackage(JSON.stringify({ ...JSON.parse(packageJSON), kind: "bnbloc.plugin.package/v1", settings: [{ key: "a" }] }));
+assert(!malformedSettings.ok, "a setting without label, type and scope is refused");
 const hostOnCore = parseComponentPackage(JSON.stringify({ ...JSON.parse(packageJSON), permissions: { host: ["chat"] } }));
 assert(!hostOnCore.ok, "permissions.host is refused on non-plugin packages");
 const personalBot = parseComponentPackage(JSON.stringify({
@@ -48,11 +50,14 @@ const personalBot = parseComponentPackage(JSON.stringify({
   artifacts: { "darwin-arm64": { url: "https://gw.example/v1/artifacts/sha256/" + "a".repeat(64), sha256: "a".repeat(64) } },
   sidecar: { localUrl: "http://127.0.0.1:7193" },
   permissions: { network: ["127.0.0.1"], host: ["chat"] },
-  localSettings: [{ key: "appId", label: "App ID", required: true }, { key: "appKey", label: "App key", secret: true, required: true }],
+  settings: [
+    { key: "appId", label: "App ID", type: "text", scope: "member", required: true },
+    { key: "appKey", label: "App key", type: "secret", scope: "member", required: true },
+  ],
 }));
 assert(personalBot.ok, personalBot.ok ? "" : personalBot.error);
 if (personalBot.ok) {
-  assert(personalBot.value.localSettings?.length === 2 && personalBot.value.localSettings[1]?.secret === true, "local settings schema survives package import");
+  assert(personalBot.value.settings?.length === 2 && personalBot.value.settings[1]?.type === "secret", "the settings declaration survives package import");
   assert(personalBot.value.permissions?.host?.[0] === "chat", "host permissions survive package import");
 }
 

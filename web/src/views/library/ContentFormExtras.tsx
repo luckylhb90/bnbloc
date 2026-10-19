@@ -2,7 +2,7 @@ import { useState } from "react";
 import { PlusIcon, TrashIcon, UsersThreeIcon } from "@phosphor-icons/react";
 import type { MemberComponent } from "@/lib/apiTypes";
 import { splitList, type ContentForm, type ContentFormRole, type ContentFormTeam, type ContentKind, type ContentQuickPrompt } from "@/lib/contentComponents";
-import { addMcpTool, clearPromptRef, envChoices, mcpPermission, pickPromptRef, removeMcpTool, toggleEnv, type PackPromptOption } from "@/lib/contentFormRefs";
+import { addMcpTool, clearPromptRef, mcpPermission, pickPromptRef, removeMcpTool, settingChoices, toggleSetting, type PackPromptOption } from "@/lib/contentFormRefs";
 import { defaultAgentLabel, formatDefaultAgent, parseDefaultAgent, type ContentTeam, type DefaultAgentKind } from "@/lib/teams";
 import { cn } from "@/lib/cn";
 import { Button } from "@/ui/Button";
@@ -152,13 +152,12 @@ function McpToolsEditor({
               </button>
             </div>
             {tool ? (
-              envChoices(tool, m).map((c) => (
-                <label key={c.env.name} className="flex items-center gap-2 text-sm" title={c.env.description}>
-                  <input type="checkbox" checked={c.checked} disabled={c.locked} onChange={(e) => patch({ requires: toggleEnv(req, tool, c.env.name, e.target.checked) })} />
-                  <span className="font-mono text-xs">{c.env.name}</span>
+              settingChoices(tool, m).map((c) => (
+                <label key={c.setting.key} className="flex items-center gap-2 text-sm" title={c.setting.help}>
+                  <input type="checkbox" checked={c.checked} disabled={c.locked} onChange={(e) => patch({ requires: toggleSetting(req, tool, c.setting.key, e.target.checked) })} />
+                  <span className="text-xs">{c.setting.label}</span>
                   <span className="text-xs text-[var(--color-fg-subtle)]">
-                    {c.locked ? "always needed" : "needed by this"}
-                    {c.env.secret ? " · secret" : ""}
+                    {c.locked ? "always needed" : "needed by this"} · set by {c.setting.scope === "member" ? "each member" : c.setting.scope === "org" ? "the organization" : "the platform"}
                   </span>
                 </label>
               ))

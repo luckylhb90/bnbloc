@@ -2,10 +2,11 @@
 // teams.md, "Gap closure" 8): an expert quick prompt that points at a pack
 // prompt, and the MCP tool components an expert or skill pack requires.
 // Pure helpers; the gateway's save check stays the authority (it refuses a
-// reference to a tool the author may not use, an undeclared variable, or a
+// reference to a tool the author may not use, an undeclared setting, or a
 // missing permission).
 
-import type { ComponentMCPEnv, MemberComponent } from "./apiTypes.ts";
+import type { MemberComponent } from "./apiTypes.ts";
+import type { ComponentSetting } from "./componentSettings.ts";
 import type { ContentComponent, ContentMCPRequirement, ContentQuickPrompt, ContentRequires } from "./contentComponents.ts";
 
 // ---- quick prompt refs
@@ -130,34 +131,35 @@ export function removeMcpTool(requires: ContentRequires, name: string, tools: re
   );
 }
 
-// envChoices are a tool's variables for the form: a required one is always
-// needed (shown ticked, not editable), an optional one is needed when the
-// content lists it.
-export interface EnvChoice {
-  readonly env: ComponentMCPEnv;
+// settingChoices are a tool's settings for the form: a required one is
+// always needed (shown ticked, not editable), an optional one is needed
+// when the content lists it.
+export interface SettingChoice {
+  readonly setting: ComponentSetting;
   readonly checked: boolean;
   readonly locked: boolean;
 }
 
-export function envChoices(tool: MemberComponent, req: ContentMCPRequirement): EnvChoice[] {
-  const listed = new Set(req.env ?? []);
-  return (tool.mcp?.env ?? []).map((e) => ({ env: e, checked: !!e.required || listed.has(e.name), locked: !!e.required }));
+export function settingChoices(tool: MemberComponent, req: ContentMCPRequirement): SettingChoice[] {
+  const listed = new Set(req.settings ?? []);
+  return (tool.settings ?? []).map((s) => ({ setting: s, checked: !!s.required || listed.has(s.key), locked: !!s.required }));
 }
 
-// toggleEnv ticks or unticks an optional variable of a required tool. The
-// saved list holds the optional variables the content needs (required ones
-// are always needed, so they are not repeated); names the tool no longer
-// declares are dropped.
-export function toggleEnv(requires: ContentRequires, tool: MemberComponent, name: string, on: boolean): ContentRequires {
-  const optional = new Set((tool.mcp?.env ?? []).filter((e) => !e.required).map((e) => e.name));
-  if (!optional.has(name)) return requires;
+// toggleSetting ticks or unticks an optional setting of a required tool.
+// The saved list holds the optional settings the content needs (required
+// ones are always needed, so they are not repeated); keys the tool no
+// longer declares are dropped.
+export function toggleSetting(requires: ContentRequires, tool: MemberComponent, key: string, on: boolean): ContentRequires {
+  const declared = tool.settings ?? [];
+  const optional = new Set(declared.filter((s) => !s.required).map((s) => s.key));
+  if (!optional.has(key)) return requires;
   const mcp = (requires.mcp ?? []).map((m) => {
     if (m.name !== tool.name) return m;
-    const env = new Set((m.env ?? []).filter((e) => optional.has(e)));
-    if (on) env.add(name);
-    else env.delete(name);
-    const list = [...(tool.mcp?.env ?? [])].map((e) => e.name).filter((e) => env.has(e));
-    return list.length > 0 ? { name: m.name, env: list } : { name: m.name };
+    const keys = new Set((m.settings ?? []).filter((k) => optional.has(k)));
+    if (on) keys.add(key);
+    else keys.delete(key);
+    const list = declared.map((s) => s.key).filter((k) => keys.has(k));
+    return list.length > 0 ? { name: m.name, settings: list } : { name: m.name };
   });
   return { ...requires, mcp };
 }

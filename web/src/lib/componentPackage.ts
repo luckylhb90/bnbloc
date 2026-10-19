@@ -36,9 +36,9 @@ function parsePackageRecord(record: Readonly<Record<string, unknown>>): ParseRes
   const permissions = readPermissions(record["permissions"]);
   if (!permissions.ok) return permissions;
   const endpoint = readEndpoint(record["endpoint"]);
-  const localSettings = readLocalSettings(record["localSettings"]);
-  if (!localSettings.ok) return localSettings;
-  if (localSettings.value && kind !== "bnbloc.plugin.package/v1") return { ok: false, error: "localSettings is only valid for plugin packages" };
+  const settings = readSettings(record["settings"]);
+  if (!settings.ok) return settings;
+  if (settings.value && kind !== "bnbloc.plugin.package/v1" && kind !== "bnbloc.mcp.package/v1") return { ok: false, error: `${kind} packages must not declare settings` };
   if (permissions.value?.host && kind !== "bnbloc.plugin.package/v1") return { ok: false, error: "permissions.host is only valid for plugin packages" };
   const previewer = readPreviewer(record["previewer"]);
   if (!previewer.ok) return previewer;
@@ -67,7 +67,7 @@ function parsePackageRecord(record: Readonly<Record<string, unknown>>): ParseRes
       ...(permissions.value ? { permissions: permissions.value } : {}),
       ...(typeof record["contract"] === "string" ? { contract: record["contract"] } : {}),
       ...(hooks.value ? { hooks: hooks.value } : {}),
-      ...(localSettings.value ? { localSettings: localSettings.value } : {}),
+      ...(settings.value ? { settings: settings.value } : {}),
       ...(previewer.value ? { previewer: previewer.value } : {}),
       ...(mcp.value ? { mcp: mcp.value } : {}),
     },
@@ -192,25 +192,22 @@ function readPermissions(value: unknown): { readonly ok: true; readonly value?: 
   return { ok: true, value: { ...(network.value ? { network: [...network.value] } : {}), ...(host.value ? { host: [...host.value] } : {}) } };
 }
 
-function readLocalSettings(value: unknown): { readonly ok: true; readonly value?: ComponentPackageEnvelope["localSettings"] } | { readonly ok: false; readonly error: string } {
+// readSettings keeps a settings declaration as published (the gateway
+// validates every rule: core/pkgmeta settings.go); it only refuses what
+// cannot be one.
+function readSettings(value: unknown): { readonly ok: true; readonly value?: ComponentPackageEnvelope["settings"] } | { readonly ok: false; readonly error: string } {
   if (value === undefined) return { ok: true };
-  if (!Array.isArray(value)) return { ok: false, error: "localSettings must be a list" };
-  const fields: NonNullable<ComponentPackageEnvelope["localSettings"]>[number][] = [];
+  if (!Array.isArray(value)) return { ok: false, error: "settings must be a list" };
   for (const item of value) {
-    if (!isRecord(item) || typeof item["key"] !== "string" || typeof item["label"] !== "string") return { ok: false, error: "localSettings entries require key and label" };
-    fields.push({
-      key: item["key"],
-      label: item["label"],
-      ...(typeof item["help"] === "string" ? { help: item["help"] } : {}),
-      ...(item["secret"] === true ? { secret: true } : {}),
-      ...(item["required"] === true ? { required: true } : {}),
-    });
+    if (!isRecord(item) || !["key", "label", "type", "scope"].every((k) => typeof item[k] === "string")) {
+      return { ok: false, error: "settings entries require key, label, type and scope" };
+    }
   }
-  return { ok: true, value: fields };
+  return { ok: true, value: value as unknown as ComponentPackageEnvelope["settings"] };
 }
 
 // readMCP keeps an MCP block as published (the gateway validates its tools,
-// env, credentials and auth); it only needs to be an object with tools.
+// credentials and auth); it only needs to be an object with tools.
 function readMCP(value: unknown): { readonly ok: true; readonly value?: ComponentMCP } | { readonly ok: false; readonly error: string } {
   if (value === undefined) return { ok: true };
   if (!isRecord(value) || !Array.isArray(value["tools"])) return { ok: false, error: "mcp requires a tools list" };

@@ -58,7 +58,7 @@ export function ComponentPackageBuilderForm({ initialDraft, initialEnvelope, onB
       ...(contract.trim() ? { contract: contract.trim() } : {}),
       ...(hooksText.trim() ? { hooks: splitLines(hooksText) } : {}),
       ...(initialDraft.host ? { host: initialDraft.host } : {}),
-      ...(initialDraft.localSettings ? { localSettings: initialDraft.localSettings } : {}),
+      ...(initialDraft.settings ? { settings: initialDraft.settings } : {}),
       ...(initialDraft.runtime === "stdio" ? { platformArtifacts: platforms } : {}),
       ...(initialDraft.mcp ? { mcp: initialDraft.mcp } : {}),
     });

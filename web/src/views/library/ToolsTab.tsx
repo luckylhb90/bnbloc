@@ -4,7 +4,8 @@ import type { MemberComponent } from "@/lib/api";
 import { contentLabel, type ContentComponent } from "@/lib/contentComponents";
 import { contentApi } from "@/lib/contentComponentsApi";
 import { desktop } from "@/lib/desktop";
-import { credentialStatus, envSummary, toolUsers, type McpToolSettings } from "@/lib/mcpTools";
+import { settingsSummary, type DesktopComponentSettings } from "@/lib/componentSettings";
+import { credentialStatus, toolUsers } from "@/lib/mcpTools";
 import { mcpToolsApi } from "@/lib/mcpToolsApi";
 import { Button } from "@/ui/Button";
 import { Badge, Card, Skeleton } from "@/ui/Card";
@@ -19,16 +20,17 @@ import { LoadFailed } from "@/ui/QueryState";
 // that is on for the member reaches every conversation they start, with
 // any agent; experts and skill packs can also require one
 // (docs/prd/2026-10-17-browser-component.md §3.6). Each card shows the
-// tools it offers, whether its credentials are in place for the member
-// (their own on this desktop, or the organization's connector) and which
-// experts and skill packs use it. Credentials are entered in Settings → Tools (own) or by an
-// org admin (Organization → Tool connectors).
+// tools it offers, whether it is set up for the member (its settings: their
+// own on this desktop, the organization's and the platform's) and which
+// experts and skill packs use it. A member sets their own in Settings →
+// Components; an org admin the organization's in Organization → Component
+// settings.
 export function ToolsTab({ tabs }: { readonly tabs: React.ReactNode }) {
   const toast = useToast();
   const [tools, setTools] = useState<MemberComponent[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [content, setContent] = useState<ContentComponent[]>([]);
-  const [local, setLocal] = useState<Map<string, McpToolSettings> | null>(null);
+  const [local, setLocal] = useState<Map<string, DesktopComponentSettings> | null>(null);
   const [q, setQ] = useState("");
   const [epoch, setEpoch] = useState(0);
   const reload = useCallback(() => setEpoch((n) => n + 1), []);
@@ -37,12 +39,12 @@ export function ToolsTab({ tabs }: { readonly tabs: React.ReactNode }) {
     let live = true;
     setTools(null);
     setLoadError(null);
-    Promise.all([mcpToolsApi.list(), contentApi.list("expert"), contentApi.list("skill"), desktop.mcpToolSettings().catch(() => null)])
+    Promise.all([mcpToolsApi.list(), contentApi.list("expert"), contentApi.list("skill"), desktop.componentSettings().catch(() => null)])
       .then(([list, experts, skills, settings]) => {
         if (!live) return;
         setTools(list);
         setContent([...(experts.components ?? []), ...(skills.components ?? [])]);
-        setLocal(settings ? new Map(settings.map((s) => [s.tool, s])) : null);
+        setLocal(settings ? new Map(settings.filter((s) => s.kind === "mcp").map((s) => [s.name, s])) : null);
       })
       .catch((e) => live && setLoadError(errorText(e, "Could not load the tools")));
     return () => {
@@ -97,7 +99,7 @@ export function ToolsTab({ tabs }: { readonly tabs: React.ReactNode }) {
             {shown.map((t) => {
               const cred = credentialStatus(t, local?.get(t.name));
               const users = toolUsers(t.name, content);
-              const vars = envSummary(t.mcp?.env);
+              const vars = settingsSummary(t.settings);
               const download = local?.get(t.name);
               return (
                 <Card key={t.name} className="flex min-w-0 flex-col gap-2 p-4">
@@ -110,7 +112,7 @@ export function ToolsTab({ tabs }: { readonly tabs: React.ReactNode }) {
                       </p>
                     </div>
                     <Badge tone={cred.state === "ready" ? "accent" : cred.state === "missing" ? "warning" : "neutral"}>
-                      {cred.state === "ready" ? "Ready" : cred.state === "missing" ? "Missing credentials" : "Own credentials"}
+                      {cred.state === "ready" ? "Ready" : cred.state === "missing" ? "Needs setup" : "Own settings"}
                     </Badge>
                   </div>
                   {t.description && <p className="line-clamp-2 text-sm text-[var(--color-fg-muted)]">{t.description}</p>}
@@ -125,7 +127,7 @@ export function ToolsTab({ tabs }: { readonly tabs: React.ReactNode }) {
                     </div>
                   )}
                   <p className="text-xs text-[var(--color-fg-muted)]">{cred.text}</p>
-                  {vars && <p className="truncate text-xs text-[var(--color-fg-subtle)]" title={vars}>Variables: {vars}</p>}
+                  {vars && <p className="truncate text-xs text-[var(--color-fg-subtle)]" title={vars}>Settings: {vars}</p>}
                   {download && t.mcp?.transport !== "http" && (
                     <p className="text-xs text-[var(--color-fg-subtle)]">{download.state === "ready" ? "Downloaded on this computer" : download.message || "Downloading on this computer…"}</p>
                   )}

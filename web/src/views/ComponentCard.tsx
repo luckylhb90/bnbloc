@@ -6,7 +6,9 @@ import { Button } from "@/ui/Button";
 import { Badge, Card } from "@/ui/Card";
 import { ConfirmDialog } from "@/ui/Dialog";
 import { Segment } from "@/ui/Segment";
-import { AdoptionBar, ArtifactFacts, ChipGroup, FactBlock, KindIcon, MCPFacts, PreviewerFacts, RolloutBadge, TrustBlock, memberMeta } from "@/views/componentFacts";
+import { AdoptionBar, ArtifactFacts, ChipGroup, FactBlock, KindIcon, MCPFacts, PreviewerFacts, RolloutBadge, SettingsFacts, TrustBlock, memberMeta } from "@/views/componentFacts";
+import { PlatformComponentSettings } from "@/views/PlatformComponentSettings";
+import { ofScope } from "@/lib/componentSettings";
 import { componentKindLabel } from "@/lib/componentKinds";
 import { exactTime } from "@/lib/format";
 
@@ -73,6 +75,7 @@ function AdminComponentCard({
   readonly onSendTest?: (component: PlatformComponent) => void;
 }) {
   const [confirming, setConfirming] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   return (
     <Card
       className={cn(
@@ -110,6 +113,7 @@ function AdminComponentCard({
       )}
       <PreviewerFacts component={component} />
       <MCPFacts component={component} />
+      <SettingsFacts component={component} />
       <ArtifactFacts component={component} />
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-[var(--color-border)] pt-4">
         <div className="min-w-[15rem] flex-1">
@@ -129,11 +133,17 @@ function AdminComponentCard({
             </Button>
           </div>
         )}
+        {ofScope(component.settings, "platform").length > 0 && (
+          <Button variant="outline" size="sm" disabled={busy} onClick={() => setSettingsOpen(true)}>
+            Settings
+          </Button>
+        )}
         <Button variant="danger" size="sm" disabled={busy} onClick={() => setConfirming(true)}>
           <TrashIcon size={14} />
           {busy ? "Working…" : "Uninstall"}
         </Button>
       </div>
+      {settingsOpen && <PlatformComponentSettings component={component} onClose={() => setSettingsOpen(false)} />}
       <ConfirmDialog
         open={confirming}
         onClose={() => setConfirming(false)}

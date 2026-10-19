@@ -10,9 +10,8 @@ import { Button } from "@/ui/Button";
 import { ErrorBox } from "@/ui/ErrorBox";
 import { useToast } from "@/ui/Toast";
 import { NotifierDelivery } from "@/views/settings/NotifierDelivery";
-import { PersonalBots } from "@/views/settings/PersonalBots";
 import { LocalSkills } from "@/views/settings/LocalSkills";
-import { ToolSettings } from "@/views/settings/ToolSettings";
+import { ComponentSettings } from "@/views/settings/ComponentSettings";
 import { BrowserPush } from "@/views/settings/BrowserPush";
 import { SignedInDevices } from "@/views/settings/SignedInDevices";
 import { MyBudget } from "@/views/settings/MyBudget";
@@ -108,7 +107,6 @@ export function Settings() {
           <BrowserPush />
         </section>
         <NotifierDelivery />
-        <PersonalBots />
         <section className="flex flex-col gap-3">
           <div>
             <h2 className="text-sm font-semibold">Muted rooms</h2>
@@ -141,7 +139,7 @@ export function Settings() {
         </section>
         <AgentSandbox />
         <LocalSkills />
-        <ToolSettings />
+        <ComponentSettings />
         <MyBudget />
         <SignedInDevices />
       </div>

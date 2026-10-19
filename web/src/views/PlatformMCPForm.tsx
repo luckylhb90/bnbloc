@@ -12,7 +12,6 @@ import {
   signSteps,
   type McpForm,
   type McpFormAuth,
-  type McpFormEnv,
   type McpFormTool,
 } from "@/lib/mcpPackageForm";
 import { Button } from "@/ui/Button";
@@ -22,6 +21,7 @@ import { Field, Input, Textarea } from "@/ui/Input";
 import { Segment, Switch } from "@/ui/Segment";
 import { Select } from "@/ui/Select";
 import { useCopy } from "@/ui/useCopy";
+import { McpSettingsEditor } from "@/views/McpSettingsEditor";
 import { errorText } from "@/lib/errors";
 
 // PlatformMCPForm builds an MCP tool package from a form (docs/prd/2026-10-
@@ -64,8 +64,7 @@ function McpFormBody() {
     setResult(null);
   };
   const setTool = (i: number, patch: Partial<McpFormTool>) => set({ tools: form.tools.map((t, j) => (j === i ? { ...t, ...patch } : t)) });
-  const setEnv = (i: number, patch: Partial<McpFormEnv>) => set({ env: form.env.map((e, j) => (j === i ? { ...e, ...patch } : e)) });
-  const envNames = form.env.map((e) => e.name.trim()).filter((n) => n !== "");
+  const settingKeys = form.settings.map((x) => x.key.trim()).filter((k) => k !== "");
 
   const upload = async (file: File | undefined) => {
     if (!file) return;
@@ -158,38 +157,7 @@ function McpFormBody() {
         </div>
       </div>
 
-      <div className="grid gap-2">
-        <p className="text-xs font-medium uppercase tracking-wide text-[var(--color-fg-muted)]">Environment</p>
-        <p className="text-xs text-[var(--color-fg-subtle)]">Variables the server needs. Values never go in the package.</p>
-        {form.env.map((v, i) => (
-          <div key={i} className="grid grid-cols-[minmax(0,12rem)_minmax(0,1fr)_auto_auto_auto] items-center gap-2">
-            <Input aria-label="Variable name" value={v.name} onChange={(e) => setEnv(i, { name: e.target.value.toUpperCase() })} placeholder="API_TOKEN" className="font-mono" />
-            <Input aria-label="Variable description" value={v.description} onChange={(e) => setEnv(i, { description: e.target.value })} placeholder="What it is (optional)" />
-            <Switch checked={v.secret} onChange={(secret) => setEnv(i, { secret })} label="Secret" />
-            <Switch checked={v.required} onChange={(required) => setEnv(i, { required })} label="Required" />
-            <Button variant="ghost" aria-label="Remove variable" onClick={() => set({ env: form.env.filter((_, j) => j !== i) })}>
-              <TrashIcon size={15} />
-            </Button>
-          </div>
-        ))}
-        <div>
-          <Button variant="ghost" size="sm" onClick={() => set({ env: [...form.env, { name: "", description: "", secret: true, required: true }] })}>
-            <PlusIcon size={14} /> Add a variable
-          </Button>
-        </div>
-        {envNames.length > 0 && (
-          <Field label="Who provides the values">
-            <Segment
-              options={[
-                { value: "member", label: "Each member", hint: "on their desktop" },
-                { value: "org", label: "The organization", hint: "an admin's connector" },
-              ]}
-              value={form.credentials}
-              onChange={(credentials) => set({ credentials })}
-            />
-          </Field>
-        )}
-      </div>
+      <McpSettingsEditor form={form} onChange={(settings) => set({ settings })} />
 
       {form.runtime === "stdio" ? (
         <div className="grid gap-3">
@@ -230,6 +198,11 @@ function McpFormBody() {
               ))}
             </ul>
           )}
+          <Switch
+            checked={form.roomCredential}
+            onChange={(roomCredential) => set({ roomCredential })}
+            label="The room is its credential (it calls the gateway through the room relay as the requester)"
+          />
           <Field label="Arguments (one per line)">
             <Textarea rows={2} value={form.argsText} onChange={(e) => set({ argsText: e.target.value })} placeholder="--stdio" className="font-mono text-xs" />
           </Field>
@@ -257,10 +230,10 @@ function McpFormBody() {
                   <Input value={form.authHeader} onChange={(e) => set({ authHeader: e.target.value })} placeholder="X-Api-Key" />
                 </Field>
               )}
-              <Field label="Variable with the credential" hint={envNames.length === 0 ? "Add the variable under Environment first." : undefined}>
-                <Select value={form.authEnv} onChange={(e) => set({ authEnv: e.target.value })} className="h-10 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 text-sm">
-                  <option value="">Pick a variable</option>
-                  {envNames.map((n) => (
+              <Field label="Setting with the credential" hint={settingKeys.length === 0 ? "Add the setting under Settings first." : undefined}>
+                <Select value={form.authSetting} onChange={(e) => set({ authSetting: e.target.value })} className="h-10 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 text-sm">
+                  <option value="">Pick a setting</option>
+                  {settingKeys.map((n) => (
                     <option key={n} value={n}>
                       {n}
                     </option>

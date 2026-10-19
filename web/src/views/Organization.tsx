@@ -31,7 +31,7 @@ import { PlatformAgentsCard } from "@/views/org/PlatformAgentsCard";
 import { PlatformRetentionCard, TenantRetentionSection } from "@/views/org/RetentionCard";
 import { AuditLogTab } from "@/views/org/AuditLogTab";
 import { PublicLinksTab } from "@/views/org/PublicLinksTab";
-import { ToolConnectorsTab } from "@/views/org/ToolConnectorsTab";
+import { ComponentSettingsTab } from "@/views/org/ComponentSettingsTab";
 import { ContentReviewTab } from "@/views/org/ContentReviewTab";
 import { PlatformContentTab } from "@/views/org/PlatformContentTab";
 import { invalidateTenantPolicy } from "@/lib/tenantPolicy";
@@ -54,7 +54,7 @@ type Tab =
   | "quota"
   | "settings"
   | "links"
-  | "tools"
+  | "componentSettings"
   | "audit"
   | "tenants"
   | "orgsync"
@@ -72,7 +72,7 @@ const TABS: { id: Tab; label: string; superOnly?: boolean }[] = [
   { id: "quota", label: "Quota" },
   { id: "settings", label: "Settings" },
   { id: "links", label: "Share links" },
-  { id: "tools", label: "Tool connectors" },
+  { id: "componentSettings", label: "Component settings" },
   { id: "audit", label: "Audit log" },
   { id: "tenants", label: "Tenants", superOnly: true },
   { id: "orgsync", label: "Org sync", superOnly: true },
@@ -168,7 +168,7 @@ export function Organization() {
       {tab === "quota" && <QuotaTab key={activeTenant} />}
       {tab === "settings" && <SettingsTab key={activeTenant} />}
       {tab === "links" && <PublicLinksTab key={activeTenant} />}
-      {tab === "tools" && <ToolConnectorsTab key={activeTenant} />}
+      {tab === "componentSettings" && <ComponentSettingsTab key={activeTenant} />}
       {tab === "content" && <ContentReviewTab key={activeTenant} />}
       {tab === "audit" && (
         <AuditLogTab key={isSuper ? "platform" : activeTenant} platform={isSuper} tenants={tenants} />

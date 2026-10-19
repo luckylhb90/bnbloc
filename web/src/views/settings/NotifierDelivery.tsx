@@ -11,7 +11,8 @@ import { errorText } from "@/lib/errors";
 // NotifierDelivery lists the organization's notifier components (installed
 // by the platform admin): an optional one can be turned on or off, and any
 // can send the member a test notification. A member's own delivery (a
-// personal bot) is a desktop plugin, configured in PersonalBots.
+// personal bot) is a desktop plugin, set up in Settings → Components
+// (ComponentSettings).
 export function NotifierDelivery() {
   const [notifiers, setNotifiers] = useState<MemberNotifier[] | null>(null);
   const [error, setError] = useState<string | null>(null);
