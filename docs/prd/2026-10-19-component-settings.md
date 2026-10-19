@@ -106,6 +106,38 @@ setting key instead of an env name.
 - **Audit.** Every save is audited: the component, the scope, the keys
   changed; never a value.
 
+### 2.2a A component's own settings page (optional)
+
+The declaration stays the contract; how the fields are shown can be the
+component's. A component whose settings need more than fields (folder
+lists, an OAuth sign-in, fields shown by a choice, a live preview) ships
+its own page, and the platform shows it in a dialog where the one form
+would be (decided 2026-10-19).
+
+- **Declared.** `settingsPage` names an HTML file in the package (with its
+  scripts and styles beside it, like a previewer's bundle). Without one,
+  the one form renders the declaration (§2.2): most components write no
+  HTML.
+- **Sandboxed like a previewer.** The page runs in the platform's
+  sandboxed frame (`docs/architecture/previewer-components.md`): an opaque
+  origin, no network (`default-src 'none'`), no access to the console
+  around it. It talks to the platform only through a narrow host API over
+  `postMessage`:
+  - `get()`: the current values of its own settings in the scope being
+    edited, a secret only as "set" or "not set", never its value;
+  - `set(values)`: a save, checked by the platform against the
+    declaration (types, required, options), then sealed and stored as any
+    save; refused values answer the field's reason;
+  - `check()`: the component's own check (§2.5), when it declares one;
+  - `close()`.
+- **The dialog is the platform's.** Its title (the component and the
+  scope), its Close, and a note that the page is the component's own sit
+  outside the frame, so a page cannot pose as the console; the theme
+  (light or dark) is passed in.
+- **Only what it declares.** A page cannot set a key the declaration
+  lacks, read another component's values, or read a secret back. Who may
+  open it is the scope's rule (an organization admin for `org`).
+
 ### 2.3 Delivery, by how the component runs
 
 | Runtime | How it gets its values |
@@ -149,10 +181,10 @@ protocol), when a second family needs one.
 |---|---|
 | One owner | One declaration shape (`pkgmeta`), one validator, one store, one form, one delivery per runtime; the web's copies of adapter kinds go. |
 | Component or platform | The platform keeps what a component cannot do safely: sealing, scope, consent, audit, delivery. What a setting means is the component's. |
-| Load on users | One form everywhere, in the place its scope is set; fewer hand-written pages. |
+| Load on users | One form everywhere, in the place its scope is set; fewer hand-written pages. A component's own page only when fields are not enough. |
 | Load on agents | None: settings never reach an agent's context. |
 | Boundaries | A value holds only for its scope; a member never reads an organization's secret; a component reads only its own record. |
-| Untrusted input | A declaration is a package's: bounded, typed, env names checked against the deny list. A value is checked against its declaration on save. |
+| Untrusted input | A declaration is a package's: bounded, typed, env names checked against the deny list. A value is checked against its declaration on save, from the form or a component's page alike. A component's page is untrusted code in a sandboxed frame with no network and no secret read. |
 | Time and lifecycle | Needs setup; an upgrade keeps the running version until set up; dropped settings' values go on the next save. |
 | Release safety | Pre-launch: `mcp.env` and `localSettings` are replaced, not kept beside; our components republish with `settings`. Organization connector values are entered again (no backfill). |
 | AI | Fill from a note; a check explained. |
@@ -168,7 +200,10 @@ protocol), when a second family needs one.
    new version waits in "needs setup"; the old one keeps running.
 4. **Admins lose their typed values** in the move from connectors. Few
    organizations, pre-launch; the form says what is missing (needs setup).
-5. **A secret leaks through the assist.** The note goes to the assist
+5. **A component's page phishes or leaks.** It runs with no network in an
+   opaque origin, reads no secret back, and sits inside the platform's
+   dialog that names it; anything it saves is only its own declared keys.
+6. **A secret leaks through the assist.** The note goes to the assist
    model like any assist input; the answer fills the form only; the run's
    audit row holds no input.
 
@@ -179,10 +214,13 @@ protocol), when a second family needs one.
    `settings` (`mcp.env`, `localSettings` removed); needs setup; audit.
    Our components republish: the browser declares its Chrome and profile
    paths; media-tools declares none.
-2. **Endpoint components ask.** `GET /v1/component-settings`; the notifier
+2. **A component's own page.** `settingsPage`, the sandboxed dialog and
+   its host API (`get`, `set`, `check`, `close`); a plugin with a
+   hand-written view in the web (local skills) moves to its own page.
+3. **Endpoint components ask.** `GET /v1/component-settings`; the notifier
    and the auth provider move their deployment environment into
    `settings`.
-3. **Built-in adapters declare.** `Adapter.Settings()`; the console's
+4. **Built-in adapters declare.** `Adapter.Settings()`; the console's
    provider cards become the one form; the web's copies go.
-4. **The rest.** The sandbox's and core connection's desktop fields as
+5. **The rest.** The sandbox's and core connection's desktop fields as
    their components' settings; Fill with AI and Check.
