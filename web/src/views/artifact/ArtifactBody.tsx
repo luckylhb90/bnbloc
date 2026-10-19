@@ -3,6 +3,7 @@ import { DownloadSimpleIcon, FileIcon } from "@phosphor-icons/react";
 import { formatBytes } from "@/lib/format";
 import { isChunkLoadError } from "@/lib/webBuild";
 import { reportStaleBuild } from "@/views/WebUpdateNotice";
+import { storeRoomCover } from "@/views/workbench/artifactData";
 import { TEXT_VIEWER_ID } from "./builtin";
 import {
   listArtifactViewers,
@@ -24,7 +25,10 @@ import { createToolbarHost } from "./toolbar";
 // viewer from the registry (re-selecting when a previewer component is
 // installed or removed at runtime), decodes text for text viewers, wires the
 // viewer's toolbar to the tab, and contains a viewer crash. With no viewer
-// for the type it renders a download card.
+// for the type it renders a download card. A cover the viewer draws goes
+// where the host says (onCover: a work's detail stores it as the work's),
+// by default to the room version's thumbnail (storeRoomCover); without a
+// room or an artifact nowhere.
 
 const EMPTY_BLOB = new Blob([]);
 
@@ -140,6 +144,7 @@ export function ArtifactBody({
   onSelection,
   reveal,
   onPublish,
+  onCover,
 }: {
   readonly roomId: string;
   readonly actor?: string;
@@ -159,6 +164,9 @@ export function ArtifactBody({
   readonly onSelection?: (selection: ViewerSelection | null) => void;
   readonly reveal?: ArtifactViewerProps["reveal"];
   readonly onPublish?: ArtifactViewerProps["onPublish"];
+  // Where a cover the viewer draws goes (default: the room version's
+  // thumbnail).
+  readonly onCover?: ArtifactViewerProps["onCover"];
 }) {
   const instanceKey = `${viewer?.id ?? ""}:${artifactId}:${file.version}`;
   const onToolbarRef = useStableRef(onToolbar);
@@ -167,6 +175,14 @@ export function ArtifactBody({
     const host = createToolbarHost((items) => onToolbarRef.current?.(items, host.emit));
     return host;
   }, [instanceKey, onToolbarRef]);
+
+  const roomCover = useMemo<ArtifactViewerProps["onCover"]>(
+    () =>
+      roomId && artifactId
+        ? (png, source) => void storeRoomCover(roomId, artifactId, file.version, png, source).catch(() => {})
+        : undefined,
+    [roomId, artifactId, file.version],
+  );
 
   const wantsText = viewer?.input === "text";
   const [text, setText] = useState<{ blob: Blob; text: string } | null>(null);
@@ -204,6 +220,7 @@ export function ArtifactBody({
     onSelection,
     reveal,
     onPublish,
+    onCover: onCover ?? roomCover,
   };
   return (
     <ViewerBoundary resetKey={instanceKey}>

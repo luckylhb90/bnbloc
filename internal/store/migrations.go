@@ -1657,6 +1657,14 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return createSchemaTable(ctx, db, "room_note_revisions")
 		},
 	},
+	{
+		// Work versions' stored covers (docs/prd/2026-10-19-work-covers.md
+		// §2.3). Additive: a new table.
+		id: "2026_10_content_version_covers",
+		run: func(ctx context.Context, db sqlConn) error {
+			return createSchemaTable(ctx, db, "content_version_covers")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

@@ -209,6 +209,10 @@ func (s *Service) routes() []route {
 		// site published as an app, and "Use this app" (a copy in a room
 		// the caller owns, or in a new room: room creation's permission).
 		member("GET /v1/content-components/{id}/versions/{version}/cover", s.handleWorkCover).with(needContent),
+		// A work version's stored cover (work_version_cover.go): a reader's
+		// render, and the author's AI cover (an image call: cost budget).
+		member("PUT /v1/content-components/{id}/versions/{version}/cover", s.handlePutWorkCover).with(needContent),
+		gated("POST /v1/content-components/{id}/versions/{version}/cover/ai", drive, s.handleDrawStoredWorkCover).spends(costBudget).with(needContent),
 		member("GET /v1/content-components/{id}/versions/{version}/file", s.handleWorkFile).with(needContent),
 		member("POST /v1/content-components/{id}/versions/{version}/demo", s.handleAppDemo).spends(costBudget).with(needContent),
 		member("PUT /v1/content-components/{id}/favorite", s.handleFavorite).spends(costBudget).with(needContent),

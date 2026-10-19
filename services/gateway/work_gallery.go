@@ -38,7 +38,7 @@ import (
 // has:
 //
 //	POST /v1/rooms/{roomId}/artifacts/{artifactId}/publish-work  a deliverable's current version as a work of the caller's
-//	GET  /v1/content-components/{id}/versions/{version}/cover    a work's cover image
+//	GET  /v1/content-components/{id}/versions/{version}/cover    a work's cover image (its own, else its stored one)
 //	PUT|DELETE /v1/content-components/{id}/favorite              the caller's star
 //	POST /v1/content-components/{id}/use-app                     an app's copy as a new site in a room the caller owns
 //
@@ -405,37 +405,21 @@ func workTypeOf(c store.ContentComponent, v store.ContentComponentVersion) strin
 
 // handleWorkCover serves a work version's cover image to a caller who may
 // read the component (readableContent), as the site cover route does
-// (contentpkg.WorkCover, the cover order; writeCover). 404 when the work
-// has none, so a card falls back to its generated cover.
+// (writeCover): the bundle's own (contentpkg.WorkCover, the cover order),
+// else the stored one (work_version_cover.go). 404 when the work has
+// none, so a card falls back to its generated cover.
 func (s *Service) handleWorkCover(w http.ResponseWriter, r *http.Request, caller auth.Claims) {
-	actor, ok := s.contentCaller(w, r, caller, grantRefused)
+	ref, ok := s.workVersion(w, r, caller, false)
 	if !ok {
 		return
 	}
-	ctx := r.Context()
-	c, err := s.readableContent(ctx, actor.Claims, r.PathValue("id"), actor.Room)
+	cover, found, err := s.workCoverOf(r.Context(), ref)
 	if err != nil {
-		contentStoreErr(w, "load content component failed", err)
+		obs.ServerError(w, "load the work's cover failed", err)
+		httpx.Error(w, "load the work's cover failed", http.StatusBadGateway)
 		return
 	}
-	if c.Kind != contentpkg.KindWork {
-		httpx.Error(w, "only a work has a cover", http.StatusNotFound)
-		return
-	}
-	v, err := s.ContentComponents.GetContentComponentVersion(ctx, c.ID, r.PathValue("version"))
-	if err != nil {
-		contentStoreErr(w, "load content version failed", err)
-		return
-	}
-	pkg, err := s.contentPackage(ctx, v)
-	if err != nil {
-		obs.ServerError(w, "load content bundle failed", err)
-		httpx.Error(w, "load content bundle failed", http.StatusBadGateway)
-		return
-	}
-	// The validator accepted the version's cover file.
-	cover, found, err := contentpkg.WorkCover(pkg)
-	if !found || err != nil {
+	if !found {
 		httpx.Error(w, "this work has no cover", http.StatusNotFound)
 		return
 	}
@@ -448,34 +432,14 @@ func (s *Service) handleWorkCover(w http.ResponseWriter, r *http.Request, caller
 // The bytes are typed by their name (store.ArtifactMIME) and served as an
 // artifact's are: nosniff, a sandbox CSP, inline only for a raster image.
 func (s *Service) handleWorkFile(w http.ResponseWriter, r *http.Request, caller auth.Claims) {
-	actor, ok := s.contentCaller(w, r, caller, grantRefused)
+	work, ok := s.workVersion(w, r, caller, false)
 	if !ok {
 		return
 	}
-	ctx := r.Context()
-	c, err := s.readableContent(ctx, actor.Claims, r.PathValue("id"), actor.Room)
-	if err == nil && c.Kind != contentpkg.KindWork {
-		err = store.ErrContentNotFound
-	}
-	if err != nil {
-		contentStoreErr(w, "load content component failed", err)
-		return
-	}
-	v, err := s.ContentComponents.GetContentComponentVersion(ctx, c.ID, r.PathValue("version"))
-	if err != nil {
-		contentStoreErr(w, "load content version failed", err)
-		return
-	}
-	pkg, err := s.contentPackage(ctx, v)
-	if err != nil {
-		obs.ServerError(w, "load content bundle failed", err)
-		httpx.Error(w, "load content bundle failed", http.StatusBadGateway)
-		return
-	}
-	name, data, ok := contentpkg.WorkFile(pkg)
+	name, data, ok := contentpkg.WorkFile(work.pkg)
 	if p := r.URL.Query().Get("path"); p != "" {
 		ok = false
-		for _, ref := range contentpkg.WorkReferences(pkg) {
+		for _, ref := range contentpkg.WorkReferences(work.pkg) {
 			if ref.Ref.File == p {
 				name, data, ok = ref.Ref.Name, ref.Data, true
 			}

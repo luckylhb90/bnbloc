@@ -1,6 +1,7 @@
 # Every work has a cover (2026-10-19)
 
-Status: building. Extends the cover order of
+Status: built (2026-10-19): §2.1–§2.2 in 9afd072e, §2.3 (the stored
+version cover) after it. Extends the cover order of
 `docs/prd/2026-10-13-works-gallery-and-make-similar.md` §2.
 
 ## 1. Why
@@ -60,25 +61,58 @@ A published work is immutable, so a work published without a cover kept
 the generated fallback for good. A work version now has one **stored
 cover** beside its bundle (as a room version has its thumbnail,
 `docs/prd/2026-10-16-file-covers.md`), made the first time someone opens
-it:
+it.
 
-- `PUT /v1/content-components/{id}/versions/{v}/cover?source=render|ai`
-  stores it (PNG, WebP or JPEG within the cover cap, checked by magic
-  bytes). `render` is any reader's and is kept only when the version has
-  none; `ai` is the author's and replaces a rendered one. The cover route
-  answers the bundle's cover first, then the stored one, then 404.
-- The detail view, when the cover route answered 404:
-  - an image, a PDF, a deck, a document or a diagram: its viewer's
-    thumbnail (the previewers' `provideThumbnail`, as in a room), stored
-    as `render`; no AI, nothing spent;
-  - a video: a frame of its player, stored as `render`;
-  - anything no viewer draws (an app, a site, audio, other): **when the
-    author opens their own work**, an AI cover is drawn from its title,
-    description and type (§2.2's prompt) and stored as `ai`. Only the
-    author's opening spends their organization's budget, once per
-    version; nobody else's view draws one.
-- The gallery's card asks again for a cover it was refused once the
-  detail stored one.
+- **Store.** `content_version_covers` (one row per component and
+  version: the blob key, the type, the rank, who stored it and when;
+  migration `2026_10_content_version_covers`, additive), read and written
+  through `store.ContentVersionCoverStore` (memory and MySQL, one contract
+  suite). A version keeps the first cover; a strictly higher rank replaces
+  it (`render` < `ai`). The bytes are a blob (blob collection counts the
+  column); the rows are deleted with the component.
+- **Routes** (`services/gateway/work_version_cover.go`):
+  - `PUT /v1/content-components/{id}/versions/{v}/cover?source=render`:
+    any member who may read the work; a PNG, WebP or JPEG body of the
+    type its Content-Type says, within the cover cap
+    (`tarbundle.CoverImage`: magic bytes; 413 over the cap, 415 anything
+    else). Kept only when the version has no cover of its bundle and none
+    stored; answers `{stored}`. No other source is accepted here.
+  - `POST /v1/content-components/{id}/versions/{v}/cover/ai`: the work's
+    author only (`ownContent`); drawn with §2.2's prompt from the version
+    manifest's title, description and type (`drawWorkCover`: the image
+    call's audit, cost budget and the assist rate limit), stored as `ai`,
+    which replaces a render. 409 without an image provider, for a version
+    with a cover of its own, or one that already has an AI cover (nothing
+    is drawn then).
+  - `GET …/cover` answers the bundle's cover first, then the stored one
+    (its type, nosniff, a sandbox CSP), then 404.
+  - An organization publication and a shared copy are rows of their own
+    with the author's versions cloned; the same version is the same
+    bundle, so they keep and read the stored cover under the author's
+    component first (`coverIDs`), and their own when the author's is gone.
+    One cover serves the author's card and everyone else's.
+- **The detail view** (`views/gallery/useWorkCover.ts`, its plan in
+  `lib/workCovers.ts`), when the cover route answered 404, once per
+  version per session:
+  - an image: drawn to a canvas at most 1600 pixels wide and saved as a
+    JPEG within the cap (1200, then 800, as `FitCover` tries), stored as
+    `render`;
+  - a PDF, a deck, a document or a diagram whose viewer draws a cover
+    (`cover: "render"`: the PDF viewer, a previewer declaring
+    `thumbnail`): the cover its viewer sends when it renders the file,
+    stored as `render`. A viewer hands its cover to its host
+    (`ArtifactViewerProps.onCover`); a room's host stores it as the
+    version's thumbnail (`storeRoomCover`), a work's detail as the work's;
+  - a video: a frame about a second in (the middle of a shorter clip) from
+    a player of its own once it has loaded data, stored as `render`;
+  - anything no viewer draws (an app, a site, audio, a text file whose
+    viewer only draws a text cover, other): **when the author opens their
+    own work** (the listing's `mine`) and the organization's image
+    generation is on, an AI cover (`POST …/cover/ai`). Nobody else's view
+    draws one.
+- The gallery's card asks again for a cover it was refused once the detail
+  stored one (`coverStored` in `AppCover`), and the gallery's listing is
+  refreshed.
 
 ### 2.4 Later
 
@@ -93,7 +127,9 @@ it:
 | AI | The AI cover is proposed, a person decides; the AI-off organization sees no button. |
 | Load on agents | No new tool or rule. |
 | Untrusted input | A cover sent in the request is checked like any cover (magic bytes, cap, PNG/WebP/JPEG). |
-| Release safety | Additive: existing works are unchanged until republished; no backfill. |
+| Release safety | Additive: existing works are unchanged until republished; no backfill. The stored cover is a new table and new routes; an older gateway never reads it. |
+| Actors (§2.3) | A render is any reader's (a picture of what they can already open, as a room's thumbnail); an AI cover only the author's, spending their organization's budget once per version. |
+| Abuse (§2.3) | A render is checked like any cover (magic bytes, cap, the type it claims) and only fills an empty place: it never replaces a cover. One per version per session from the web. |
 
 ## 4. Build order
 

@@ -79,6 +79,14 @@ func TestContractRetentionStoreReferencedBlobKeys(t *testing.T) {
 			"content_component_versions.bundle_blob_key": func(key string) error {
 				return b.ContentComponents.CreateContentComponent(context.Background(), cc, contentVersion(cc.ID, "1.0.0", key, 1))
 			},
+			"content_version_covers.blob_key": func(key string) error {
+				cover := ContentComponent{ID: uniq("cc-cover-"), Kind: "bnbloc.work.package/v1", Name: uniq("n-"), TenantID: "t", Owner: "maya", Scope: ContentScopePersonal, Status: ContentStatusActive}
+				if err := b.ContentComponents.CreateContentComponent(context.Background(), cover, contentVersion(cover.ID, "1.0.0", uniqBlobKey(), 1)); err != nil {
+					return err
+				}
+				_, _, err := b.ContentComponents.SetContentVersionCover(context.Background(), ContentVersionCover{ComponentID: cover.ID, Version: "1.0.0", BlobKey: key, MimeType: "image/png", Rank: 1, CreatedBy: "maya", CreatedAtMs: 1})
+				return err
+			},
 			"app_files.blob_key": func(key string) error {
 				appRoom := newContractRoom(t, ctx, b, "maya")
 				k, err := b.AppDocs.EnsureAppKey(ctx, AppKey{AppID: uniq("app-"), RoomID: appRoom, WrappedKey: "wk", CreatedAtMs: 1})

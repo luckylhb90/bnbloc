@@ -216,8 +216,8 @@ type ContentComponentStore interface {
 	// q's reach (ContentBlobQuery), by id, at most MaxContentList.
 	ContentComponentsByBlob(ctx context.Context, q ContentBlobQuery) ([]ContentComponent, error)
 	// DeleteContentComponent removes a component, its versions, uses, acks,
-	// favorites and publish requests (the bundles become unreferenced; blob GC
-	// collects them).
+	// favorites, stored covers and publish requests (the bundles and covers
+	// become unreferenced; blob GC collects them).
 	DeleteContentComponent(ctx context.Context, id string) error
 	// SetContentComponentStatus changes a component's status (unpublish,
 	// restore). Restoring an organization row claims its name
@@ -254,6 +254,7 @@ type ContentComponentStore interface {
 	ContentRoomShareStore
 	ContentDraftStore
 	ContentFavoriteStore
+	ContentVersionCoverStore
 }
 
 func contentLimit(n int) int { return clampLimit(n, MaxContentList, MaxContentList) }
@@ -333,13 +334,14 @@ type MemoryContentComponents struct {
 	roomShares map[string]ContentRoomShare          // room\x00component -> share
 	drafts     map[string]ContentDraft              // draft id -> staged draft (content_drafts.go)
 	favorites  map[string]ContentFavorite           // tenant\x00member\x00component -> star (content_favorites.go)
+	covers     map[string]ContentVersionCover       // component\x00version -> stored cover (content_covers.go)
 }
 
 // NewMemoryContentComponents returns an empty in-memory store.
 func NewMemoryContentComponents() *MemoryContentComponents {
 	return &MemoryContentComponents{components: map[string]ContentComponent{}, versions: map[string][]ContentComponentVersion{}, uses: map[string]ContentUse{}, acks: map[string]ContentAck{},
 		promptUses: map[string]map[string]int64{}, requests: map[string]ContentPublishRequest{}, roomShares: map[string]ContentRoomShare{},
-		favorites: map[string]ContentFavorite{}}
+		favorites: map[string]ContentFavorite{}, covers: map[string]ContentVersionCover{}}
 }
 
 var _ ContentComponentStore = (*MemoryContentComponents)(nil)
@@ -506,6 +508,11 @@ func (s *MemoryContentComponents) DeleteContentComponent(_ context.Context, id s
 	for k, f := range s.favorites {
 		if f.ComponentID == id {
 			delete(s.favorites, k)
+		}
+	}
+	for k, c := range s.covers {
+		if c.ComponentID == id {
+			delete(s.covers, k)
 		}
 	}
 	return nil

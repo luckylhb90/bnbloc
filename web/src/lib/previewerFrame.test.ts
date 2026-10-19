@@ -133,12 +133,10 @@ test("inbound messages: size limits", () => {
   eq(readPreviewerMessage({ origin: "null", source: frame, data: { type: "preview.title", text: "t".repeat(121) } }, frame), null, "long title");
 });
 
-test("thumbnails are stored only when declared and missing", () => {
+test("thumbnails are taken only when declared", () => {
   const d = parsePreviewerEntry(entry)!;
-  ok(wantsThumbnail(d, {}), "declared, none stored");
-  ok(!wantsThumbnail(d, { thumbnail: { mimeType: "image/png" } }), "already stored");
-  ok(!wantsThumbnail(d, undefined), "unknown version");
-  ok(!wantsThumbnail({ capabilities: ["toolbar"] }, {}), "not declared");
+  ok(wantsThumbnail(d), "declared");
+  ok(!wantsThumbnail({ capabilities: ["toolbar"] }), "not declared");
 });
 
 test("theme follows the app background", () => {

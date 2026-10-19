@@ -150,13 +150,11 @@ export function readPreviewerMessage(
   return readFrameMessage(ev.data);
 }
 
-/** Whether the host should store a thumbnail the previewer produced: only
- *  when it declares the capability and the version has none yet. */
-export function wantsThumbnail(
-  desc: Pick<PreviewerDescriptor, "capabilities">,
-  version: { readonly thumbnail?: unknown } | undefined,
-): boolean {
-  return desc.capabilities.includes("thumbnail") && version !== undefined && !version.thumbnail;
+/** Whether the host takes a thumbnail the previewer produced: only when it
+ *  declares the capability (where it goes, and whether the version still
+ *  needs one, is the host's: ArtifactBody's onCover). */
+export function wantsThumbnail(desc: Pick<PreviewerDescriptor, "capabilities">): boolean {
+  return desc.capabilities.includes("thumbnail");
 }
 
 /** Theme from the app's background lightness ("hsl(h s% l%)" or "#rrggbb"). */

@@ -1275,6 +1275,17 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `tarbundle.WorkCover` over it (the cover file, else an image work's
   image, else the generated cover; a video's is the frame its turn saved
   as a cover file, `turnCover`), served only through `writeCover`. A
+  version without one gets a **stored cover** beside its bundle
+  (`store.ContentVersionCoverStore`, `content_version_covers`, deleted
+  with the component; `services/gateway/work_version_cover.go`): any
+  reader's render (`PUT …/cover?source=render`, checked by
+  `tarbundle.CoverImage`, kept only while the version has no cover) or
+  the author's AI cover (`POST …/cover/ai`, which replaces a render); an
+  organization row or a shared copy shares its source's (`coverIDs`). The
+  cover route answers the bundle's first (`workCoverOf`). The web's one
+  maker is `views/gallery/useWorkCover.ts` over `lib/workCovers.ts`, and a
+  viewer's drawn cover goes where its host says (`onCover`; a room's
+  default is `storeRoomCover`). A
   deliverable becomes a work only through `POST
   /v1/rooms/{roomId}/artifacts/{artifactId}/publish-work`
   (`contentpkg.WorkFromDeliverable`, a room member who may post:
@@ -2061,7 +2072,8 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
     generated cover and when a cover is given up (`coverRefused`: 404,
     413, 415): `lib/appCover.ts` (a gradient seeded by the app id, the
     name's initial; `views/workbench/AppCover.tsx` draws a cover source,
-    `siteCover` or `componentCover`, or it); the deliverables' filters:
+    `siteCover` or `componentCover`, or it, and asks again for a refused
+    one once `coverStored` says it exists); the deliverables' filters:
     `views/workbench/deliverableFilters.ts` ("Apps" is `isApp`); a
     member's works and apps (Library → Works: Published, Apps in rooms):
     `lib/myApps.ts` + `views/library/WorksTab.tsx`

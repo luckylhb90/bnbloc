@@ -201,6 +201,15 @@ var blobKeySources = []blobKeySource{
 			}
 		}
 	}},
+	{"content_version_covers", "blob_key", func(m *MemoryRetention, see func(string)) {
+		if c := m.Content; c != nil {
+			c.mu.Lock()
+			defer c.mu.Unlock()
+			for _, cv := range c.covers {
+				see(cv.BlobKey)
+			}
+		}
+	}},
 	{"app_files", "blob_key", func(m *MemoryRetention, see func(string)) {
 		if a := m.AppDocs; a != nil {
 			a.eachAppFile(func(f AppFile) { see(f.BlobKey) })

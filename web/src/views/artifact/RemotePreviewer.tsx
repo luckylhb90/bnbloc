@@ -11,7 +11,6 @@ import {
   type PreviewerDescriptor,
 } from "@/lib/previewerFrame";
 import { PREVIEWER_PROTOCOL, stateKey, type HostMessage } from "../../../previewer-sdk/src/protocol.ts";
-import { invalidateArtifacts, loadArtifactDetail } from "@/views/workbench/artifactData";
 import type { ArtifactViewerProps, ViewerToolbarItem } from "./registry";
 import { freshPreviewer, installedPreviewer } from "./remotePreviewers";
 import { errorText } from "@/lib/errors";
@@ -29,7 +28,8 @@ import { errorText } from "@/lib/errors";
 //     window, known type, size limits) by lib/previewerFrame + the SDK's
 //     protocol module; the frame drives only data — toolbar items by icon
 //     NAME, live state into the room's artifact_state channel, a PNG
-//     thumbnail the host stores when the previewer declared the capability.
+//     thumbnail the host keeps (onCover) when the previewer declared the
+//     capability.
 
 type Desc = PreviewerDescriptor;
 
@@ -96,6 +96,7 @@ function PreviewerFrame({
   remoteState,
   onSelection,
   reveal,
+  onCover,
 }: ArtifactViewerProps & { readonly desc: Desc }) {
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const boxRef = useRef<HTMLDivElement | null>(null);
@@ -119,8 +120,8 @@ function PreviewerFrame({
 
   // Latest props for the message handler (registered once per frame).
   const units = desc.capabilities.includes("units");
-  const latest = useRef({ blob, file, version, onLocalState, onSelection, roomId, artifactId, revealAt: reveal?.at });
-  latest.current = { blob, file, version, onLocalState, onSelection, roomId, artifactId, revealAt: reveal?.at };
+  const latest = useRef({ blob, file, version, onLocalState, onSelection, onCover, roomId, artifactId, revealAt: reveal?.at });
+  latest.current = { blob, file, version, onLocalState, onSelection, onCover, roomId, artifactId, revealAt: reveal?.at };
 
   const post = useCallback((msg: HostMessage, transfer?: Transferable[]) => {
     // A sandboxed frame's origin is opaque: "*" is the only accepted target;
@@ -169,16 +170,10 @@ function PreviewerFrame({
   }, [reveal?.nonce]);
 
   const storeThumbnail = useCallback(
-    async (png: ArrayBuffer) => {
-      if (thumbnailDone.current) return;
+    (png: ArrayBuffer) => {
+      if (thumbnailDone.current || !wantsThumbnail(desc)) return;
       thumbnailDone.current = true;
-      const { roomId: room, artifactId: id, version: v } = latest.current;
-      if (!id) return; // a file that is not an artifact (a chat attachment) stores none
-      const detail = await loadArtifactDetail(room, id).catch(() => null);
-      const ver = detail?.versions.find((candidate) => candidate.version === v);
-      if (!wantsThumbnail(desc, ver)) return;
-      await api.putArtifactThumbnail(room, id, v, png, "previewer");
-      invalidateArtifacts(room, id);
+      latest.current.onCover?.(png, "previewer");
     },
     [desc],
   );
@@ -206,7 +201,7 @@ function PreviewerFrame({
           return;
         }
         case "preview.thumbnail":
-          void storeThumbnail(msg.png).catch(() => {});
+          storeThumbnail(msg.png);
           return;
         case "preview.error":
           setError(msg.message);

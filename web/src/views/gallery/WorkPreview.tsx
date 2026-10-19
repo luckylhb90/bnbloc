@@ -9,6 +9,7 @@ import { ArtifactBody, resolveViewer } from "@/views/artifact/ArtifactBody";
 import { useViewerRegistry } from "@/views/artifact/registry";
 import { fileInfoFromFacts } from "@/views/artifact/fileInfo";
 import type { SiteSource } from "@/views/artifact/registry";
+import { useWorkCover } from "./useWorkCover";
 
 // WorkPreview renders a work in its detail with the artifact viewers
 // (docs/prd/2026-10-13-works-gallery-and-make-similar.md §2, "Detail
@@ -17,7 +18,9 @@ import type { SiteSource } from "@/views/artifact/registry";
 // its viewer, a site or an app in the sandboxed site frame (from the URL
 // its demo route mints: an app's SDK keeps its data in the page). A type
 // no viewer takes is offered as a download. The viewers never fetch: the
-// bytes are the work's file (GET …/versions/{v}/file).
+// bytes are the work's file (GET …/versions/{v}/file). A version without a
+// cover gets one here (useWorkCover: the image, a frame, the viewer's
+// cover, or the author's AI cover).
 
 export function WorkPreview({ work }: { readonly work: ContentComponent }) {
   useViewerRegistry();
@@ -53,6 +56,7 @@ export function WorkPreview({ work }: { readonly work: ContentComponent }) {
     }
   };
   const loaded = bytes?.key === key ? bytes : null;
+  const onCover = useWorkCover(work, viewer, loaded?.blob ?? null);
   return (
     <div className="h-[min(60vh,32rem)] w-full overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)]">
       {loaded?.error ? (
@@ -70,6 +74,7 @@ export function WorkPreview({ work }: { readonly work: ContentComponent }) {
           site={source}
           viewer={viewer}
           onDownload={site ? undefined : () => void download()}
+          onCover={onCover}
         />
       )}
     </div>

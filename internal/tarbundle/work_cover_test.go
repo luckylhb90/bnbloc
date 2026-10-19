@@ -65,6 +65,9 @@ func TestWorkCoverOrder(t *testing.T) {
 	if name, err := CoverFile(img); err != nil || name != coverName {
 		t.Fatalf("a PNG frame's cover file = %q %v", name, err)
 	}
+	if c, err := CoverImage(img); err != nil || c.File != coverName || c.MimeType != "image/png" || len(c.Data) != len(img) {
+		t.Fatalf("a PNG as a cover = %+v %v", c, err)
+	}
 	if _, err := CoverFile(svg); !errors.Is(err, ErrCoverNotImage) {
 		t.Fatalf("an SVG frame = %v", err)
 	}

@@ -5269,6 +5269,15 @@ export interface WorkCoverReply {
   model?: string;
 }
 
+// WorkCoverStored answers a work version's stored cover
+// (docs/prd/2026-10-19-work-covers.md §2.3: PUT
+// /v1/content-components/{id}/versions/{v}/cover?source=render, POST
+// …/cover/ai): whether this one was kept. A render is kept only when the
+// version has no cover; an author's AI cover replaces a render.
+export interface WorkCoverStored {
+  stored: boolean;
+}
+
 // WorkRecipe is how a work was made (works PRD §3): the request that
 // produced the deliverable version, the expert, skill packs and prompt
 // packs the turn used, the files the request attached (stored in the

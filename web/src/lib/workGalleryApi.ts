@@ -3,7 +3,7 @@ import type { ContentComponent, ContentComponentDetail } from "./contentComponen
 import { noteSaved } from "./contentComponentsApi.ts";
 import { roomPath } from "./roomId.ts";
 import type { AppDemo, AppUseReply, MakeSimilarDraft, WorkPublishRequest, WorkRecipeCapture } from "./workGallery.ts";
-import type { AppUseRequest, MakeSimilarRequest, WorkCoverReply, WorkCoverRequest } from "./wire.gen.ts";
+import type { AppUseRequest, MakeSimilarRequest, WorkCoverReply, WorkCoverRequest, WorkCoverStored } from "./wire.gen.ts";
 
 const enc = encodeURIComponent;
 
@@ -18,6 +18,17 @@ export const workGalleryApi = {
   // one of its recipe's reference files: what the detail's viewers render.
   file: (c: Pick<ContentComponent, "id" | "version">, path?: string) =>
     req<Blob>(`/v1/content-components/${enc(c.id)}/versions/${enc(c.version)}/file${path ? `?path=${enc(path)}` : ""}`, { as: "blob" }),
+  // A work version's stored cover (work covers PRD §2.3): a reader's
+  // picture of it (a PNG, WebP or JPEG; kept only while it has none), and
+  // the author's AI cover (drawn by the gateway, which replaces a render).
+  putCover: (c: Pick<ContentComponent, "id" | "version">, image: Blob) =>
+    req<WorkCoverStored>(`/v1/content-components/${enc(c.id)}/versions/${enc(c.version)}/cover?source=render`, {
+      method: "PUT",
+      headers: { "Content-Type": image.type },
+      body: image,
+    }),
+  drawCover: (c: Pick<ContentComponent, "id" | "version">) =>
+    req<WorkCoverStored>(`/v1/content-components/${enc(c.id)}/versions/${enc(c.version)}/cover/ai`, { method: "POST" }),
   favorite: (id: string, on: boolean) =>
     req<void>(`/v1/content-components/${enc(id)}/favorite`, { method: on ? "PUT" : "DELETE", as: "none" }),
   // A site or app work's site in the sandboxed frame: a site URL whose SDK

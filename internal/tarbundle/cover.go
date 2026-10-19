@@ -79,16 +79,24 @@ func IsCoverFile(name string) bool {
 // name of the type its bytes sniff as (ErrCoverNotImage for anything but a
 // PNG, WebP or JPEG; ErrCoverTooLarge over wire.MaxWorkCoverBytes).
 func CoverFile(data []byte) (string, error) {
+	c, err := CoverImage(data)
+	return c.File, err
+}
+
+// CoverImage is an image as a cover (a work version's stored cover,
+// docs/prd/2026-10-19-work-covers.md §2.3): the cover file it would be
+// (CoverFile) and the type its bytes sniff as.
+func CoverImage(data []byte) (Cover, error) {
 	if len(data) > wire.MaxWorkCoverBytes {
-		return "", ErrCoverTooLarge
+		return Cover{}, ErrCoverTooLarge
 	}
 	sniffed := http.DetectContentType(data)
 	for _, f := range coverFiles {
 		if sniffed == f.mimeType {
-			return f.name, nil
+			return Cover{File: f.name, MimeType: f.mimeType, Data: data}, nil
 		}
 	}
-	return "", ErrCoverNotImage
+	return Cover{}, ErrCoverNotImage
 }
 
 // WorkCover is a work's cover, in the works PRD's order: its cover file

@@ -91,6 +91,13 @@ export interface ArtifactViewerProps {
    *  (a share page, an attachment, an older version). Resolves to the new
    *  version. */
   readonly onPublish?: (bytes: Blob, summary: string) => Promise<number>;
+  /** Takes a cover the viewer drew of the version (a PNG: a PDF's first
+   *  page, a previewer's thumbnail; `source` ranks it in a room, an
+   *  installed previewer's above the app's own viewers'). The host decides
+   *  where it goes: a room version's thumbnail, a work version's stored
+   *  cover; absent where none is kept (a share page, an attachment). A
+   *  viewer sends at most one. */
+  readonly onCover?: (png: ArrayBuffer, source: "builtin" | "previewer") => void;
 }
 
 /** What a viewer reports as selected: the frame protocol's Selection

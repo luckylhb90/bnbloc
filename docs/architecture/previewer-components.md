@@ -184,7 +184,7 @@ are `postMessage` objects with a `type`:
 | host → frame | `preview.toolbar {id, value}` | a gesture: `null` (button), boolean (toggle), number (zoom) |
 | frame → host | `preview.state.send {state}` | JSON ≤ 16 KiB, relayed to the room as `artifact_state` (needs `liveState`) |
 | host → frame | `preview.state {state, actor}` | room live state (join snapshot and remote changes) |
-| frame → host | `preview.thumbnail {png: ArrayBuffer}` | PNG ≤ 512 KiB; stored via `PUT …/versions/{n}/thumbnail` only when the previewer declares `thumbnail` and the version has none |
+| frame → host | `preview.thumbnail {png: ArrayBuffer}` | PNG ≤ 512 KiB; taken only when the previewer declares `thumbnail`, and kept where the host says (`onCover`): in a room via `PUT …/versions/{n}/thumbnail` when the version has none, in a work's detail as the work version's stored cover (`docs/prd/2026-10-19-work-covers.md` §2.3) |
 | frame → host | `preview.error {message}` | ≤ 500 characters, shown over the frame |
 | frame → host | `preview.title {text}` | ≤ 120 characters, the frame's accessible title |
 | host → frame | `preview.units.request {id, file, bytes}` | Compare reads a version into units, in a hidden frame (needs `units`) |

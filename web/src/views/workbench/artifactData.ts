@@ -60,6 +60,18 @@ export function invalidateArtifacts(roomId: string, artifactId?: string): void {
   for (const l of detailListeners) l(null);
 }
 
+/** Stores a cover a viewer drew of a room version as its thumbnail
+ *  (docs/prd/2026-10-16-file-covers.md), when the version has none: the
+ *  room keeps the first and lets a higher-ranked source replace it. The one
+ *  place a viewer's cover reaches a room (ArtifactBody's default sink). */
+export async function storeRoomCover(roomId: string, artifactId: string, version: number, png: ArrayBuffer, source: "builtin" | "previewer"): Promise<void> {
+  const detail = await loadArtifactDetail(roomId, artifactId);
+  const meta = detail.versions.find((v) => v.version === version);
+  if (!meta || meta.thumbnail) return;
+  await api.putArtifactThumbnail(roomId, artifactId, version, png, source);
+  invalidateArtifacts(roomId, artifactId);
+}
+
 /** Artifact detail for a mounted consumer; `enabled` defers the fetch (a
  *  card off-screen). Keeps the last detail while a refetch runs. */
 export function useArtifactDetail(

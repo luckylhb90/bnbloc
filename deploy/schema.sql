@@ -919,6 +919,23 @@ CREATE TABLE IF NOT EXISTS content_favorites (
   KEY idx_content_favorites_component (component_id, tenant_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- A work version's stored cover (docs/prd/2026-10-19-work-covers.md §2.3):
+-- a version published without one gets one the first time someone opens
+-- it, drawn by a reader's viewer ('render') or by the image model for its
+-- author ('ai', which replaces a rendered one). The bytes are a blob.
+-- Deleted with the component.
+CREATE TABLE IF NOT EXISTS content_version_covers (
+  component_id  VARCHAR(64) NOT NULL,
+  version       VARCHAR(64) NOT NULL,
+  blob_key      VARCHAR(128) NOT NULL,
+  mime_type     VARCHAR(32) NOT NULL,
+  cover_rank    INT NOT NULL,
+  created_by    VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  created_at_ms BIGINT NOT NULL,
+  PRIMARY KEY (component_id, version),
+  KEY idx_content_version_covers_blob (blob_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- Interactive apps' documents (docs/prd/2026-10-12-interactive-apps.md
 -- §5.2): one shared table for every app (app_id = the site artifact's id),
 -- keyed app_id first, so one app's rows cluster together and every query is

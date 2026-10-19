@@ -32,6 +32,7 @@ var readerWrites = map[string]string{
 	"PUT /v1/content-components/{id}/favorite":                 "a member's own star on a component they see (it spends the cost budget)",
 	"POST /v1/content-components/{id}/versions/{version}/demo": "mints a read ticket for an app's demo the member may read (it spends the cost budget)",
 	"DELETE /v1/content-components/{id}/favorite":              "takes a member's own star back (it spends the cost budget)",
+	"PUT /v1/content-components/{id}/versions/{version}/cover": "stores a picture of a work version the member may read, kept only while the version has no cover",
 }
 
 // publicPrefixes are where a route may take no session: sign-in, the IdP's
