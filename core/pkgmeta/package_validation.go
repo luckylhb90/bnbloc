@@ -2,10 +2,8 @@ package pkgmeta
 
 import (
 	"fmt"
-	"regexp"
 	"slices"
 	"sort"
-	"strings"
 
 	"github.com/luckylhb90/bnbloc/internal/extreg"
 	"github.com/luckylhb90/bnbloc/internal/wire"
@@ -156,7 +154,7 @@ func validatePluginPackage(pkg Package) error {
 		}
 		seen[p] = true
 	}
-	return validateLocalSettings(pkg.LocalSettings)
+	return nil
 }
 
 // validatePluginJobs checks the launch fields the capabilities that are not
@@ -187,42 +185,6 @@ func validateNotifierPackage(pkg Package) error {
 		}
 	}
 	return validateEndpointPackage(pkg, "notifier", NotifierContractV1)
-}
-
-// Local settings schema bounds: a handful of short, form-sized fields.
-const (
-	maxLocalSettings      = 10
-	maxLocalSettingLabel  = 80
-	maxLocalSettingHelp   = 300
-	maxLocalSettingKeyLen = 40
-)
-
-var localSettingKeyRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
-
-// validateLocalSettings checks a plugin's desktop-local settings schema: at
-// most maxLocalSettings fields, unique identifier-shaped keys, and non-empty
-// bounded labels.
-func validateLocalSettings(fields []LocalSetting) error {
-	if len(fields) > maxLocalSettings {
-		return fmt.Errorf("localSettings: at most %d fields", maxLocalSettings)
-	}
-	seen := map[string]bool{}
-	for _, f := range fields {
-		if len(f.Key) > maxLocalSettingKeyLen || !localSettingKeyRE.MatchString(f.Key) {
-			return fmt.Errorf("localSettings: key %q must be an identifier of at most %d characters", f.Key, maxLocalSettingKeyLen)
-		}
-		if seen[f.Key] {
-			return fmt.Errorf("localSettings: duplicate key %q", f.Key)
-		}
-		seen[f.Key] = true
-		if l := len([]rune(strings.TrimSpace(f.Label))); l == 0 || l > maxLocalSettingLabel {
-			return fmt.Errorf("localSettings: %s label must be 1-%d characters", f.Key, maxLocalSettingLabel)
-		}
-		if len([]rune(f.Help)) > maxLocalSettingHelp {
-			return fmt.Errorf("localSettings: %s help must be at most %d characters", f.Key, maxLocalSettingHelp)
-		}
-	}
-	return nil
 }
 
 // validateEndpointPackage is the one shape rule of every endpoint component

@@ -2,6 +2,8 @@ package bridge
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -19,25 +21,29 @@ import (
 
 // MCP tool components (docs/prd/2026-10-12-experts-and-teams.md §6): the
 // gateway resolves the MCP tools of a job, the ones its content requires
-// and the ones its requester installed (the requester may use them; an
-// org-credential tool brings its organization connector's values;
+// and the ones its requester installed (the requester may use them, each
+// with its platform and organization setting values;
 // docs/prd/2026-10-17-browser-component.md §3.6). The bridge turns each
 // into an MCP server of the session's profile:
 //
 //   - stdio: the binary the member's desktop materialized and verified
 //     (MCPToolsDir/index.json must carry the gateway's sha256 pin for this
-//     platform), with the tool's args; the env values become its process
-//     environment.
-//   - http: the tool's URL with its auth header. An oauth tool's header is
-//     the member's own access token, from the sign-in their desktop ran
-//     (MCPSettingsDir/oauth/<tool>.json, 0600, refreshed by the desktop).
+//     platform), with the tool's args; its settings' values become its
+//     process environment (deliver.env) and its settings file
+//     (pkgmeta.ComponentSettingsFileEnv).
+//   - http: the tool's URL with its headers (pkgmeta.MCPHeaders). An oauth
+//     tool's bearer is the member's own access token, from the sign-in
+//     their desktop ran (MCPSignInsDir/<tool>.json, 0600, refreshed by the
+//     desktop).
 //
-// Member credentials are read from the member's own desktop settings
-// (MCPSettingsDir/<tool>.json, written 0600 by Settings → Tools) and only
-// for drives the member asked for themselves: a borrowed or platform drive
-// never lends the agent owner's accounts. What cannot be attached is
-// reported as missing on the job, never a failed turn. Values are secrets:
-// never logged, never in the session checksum, never in job data.
+// Member settings (docs/prd/2026-10-19-component-settings.md) are read from
+// the member's own desktop store (ComponentSettingsDir/mcp@<tool>.json,
+// written 0600 by Settings → Components) and only for drives the member
+// asked for themselves: a borrowed or platform drive never lends the agent
+// owner's values or accounts. A tool whose required settings are not all
+// set needs setup and is not attached. What cannot be attached is reported
+// as missing on the job, never a failed turn. Values are secrets: never
+// logged, never in the session checksum, never in job data.
 
 // mcpIndexFile is the desktop's index of materialized stdio tools.
 const mcpIndexFile = "index.json"
@@ -70,12 +76,13 @@ type jobMCP struct {
 
 // resolveMCP builds the MCP servers of a job's tools. refs are the packages
 // in effect (to tell whose content requires a tool); own reports a drive
-// the requester asked of their own agent. It returns the servers, the unmet
+// the requester asked of their own agent; tenantID is the job's
+// organization (whose values the tools carry). It returns the servers, the unmet
 // tools, and the packages that are not the agent owner's own and require a
 // stdio tool (they force the sandboxed drive). Platform content (a
 // built-in, Owner "") is no one else's: the platform signs both it and the
 // tool.
-func (b *Bridge) resolveMCP(tools []wire.ContentMCPTool, refs []wire.ContentRef, owner string, own bool) (jobMCP, []string, []string) {
+func (b *Bridge) resolveMCP(tools []wire.ContentMCPTool, refs []wire.ContentRef, owner, tenantID string, own bool) (jobMCP, []string, []string) {
 	var out jobMCP
 	var missing, foreign []string
 	byID := map[string]wire.ContentRef{}
@@ -99,9 +106,10 @@ func (b *Bridge) resolveMCP(tools []wire.ContentMCPTool, refs []wire.ContentRef,
 			unmet("invalid name")
 			continue
 		}
-		values, why := b.mcpValues(t, own)
+		values, why := b.mcpSettings(t, own)
+		var signIn string
 		if why == "" && t.Auth != nil && t.Auth.Scheme == pkgmeta.MCPAuthOAuth {
-			values, why = b.mcpOAuthToken(t, own)
+			signIn, why = b.mcpOAuthToken(t, own)
 		}
 		if why != "" {
 			unmet(why)
@@ -120,10 +128,18 @@ func (b *Bridge) resolveMCP(tools []wire.ContentMCPTool, refs []wire.ContentRef,
 			}
 			server.Type = corepkg.MCPStdio
 			server.Command, server.Args = b.toolCommand(t.Name, path, t.Args)
-			for _, e := range t.Env {
-				if v := values[e.Name]; v != "" {
-					server.Env = append(server.Env, corepkg.NameValue{Name: e.Name, Value: v})
+			for _, nv := range pkgmeta.SettingsEnv(t.Settings, values) {
+				server.Env = append(server.Env, corepkg.NameValue{Name: nv.Name, Value: nv.Value})
+			}
+			if len(t.Settings) > 0 {
+				file, err := b.writeSettingsFile(t.Name, tenantID, own, values)
+				if err != nil {
+					slog.Warn("bnbloc bridge MCP settings file not written",
+						"event", "bnbloc.bridge.mcp_settings_file_failed", "tool", t.Name, "error", err)
+					unmet("its settings file could not be written")
+					continue
 				}
+				server.Env = append(server.Env, corepkg.NameValue{Name: pkgmeta.ComponentSettingsFileEnv, Value: file})
 			}
 			if t.Credentials == pkgmeta.MCPCredentialsRoom {
 				// The session's room relay is its credential, granted when
@@ -147,16 +163,7 @@ func (b *Bridge) resolveMCP(tools []wire.ContentMCPTool, refs []wire.ContentRef,
 			}
 			server.Type = corepkg.MCPHTTP
 			server.URL = t.URL
-			if t.Auth != nil {
-				switch t.Auth.Scheme {
-				case pkgmeta.MCPAuthBearer:
-					server.Headers = []corepkg.NameValue{{Name: "Authorization", Value: "Bearer " + values[t.Auth.Env]}}
-				case pkgmeta.MCPAuthHeader:
-					server.Headers = []corepkg.NameValue{{Name: t.Auth.Header, Value: values[t.Auth.Env]}}
-				case pkgmeta.MCPAuthOAuth:
-					server.Headers = []corepkg.NameValue{{Name: "Authorization", Value: "Bearer " + values[mcpOAuthAccessKey]}}
-				}
-			}
+			server.Headers = mcpHeaders(t.Auth, t.Settings, values, signIn)
 		default:
 			unmet("unknown transport " + t.Transport)
 			continue
@@ -169,40 +176,121 @@ func (b *Bridge) resolveMCP(tools []wire.ContentMCPTool, refs []wire.ContentRef,
 	return out, missing, foreign
 }
 
-// mcpValues returns a tool's env values, or why they are not available.
-func (b *Bridge) mcpValues(t wire.ContentMCPTool, own bool) (map[string]string, string) {
-	if len(t.Env) == 0 {
+// mcpSettings returns a tool's effective setting values
+// (pkgmeta.EffectiveSettings over its platform and organization values and,
+// on the member's own drive, their member values), or why it needs setup.
+func (b *Bridge) mcpSettings(t wire.ContentMCPTool, own bool) (map[string]string, string) {
+	if len(t.Settings) == 0 {
 		return nil, ""
 	}
-	var values map[string]string
-	switch t.Credentials {
-	case pkgmeta.MCPCredentialsOrg:
-		values = t.Values
-	case pkgmeta.MCPCredentialsMember:
-		if !own {
-			return nil, "member credentials are not lent to someone else's drive"
-		}
-		values = b.mcpMemberSettings(t.Name)
-	default:
-		return nil, "unknown credentials source"
+	values := map[string]string{}
+	for k, v := range t.Values {
+		values[k] = v
 	}
-	if unset := pkgmeta.UnsetEnv(t.RequiredEnv(), values); len(unset) > 0 {
-		if t.Credentials == pkgmeta.MCPCredentialsMember {
-			return nil, "set " + strings.Join(unset, ", ") + " in Settings → Tools"
+	member := pkgmeta.SettingsOfScope(t.Settings, pkgmeta.SettingScopeMember)
+	if own && len(member) > 0 {
+		stored := b.mcpMemberSettings(t.Name)
+		for _, s := range member {
+			values[s.Key] = stored[s.Key]
 		}
-		return nil, "its organization connector is not configured"
 	}
-	return values, ""
+	unset := pkgmeta.UnsetSettings(t.Settings, values)
+	if len(unset) == 0 {
+		return pkgmeta.EffectiveSettings(t.Settings, values), ""
+	}
+	var labels []string
+	memberUnset := false
+	for _, s := range t.Settings {
+		if slices.Contains(unset, s.Key) {
+			labels = append(labels, s.Label)
+			memberUnset = memberUnset || s.Scope == pkgmeta.SettingScopeMember
+		}
+	}
+	switch {
+	case memberUnset && !own:
+		return nil, "member settings are not lent to someone else's drive"
+	case memberUnset:
+		return nil, "needs setup: set " + strings.Join(labels, ", ") + " in Settings → Components"
+	}
+	return nil, "needs setup: an admin has not set " + strings.Join(labels, ", ")
 }
 
-// mcpOAuthDir is the subdirectory of MCPSettingsDir holding the member's
-// OAuth sign-ins, one <tool>.json each (apart from the env settings files,
-// so no tool name can collide with another tool's sign-in).
-const mcpOAuthDir = "oauth"
+// mcpHeaders is the request headers an http MCP tool gets from its
+// effective values: the auth block's credential (Authorization: Bearer
+// <value>, or <header>: <value>; an oauth tool's bearer is the member's
+// sign-in) and each setting's deliver.header or deliver.bearer, for every
+// setting with a value (pkgmeta validated that no two name one header).
+func mcpHeaders(auth *wire.ComponentMCPHTTPAuth, decl []wire.ComponentSetting, values map[string]string, signIn string) []corepkg.NameValue {
+	var out []corepkg.NameValue
+	bearer := func(v string) corepkg.NameValue {
+		return corepkg.NameValue{Name: "Authorization", Value: "Bearer " + v}
+	}
+	if auth != nil {
+		switch v := values[auth.Setting]; {
+		case auth.Scheme == pkgmeta.MCPAuthOAuth && signIn != "":
+			out = append(out, bearer(signIn))
+		case auth.Scheme == pkgmeta.MCPAuthBearer && v != "":
+			out = append(out, bearer(v))
+		case auth.Scheme == pkgmeta.MCPAuthHeader && v != "":
+			out = append(out, corepkg.NameValue{Name: auth.Header, Value: v})
+		}
+	}
+	for _, s := range decl {
+		v := values[s.Key]
+		if s.Deliver == nil || v == "" {
+			continue
+		}
+		switch {
+		case s.Deliver.Bearer:
+			out = append(out, bearer(v))
+		case s.Deliver.Header != "":
+			out = append(out, corepkg.NameValue{Name: s.Deliver.Header, Value: v})
+		}
+	}
+	return out
+}
 
-// mcpOAuthAccessKey keys the access token in the values mcpOAuthToken
-// returns (never an env name: env names are upper-case).
-const mcpOAuthAccessKey = "access_token"
+// mcpMemberSettingsFile is the desktop's store of a tool's member values in
+// ComponentSettingsDir: "<kind>@<name>.json", the desktop's file stem of a
+// component (component_settings.rs).
+func mcpMemberSettingsFile(dir, name string) string {
+	return filepath.Join(dir, "mcp@"+name+".json")
+}
+
+// settingsFilesDir holds the settings files the bridge writes for the stdio
+// tools it starts: under StateDir (the member's own directory), else a
+// private directory of this process.
+func (b *Bridge) settingsFilesDir() (string, error) {
+	if dir := strings.TrimSpace(b.cfg.StateDir); dir != "" {
+		return filepath.Join(dir, "component-settings"), nil
+	}
+	b.settingsTmp.Do(func() {
+		b.settingsTmpDir, b.settingsTmpErr = os.MkdirTemp("", "bnbloc-bridge-settings-")
+	})
+	return b.settingsTmpDir, b.settingsTmpErr
+}
+
+// writeSettingsFile writes a stdio tool's settings file (every effective
+// value, secrets included; owner-only) and returns its path. A tool's file
+// is one per organization and per drive kind (the member's own values, or
+// none for a lent drive), rewritten whenever a session is set up, so a
+// running server reads the current values at its next start.
+func (b *Bridge) writeSettingsFile(name, tenantID string, own bool, values map[string]string) (string, error) {
+	dir, err := b.settingsFilesDir()
+	if err != nil {
+		return "", err
+	}
+	variant := "lent"
+	if own {
+		variant = "own"
+	}
+	sum := sha256.Sum256([]byte(variant + ":" + tenantID))
+	path := filepath.Join(dir, name+"-"+hex.EncodeToString(sum[:6])+".json")
+	if values == nil {
+		values = map[string]string{}
+	}
+	return path, writeFileAtomic(path, values)
+}
 
 // mcpOAuthExpirySlack treats a token about to expire as expired: a session
 // created now must not start with a token that dies in its first request.
@@ -215,45 +303,45 @@ type mcpOAuthFile struct {
 }
 
 // mcpOAuthToken returns the member's access token of an oauth tool, or why
-// there is none. Like member credentials it is used only for drives the
+// there is none. Like member settings it is used only for drives the
 // member asked for themselves.
-func (b *Bridge) mcpOAuthToken(t wire.ContentMCPTool, own bool) (map[string]string, string) {
+func (b *Bridge) mcpOAuthToken(t wire.ContentMCPTool, own bool) (string, string) {
 	if !own {
-		return nil, "member sign-ins are not lent to someone else's drive"
+		return "", "member sign-ins are not lent to someone else's drive"
 	}
-	signIn := "sign in to " + t.Name + " in Settings → Tools"
-	dir := strings.TrimSpace(b.cfg.MCPSettingsDir)
+	signIn := "sign in to " + t.Name + " in Settings → Components"
+	dir := strings.TrimSpace(b.cfg.MCPSignInsDir)
 	if dir == "" {
-		return nil, signIn
+		return "", signIn
 	}
-	raw, err := os.ReadFile(filepath.Join(dir, mcpOAuthDir, t.Name+".json"))
+	raw, err := os.ReadFile(filepath.Join(dir, t.Name+".json"))
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			slog.Warn("bnbloc bridge MCP sign-in unreadable",
 				"event", "bnbloc.bridge.mcp_oauth_unreadable", "tool", t.Name, "error", err)
 		}
-		return nil, signIn
+		return "", signIn
 	}
 	var f mcpOAuthFile
 	if err := json.Unmarshal(raw, &f); err != nil || strings.TrimSpace(f.AccessToken) == "" {
 		slog.Warn("bnbloc bridge MCP sign-in invalid",
 			"event", "bnbloc.bridge.mcp_oauth_invalid", "tool", t.Name)
-		return nil, signIn
+		return "", signIn
 	}
 	if f.ExpiresAtMs > 0 && time.Now().Add(mcpOAuthExpirySlack).UnixMilli() >= f.ExpiresAtMs {
-		return nil, "its sign-in expired: sign in to " + t.Name + " again in Settings → Tools"
+		return "", "its sign-in expired: sign in to " + t.Name + " again in Settings → Components"
 	}
-	return map[string]string{mcpOAuthAccessKey: strings.TrimSpace(f.AccessToken)}, ""
+	return strings.TrimSpace(f.AccessToken), ""
 }
 
 // mcpMemberSettings reads the member's own values of a tool (none when the
 // desktop handed no settings dir or nothing is stored).
 func (b *Bridge) mcpMemberSettings(name string) map[string]string {
-	dir := strings.TrimSpace(b.cfg.MCPSettingsDir)
+	dir := strings.TrimSpace(b.cfg.ComponentSettingsDir)
 	if dir == "" {
 		return nil
 	}
-	raw, err := os.ReadFile(filepath.Join(dir, name+".json"))
+	raw, err := os.ReadFile(mcpMemberSettingsFile(dir, name))
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			slog.Warn("bnbloc bridge MCP settings unreadable",

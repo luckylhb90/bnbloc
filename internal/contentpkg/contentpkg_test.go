@@ -130,9 +130,9 @@ func TestValidateRefuses(t *testing.T) {
 	tools := Options{MCPTool: func(n string) (MCPToolInfo, bool) {
 		switch n {
 		case "browser":
-			return MCPToolInfo{Transport: "stdio", Env: []string{"BROWSER_TOKEN"}}, true
+			return MCPToolInfo{Transport: "stdio", Settings: []string{"chrome"}}, true
 		case "search":
-			return MCPToolInfo{Transport: "http", Host: "tools.example.com", Env: []string{"TOOLS_TOKEN"}}, true
+			return MCPToolInfo{Transport: "http", Host: "tools.example.com", Settings: []string{"token"}}, true
 		}
 		return MCPToolInfo{}, false
 	}}
@@ -143,10 +143,10 @@ func TestValidateRefuses(t *testing.T) {
 		extra map[string]any
 		want  string
 	}{
-		"known stdio tool":         {mcpReq([]map[string]any{{"name": "browser", "env": []string{"BROWSER_TOKEN"}}}, "mcp.stdio"), ""},
+		"known stdio tool":         {mcpReq([]map[string]any{{"name": "browser", "settings": []string{"chrome"}}}, "mcp.stdio"), ""},
 		"known http tool":          {mcpReq([]map[string]any{{"name": "search"}}, "mcp.http:tools.example.com"), ""},
 		"unknown tool":             {mcpReq([]map[string]any{{"name": "ghost"}}, "mcp.stdio"), "not an MCP tool component"},
-		"undeclared env":           {mcpReq([]map[string]any{{"name": "browser", "env": []string{"OTHER"}}}, "mcp.stdio"), "not one of its variables"},
+		"undeclared setting":       {mcpReq([]map[string]any{{"name": "browser", "settings": []string{"other"}}}, "mcp.stdio"), "not one of its settings"},
 		"stdio without permission": {mcpReq([]map[string]any{{"name": "browser"}}, "scripts"), `needs the "mcp.stdio" permission`},
 		"http wrong host":          {mcpReq([]map[string]any{{"name": "search"}}, "mcp.http:other.example.com"), `"mcp.http:tools.example.com"`},
 		"named twice":              {mcpReq([]map[string]any{{"name": "browser"}, {"name": "browser"}}, "mcp.stdio"), "named twice"},
@@ -170,7 +170,7 @@ func TestValidateRefuses(t *testing.T) {
 		"dotted and underscored tool": {map[string]any{"name": "acme_search.v2"}, ""},
 		"reserved room tools":         {map[string]any{"name": "bnbloc-room"}, "reserved"},
 		"upper-case tool":             {map[string]any{"name": "Acme"}, "MCP tool name"},
-		"lower-case env":              {map[string]any{"name": "acme", "env": []string{"token"}}, "invalid env name"},
+		"bad setting key":             {map[string]any{"name": "acme", "settings": []string{"API_TOKEN"}}, "invalid setting key"},
 	} {
 		_, err := Validate(bundle(t, expertFiles(t, mcpReq([]map[string]any{c.req}, "mcp.stdio"))), "", Options{})
 		switch {

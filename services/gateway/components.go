@@ -77,10 +77,10 @@ func (s *Service) handleComponents(w http.ResponseWriter, r *http.Request, calle
 			PublishedAtMs:   rec.InstalledAtMs,
 			MemberInstalls:  memberCounts[componentKey(rec.Kind, rec.Name)],
 		}
+		s.catalogSettings(r.Context(), claims, rec, cfg, &component)
 		if vis.Installed {
 			perms := cfg.EffectivePermissions(rec)
 			component.Permissions = &perms
-			component.LocalSettings = cfg.LocalSettings
 			component.Artifacts = cfg.Artifacts
 			component.Endpoint = cfg.Endpoint
 			component.Sidecar = cfg.Sidecar
@@ -90,7 +90,7 @@ func (s *Service) handleComponents(w http.ResponseWriter, r *http.Request, calle
 				component.Previewer = s.previewerCatalog(claims, rec, cfg)
 			}
 			if isMCP(rec) {
-				component.MCP = s.mcpCatalog(r.Context(), claims, rec, cfg)
+				component.MCP = mcpCatalog(cfg)
 			}
 			if cfg.Protocol.Min != "" || cfg.Protocol.Max != "" {
 				proto := componentProtocol(cfg.Protocol)

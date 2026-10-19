@@ -3,6 +3,7 @@ package pkgmeta
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode/utf8"
 )
@@ -29,25 +30,17 @@ const MCPContractV1 = "bnbloc.mcp.contract/v1"
 // supervises, no endpoint.
 const RuntimeStdio Runtime = "stdio"
 
-// Where an MCP component's env values come from (MCP.Credentials).
-const (
-	// MCPCredentialsMember: each member enters them on their own desktop
-	// (Settings → Tools); they never leave that machine.
-	MCPCredentialsMember = "member"
-	// MCPCredentialsOrg: an org admin configures one connector per
-	// organization, stored sealed server-side.
-	MCPCredentialsOrg = "org"
-	// MCPCredentialsRoom: the room the agent works in is the credential. The
-	// package declares no env; the bridge gives the server the room relay
-	// (RoomRelayURLEnv, RoomRelayTokenEnv): a loopback address and the
-	// agent session's bearer, through which the server calls the gateway
-	// routes that act as the requester of the turn being driven. The
-	// gateway session never reaches the server. Stdio servers only.
-	MCPCredentialsRoom = "room"
-)
+// MCPCredentialsRoom is the one value of MCP.Credentials: the room the
+// agent works in is the credential. The bridge gives the server the room
+// relay (RoomRelayURLEnv, RoomRelayTokenEnv): a loopback address and the
+// agent session's bearer, through which the server calls the gateway routes
+// that act as the requester of the turn being driven. The gateway session
+// never reaches the server. Stdio servers only. Everything else a tool
+// needs is a setting of its own (settings.go), of any scope.
+const MCPCredentialsRoom = "room"
 
 // The room relay's variables (MCPCredentialsRoom), set by the bridge. They
-// carry the reserved prefix: no package declares them.
+// carry the reserved prefix: no setting delivers them.
 const (
 	RoomRelayURLEnv   = "BNBLOC_ROOM_RELAY_URL"
 	RoomRelayTokenEnv = "BNBLOC_ROOM_RELAY_TOKEN"
@@ -68,16 +61,13 @@ const (
 
 // MCP bounds: a display catalog, not the server's schema.
 const (
-	maxMCPTools        = 64
-	maxMCPToolDesc     = 1024
-	maxMCPEnv          = 16
-	maxMCPEnvDesc      = 300
-	maxMCPArgs         = 32
-	maxMCPArgLen       = 1024
-	mcpReservedEnvPref = "BNBLOC_"
-	maxMCPOAuthScopes  = 32
-	maxMCPOAuthScope   = 128
-	maxMCPClientID     = 256
+	maxMCPTools       = 64
+	maxMCPToolDesc    = 1024
+	maxMCPArgs        = 32
+	maxMCPArgLen      = 1024
+	maxMCPOAuthScopes = 32
+	maxMCPOAuthScope  = 128
+	maxMCPClientID    = 256
 )
 
 var (
@@ -107,31 +97,6 @@ func ValidMCPToolName(name string) error {
 	return nil
 }
 
-// RequiredEnv lists the variables a tool declares required.
-func RequiredEnv(env []MCPEnv) []string {
-	var out []string
-	for _, e := range env {
-		if e.Required {
-			out = append(out, e.Name)
-		}
-	}
-	return out
-}
-
-// UnsetEnv is the one "required env is set" rule (an org connector's
-// status and save, a job's tool resolution, the bridge attaching a tool):
-// the names in required, in order, whose value is blank (absent, empty or
-// whitespace). A value that would not reach the server is not set.
-func UnsetEnv(required []string, values map[string]string) []string {
-	var unset []string
-	for _, name := range required {
-		if strings.TrimSpace(values[name]) == "" {
-			unset = append(unset, name)
-		}
-	}
-	return unset
-}
-
 func validateMCPPackage(pkg Package) error {
 	if err := ValidMCPToolName(pkg.Name); err != nil {
 		return err
@@ -146,8 +111,8 @@ func validateMCPPackage(pkg Package) error {
 	if err := validateMCPTools(m.Tools); err != nil {
 		return err
 	}
-	if err := validateMCPEnv(m); err != nil {
-		return err
+	if m.Credentials != "" && m.Credentials != MCPCredentialsRoom {
+		return fmt.Errorf("mcp.credentials must be %q or absent, got %q (a tool's own values are settings)", MCPCredentialsRoom, m.Credentials)
 	}
 	switch pkg.Runtime {
 	case RuntimeStdio:
@@ -190,7 +155,7 @@ func validateMCPPackage(pkg Package) error {
 		if m.Stdio != nil {
 			return fmt.Errorf(`mcp runtime "endpoint" must not declare mcp.stdio`)
 		}
-		if err := validateMCPHTTP(m); err != nil {
+		if err := validateMCPHTTP(m, pkg.Settings); err != nil {
 			return err
 		}
 	default:
@@ -222,49 +187,12 @@ func validateMCPTools(tools []MCPTool) error {
 	return nil
 }
 
-func validateMCPEnv(m MCP) error {
-	if len(m.Env) > maxMCPEnv {
-		return fmt.Errorf("mcp.env: at most %d variables", maxMCPEnv)
-	}
-	seen := map[string]bool{}
-	for i, e := range m.Env {
-		if !ValidEnvName(e.Name) {
-			return fmt.Errorf("mcp.env[%d].name %q must be an upper-case identifier", i, e.Name)
-		}
-		if strings.HasPrefix(e.Name, mcpReservedEnvPref) {
-			return fmt.Errorf("mcp.env[%d].name %q: the %s prefix is reserved", i, e.Name, mcpReservedEnvPref)
-		}
-		if seen[e.Name] {
-			return fmt.Errorf("mcp.env: duplicate variable %q", e.Name)
-		}
-		seen[e.Name] = true
-		if utf8.RuneCountInString(e.Description) > maxMCPEnvDesc || strings.ContainsAny(e.Description, "\r\n") {
-			return fmt.Errorf("mcp.env[%d].description must be one line of at most %d characters", i, maxMCPEnvDesc)
-		}
-	}
-	switch m.Credentials {
-	case "":
-		if len(m.Env) > 0 {
-			return fmt.Errorf("mcp.credentials is required with mcp.env (%q or %q)", MCPCredentialsMember, MCPCredentialsOrg)
-		}
-	case MCPCredentialsMember, MCPCredentialsOrg:
-		if len(m.Env) == 0 {
-			return fmt.Errorf("mcp.credentials needs mcp.env naming the variables")
-		}
-	case MCPCredentialsRoom:
-		if len(m.Env) > 0 {
-			return fmt.Errorf("mcp.credentials %q takes no mcp.env: the bridge sets %s and %s", MCPCredentialsRoom, RoomRelayURLEnv, RoomRelayTokenEnv)
-		}
-	default:
-		return fmt.Errorf("mcp.credentials must be %q, %q or %q, got %q", MCPCredentialsMember, MCPCredentialsOrg, MCPCredentialsRoom, m.Credentials)
-	}
-	return nil
-}
-
-// validateMCPHTTP checks an endpoint server's auth: the header value comes
-// from one declared env, and an endpoint takes no other env (its only
-// credential is the header).
-func validateMCPHTTP(m MCP) error {
+// validateMCPHTTP checks an endpoint server's credential and that every
+// setting reaches it: the server runs elsewhere, so a value it gets is a
+// request header, the auth block's (a bearer or a named header carrying
+// the setting it names) or a setting's own deliver.header or
+// deliver.bearer.
+func validateMCPHTTP(m MCP, settings []Setting) error {
 	auth := MCPHTTPAuth{Scheme: MCPAuthNone}
 	if m.HTTP != nil {
 		auth = m.HTTP.Auth
@@ -272,44 +200,60 @@ func validateMCPHTTP(m MCP) error {
 	if auth.Scheme != MCPAuthOAuth && (auth.ClientID != "" || len(auth.Scopes) > 0) {
 		return fmt.Errorf(`mcp.http.auth clientId and scopes belong to scheme "oauth"`)
 	}
+	bearer := slices.ContainsFunc(settings, func(s Setting) bool { return s.Deliver != nil && s.Deliver.Bearer })
 	switch auth.Scheme {
 	case MCPAuthOAuth:
-		return validateMCPOAuth(m, auth)
+		if err := validateMCPOAuth(auth); err != nil {
+			return err
+		}
+		if bearer {
+			return fmt.Errorf(`mcp.http.auth scheme "oauth": the bearer is the member's sign-in, no setting is delivered as one`)
+		}
 	case MCPAuthNone:
-		if auth.Env != "" || auth.Header != "" {
-			return fmt.Errorf(`mcp.http.auth scheme "none" takes no env or header`)
+		if auth.Setting != "" || auth.Header != "" {
+			return fmt.Errorf(`mcp.http.auth scheme "none" takes no setting or header`)
 		}
-		if len(m.Env) > 0 {
-			return fmt.Errorf("mcp.env: an endpoint server without auth takes no env")
-		}
-		return nil
-	case MCPAuthBearer:
-		if auth.Header != "" {
+	case MCPAuthBearer, MCPAuthHeader:
+		if auth.Scheme == MCPAuthBearer && auth.Header != "" {
 			return fmt.Errorf(`mcp.http.auth scheme "bearer" takes no header (it is Authorization)`)
 		}
-	case MCPAuthHeader:
-		if !mcpHeaderRE.MatchString(auth.Header) {
-			return fmt.Errorf("mcp.http.auth.header %q must be a header name", auth.Header)
+		if auth.Scheme == MCPAuthHeader {
+			if err := validMCPHeader(auth.Header); err != nil {
+				return fmt.Errorf("mcp.http.auth.header: %w", err)
+			}
+			for _, s := range settings {
+				if s.Deliver != nil && strings.EqualFold(s.Deliver.Header, auth.Header) {
+					return fmt.Errorf("mcp.http.auth.header %q is also settings.%s's header", auth.Header, s.Key)
+				}
+			}
+		}
+		if auth.Scheme == MCPAuthBearer && bearer {
+			return fmt.Errorf(`mcp.http.auth scheme "bearer" is the bearer: no setting is delivered as another`)
+		}
+		i := slices.IndexFunc(settings, func(s Setting) bool { return s.Key == auth.Setting })
+		if i < 0 {
+			return fmt.Errorf("mcp.http.auth.setting must name the setting carrying the credential, got %q", auth.Setting)
+		}
+		if settings[i].Deliver != nil {
+			return fmt.Errorf("settings.%s is delivered by mcp.http.auth: it declares no deliver", auth.Setting)
 		}
 	default:
 		return fmt.Errorf("mcp.http.auth.scheme must be none, bearer, header or oauth, got %q", auth.Scheme)
 	}
-	if len(m.Env) != 1 || m.Env[0].Name != auth.Env {
-		return fmt.Errorf("mcp.http.auth.env must name the one declared mcp.env variable (an endpoint server's only credential is its auth header)")
+	for _, s := range settings {
+		if s.Key != auth.Setting && (s.Deliver == nil || (s.Deliver.Header == "" && !s.Deliver.Bearer)) {
+			return fmt.Errorf("settings.%s never reaches an http MCP tool: deliver it in a header (deliver.header, deliver.bearer or mcp.http.auth.setting)", s.Key)
+		}
 	}
 	return nil
 }
 
 // validateMCPOAuth checks an oauth endpoint: each member signs in for
-// themselves, so it takes no env, header or org connector (credentials are
-// always the member's own), and the optional client id and scopes are
-// plain OAuth values.
-func validateMCPOAuth(m MCP, auth MCPHTTPAuth) error {
-	if auth.Env != "" || auth.Header != "" {
-		return fmt.Errorf(`mcp.http.auth scheme "oauth" takes no env or header (each member signs in)`)
-	}
-	if m.Credentials != "" || len(m.Env) > 0 {
-		return fmt.Errorf(`mcp.http.auth scheme "oauth" takes no mcp.env or mcp.credentials: each member signs in for themselves, never through an organization connector`)
+// themselves, so it names no setting or header, and the optional client id
+// and scopes are plain OAuth values.
+func validateMCPOAuth(auth MCPHTTPAuth) error {
+	if auth.Setting != "" || auth.Header != "" {
+		return fmt.Errorf(`mcp.http.auth scheme "oauth" takes no setting or header (each member signs in)`)
 	}
 	if len(auth.ClientID) > maxMCPClientID || (auth.ClientID != "" && !mcpScopeRE.MatchString(auth.ClientID)) {
 		return fmt.Errorf("mcp.http.auth.clientId must be printable text of at most %d characters without spaces", maxMCPClientID)

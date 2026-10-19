@@ -1,5 +1,5 @@
 // Package sealbox seals secrets bnbloc must store and later hand back in
-// clear (an organization's MCP tool connector credentials), as opposed to
+// clear (a component's platform and organization settings), as opposed to
 // secrets it only verifies (internal/secrettoken keeps a hash). A Box is
 // AES-256-GCM under one deployment key; every sealed value is bound to the
 // additional data the caller names (its storage key), so a sealed value

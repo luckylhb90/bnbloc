@@ -47,10 +47,10 @@ func stdioMCPDraft(key string) map[string]any {
 	return map[string]any{
 		"name": "codeword", "version": "1.0.0", "publisher": "acme", "runtime": "stdio",
 		"mcp": map[string]any{
-			"tools":       []any{map[string]any{"name": "get_codeword", "description": "Answers the codeword."}},
-			"env":         []any{map[string]any{"name": "CODEWORD_SALT", "secret": true, "required": true}},
-			"credentials": "member", "stdio": map[string]any{"args": []any{"--stdio"}},
+			"tools": []any{map[string]any{"name": "get_codeword", "description": "Answers the codeword."}},
+			"stdio": map[string]any{"args": []any{"--stdio"}},
 		},
+		"settings":  []any{map[string]any{"key": "salt", "label": "Salt", "type": "secret", "scope": "member", "required": true, "deliver": map[string]any{"env": "CODEWORD_SALT"}}},
 		"artifacts": map[string]any{"darwin-arm64": map[string]any{"key": key}},
 	}
 }
@@ -83,7 +83,7 @@ func TestBuildMCPPackageStdio(t *testing.T) {
 	}
 	a := pkg.Artifacts["darwin-arm64"]
 	if pkg.Kind != pkgmeta.KindMCPPackageV1 || pkg.Contract != pkgmeta.MCPContractV1 || "sha256/"+a.SHA256 != key ||
-		a.URL != g.srv.URL+"/v1/artifacts/"+key || pkg.MCP.Stdio.Args[0] != "--stdio" {
+		a.URL != g.srv.URL+"/v1/artifacts/"+key || pkg.MCP.Stdio.Args[0] != "--stdio" || pkg.Settings[0].Deliver.Env != "CODEWORD_SALT" {
 		t.Fatalf("pkg = %+v", pkg)
 	}
 	if err := pkgmeta.ValidatePackage(pkg); err != nil {
@@ -99,9 +99,10 @@ func TestBuildMCPPackageEndpoint(t *testing.T) {
 		"name": "search", "version": "2.0.0", "publisher": "acme", "runtime": "endpoint",
 		"endpoint": map[string]any{"baseUrl": "https://tools.example.com/mcp"}, "permissions": map[string]any{"network": []any{"tools.example.com"}},
 		"mcp": map[string]any{
-			"tools": []any{map[string]any{"name": "search"}}, "env": []any{map[string]any{"name": "TOOLS_TOKEN", "secret": true, "required": true}},
-			"credentials": "org", "http": map[string]any{"auth": map[string]any{"scheme": "bearer", "env": "TOOLS_TOKEN"}},
+			"tools": []any{map[string]any{"name": "search"}},
+			"http":  map[string]any{"auth": map[string]any{"scheme": "bearer", "setting": "token"}},
 		},
+		"settings": []any{map[string]any{"key": "token", "label": "API token", "type": "secret", "scope": "org", "required": true}},
 	}
 	status, raw := g.json("sam", http.MethodPost, "/v1/platform/mcp-packages", draft)
 	if status != http.StatusOK {
@@ -118,8 +119,8 @@ func TestBuildMCPPackageRefusals(t *testing.T) {
 	g := mcpFormGateway(t)
 	key := stageBinary(t, g, "codeword binary")
 	missing := "sha256/" + strings.Repeat("b", 64)
-	noCreds := stdioMCPDraft(key)
-	delete(noCreds["mcp"].(map[string]any), "credentials")
+	badSetting := stdioMCPDraft(key)
+	badSetting["settings"].([]any)[0].(map[string]any)["deliver"] = map[string]any{"env": "LD_PRELOAD"}
 	noBinary := stdioMCPDraft(key)
 	delete(noBinary, "artifacts")
 	badKey := stdioMCPDraft("not-a-key")
@@ -129,7 +130,7 @@ func TestBuildMCPPackageRefusals(t *testing.T) {
 		draft map[string]any
 		want  string
 	}{
-		"no credentials":    {noCreds, "mcp.credentials is required"},
+		"hijacking setting": {badSetting, "changes how a process runs"},
 		"stdio no binary":   {noBinary, "at least one platform binary"},
 		"bad key":           {badKey, "sha256/<hex>"},
 		"unknown field":     {unknownField, "invalid json body"},

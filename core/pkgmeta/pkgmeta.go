@@ -53,11 +53,11 @@ type Package struct {
 	Contract string   `json:"contract,omitempty"`
 	Hooks    []string `json:"hooks,omitempty"`
 
-	// Plugin-only payload: the settings a member fills in on their desktop
-	// for this plugin (e.g. their own bot's credentials). The values never
-	// leave the member's machine: the desktop stores them locally and hands
-	// them to the sidecar at launch (docs/notifications.md, "Personal bots").
-	LocalSettings []LocalSetting `json:"localSettings,omitempty"`
+	// Settings the component declares (settings.go,
+	// docs/prd/2026-10-19-component-settings.md): who sets each, for whom,
+	// and how its value reaches the component. Plugins and MCP tools only
+	// (the field-to-kinds table).
+	Settings []Setting `json:"settings,omitempty"`
 
 	// Sandbox-only payload: the guest profile of the one machine the desktop
 	// prepares (prewarms) on a member's computer. The image is the
@@ -69,8 +69,8 @@ type Package struct {
 	// bundle entry, rank, capabilities and toolbar (previewer_validation.go).
 	Previewer *Previewer `json:"previewer,omitempty"`
 
-	// MCP-only payload: the tools, env requirements, credentials source and
-	// runtime details of an MCP tool component (mcp_validation.go).
+	// MCP-only payload: the tools, credentials source and runtime details
+	// of an MCP tool component (mcp_validation.go).
 	MCP *MCP `json:"mcp,omitempty"`
 }
 
@@ -82,7 +82,6 @@ type (
 	Endpoint             = wire.ComponentEndpoint
 	Artifact             = wire.ComponentArtifact
 	Permissions          = wire.ComponentPermissions
-	LocalSetting         = wire.ComponentLocalSetting
 	Sidecar              = wire.ComponentSidecar
 	SidecarFile          = wire.ComponentSidecarFile
 	Guest                = wire.ComponentGuest
@@ -91,7 +90,6 @@ type (
 	PreviewerToolbarItem = wire.ComponentPreviewerToolbarItem
 	MCP                  = wire.ComponentMCP
 	MCPTool              = wire.ComponentMCPTool
-	MCPEnv               = wire.ComponentMCPEnv
 	MCPStdio             = wire.ComponentMCPStdio
 	MCPHTTP              = wire.ComponentMCPHTTP
 	MCPHTTPAuth          = wire.ComponentMCPHTTPAuth
@@ -185,7 +183,10 @@ func validatePackage(pkg Package) error {
 	if err := validateSidecarShape(pkg); err != nil {
 		return err
 	}
-	return validate(pkg)
+	if err := validate(pkg); err != nil {
+		return err
+	}
+	return validateSettings(pkg)
 }
 
 func validatePackageShell(pkg Package) error {

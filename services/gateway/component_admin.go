@@ -102,7 +102,7 @@ func (s *Service) handleUninstallComponent(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	s.afterNotifierUninstall(r.Context(), rec)
-	s.afterMCPUninstall(r.Context(), rec)
+	s.afterSettingsUninstall(r.Context(), rec)
 	s.componentsChanged(r.Context(), "", "")
 	w.WriteHeader(http.StatusNoContent)
 }

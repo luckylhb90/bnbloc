@@ -96,8 +96,9 @@ func TestRouteLabel(t *testing.T) {
 		"/internal/v1/rooms/r/dispatch":                    "/internal/v1/rooms/:id/dispatch",
 		"/v1/rooms/r/dispatch":                             "/v1/rooms/:id/dispatch",
 		"/v1/rooms/r/team-plan":                            "/v1/rooms/:id/team-plan",
-		"/v1/tenant/mcp-connectors":                        "/v1/tenant/mcp-connectors",
-		"/v1/tenant/mcp-connectors/effective":              "/v1/tenant/mcp-connectors/:id",
+		"/v1/org/components/notes/settings":                "/v1/org/components/:id/settings",
+		"/v1/platform/components/settings/settings":        "/v1/platform/components/:id/settings",
+		"/v1/components/notes/settings/resolved":           "/v1/components/:id/settings/resolved",
 		// content sharing and approval
 		"/v1/content-components/cc_1/shares":           "/v1/content-components/:id/shares",
 		"/v1/content-components/cc_1/update":           "/v1/content-components/:id/update",

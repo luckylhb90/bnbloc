@@ -2,7 +2,6 @@ package pkgmeta
 
 import (
 	"regexp"
-	"slices"
 	"strings"
 	"testing"
 
@@ -29,16 +28,6 @@ func TestMCPToolNameRule(t *testing.T) {
 	}
 }
 
-func TestUnsetEnv(t *testing.T) {
-	values := map[string]string{"A": "x", "B": "", "C": "  \t", "D": "y"}
-	if got := UnsetEnv([]string{"A", "B", "C", "E", "D"}, values); !slices.Equal(got, []string{"B", "C", "E"}) {
-		t.Fatalf("UnsetEnv = %v (a blank value is not set)", got)
-	}
-	if got := RequiredEnv([]MCPEnv{{Name: "A", Required: true}, {Name: "B"}, {Name: "C", Required: true}}); !slices.Equal(got, []string{"A", "C"}) {
-		t.Fatalf("RequiredEnv = %v", got)
-	}
-}
-
 func TestEnvNameRule(t *testing.T) {
 	for name, ok := range map[string]bool{"TOKEN": true, "A_1": true, "token": false, "_A": false, "1A": false, "A-B": false, "": false} {
 		if ValidEnvName(name) != ok {
@@ -59,19 +48,19 @@ func TestPackageVersionIsStrictSemver(t *testing.T) {
 	}
 }
 
-// The MCP name, env name, required-env and semver rules each have one
+// The MCP name, env name, needs-setup and semver rules each have one
 // owner: no other non-test file re-implements them.
 func TestPackageRulesSingleOwner(t *testing.T) {
 	forbidden := []struct {
 		re   *regexp.Regexp
 		what string
 	}{
-		{regexp.MustCompile(`\.Required && [^\n]*(== ""|!= "")`), "a required-env check (pkgmeta.UnsetEnv)"},
+		{regexp.MustCompile(`\.Required && [^\n]*(== ""|!= "")`), "a required-setting check (pkgmeta.UnsetSettings)"},
 		{regexp.MustCompile(`[!=]= (roomtools\.)?(ServerName|ReservedMCPServerName)\b`), "the reserved MCP name (pkgmeta.ValidMCPToolName)"},
 		{regexp.MustCompile(`\[0-9\]\+\\\.\[0-9\]\+\\\.\[0-9\]\+`), "a semver regexp (semver.Valid)"},
 		{regexp.MustCompile("`\\^\\[A-Z\\]\\[A-Z0-9_\\]\\*\\$`"), "an env name regexp (pkgmeta.ValidEnvName)"},
 	}
-	owners := map[string]bool{"core/pkgmeta/mcp_validation.go": true, "core/pkgmeta/sidecar_validation.go": true}
+	owners := map[string]bool{"core/pkgmeta/mcp_validation.go": true, "core/pkgmeta/sidecar_validation.go": true, "core/pkgmeta/settings.go": true}
 	archtest.Scan(t, archtest.Opts{Lang: archtest.Go}, func(rel string, src []byte) {
 		if owners[rel] {
 			return

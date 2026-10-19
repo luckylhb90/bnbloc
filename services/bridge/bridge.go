@@ -111,12 +111,15 @@ type Config struct {
 	// only, its admin token never logged nor handed to a core.
 	Sandbox SandboxConfig
 	// MCPToolsDir is where the desktop materializes stdio MCP tool binaries
-	// (index.json lists them with their sha256), and MCPSettingsDir holds
-	// the member's own MCP tool credentials (<tool>.json, 0600), both set by
-	// the desktop (BNBLOC_MCP_TOOLS_DIR / BNBLOC_MCP_SETTINGS_DIR). Empty:
-	// stdio tools and member credentials are unavailable (mcp_tools.go).
-	MCPToolsDir    string
-	MCPSettingsDir string
+	// (index.json lists them with their sha256), ComponentSettingsDir holds
+	// the member's own component settings (mcp@<tool>.json, 0600) and
+	// MCPSignInsDir their MCP OAuth sign-ins (<tool>.json, 0600), all set by
+	// the desktop (BNBLOC_MCP_TOOLS_DIR, BNBLOC_COMPONENT_SETTINGS_DIR,
+	// BNBLOC_MCP_SIGN_INS_DIR). Empty: stdio tools, member settings and
+	// sign-ins are unavailable (mcp_tools.go).
+	MCPToolsDir          string
+	ComponentSettingsDir string
+	MCPSignInsDir        string
 	// StateDir is where the bridge keeps what must outlive a restart: which
 	// workspace each agent of a room uses (workspaces.go). Set by the
 	// desktop to the member's own directory (BNBLOC_BRIDGE_STATE_DIR).
@@ -196,6 +199,11 @@ type Bridge struct {
 	summarizer roomlog.Summarizer
 	// toolLauncher starts stdio MCP tools (mcp_tool_exec.go; "" none).
 	toolLauncher string
+	// settingsTmp makes the private directory of the stdio tools' settings
+	// files once, when there is no StateDir (mcp_tools.go).
+	settingsTmp    sync.Once
+	settingsTmpDir string
+	settingsTmpErr error
 	// producers caches who produced each deliverable version .room/
 	// artifacts.md lists (roomlog.ReadDeliverables).
 	producers   roomlog.ProducerCache

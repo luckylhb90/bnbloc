@@ -26,15 +26,62 @@ type ComponentPermissions struct {
 	Host []string `json:"host,omitempty"`
 }
 
-// ComponentLocalSetting is one field of a plugin's desktop-local settings schema.
-// Secret values are write-only in the desktop UI (masked, never shown back).
-type ComponentLocalSetting struct {
-	Key      string `json:"key"`
-	Label    string `json:"label"`
-	Help     string `json:"help,omitempty"`
-	Secret   bool   `json:"secret,omitempty"`
-	Required bool   `json:"required,omitempty"`
+// ComponentSetting is one setting a component declares in its manifest
+// (pkgmeta.Setting; docs/prd/2026-10-19-component-settings.md): what it
+// holds (Type), who sets it and for whom (Scope), and how its value
+// reaches the component (Deliver; every value is also in the component's
+// settings file). Every value is text: a number in decimal, a boolean
+// "true" or "false". core/pkgmeta validates a declaration and a value.
+type ComponentSetting struct {
+	Key   string `json:"key"`
+	Label string `json:"label"`
+	Help  string `json:"help,omitempty"`
+	Type  string `json:"type" tstype:"ComponentSettingType"`
+	Scope string `json:"scope" tstype:"ComponentSettingScope"`
+	// Required: the component does not run until it is set ("needs setup").
+	Required bool `json:"required,omitempty"`
+	// Default is the value used while none is set (never a secret's).
+	Default string `json:"default,omitempty"`
+	// Options are a choice's values.
+	Options []string                 `json:"options,omitempty"`
+	Deliver *ComponentSettingDeliver `json:"deliver,omitempty"`
 }
+
+// ComponentSettingDeliver says how a setting's value reaches the component
+// beyond its settings file: an environment variable of its process, or a
+// request header of an http MCP tool (a named header, or Authorization:
+// Bearer <value>).
+type ComponentSettingDeliver struct {
+	Env    string `json:"env,omitempty"`
+	Header string `json:"header,omitempty"`
+	Bearer bool   `json:"bearer,omitempty"`
+}
+
+// The types of a setting (ComponentSetting.Type). A secret is write-only:
+// never shown back, only "set". A path is a path on the member's own
+// machine (member scope only).
+//
+//wire:union ComponentSettingType
+const (
+	SettingText    = "text"
+	SettingSecret  = "secret"
+	SettingURL     = "url"
+	SettingNumber  = "number"
+	SettingBoolean = "boolean"
+	SettingChoice  = "choice"
+	SettingPath    = "path"
+)
+
+// Who sets a setting, and for whom it holds (ComponentSetting.Scope): the
+// super admin for the deployment, an organization admin for their
+// organization, each member for themselves.
+//
+//wire:union ComponentSettingScope
+const (
+	SettingScopePlatform = "platform"
+	SettingScopeOrg      = "org"
+	SettingScopeMember   = "member"
+)
 
 // ComponentSidecar is part of a component package (core/pkgmeta).
 type ComponentSidecar struct {
@@ -116,11 +163,9 @@ type ComponentMCP struct {
 	// Tools are the tools the server offers, for display (the server's own
 	// tools/list stays authoritative at run time).
 	Tools []ComponentMCPTool `json:"tools"`
-	// Env are the variables the server needs; values never ship in a
-	// package (Credentials says where they come from).
-	Env []ComponentMCPEnv `json:"env,omitempty"`
-	// Credentials is member, org or bridge; required exactly when Env is
-	// declared.
+	// Credentials is "room" (the room the agent works in is the
+	// credential: the bridge gives a stdio server the room relay) or empty.
+	// Everything else a server needs is a setting (Package.Settings).
 	Credentials string             `json:"credentials,omitempty"`
 	Stdio       *ComponentMCPStdio `json:"stdio,omitempty"`
 	HTTP        *ComponentMCPHTTP  `json:"http,omitempty"`
@@ -132,16 +177,9 @@ type ComponentMCPTool struct {
 	Description string `json:"description,omitempty"`
 }
 
-// ComponentMCPEnv is one variable an MCP server needs.
-type ComponentMCPEnv struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	Secret      bool   `json:"secret,omitempty"`
-	Required    bool   `json:"required,omitempty"`
-}
-
 // ComponentMCPStdio is how a stdio server is started: the materialized binary with
-// these arguments (env values arrive as its process environment).
+// these arguments (setting values arrive as its process environment and
+// settings file).
 type ComponentMCPStdio struct {
 	Args []string `json:"args,omitempty"`
 }
@@ -151,13 +189,16 @@ type ComponentMCPHTTP struct {
 	Auth ComponentMCPHTTPAuth `json:"auth"`
 }
 
-// ComponentMCPHTTPAuth is the header an endpoint server expects: none, a bearer token
-// (Authorization: Bearer <Env>), a named header (<Header>: <Env>), or a
-// member's OAuth sign-in (Authorization: Bearer <their access token>).
+// ComponentMCPHTTPAuth is the credential an endpoint server expects: none,
+// a bearer token (Authorization: Bearer <the Setting's value>), a named
+// header (<Header>: <the Setting's value>), or a member's OAuth sign-in
+// (Authorization: Bearer <their access token>).
 type ComponentMCPHTTPAuth struct {
 	Scheme string `json:"scheme"`
 	Header string `json:"header,omitempty"`
-	Env    string `json:"env,omitempty"`
+	// Setting is the key of the setting carrying a bearer or header
+	// scheme's value.
+	Setting string `json:"setting,omitempty"`
 	// ClientID (oauth, optional) is a client the publisher registered with
 	// the server's authorization server; without it the desktop registers
 	// itself where the authorization server allows it.

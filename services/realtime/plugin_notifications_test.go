@@ -30,10 +30,10 @@ func notificationPluginBody(t *testing.T, name string) []byte {
 	raw, err := json.Marshal(map[string]any{
 		"kind": pkgmeta.KindPluginPackageV1, "name": name, "version": "0.1.0", "publisher": "Acme Corp",
 		"runtime": "sidecar", "contract": pkgmeta.PluginContractV1, "hooks": []string{pkgmeta.NotificationHook},
-		"artifacts":     map[string]any{"darwin-arm64": map[string]string{"url": "https://gw.example/plugin", "sha256": strings.Repeat("0", 64)}},
-		"sidecar":       map[string]any{"localUrl": "http://127.0.0.1:7193"},
-		"permissions":   map[string]any{"network": []string{"127.0.0.1"}, "host": []string{pkgmeta.PluginHostChat}},
-		"localSettings": []map[string]any{{"key": "appKey", "label": "App key", "secret": true, "required": true}},
+		"artifacts":   map[string]any{"darwin-arm64": map[string]string{"url": "https://gw.example/plugin", "sha256": strings.Repeat("0", 64)}},
+		"sidecar":     map[string]any{"localUrl": "http://127.0.0.1:7193"},
+		"permissions": map[string]any{"network": []string{"127.0.0.1"}, "host": []string{pkgmeta.PluginHostChat}},
+		"settings":    []map[string]any{{"key": "appKey", "label": "App key", "type": "secret", "scope": "member", "required": true}},
 	})
 	if err != nil {
 		t.Fatal(err)

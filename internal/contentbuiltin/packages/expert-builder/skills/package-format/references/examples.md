@@ -125,7 +125,7 @@ description: Use when the user shares a meeting transcript or notes and wants a 
   "description": "Plans a product launch with a researcher and a writer, tracks the work in the issue tracker, and announces the release.",
   "requires": {
     "prompts": ["release-kit@^1"],
-    "mcp": [{ "name": "issue-tracker", "env": ["TRACKER_TOKEN"] }],
+    "mcp": [{ "name": "issue-tracker", "settings": ["apiToken"] }],
     "permissions": ["mcp.http:tracker.example.com"]
   },
   "quickPrompts": [

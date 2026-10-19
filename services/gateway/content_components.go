@@ -192,7 +192,7 @@ func contentView(c store.ContentComponent, v store.ContentComponentVersion, clai
 		out.Permissions = []string{}
 	}
 	for _, t := range m.Requires.MCP {
-		out.Requires.MCP = append(out.Requires.MCP, wire.ContentMCPRequirement{Name: t.Name, Env: t.Env})
+		out.Requires.MCP = append(out.Requires.MCP, wire.ContentMCPRequirement{Name: t.Name, Settings: t.Settings})
 	}
 	for _, q := range m.QuickPrompts {
 		out.QuickPrompts = append(out.QuickPrompts, wire.ContentQuickPrompt{Title: q.Title, Prompt: q.Prompt})

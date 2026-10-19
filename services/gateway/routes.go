@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/luckylhb90/bnbloc/core/pkgmeta"
 	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/rbac"
@@ -151,6 +152,9 @@ func (s *Service) routes() []route {
 		member("GET /v1/components", s.handleComponents),
 		member("POST /v1/components/{name}/install", s.handleComponentInstall),
 		member("DELETE /v1/components/{name}/install", s.handleComponentUninstall),
+		// The platform and organization values of a component the member's
+		// desktop runs (component_settings.go).
+		member("GET /v1/components/{name}/settings/resolved", s.handleResolvedComponentSettings),
 
 		// Desktop updates and releases.
 		member("GET /v1/app/update/{target}/{currentVersion}", s.handleAppUpdate),
@@ -245,9 +249,8 @@ func (s *Service) routes() []route {
 		gated("POST /v1/live", drive, s.handleLiveFrame),
 
 		// Organization administration (manage_org in the acting tenant).
-		gated("GET /v1/tenant/mcp-connectors", org, s.handleListMCPConnectors),
-		gated("PUT /v1/tenant/mcp-connectors/{name}", org, s.handlePutMCPConnector),
-		gated("DELETE /v1/tenant/mcp-connectors/{name}", org, s.handleDeleteMCPConnector),
+		gated("GET /v1/org/components/{name}/settings", org, s.handleComponentSettings(pkgmeta.SettingScopeOrg)),
+		gated("PUT /v1/org/components/{name}/settings", org, s.handlePutComponentSettings(pkgmeta.SettingScopeOrg)),
 		gated("GET /v1/tenant/assist-model", org, s.handleOrgAssistModel),
 		gated("PUT /v1/tenant/assist-model", org, s.handlePutOrgAssistModel),
 		gated("POST /v1/tenant/assist-model/test", org, s.handleTestOrgAssistModel),
@@ -278,6 +281,8 @@ func (s *Service) routes() []route {
 		gated("PUT /v1/platform/components/{name}/rollout", platform, s.handleSetComponentRollout),
 		gated("POST /v1/platform/components/{name}/secret/rotate", platform, s.handleRotateComponentSecret),
 		gated("POST /v1/platform/components/{name}/test", platform, s.handleTestComponent),
+		gated("GET /v1/platform/components/{name}/settings", platform, s.handleComponentSettings(pkgmeta.SettingScopePlatform)),
+		gated("PUT /v1/platform/components/{name}/settings", platform, s.handlePutComponentSettings(pkgmeta.SettingScopePlatform)),
 		gated("POST /v1/platform/mcp-packages", platform, s.handleBuildMCPPackage),
 		gated("GET /v1/platform/component-keys", platform, s.handleListComponentTrustedKeys),
 		gated("POST /v1/platform/component-keys", platform, s.handleAddComponentTrustedKey),

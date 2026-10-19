@@ -21,10 +21,10 @@ import (
 // browser release restarted the conversations that used it).
 func TestToolUpdateKeepsTheSessionBinding(t *testing.T) {
 	f := newMCPFixture(t)
-	f.setMember(t, "codeword", map[string]string{"CODEWORD_SALT": "pepper"})
-	b := &Bridge{cfg: Config{MCPToolsDir: f.tools, MCPSettingsDir: f.settings}}
+	f.setMember(t, "codeword", map[string]string{"salt": "pepper"})
+	b := &Bridge{cfg: Config{MCPToolsDir: f.tools, ComponentSettingsDir: f.settings, StateDir: t.TempDir()}}
 	b.UseToolLauncher("/Applications/bnbloc.app/Contents/MacOS/bnbloc-bridge")
-	before, _, _ := b.resolveMCP([]wire.ContentMCPTool{codewordTool(f.sha)}, nil, "maya", true)
+	before, _, _ := b.resolveMCP([]wire.ContentMCPTool{codewordTool(f.sha)}, nil, "maya", "home", true)
 
 	// The desktop materializes the next version and drops the first.
 	content := []byte("#!/bin/sh\necho codeword v2\n")
@@ -39,7 +39,7 @@ func TestToolUpdateKeepsTheSessionBinding(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = os.Remove(f.binary)
-	after, missing, _ := b.resolveMCP([]wire.ContentMCPTool{codewordTool(sha2)}, nil, "maya", true)
+	after, missing, _ := b.resolveMCP([]wire.ContentMCPTool{codewordTool(sha2)}, nil, "maya", "home", true)
 	if len(before.servers) != 1 || len(after.servers) != 1 || len(missing) != 0 {
 		t.Fatalf("before %+v after %+v missing %v", before.servers, after.servers, missing)
 	}
@@ -53,7 +53,7 @@ func TestToolUpdateKeepsTheSessionBinding(t *testing.T) {
 		t.Fatalf("server = %+v", s)
 	}
 	// A turn still needs the gateway's current pin materialized.
-	if _, missing, _ := b.resolveMCP([]wire.ContentMCPTool{codewordTool(f.sha)}, nil, "maya", true); len(missing) != 1 {
+	if _, missing, _ := b.resolveMCP([]wire.ContentMCPTool{codewordTool(f.sha)}, nil, "maya", "home", true); len(missing) != 1 {
 		t.Fatalf("a pin the desktop no longer holds was attached: missing %v", missing)
 	}
 }

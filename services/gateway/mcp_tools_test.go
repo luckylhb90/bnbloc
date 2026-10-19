@@ -22,8 +22,8 @@ import (
 )
 
 // mcpGateway is the content gateway with two installed MCP tools: codeword
-// (stdio, member credentials) and search (http, org credentials), and ada,
-// an org admin of "home".
+// (stdio, member settings) and search (http, an organization setting), and
+// ada, an org admin of "home".
 func mcpGateway(t *testing.T, withKey bool) (*contentGateway, string) {
 	t.Helper()
 	g := newContentGateway(t)
@@ -51,10 +51,10 @@ func mcpGateway(t *testing.T, withKey bool) (*contentGateway, string) {
 		Kind: pkgmeta.KindMCPPackageV1, Name: "codeword", Version: "1.0.0", Publisher: "acme",
 		Contract: pkgmeta.MCPContractV1, Runtime: pkgmeta.RuntimeStdio,
 		Artifacts: map[string]pkgmeta.Artifact{"darwin-arm64": {URL: "https://gw.example/v1/artifacts/sha256/" + sha, SHA256: sha}},
-		MCP: &pkgmeta.MCP{
-			Tools:       []pkgmeta.MCPTool{{Name: "get_codeword"}},
-			Env:         []pkgmeta.MCPEnv{{Name: "CODEWORD_SALT", Secret: true, Required: true}, {Name: "CODEWORD_LANG"}},
-			Credentials: pkgmeta.MCPCredentialsMember, Stdio: &pkgmeta.MCPStdio{Args: []string{"serve"}},
+		MCP:       &pkgmeta.MCP{Tools: []pkgmeta.MCPTool{{Name: "get_codeword"}}, Stdio: &pkgmeta.MCPStdio{Args: []string{"serve"}}},
+		Settings: []pkgmeta.Setting{
+			{Key: "salt", Label: "Salt", Type: pkgmeta.SettingSecret, Scope: pkgmeta.SettingScopeMember, Required: true, Deliver: &pkgmeta.SettingDeliver{Env: "CODEWORD_SALT"}},
+			{Key: "lang", Label: "Language", Type: pkgmeta.SettingText, Scope: pkgmeta.SettingScopeMember, Deliver: &pkgmeta.SettingDeliver{Env: "CODEWORD_LANG"}},
 		},
 	}
 	u, _ := url.Parse(endpoint.URL)
@@ -63,11 +63,10 @@ func mcpGateway(t *testing.T, withKey bool) (*contentGateway, string) {
 		Contract: pkgmeta.MCPContractV1, Runtime: pkgmeta.RuntimeEndpoint,
 		Endpoint: &pkgmeta.Endpoint{BaseURL: endpoint.URL + "/mcp"}, Permissions: pkgmeta.Permissions{Network: []string{u.Hostname()}},
 		MCP: &pkgmeta.MCP{
-			Tools:       []pkgmeta.MCPTool{{Name: "search"}},
-			Env:         []pkgmeta.MCPEnv{{Name: "TOOLS_TOKEN", Secret: true, Required: true}},
-			Credentials: pkgmeta.MCPCredentialsOrg,
-			HTTP:        &pkgmeta.MCPHTTP{Auth: pkgmeta.MCPHTTPAuth{Scheme: pkgmeta.MCPAuthBearer, Env: "TOOLS_TOKEN"}},
+			Tools: []pkgmeta.MCPTool{{Name: "search"}},
+			HTTP:  &pkgmeta.MCPHTTP{Auth: pkgmeta.MCPHTTPAuth{Scheme: pkgmeta.MCPAuthBearer, Setting: "token"}},
 		},
+		Settings: []pkgmeta.Setting{{Key: "token", Label: "API token", Type: pkgmeta.SettingSecret, Scope: pkgmeta.SettingScopeOrg, Required: true}},
 	}
 	for _, pkg := range []pkgmeta.Package{stdio, httpPkg} {
 		raw, _ := json.Marshal(pkg)
@@ -85,7 +84,7 @@ func mcpExpert(requires map[string]any) map[string]any {
 }
 
 // A save's requires.mcp must name an MCP component the author may use, only
-// its variables, with the permission its transport needs.
+// its settings, with the permission its transport needs.
 func TestContentSaveChecksMCPReferences(t *testing.T) {
 	g, host := mcpGateway(t, false)
 	cases := []struct {
@@ -95,7 +94,7 @@ func TestContentSaveChecksMCPReferences(t *testing.T) {
 	}{
 		{map[string]any{"mcp": []map[string]any{{"name": "ghost"}}, "permissions": []string{"mcp.stdio"}}, 400, "not an MCP tool component"},
 		{map[string]any{"mcp": []map[string]any{{"name": "codeword"}}}, 400, `needs the "mcp.stdio" permission`},
-		{map[string]any{"mcp": []map[string]any{{"name": "codeword", "env": []string{"NOPE"}}}, "permissions": []string{"mcp.stdio"}}, 400, "not one of its variables"},
+		{map[string]any{"mcp": []map[string]any{{"name": "codeword", "settings": []string{"nope"}}}, "permissions": []string{"mcp.stdio"}}, 400, "not one of its settings"},
 		{map[string]any{"mcp": []map[string]any{{"name": "search"}}, "permissions": []string{"mcp.http:" + host}}, 201, ""},
 	}
 	for i, c := range cases {
@@ -112,8 +111,8 @@ func TestContentSaveChecksMCPReferences(t *testing.T) {
 	}
 }
 
-// The member catalog lists MCP tools with their tools, env and credentials
-// source; an org tool says whether the member's organization configured it.
+// The member catalog lists MCP tools with their tools and settings; a tool
+// whose organization setting is not set says so (needs setup).
 func TestMemberCatalogListsMCPTools(t *testing.T) {
 	g, _ := mcpGateway(t, true)
 	code, raw := g.do("maya", http.MethodGet, "/v1/components?kind=mcp", "", nil)
@@ -126,11 +125,11 @@ func TestMemberCatalogListsMCPTools(t *testing.T) {
 			Runtime         string                      `json:"runtime"`
 			RequiresDesktop bool                        `json:"requiresDesktop"`
 			Artifacts       map[string]pkgmeta.Artifact `json:"artifacts"`
+			Settings        []pkgmeta.Setting           `json:"settings"`
+			SettingsMissing []string                    `json:"settingsMissing"`
 			MCP             *struct {
-				Transport     string            `json:"transport"`
-				Credentials   string            `json:"credentials"`
-				Tools         []pkgmeta.MCPTool `json:"tools"`
-				OrgConfigured *bool             `json:"orgConfigured"`
+				Transport string            `json:"transport"`
+				Tools     []pkgmeta.MCPTool `json:"tools"`
 			} `json:"mcp"`
 		} `json:"components"`
 	}
@@ -140,79 +139,13 @@ func TestMemberCatalogListsMCPTools(t *testing.T) {
 	for _, c := range out.Components {
 		switch c.Name {
 		case "codeword":
-			if c.Runtime != "stdio" || !c.RequiresDesktop || c.Artifacts["darwin-arm64"].SHA256 == "" || c.MCP.Transport != "stdio" || c.MCP.OrgConfigured != nil {
+			if c.Runtime != "stdio" || !c.RequiresDesktop || c.Artifacts["darwin-arm64"].SHA256 == "" || c.MCP.Transport != "stdio" || len(c.Settings) != 2 || c.SettingsMissing != nil {
 				t.Fatalf("codeword = %+v", c)
 			}
 		case "search":
-			if c.MCP.Transport != "http" || c.MCP.Credentials != "org" || c.MCP.OrgConfigured == nil || *c.MCP.OrgConfigured {
+			if c.MCP.Transport != "http" || len(c.SettingsMissing) != 1 || c.SettingsMissing[0] != "token" {
 				t.Fatalf("search = %+v", c)
 			}
-		}
-	}
-}
-
-// Org connectors: org admins only, sealed at rest, secret values never
-// returned, off without the secret store key, gone with the component.
-func TestOrgMCPConnectors(t *testing.T) {
-	off, _ := mcpGateway(t, false)
-	if code, raw := off.do("ada", http.MethodGet, "/v1/tenant/mcp-connectors", "", nil); code != http.StatusOK || !strings.Contains(string(raw), `"available":false`) {
-		t.Fatalf("list without key = %d %s", code, raw)
-	}
-	if code, _ := off.json("ada", http.MethodPut, "/v1/tenant/mcp-connectors/search", map[string]any{"values": map[string]string{"TOOLS_TOKEN": "x"}}); code != http.StatusConflict {
-		t.Fatalf("put without key = %d", code)
-	}
-
-	g, _ := mcpGateway(t, true)
-	if code, _ := g.do("maya", http.MethodGet, "/v1/tenant/mcp-connectors", "", nil); code != http.StatusForbidden {
-		t.Fatalf("member list = %d", code)
-	}
-	if code, _ := g.json("maya", http.MethodPut, "/v1/tenant/mcp-connectors/search", map[string]any{"values": map[string]string{"TOOLS_TOKEN": "x"}}); code != http.StatusForbidden {
-		t.Fatalf("member put = %d", code)
-	}
-	if code, _ := g.json("ada", http.MethodPut, "/v1/tenant/mcp-connectors/codeword", map[string]any{"values": map[string]string{}}); code != http.StatusBadRequest {
-		t.Fatalf("member-credential tool takes no connector = %d", code)
-	}
-	if code, raw := g.json("ada", http.MethodPut, "/v1/tenant/mcp-connectors/search", map[string]any{"values": map[string]string{}}); code != http.StatusBadRequest || !strings.Contains(string(raw), "TOOLS_TOKEN is required") {
-		t.Fatalf("missing required = %d %s", code, raw)
-	}
-	if code, raw := g.json("ada", http.MethodPut, "/v1/tenant/mcp-connectors/search", map[string]any{"values": map[string]string{"TOOLS_TOKEN": "s3cr3t-token"}}); code != http.StatusNoContent {
-		t.Fatalf("put = %d %s", code, raw)
-	}
-	code, raw := g.do("ada", http.MethodGet, "/v1/tenant/mcp-connectors", "", nil)
-	var list wire.MCPConnectorsReply
-	_ = json.Unmarshal(raw, &list)
-	if code != http.StatusOK || !list.Available || len(list.Connectors) != 1 || !list.Connectors[0].Configured || !list.Connectors[0].Fields[0].Set || list.Connectors[0].UpdatedBy != "ada" {
-		t.Fatalf("list = %d %s", code, raw)
-	}
-	if strings.Contains(string(raw), "s3cr3t-token") {
-		t.Fatal("a secret value is never returned")
-	}
-	rows, _ := g.svc.PlatformSettings.ListPlatformSettings(context.Background())
-	for _, row := range rows {
-		if strings.Contains(row.Value, "s3cr3t-token") {
-			t.Fatalf("stored in clear under %s", row.Key)
-		}
-	}
-	if _, raw := g.do("maya", http.MethodGet, "/v1/components?kind=mcp", "", nil); !strings.Contains(string(raw), `"orgConfigured":true`) {
-		t.Fatalf("catalog = %s", raw)
-	}
-	// A super admin administers another organization's connector acting in
-	// it, like every tenant route.
-	g.tokens["root"] = superAdminToken(t, g)
-	other, _ := json.Marshal(map[string]any{"values": map[string]string{"TOOLS_TOKEN": "other-token"}})
-	if code, raw := g.doWith("root", http.MethodPut, "/v1/tenant/mcp-connectors/search", map[string]string{actingTenantHeader: "other"}, "application/json", other); code != http.StatusNoContent {
-		t.Fatalf("super admin put = %d %s", code, raw)
-	}
-	if c, ok, _ := g.svc.mcpConnectors().Get(context.Background(), "other", "search"); !ok || c.Values["TOOLS_TOKEN"] != "other-token" {
-		t.Fatalf("other tenant connector = %+v %v", c, ok)
-	}
-	// Uninstalling the component deletes every organization's connector.
-	if code, raw := g.do("root", http.MethodDelete, "/v1/platform/components/search?kind=mcp", "", nil); code != http.StatusNoContent {
-		t.Fatalf("uninstall = %d %s", code, raw)
-	}
-	for _, tid := range []string{"home", "other"} {
-		if _, ok, _ := g.svc.mcpConnectors().Get(context.Background(), tid, "search"); ok {
-			t.Fatalf("%s connector survived its component", tid)
 		}
 	}
 }
@@ -233,12 +166,13 @@ func superAdminToken(t *testing.T, g *contentGateway) string {
 }
 
 // The effective resolution of a job lists the MCP tools its content
-// requires (with an org connector's values for the bridge holding the
-// lease) and reports the unmet ones as missing.
+// requires (with their organization values for the bridge holding the
+// lease) and reports the unmet ones, one needing setup among them, as
+// missing.
 func TestContentEffectiveResolvesMCP(t *testing.T) {
 	g, host := mcpGateway(t, true)
 	code, raw := g.json("maya", http.MethodPost, "/v1/content-components", mcpExpert(map[string]any{
-		"mcp":         []map[string]any{{"name": "codeword", "env": []string{"CODEWORD_LANG"}}, {"name": "search"}},
+		"mcp":         []map[string]any{{"name": "codeword", "settings": []string{"lang"}}, {"name": "search"}},
 		"permissions": []string{"mcp.stdio", "mcp.http:" + host},
 	}))
 	if code != http.StatusCreated {
@@ -264,21 +198,21 @@ func TestContentEffectiveResolvesMCP(t *testing.T) {
 	}
 	eff := effective()
 	if len(eff.MCP) != 1 || eff.MCP[0].Name != "codeword" || eff.MCP[0].Transport != "stdio" || eff.MCP[0].Args[0] != "serve" ||
-		eff.MCP[0].Artifacts["darwin-arm64"] != strings.Repeat("a", 64) || !eff.MCP[0].Env[1].Required || eff.MCP[0].RequiredBy[0] != ex.Component.ID {
+		eff.MCP[0].Artifacts["darwin-arm64"] != strings.Repeat("a", 64) || !eff.MCP[0].Settings[1].Required || eff.MCP[0].RequiredBy[0] != ex.Component.ID {
 		t.Fatalf("mcp = %+v", eff.MCP)
 	}
-	if len(eff.Missing) != 1 || !strings.Contains(eff.Missing[0], "search") {
-		t.Fatalf("an unconfigured org connector is missing: %v", eff.Missing)
+	if len(eff.Missing) != 1 || eff.Missing[0] != "MCP tool search (needs setup: an admin has not set API token)" {
+		t.Fatalf("a tool needing setup is missing: %v", eff.Missing)
 	}
-	if code, _ := g.json("ada", http.MethodPut, "/v1/tenant/mcp-connectors/search", map[string]any{"values": map[string]string{"TOOLS_TOKEN": "tok"}}); code != http.StatusNoContent {
-		t.Fatalf("put = %d", code)
+	if code, raw := g.json("ada", http.MethodPut, "/v1/org/components/search/settings?kind=mcp", map[string]any{"values": map[string]string{"token": "tok"}}); code != http.StatusOK {
+		t.Fatalf("put = %d %s", code, raw)
 	}
 	eff = effective()
 	if len(eff.MCP) != 2 || len(eff.Missing) != 0 {
 		t.Fatalf("mcp = %+v missing = %v", eff.MCP, eff.Missing)
 	}
 	s := eff.MCP[1]
-	if s.Transport != "http" || !strings.HasSuffix(s.URL, "/mcp") || s.Auth.Scheme != "bearer" || s.Values["TOOLS_TOKEN"] != "tok" {
+	if s.Transport != "http" || !strings.HasSuffix(s.URL, "/mcp") || s.Auth.Scheme != "bearer" || s.Auth.Setting != "token" || s.Values["token"] != "tok" {
 		t.Fatalf("search = %+v", s)
 	}
 	// A tool the requester may no longer use (rollout off) is missing.
@@ -294,7 +228,7 @@ func TestContentEffectiveResolvesMCP(t *testing.T) {
 
 // An http tool declaring a member OAuth sign-in reaches the member catalog
 // with its server URL and sign-in hints (the desktop signs in from them);
-// it has no org connector.
+// it has no settings.
 func TestMemberCatalogListsOAuthMCPTool(t *testing.T) {
 	g, host := mcpGateway(t, true)
 	pkg := pkgmeta.Package{
@@ -318,11 +252,11 @@ func TestMemberCatalogListsOAuthMCPTool(t *testing.T) {
 		Components []struct {
 			Name     string            `json:"name"`
 			Endpoint *pkgmeta.Endpoint `json:"endpoint"`
+			Settings []pkgmeta.Setting `json:"settings"`
 			MCP      *struct {
-				Transport     string           `json:"transport"`
-				Credentials   string           `json:"credentials"`
-				HTTP          *pkgmeta.MCPHTTP `json:"http"`
-				OrgConfigured *bool            `json:"orgConfigured"`
+				Transport   string           `json:"transport"`
+				Credentials string           `json:"credentials"`
+				HTTP        *pkgmeta.MCPHTTP `json:"http"`
 			} `json:"mcp"`
 		} `json:"components"`
 	}
@@ -334,7 +268,7 @@ func TestMemberCatalogListsOAuthMCPTool(t *testing.T) {
 			continue
 		}
 		if c.Endpoint == nil || c.Endpoint.BaseURL != "http://"+host+"/drive" || c.MCP == nil || c.MCP.Transport != "http" ||
-			c.MCP.HTTP == nil || c.MCP.HTTP.Auth.Scheme != "oauth" || c.MCP.HTTP.Auth.ClientID != "bnbloc" || c.MCP.Credentials != "" || c.MCP.OrgConfigured != nil {
+			c.MCP.HTTP == nil || c.MCP.HTTP.Auth.Scheme != "oauth" || c.MCP.HTTP.Auth.ClientID != "bnbloc" || c.MCP.Credentials != "" || c.Settings != nil {
 			t.Fatalf("drive = %s", body)
 		}
 		return
@@ -365,7 +299,7 @@ func TestContentEffectiveOffersInstalledMCP(t *testing.T) {
 		_ = json.Unmarshal(raw, &eff)
 		return eff
 	}
-	// search's connector is unset: offered, not attachable, not missing.
+	// search needs setup: offered, not attachable, not missing.
 	eff := effective()
 	if len(eff.MCP) != 1 || eff.MCP[0].Name != "codeword" || len(eff.MCP[0].RequiredBy) != 0 || len(eff.Missing) != 0 {
 		t.Fatalf("mcp = %+v missing = %v", eff.MCP, eff.Missing)

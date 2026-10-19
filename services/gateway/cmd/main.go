@@ -272,14 +272,15 @@ func main() {
 		// start), but loud: the platform console shows the same warning.
 		log.Printf("bnbloc-gateway: WARNING BNBLOC_EXT_ALLOW_UNSIGNED is on in production: unsigned component packages install and run unverified")
 	}
-	// Organization MCP connectors are sealed under the secret store key;
-	// unset turns them off, a malformed key refuses to start.
+	// Component settings are sealed under the secret store key; unset turns
+	// platform and organization settings off, a malformed key refuses to
+	// start.
 	secretBox, err := sealbox.FromEnv()
 	if err != nil {
 		log.Fatalf("bnbloc-gateway: %v", err)
 	}
 	if secretBox == nil {
-		log.Printf("bnbloc-gateway: %s unset; organization MCP connectors are off", sealbox.KeyEnv)
+		log.Printf("bnbloc-gateway: %s unset; platform and organization component settings are off", sealbox.KeyEnv)
 	}
 	members, err := membership.FromEnv()
 	if err != nil {

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -17,14 +18,15 @@ import (
 )
 
 // mcpFixture is a member's machine: the desktop's tools dir with one
-// materialized stdio binary (index.json) and the member's settings dir.
+// materialized stdio binary (index.json), the member's component settings
+// dir and their sign-ins dir.
 type mcpFixture struct {
-	tools, settings, binary, sha string
+	tools, settings, signIns, binary, sha string
 }
 
 func newMCPFixture(t *testing.T) mcpFixture {
 	t.Helper()
-	f := mcpFixture{tools: t.TempDir(), settings: t.TempDir()}
+	f := mcpFixture{tools: t.TempDir(), settings: t.TempDir(), signIns: t.TempDir()}
 	content := []byte("#!/bin/sh\necho codeword\n")
 	sum := sha256.Sum256(content)
 	f.sha = hex.EncodeToString(sum[:])
@@ -42,13 +44,13 @@ func newMCPFixture(t *testing.T) mcpFixture {
 func (f mcpFixture) setMember(t *testing.T, tool string, values map[string]string) {
 	t.Helper()
 	raw, _ := json.Marshal(values)
-	if err := os.WriteFile(filepath.Join(f.settings, tool+".json"), raw, 0o600); err != nil {
+	if err := os.WriteFile(mcpMemberSettingsFile(f.settings, tool), raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func (f mcpFixture) bridge(g *contentFixtureGateway, prov corepkg.Provider, transports ...string) *Bridge {
-	b := New(Config{GatewayBaseURL: g.srv.URL, GatewayToken: "t", OwnerSubject: "maya", MCPToolsDir: f.tools, MCPSettingsDir: f.settings,
+	b := New(Config{GatewayBaseURL: g.srv.URL, GatewayToken: "t", OwnerSubject: "maya", MCPToolsDir: f.tools, ComponentSettingsDir: f.settings, MCPSignInsDir: f.signIns,
 		Cores: []CoreConfig{{Name: "core-a", Provider: prov, Endpoint: corepkg.Endpoint{BaseURL: g.srv.URL}}}})
 	b.rosterMu.Lock()
 	if b.targetCache == nil {
@@ -63,16 +65,20 @@ func codewordTool(sha string) wire.ContentMCPTool {
 	return wire.ContentMCPTool{
 		Name: "codeword", Version: "1.0.0", Transport: wire.MCPTransportStdio,
 		Artifacts: map[string]string{mcpPlatform(): sha}, Args: []string{"serve"},
-		Env:         []wire.ContentMCPEnv{{Name: "CODEWORD_SALT", Secret: true, Required: true}, {Name: "CODEWORD_LANG"}},
-		Credentials: "member", RequiredBy: []string{"cc_reviewer"},
+		Settings: []wire.ComponentSetting{
+			{Key: "salt", Label: "Salt", Type: pkgmeta.SettingSecret, Scope: pkgmeta.SettingScopeMember, Required: true, Deliver: &wire.ComponentSettingDeliver{Env: "CODEWORD_SALT"}},
+			{Key: "lang", Label: "Language", Type: pkgmeta.SettingText, Scope: pkgmeta.SettingScopeMember, Deliver: &wire.ComponentSettingDeliver{Env: "CODEWORD_LANG"}},
+		},
+		RequiredBy: []string{"cc_reviewer"},
 	}
 }
 
 func searchTool() wire.ContentMCPTool {
 	return wire.ContentMCPTool{
 		Name: "search", Version: "2.0.0", Transport: wire.MCPTransportHTTP, URL: "https://tools.example.com/mcp",
-		Auth: &wire.ContentMCPAuth{Scheme: "bearer", Env: "TOOLS_TOKEN"}, Env: []wire.ContentMCPEnv{{Name: "TOOLS_TOKEN", Secret: true, Required: true}},
-		Credentials: "org", Values: map[string]string{"TOOLS_TOKEN": "org-token"}, RequiredBy: []string{"cc_reviewer"},
+		Auth:     &wire.ComponentMCPHTTPAuth{Scheme: "bearer", Setting: "token"},
+		Settings: []wire.ComponentSetting{{Key: "token", Label: "API token", Type: pkgmeta.SettingSecret, Scope: pkgmeta.SettingScopeOrg, Required: true}},
+		Values:   map[string]string{"token": "org-token"}, RequiredBy: []string{"cc_reviewer"},
 	}
 }
 
@@ -98,12 +104,12 @@ func serverNamed(p *corepkg.AgentProfile, name string) *corepkg.MCPServer {
 }
 
 // An own drive gets a stdio server from the desktop's verified binary with
-// the member's own values as its env, and an http server with the org
-// connector's bearer.
+// the member's own values as its env and settings file, and an http server
+// with its organization value as the bearer.
 func TestMCPToolsReachTheSession(t *testing.T) {
 	g := newContentFixtureGateway(t)
 	f := newMCPFixture(t)
-	f.setMember(t, "codeword", map[string]string{"CODEWORD_SALT": "member-salt", "OTHER": "ignored"})
+	f.setMember(t, "codeword", map[string]string{"salt": "member-salt", "other": "ignored"})
 	expert := g.pkg(reviewerForm("Use the tools."), "1.0.0")
 	expert.Source = wire.ContentSourceExpert
 	g.setEffective("job-1", wire.ContentEffective{Expert: &expert, MCP: []wire.ContentMCPTool{codewordTool(f.sha), searchTool()}})
@@ -116,8 +122,14 @@ func TestMCPToolsReachTheSession(t *testing.T) {
 	}
 	cw := serverNamed(ps[0], "codeword")
 	if cw == nil || cw.Transport() != corepkg.MCPStdio || cw.Command != f.binary || strings.Join(cw.Args, " ") != "serve" ||
-		len(cw.Env) != 1 || cw.Env[0] != (corepkg.NameValue{Name: "CODEWORD_SALT", Value: "member-salt"}) {
+		len(cw.Env) != 2 || cw.Env[0] != (corepkg.NameValue{Name: "CODEWORD_SALT", Value: "member-salt"}) || cw.Env[1].Name != pkgmeta.ComponentSettingsFileEnv {
 		t.Fatalf("codeword = %+v", cw)
+	}
+	// The settings file: every value, owner-only.
+	st, err := os.Stat(cw.Env[1].Value)
+	raw, _ := os.ReadFile(cw.Env[1].Value)
+	if err != nil || st.Mode().Perm() != 0o600 || string(raw) != "{\n  \"salt\": \"member-salt\"\n}" {
+		t.Fatalf("settings file = %v %v %q", st, err, raw)
 	}
 	s := serverNamed(ps[0], "search")
 	if s == nil || s.Transport() != corepkg.MCPHTTP || s.URL != "https://tools.example.com/mcp" || len(s.Headers) != 1 || s.Headers[0].Value != "Bearer org-token" {
@@ -128,7 +140,7 @@ func TestMCPToolsReachTheSession(t *testing.T) {
 	}
 	// Secrets never reach the job's persisted status.
 	g.mu.Lock()
-	raw, _ := json.Marshal(g.statuses)
+	raw, _ = json.Marshal(g.statuses)
 	g.mu.Unlock()
 	if strings.Contains(string(raw), "member-salt") || strings.Contains(string(raw), "org-token") {
 		t.Fatalf("a secret reached job data: %s", raw)
@@ -139,7 +151,7 @@ func TestMCPToolsReachTheSession(t *testing.T) {
 func TestMCPToolsMissingDoNotFailTheTurn(t *testing.T) {
 	g := newContentFixtureGateway(t)
 	f := newMCPFixture(t)
-	f.setMember(t, "codeword", map[string]string{"CODEWORD_SALT": "s"})
+	f.setMember(t, "codeword", map[string]string{"salt": "s"})
 	expert := g.pkg(reviewerForm("Use the tools."), "1.0.0")
 	expert.Source = wire.ContentSourceExpert
 	stale := codewordTool(strings.Repeat("0", 64)) // the gateway pins a newer binary than the desktop holds
@@ -155,7 +167,7 @@ func TestMCPToolsMissingDoNotFailTheTurn(t *testing.T) {
 		t.Fatalf("profiles = %+v", ps)
 	}
 	missing := strings.Join(toStrings(runningDiagnostics(g)["contentMissing"]), "; ")
-	for _, want := range []string{"MCP tool ghost", "codeword (not downloaded on this computer yet)", "salted (set CODEWORD_SALT in Settings → Tools)", "search (the agent accepts no http MCP server)"} {
+	for _, want := range []string{"MCP tool ghost", "codeword (not downloaded on this computer yet)", "salted (needs setup: set Salt in Settings → Components)", "search (the agent accepts no http MCP server)"} {
 		if !strings.Contains(missing, want) {
 			t.Fatalf("missing %q in %q", want, missing)
 		}
@@ -170,7 +182,7 @@ func TestMCPOfferedToolsAttachQuietly(t *testing.T) {
 	g := newContentFixtureGateway(t)
 	f := newMCPFixture(t)
 	room := codewordTool(f.sha)
-	room.Env, room.Credentials, room.RequiredBy = nil, pkgmeta.MCPCredentialsRoom, nil
+	room.Settings, room.Credentials, room.RequiredBy = nil, pkgmeta.MCPCredentialsRoom, nil
 	notHere := codewordTool(strings.Repeat("0", 64))
 	notHere.Name, notHere.RequiredBy = "salted", nil
 	httpOnly := searchTool()
@@ -192,7 +204,7 @@ func TestMCPOfferedToolsAttachQuietly(t *testing.T) {
 func TestMCPToolsMissingOnACoreWithoutProfile(t *testing.T) {
 	g := newContentFixtureGateway(t)
 	f := newMCPFixture(t)
-	f.setMember(t, "codeword", map[string]string{"CODEWORD_SALT": "s"})
+	f.setMember(t, "codeword", map[string]string{"salt": "s"})
 	expert := g.pkg(reviewerForm("Use the tools."), "1.0.0")
 	expert.Source = wire.ContentSourceExpert
 	g.setEffective("job-1", wire.ContentEffective{Expert: &expert, MCP: []wire.ContentMCPTool{codewordTool(f.sha)}})
@@ -204,24 +216,24 @@ func TestMCPToolsMissingOnACoreWithoutProfile(t *testing.T) {
 	}
 }
 
-// A borrowed drive never lends the owner's member credentials; an org
-// connector still applies.
-func TestMCPMemberCredentialsAreNotLent(t *testing.T) {
+// A borrowed drive never lends the owner's member settings; organization
+// values still apply.
+func TestMCPMemberSettingsAreNotLent(t *testing.T) {
 	f := newMCPFixture(t)
-	f.setMember(t, "codeword", map[string]string{"CODEWORD_SALT": "owner-salt"})
-	b := &Bridge{cfg: Config{MCPToolsDir: f.tools, MCPSettingsDir: f.settings}}
+	f.setMember(t, "codeword", map[string]string{"salt": "owner-salt"})
+	b := &Bridge{cfg: Config{MCPToolsDir: f.tools, ComponentSettingsDir: f.settings}}
 	refs := []wire.ContentRef{{ComponentID: "cc_reviewer", Owner: "maya", Name: "reviewer"}}
-	mcp, missing, foreign := b.resolveMCP([]wire.ContentMCPTool{codewordTool(f.sha), searchTool()}, refs, "maya", false)
+	mcp, missing, foreign := b.resolveMCP([]wire.ContentMCPTool{codewordTool(f.sha), searchTool()}, refs, "maya", "home", false)
 	if len(mcp.servers) != 1 || mcp.servers[0].Name != "search" || len(foreign) != 0 {
 		t.Fatalf("servers = %+v foreign = %v", mcp.servers, foreign)
 	}
 	if len(missing) != 1 || !strings.Contains(missing[0], "not lent") {
 		t.Fatalf("missing = %v", missing)
 	}
-	// A tool taking no env runs for anyone.
+	// A tool whose member settings are optional runs for anyone, without them.
 	open := codewordTool(f.sha)
-	open.Env, open.Credentials = nil, ""
-	if mcp, missing, _ := b.resolveMCP([]wire.ContentMCPTool{open}, refs, "maya", false); len(mcp.servers) != 1 || len(missing) != 0 {
+	open.Settings[0].Required = false
+	if mcp, missing, _ := b.resolveMCP([]wire.ContentMCPTool{open}, refs, "maya", "home", false); len(mcp.servers) != 1 || len(missing) != 0 || len(mcp.servers[0].Env) != 1 {
 		t.Fatalf("servers = %+v missing = %v", mcp.servers, missing)
 	}
 }
@@ -232,11 +244,11 @@ func TestMCPMemberCredentialsAreNotLent(t *testing.T) {
 // else's: it does not force the sandbox; another member's content does.
 func TestMCPRoomCredentialTool(t *testing.T) {
 	f := newMCPFixture(t)
-	b := &Bridge{cfg: Config{MCPToolsDir: f.tools, MCPSettingsDir: f.settings}}
+	b := &Bridge{cfg: Config{MCPToolsDir: f.tools, ComponentSettingsDir: f.settings}}
 	tool := codewordTool(f.sha)
-	tool.Env, tool.Credentials, tool.RequiredBy = nil, pkgmeta.MCPCredentialsRoom, []string{"cc_builtin_media-skills"}
+	tool.Settings, tool.Credentials, tool.RequiredBy = nil, pkgmeta.MCPCredentialsRoom, []string{"cc_builtin_media-skills"}
 	builtin := []wire.ContentRef{{ComponentID: "cc_builtin_media-skills", Name: "media-skills"}}
-	mcp, missing, foreign := b.resolveMCP([]wire.ContentMCPTool{tool}, builtin, "maya", false)
+	mcp, missing, foreign := b.resolveMCP([]wire.ContentMCPTool{tool}, builtin, "maya", "home", false)
 	if len(mcp.servers) != 1 || len(missing) != 0 || len(foreign) != 0 || len(mcp.relayed) != 1 || mcp.relayed[0] != "codeword" {
 		t.Fatalf("servers = %+v relayed = %v missing = %v foreign = %v", mcp.servers, mcp.relayed, missing, foreign)
 	}
@@ -245,7 +257,7 @@ func TestMCPRoomCredentialTool(t *testing.T) {
 	}
 	tool.RequiredBy = []string{"cc_bob"}
 	theirs := []wire.ContentRef{{ComponentID: "cc_bob", Owner: "bob", Name: "bobs-pack"}}
-	if _, _, foreign := b.resolveMCP([]wire.ContentMCPTool{tool}, theirs, "maya", false); len(foreign) != 1 {
+	if _, _, foreign := b.resolveMCP([]wire.ContentMCPTool{tool}, theirs, "maya", "home", false); len(foreign) != 1 {
 		t.Fatalf("foreign = %v; another member's content runs a stdio tool sandboxed", foreign)
 	}
 }
@@ -285,7 +297,7 @@ func TestForeignContentRequiringStdioMCPRequiresTheSandbox(t *testing.T) {
 		t.Fatal("fixture pack declares a sandboxed permission")
 	}
 	tool := codewordTool(f.sha)
-	tool.Env, tool.Credentials, tool.RequiredBy = nil, "", []string{pack.ComponentID}
+	tool.Settings, tool.Credentials, tool.RequiredBy = nil, "", []string{pack.ComponentID}
 	g.setEffective("job-1", wire.ContentEffective{SkillPacks: []wire.ContentRef{pack}, MCP: []wire.ContentMCPTool{tool}})
 	prov := &profileProv{}
 	f.bridge(g, prov).runBridgeJob(context.Background(), contentJob("job-1", ""))
@@ -338,18 +350,14 @@ func toStrings(v any) []string {
 func driveTool() wire.ContentMCPTool {
 	return wire.ContentMCPTool{
 		Name: "drive", Version: "1.0.0", Transport: wire.MCPTransportHTTP, URL: "https://tools.example.com/mcp",
-		Auth: &wire.ContentMCPAuth{Scheme: "oauth"}, RequiredBy: []string{"cc_reviewer"},
+		Auth: &wire.ComponentMCPHTTPAuth{Scheme: "oauth"}, RequiredBy: []string{"cc_reviewer"},
 	}
 }
 
 func (f mcpFixture) setSignIn(t *testing.T, tool, token string, expiresAtMs int64) {
 	t.Helper()
-	dir := filepath.Join(f.settings, mcpOAuthDir)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
 	raw, _ := json.Marshal(map[string]any{"accessToken": token, "expiresAtMs": expiresAtMs, "refreshToken": "never-read"})
-	if err := os.WriteFile(filepath.Join(dir, tool+".json"), raw, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(f.signIns, tool+".json"), raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -359,19 +367,19 @@ func (f mcpFixture) setSignIn(t *testing.T, tool, token string, expiresAtMs int6
 // and the turn still runs. The token never reaches the session checksum.
 func TestMCPOAuthSignIn(t *testing.T) {
 	f := newMCPFixture(t)
-	b := &Bridge{cfg: Config{MCPToolsDir: f.tools, MCPSettingsDir: f.settings}}
+	b := &Bridge{cfg: Config{MCPToolsDir: f.tools, MCPSignInsDir: f.signIns}}
 	refs := []wire.ContentRef{{ComponentID: "cc_reviewer", Owner: "maya", Name: "reviewer"}}
 
-	_, missing, _ := b.resolveMCP([]wire.ContentMCPTool{driveTool()}, refs, "maya", true)
-	if len(missing) != 1 || !strings.Contains(missing[0], "sign in to drive in Settings → Tools") {
+	_, missing, _ := b.resolveMCP([]wire.ContentMCPTool{driveTool()}, refs, "maya", "home", true)
+	if len(missing) != 1 || !strings.Contains(missing[0], "sign in to drive in Settings → Components") {
 		t.Fatalf("not signed in: missing = %v", missing)
 	}
 	f.setSignIn(t, "drive", "old-token", time.Now().Add(10*time.Second).UnixMilli())
-	if _, missing, _ := b.resolveMCP([]wire.ContentMCPTool{driveTool()}, refs, "maya", true); len(missing) != 1 || !strings.Contains(missing[0], "expired") {
+	if _, missing, _ := b.resolveMCP([]wire.ContentMCPTool{driveTool()}, refs, "maya", "home", true); len(missing) != 1 || !strings.Contains(missing[0], "expired") {
 		t.Fatalf("expiring: missing = %v", missing)
 	}
 	f.setSignIn(t, "drive", "member-token", time.Now().Add(time.Hour).UnixMilli())
-	mcp, missing, _ := b.resolveMCP([]wire.ContentMCPTool{driveTool()}, refs, "maya", true)
+	mcp, missing, _ := b.resolveMCP([]wire.ContentMCPTool{driveTool()}, refs, "maya", "home", true)
 	if len(missing) != 0 || len(mcp.servers) != 1 {
 		t.Fatalf("servers = %+v missing = %v", mcp.servers, missing)
 	}
@@ -383,12 +391,34 @@ func TestMCPOAuthSignIn(t *testing.T) {
 		t.Fatal("token in the checksum")
 	}
 	f.setSignIn(t, "drive", "rotated-token", 0)
-	again, _, _ := b.resolveMCP([]wire.ContentMCPTool{driveTool()}, refs, "maya", true)
+	again, _, _ := b.resolveMCP([]wire.ContentMCPTool{driveTool()}, refs, "maya", "home", true)
 	if mcpSum(again) != mcpSum(mcp) {
 		t.Fatal("a refreshed token must not churn the session")
 	}
 	// Never lent: a borrowed or platform drive does not get it.
-	if mcp, missing, _ := b.resolveMCP([]wire.ContentMCPTool{driveTool()}, refs, "maya", false); len(mcp.servers) != 0 || len(missing) != 1 || !strings.Contains(missing[0], "not lent") {
+	if mcp, missing, _ := b.resolveMCP([]wire.ContentMCPTool{driveTool()}, refs, "maya", "home", false); len(mcp.servers) != 0 || len(missing) != 1 || !strings.Contains(missing[0], "not lent") {
 		t.Fatalf("lent: servers = %+v missing = %v", mcp.servers, missing)
+	}
+}
+
+// An http tool's headers: the auth block's credential and each setting's
+// own header, only for the values that are set.
+func TestMCPHeaders(t *testing.T) {
+	decl := []wire.ComponentSetting{
+		{Key: "token", Type: pkgmeta.SettingSecret, Scope: pkgmeta.SettingScopeOrg},
+		{Key: "workspace", Type: pkgmeta.SettingText, Scope: pkgmeta.SettingScopeMember, Deliver: &wire.ComponentSettingDeliver{Header: "X-Workspace"}},
+		{Key: "region", Type: pkgmeta.SettingText, Scope: pkgmeta.SettingScopePlatform, Deliver: &wire.ComponentSettingDeliver{Header: "X-Region"}},
+	}
+	got := mcpHeaders(&wire.ComponentMCPHTTPAuth{Scheme: "bearer", Setting: "token"}, decl, map[string]string{"token": "t", "workspace": "w"}, "")
+	if !slices.Equal(got, []corepkg.NameValue{{Name: "Authorization", Value: "Bearer t"}, {Name: "X-Workspace", Value: "w"}}) {
+		t.Fatalf("headers = %v", got)
+	}
+	got = mcpHeaders(&wire.ComponentMCPHTTPAuth{Scheme: "header", Header: "X-Api-Key", Setting: "token"}, decl[:1], map[string]string{"token": "t"}, "")
+	if !slices.Equal(got, []corepkg.NameValue{{Name: "X-Api-Key", Value: "t"}}) {
+		t.Fatalf("header scheme = %v", got)
+	}
+	got = mcpHeaders(&wire.ComponentMCPHTTPAuth{Scheme: "oauth"}, decl[1:2], map[string]string{"workspace": "w"}, "member-token")
+	if !slices.Equal(got, []corepkg.NameValue{{Name: "Authorization", Value: "Bearer member-token"}, {Name: "X-Workspace", Value: "w"}}) {
+		t.Fatalf("oauth = %v", got)
 	}
 }

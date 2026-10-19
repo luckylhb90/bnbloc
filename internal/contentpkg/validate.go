@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path"
+	"slices"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -56,8 +57,8 @@ type MCPToolInfo struct {
 	Transport string
 	// Host is an http tool's URL host, as mcp.http:<host> names it.
 	Host string
-	// Env are the variable names the component declares.
-	Env []string
+	// Settings are the keys of the settings the component declares.
+	Settings []string
 }
 
 // Validate parses a bundle (verifying wantSHA256 when non-empty) and checks
@@ -221,9 +222,9 @@ func validateEnvelope(m Manifest, opts Options) error {
 			return fmt.Errorf("requires.mcp: %q is named twice", t.Name)
 		}
 		mcpSeen[t.Name] = true
-		for _, e := range t.Env {
-			if !pkgmeta.ValidEnvName(e) {
-				return fmt.Errorf("requires.mcp %s: invalid env name %q", t.Name, e)
+		for _, key := range t.Settings {
+			if !pkgmeta.ValidSettingKey(key) {
+				return fmt.Errorf("requires.mcp %s: invalid setting key %q", t.Name, key)
 			}
 		}
 		if err := checkMCPReference(m, t, opts); err != nil {
@@ -260,7 +261,7 @@ func validateEnvelope(m Manifest, opts Options) error {
 // checkMCPReference holds a requires.mcp entry to the MCP tool component
 // it names, when the caller can look components up (a save): MCP servers
 // come only from those platform-signed components, so a reference must name
-// one, only its declared variables, and the package must declare the
+// one, only its declared settings, and the package must declare the
 // permission the tool's transport needs (mcp.stdio, or mcp.http:<host>) so
 // its card shows what runs.
 func checkMCPReference(m Manifest, t MCPRequirement, opts Options) error {
@@ -271,13 +272,9 @@ func checkMCPReference(m Manifest, t MCPRequirement, opts Options) error {
 	if !ok {
 		return fmt.Errorf("requires.mcp: %q is not an MCP tool component available to you (MCP tools are published by the platform)", t.Name)
 	}
-	declared := map[string]bool{}
-	for _, e := range info.Env {
-		declared[e] = true
-	}
-	for _, e := range t.Env {
-		if !declared[e] {
-			return fmt.Errorf("requires.mcp %s: %q is not one of its variables (%s)", t.Name, e, strings.Join(info.Env, ", "))
+	for _, key := range t.Settings {
+		if !slices.Contains(info.Settings, key) {
+			return fmt.Errorf("requires.mcp %s: %q is not one of its settings (%s)", t.Name, key, strings.Join(info.Settings, ", "))
 		}
 	}
 	switch info.Transport {

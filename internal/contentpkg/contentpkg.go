@@ -123,8 +123,8 @@ type Manifest struct {
 }
 
 // Requires lists what a package needs at use time: skill and prompt packs
-// by "name@range", MCP tools by name (with the env names their credentials
-// come from), and the permissions it declares.
+// by "name@range", MCP tools by name (with the keys of the tool's settings
+// it needs set), and the permissions it declares.
 type Requires struct {
 	Skills      []string         `json:"skills,omitempty"`
 	Prompts     []string         `json:"prompts,omitempty"`
@@ -132,11 +132,11 @@ type Requires struct {
 	Permissions []string         `json:"permissions,omitempty"`
 }
 
-// MCPRequirement names an MCP tool component and the env variable names its
-// credentials are read from (values never ship in a package).
+// MCPRequirement names an MCP tool component and the keys of its settings
+// the package needs set (values never ship in a package).
 type MCPRequirement struct {
-	Name string   `json:"name"`
-	Env  []string `json:"env,omitempty"`
+	Name     string   `json:"name"`
+	Settings []string `json:"settings,omitempty"`
 }
 
 // QuickPrompt is one composer quick prompt of an expert: its text, or a

@@ -77,6 +77,6 @@ bumped for you.
   harness's own configuration: they are not the person's package and are
   never saved with it.
 - Never put secrets, tokens or personal data in a package; a tool's
-  credentials are named as variables, never written.
+  credentials are named by its settings' keys, never written.
 - Keep the person in control: no save or publish without their
   confirmation, and say plainly what was saved.

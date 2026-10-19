@@ -27,34 +27,34 @@ type PackageConfig struct {
 	Hooks        []string                    `json:"hooks,omitempty"`
 	Permissions  pkgmeta.Permissions         `json:"permissions"`
 	Description  string                      `json:"description,omitempty"`
-	// LocalSettings is a plugin's desktop-local settings schema.
-	LocalSettings []pkgmeta.LocalSetting `json:"localSettings,omitempty"`
+	// Settings is the component's settings declaration (plugins, MCP tools).
+	Settings []pkgmeta.Setting `json:"settings,omitempty"`
 	// Guest is a sandbox's machine profile (the image the desktop prewarms).
 	Guest *pkgmeta.Guest `json:"guest,omitempty"`
 	// Previewer is a previewer's match/entry/rank/capabilities/toolbar.
 	Previewer *pkgmeta.Previewer `json:"previewer,omitempty"`
-	// MCP is an MCP tool's tools, env, credentials source and runtime details.
+	// MCP is an MCP tool's tools, credentials source and runtime details.
 	MCP *pkgmeta.MCP `json:"mcp,omitempty"`
 }
 
 // ConfigFromPackage projects a verified package onto its persisted config.
 func ConfigFromPackage(pkg pkgmeta.Package) PackageConfig {
 	return PackageConfig{
-		Runtime:       pkg.Runtime,
-		Contract:      pkg.Contract,
-		Protocol:      pkg.Protocol,
-		Endpoint:      pkg.Endpoint,
-		Manifest:      pkg.Manifest,
-		Sidecar:       pkg.Sidecar,
-		Artifacts:     pkg.Artifacts,
-		Capabilities:  append([]string(nil), pkg.Capabilities...),
-		Hooks:         append([]string(nil), pkg.Hooks...),
-		Permissions:   pkg.Permissions,
-		Description:   pkg.Description,
-		LocalSettings: append([]pkgmeta.LocalSetting(nil), pkg.LocalSettings...),
-		Guest:         pkg.Guest,
-		Previewer:     pkg.Previewer,
-		MCP:           pkg.MCP,
+		Runtime:      pkg.Runtime,
+		Contract:     pkg.Contract,
+		Protocol:     pkg.Protocol,
+		Endpoint:     pkg.Endpoint,
+		Manifest:     pkg.Manifest,
+		Sidecar:      pkg.Sidecar,
+		Artifacts:    pkg.Artifacts,
+		Capabilities: append([]string(nil), pkg.Capabilities...),
+		Hooks:        append([]string(nil), pkg.Hooks...),
+		Permissions:  pkg.Permissions,
+		Description:  pkg.Description,
+		Settings:     append([]pkgmeta.Setting(nil), pkg.Settings...),
+		Guest:        pkg.Guest,
+		Previewer:    pkg.Previewer,
+		MCP:          pkg.MCP,
 	}
 }
 
@@ -80,25 +80,25 @@ func DecodeConfig(rec Record) (PackageConfig, error) {
 // the record, payload from its config), e.g. to re-probe or re-activate it.
 func (c PackageConfig) Package(kind string, rec Record) pkgmeta.Package {
 	return pkgmeta.Package{
-		Kind:          kind,
-		Name:          rec.Name,
-		Version:       rec.Version,
-		Protocol:      c.Protocol,
-		Runtime:       c.Runtime,
-		Endpoint:      c.Endpoint,
-		Manifest:      c.Manifest,
-		Sidecar:       c.Sidecar,
-		Artifacts:     c.Artifacts,
-		Capabilities:  c.Capabilities,
-		Permissions:   c.EffectivePermissions(rec),
-		Publisher:     rec.Publisher,
-		Description:   c.Description,
-		Contract:      c.Contract,
-		Hooks:         c.Hooks,
-		LocalSettings: c.LocalSettings,
-		Guest:         c.Guest,
-		Previewer:     c.Previewer,
-		MCP:           c.MCP,
+		Kind:         kind,
+		Name:         rec.Name,
+		Version:      rec.Version,
+		Protocol:     c.Protocol,
+		Runtime:      c.Runtime,
+		Endpoint:     c.Endpoint,
+		Manifest:     c.Manifest,
+		Sidecar:      c.Sidecar,
+		Artifacts:    c.Artifacts,
+		Capabilities: c.Capabilities,
+		Permissions:  c.EffectivePermissions(rec),
+		Publisher:    rec.Publisher,
+		Description:  c.Description,
+		Contract:     c.Contract,
+		Hooks:        c.Hooks,
+		Settings:     c.Settings,
+		Guest:        c.Guest,
+		Previewer:    c.Previewer,
+		MCP:          c.MCP,
 	}
 }
 

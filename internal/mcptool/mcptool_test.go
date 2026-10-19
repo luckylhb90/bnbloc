@@ -2,7 +2,6 @@ package mcptool
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -15,7 +14,6 @@ import (
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/extreg"
-	"github.com/luckylhb90/bnbloc/internal/sealbox"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
@@ -40,10 +38,12 @@ func stdioPackage(name string) pkgmeta.Package {
 			"linux-amd64":  {URL: "https://gw.example/v1/artifacts/sha256/" + sha('b'), SHA256: sha('b')},
 		},
 		MCP: &pkgmeta.MCP{
-			Tools:       []pkgmeta.MCPTool{{Name: "get_codeword"}},
-			Env:         []pkgmeta.MCPEnv{{Name: "CODEWORD_SALT", Secret: true, Required: true}, {Name: "CODEWORD_LANG"}},
-			Credentials: pkgmeta.MCPCredentialsMember,
-			Stdio:       &pkgmeta.MCPStdio{Args: []string{"--stdio"}},
+			Tools: []pkgmeta.MCPTool{{Name: "get_codeword"}},
+			Stdio: &pkgmeta.MCPStdio{Args: []string{"--stdio"}},
+		},
+		Settings: []pkgmeta.Setting{
+			{Key: "salt", Label: "Salt", Type: pkgmeta.SettingSecret, Scope: pkgmeta.SettingScopeMember, Required: true, Deliver: &pkgmeta.SettingDeliver{Env: "CODEWORD_SALT"}},
+			{Key: "lang", Label: "Language", Type: pkgmeta.SettingText, Scope: pkgmeta.SettingScopeMember, Deliver: &pkgmeta.SettingDeliver{Env: "CODEWORD_LANG"}},
 		},
 	}
 }
@@ -56,11 +56,10 @@ func httpPackage(name, baseURL string) pkgmeta.Package {
 		Endpoint:    &pkgmeta.Endpoint{BaseURL: baseURL},
 		Permissions: pkgmeta.Permissions{Network: []string{u.Hostname()}},
 		MCP: &pkgmeta.MCP{
-			Tools:       []pkgmeta.MCPTool{{Name: "search"}},
-			Env:         []pkgmeta.MCPEnv{{Name: "TOOLS_TOKEN", Secret: true, Required: true}},
-			Credentials: pkgmeta.MCPCredentialsOrg,
-			HTTP:        &pkgmeta.MCPHTTP{Auth: pkgmeta.MCPHTTPAuth{Scheme: pkgmeta.MCPAuthBearer, Env: "TOOLS_TOKEN"}},
+			Tools: []pkgmeta.MCPTool{{Name: "search"}},
+			HTTP:  &pkgmeta.MCPHTTP{Auth: pkgmeta.MCPHTTPAuth{Scheme: pkgmeta.MCPAuthBearer, Setting: "token"}},
 		},
+		Settings: []pkgmeta.Setting{{Key: "token", Label: "API token", Type: pkgmeta.SettingSecret, Scope: pkgmeta.SettingScopeOrg, Required: true}},
 	}
 }
 
@@ -89,7 +88,7 @@ func TestInstallStdioPersistsAndRegistersNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if Transport(cfg) != wire.MCPTransportStdio || cfg.MCP.Stdio.Args[0] != "--stdio" || !reflect.DeepEqual(EnvNames(cfg), []string{"CODEWORD_SALT", "CODEWORD_LANG"}) {
+	if Transport(cfg) != wire.MCPTransportStdio || cfg.MCP.Stdio.Args[0] != "--stdio" || !reflect.DeepEqual(SettingKeys(cfg), []string{"salt", "lang"}) {
 		t.Fatalf("config = %+v", cfg)
 	}
 	recs, _ := p.List(context.Background(), extreg.KindMCP)
@@ -199,9 +198,23 @@ func candidate(t *testing.T, pkg pkgmeta.Package, installed bool) Candidate {
 	return Candidate{Record: rec, Config: cfg, Visibility: extpipe.Visibility{Visible: true, Installed: installed}}
 }
 
+// orgSettings answers the given stored values for every tool, held to
+// each tool's declaration like componentsettings.Store.Resolved.
+func orgSettings(values map[string]map[string]string) Settings {
+	return func(name string, decl []pkgmeta.Setting) (map[string]string, []string, error) {
+		stored := map[string]string{}
+		for _, s := range pkgmeta.SettingsOfScope(decl, pkgmeta.SettingScopePlatform, pkgmeta.SettingScopeOrg) {
+			if v := values[name][s.Key]; v != "" {
+				stored[s.Key] = v
+			}
+		}
+		return stored, pkgmeta.UnsetSettings(decl, stored, pkgmeta.SettingScopePlatform, pkgmeta.SettingScopeOrg), nil
+	}
+}
+
 func TestResolve(t *testing.T) {
 	refs := []wire.ContentRef{
-		{ComponentID: "cc_expert", MCP: []wire.ContentMCPRequirement{{Name: "codeword", Env: []string{"CODEWORD_LANG"}}, {Name: "search"}, {Name: "ghost"}}},
+		{ComponentID: "cc_expert", MCP: []wire.ContentMCPRequirement{{Name: "codeword", Settings: []string{"lang"}}, {Name: "search"}, {Name: "ghost"}}},
 		{ComponentID: "cc_pack", MCP: []wire.ContentMCPRequirement{{Name: "codeword"}, {Name: "optin"}}},
 	}
 	lookup := lookupOf(t,
@@ -209,15 +222,7 @@ func TestResolve(t *testing.T) {
 		candidate(t, httpPackage("search", "https://tools.example.com/mcp"), true),
 		candidate(t, stdioPackage("optin"), false),
 	)
-	orgCalls := 0
-	org := func(name string) (map[string]string, bool, error) {
-		orgCalls++
-		if name != "search" {
-			t.Fatalf("org values asked for %s", name)
-		}
-		return map[string]string{"TOOLS_TOKEN": "tok"}, true, nil
-	}
-	tools, missing, err := Resolve(refs, nil, lookup, org)
+	tools, missing, err := Resolve(refs, nil, lookup, orgSettings(map[string]map[string]string{"search": {"token": "tok"}}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,123 +235,45 @@ func TestResolve(t *testing.T) {
 	cw := tools[0]
 	if cw.Name != "codeword" || cw.Transport != wire.MCPTransportStdio || cw.Artifacts["darwin-arm64"] != sha('a') ||
 		!reflect.DeepEqual(cw.Args, []string{"--stdio"}) || !reflect.DeepEqual(cw.RequiredBy, []string{"cc_expert", "cc_pack"}) ||
-		cw.Credentials != "member" || cw.Values != nil {
+		cw.Credentials != "" || cw.Values != nil {
 		t.Fatalf("codeword = %+v", cw)
 	}
 	// Required: declared required, or named by a requiring package.
-	if !cw.Env[0].Required || !cw.Env[1].Required || !cw.Env[0].Secret {
-		t.Fatalf("codeword env = %+v", cw.Env)
+	if !cw.Settings[0].Required || !cw.Settings[1].Required || cw.Settings[0].Deliver.Env != "CODEWORD_SALT" {
+		t.Fatalf("codeword settings = %+v", cw.Settings)
 	}
 	s := tools[1]
-	if s.Transport != wire.MCPTransportHTTP || s.URL != "https://tools.example.com/mcp" || s.Auth.Scheme != "bearer" || s.Values["TOOLS_TOKEN"] != "tok" {
+	if s.Transport != wire.MCPTransportHTTP || s.URL != "https://tools.example.com/mcp" || s.Auth.Scheme != "bearer" || s.Auth.Setting != "token" || s.Values["token"] != "tok" {
 		t.Fatalf("search = %+v", s)
-	}
-	if orgCalls != 1 {
-		t.Fatalf("org values read %d times", orgCalls)
 	}
 }
 
-func TestResolveOAuthNeedsNoConnector(t *testing.T) {
+func TestResolveOAuthNeedsNoSettings(t *testing.T) {
 	pkg := httpPackage("drive", "https://tools.example.com/mcp")
-	pkg.MCP.Env, pkg.MCP.Credentials = nil, ""
+	pkg.Settings = nil
 	pkg.MCP.HTTP = &pkgmeta.MCPHTTP{Auth: pkgmeta.MCPHTTPAuth{Scheme: pkgmeta.MCPAuthOAuth, ClientID: "c", Scopes: []string{"files:read"}}}
 	refs := []wire.ContentRef{{ComponentID: "cc", MCP: []wire.ContentMCPRequirement{{Name: "drive"}}}}
-	tools, missing, err := Resolve(refs, nil, lookupOf(t, candidate(t, pkg, true)), func(string) (map[string]string, bool, error) {
-		t.Fatal("an oauth tool has no organization connector")
-		return nil, false, nil
-	})
+	tools, missing, err := Resolve(refs, nil, lookupOf(t, candidate(t, pkg, true)), orgSettings(nil))
 	if err != nil || len(missing) != 0 || len(tools) != 1 {
 		t.Fatalf("tools=%+v missing=%v err=%v", tools, missing, err)
 	}
-	if a := tools[0].Auth; a == nil || a.Scheme != pkgmeta.MCPAuthOAuth || a.Env != "" || tools[0].Credentials != "" || tools[0].Values != nil {
+	if a := tools[0].Auth; a == nil || a.Scheme != pkgmeta.MCPAuthOAuth || a.Setting != "" || tools[0].Credentials != "" || tools[0].Values != nil {
 		t.Fatalf("drive = %+v auth=%+v", tools[0], tools[0].Auth)
 	}
 }
 
-func TestResolveMissingConnectorAndUndeclaredEnv(t *testing.T) {
-	refs := []wire.ContentRef{{ComponentID: "cc", MCP: []wire.ContentMCPRequirement{{Name: "search"}, {Name: "codeword", Env: []string{"GONE"}}}}}
+// A tool whose organization settings are not set needs setup, and one that
+// no longer has the settings the content names is unmet.
+func TestResolveNeedsSetupAndUndeclaredSetting(t *testing.T) {
+	refs := []wire.ContentRef{{ComponentID: "cc", MCP: []wire.ContentMCPRequirement{{Name: "search"}, {Name: "codeword", Settings: []string{"gone"}}}}}
 	lookup := lookupOf(t, candidate(t, httpPackage("search", "https://tools.example.com/mcp"), true), candidate(t, stdioPackage("codeword"), true))
-	for _, org := range []OrgValues{
-		func(string) (map[string]string, bool, error) { return nil, false, nil },
-		func(string) (map[string]string, bool, error) { return map[string]string{}, true, nil },
-		func(string) (map[string]string, bool, error) { return nil, false, ErrConnectorsOff },
-	} {
-		tools, missing, err := Resolve(refs, nil, lookup, org)
-		if err != nil || len(tools) != 0 || len(missing) != 2 {
-			t.Fatalf("tools=%+v missing=%v err=%v", tools, missing, err)
-		}
-		if !strings.Contains(strings.Join(missing, ";"), "no longer takes the variables") {
-			t.Fatalf("missing = %v", missing)
-		}
+	tools, missing, err := Resolve(refs, nil, lookup, orgSettings(map[string]map[string]string{"search": {"token": " "}}))
+	if err != nil || len(tools) != 0 {
+		t.Fatalf("tools=%+v missing=%v err=%v", tools, missing, err)
 	}
-}
-
-func testBox(t *testing.T) *sealbox.Box {
-	t.Helper()
-	key := make([]byte, 32)
-	_, _ = rand.Read(key)
-	b, err := sealbox.New(key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return b
-}
-
-func TestConnectorsSealedPerOrganization(t *testing.T) {
-	ctx := context.Background()
-	settings := store.NewMemoryPlatformSettings()
-	c := &Connectors{Settings: settings, Box: testBox(t), Now: func() int64 { return 42 }}
-	if err := c.Put(ctx, "t1", "search", map[string]string{"TOOLS_TOKEN": "s3cr3t"}, "admin"); err != nil {
-		t.Fatal(err)
-	}
-	rows, _ := settings.ListPlatformSettings(ctx)
-	if len(rows) != 1 || strings.Contains(rows[0].Value, "s3cr3t") {
-		t.Fatalf("stored in clear: %+v", rows)
-	}
-	got, ok, err := c.Get(ctx, "t1", "search")
-	if err != nil || !ok || got.Values["TOOLS_TOKEN"] != "s3cr3t" || got.UpdatedBy != "admin" || got.UpdatedAtMs != 42 {
-		t.Fatalf("get = %+v %v %v", got, ok, err)
-	}
-	if _, ok, _ := c.Get(ctx, "t2", "search"); ok {
-		t.Fatal("another organization has no connector")
-	}
-	// A row copied to another organization does not open.
-	_ = settings.PutPlatformSetting(ctx, store.PlatformSetting{Key: connectorKey("t2", "search"), Value: rows[0].Value})
-	if _, _, err := c.Get(ctx, "t2", "search"); err == nil {
-		t.Fatal("a moved sealed row must not open")
-	}
-	_ = c.Put(ctx, "t1", "other", map[string]string{"X": "y"}, "admin")
-	if err := c.DeleteComponent(ctx, "search"); err != nil {
-		t.Fatal(err)
-	}
-	rows, _ = settings.ListPlatformSettings(ctx)
-	if len(rows) != 1 || rows[0].Key != connectorKey("t1", "other") {
-		t.Fatalf("after uninstall = %+v", rows)
-	}
-	off := &Connectors{Settings: settings}
-	if err := off.Put(ctx, "t1", "x", nil, "a"); err != ErrConnectorsOff {
-		t.Fatalf("without a key connectors are off: %v", err)
-	}
-}
-
-func TestMergeValues(t *testing.T) {
-	env := []pkgmeta.MCPEnv{{Name: "TOKEN", Secret: true, Required: true}, {Name: "REGION"}}
-	if _, err := MergeValues(env, nil, map[string]string{"REGION": "eu"}); err == nil || !strings.Contains(err.Error(), "TOKEN is required") {
-		t.Fatalf("err = %v", err)
-	}
-	if _, err := MergeValues(env, nil, map[string]string{"OTHER": "x"}); err == nil {
-		t.Fatal("unknown variable accepted")
-	}
-	first, err := MergeValues(env, nil, map[string]string{"TOKEN": " t ", "REGION": "eu"})
-	if err != nil || first["TOKEN"] != "t" {
-		t.Fatalf("first = %v %v", first, err)
-	}
-	second, err := MergeValues(env, first, map[string]string{"TOKEN": "", "REGION": ""})
-	if err != nil || second["TOKEN"] != "t" || second["REGION"] != "" {
-		t.Fatalf("an empty secret keeps the stored one, an empty plain value clears: %v %v", second, err)
-	}
-	if !Configured(env, second) || Configured(env, map[string]string{}) {
-		t.Fatal("Configured")
+	want := []string{"MCP tool codeword (it no longer has the settings the content needs)", "MCP tool search (needs setup: an admin has not set API token)"}
+	if !reflect.DeepEqual(missing, want) {
+		t.Fatalf("missing = %v", missing)
 	}
 }
 
@@ -360,14 +287,14 @@ func TestResolveOffersInstalledTools(t *testing.T) {
 		candidate(t, httpPackage("search", "https://tools.example.com/mcp"), true),
 		candidate(t, stdioPackage("optin"), false),
 	)
-	noConnector := func(string) (map[string]string, bool, error) { return nil, false, nil }
-	tools, missing, err := Resolve(nil, []string{"codeword", "search", "optin"}, lookup, noConnector)
+	notSet := orgSettings(nil)
+	tools, missing, err := Resolve(nil, []string{"codeword", "search", "optin"}, lookup, notSet)
 	if err != nil || len(missing) != 0 || len(tools) != 1 || tools[0].Name != "codeword" || len(tools[0].RequiredBy) != 0 {
 		t.Fatalf("tools=%+v missing=%v err=%v", tools, missing, err)
 	}
 	refs := []wire.ContentRef{{ComponentID: "cc", MCP: []wire.ContentMCPRequirement{{Name: "search"}}}}
-	tools, missing, err = Resolve(refs, []string{"codeword", "search"}, lookup, noConnector)
-	if err != nil || len(tools) != 1 || !reflect.DeepEqual(missing, []string{"MCP tool search (an organization admin has not configured its connector)"}) {
+	tools, missing, err = Resolve(refs, []string{"codeword", "search"}, lookup, notSet)
+	if err != nil || len(tools) != 1 || !reflect.DeepEqual(missing, []string{"MCP tool search (needs setup: an admin has not set API token)"}) {
 		t.Fatalf("tools=%+v missing=%v err=%v", tools, missing, err)
 	}
 }

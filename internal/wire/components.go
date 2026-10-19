@@ -43,7 +43,7 @@ type PlatformComponent struct {
 	Capabilities  []string                     `json:"capabilities,omitempty"`
 	Permissions   ComponentPermissions         `json:"permissions"`
 	Hooks         []string                     `json:"hooks,omitempty"`
-	LocalSettings []ComponentLocalSetting      `json:"localSettings,omitempty"`
+	Settings      []ComponentSetting           `json:"settings,omitempty"`
 	Artifacts     map[string]ComponentArtifact `json:"artifacts,omitempty"`
 	Endpoint      *ComponentEndpoint           `json:"endpoint,omitempty"`
 	Sidecar       *ComponentSidecar            `json:"sidecar,omitempty"`
@@ -98,14 +98,22 @@ type MemberComponent struct {
 	Contract        string   `json:"contract,omitempty"`
 	RequiresDesktop bool     `json:"requiresDesktop,omitempty"`
 	Hooks           []string `json:"hooks,omitempty"`
-	// Permissions and LocalSettings tell the member's desktop how to launch
-	// a plugin sidecar: the host API capabilities it may use, and the
-	// settings the member fills in locally (never sent back here).
-	Permissions   *ComponentPermissions        `json:"permissions,omitempty"`
-	LocalSettings []ComponentLocalSetting      `json:"localSettings,omitempty"`
-	Artifacts     map[string]ComponentArtifact `json:"artifacts,omitempty"`
-	Endpoint      *ComponentEndpoint           `json:"endpoint,omitempty"`
-	Sidecar       *ComponentSidecar            `json:"sidecar,omitempty"`
+	// Permissions tells the member's desktop how to launch a plugin
+	// sidecar: the host API capabilities it may use.
+	Permissions *ComponentPermissions `json:"permissions,omitempty"`
+	// Settings is the component's declaration (docs/prd/2026-10-19-
+	// component-settings.md). SettingsSet are the keys of its platform and
+	// organization settings that hold a value for the member's
+	// organization (values never come here), and SettingsMissing the
+	// required ones of those scopes that are not set: while any is, the
+	// component needs setup and does not run. Member-scope settings live on
+	// the member's desktop.
+	Settings        []ComponentSetting           `json:"settings,omitempty"`
+	SettingsSet     []string                     `json:"settingsSet,omitempty"`
+	SettingsMissing []string                     `json:"settingsMissing,omitempty"`
+	Artifacts       map[string]ComponentArtifact `json:"artifacts,omitempty"`
+	Endpoint        *ComponentEndpoint           `json:"endpoint,omitempty"`
+	Sidecar         *ComponentSidecar            `json:"sidecar,omitempty"`
 	// Capabilities and Protocol tell the desktop/bridge what a protocol
 	// component (a sandbox runtime) was published to support before it is
 	// launched; the running implementation's discovery stays authoritative.
@@ -125,7 +133,7 @@ type MemberComponent struct {
 	// Previewer is an installed previewer's match/toolbar metadata, its
 	// pinned bundle, and the caller's browser frame URL.
 	Previewer *MemberComponentPreviewer `json:"previewer,omitempty"`
-	// MCP is an MCP tool's tools, env and credentials source.
+	// MCP is an MCP tool's tools, credentials source and transport.
 	MCP *MemberComponentMCP `json:"mcp,omitempty"`
 }
 
@@ -144,13 +152,10 @@ type MemberComponentPreviewer struct {
 }
 
 // MemberComponentMCP is an installed MCP tool in the member catalog: its
-// package payload, how it is reached, and (org credentials) whether the
-// member's organization configured its connector.
+// package payload and how it is reached.
 type MemberComponentMCP struct {
 	ComponentMCP
 	Transport string `json:"transport"`
-	// OrgConfigured is set for org credentials.
-	OrgConfigured *bool `json:"orgConfigured,omitempty"`
 }
 
 // ComponentsReply is GET /v1/components: the executable catalog the desktop

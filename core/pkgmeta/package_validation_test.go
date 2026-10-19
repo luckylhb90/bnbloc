@@ -310,20 +310,21 @@ func TestValidatePackage_matchesParseGate_andShellSkipsKind(t *testing.T) {
 	}
 }
 
-func TestParsePackage_acceptsNotificationPluginWithHostPermissionAndLocalSettings(t *testing.T) {
+func TestParsePackage_acceptsNotificationPluginWithHostPermissionAndSettings(t *testing.T) {
 	body := validPluginPackageBody(t, func(b map[string]any) {
 		b["hooks"] = []string{NotificationHook}
 		b["permissions"] = map[string]any{"network": []string{"cdn.example"}, "host": []string{PluginHostChat}}
-		b["localSettings"] = []map[string]any{
-			{"key": "appId", "label": "App ID", "required": true},
-			{"key": "appKey", "label": "App key", "secret": true, "required": true, "help": "Stays on this computer."},
+		b["settings"] = []map[string]any{
+			{"key": "apiBase", "label": "API base URL", "type": "url", "scope": "platform", "required": true, "deliver": map[string]any{"env": "BNBLOC_ACME_AUDITOR_API_BASE"}},
+			{"key": "appId", "label": "App ID", "type": "text", "scope": "member", "required": true},
+			{"key": "appKey", "label": "App key", "type": "secret", "scope": "member", "required": true, "help": "Stays on this computer."},
 		}
 	})
 	pkg, err := ParsePackage(body)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if len(pkg.LocalSettings) != 2 || !pkg.LocalSettings[1].Secret || pkg.Permissions.Host[0] != PluginHostChat {
+	if len(pkg.Settings) != 3 || pkg.Settings[2].Type != SettingSecret || pkg.Permissions.Host[0] != PluginHostChat {
 		t.Fatalf("pkg = %+v", pkg)
 	}
 	if spec, ok := LookupHook(NotificationHook); !ok || spec.Event != NotificationHookEvent || spec.Version != "1" {
@@ -331,11 +332,7 @@ func TestParsePackage_acceptsNotificationPluginWithHostPermissionAndLocalSetting
 	}
 }
 
-func TestParsePackage_rejectsInvalidPluginHostAndLocalSettings(t *testing.T) {
-	many := []map[string]any{}
-	for i := 0; i < 11; i++ {
-		many = append(many, map[string]any{"key": "k" + string(rune('a'+i)), "label": "L"})
-	}
+func TestParsePackage_rejectsInvalidPluginHost(t *testing.T) {
 	tests := map[string]struct {
 		mutate func(map[string]any)
 		want   string
@@ -346,12 +343,9 @@ func TestParsePackage_rejectsInvalidPluginHostAndLocalSettings(t *testing.T) {
 		"duplicate host permission": {func(b map[string]any) {
 			b["permissions"] = map[string]any{"host": []string{"chat", "chat"}}
 		}, "duplicate permissions.host"},
-		"duplicate key": {func(b map[string]any) {
-			b["localSettings"] = []map[string]any{{"key": "a", "label": "A"}, {"key": "a", "label": "B"}}
-		}, "duplicate key"},
-		"bad key":           {func(b map[string]any) { b["localSettings"] = []map[string]any{{"key": "a-b", "label": "A"}} }, "must be an identifier"},
-		"empty label":       {func(b map[string]any) { b["localSettings"] = []map[string]any{{"key": "a", "label": " "}} }, "label must be"},
-		"too many settings": {func(b map[string]any) { b["localSettings"] = many }, "at most 10 fields"},
+		"localSettings is gone": {func(b map[string]any) {
+			b["localSettings"] = []map[string]any{{"key": "a", "label": "A"}}
+		}, "unknown field"},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -362,12 +356,12 @@ func TestParsePackage_rejectsInvalidPluginHostAndLocalSettings(t *testing.T) {
 	}
 }
 
-func TestParsePackage_rejectsLocalSettingsOnOtherKinds(t *testing.T) {
+func TestParsePackage_rejectsSettingsOnOtherKinds(t *testing.T) {
 	body := validAuthProviderPackageBody(t, func(b map[string]any) {
-		b["localSettings"] = []map[string]any{{"key": "a", "label": "A"}}
+		b["settings"] = []map[string]any{{"key": "a", "label": "A", "type": "text", "scope": "org"}}
 	})
-	if _, err := ParsePackage(body); err == nil || !strings.Contains(err.Error(), "localSettings is only valid") {
-		t.Fatalf("error = %v; want localSettings refusal", err)
+	if _, err := ParsePackage(body); err == nil || !strings.Contains(err.Error(), "must not declare settings") {
+		t.Fatalf("error = %v; want settings refusal", err)
 	}
 }
 

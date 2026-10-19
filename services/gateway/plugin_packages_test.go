@@ -229,15 +229,19 @@ func TestComponentsMemberCatalog_hidesPluginLaunchMetadataUntilInstalled(t *test
 }
 
 // The member catalog hands an installed notification plugin's host API
-// permissions and local settings schema to the desktop (it launches the
-// sidecar with them); the settings values never come back here.
-func TestComponentsMemberCatalog_carriesPluginHostPermissionsAndLocalSettings(t *testing.T) {
+// permissions and settings declaration to the desktop (it launches the
+// sidecar with them), and says its required platform setting is not set
+// (needs setup); setting values never come back here.
+func TestComponentsMemberCatalog_carriesPluginHostPermissionsAndSettings(t *testing.T) {
 	_, srv, adminToken, memberToken := rolloutTestGateway(t)
 	artifact := uploadComponentArtifact(t, srv.URL, adminToken, []byte("personal bot sidecar bytes"))
 	var pkg map[string]any
 	_ = json.Unmarshal(pluginPackageBodyWithArtifact(t, "personal-bot", "http://127.0.0.1:7193", []string{pkgmeta.NotificationHook}, artifact), &pkg)
 	pkg["permissions"] = map[string]any{"network": []string{"127.0.0.1"}, "host": []string{pkgmeta.PluginHostChat}}
-	pkg["localSettings"] = []map[string]any{{"key": "appKey", "label": "App key", "secret": true, "required": true}}
+	pkg["settings"] = []map[string]any{
+		{"key": "appKey", "label": "App key", "type": "secret", "scope": "member", "required": true},
+		{"key": "apiBase", "label": "API base", "type": "url", "scope": "platform", "required": true, "deliver": map[string]any{"env": "BNBLOC_PERSONAL_BOT_API_BASE"}},
+	}
 	body, _ := json.Marshal(pkg)
 	if respBody, status := postComponent(t, srv.URL, adminToken, body, ""); status != http.StatusOK {
 		t.Fatalf("install status=%d body=%s, want 200", status, respBody)
@@ -245,12 +249,13 @@ func TestComponentsMemberCatalog_carriesPluginHostPermissionsAndLocalSettings(t 
 	plugin := rawComponentsForMember(t, srv.URL, memberToken)["personal-bot"]
 	perms, _ := plugin["permissions"].(map[string]any)
 	host, _ := perms["host"].([]any)
-	settings, _ := plugin["localSettings"].([]any)
-	if len(host) != 1 || host[0] != pkgmeta.PluginHostChat || len(settings) != 1 {
+	settings, _ := plugin["settings"].([]any)
+	missing, _ := plugin["settingsMissing"].([]any)
+	if len(host) != 1 || host[0] != pkgmeta.PluginHostChat || len(settings) != 2 || len(missing) != 1 || missing[0] != "apiBase" {
 		t.Fatalf("member catalog entry = %+v", plugin)
 	}
-	if field, _ := settings[0].(map[string]any); field["key"] != "appKey" || field["secret"] != true || field["required"] != true {
-		t.Fatalf("local setting = %+v", settings[0])
+	if field, _ := settings[0].(map[string]any); field["key"] != "appKey" || field["type"] != "secret" || field["required"] != true {
+		t.Fatalf("setting = %+v", settings[0])
 	}
 }
 

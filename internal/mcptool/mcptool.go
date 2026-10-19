@@ -1,14 +1,13 @@
 // Package mcptool is the MCP tool component kind
 // (bnbloc.mcp.package/v1, docs/prd/2026-10-12-experts-and-teams.md §6): its
-// extpipe lifecycle, the resolution of the MCP tools content requires for a
-// job, and the organization connectors that hold org-shared credentials.
+// extpipe lifecycle and the resolution of the MCP tools in effect for a
+// job (their settings' values are internal/componentsettings').
 //
 // Nothing runs server-side. A stdio tool's binaries are materialized by the
 // member's desktop (like sidecar artifacts, never supervised) and spawned by
 // the agent per session; an http tool is an endpoint component reached by
-// the agent. The gateway owns the install record, the member catalog, the
-// connectors and the per-job resolution the bridge builds the session's MCP
-// servers from.
+// the agent. The gateway owns the install record, the member catalog and
+// the per-job resolution the bridge builds the session's MCP servers from.
 package mcptool
 
 import (
@@ -100,7 +99,7 @@ func ProbeRecord(ctx context.Context, rec extpipe.Record, guard extgov.Guard) er
 
 // probeInitialize posts MCP's initialize to the server. A JSON-RPC answer
 // (JSON or an SSE stream) proves an MCP server; 401/403 proves one that
-// wants the credentials it declares, which the platform does not hold.
+// wants the credential it declares, which the probe does not send.
 func probeInitialize(ctx context.Context, ep endpointpkg.Endpoint) error {
 	body, _ := json.Marshal(map[string]any{
 		"jsonrpc": "2.0", "id": 1, "method": "initialize",
@@ -180,14 +179,11 @@ func Host(cfg extpipe.PackageConfig) string {
 	return strings.ToLower(u.Host)
 }
 
-// EnvNames lists a config's declared env names.
-func EnvNames(cfg extpipe.PackageConfig) []string {
-	if cfg.MCP == nil {
-		return nil
-	}
-	out := make([]string, 0, len(cfg.MCP.Env))
-	for _, e := range cfg.MCP.Env {
-		out = append(out, e.Name)
+// SettingKeys lists a config's declared setting keys.
+func SettingKeys(cfg extpipe.PackageConfig) []string {
+	out := make([]string, 0, len(cfg.Settings))
+	for _, s := range cfg.Settings {
+		out = append(out, s.Key)
 	}
 	return out
 }

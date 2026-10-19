@@ -1,0 +1,117 @@
+{
+  "_comment": "The value rules of component settings (core/pkgmeta/settings.go): CheckSettingValue, MergeSettings, EffectiveSettings, UnsetSettings and SettingsEnv. The desktop's copy (apps/desktop/src-tauri/src/internal_ext/component_settings.rs) is pinned to the same cases.",
+  "values": [
+    {"setting": {"type": "text"}, "value": "hello world", "ok": true},
+    {"setting": {"type": "text"}, "value": "line one\nline two", "ok": true},
+    {"setting": {"type": "secret"}, "value": "-----BEGIN KEY-----\nabc\n-----END KEY-----", "ok": true},
+    {"setting": {"type": "path"}, "value": "/Applications/Google Chrome.app", "ok": true},
+    {"setting": {"type": "text"}, "value": "nul\u0000byte", "ok": false},
+    {"setting": {"type": "url"}, "value": "https://api.example.com/v1", "ok": true},
+    {"setting": {"type": "url"}, "value": "http://127.0.0.1:8080", "ok": true},
+    {"setting": {"type": "url"}, "value": "ftp://files.example.com", "ok": false},
+    {"setting": {"type": "url"}, "value": "api.example.com", "ok": false},
+    {"setting": {"type": "url"}, "value": "https://", "ok": false},
+    {"setting": {"type": "url"}, "value": "https://api.example.com/a b", "ok": false},
+    {"setting": {"type": "number"}, "value": "42", "ok": true},
+    {"setting": {"type": "number"}, "value": "-0.5", "ok": true},
+    {"setting": {"type": "number"}, "value": "1e3", "ok": true},
+    {"setting": {"type": "number"}, "value": "007", "ok": false},
+    {"setting": {"type": "number"}, "value": "1.", "ok": false},
+    {"setting": {"type": "number"}, "value": "0x10", "ok": false},
+    {"setting": {"type": "number"}, "value": "1e999", "ok": false},
+    {"setting": {"type": "number"}, "value": "ten", "ok": false},
+    {"setting": {"type": "boolean"}, "value": "true", "ok": true},
+    {"setting": {"type": "boolean"}, "value": "false", "ok": true},
+    {"setting": {"type": "boolean"}, "value": "True", "ok": false},
+    {"setting": {"type": "boolean"}, "value": "1", "ok": false},
+    {"setting": {"type": "choice", "options": ["low", "medium", "high"]}, "value": "medium", "ok": true},
+    {"setting": {"type": "choice", "options": ["low", "medium", "high"]}, "value": "Medium", "ok": false}
+  ],
+  "merges": [
+    {
+      "_comment": "a first save: values trimmed, an empty optional left out, a required secret set",
+      "settings": [
+        {"key": "apiBase", "label": "API base", "type": "url", "scope": "org", "required": true},
+        {"key": "apiKey", "label": "API key", "type": "secret", "scope": "org", "required": true},
+        {"key": "note", "label": "Note", "type": "text", "scope": "org"},
+        {"key": "chrome", "label": "Chrome", "type": "path", "scope": "member"}
+      ],
+      "scope": "org",
+      "current": {},
+      "update": {"apiBase": " https://api.example.com ", "apiKey": "s3cr3t", "note": ""},
+      "next": {"apiBase": "https://api.example.com", "apiKey": "s3cr3t"},
+      "changed": ["apiBase", "apiKey"]
+    },
+    {
+      "_comment": "an empty secret keeps the stored one; an absent key is left; an empty text clears",
+      "settings": [
+        {"key": "apiBase", "label": "API base", "type": "url", "scope": "org", "required": true},
+        {"key": "apiKey", "label": "API key", "type": "secret", "scope": "org", "required": true},
+        {"key": "note", "label": "Note", "type": "text", "scope": "org"}
+      ],
+      "scope": "org",
+      "current": {"apiBase": "https://a.example.com", "apiKey": "s3cr3t", "note": "hi"},
+      "update": {"apiKey": "", "note": ""},
+      "next": {"apiBase": "https://a.example.com", "apiKey": "s3cr3t"},
+      "changed": ["note"]
+    },
+    {
+      "_comment": "clear removes a secret; a dropped key's value goes",
+      "settings": [
+        {"key": "apiKey", "label": "API key", "type": "secret", "scope": "org"}
+      ],
+      "scope": "org",
+      "current": {"apiKey": "s3cr3t", "gone": "x"},
+      "update": {},
+      "clear": ["apiKey"],
+      "next": {},
+      "changed": ["apiKey", "gone"]
+    },
+    {
+      "_comment": "a required setting with a default needs no value",
+      "settings": [
+        {"key": "quality", "label": "Quality", "type": "choice", "options": ["low", "high"], "default": "low", "scope": "member", "required": true}
+      ],
+      "scope": "member",
+      "current": {},
+      "update": {},
+      "next": {},
+      "changed": []
+    },
+    {
+      "settings": [{"key": "apiKey", "label": "API key", "type": "secret", "scope": "org", "required": true}],
+      "scope": "org", "current": {}, "update": {"apiKey": ""},
+      "error": "API key is required"
+    },
+    {
+      "settings": [{"key": "apiKey", "label": "API key", "type": "secret", "scope": "org"}],
+      "scope": "org", "current": {}, "update": {"other": "x"},
+      "error": "\"other\" is not a org setting"
+    },
+    {
+      "settings": [{"key": "chrome", "label": "Chrome", "type": "path", "scope": "member"}],
+      "scope": "org", "current": {}, "update": {"chrome": "/x"},
+      "error": "\"chrome\" is not a org setting"
+    },
+    {
+      "settings": [{"key": "port", "label": "Port", "type": "number", "scope": "platform"}],
+      "scope": "platform", "current": {}, "update": {"port": "eighty"},
+      "error": "Port must be a number"
+    }
+  ],
+  "effective": [
+    {
+      "settings": [
+        {"key": "apiBase", "label": "API base", "type": "url", "scope": "platform", "required": true, "deliver": {"env": "NOTES_API_BASE"}},
+        {"key": "apiKey", "label": "API key", "type": "secret", "scope": "org", "required": true, "deliver": {"env": "NOTES_API_KEY"}},
+        {"key": "quality", "label": "Quality", "type": "choice", "options": ["low", "high"], "default": "low", "scope": "member", "deliver": {"env": "NOTES_QUALITY"}},
+        {"key": "chrome", "label": "Chrome", "type": "path", "scope": "member", "required": true},
+        {"key": "note", "label": "Note", "type": "text", "scope": "member"}
+      ],
+      "values": {"apiBase": " https://api.example.com ", "apiKey": "", "note": "n", "stray": "x"},
+      "effective": {"apiBase": "https://api.example.com", "quality": "low", "note": "n"},
+      "unset": ["apiKey", "chrome"],
+      "env": [["NOTES_API_BASE", "https://api.example.com"], ["NOTES_QUALITY", "low"]]
+    }
+  ]
+}

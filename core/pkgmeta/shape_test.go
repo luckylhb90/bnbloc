@@ -28,17 +28,17 @@ func TestKindOnlyFieldsRefused(t *testing.T) {
 		},
 	}
 	stray := map[string]any{
-		"contract":      "bnbloc.other.contract/v1",
-		"protocol":      map[string]any{"min": "1.0", "max": "1.0"},
-		"manifest":      map[string]any{"name": "x"},
-		"sidecar":       map[string]any{"localUrl": "http://127.0.0.1:1"},
-		"endpoint":      map[string]any{"baseUrl": "https://x.example.com"},
-		"capabilities":  []string{"interrupt"},
-		"hooks":         []string{"chat_message.v1"},
-		"localSettings": []map[string]any{{"key": "token", "label": "Token"}},
-		"guest":         map[string]any{"image": "alpine:3.20"},
-		"previewer":     map[string]any{"entry": "index.html"},
-		"mcp":           map[string]any{"tools": []map[string]any{{"name": "t"}}},
+		"contract":     "bnbloc.other.contract/v1",
+		"protocol":     map[string]any{"min": "1.0", "max": "1.0"},
+		"manifest":     map[string]any{"name": "x"},
+		"sidecar":      map[string]any{"localUrl": "http://127.0.0.1:1"},
+		"endpoint":     map[string]any{"baseUrl": "https://x.example.com"},
+		"capabilities": []string{"interrupt"},
+		"hooks":        []string{"chat_message.v1"},
+		"settings":     []map[string]any{{"key": "token", "label": "Token", "type": "text", "scope": "member"}},
+		"guest":        map[string]any{"image": "alpine:3.20"},
+		"previewer":    map[string]any{"entry": "index.html"},
+		"mcp":          map[string]any{"tools": []map[string]any{{"name": "t"}}},
 	}
 	for kind, body := range bodies {
 		if _, err := ParsePackage(body(t, func(map[string]any) {})); err != nil {

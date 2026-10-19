@@ -139,10 +139,12 @@ func main() {
 		SyncEngine:        config.FromEnvRaw("BNBLOC_BRIDGE_SYNC_ENGINE"),
 		SyncSecret:        config.FromEnvRaw("BNBLOC_SYNC_SECRET"),
 		Cores:             entries,
-		// MCP tools: the desktop's materialized stdio binaries and the
-		// member's own tool credentials (never sent to the gateway).
-		MCPToolsDir:    strings.TrimSpace(config.FromEnvRaw("BNBLOC_MCP_TOOLS_DIR")),
-		MCPSettingsDir: strings.TrimSpace(config.FromEnvRaw("BNBLOC_MCP_SETTINGS_DIR")),
+		// MCP tools: the desktop's materialized stdio binaries, and the
+		// member's own component settings and sign-ins (never sent to the
+		// gateway).
+		MCPToolsDir:          strings.TrimSpace(config.FromEnvRaw("BNBLOC_MCP_TOOLS_DIR")),
+		ComponentSettingsDir: strings.TrimSpace(config.FromEnvRaw("BNBLOC_COMPONENT_SETTINGS_DIR")),
+		MCPSignInsDir:        strings.TrimSpace(config.FromEnvRaw("BNBLOC_MCP_SIGN_INS_DIR")),
 		// Which workspace each agent of a room uses, kept across restarts
 		// (the desktop: the member's own directory; empty = memory only).
 		StateDir: strings.TrimSpace(config.FromEnvRaw("BNBLOC_BRIDGE_STATE_DIR")),

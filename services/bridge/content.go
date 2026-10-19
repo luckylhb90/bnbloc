@@ -247,7 +247,7 @@ func (b *Bridge) resolveJobContent(ctx context.Context, job bridgeJob, owner str
 			return nil, err
 		}
 	}
-	mcp, unmet, stdioForeign := b.resolveMCP(eff.MCP, refs, owner, job.RequesterUserID == owner)
+	mcp, unmet, stdioForeign := b.resolveMCP(eff.MCP, refs, owner, job.TenantID, job.RequesterUserID == owner)
 	c.mcp = mcp
 	c.missing = append(c.missing, unmet...)
 	for _, name := range stdioForeign {

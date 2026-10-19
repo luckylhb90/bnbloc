@@ -19,10 +19,11 @@ func mcpStdioBody(t *testing.T, mutate func(map[string]any)) []byte {
 			"linux-amd64":  sandboxArtifact('b'),
 		},
 		"mcp": map[string]any{
-			"tools":       []map[string]any{{"name": "get_codeword", "description": "Returns today's codeword"}},
-			"env":         []map[string]any{{"name": "CODEWORD_SALT", "description": "salt", "secret": true, "required": true}},
-			"credentials": "member",
-			"stdio":       map[string]any{"args": []string{"--stdio"}},
+			"tools": []map[string]any{{"name": "get_codeword", "description": "Returns today's codeword"}},
+			"stdio": map[string]any{"args": []string{"--stdio"}},
+		},
+		"settings": []map[string]any{
+			{"key": "salt", "label": "Salt", "type": "secret", "scope": "member", "required": true, "deliver": map[string]any{"env": "CODEWORD_SALT"}},
 		},
 		"publisher":   "Acme Corp",
 		"description": "codeword tools",
@@ -45,11 +46,10 @@ func mcpEndpointBody(t *testing.T, mutate func(map[string]any)) []byte {
 		b["endpoint"] = map[string]any{"baseUrl": "https://tools.example.com/mcp"}
 		b["permissions"] = map[string]any{"network": []string{"tools.example.com"}}
 		b["mcp"] = map[string]any{
-			"tools":       []map[string]any{{"name": "search"}},
-			"env":         []map[string]any{{"name": "TOOLS_TOKEN", "secret": true, "required": true}},
-			"credentials": "org",
-			"http":        map[string]any{"auth": map[string]any{"scheme": "bearer", "env": "TOOLS_TOKEN"}},
+			"tools": []map[string]any{{"name": "search"}},
+			"http":  map[string]any{"auth": map[string]any{"scheme": "bearer", "setting": "token"}},
 		}
+		b["settings"] = []map[string]any{{"key": "token", "label": "API token", "type": "secret", "scope": "org", "required": true}}
 		if mutate != nil {
 			mutate(b)
 		}
@@ -63,26 +63,37 @@ func TestMCPPackageValid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stdio: %v", err)
 	}
-	if pkg.MCP == nil || pkg.MCP.Credentials != MCPCredentialsMember || pkg.MCP.Stdio.Args[0] != "--stdio" {
-		t.Fatalf("stdio payload = %+v", pkg.MCP)
+	if pkg.MCP == nil || pkg.MCP.Credentials != "" || pkg.MCP.Stdio.Args[0] != "--stdio" || pkg.Settings[0].Deliver.Env != "CODEWORD_SALT" {
+		t.Fatalf("stdio payload = %+v %+v", pkg.MCP, pkg.Settings)
 	}
 	if _, err := ParsePackage(mcpEndpointBody(t, nil)); err != nil {
 		t.Fatalf("endpoint: %v", err)
 	}
-	// No env, no credentials, no auth: a public endpoint.
+	// No settings, no auth: a public endpoint.
 	if _, err := ParsePackage(mcpEndpointBody(t, func(b map[string]any) {
 		b["mcp"] = map[string]any{"tools": []map[string]any{{"name": "t"}}}
+		delete(b, "settings")
 	})); err != nil {
 		t.Fatalf("public endpoint: %v", err)
 	}
-	// A named header.
+	// A named header, and a further setting in a header of its own.
 	if _, err := ParsePackage(mcpEndpointBody(t, func(b map[string]any) {
-		mcpBlock(b)["http"] = map[string]any{"auth": map[string]any{"scheme": "header", "header": "X-Api-Key", "env": "TOOLS_TOKEN"}}
+		mcpBlock(b)["http"] = map[string]any{"auth": map[string]any{"scheme": "header", "header": "X-Api-Key", "setting": "token"}}
+		b["settings"] = append(b["settings"].([]map[string]any),
+			map[string]any{"key": "workspace", "label": "Workspace", "type": "text", "scope": "member", "deliver": map[string]any{"header": "X-Workspace"}})
 	})); err != nil {
 		t.Fatalf("header auth: %v", err)
 	}
-	// A member OAuth sign-in: no env, no credentials.
+	// A setting delivered as the bearer, no auth block.
+	if _, err := ParsePackage(mcpEndpointBody(t, func(b map[string]any) {
+		delete(mcpBlock(b), "http")
+		b["settings"] = []map[string]any{{"key": "token", "label": "Token", "type": "secret", "scope": "platform", "deliver": map[string]any{"bearer": true}}}
+	})); err != nil {
+		t.Fatalf("deliver.bearer: %v", err)
+	}
+	// A member OAuth sign-in: no setting carries its credential.
 	pkg, err = ParsePackage(mcpEndpointBody(t, func(b map[string]any) {
+		delete(b, "settings")
 		b["mcp"] = map[string]any{
 			"tools": []map[string]any{{"name": "search"}},
 			"http":  map[string]any{"auth": map[string]any{"scheme": "oauth", "clientId": "bnbloc-desktop", "scopes": []string{"files:read", "files:write"}}},
@@ -94,10 +105,10 @@ func TestMCPPackageValid(t *testing.T) {
 	if a := pkg.MCP.HTTP.Auth; a.Scheme != MCPAuthOAuth || a.ClientID != "bnbloc-desktop" || len(a.Scopes) != 2 {
 		t.Fatalf("oauth payload = %+v", a)
 	}
-	// The room as the credential: a stdio server declaring no env.
+	// The room as the credential, beside settings of its own.
 	if _, err := ParsePackage(mcpStdioBody(t, func(b map[string]any) {
-		delete(mcpBlock(b), "env")
 		mcpBlock(b)["credentials"] = MCPCredentialsRoom
+		b["settings"] = []map[string]any{{"key": "chrome", "label": "Chrome binary", "type": "path", "scope": "member", "deliver": map[string]any{"env": "BNBLOC_CODEWORD_CHROME"}}}
 	})); err != nil {
 		t.Fatalf("room credentials: %v", err)
 	}
@@ -117,18 +128,10 @@ func TestMCPPackageRefusals(t *testing.T) {
 		{"duplicate tool", mcpStdioBody, func(b map[string]any) {
 			mcpBlock(b)["tools"] = []map[string]any{{"name": "a"}, {"name": "a"}}
 		}, "duplicate tool"},
-		{"lower-case env", mcpStdioBody, func(b map[string]any) {
-			mcpBlock(b)["env"] = []map[string]any{{"name": "token"}}
-		}, "upper-case identifier"},
-		{"reserved env", mcpStdioBody, func(b map[string]any) {
-			mcpBlock(b)["env"] = []map[string]any{{"name": "BNBLOC_TOKEN"}}
-		}, "reserved"},
-		{"env without credentials", mcpStdioBody, func(b map[string]any) { delete(mcpBlock(b), "credentials") }, "mcp.credentials is required"},
-		{"credentials without env", mcpStdioBody, func(b map[string]any) { delete(mcpBlock(b), "env") }, "needs mcp.env"},
-		{"unknown credentials", mcpStdioBody, func(b map[string]any) { mcpBlock(b)["credentials"] = "everyone" }, "mcp.credentials must be"},
-		// The room relay's variables are the bridge's: a room-credential
-		// package declares none, and an endpoint never receives them.
-		{"room credentials with env", mcpStdioBody, func(b map[string]any) { mcpBlock(b)["credentials"] = "room" }, "takes no mcp.env"},
+		{"unknown credentials", mcpStdioBody, func(b map[string]any) { mcpBlock(b)["credentials"] = "member" }, `mcp.credentials must be "room"`},
+		{"mcp.env is gone", mcpStdioBody, func(b map[string]any) {
+			mcpBlock(b)["env"] = []map[string]any{{"name": "TOKEN"}}
+		}, "unknown field"},
 		{"room credentials on an endpoint", mcpEndpointBody, func(b map[string]any) {
 			b["mcp"] = map[string]any{"tools": []map[string]any{{"name": "t"}}, "credentials": "room"}
 		}, `for runtime "stdio" only`},
@@ -151,19 +154,34 @@ func TestMCPPackageRefusals(t *testing.T) {
 		{"endpoint artifacts", mcpEndpointBody, func(b map[string]any) {
 			b["artifacts"] = map[string]any{"linux-amd64": sandboxArtifact('a')}
 		}, "must not declare artifacts"},
-		{"endpoint auth env mismatch", mcpEndpointBody, func(b map[string]any) {
-			mcpBlock(b)["http"] = map[string]any{"auth": map[string]any{"scheme": "bearer", "env": "OTHER"}}
-		}, "auth.env must name"},
-		{"endpoint env without auth", mcpEndpointBody, func(b map[string]any) { delete(mcpBlock(b), "http") }, "without auth takes no env"},
+		{"endpoint auth names no setting", mcpEndpointBody, func(b map[string]any) {
+			mcpBlock(b)["http"] = map[string]any{"auth": map[string]any{"scheme": "bearer", "setting": "other"}}
+		}, "auth.setting must name"},
+		{"endpoint setting that never reaches it", mcpEndpointBody, func(b map[string]any) { delete(mcpBlock(b), "http") }, "never reaches an http MCP tool"},
+		{"endpoint auth setting delivered twice", mcpEndpointBody, func(b map[string]any) {
+			b["settings"].([]map[string]any)[0]["deliver"] = map[string]any{"header": "X-Token"}
+		}, "it declares no deliver"},
+		{"endpoint second bearer", mcpEndpointBody, func(b map[string]any) {
+			b["settings"] = append(b["settings"].([]map[string]any),
+				map[string]any{"key": "other", "label": "Other", "type": "secret", "scope": "org", "deliver": map[string]any{"bearer": true}})
+		}, `scheme "bearer" is the bearer`},
+		{"endpoint env delivery", mcpEndpointBody, func(b map[string]any) {
+			b["settings"] = append(b["settings"].([]map[string]any),
+				map[string]any{"key": "region", "label": "Region", "type": "text", "scope": "org", "deliver": map[string]any{"env": "REGION", "header": "X-Region"}})
+		}, "only a plugin or a stdio MCP tool"},
 		{"endpoint bad header", mcpEndpointBody, func(b map[string]any) {
-			mcpBlock(b)["http"] = map[string]any{"auth": map[string]any{"scheme": "header", "header": "X Bad", "env": "TOOLS_TOKEN"}}
+			mcpBlock(b)["http"] = map[string]any{"auth": map[string]any{"scheme": "header", "header": "X Bad", "setting": "token"}}
 		}, "header name"},
-		{"oauth with org credentials", mcpEndpointBody, func(b map[string]any) {
+		{"endpoint transport header", mcpEndpointBody, func(b map[string]any) {
+			mcpBlock(b)["http"] = map[string]any{"auth": map[string]any{"scheme": "header", "header": "Mcp-Session-Id", "setting": "token"}}
+		}, "set by the MCP client"},
+		{"oauth with a setting", mcpEndpointBody, func(b map[string]any) {
+			mcpBlock(b)["http"] = map[string]any{"auth": map[string]any{"scheme": "oauth", "setting": "token"}}
+		}, "takes no setting or header"},
+		{"oauth with a bearer setting", mcpEndpointBody, func(b map[string]any) {
 			mcpBlock(b)["http"] = map[string]any{"auth": map[string]any{"scheme": "oauth"}}
-		}, "never through an organization connector"},
-		{"oauth with env", mcpEndpointBody, func(b map[string]any) {
-			mcpBlock(b)["http"] = map[string]any{"auth": map[string]any{"scheme": "oauth", "env": "TOOLS_TOKEN"}}
-		}, "takes no env or header"},
+			b["settings"].([]map[string]any)[0]["deliver"] = map[string]any{"bearer": true}
+		}, "the bearer is the member's sign-in"},
 		{"oauth bad scope", mcpEndpointBody, func(b map[string]any) {
 			b["mcp"] = map[string]any{"tools": []map[string]any{{"name": "t"}}, "http": map[string]any{"auth": map[string]any{"scheme": "oauth", "scopes": []string{"a b"}}}}
 		}, "is not an OAuth scope"},
@@ -171,7 +189,7 @@ func TestMCPPackageRefusals(t *testing.T) {
 			b["mcp"] = map[string]any{"tools": []map[string]any{{"name": "t"}}, "http": map[string]any{"auth": map[string]any{"scheme": "oauth", "clientId": "has space"}}}
 		}, "clientId must be"},
 		{"scopes without oauth", mcpEndpointBody, func(b map[string]any) {
-			mcpBlock(b)["http"] = map[string]any{"auth": map[string]any{"scheme": "bearer", "env": "TOOLS_TOKEN", "scopes": []string{"x"}}}
+			mcpBlock(b)["http"] = map[string]any{"auth": map[string]any{"scheme": "bearer", "setting": "token", "scopes": []string{"x"}}}
 		}, `belong to scheme "oauth"`},
 		{"unknown runtime", mcpStdioBody, func(b map[string]any) { b["runtime"] = "sidecar" }, `must be "stdio" or "endpoint"`},
 	}

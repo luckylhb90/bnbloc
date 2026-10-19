@@ -119,8 +119,8 @@ type Service struct {
 	ExtPipe          *extpipe.Pipeline
 	extPipeOnce      sync.Once
 	AllowExtUnsigned bool
-	// SecretBox seals organization MCP connectors and the assist model's
-	// key (BNBLOC_SECRET_STORE_KEY); nil turns both off (mcp_tools.go,
+	// SecretBox seals component settings and the assist model's key
+	// (BNBLOC_SECRET_STORE_KEY); nil turns both off (component_settings.go,
 	// assist.go).
 	SecretBox *sealbox.Box
 	// AssistTransport, when set, carries the assist model's calls (tests);

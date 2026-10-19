@@ -8,8 +8,8 @@ import (
 
 func mcpStdioDraft() Package {
 	return Package{Name: "codeword", Version: "1.0.0", Publisher: "acme", Runtime: RuntimeStdio,
-		MCP: &MCP{Tools: []MCPTool{{Name: "get_codeword"}}, Env: []MCPEnv{{Name: "CODEWORD_SALT", Secret: true, Required: true}},
-			Credentials: MCPCredentialsMember, Stdio: &MCPStdio{Args: []string{"--stdio"}}}}
+		MCP:      &MCP{Tools: []MCPTool{{Name: "get_codeword"}}, Stdio: &MCPStdio{Args: []string{"--stdio"}}},
+		Settings: []Setting{{Key: "salt", Label: "Salt", Type: SettingSecret, Scope: SettingScopeMember, Required: true, Deliver: &SettingDeliver{Env: "CODEWORD_SALT"}}}}
 }
 
 const pinSHA = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
@@ -74,8 +74,8 @@ func TestPrepareMCPRefusals(t *testing.T) {
 		t.Fatalf("another kind: err = %v", err)
 	}
 	invalid := mcpStdioDraft()
-	invalid.MCP.Credentials = ""
-	if _, err := PrepareMCP(invalid, []string{"darwin-arm64"}); err == nil || !strings.Contains(err.Error(), "mcp.credentials is required") {
+	invalid.Settings[0].Scope = "everyone"
+	if _, err := PrepareMCP(invalid, []string{"darwin-arm64"}); err == nil || !strings.Contains(err.Error(), "scope must be") {
 		t.Fatalf("invalid: err = %v", err)
 	}
 }

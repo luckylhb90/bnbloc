@@ -11,7 +11,8 @@ import (
 )
 
 const mcpStdioJSON = `{"name":"codeword","version":"1.0.0","publisher":"acme","runtime":"stdio",
- "mcp":{"tools":[{"name":"get_codeword"}],"env":[{"name":"CODEWORD_SALT","secret":true,"required":true}],"credentials":"member","stdio":{"args":["serve"]}}}`
+ "mcp":{"tools":[{"name":"get_codeword"}],"stdio":{"args":["serve"]}},
+ "settings":[{"key":"salt","label":"Salt","type":"secret","scope":"member","required":true,"deliver":{"env":"CODEWORD_SALT"}}]}`
 
 // A stdio MCP tool: every --binary is uploaded and pinned, the package is
 // signed by the default key and published with the rollout.
@@ -50,7 +51,8 @@ func TestPublishMCPEndpoint(t *testing.T) {
 	gw := newPublishGateway(t)
 	pkgFile := writeTemp(t, "mcp.json", `{"name":"search","version":"2.0.0","publisher":"acme","runtime":"endpoint",
  "endpoint":{"baseUrl":"https://tools.example.com/mcp"},"permissions":{"network":["tools.example.com"]},
- "mcp":{"tools":[{"name":"search"}],"env":[{"name":"TOOLS_TOKEN","secret":true,"required":true}],"credentials":"org","http":{"auth":{"scheme":"bearer","env":"TOOLS_TOKEN"}}}}`)
+ "mcp":{"tools":[{"name":"search"}],"http":{"auth":{"scheme":"bearer","setting":"token"}}},
+ "settings":[{"key":"token","label":"API token","type":"secret","scope":"org","required":true}]}`)
 	if err := coresPublishMCP([]string{"--gateway", gw.URL, "--token", "admin", "--package", pkgFile, "--unsigned"}); err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +69,7 @@ func TestPublishMCPRefusesBeforeUpload(t *testing.T) {
 	stdio := writeTemp(t, "mcp.json", mcpStdioJSON)
 	bin := writeTemp(t, "codeword", "bin")
 	core := writeTemp(t, "core.json", `{"kind":"bnbloc.core.package/v1","name":"acme","version":"1.0.0","publisher":"x","runtime":"manifest"}`)
-	invalid := writeTemp(t, "bad.json", strings.Replace(mcpStdioJSON, `"credentials":"member",`, "", 1))
+	invalid := writeTemp(t, "bad.json", strings.Replace(mcpStdioJSON, `"scope":"member"`, `"scope":"room"`, 1))
 	endpoint := writeTemp(t, "ep.json", `{"name":"s","version":"1.0.0","publisher":"a","runtime":"endpoint","endpoint":{"baseUrl":"https://t.example.com"},"permissions":{"network":["t.example.com"]},"mcp":{"tools":[{"name":"s"}]}}`)
 	for name, c := range map[string]struct {
 		args []string
@@ -77,7 +79,7 @@ func TestPublishMCPRefusesBeforeUpload(t *testing.T) {
 		"stdio no binary": {[]string{"--package", stdio, "--unsigned"}, "at least one --binary"},
 		"missing binary":  {[]string{"--package", stdio, "--binary", "darwin-arm64=/nope", "--unsigned"}, "--binary darwin-arm64"},
 		"another kind":    {[]string{"--package", core, "--unsigned"}, "is not bnbloc.mcp.package/v1"},
-		"invalid":         {[]string{"--package", invalid, "--binary", "darwin-arm64=" + bin, "--unsigned"}, "mcp.credentials is required"},
+		"invalid":         {[]string{"--package", invalid, "--binary", "darwin-arm64=" + bin, "--unsigned"}, "scope must be one of"},
 		"endpoint binary": {[]string{"--package", endpoint, "--binary", "darwin-arm64=" + bin, "--unsigned"}, "only for a stdio MCP tool"},
 		"no key":          {[]string{"--package", stdio, "--binary", "darwin-arm64=" + bin}, "component-publisher.key does not exist"},
 		"bad rollout":     {[]string{"--package", stdio, "--binary", "darwin-arm64=" + bin, "--rollout", "all", "--unsigned"}, "--rollout"},

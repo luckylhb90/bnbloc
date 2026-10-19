@@ -55,9 +55,11 @@ func TestParsePackage_rejectsInvalidNotifier(t *testing.T) {
 		"wrong contract":   {func(b map[string]any) { b["contract"] = "bnbloc.notifier.contract/v9" }, "unknown notifier contract"},
 		"missing endpoint": {func(b map[string]any) { delete(b, "endpoint") }, `notifier runtime "endpoint" requires endpoint.baseUrl`},
 		// Notifiers carry no member settings: personal delivery is a desktop
-		// plugin (localSettings), never a server-side secret.
-		"member settings":    {func(b map[string]any) { b["memberSettings"] = []map[string]any{{"key": "a", "label": "A"}} }, "unknown field"},
-		"local settings":     {func(b map[string]any) { b["localSettings"] = []map[string]any{{"key": "a", "label": "A"}} }, "localSettings is only valid"},
+		// plugin (its settings), never a server-side secret.
+		"member settings": {func(b map[string]any) { b["memberSettings"] = []map[string]any{{"key": "a", "label": "A"}} }, "unknown field"},
+		"settings": {func(b map[string]any) {
+			b["settings"] = []map[string]any{{"key": "a", "label": "A", "type": "text", "scope": "org"}}
+		}, "must not declare settings"},
 		"unknown capability": {func(b map[string]any) { b["capabilities"] = []string{"broadcast"} }, `unknown notifier capability "broadcast"`},
 		"host permission": {func(b map[string]any) {
 			b["permissions"] = map[string]any{"network": []string{"notify.internal"}, "host": []string{"chat"}}

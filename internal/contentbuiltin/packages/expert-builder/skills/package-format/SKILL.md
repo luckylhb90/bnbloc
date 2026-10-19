@@ -125,12 +125,13 @@ that description alone), then the steps, checklists and examples.
   then `ref` their prompts instead of repeating them.
 - `mcp`: MCP tools the agent needs, each by the name of an MCP tool in the
   person's Library (`list_components` with kind `mcp`), never a command or
-  a URL: `[{ "name": "issue-tracker", "env": ["TRACKER_TOKEN"] }]`. `env`
-  names the tool's credential variables the package relies on; their values
-  stay with the person or their organization, never in the package (a
-  wrong name is refused with the tool's own list). Declare the permission
-  the tool's transport needs: `"mcp.stdio"` for a local tool,
-  `"mcp.http:<host>"` for a remote one (the save says which is missing).
+  a URL: `[{ "name": "issue-tracker", "settings": ["apiToken"] }]`.
+  `settings` names the keys of the tool's settings the package relies on;
+  their values stay with the platform, the organization or the person,
+  never in the package (a wrong key is refused with the tool's own list).
+  Declare the permission the tool's transport needs: `"mcp.stdio"` for a
+  local tool, `"mcp.http:<host>"` for a remote one (the save says which is
+  missing).
 - `permissions`: `"scripts"` when the package ships scripts (see
   "Scripts"), and the MCP permission above; otherwise omit.
 

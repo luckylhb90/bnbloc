@@ -103,3 +103,14 @@ const (
 	// MaxWorkReferenceBytes bounds the reference files of a work together.
 	MaxWorkReferenceBytes = 25 << 20
 )
+
+// The bounds of a component's settings (docs/prd/2026-10-19-component-
+// settings.md): core/pkgmeta holds a declaration and a value to them; the
+// web reads them to say why before it sends.
+const (
+	// MaxComponentSettings bounds the settings one component declares.
+	MaxComponentSettings = 24
+	// MaxComponentSettingValueBytes bounds one value (a key, a URL, a
+	// path: never a document).
+	MaxComponentSettingValueBytes = 4 << 10
+)

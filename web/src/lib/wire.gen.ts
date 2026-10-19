@@ -1205,6 +1205,59 @@ export interface ClientConfig {
   sitesOrigin?: string;
 }
 
+// ---- wire/component_settings.go ----
+
+// ComponentSettingField is one declared setting with its state in the scope
+// a view shows: a secret's value is never returned (Set says whether one is
+// stored).
+export interface ComponentSettingField extends ComponentSetting {
+  set: boolean;
+  value?: string;
+}
+
+// ComponentSettingsView answers GET and PUT of
+// /v1/platform/components/{name}/settings (platform scope) and
+// /v1/org/components/{name}/settings (the caller's organization): the
+// component's settings of that scope with their state, and the required
+// settings of this and the scopes above it that are not set (the component
+// needs setup while any is).
+export interface ComponentSettingsView {
+  kind: string;
+  name: string;
+  version: string;
+  description?: string;
+  scope: ComponentSettingScope;
+  // Available is false when the gateway has no secret store key: values
+  // cannot be stored.
+  available: boolean;
+  // ReachesMembers: the component runs on members' computers (a plugin,
+  // a stdio MCP tool), so these values are sent to them.
+  reachesMembers: boolean;
+  fields: ComponentSettingField[];
+  missing: ComponentSetting[];
+  updatedBy?: string;
+  updatedAtMs?: number;
+}
+
+// ComponentSettingsUpdate is a PUT of a scope's values: a key absent is
+// left as it is, an empty value clears it (an empty secret keeps the
+// stored one), Clear clears keys (a secret too). Values of settings the
+// component no longer declares are dropped.
+export interface ComponentSettingsUpdate {
+  values: Record<string, string>;
+  clear?: string[];
+}
+
+// ComponentSettingsResolved answers GET
+// /v1/components/{name}/settings/resolved: the platform and organization
+// values of a component installed for the caller, secrets included, which
+// the caller's desktop hands the component when it launches it there. Missing
+// are the required settings of those scopes that are not set.
+export interface ComponentSettingsResolved {
+  values: Record<string, string>;
+  missing: string[];
+}
+
 // ---- wire/component_shapes.go ----
 
 // ComponentEndpoint is part of a component package (core/pkgmeta).
@@ -1227,15 +1280,54 @@ export interface ComponentPermissions {
   host?: string[];
 }
 
-// ComponentLocalSetting is one field of a plugin's desktop-local settings schema.
-// Secret values are write-only in the desktop UI (masked, never shown back).
-export interface ComponentLocalSetting {
+// ComponentSetting is one setting a component declares in its manifest
+// (pkgmeta.Setting; docs/prd/2026-10-19-component-settings.md): what it
+// holds (Type), who sets it and for whom (Scope), and how its value
+// reaches the component (Deliver; every value is also in the component's
+// settings file). Every value is text: a number in decimal, a boolean
+// "true" or "false". core/pkgmeta validates a declaration and a value.
+export interface ComponentSetting {
   key: string;
   label: string;
   help?: string;
-  secret?: boolean;
+  type: ComponentSettingType;
+  scope: ComponentSettingScope;
+  // Required: the component does not run until it is set ("needs setup").
   required?: boolean;
+  // Default is the value used while none is set (never a secret's).
+  default?: string;
+  // Options are a choice's values.
+  options?: string[];
+  deliver?: ComponentSettingDeliver;
 }
+
+// ComponentSettingDeliver says how a setting's value reaches the component
+// beyond its settings file: an environment variable of its process, or a
+// request header of an http MCP tool (a named header, or Authorization:
+// Bearer <value>).
+export interface ComponentSettingDeliver {
+  env?: string;
+  header?: string;
+  bearer?: boolean;
+}
+
+// The types of a setting (ComponentSetting.Type). A secret is write-only:
+// never shown back, only "set". A path is a path on the member's own
+// machine (member scope only).
+export const SettingText = "text";
+export const SettingSecret = "secret";
+export const SettingURL = "url";
+export const SettingNumber = "number";
+export const SettingBoolean = "boolean";
+export const SettingChoice = "choice";
+export const SettingPath = "path";
+
+// Who sets a setting, and for whom it holds (ComponentSetting.Scope): the
+// super admin for the deployment, an organization admin for their
+// organization, each member for themselves.
+export const SettingScopePlatform = "platform";
+export const SettingScopeOrg = "org";
+export const SettingScopeMember = "member";
 
 // ComponentSidecar is part of a component package (core/pkgmeta).
 export interface ComponentSidecar {
@@ -1317,11 +1409,9 @@ export interface ComponentMCP {
   // Tools are the tools the server offers, for display (the server's own
   // tools/list stays authoritative at run time).
   tools: ComponentMCPTool[];
-  // Env are the variables the server needs; values never ship in a
-  // package (Credentials says where they come from).
-  env?: ComponentMCPEnv[];
-  // Credentials is member, org or bridge; required exactly when Env is
-  // declared.
+  // Credentials is "room" (the room the agent works in is the
+  // credential: the bridge gives a stdio server the room relay) or empty.
+  // Everything else a server needs is a setting (Package.Settings).
   credentials?: string;
   stdio?: ComponentMCPStdio;
   http?: ComponentMCPHTTP;
@@ -1333,16 +1423,9 @@ export interface ComponentMCPTool {
   description?: string;
 }
 
-// ComponentMCPEnv is one variable an MCP server needs.
-export interface ComponentMCPEnv {
-  name: string;
-  description?: string;
-  secret?: boolean;
-  required?: boolean;
-}
-
 // ComponentMCPStdio is how a stdio server is started: the materialized binary with
-// these arguments (env values arrive as its process environment).
+// these arguments (setting values arrive as its process environment and
+// settings file).
 export interface ComponentMCPStdio {
   args?: string[];
 }
@@ -1352,13 +1435,16 @@ export interface ComponentMCPHTTP {
   auth: ComponentMCPHTTPAuth;
 }
 
-// ComponentMCPHTTPAuth is the header an endpoint server expects: none, a bearer token
-// (Authorization: Bearer <Env>), a named header (<Header>: <Env>), or a
-// member's OAuth sign-in (Authorization: Bearer <their access token>).
+// ComponentMCPHTTPAuth is the credential an endpoint server expects: none,
+// a bearer token (Authorization: Bearer <the Setting's value>), a named
+// header (<Header>: <the Setting's value>), or a member's OAuth sign-in
+// (Authorization: Bearer <their access token>).
 export interface ComponentMCPHTTPAuth {
   scheme: string;
   header?: string;
-  env?: string;
+  // Setting is the key of the setting carrying a bearer or header
+  // scheme's value.
+  setting?: string;
   // ClientID (oauth, optional) is a client the publisher registered with
   // the server's authorization server; without it the desktop registers
   // itself where the authorization server allows it.
@@ -1408,7 +1494,7 @@ export interface PlatformComponent {
   capabilities?: string[];
   permissions: ComponentPermissions;
   hooks?: string[];
-  localSettings?: ComponentLocalSetting[];
+  settings?: ComponentSetting[];
   artifacts?: Record<string, ComponentArtifact>;
   endpoint?: ComponentEndpoint;
   sidecar?: ComponentSidecar;
@@ -1462,11 +1548,19 @@ export interface MemberComponent {
   contract?: string;
   requiresDesktop?: boolean;
   hooks?: string[];
-  // Permissions and LocalSettings tell the member's desktop how to launch
-  // a plugin sidecar: the host API capabilities it may use, and the
-  // settings the member fills in locally (never sent back here).
+  // Permissions tells the member's desktop how to launch a plugin
+  // sidecar: the host API capabilities it may use.
   permissions?: ComponentPermissions;
-  localSettings?: ComponentLocalSetting[];
+  // Settings is the component's declaration (docs/prd/2026-10-19-
+  // component-settings.md). SettingsSet are the keys of its platform and
+  // organization settings that hold a value for the member's
+  // organization (values never come here), and SettingsMissing the
+  // required ones of those scopes that are not set: while any is, the
+  // component needs setup and does not run. Member-scope settings live on
+  // the member's desktop.
+  settings?: ComponentSetting[];
+  settingsSet?: string[];
+  settingsMissing?: string[];
   artifacts?: Record<string, ComponentArtifact>;
   endpoint?: ComponentEndpoint;
   sidecar?: ComponentSidecar;
@@ -1489,7 +1583,7 @@ export interface MemberComponent {
   // Previewer is an installed previewer's match/toolbar metadata, its
   // pinned bundle, and the caller's browser frame URL.
   previewer?: MemberComponentPreviewer;
-  // MCP is an MCP tool's tools, env and credentials source.
+  // MCP is an MCP tool's tools, credentials source and transport.
   mcp?: MemberComponentMCP;
 }
 
@@ -1507,12 +1601,9 @@ export interface MemberComponentPreviewer extends ComponentPreviewer {
 }
 
 // MemberComponentMCP is an installed MCP tool in the member catalog: its
-// package payload, how it is reached, and (org credentials) whether the
-// member's organization configured its connector.
+// package payload and how it is reached.
 export interface MemberComponentMCP extends ComponentMCP {
   transport: string;
-  // OrgConfigured is set for org credentials.
-  orgConfigured?: boolean;
 }
 
 // ComponentsReply is GET /v1/components: the executable catalog the desktop
@@ -2957,13 +3048,23 @@ export const MaxWorkReferences = 8;
 // MaxWorkReferenceBytes bounds the reference files of a work together.
 export const MaxWorkReferenceBytes = 26214400;
 
+// The bounds of a component's settings (docs/prd/2026-10-19-component-
+// settings.md): core/pkgmeta holds a declaration and a value to them; the
+// web reads them to say why before it sends.
+// MaxComponentSettings bounds the settings one component declares.
+export const MaxComponentSettings = 24;
+// MaxComponentSettingValueBytes bounds one value (a key, a URL, a
+// path: never a document).
+export const MaxComponentSettingValueBytes = 4096;
+
 // ---- wire/mcp_tools.go ----
 
 // ContentMCPRequirement is one requires.mcp entry of a package: an MCP tool
-// component by name, and the component's env names the package needs set.
+// component by name, and the keys of the component's settings the package
+// needs set.
 export interface ContentMCPRequirement {
   name: string;
-  env?: string[];
+  settings?: string[];
 }
 
 // RoomRelayRoutes are the gateway routes a room-credential MCP tool reaches
@@ -2979,9 +3080,9 @@ export const MCPTransportStdio = "stdio";
 export const MCPTransportHTTP = "http";
 
 // ContentMCPTool is one MCP tool component in effect for a job's turn, as
-// the bridge driving it needs it. Values carries an org connector's values
-// (secrets): it is answered only to the bridge holding the job's lease and
-// never logged or persisted.
+// the bridge driving it needs it. Values carries the tool's platform and
+// organization setting values (secrets included): it is answered only to
+// the bridge holding the job's lease and never logged or persisted.
 export interface ContentMCPTool {
   name: string;
   version: string;
@@ -2993,69 +3094,15 @@ export interface ContentMCPTool {
   args?: string[];
   // URL and Auth describe an http server.
   url?: string;
-  auth?: ContentMCPAuth;
-  env?: ContentMCPEnv[];
-  // Credentials is "member" or "org" ("" when the tool takes no env).
+  auth?: ComponentMCPHTTPAuth;
+  // Settings is the tool's declaration, a setting the content in effect
+  // needs marked required.
+  settings?: ComponentSetting[];
+  // Credentials is "room" when the room is the tool's credential.
   credentials?: string;
   values?: Record<string, string>;
   // RequiredBy are the ids of the packages in effect that require it.
   requiredBy: string[];
-}
-
-// ContentMCPAuth is the header an http MCP server expects (scheme none,
-// bearer or header, Env naming the value's variable; or oauth: the
-// requester's own sign-in from their desktop, attached as a bearer token by
-// their bridge and never lent to someone else's drive).
-export interface ContentMCPAuth {
-  scheme: string;
-  header?: string;
-  env?: string;
-}
-
-// ContentMCPEnv is one variable a resolved tool takes; Required means the
-// turn needs it set (declared required, or named by a requiring package).
-export interface ContentMCPEnv {
-  name: string;
-  secret?: boolean;
-  required?: boolean;
-}
-
-// MCPConnectorField is one variable of an org connector as an org admin
-// sees it: a secret value is never returned (Set says whether one is
-// stored).
-export interface MCPConnectorField {
-  name: string;
-  description?: string;
-  secret?: boolean;
-  required?: boolean;
-  set: boolean;
-  value?: string;
-}
-
-// MCPConnector is one org-credential MCP tool component visible to the
-// organization, with its connector's state.
-export interface MCPConnector {
-  name: string;
-  version: string;
-  description?: string;
-  transport: string;
-  configured: boolean;
-  fields: MCPConnectorField[];
-  updatedBy?: string;
-  updatedAtMs?: number;
-}
-
-// MCPConnectorsReply answers GET /v1/tenant/mcp-connectors. Available is
-// false when the gateway has no secret store key (org connectors are off).
-export interface MCPConnectorsReply {
-  available: boolean;
-  connectors: MCPConnector[];
-}
-
-// MCPConnectorUpdate is PUT /v1/tenant/mcp-connectors/{name}: the values to
-// store (an empty secret keeps the stored one).
-export interface MCPConnectorUpdate {
-  values: Record<string, string>;
 }
 
 // ---- wire/media.go ----
@@ -5411,6 +5458,10 @@ export type AssistFieldType = "text" | "list" | "items";
 export const AssistFieldTypeValues: readonly AssistFieldType[] = ["text", "list", "items"];
 export type AttachmentContent = "png" | "jpeg" | "gif" | "webp" | "pdf" | "zip" | "ole" | "text" | "isomedia" | "webm" | "mp3" | "wav" | "ogg";
 export const AttachmentContentValues: readonly AttachmentContent[] = ["png", "jpeg", "gif", "webp", "pdf", "zip", "ole", "text", "isomedia", "webm", "mp3", "wav", "ogg"];
+export type ComponentSettingType = "text" | "secret" | "url" | "number" | "boolean" | "choice" | "path";
+export const ComponentSettingTypeValues: readonly ComponentSettingType[] = ["text", "secret", "url", "number", "boolean", "choice", "path"];
+export type ComponentSettingScope = "platform" | "org" | "member";
+export const ComponentSettingScopeValues: readonly ComponentSettingScope[] = ["platform", "org", "member"];
 export type ContentUseScope = "member" | "room" | "room-expert";
 export const ContentUseScopeValues: readonly ContentUseScope[] = ["member", "room", "room-expert"];
 export type ContentSavedAction = "saved" | "submitted" | "published";

@@ -27,7 +27,7 @@ func componentFromExtRecord(rec extpipe.Record) (wire.PlatformComponent, error) 
 		Capabilities:    cfg.Capabilities,
 		Permissions:     cfg.EffectivePermissions(rec),
 		Hooks:           cfg.Hooks,
-		LocalSettings:   cfg.LocalSettings,
+		Settings:        cfg.Settings,
 		Artifacts:       cfg.Artifacts,
 		Endpoint:        cfg.Endpoint,
 		Sidecar:         cfg.Sidecar,

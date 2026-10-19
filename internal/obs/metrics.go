@@ -196,8 +196,9 @@ var routeWords = map[string]bool{
 	// the works gallery: a deliverable published as a work, its recipe,
 	// and a draft started from one.
 	"publish-work": true, "recipe": true, "make-similar": true,
-	// MCP tool components: organization connectors.
-	"mcp-connectors": true,
+	// component settings: /v1/{platform,org}/components/{name}/settings and
+	// a member's /v1/components/{name}/settings/resolved.
+	"org": true, "resolved": true,
 	// content sharing and approval: /v1/content-components/{id}/shares|
 	// update|publish, /v1/tenant/content-requests/{id}/approve|decline,
 	// /v1/{tenant,platform}/content-components/{id}/unpublish|restore|package.
@@ -225,8 +226,6 @@ var idCollections = map[string]bool{
 	// names a route; a room's /platform-agents/{provider} still collapses
 	// (a provider is not a route word).
 	"agent-hosts": true,
-	// /v1/tenant/mcp-connectors/{component}
-	"mcp-connectors": true,
 	// /v1/content-components/{id}, /v1/tenant/content-requests/{id}: an id
 	// is never read as a route word ("effective" and "import" are routes
 	// under content-components, so only the request collection is listed).

@@ -39,6 +39,7 @@ type mcpPackageDraft struct {
 	Endpoint    *pkgmeta.Endpoint          `json:"endpoint,omitempty"`
 	Permissions pkgmeta.Permissions        `json:"permissions"`
 	MCP         *pkgmeta.MCP               `json:"mcp"`
+	Settings    []pkgmeta.Setting          `json:"settings,omitempty"`
 	Artifacts   map[string]mcpStagedBinary `json:"artifacts,omitempty"`
 }
 
@@ -72,7 +73,7 @@ func (s *Service) handleBuildMCPPackage(w http.ResponseWriter, r *http.Request, 
 	prepared, err := pkgmeta.PrepareMCP(pkgmeta.Package{
 		Name: strings.TrimSpace(draft.Name), Version: strings.TrimSpace(draft.Version), Publisher: strings.TrimSpace(draft.Publisher),
 		Description: strings.TrimSpace(draft.Description), Runtime: draft.Runtime, Endpoint: draft.Endpoint,
-		Permissions: draft.Permissions, MCP: draft.MCP,
+		Permissions: draft.Permissions, MCP: draft.MCP, Settings: draft.Settings,
 	}, platforms)
 	if err != nil {
 		httpx.Error(w, err.Error(), http.StatusBadRequest)

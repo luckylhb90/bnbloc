@@ -13,7 +13,7 @@ import (
 
 // coresPublishMCP publishes an MCP tool component (bnbloc.mcp.package/v1,
 // docs/prd/2026-10-12-experts-and-teams.md §6): the package JSON names the
-// tools, env, credentials source and runtime; a stdio tool's per-platform
+// tools, settings, credentials source and runtime; a stdio tool's per-platform
 // binaries are uploaded with --binary (the publish-sidecar upload path),
 // pinned in the package, signed and installed through the one publish call.
 func coresPublishMCP(args []string) error {

@@ -105,7 +105,7 @@ func Ref(c store.ContentComponent, v store.ContentComponentVersion, source strin
 		Permissions: m.Permissions(), NeedsSandbox: m.NeedsSandbox(),
 	}
 	for _, t := range m.Requires.MCP {
-		ref.MCP = append(ref.MCP, wire.ContentMCPRequirement{Name: t.Name, Env: append([]string(nil), t.Env...)})
+		ref.MCP = append(ref.MCP, wire.ContentMCPRequirement{Name: t.Name, Settings: append([]string(nil), t.Settings...)})
 	}
 	return ref, nil
 }
