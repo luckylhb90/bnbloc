@@ -194,10 +194,17 @@ unnecessary.
   work?
 - Can it be rolled back, and rolled out to a few first?
 
+- Does it run where it will really run? A component's process may run
+  confined (an agent's sandbox denies writes outside the workspace). Never
+  stop something (a browser, a daemon) that cannot be started again from
+  the process that stops it.
+
 *Test:* the upgrade itself, with existing state, before and after; a mixed
-deployment.
+deployment; the change run under the confinement it meets in use.
 *Seen:* a destructive migration that broke a mixed deploy; an upgrade
-that lost in-use workspace bindings; updates applied mid-task.
+that lost in-use workspace bindings; updates applied mid-task; a browser
+closed for an upgrade from inside the agent's sandbox, where no new one
+could start.
 
 ### 12. Observability
 
