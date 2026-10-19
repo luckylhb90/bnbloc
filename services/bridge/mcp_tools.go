@@ -119,8 +119,7 @@ func (b *Bridge) resolveMCP(tools []wire.ContentMCPTool, refs []wire.ContentRef,
 				continue
 			}
 			server.Type = corepkg.MCPStdio
-			server.Command = path
-			server.Args = append([]string(nil), t.Args...)
+			server.Command, server.Args = b.toolCommand(t.Name, path, t.Args)
 			for _, e := range t.Env {
 				if v := values[e.Name]; v != "" {
 					server.Env = append(server.Env, corepkg.NameValue{Name: e.Name, Value: v})
@@ -307,20 +306,7 @@ func (b *Bridge) mcpBinary(idx *mcpIndex, t wire.ContentMCPTool) (string, string
 	if dir == "" {
 		return "", "stdio tools need the desktop app"
 	}
-	for _, e := range idx.Tools {
-		if e.Name != t.Name || e.SHA256 != pin {
-			continue
-		}
-		rel, err := filepath.Rel(dir, e.Path)
-		if err != nil || !filepath.IsAbs(e.Path) || rel == "." || strings.HasPrefix(rel, "..") {
-			return "", "its binary is outside the tools directory"
-		}
-		if st, err := os.Stat(e.Path); err != nil || !st.Mode().IsRegular() {
-			return "", "not downloaded on this computer yet"
-		}
-		return e.Path, ""
-	}
-	return "", "not downloaded on this computer yet"
+	return materializedTool(dir, idx, t.Name, pin)
 }
 
 // fitMCPToTarget drops the MCP servers the session cannot attach: none on a

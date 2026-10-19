@@ -194,6 +194,8 @@ type Bridge struct {
 	// default is deterministic and model-free; a configurable LLM-backed
 	// summarizer can replace it later behind the same interface.
 	summarizer roomlog.Summarizer
+	// toolLauncher starts stdio MCP tools (mcp_tool_exec.go; "" none).
+	toolLauncher string
 	// producers caches who produced each deliverable version .room/
 	// artifacts.md lists (roomlog.ReadDeliverables).
 	producers   roomlog.ProducerCache
@@ -1627,10 +1629,18 @@ func (b *Bridge) turnWroteFiles(ctx context.Context, rs *roomSession, startMs in
 // window and continues in a fresh session (once per job, apart from the
 // job's own notice).
 func (b *Bridge) noticeContextReset(ctx context.Context, d *drive) {
+	b.noticeNewSession(ctx, d, "the conversation grew past its context window")
+}
+
+// noticeNewSession tells the room the agent continues the channel's
+// conversation in a new session, and why: it remembers none of it, and was
+// handed a summary and where the rest is (roomlog.ComposeHandover), so a
+// person knows to expect it.
+func (b *Bridge) noticeNewSession(ctx context.Context, d *drive, why string) {
 	job := d.ref()
 	n := wire.JobNotice{
 		Kind:        wire.NoticeContextReset,
-		Text:        "The conversation grew past " + d.job.Provider + "'s context window; continuing in a fresh session (the room's history stays in .room/).",
+		Text:        d.job.Provider + " continues in a new session (" + why + "): it was handed a summary of this conversation and where to read the rest.",
 		OwnerUserID: d.owner, Provider: d.job.Provider,
 		RoomID: job.RoomID, ChannelID: job.ChannelID, JobID: job.ID, SourceSeq: job.MessageSeq,
 		Session: wire.ContextResetNoticeSessionID(job.ID), AtUnixMs: time.Now().UnixMilli(),
@@ -1695,6 +1705,7 @@ func (b *Bridge) ensureSession(ctx context.Context, d *drive, key driveKey, prom
 			"event", "bnbloc.bridge.session_content_changed", "room", room, "core", d.core, "provider", provider, "session", existing.sessionID)
 		b.unbindLocked(sk)
 		existing = nil
+		go b.noticeNewSession(context.WithoutCancel(ctx), d, "it now wears other content: an expert, a skill pack or its tools changed")
 	}
 	b.mu.Unlock()
 	if existing == nil {
@@ -1713,6 +1724,7 @@ func (b *Bridge) ensureSession(ctx context.Context, d *drive, key driveKey, prom
 		b.unbindWorkspaceLocked(key)
 		b.mu.Unlock()
 		existing = nil
+		b.noticeNewSession(ctx, d, "its workspace's protected files changed")
 	}
 	if existing != nil && b.channelReset(ctx, room, d.job.ChannelID, existing) {
 		// A message of the channel was deleted after the session started:
@@ -1726,6 +1738,7 @@ func (b *Bridge) ensureSession(ctx context.Context, d *drive, key driveKey, prom
 		}
 		b.mu.Unlock()
 		existing = nil
+		b.noticeNewSession(ctx, d, "a message of this conversation was deleted")
 	}
 	if existing != nil {
 		if err := b.sessionReachable(ctx, entry, existing.workspaceID, existing.sessionID); err != nil {
@@ -1737,6 +1750,7 @@ func (b *Bridge) ensureSession(ctx context.Context, d *drive, key driveKey, prom
 				b.unbindLocked(sk)
 			}
 			b.mu.Unlock()
+			b.noticeNewSession(ctx, d, "its previous session could not be continued")
 		} else {
 			// Reused session: materialize this turn's attachments into the
 			// existing workspace BEFORE the caller composes the follow-up prompt,

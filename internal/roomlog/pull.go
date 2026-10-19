@@ -284,6 +284,41 @@ func ComposeTurn(now Now, recordsHint bool, delta []Entry) string {
 	return b.String()
 }
 
+// ComposeHandover is a new session's first prompt in a channel that already
+// has a conversation (pull model): the session remembers none of it (a
+// session replaced for new content, a deleted message, an outgrown context
+// or one that could not be continued), so the prompt hands it over before
+// the current message: the older part condensed by opts.Summarizer, the
+// newest exchanges verbatim within handoverChars, the agent's own replies
+// included, and where the whole of it is (records: the channel's records
+// directory under .room/, GuidanceChannel's). entries are the channel's
+// messages before the current one, oldest first.
+func ComposeHandover(entries []Entry, records string, now Now, recordsHint bool, opts Options) string {
+	var b strings.Builder
+	if recordsHint {
+		b.WriteString("(room records: .room/INDEX.md)\n")
+	}
+	if len(entries) > 0 {
+		older, window := splitWindow(entries, handoverChars)
+		b.WriteString(RecordsHeader("Earlier in this conversation"))
+		b.WriteString("This is a new session of the conversation: you do not remember it. What was said is below; all of it is in .room/" + records + "recent.md and the chunks before it. Read them when this message builds on more than this.\n")
+		if opts.Summarizer != nil && len(older) > 0 {
+			if summary := strings.TrimSpace(opts.Summarizer.Summarize(older)); summary != "" {
+				b.WriteString("Before the lines below:\n" + summary + "\n")
+			}
+		}
+		for _, e := range firstMentions(window) {
+			b.WriteString(Line(e))
+		}
+		b.WriteString("\n")
+	}
+	writeNow(&b, now)
+	return b.String()
+}
+
+// handoverChars bounds the verbatim part of a handover (ComposeHandover).
+const handoverChars = 6000
+
 // ComposeDelta renders a follow-up prompt under the push model: only the
 // messages that arrived since the session's last turn, then the current
 // message. The session's first-turn prompt and the CLI's own memory hold the

@@ -43,6 +43,9 @@ a turn matched by message text.
   use, or does a long task outlive it?
 - Edited, deleted, revoked, renamed afterwards: do copies, caches and
   derived state follow?
+- Updated afterwards: when something a session depends on gets a new
+  version (a tool, a skill pack), does the session keep its memory, and
+  if it must restart, is it handed what it knew and is the person told?
 - Resumed after a long pause: is stale state still valid?
 - What does each value belong to — the session, the turn, or the call —
   and is it set where that lifetime starts (a per-turn job id in a
@@ -50,7 +53,8 @@ a turn matched by message text.
 
 *Test:* run it long; restart each process in the middle; upgrade across
 it; edit or delete its inputs afterwards.
-*Seen:* a fixed 5-minute turn cap killing real work; a 4-hour token under
+*Seen:* every release of a tool silently restarting the conversations
+that used it; a fixed 5-minute turn cap killing real work; a 4-hour token under
 an unbounded turn; sessions lost on every restart; a deleted message still
 in an agent's memory; updates killing running tasks.
 

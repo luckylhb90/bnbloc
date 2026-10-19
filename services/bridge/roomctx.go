@@ -435,6 +435,20 @@ func (b *Bridge) drivePrompt(ctx context.Context, d *drive, workspaceID string, 
 	if from != "" {
 		now.From = from
 	}
+	// A new session of an agent that already took part in the channel's
+	// conversation (its session was replaced) is handed it over: it
+	// remembers none of it, its own replies included. An agent new to the
+	// channel gets the pointer alone, and reads .room/ when it needs to.
+	if fresh {
+		if prior, _ := dropInstruction(own, d.job.MessageSeq, text); spoke(prior, agentSpeakerLabel(owner, provider)) {
+			if st != nil {
+				for _, e := range own {
+					st.PushSeenSeq = max(st.PushSeenSeq, e.Seq)
+				}
+			}
+			return roomlog.ComposeHandover(prior, b.guidanceChannel(ctx, room, d.job.ChannelID), now, !d.caps.profile, roomlog.Options{Summarizer: b.summarizer})
+		}
+	}
 	// A reused session hears what others said in its channel since its last
 	// turn, as conversation lines before the message (its own replies are
 	// in its memory; a fresh session has .room/ and its guidance).
@@ -679,6 +693,11 @@ func dropInstruction(entries []roomlog.Entry, seq int64, text string) (kept []ro
 // those were said in the current session, whose CLI memory holds them (the
 // entries are the session's channel's).
 // Others' lines — people and other agents — always stay.
+// spoke reports whether self said something in entries.
+func spoke(entries []roomlog.Entry, self string) bool {
+	return strings.TrimSpace(self) != "" && slices.ContainsFunc(entries, func(e roomlog.Entry) bool { return e.Speaker == self })
+}
+
 func dropSelf(entries []roomlog.Entry, self string, bound int64) []roomlog.Entry {
 	if strings.TrimSpace(self) == "" {
 		return entries

@@ -909,3 +909,59 @@ func TestRecordsNamePeople(t *testing.T) {
 		t.Fatalf("profile reads = %d, want each id read once", reads)
 	}
 }
+
+// A new session of an agent that already took part in the channel (its
+// session was replaced: here, it now wears an expert) is handed the
+// conversation over, its own replies included, with where the rest is; the
+// room is told why. An agent new to the channel gets the pointer alone
+// (TestDriveClaimPullWritesRoomFilesAndPointerPrompt).
+func TestReplacedSessionIsHandedTheConversation(t *testing.T) {
+	g := newPullGateway(t)
+	g.addChatRow("general", 1, "maya", "find my Workday courses")
+	g.addAgentRow("general", 2, "maya", "agent-a", "Sign in to Workday in the live view, then tell me")
+	g.addChatRow("general", 3, "maya", "signed in")
+	prov := &fakeCoreProvider{url: g.srv.URL}
+	b := New(Config{
+		GatewayBaseURL: g.srv.URL,
+		GatewayToken:   "t",
+		OwnerSubject:   "maya",
+		Cores:          []CoreConfig{{Name: "core-a", Provider: prov, Endpoint: corepkg.Endpoint{BaseURL: g.srv.URL}}},
+	})
+	drive := func(id string, seq int64, text string, content *jobContent) {
+		t.Helper()
+		if _, err := b.driveClaim(context.Background(), testDrive(b, jobRef{ID: id, MessageSeq: seq, content: content}, "r1", "maya", "core-a", "agent-a", "t", text, "general"), nil); err != nil {
+			t.Fatalf("%s: %v", id, err)
+		}
+	}
+	drive("job-1", 3, "signed in", nil)
+	g.addAgentRow("general", 4, "maya", "agent-a", "You have 3 courses due")
+	g.addChatRow("general", 5, "maya", "which one first?")
+	drive("job-2", 5, "which one first?", &jobContent{instructions: "You plan learning."})
+
+	prompts := prov.recordedPrompts()
+	if len(prompts) < 2 {
+		t.Fatalf("prompts = %d", len(prompts))
+	}
+	last := prompts[len(prompts)-1]
+	for _, want := range []string{"Earlier in this conversation", "find my Workday courses", "You have 3 courses due", ".room/channels/general/recent.md"} {
+		if !strings.Contains(last, want) {
+			t.Fatalf("the replaced session's prompt lacks %q:\n%s", want, last)
+		}
+	}
+	if !strings.HasSuffix(strings.TrimSpace(last), "which one first?") {
+		t.Fatalf("the current message is not last:\n%s", last)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		g.mu.Lock()
+		reports := strings.Join(g.reports, "\n")
+		g.mu.Unlock()
+		if strings.Contains(reports, "continues in a new session (it now wears other content") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the room was not told the session was replaced:\n%s", reports)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}

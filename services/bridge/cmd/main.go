@@ -28,6 +28,12 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "roomtools-stdio" {
 		os.Exit(roomtools.RunStdioMain(os.Args[2:]))
 	}
+	// `bnbloc-bridge mcp-tool --dir <tools> --name <tool> -- <args>` starts
+	// a stdio MCP tool the desktop materialized, by name (its stdout is the
+	// MCP channel too).
+	if len(os.Args) > 1 && os.Args[1] == bridge.MCPToolCommand {
+		os.Exit(bridge.RunMCPToolMain(os.Args[2:]))
+	}
 	// The bridge serves no public HTTP, so its build identity goes to the log the
 	// desktop collects (internal/buildinfo; stamped by build-bridge-sidecar.mjs).
 	bi := buildinfo.Get("bnbloc-bridge")
@@ -157,6 +163,9 @@ func main() {
 		log.Printf("bnbloc-bridge: room tools stdio shim unavailable: %v", err)
 		shim = ""
 	}
+	// Stdio MCP tools start through this executable too, by name: a tool's
+	// update then never restarts an agent's conversation.
+	b.UseToolLauncher(shim)
 	if stopRoomTools, err := b.EnableRoomTools(shim); err != nil {
 		log.Printf("bnbloc-bridge: room tools disabled: %v", err)
 	} else {

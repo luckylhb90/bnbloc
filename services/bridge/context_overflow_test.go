@@ -105,7 +105,7 @@ func TestContextOverflowContinuesInAFreshSession(t *testing.T) {
 			}
 			_, fresh := gw.stored()
 			texts := storedTexts(fresh)
-			if len(texts) != 2 || !strings.Contains(texts[0], "grew past codex's context window; continuing in a fresh session") || texts[1] != "done in s2" {
+			if len(texts) != 2 || !strings.Contains(texts[0], "codex continues in a new session (the conversation grew past its context window)") || texts[1] != "done in s2" {
 				t.Fatalf("rows = %q; want the reset notice then the reply", texts)
 			}
 		})
