@@ -492,6 +492,18 @@ the room.)
   posts `End` when the run is resumed (the resuming call stops it), the
   owner closes the view, the tab is gone, or the relay refuses it (the
   agent's session was released).
+- **One sign-in per site, one view per job.** (Found on QA, 2026-10-19:
+  an agent started a second Workday run while the first waited at the
+  identity provider; the two tabs' sign-ins undid each other in the one
+  profile and bounced between Workday and the IdP, and both keepers
+  posted under the same job, so the room's view flipped between them and
+  a close reached only one.)
+  - A new run on a site where a run of the same requester waits for
+    them to sign in opens no tab: it answers that run, its view shown
+    again under the current turn. A run whose tab is gone is dropped.
+  - The room shows one view per job: the newest keeper of a job holds
+    it, and an older one leaves without posting `End` (which would close
+    the newer view).
 
 ## 4. The component
 
@@ -717,6 +729,11 @@ likely reasons, and what the design does about each:
      process, opened in the owner's sidebar, with Continue.
    - It is still bounded by activity, not time: a gone tab, a released
      session or a closed view ends it.
+7. **Two sign-ins fought in one browser.** (Happened on QA, 2026-10-19.)
+   A second run on the same site started a new sign-in that undid the
+   first, and the two views of one job fought over the room's view.
+   - One sign-in per site: a new run there answers the waiting one.
+   - One view per job: the newest keeper holds it.
 
 ## 9. Decisions
 
