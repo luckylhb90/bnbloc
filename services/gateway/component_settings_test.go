@@ -63,18 +63,18 @@ func TestComponentSettingsRoutes(t *testing.T) {
 	g.svc.ExtAudit = audit
 
 	// Who may: a member neither scope, an org admin only their organization's.
-	if code, _ := g.do("maya", http.MethodGet, "/v1/org/components/notes/settings?kind=mcp", "", nil); code != http.StatusForbidden {
+	if code, _ := g.do("maya", http.MethodGet, "/v1/tenant/components/notes/settings?kind=mcp", "", nil); code != http.StatusForbidden {
 		t.Fatalf("member org get = %d", code)
 	}
 	if code, _ := g.json("ada", http.MethodPut, "/v1/platform/components/notes/settings?kind=mcp", map[string]any{"values": map[string]string{"apiBase": "https://notes.example.com"}}); code != http.StatusForbidden {
 		t.Fatalf("org admin platform put = %d", code)
 	}
-	if code, _ := g.do("ada", http.MethodGet, "/v1/org/components/ghost/settings", "", nil); code != http.StatusNotFound {
+	if code, _ := g.do("ada", http.MethodGet, "/v1/tenant/components/ghost/settings", "", nil); code != http.StatusNotFound {
 		t.Fatalf("unknown component = %d", code)
 	}
 
 	// The org form: its settings, and what keeps the tool in needs setup.
-	code, raw := g.do("ada", http.MethodGet, "/v1/org/components/notes/settings?kind=mcp", "", nil)
+	code, raw := g.do("ada", http.MethodGet, "/v1/tenant/components/notes/settings?kind=mcp", "", nil)
 	v := settingsView(t, raw)
 	if code != http.StatusOK || v.Scope != "org" || !v.Available || !v.ReachesMembers || len(v.Fields) != 2 || v.Fields[0].Key != "apiKey" ||
 		!slices.Equal(missingKeys(v), []string{"apiBase", "apiKey"}) {
@@ -90,11 +90,11 @@ func TestComponentSettingsRoutes(t *testing.T) {
 		{map[string]string{"apiKey": "k", "folder": "/tmp"}, `"folder" is not a org setting`},
 		{map[string]string{"pageSize": "10"}, "API key is required"},
 	} {
-		if code, raw := g.json("ada", http.MethodPut, "/v1/org/components/notes/settings?kind=mcp", map[string]any{"values": c.values}); code != http.StatusBadRequest || !strings.Contains(errorMessage(raw), c.want) {
+		if code, raw := g.json("ada", http.MethodPut, "/v1/tenant/components/notes/settings?kind=mcp", map[string]any{"values": c.values}); code != http.StatusBadRequest || !strings.Contains(errorMessage(raw), c.want) {
 			t.Fatalf("put %v = %d %s, want %q", c.values, code, raw, c.want)
 		}
 	}
-	code, raw = g.json("ada", http.MethodPut, "/v1/org/components/notes/settings?kind=mcp", map[string]any{"values": map[string]string{"apiKey": "s3cr3t-key", "pageSize": "50"}})
+	code, raw = g.json("ada", http.MethodPut, "/v1/tenant/components/notes/settings?kind=mcp", map[string]any{"values": map[string]string{"apiKey": "s3cr3t-key", "pageSize": "50"}})
 	v = settingsView(t, raw)
 	if code != http.StatusOK || !v.Fields[0].Set || v.Fields[0].Value != "" || v.Fields[1].Value != "50" || v.UpdatedBy != "ada" ||
 		!slices.Equal(missingKeys(v), []string{"apiBase"}) {
@@ -104,14 +104,14 @@ func TestComponentSettingsRoutes(t *testing.T) {
 		t.Fatal("a secret value is never returned")
 	}
 	// An empty secret keeps the stored one; the platform's URL ends needs setup.
-	if code, raw := g.json("ada", http.MethodPut, "/v1/org/components/notes/settings?kind=mcp", map[string]any{"values": map[string]string{"apiKey": ""}}); code != http.StatusOK {
+	if code, raw := g.json("ada", http.MethodPut, "/v1/tenant/components/notes/settings?kind=mcp", map[string]any{"values": map[string]string{"apiKey": ""}}); code != http.StatusOK {
 		t.Fatalf("keep secret = %d %s", code, raw)
 	}
 	code, raw = g.json("root", http.MethodPut, "/v1/platform/components/notes/settings?kind=mcp", map[string]any{"values": map[string]string{"apiBase": "https://notes.example.com"}})
 	if v := settingsView(t, raw); code != http.StatusOK || v.Scope != "platform" || len(v.Fields) != 1 || v.Fields[0].Value != "https://notes.example.com" || len(v.Missing) != 0 {
 		t.Fatalf("platform put = %d %s", code, raw)
 	}
-	if _, raw := g.do("ada", http.MethodGet, "/v1/org/components/notes/settings?kind=mcp", "", nil); len(settingsView(t, raw).Missing) != 0 {
+	if _, raw := g.do("ada", http.MethodGet, "/v1/tenant/components/notes/settings?kind=mcp", "", nil); len(settingsView(t, raw).Missing) != 0 {
 		t.Fatalf("set up: %s", raw)
 	}
 	rows, _ := g.svc.PlatformSettings.ListPlatformSettings(context.Background())
@@ -142,13 +142,13 @@ func TestComponentSettingsRoutes(t *testing.T) {
 		t.Fatalf("audit = %v", details)
 	}
 	// Clear removes a stored secret; required, so refused here.
-	if code, raw := g.json("ada", http.MethodPut, "/v1/org/components/notes/settings?kind=mcp", map[string]any{"values": map[string]string{}, "clear": []string{"apiKey"}}); code != http.StatusBadRequest || !strings.Contains(string(raw), "API key is required") {
+	if code, raw := g.json("ada", http.MethodPut, "/v1/tenant/components/notes/settings?kind=mcp", map[string]any{"values": map[string]string{}, "clear": []string{"apiKey"}}); code != http.StatusBadRequest || !strings.Contains(string(raw), "API key is required") {
 		t.Fatalf("clear a required secret = %d %s", code, raw)
 	}
 
 	// A super admin sets another organization's acting in it.
 	other, _ := json.Marshal(map[string]any{"values": map[string]string{"apiKey": "other-key"}})
-	if code, raw := g.doWith("root", http.MethodPut, "/v1/org/components/notes/settings?kind=mcp", map[string]string{actingTenantHeader: "other"}, "application/json", other); code != http.StatusOK {
+	if code, raw := g.doWith("root", http.MethodPut, "/v1/tenant/components/notes/settings?kind=mcp", map[string]string{actingTenantHeader: "other"}, "application/json", other); code != http.StatusOK {
 		t.Fatalf("super admin put = %d %s", code, raw)
 	}
 	if rec, ok, _ := g.svc.componentSettings().Get(context.Background(), "org", "other", "mcp", "notes"); !ok || rec.Values["apiKey"] != "other-key" {
@@ -170,10 +170,10 @@ func TestComponentSettingsRoutes(t *testing.T) {
 // save answers 409.
 func TestComponentSettingsOffWithoutKey(t *testing.T) {
 	g, _ := mcpGateway(t, false)
-	if code, raw := g.do("ada", http.MethodGet, "/v1/org/components/search/settings?kind=mcp", "", nil); code != http.StatusOK || settingsView(t, raw).Available {
+	if code, raw := g.do("ada", http.MethodGet, "/v1/tenant/components/search/settings?kind=mcp", "", nil); code != http.StatusOK || settingsView(t, raw).Available {
 		t.Fatalf("view without key = %d %s", code, raw)
 	}
-	if code, _ := g.json("ada", http.MethodPut, "/v1/org/components/search/settings?kind=mcp", map[string]any{"values": map[string]string{"token": "x"}}); code != http.StatusConflict {
+	if code, _ := g.json("ada", http.MethodPut, "/v1/tenant/components/search/settings?kind=mcp", map[string]any{"values": map[string]string{"token": "x"}}); code != http.StatusConflict {
 		t.Fatalf("put without key = %d", code)
 	}
 }
@@ -196,7 +196,7 @@ func TestResolvedComponentSettings(t *testing.T) {
 		t.Fatalf("resolved before setup = %d %+v", code, out)
 	}
 	_, _ = g.json("root", http.MethodPut, "/v1/platform/components/notes/settings?kind=mcp", map[string]any{"values": map[string]string{"apiBase": "https://notes.example.com"}})
-	_, _ = g.json("ada", http.MethodPut, "/v1/org/components/notes/settings?kind=mcp", map[string]any{"values": map[string]string{"apiKey": "s3cr3t-key"}})
+	_, _ = g.json("ada", http.MethodPut, "/v1/tenant/components/notes/settings?kind=mcp", map[string]any{"values": map[string]string{"apiKey": "s3cr3t-key"}})
 	code, out := resolved("/v1/components/notes/settings/resolved?kind=mcp")
 	if code != http.StatusOK || out.Values["apiKey"] != "s3cr3t-key" || out.Values["apiBase"] != "https://notes.example.com" || len(out.Missing) != 0 {
 		t.Fatalf("resolved = %d %+v", code, out)

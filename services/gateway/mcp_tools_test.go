@@ -204,7 +204,7 @@ func TestContentEffectiveResolvesMCP(t *testing.T) {
 	if len(eff.Missing) != 1 || eff.Missing[0] != "MCP tool search (needs setup: an admin has not set API token)" {
 		t.Fatalf("a tool needing setup is missing: %v", eff.Missing)
 	}
-	if code, raw := g.json("ada", http.MethodPut, "/v1/org/components/search/settings?kind=mcp", map[string]any{"values": map[string]string{"token": "tok"}}); code != http.StatusOK {
+	if code, raw := g.json("ada", http.MethodPut, "/v1/tenant/components/search/settings?kind=mcp", map[string]any{"values": map[string]string{"token": "tok"}}); code != http.StatusOK {
 		t.Fatalf("put = %d %s", code, raw)
 	}
 	eff = effective()

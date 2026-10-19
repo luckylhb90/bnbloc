@@ -125,7 +125,12 @@ func TestMCPToolsReachTheSession(t *testing.T) {
 		len(cw.Env) != 2 || cw.Env[0] != (corepkg.NameValue{Name: "CODEWORD_SALT", Value: "member-salt"}) || cw.Env[1].Name != pkgmeta.ComponentSettingsFileEnv {
 		t.Fatalf("codeword = %+v", cw)
 	}
-	// The settings file: every value, owner-only.
+	// The settings file: every value, owner-only, in the bridge's private
+	// temp dir, never its state dir (confinement read-denies the desktop's
+	// data directory to a sandboxed tool).
+	if !strings.HasPrefix(filepath.Base(filepath.Dir(cw.Env[1].Value)), "bnbloc-bridge-settings-") {
+		t.Fatalf("settings file at %s", cw.Env[1].Value)
+	}
 	st, err := os.Stat(cw.Env[1].Value)
 	raw, _ := os.ReadFile(cw.Env[1].Value)
 	if err != nil || st.Mode().Perm() != 0o600 || string(raw) != "{\n  \"salt\": \"member-salt\"\n}" {

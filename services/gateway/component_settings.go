@@ -117,7 +117,7 @@ func (s *Service) settingsView(ctx context.Context, scope string, claims auth.Cl
 }
 
 // handleComponentSettings answers GET /v1/platform/components/{name}/settings
-// (platform scope) and GET /v1/org/components/{name}/settings (the caller's
+// (platform scope) and GET /v1/tenant/components/{name}/settings (the caller's
 // organization).
 func (s *Service) handleComponentSettings(scope string) sessionHandler {
 	return func(w http.ResponseWriter, r *http.Request, claims auth.Claims) {

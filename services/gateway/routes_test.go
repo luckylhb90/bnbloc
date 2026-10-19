@@ -93,7 +93,7 @@ func TestEveryGatewayRouteGated(t *testing.T) {
 		switch {
 		case strings.HasPrefix(path, "/v1/platform/") && rt.perm != rbac.PermManagePlatform:
 			t.Errorf("%s: a platform route needs manage_platform, has %q", rt.pattern, rt.perm)
-		case (strings.HasPrefix(path, "/v1/tenant/") || strings.HasPrefix(path, "/v1/org/")) && rt.perm != rbac.PermManageOrg:
+		case strings.HasPrefix(path, "/v1/tenant/") && rt.perm != rbac.PermManageOrg:
 			t.Errorf("%s: a tenant route needs manage_org, has %q", rt.pattern, rt.perm)
 		case method != http.MethodGet && rt.perm == rbac.PermRead && readerWrites[rt.pattern] == "":
 			t.Errorf("%s: a write any viewer may call; give it a permission or list it in readerWrites with why", rt.pattern)
@@ -142,7 +142,7 @@ func TestEveryGatewayRouteGated(t *testing.T) {
 				t.Errorf("%s as an org admin = %d, want 403", rt.pattern, got)
 			}
 		}
-		if strings.HasPrefix(pattern, "/v1/tenant/") || strings.HasPrefix(pattern, "/v1/org/") {
+		if strings.HasPrefix(pattern, "/v1/tenant/") {
 			if got := call(method, path, member); got != http.StatusForbidden {
 				t.Errorf("%s as a member = %d, want 403", rt.pattern, got)
 			}

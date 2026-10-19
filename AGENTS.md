@@ -851,7 +851,7 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `component.settings/org/<tenant>/<kind>/<name>`, written by one
   read-modify-write), set through `GET/PUT
   /v1/platform/components/{name}/settings` and `GET/PUT
-  /v1/org/components/{name}/settings`, every save audited by key, never by
+  /v1/tenant/components/{name}/settings`, every save audited by key, never by
   value; member values never leave the member's desktop. A secret is never
   answered back, only "set".
 - **Notifiers are endpoint components; realtime delivers.** A

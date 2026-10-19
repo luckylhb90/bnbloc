@@ -249,8 +249,8 @@ func (s *Service) routes() []route {
 		gated("POST /v1/live", drive, s.handleLiveFrame),
 
 		// Organization administration (manage_org in the acting tenant).
-		gated("GET /v1/org/components/{name}/settings", org, s.handleComponentSettings(pkgmeta.SettingScopeOrg)),
-		gated("PUT /v1/org/components/{name}/settings", org, s.handlePutComponentSettings(pkgmeta.SettingScopeOrg)),
+		gated("GET /v1/tenant/components/{name}/settings", org, s.handleComponentSettings(pkgmeta.SettingScopeOrg)),
+		gated("PUT /v1/tenant/components/{name}/settings", org, s.handlePutComponentSettings(pkgmeta.SettingScopeOrg)),
 		gated("GET /v1/tenant/assist-model", org, s.handleOrgAssistModel),
 		gated("PUT /v1/tenant/assist-model", org, s.handlePutOrgAssistModel),
 		gated("POST /v1/tenant/assist-model/test", org, s.handleTestOrgAssistModel),

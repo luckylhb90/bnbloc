@@ -10,7 +10,7 @@ export type SettingsOwner = "platform" | "org";
 
 const base: Record<SettingsOwner, string> = {
   platform: "/v1/platform/components",
-  org: "/v1/org/components",
+  org: "/v1/tenant/components",
 };
 
 export const componentSettingsApi = {

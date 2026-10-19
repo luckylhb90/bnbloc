@@ -896,7 +896,7 @@ store and the artifact entitlement). JSON shapes: `internal/wire/content_compone
 | `DELETE /v1/content-uses?scope=&roomId=&componentId=` | Remove a use (unpinning the room expert clears it) |
 | `GET /v1/content-components/effective?job=&room=` | The bridge running a job: what its turn wears, with the MCP tools in effect, required or installed by the requester (`mcp`, each with its platform and organization setting values) |
 | `GET /v1/components?kind=mcp` | The MCP tools visible to the caller (rollout, tenants, opt-in) with their tools, credentials source, `settings` declaration, `settingsSet` and `settingsMissing` (platform and organization settings; values never) |
-| `GET\|PUT /v1/org/components/{name}/settings?kind=` | Org admins (`manage_org`): a component's organization settings (`wire.ComponentSettingsView`; secrets only as set; `available: false` without the secret store key) and a save (`wire.ComponentSettingsUpdate`, checked by `pkgmeta.MergeSettings`; 409 without the key); the platform's `GET\|PUT /v1/platform/components/{name}/settings` is the same for super admins |
+| `GET\|PUT /v1/tenant/components/{name}/settings?kind=` | Org admins (`manage_org`): a component's organization settings (`wire.ComponentSettingsView`; secrets only as set; `available: false` without the secret store key) and a save (`wire.ComponentSettingsUpdate`, checked by `pkgmeta.MergeSettings`; 409 without the key); the platform's `GET\|PUT /v1/platform/components/{name}/settings` is the same for super admins |
 | `GET /v1/artifacts/{key}[?room=\|?job=&room=]` | Bundle download (`artifactEntitled`) |
 
 Every change of a room's uses (a pin, the room expert, a room pack)

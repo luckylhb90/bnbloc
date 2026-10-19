@@ -258,12 +258,13 @@ func mcpMemberSettingsFile(dir, name string) string {
 }
 
 // settingsFilesDir holds the settings files the bridge writes for the stdio
-// tools it starts: under StateDir (the member's own directory), else a
-// private directory of this process.
+// tools it starts: a private (0700) directory of this process under the
+// system temp dir. Never under StateDir: that lies in the desktop's data
+// directory, which confinement read-denies to the agent CLI and so to the
+// tools it starts, and a sandboxed tool could not read its own settings.
+// Nothing is exposed by this: the CLI already holds a stdio tool's
+// environment, which carries the same values.
 func (b *Bridge) settingsFilesDir() (string, error) {
-	if dir := strings.TrimSpace(b.cfg.StateDir); dir != "" {
-		return filepath.Join(dir, "component-settings"), nil
-	}
 	b.settingsTmp.Do(func() {
 		b.settingsTmpDir, b.settingsTmpErr = os.MkdirTemp("", "bnbloc-bridge-settings-")
 	})

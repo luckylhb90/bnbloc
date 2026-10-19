@@ -171,6 +171,13 @@ would be (decided 2026-10-19).
 | An endpoint component beside the gateway (notifier, auth provider) | it asks: `GET /v1/component-settings` with its install identity, answered its platform and organization values (per tenant); a change notifies it to ask again |
 | A built-in adapter (media, decision, assist) | §2.4 |
 
+A stdio tool's values, secrets included, are visible to the agent CLI
+that starts it: the CLI holds the tool's environment, and the tool's
+settings file lies where a sandboxed tool can read it (a private temp
+directory, not the desktop's data directory, which confinement
+read-denies). A secret an agent must never see belongs to an HTTP tool or
+a room-credential tool whose secret stays on the platform's side.
+
 A value changes without a reinstall: a process gets it at its next start
 (the form says so), an endpoint component on its next ask.
 
@@ -279,7 +286,7 @@ organization or a member (decided 2026-10-20):
      (`<member>/component-settings/<kind>@<name>.json`), one Rust owner
      (`internal_ext/component_settings.rs`) for plugins and tools alike.
    - *Routes.* `GET/PUT /v1/platform/components/{name}/settings` (super
-     admin) and `GET/PUT /v1/org/components/{name}/settings` (org admin):
+     admin) and `GET/PUT /v1/tenant/components/{name}/settings` (org admin):
      `wire.ComponentSettingsView` (the scope's fields, a secret as set
      only; the required settings of this and the scopes above it not set;
      whether the values reach members' computers; off without

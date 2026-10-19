@@ -96,7 +96,7 @@ func TestRouteLabel(t *testing.T) {
 		"/internal/v1/rooms/r/dispatch":                    "/internal/v1/rooms/:id/dispatch",
 		"/v1/rooms/r/dispatch":                             "/v1/rooms/:id/dispatch",
 		"/v1/rooms/r/team-plan":                            "/v1/rooms/:id/team-plan",
-		"/v1/org/components/notes/settings":                "/v1/org/components/:id/settings",
+		"/v1/tenant/components/notes/settings":                "/v1/tenant/components/:id/settings",
 		"/v1/platform/components/settings/settings":        "/v1/platform/components/:id/settings",
 		"/v1/components/notes/settings/resolved":           "/v1/components/:id/settings/resolved",
 		// content sharing and approval
