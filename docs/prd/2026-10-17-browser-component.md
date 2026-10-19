@@ -155,8 +155,8 @@ whether a page is a sign-in that waits for a person).
 | `browser_open(url)` | The requester's browser for this room: the run's tab, opened on `url` (a later open in the same room navigates the same tab, and the run's sites grow by the new one's). Answers the page view. |
 | `browser_view(run, screenshot?)` | The page view: title, address, the page's text, and its controls, each with a stable number (the element's own id for as long as it exists), its role, label, value and state, off-screen ones marked. Fenced as the site's data. With `screenshot`, the picture too. |
 | `browser_find(run, what)` | The decision model ranks the page's controls for a description ("the Start button of Orion Training Course") and answers the likeliest few with their likelihood. Narrowing only: the agent decides. |
-| `browser_act(run, action, element?, text?, option?, key?, file?, confirmed?)` | One action, then the page view once it settled: `click`, `type` (replaces the field's text), `select` (a dropdown's option), `press` (Enter, Tab, Escape, arrows), `scroll` (`up` / `down`), `back`, `wait`, `upload`. An element off-screen is scrolled into view first. |
-| `browser_close(run?)` | Ends the run (or, without one, every run of the room the agent started for the person): its view leaves the room and its tab closes. |
+| `browser_act(run, action, element?, text?, option?, key?, file?, confirmed?, then?)` | One action, then the page once it settled: `click`, `type` (replaces the field's text), `select` (a dropdown's option), `press` (Enter, Tab, Escape, arrows), `scroll` (`up` / `down`), `back`, `wait`, `upload`. An element off-screen is scrolled into view first. `then` lists more actions on the same page, done in order (choose an answer, then Submit); the call stops at the first that pauses or is refused, or once the page is another (a new address or a new tab), saying how many it did. `confirmed` covers every action of the call. On the page it started on, the call answers only what changed (new and gone text, new or changed controls, controls gone); a new page, or one that mostly changed, is answered whole. |
+| `browser_close(run?, procedure?, purpose?)` | Ends the run (or, without one, every run of the room the agent started for the person): its view leaves the room and its tab closes. With `procedure` (a name) and `purpose` (one sentence), the run's steps are first written as a skill pack draft (§5). |
 
 Guards stay inside `browser_act`, whatever the agent asks:
 
@@ -686,13 +686,25 @@ The feature is AI throughout:
 Extra entry points:
 - An organization's or member's assist can draft a run's goal from a
   message ("do this in the portal").
-- **Procedures from runs.** A finished run's history (goal, steps,
-  sites, values asked, checkpoints passed) can be saved as a room
-  procedure: the agent proposes it, a member saves it, the way skills
-  are saved today. Running a procedure is `browse` with the saved steps
-  as a plan: each step is still observed, decided and checked (a changed
-  page re-decides rather than replays blindly), and its checkpoints
-  still pause.
+- **Procedures from runs (built 2026-10-19).** A run's steps can be
+  saved as a skill, the way skills are saved today, with no platform
+  change:
+  - The agent proposes: `browser_close(run, procedure, purpose)` writes
+    `drafts/<procedure>/component.json` (a `bnbloc.skill.package/v1`
+    that requires the `browser` MCP tool, `mcp.stdio`) and
+    `drafts/<procedure>/<procedure>/SKILL.md` into its workspace.
+  - The bridge publishes them as the turn's files, and the room offers
+    "Save as skill pack" under them. A person saving it puts it in their
+    Library; nothing is saved without that click.
+  - The skill lists the run's steps (a step repeated in a row once; a
+    sign-in is "the person signs in in the browser window"; typed text as
+    typed last time, to be asked when it should differ) and tells the
+    agent to read each page and find each control by what it is, never
+    by an earlier run's number. Running it is the agent driving with the
+    browser tools: each step is still checked and its checkpoints still
+    pause.
+  - The draft passes the platform's content validator
+    (`internal/contentpkg`).
 
 With the decision model off the component answers `blocked`, explaining
 "decisions are off for this organization". The browser still opens, and
