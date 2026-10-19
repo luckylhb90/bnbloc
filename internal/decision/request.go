@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/luckylhb90/bnbloc/component"
 	"strings"
 	"unicode/utf8"
 
@@ -85,8 +86,8 @@ func Validate(in wire.DecisionRequest) (Request, error) {
 				return Request{}, invalid("%s: a predicate takes no choices or levels", at)
 			}
 		case wire.DecisionChoice:
-			if len(q.Choices) < 2 || len(q.Choices) > wire.MaxDecisionChoices || len(q.Levels) > 0 {
-				return Request{}, invalid("%s.choices: 2 to %d choices", at, wire.MaxDecisionChoices)
+			if len(q.Choices) < component.MinDecisionChoices || len(q.Choices) > wire.MaxDecisionChoices || len(q.Levels) > 0 {
+				return Request{}, invalid("%s.choices: %d to %d choices", at, component.MinDecisionChoices, wire.MaxDecisionChoices)
 			}
 			values := map[string]bool{}
 			for j, c := range q.Choices {

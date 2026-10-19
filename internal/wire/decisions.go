@@ -1,6 +1,10 @@
 package wire
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/luckylhb90/bnbloc/component"
+)
 
 // Decision models (docs/prd/2026-10-17-decision-models.md): a model that
 // answers bounded questions about an input with calibrated numbers, through
@@ -32,7 +36,7 @@ const DecisionRefusal = "refusal"
 // Decision bounds (the provider's own, so a refusal is ours and says why).
 const (
 	MaxDecisionQuestions    = 128
-	MaxDecisionChoices      = 255
+	MaxDecisionChoices      = component.MaxDecisionChoices
 	MaxDecisionLevels       = 10
 	MaxDecisionInputText    = 64 << 10 // all text parts of the input
 	MaxDecisionImages       = 8
