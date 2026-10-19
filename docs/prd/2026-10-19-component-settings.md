@@ -1,7 +1,8 @@
 # Components describe their own settings (2026-10-19)
 
-Status: proposed. Owner: the component contract (`core/pkgmeta`), the
-settings store, the one settings form.
+Status: slice 1 built (2026-10-20, §5); slices 2–5 proposed. Owner: the
+component contract (`core/pkgmeta`), the settings store
+(`internal/componentsettings`), the one settings form.
 
 A component that needs a setting (a URL, a key, a model, a path, a switch)
 declares it in its own manifest. The platform stores the values, shows one
@@ -173,6 +174,15 @@ would be (decided 2026-10-19).
 A value changes without a reinstall: a process gets it at its next start
 (the form says so), an endpoint component on its next ask.
 
+A process component runs on members' computers (a plugin, a stdio MCP
+tool), so its platform and organization values, secrets included, are sent
+to those computers: to the bridge in a job's resolution, to the desktop by
+`GET /v1/components/{name}/settings/resolved` (a member of the
+organization, for a component installed for them; not logged, reads not
+audited). The platform and organization forms say so for such a
+component ("these values are sent to the computers where this component
+runs").
+
 ### 2.4 Model providers are components
 
 The assist, decision and media models become provider components that
@@ -232,6 +242,81 @@ organization or a member (decided 2026-10-20):
    `settings` (`mcp.env`, `localSettings` removed); needs setup; audit.
    Our components republish: the browser declares its Chrome and profile
    paths; media-tools declares none.
+
+   **Built 2026-10-20** (commits 9bfd31d6 platform, d5644896 web,
+   f2b53396 desktop, and the docs beside this record):
+   - *Declaration.* `settings` on plugin and MCP packages only (the
+     field-to-kinds table; `wire.ComponentSetting`, `pkgmeta.Setting`),
+     validated only by `core/pkgmeta/settings.go`: the key rule, the seven
+     types, the three scopes, `path` member-only, a choice's 1–32 options,
+     a default valid for its type and never a secret's, at most 24.
+     `deliver.env` only for a process (a plugin, a stdio tool): an env
+     name, never one of the process-hijack list (`processEnv`), under
+     `BNBLOC_` only the component's own `BNBLOC_<NAME>_` and never a name
+     the platform sets (`ComponentSettingsFileEnv`, the room relay's, the
+     plugin host's), never one of its own sidecar env names.
+     `deliver.header`/`deliver.bearer` only for an http tool, one header
+     each, one bearer at most. `mcp.http.auth` keeps `scheme` and names
+     its credential's `setting` (was `env`); every setting of an http tool
+     must reach it in a header. `mcp.credentials` is only `"room"`, beside
+     settings of any scope. `requires.mcp[].settings` names keys.
+   - *Values.* One rule each in `pkgmeta`: `CheckSettingValue` (text up to
+     4 KiB, an http(s) URL, a JSON-syntax number, `true`/`false`, one of a
+     choice's options), `MergeSettings` (a save: unknown or other-scope
+     keys refused, an absent key kept, `""` clears, an empty secret keeps
+     the stored one, `clear` removes, required ones of the scope must end
+     set, undeclared values dropped, the changed keys for the audit),
+     `EffectiveSettings` (a default where no value), `UnsetSettings`
+     (needs setup), `SettingsEnv`. The desktop's Rust copy is pinned to
+     `core/pkgmeta/testdata/setting_values.json`.
+   - *Store.* `internal/componentsettings`: one sealed record per scope at
+     `component.settings/platform/<kind>/<name>` and
+     `component.settings/org/<tenant>/<kind>/<name>` (the kind is in the
+     key: a name is unique per kind only), written by one
+     read-modify-write, deleted with the component; the MCP connectors
+     (`mcp.connector/…`) are gone, not migrated. Member values: one 0600
+     file per component on the desktop
+     (`<member>/component-settings/<kind>@<name>.json`), one Rust owner
+     (`internal_ext/component_settings.rs`) for plugins and tools alike.
+   - *Routes.* `GET/PUT /v1/platform/components/{name}/settings` (super
+     admin) and `GET/PUT /v1/org/components/{name}/settings` (org admin):
+     `wire.ComponentSettingsView` (the scope's fields, a secret as set
+     only; the required settings of this and the scopes above it not set;
+     whether the values reach members' computers; off without
+     `BNBLOC_SECRET_STORE_KEY`, a save then 409). A save is audited
+     (`settings-set`, `scope=… keys=…`, never a value). `GET
+     /v1/components/{name}/settings/resolved` (member) answers a process
+     component installed for the caller its platform and organization
+     values. The member catalog carries `settings`, `settingsSet` and
+     `settingsMissing` (fail closed on a store error).
+   - *Delivery.* Stdio MCP: the gateway's per-job resolution carries the
+     declaration and platform and organization values; the bridge adds
+     the member's own values on their own drives, sets each
+     `deliver.env` and writes every value to the 0600 file named by
+     `BNBLOC_COMPONENT_SETTINGS_FILE` (under its state dir, one per tool,
+     organization and own or lent drive). Http MCP: headers from the auth
+     block and `deliver.header`/`deliver.bearer`. Plugins: the desktop
+     reads the resolved values at each launch, merges the member's and
+     writes the same file (replacing `BNBLOC_PLUGIN_SETTINGS_FILE`) and
+     env. The bridge's dirs are `BNBLOC_COMPONENT_SETTINGS_DIR` and
+     `BNBLOC_MCP_SIGN_INS_DIR` (was `BNBLOC_MCP_SETTINGS_DIR`).
+   - *Needs setup.* A tool missing a platform or organization setting is
+     not offered (a requiring package's turn lists it missing: "needs
+     setup: an admin has not set …"); a member one, "set … in Settings →
+     Components", or "not lent" on a borrowed drive. A plugin missing any
+     is not launched, and restarts when the catalog says the values
+     changed. Every settings view shows "Needs setup: …".
+   - *Forms.* The one form (`web/src/views/settings/SettingsForm.tsx`, the
+     widened `LocalSettingsCard`) renders every type and each field's
+     scope; Platform console → Components → Settings, Organization →
+     Component settings (was Tool connectors), Settings → Components
+     (merging Tools and Personal bot); a member sees organization and
+     platform settings as set or not, never a value.
+   - *Not in slice 1.* An upgrade that adds a required setting is not held
+     back (the new version needs setup at once); member values of a
+     component that does not run on the member's device
+     (`component.settings/member/…`) and the endpoint components' ask
+     (slice 3) are not built.
 2. **A component's own page.** `settingsPage`, the sandboxed dialog and
    its host API (`get`, `set`, `check`, `close`); a plugin with a
    hand-written view in the web (local skills) moves to its own page.

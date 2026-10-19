@@ -63,7 +63,7 @@ sync-layer HMAC. The value must be identical across every service.
 | `BNBLOC_TENANT_AUTOPROVISION` | on | `false` locks tenant membership to pre-provisioned tenants instead of auto-provisioning at login. |
 | `BNBLOC_DESKTOP_DOWNLOAD_URL` | — | Fallback desktop download link served when the deployment has no curated release history. |
 | `BNBLOC_EXT_ALLOW_UNSIGNED` | unset | Dev-only: accept unsigned component packages (see Components below). |
-| `BNBLOC_SECRET_STORE_KEY` | — (org connectors off) | 32 random bytes, base64 or hex (`openssl rand -base64 32`), sealing organization MCP tool connectors at rest (AES-256-GCM, `internal/sealbox`): the credentials org admins enter for MCP tools with org credentials (`/v1/tenant/mcp-connectors`). Every gateway replica shares it, and the room service reads the same value for interactive apps' data (see Artifact files (room)). Unset = org connectors are off (the routes answer 409; such tools show as missing); a malformed value refuses to start. Losing or changing it makes stored connectors unreadable: org admins enter them again. Secret. |
+| `BNBLOC_SECRET_STORE_KEY` | — (component settings off) | 32 random bytes, base64 or hex (`openssl rand -base64 32`), sealing component settings at rest (AES-256-GCM, `internal/sealbox`): the platform and organization values admins enter for the settings components declare (`/v1/platform/components/{name}/settings`, `/v1/org/components/{name}/settings`). Every gateway replica shares it, and the room service reads the same value for interactive apps' data (see Artifact files (room)). Unset = those settings cannot be stored (a save answers 409; a component that requires one needs setup); a malformed value refuses to start. Losing or changing it makes stored values unreadable: admins enter them again. Secret. |
 
 ## Internal wiring
 
@@ -213,8 +213,9 @@ set-to-empty disables it); those names belong to the manifest, not to bnbloc.
 Typed packages (auth providers, cores, plugin sidecars, MCP tools) are
 installed by a super-admin through `POST /v1/platform/components` (signed
 package body) or the CLI (`bnbloc cores install`, `bnbloc cores
-publish-sidecar`, `bnbloc cores publish-mcp`). Organization MCP connectors
-need `BNBLOC_SECRET_STORE_KEY` on the gateway (see Gateway). Production
+publish-sidecar`, `bnbloc cores publish-mcp`). Platform and organization
+component settings need `BNBLOC_SECRET_STORE_KEY` on the gateway (see
+Gateway). Production
 requires a signature that verifies against a trusted publisher key
 (`POST /v1/platform/component-keys`).
 
@@ -266,10 +267,12 @@ These are code behaviors, not variables — recorded here because operators ask:
   The server never launches plugin processes — supervision is the desktop
   sidecar manager's. The desktop launches a plugin with
   `BNBLOC_PLUGIN_HOST_URL`/`BNBLOC_PLUGIN_HOST_TOKEN` (its loopback host API,
-  when the package declares `permissions.host`) and
-  `BNBLOC_PLUGIN_SETTINGS_FILE` (the member's desktop-local settings, when it
-  declares `localSettings`); these are read by the plugin, not by any bnbloc
-  service ([notifications.md](./notifications.md#launch-environment)).
+  when the package declares `permissions.host`),
+  `BNBLOC_COMPONENT_SETTINGS_FILE` (every value of the settings it declares:
+  platform and organization values from the gateway, the member's from
+  this computer) and each setting's `deliver.env`; these are read by the
+  plugin, not by any bnbloc service
+  ([notifications.md](./notifications.md#launch-environment)).
 - **Auth-provider sidecars.** An auth-provider package
   (`bnbloc.auth-provider.package/v1`) exposes
   `bnbloc.auth-provider.contract/v1` on loopback; the gateway proxies
@@ -353,7 +356,8 @@ standalone bridge (compose `bridge` profile) reads them from the environment.
 | `BNBLOC_SANDBOX_MOUNT_ROOTS` | the member's home folder | Comma, space or newline separated absolute guest folders a component may mount read-only copies under (`docs/architecture/sandbox-mounts.md`). A relative, unclean or `/` entry is ignored with a log line; a list replaces the default. Components' descriptor files are read from `<BNBLOC_BRIDGE_STATE_DIR>/mounts/<component>/mounts.json` before every sandboxed turn. |
 | `BNBLOC_SANDBOX_WORKSPACES_ROOT` | — | The host directory shared into the machine at the identical guest path (`<home>/bnbloc-workspaces`); sandboxed room workspaces live under it. Set with `BNBLOC_SANDBOX_URL`. |
 | `BNBLOC_MCP_TOOLS_DIR` | — | Set by the desktop: the directory it materializes stdio MCP tool binaries into (sha256-verified, one per installed tool for this platform), with `index.json` listing `{name, sha256, path}`. The bridge attaches a stdio tool only from an entry carrying the gateway's pin for this platform. Unset (a standalone bridge) = stdio MCP tools show as missing. |
-| `BNBLOC_MCP_SETTINGS_DIR` | — | Set by the desktop: the member's own MCP tool credentials (`<tool>.json`, 0600, entered in Settings → Tools, never sent to the gateway). Read only for drives the member asked for themselves. Unset = tools with member credentials show as missing. |
+| `BNBLOC_COMPONENT_SETTINGS_DIR` | — | Set by the desktop: the member's own component settings (`mcp@<tool>.json`, 0600, entered in Settings → Components, never sent to the gateway). Read only for drives the member asked for themselves. Unset = a tool with a required member setting shows as missing. The bridge writes each stdio tool's settings file (`BNBLOC_COMPONENT_SETTINGS_FILE`, 0600) under `BNBLOC_BRIDGE_STATE_DIR/component-settings`, else a private temporary directory. |
+| `BNBLOC_MCP_SIGN_INS_DIR` | — | Set by the desktop: the member's MCP OAuth sign-ins (`<tool>.json`, 0600, signed in from Settings → Components). Read only for drives the member asked for themselves. Unset = oauth tools show as missing. |
 
 ### Room tools stdio shim (`bnbloc-bridge roomtools-stdio`)
 

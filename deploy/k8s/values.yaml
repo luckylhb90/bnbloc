@@ -37,10 +37,10 @@ sessionSigning:
     key: signingKey
 
 # Seals secrets at rest (BNBLOC_SECRET_STORE_KEY: 32 random bytes, base64 or
-# hex, e.g. `openssl rand -base64 32`): organization MCP tool connectors
-# (gateway) and interactive apps' data keys (room). Every replica of both
-# shares it; losing it loses the connectors (org admins enter them again)
-# and every app's data. Unset turns both features off.
+# hex, e.g. `openssl rand -base64 32`): components' platform and
+# organization settings (gateway) and interactive apps' data keys (room).
+# Every replica of both shares it; losing it loses those settings (admins
+# enter them again) and every app's data. Unset turns both features off.
 secretStoreKey:
   secretRef: { name: "", key: secretStoreKey }
 

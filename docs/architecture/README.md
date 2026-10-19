@@ -36,7 +36,8 @@ extend it" references.
   safety rules and the HTTP surface.
   MCP tool components (`bnbloc.mcp.package/v1`, platform-published stdio
   binaries or http endpoints that content requires by name) are in the same
-  document: distribution to desktops, member and organization credentials.
+  document: distribution to desktops, their settings (platform,
+  organization and member values).
 - [AI assist](ai-assist.md) — the deployment's assist model behind manual
   entry points (the composer's "enhance prompt", a form's "Fill with AI"):
   the model's settings and client, assist tasks as content resolved by name,

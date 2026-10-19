@@ -48,9 +48,9 @@ unset BNBLOC_REALTIME_PEERS BNBLOC_REALTIME_SELF BNBLOC_RELAY_PEERS BNBLOC_RELAY
 # sandboxed from the public origin.
 # Browser push reads BNBLOC_WEB_PUSH_VAPID_PUBLIC_KEY / _PRIVATE_KEY /
 # _SUBJECT (realtime) the same way; unset means the channel is off.
-# The gateway and room read BNBLOC_SECRET_STORE_KEY (seals organization MCP
-# tool connectors and interactive apps' data keys) the same way; unset means
-# org connectors and app data are off.
+# The gateway and room read BNBLOC_SECRET_STORE_KEY (seals component settings
+# and interactive apps' data keys) the same way; unset means platform and
+# organization component settings and app data are off.
 # Realtime reads its blob store settings (BNBLOC_ATTACHMENTS_DIR or
 # BNBLOC_ATTACHMENTS_S3_*, incl. _DIRECT_DOWNLOADS / _PUBLIC_ENDPOINT for
 # presigned downloads) straight from the container environment.

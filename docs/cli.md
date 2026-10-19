@@ -302,7 +302,7 @@ bnbloc previewers publish --package dist/package.json --bundle dist/bundle.tar -
 
 An MCP tool (`bnbloc.mcp.package/v1`, see
 [architecture/content-components.md](./architecture/content-components.md#mcp-tool-components))
-is a package JSON naming its tools, env, credentials source and runtime
+is a package JSON naming its tools, settings, credentials source and runtime
 (`kind` and `contract` may be omitted). A stdio tool's per-platform
 binaries are uploaded and pinned like a sidecar's; an endpoint tool takes
 none:

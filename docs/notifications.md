@@ -130,8 +130,8 @@ A notifier package:
   connection is refused at connect time when the resolved address is
   link-local or a cloud-metadata address.
 - A notifier has no per-member settings: a member's own delivery is a
-  desktop plugin (`localSettings` on the plugin package), so no member
-  credential is ever stored or sent server-side.
+  desktop plugin (member-scope `settings` on the plugin package), so no
+  member credential is ever stored or sent server-side.
 
 **Groups.** A notifier that can post into group chats declares
 `"capabilities": ["groups"]` in its package. The room's members connect
@@ -227,9 +227,9 @@ whether the organization's delivery reaches them. Both routes are personal
 
 A member's own delivery — e.g. their own messenger bot — is a **plugin
 package** that runs as a sidecar in their desktop app, not a server-side
-setting. Its credentials are desktop-local settings: they never reach
-bnbloc's servers, and bnbloc keeps one connection per desktop, not one per
-member on the server.
+setting. Its credentials are member-scope settings: they stay on the
+member's desktop and never reach bnbloc's servers, and bnbloc keeps one
+connection per desktop, not one per member on the server.
 
 ### The plugin package
 
@@ -245,14 +245,15 @@ member on the server.
   "sidecar": {
     "localUrl": "http://127.0.0.1:7193",
     "listenEnv": "PERSONAL_BOT_LISTEN",
-    "supervisedEnv": "PERSONAL_BOT_SUPERVISED",
-    "args": ["--api-base-url=https://bot-api.acme.example"]
+    "supervisedEnv": "PERSONAL_BOT_SUPERVISED"
   },
   "artifacts": { "darwin-arm64": { "url": "https://<gateway>/v1/artifacts/sha256/…", "sha256": "…" } },
   "permissions": { "network": ["127.0.0.1"], "host": ["chat"] },
-  "localSettings": [
-    { "key": "appId", "label": "App ID", "required": true },
-    { "key": "appKey", "label": "App key", "secret": true, "required": true,
+  "settings": [
+    { "key": "apiBase", "label": "Bot API URL", "type": "url", "scope": "platform",
+      "required": true, "deliver": { "env": "BNBLOC_PERSONAL_BOT_API_BASE" } },
+    { "key": "appId", "label": "App ID", "type": "text", "scope": "member", "required": true },
+    { "key": "appKey", "label": "App key", "type": "secret", "scope": "member", "required": true,
       "help": "Stored on this computer only." }
   ]
 }
@@ -263,12 +264,15 @@ member on the server.
 - `permissions.host` (plugin packages only; the only capability is `chat`)
   lets the sidecar post chat as the member through the desktop host API
   (below). Without it the sidecar gets no host URL or token.
-- `localSettings` (plugin packages only; at most 10 fields, identifier keys,
-  labels 1–80 characters, help up to 300) is the form the member fills in on
-  their desktop. `secret` fields are masked and never shown back.
-- Deployment data the plugin needs (e.g. its service's API origin) is set by
-  the publisher in `sidecar.args` when the package is built and signed, not
-  hard-coded in the plugin.
+- `settings` are the plugin's component settings
+  (docs/prd/2026-10-19-component-settings.md; `core/pkgmeta/settings.go`):
+  member-scope ones are the form the member fills in on their desktop
+  (Settings → Components); a `secret` is never shown back. Deployment data
+  the plugin needs (e.g. its service's API origin) is a platform-scope
+  setting the super admin sets (Platform console → Components → Settings),
+  or an organization one an org admin sets, never baked into `sidecar.args`
+  or hard-coded in the plugin. A setting's `deliver.env` may use the
+  plugin's own `BNBLOC_<NAME>_` prefix.
 
 Install, rollout (`auto` / `optin` / `off`) and tenant scope are those of
 every component; an opt-in plugin runs only for members who turned it on.
@@ -352,15 +356,18 @@ member may answer (`mention`: `to: "room"`; `agent_finished`/`agent_failed`:
 | `<sidecar.listenEnv>` / `<sidecar.supervisedEnv>` | as declared | As for every sidecar (listen address; `1` = exit when stdin closes). |
 | `BNBLOC_PLUGIN_HOST_URL` | `permissions.host` declared | The desktop host API, `http://127.0.0.1:<random port>`. |
 | `BNBLOC_PLUGIN_HOST_TOKEN` | `permissions.host` declared | Bearer token for it: random per launch, revoked when the process exits. |
-| `BNBLOC_PLUGIN_SETTINGS_FILE` | `localSettings` declared | Path of an owner-only (0600) JSON object `{key: value}` with the member's values. |
+| `BNBLOC_COMPONENT_SETTINGS_FILE` | `settings` declared | Path of an owner-only (0600) JSON object `{key: value}` with every value of its settings (platform and organization values read from `GET /v1/components/{name}/settings/resolved`, the member's from this computer; a default where none is set), rewritten at every launch. |
+| `<settings[].deliver.env>` | as declared | A setting's value, when it has one. |
 
-The desktop does not start a plugin whose required local settings are not
-all set (its status says so; its notifications fall back to the server
-notifiers). Saving or removing the settings restarts the sidecar; an
-uninstalled plugin's settings file is deleted (every catalog refresh sweeps
-the files of plugins no longer installed in that member's tenant). The
-values are stored per gateway, member and tenant under the app config dir
-(`members/<hash of gateway origin, subject and tenant>/plugin-settings/<plugin>.json`),
+The desktop does not start a plugin whose required settings are not all set,
+in any scope (its status and Settings → Components say which; its
+notifications fall back to the server notifiers). Saving the member's
+values restarts the sidecar, and so does a change of the platform or
+organization values (the catalog says which are set); an uninstalled
+plugin's files are deleted (every catalog refresh sweeps the files of
+plugins no longer installed in that member's tenant). The member's values
+are stored per gateway, member and tenant under the app config dir
+(`members/<hash of gateway origin, subject and tenant>/component-settings/plugin@<plugin>.json`),
 so another member signing in on the same desktop never gets them and a
 tenant switch never deletes them; a member or tenant switch restarts the
 plugin with the new scope's file.

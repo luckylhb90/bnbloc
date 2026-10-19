@@ -822,15 +822,38 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `BNBLOC_PLUGIN_HOST_TOKEN` (per launch, constant-time compared, revoked on
   exit); `POST /v1/chat` forwards to the gateway chat route with the
   desktop's session (per-plugin rate limit, namespaced `clientMsgId`).
-  `localSettings` (plugin packages only) are entered in Settings →
-  Notifications via Tauri commands, stored 0600 in the signed-in member's
-  own directory (`member_dir`: `<app config>/members/<hash of gateway origin,
-  subject and tenant>/`, `internal_ext/member_dir.rs`; never a shared dir),
-  passed as
-  `BNBLOC_PLUGIN_SETTINGS_FILE`, and NEVER sent to the gateway; a plugin
-  missing required settings is not launched, saving restarts it. Do not
-  reintroduce member secrets on the server (the old
+  A plugin's member-scope settings (component settings, below) are entered
+  in Settings → Components via Tauri commands, stored 0600 in the signed-in
+  member's own directory (`member_dir`: `<app config>/members/<hash of
+  gateway origin, subject and tenant>/`, `internal_ext/member_dir.rs`; never
+  a shared dir) and NEVER sent to the gateway; at launch the desktop merges
+  them with the platform and organization values it reads from `GET
+  /v1/components/{name}/settings/resolved` into the file named by
+  `BNBLOC_COMPONENT_SETTINGS_FILE` and each setting's `deliver.env`. A
+  plugin with a required setting unset (any scope) is not launched; saving
+  restarts it. Do not reintroduce member secrets on the server (the old
   `member_notifier_settings` table is dropped by migration).
+- **A component's settings have one declaration, one validator, one store
+  and one form** (`docs/prd/2026-10-19-component-settings.md`). The
+  manifest's `settings` (plugins and MCP tools) is validated only by
+  `core/pkgmeta/settings.go`: keys, types (`text`, `secret`, `url`,
+  `number`, `boolean`, `choice`, `path`), scopes (`platform`, `org`,
+  `member`), defaults, and the env a value is delivered as
+  (`ValidSettingEnv`: no variable that changes how a process runs, and
+  under `BNBLOC_` only the component's own `OwnEnvPrefix`). A value is
+  checked by `CheckSettingValue`, a save by `MergeSettings`, "needs setup"
+  is `UnsetSettings` (a default counts), what a component gets is
+  `EffectiveSettings`/`SettingsEnv`; the desktop's copy
+  (`internal_ext/component_settings.rs`) is pinned to the same cases
+  (`core/pkgmeta/testdata/setting_values.json`). Platform and organization
+  values live only in `internal/componentsettings` (sealed per record under
+  `component.settings/platform/<kind>/<name>` and
+  `component.settings/org/<tenant>/<kind>/<name>`, written by one
+  read-modify-write), set through `GET/PUT
+  /v1/platform/components/{name}/settings` and `GET/PUT
+  /v1/org/components/{name}/settings`, every save audited by key, never by
+  value; member values never leave the member's desktop. A secret is never
+  answered back, only "set".
 - **Notifiers are endpoint components; realtime delivers.** A
   `bnbloc.notifier.package/v1` (runtime `endpoint`, contract
   `bnbloc.notifier.contract/v1`) installs through the same shared endpoint
@@ -1527,18 +1550,22 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `requires.mcp`, never a command or URL. The desktop downloads stdio tool
   binaries through the shared verified download into
   `BNBLOC_MCP_TOOLS_DIR` and never runs them as services; the bridge attaches
-  only an index entry carrying the gateway's pin. Member tool credentials stay
-  on the member's desktop (0600) and are used only for their own runs, never a
-  borrowed one. Org connectors are sealed with `internal/sealbox` under
-  `BNBLOC_SECRET_STORE_KEY` and decrypted only into the per-job resolution for
-  a job in that org; no second secret store, no clear-text fallback.
-  Unattachable tools go to `contentMissing` and never fail the run.
+  only an index entry carrying the gateway's pin. A tool's settings
+  (component settings, above) reach it as its env and settings file
+  (stdio) or its headers (http). Member values stay on the member's desktop
+  (0600) and are used only for their own runs, never a borrowed one.
+  Platform and organization values are sealed with `internal/sealbox` under
+  `BNBLOC_SECRET_STORE_KEY` and decrypted only into the per-job resolution
+  for a job in that org (and a member's resolved read of a component their
+  desktop runs); no second secret store, no clear-text fallback. A tool
+  that needs setup is not offered to the agent. Unattachable tools go to
+  `contentMissing` and never fail the run.
   One rule each, in `pkgmeta`: a tool's name is `ValidMCPToolName` (a
   package name, never the room tools' `ReservedMCPServerName`, refused at
   install, in `requires.mcp` and in the bridge alike), an env name is
-  `ValidEnvName`, "required env is set" is `UnsetEnv` (a blank value is
-  unset; connector status and save, job resolution and the bridge agree),
-  and a package or content version is `semver.Valid`
+  `ValidEnvName`, "a required setting is set" is `UnsetSettings` (a blank
+  value is unset; the settings forms, job resolution, the bridge and the
+  desktop agree), and a package or content version is `semver.Valid`
   (`TestPackageRulesSingleOwner`).
 
 - **Sharing is a copy, publishing is a second row.** A shared copy is a
