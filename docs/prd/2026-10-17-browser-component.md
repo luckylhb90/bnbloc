@@ -136,18 +136,46 @@ room agent (any core) ── browse(goal, url, values) ──► browser compone
   The host is chosen per run (`browse(…, host)`; the default is the
   requester's profile). §6 lists the order the hosts are built in.
 
-### 2.3 The agent's tools
+### 2.3 The agent's tools (revised 2026-10-19: the agent drives)
+
+**Why the revision.** Until 0.4.12 the agent handed `browse` one goal and
+the decision model chose every step. On a large enterprise app it could
+not find its way (QA, 2026-10-19: six clicks in a row on a search control
+that did nothing; a single-sign-on redirect that completes by itself taken
+for a sign-in, so the person was asked to sign in again while signed in; a
+comment box clicked open and shut), and it never saw the conversation the
+request came from. Every guard added around it treated a symptom. The
+room's agent holds the request and the conversation, and is far stronger:
+it drives. The decision model does what it is good at: answering bounded
+questions fast (where an element is, whether a click can be undone,
+whether a page is a sign-in that waits for a person).
 
 | Tool | Does |
 |---|---|
-| `browse(goal, url, values?, host?)` | Starts a run: opens `url` in a new tab and works toward `goal`. `values` maps field descriptions to the text the agent wants typed (it names the value, never a selector). Returns at the next checkpoint. |
-| `browse(run, value? \| confirmed? \| file? \| reply?)` | The same tool with a run id resumes that run from its checkpoint with the agent's answer: a value for `needs_input`, the member's confirmation, a file to upload, "the member signed in", a new instruction ("change the amount to 200 and submit"), or nothing to keep a `running` run going. |
-| `browser_look(run)` | The run's current page: a screenshot (MCP image content, `roomtools/tools.go:48-79`) with its text and fields, fenced as untrusted. Every checkpoint already carries the text and the fields as filled now; the image is only for when they are not enough, since it costs far more. |
+| `browser_open(url)` | The requester's browser for this room: the run's tab, opened on `url` (a later open in the same room navigates the same tab, and the run's sites grow by the new one's). Answers the page view. |
+| `browser_view(run, screenshot?)` | The page view: title, address, the page's text, and its controls, each with a stable number (the element's own id for as long as it exists), its role, label, value and state, off-screen ones marked. Fenced as the site's data. With `screenshot`, the picture too. |
+| `browser_find(run, what)` | The decision model ranks the page's controls for a description ("the Start button of Orion Training Course") and answers the likeliest few with their likelihood. Narrowing only: the agent decides. |
+| `browser_act(run, action, element?, text?, option?, key?, file?, confirmed?)` | One action, then the page view once it settled: `click`, `type` (replaces the field's text), `select` (a dropdown's option), `press` (Enter, Tab, Escape, arrows), `scroll` (`up` / `down`), `back`, `wait`, `upload`. An element off-screen is scrolled into view first. |
+| `browser_close(run?)` | Ends the run (or, without one, every run of the room the agent started for the person): its view leaves the room and its tab closes. |
 
-Two tools, and their descriptions say all an agent needs: no skill pack
-teaches them. A run lives as long as its tab. It survives across turns
-and agents: a later turn, or another agent the requester asks, continues
-it by its id.
+Guards stay inside `browser_act`, whatever the agent asks:
+
+- The executor re-checks the element against the page before input (the
+  same node, enabled, visible, not covered) and refuses a stale one.
+- A secret field is never typed into: a person fills it.
+- A click the decision model judges likely irreversible (§2.5), a click
+  leading off the run's sites, an upload and a question a page's dialog
+  asks pause at `needs_confirmation`, held until the requester's own newer
+  message (the consent rule is unchanged); the agent repeats the action
+  with `confirmed`.
+- A page that settles on a sign-in (a password field, or an identity
+  provider's page still there after its own redirects had time to finish)
+  pauses at `needs_human`, with the keeper (§3.7).
+- While a person holds control from the room, an action is refused with
+  who drives.
+
+The autonomous `browse` loop is removed. The live view, the keeper,
+hands off at the computer, crashes and dialogs are unchanged.
 
 ### 2.4 Checkpoints
 
@@ -732,7 +760,7 @@ with the room watching.
 | One owner | The component owns the run loop, checkpoints and the CDP executor. `internal/decision` owns the decision call. The relay owns which routes a tool reaches and what it knows of its turn (§3.1). `job_live_frame` / `job_live_input` own live media and input for every tool. Quick replies own one-tap answers for every feature. The borrow-grant model owns who may use the owner's things. |
 | Defaults and fallbacks | The default host is the requester's dedicated profile. The default irreversibility threshold is 0.3 (more confirmations until the audit shows the predicate's calibration), set by the org and per run. Without a decision model: `blocked` with the reason, and people drive. An unknown field value: `needs_input`, never a guess. No silent fallback to a chat model for steps. |
 | External contracts | CDP (screencast, input, file inputs, download behavior) is pinned by tests against a real headless Chromium in CI, with fixture pages (the reference ships one, `jev_ultrafast/static/fixture.html`, and 19 tests, `tests/test_agent.py`). `/v1/systemone` is pinned by the decision PRD's fake. Each CLI's tool-call behavior is covered by the `running` checkpoint rather than assumed. |
-| Load on users and agents | For agents: two tools and checkpoints that say what to do next, with no browser knowledge and no skill pack needed; only turns of members who installed the browser carry them. For members: sign in once in a dedicated window; answer confirmations in chat (one tap with quick replies); watch or take over when they want. No new settings to start: installing the component is the switch, and it works with any agent they ask; grants appear only when someone asks for another member's browser. |
+| Load on users and agents | For agents (revised 2026-10-19): five browser tools of the shape every agent already knows (open, view, find, act, close), each result carrying the page and what to do next, no skill pack needed; more tools than the two before, traded for the agent deciding with the conversation in hand instead of a model that had none; only turns of members who installed the browser carry them. For members: sign in once in a dedicated window; answer confirmations in chat (one tap with quick replies); watch or take over when they want. No new settings to start: installing the component is the switch, and it works with any agent they ask; grants appear only when someone asks for another member's browser. |
 | Release and compatibility | Additive: a new component, relay facts, two transient events and their routes, quick replies on messages, a decision rate. Pre-launch, no migration. Opt-in by installing the component; the desktop launches Chrome only when the component is installed and a run asks for it. |
 | Observability | Each step is a job activity line. Each decision call has its audit row. Each run's checkpoints, upload, download and remote-control take-over and hand-back are audited (kind `tool`, the run id, never page content). A frame counter per run is in metrics. Failures carry their class (stale, occluded, blocked, decision unavailable, host lost). |
 | AI capability | §5. |
