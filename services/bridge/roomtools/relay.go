@@ -30,7 +30,10 @@ import (
 //   - only the routes in wire.RoomRelayRoutes are reachable, each one a
 //     gateway route that admits a job grant;
 //   - GET <relay>/session answers the bound turn itself
-//     (component.RelaySession), never reaching the gateway.
+//     (component.RelaySession), never reaching the gateway;
+//   - once the session is revoked its bearer still posts the live view of
+//     a job it drove (POST /v1/live?job=, relayRetired) and nothing else,
+//     until the gateway refuses the view or it goes quiet.
 
 // RelayPath prefixes the relay's routes: <server>/relay/<gateway path>.
 const RelayPath = "/relay"
@@ -48,13 +51,16 @@ func (s *Server) handleRelay(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden origin", http.StatusForbidden)
 		return
 	}
+	path := strings.TrimPrefix(r.URL.Path, RelayPath)
 	sess := s.authenticate(r)
 	if sess == nil {
+		if s.relayRetired(w, r, path) {
+			return
+		}
 		w.Header().Set("WWW-Authenticate", `Bearer realm="bnbloc-room"`)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	path := strings.TrimPrefix(r.URL.Path, RelayPath)
 	if r.Method == http.MethodGet && path == component.RelaySessionPath {
 		s.relaySession(w, sess)
 		return
@@ -84,6 +90,44 @@ func (s *Server) handleRelay(w http.ResponseWriter, r *http.Request) {
 	}
 	q.Set("room", sess.Scope().RoomID)
 	q.Set("job", jobID)
+	s.forward(w, r, path, q, body)
+}
+
+// relayRetired serves a revoked session's live post (POST /v1/live?job=, a
+// job it drove): the view a sign-in waits on outlives the agent session it
+// was started in (PRD §3.7); the gateway admits it only while the view
+// waits. It answers whether it handled the request.
+func (s *Server) relayRetired(w http.ResponseWriter, r *http.Request, path string) bool {
+	if r.Method != http.MethodPost || path != liveRelayPath {
+		return false
+	}
+	token, _ := strings.CutPrefix(strings.TrimSpace(r.Header.Get("Authorization")), "Bearer ")
+	token = strings.TrimSpace(token)
+	job := strings.TrimSpace(r.URL.Query().Get("job"))
+	ret := s.retiredFor(token, job)
+	if token == "" || job == "" || ret == nil {
+		return false
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxRelayBody+1))
+	if err != nil || len(body) > maxRelayBody {
+		http.Error(w, "request too large or unreadable", http.StatusRequestEntityTooLarge)
+		return true
+	}
+	q := url.Values{}
+	q.Set("room", ret.scope.RoomID)
+	q.Set("job", job)
+	if status := s.forward(w, r, path, q, body); status == http.StatusConflict || status == http.StatusForbidden || status == http.StatusNotFound {
+		s.dropRetired(token) // the view no longer waits: nothing more is relayed for it
+	}
+	return true
+}
+
+// liveRelayPath is the one route a retired session reaches.
+const liveRelayPath = "/v1/live"
+
+// forward sends one relayed call with the bridge's client and copies the
+// gateway's answer; it returns the answer's status.
+func (s *Server) forward(w http.ResponseWriter, r *http.Request, path string, q url.Values, body []byte) int {
 	raw, err := s.cfg.Gateway.Do(r.Context(), r.Method, path+"?"+q.Encode(), RawBody{ContentType: r.Header.Get("Content-Type"), Data: body})
 	var se *StatusError
 	switch {
@@ -91,12 +135,15 @@ func (s *Server) handleRelay(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(se.Status)
 		_, _ = w.Write(se.Body)
+		return se.Status
 	case err != nil:
 		obs.ServerError(w, "relay a room-credential tool's call failed", err)
 		http.Error(w, "the gateway could not be reached", http.StatusBadGateway)
+		return http.StatusBadGateway
 	default:
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(raw)
+		return http.StatusOK
 	}
 }
 

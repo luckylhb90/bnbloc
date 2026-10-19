@@ -33,6 +33,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -87,7 +88,24 @@ type Server struct {
 
 	mu       sync.Mutex
 	sessions map[[sha256.Size]byte]*Session
+	// retired are revoked sessions kept for one thing only: the live view
+	// of a job they drove that waits for a person (relay.go, PRD §3.7).
+	// One is dropped once its views are refused or go quiet (retiredIdle).
+	retired map[[sha256.Size]byte]*retiredSession
 }
+
+// retiredSession is a revoked session's live-view remainder: the jobs it
+// drove and when it last posted.
+type retiredSession struct {
+	token string
+	scope Scope
+	jobs  []string
+	used  time.Time
+}
+
+// retiredIdle drops a retired session whose views have not posted for this
+// long (realtime has dropped them too: liveIdleFor there).
+const retiredIdle = 3 * time.Minute
 
 // Start listens on 127.0.0.1 (cfg.Addr when it is free, else a random
 // port) and serves until Close.
@@ -100,7 +118,7 @@ func Start(cfg Config) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("roomtools: listen: %w", err)
 	}
-	s := &Server{cfg: cfg, ln: ln, sessions: map[[sha256.Size]byte]*Session{}}
+	s := &Server{cfg: cfg, ln: ln, sessions: map[[sha256.Size]byte]*Session{}, retired: map[[sha256.Size]byte]*retiredSession{}}
 	s.tools = DefaultRegistry()
 	mux := http.NewServeMux()
 	mux.HandleFunc(Endpoint, s.handle)
@@ -140,6 +158,7 @@ func (s *Server) Close() error {
 		sess.revoke()
 		delete(s.sessions, k)
 	}
+	clear(s.retired)
 	s.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -185,13 +204,49 @@ func (s *Server) Revoke(sess *Session) {
 	if sess == nil {
 		return
 	}
+	jobs := sess.droveJobs()
 	s.mu.Lock()
 	k := sha256.Sum256([]byte(sess.token))
 	if s.sessions[k] == sess {
 		delete(s.sessions, k)
+		if len(jobs) > 0 {
+			s.retired[k] = &retiredSession{token: sess.token, scope: sess.Scope(), jobs: jobs, used: time.Now()}
+		}
 	}
+	s.pruneRetiredLocked(time.Now())
 	s.mu.Unlock()
 	sess.revoke()
+}
+
+// retiredFor resolves a revoked session's bearer for a live post of job
+// (one it drove), marking it used; nil otherwise.
+func (s *Server) retiredFor(token, job string) *retiredSession {
+	k := sha256.Sum256([]byte(token))
+	now := time.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pruneRetiredLocked(now)
+	r := s.retired[k]
+	if r == nil || subtle.ConstantTimeCompare([]byte(r.token), []byte(token)) != 1 || !slices.Contains(r.jobs, job) {
+		return nil
+	}
+	r.used = now
+	return r
+}
+
+// dropRetired forgets a retired session (its views were refused).
+func (s *Server) dropRetired(token string) {
+	s.mu.Lock()
+	delete(s.retired, sha256.Sum256([]byte(token)))
+	s.mu.Unlock()
+}
+
+func (s *Server) pruneRetiredLocked(now time.Time) {
+	for k, r := range s.retired {
+		if now.Sub(r.used) > retiredIdle {
+			delete(s.retired, k)
+		}
+	}
 }
 
 // authenticate resolves the request's bearer to a live session. The map is

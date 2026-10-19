@@ -446,7 +446,11 @@ the room.)
   none), for a requester who may still post in the room
   (`store.LoadRanJob`). The relay names the job: a tool may post under an
   earlier job of its own session (`?job=`, one the session drove), never
-  another.
+  another. A session the bridge releases after its turn (a sandboxed turn
+  does) keeps only that: its bearer still posts the live view of a job it
+  drove, until the gateway refuses the view or it is quiet for 3 minutes
+  (found on QA, 2026-10-19: the keeper's first posts after the turn were
+  refused 401 and the view froze unusable).
 - **No clock.** Realtime drops a view two minutes after its tool stops
   posting; a waiting view posts at least every 10 s
   (`component.LiveKeepEverySec` = 20 s, at half the period). Nothing ends

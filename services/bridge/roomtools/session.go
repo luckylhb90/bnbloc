@@ -144,6 +144,18 @@ func (s *Session) Bind(j Job) {
 	s.mu.Unlock()
 }
 
+// droveJobs is every job the session drove that it remembers, the bound
+// one last.
+func (s *Session) droveJobs() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := append([]string(nil), s.ran...)
+	if s.job.JobID != "" {
+		out = append(out, s.job.JobID)
+	}
+	return out
+}
+
 // maxRanJobs bounds the earlier jobs a session remembers.
 const maxRanJobs = 16
 

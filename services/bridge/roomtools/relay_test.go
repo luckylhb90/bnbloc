@@ -117,3 +117,40 @@ func TestRoomRelaySession(t *testing.T) {
 		t.Fatal("the session route reached the gateway")
 	}
 }
+
+// A revoked session's bearer still posts the live view of a job it drove
+// (a sign-in waits on it after the agent's session was released, PRD
+// §3.7), and nothing else; once the gateway refuses the view, the bearer
+// is refused for it too.
+func TestRoomRelayRetiredSessionKeepsItsLiveView(t *testing.T) {
+	refuse := false
+	gw := &fakeGateway{handle: func(method, path string, body []byte) (int, any) {
+		if refuse {
+			return http.StatusConflict, map[string]any{"error": "job is not running"}
+		}
+		return 200, map[string]any{}
+	}}
+	srv, token, sess := startServer(t, gw)
+	sess.Bind(Job{JobID: "job-1", RequesterUserID: "maya"})
+	srv.Revoke(sess)
+
+	if code, _ := relayPost(t, srv, token, "/v1/live?job=job-1", []byte(`{"waiting":"sign in"}`)); code != http.StatusOK {
+		t.Fatalf("retired live post = %d", code)
+	}
+	if calls := gw.callsTo(http.MethodPost, "/v1/live"); len(calls) != 1 || !strings.HasSuffix(calls[0].Path, "?job=job-1&room=room-1") {
+		t.Fatalf("calls = %+v", calls)
+	}
+	for _, path := range []string{"/v1/live?job=job-2", "/v1/live", "/v1/media/image?job=job-1"} {
+		if code, _ := relayPost(t, srv, token, path, []byte(`{}`)); code != http.StatusUnauthorized {
+			t.Fatalf("retired %s = %d; want 401", path, code)
+		}
+	}
+	refuse = true
+	if code, _ := relayPost(t, srv, token, "/v1/live?job=job-1", []byte(`{}`)); code != http.StatusConflict {
+		t.Fatalf("refused view = %d", code)
+	}
+	refuse = false
+	if code, _ := relayPost(t, srv, token, "/v1/live?job=job-1", []byte(`{"waiting":"sign in"}`)); code != http.StatusUnauthorized {
+		t.Fatalf("after the refusal = %d; want 401", code)
+	}
+}
