@@ -5,6 +5,7 @@ import { contentLabel, type ContentComponent } from "@/lib/contentComponents";
 import { contentApi } from "@/lib/contentComponentsApi";
 import { errorText } from "@/lib/errors";
 import { formatBytes } from "@/lib/format";
+import { useMediaCapability } from "@/lib/media";
 import { invalidateQueries } from "@/lib/useQuery";
 import { WorkCategoryValues } from "@/lib/wire.gen";
 import {
@@ -64,6 +65,10 @@ export function PublishWorkDialog({ deliverable, onClose }: { readonly deliverab
   const [publishing, setPublishing] = useState(false);
   const describe = useAssistTask(DESCRIBE_WORK);
   const [filling, setFilling] = useState(false);
+  // An AI cover the person asked for (a data URL), sent with the publish.
+  const [cover, setCover] = useState("");
+  const [drawing, setDrawing] = useState(false);
+  const canDraw = useMediaCapability("image") === true;
   // The dialog restarts when it opens for another deliverable, not on a new
   // object for the same one.
   const key = deliverable ? `${deliverable.roomId}\u0000${deliverable.artifactId}` : "";
@@ -78,6 +83,7 @@ export function PublishWorkDialog({ deliverable, onClose }: { readonly deliverab
     setFailure("");
     setMine(null);
     setCapture(null);
+    setCover("");
     setForm(publishWorkForm(d.title, []));
     void Promise.all([
       contentApi
@@ -109,7 +115,7 @@ export function PublishWorkDialog({ deliverable, onClose }: { readonly deliverab
     setBusy(true);
     setFailure("");
     try {
-      const d = await workGalleryApi.publish(deliverable.roomId, deliverable.artifactId, publishWorkRequest(form, recipe));
+      const d = await workGalleryApi.publish(deliverable.roomId, deliverable.artifactId, { ...publishWorkRequest(form, recipe), ...(cover ? { cover } : {}) });
       invalidateQueries(GALLERY_QUERY);
       toast.success(`${contentLabel(d.component)} v${d.component.latestVersion} is in the gallery`);
       setSaved(d.component);
@@ -131,6 +137,23 @@ export function PublishWorkDialog({ deliverable, onClose }: { readonly deliverab
       setFailure(errorText(e, "Could not fill it in with AI"));
     } finally {
       setFilling(false);
+    }
+  };
+
+  const drawCover = async () => {
+    if (drawing) return;
+    setDrawing(true);
+    setFailure("");
+    try {
+      const r = await workGalleryApi.makeCover(deliverable.roomId, deliverable.artifactId, {
+        displayName: form.displayName.trim() || undefined,
+        description: form.description.trim() || undefined,
+      });
+      setCover(r.cover);
+    } catch (e) {
+      setFailure(errorText(e, "Could not make a cover"));
+    } finally {
+      setDrawing(false);
     }
   };
 
@@ -224,10 +247,52 @@ export function PublishWorkDialog({ deliverable, onClose }: { readonly deliverab
             <Input value={form.tags} onChange={(e) => set({ tags: e.target.value })} placeholder="chart, sales" />
           </Field>
         </div>
+        <CoverSection cover={cover} canDraw={canDraw} drawing={drawing} disabled={loading || busy} onDraw={() => void drawCover()} onRemove={() => setCover("")} />
         <RecipeSection capture={capture} form={form} set={set} />
         {(failure || (problem && form.name.trim())) && <ErrorBox>{failure || problem}</ErrorBox>}
       </div>
     </Dialog>
+  );
+}
+
+/** CoverSection is the card's picture: without a chosen one, the work's
+ *  own (a cover file beside it, an image's picture, a document's first
+ *  page); "Make a cover with AI" draws one from the title and description,
+ *  which the person keeps, redraws or removes (work covers PRD §2.2). */
+function CoverSection({
+  cover,
+  canDraw,
+  drawing,
+  disabled,
+  onDraw,
+  onRemove,
+}: {
+  readonly cover: string;
+  readonly canDraw: boolean;
+  readonly drawing: boolean;
+  readonly disabled: boolean;
+  readonly onDraw: () => void;
+  readonly onRemove: () => void;
+}) {
+  return (
+    <section aria-label="Cover" className="flex items-center gap-3 rounded-[var(--radius-lg)] bg-[var(--color-surface-2)] px-3 py-2">
+      {cover ? (
+        <img src={cover} alt="The cover" className="h-16 w-28 shrink-0 rounded-[var(--radius)] object-cover" />
+      ) : null}
+      <p className="min-w-0 flex-1 text-xs text-[var(--color-fg-muted)]">
+        {cover
+          ? "The card's cover. Publishing keeps it."
+          : "The card shows the work's own cover: one saved beside it, an image's own picture, or a document's first page."}
+      </p>
+      {cover && (
+        <Button variant="ghost" size="sm" onClick={onRemove} disabled={disabled || drawing}>
+          Remove
+        </Button>
+      )}
+      {canDraw && (
+        <AssistButton variant="text" label={cover ? "Make another" : "Make a cover with AI"} state={drawing ? "waiting" : "idle"} onRun={onDraw} disabled={disabled} />
+      )}
+    </section>
   );
 }
 

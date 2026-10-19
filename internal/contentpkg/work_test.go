@@ -308,8 +308,23 @@ func TestWorkFromDeliverable(t *testing.T) {
 	if _, _, err := WorkFromDeliverable(WorkDeliverable{Artifact: wire.Artifact{Kind: store.ArtifactKindFile}}, WorkSnapshot{Name: "clip.mp4", Data: clip, Cover: []byte("<svg/>")}, m); err == nil {
 		t.Fatal("an SVG frame became a cover")
 	}
-	if _, _, err := WorkFromDeliverable(WorkDeliverable{Artifact: wire.Artifact{Kind: store.ArtifactKindSite}}, WorkSnapshot{Site: site, Cover: img}, m); err == nil {
-		t.Fatal("a site took a cover from elsewhere")
+	// A site keeps its own cover over a given one; one without a cover
+	// (and a single HTML file) takes the given one (work covers PRD §2.1).
+	p, _, err = WorkFromDeliverable(WorkDeliverable{Artifact: wire.Artifact{Kind: store.ArtifactKindSite}}, WorkSnapshot{Site: site, Cover: img}, m)
+	if c, found, _ := WorkCover(p); err != nil || !found || !bytes.Equal(c.Data, siteFiles(t)[coverName]) {
+		t.Fatalf("a site's own cover = %+v %v", c, err)
+	}
+	bare := siteFiles(t)
+	delete(bare, coverName)
+	raw, _ = tarbundle.PackFiles(bare, tarbundle.SiteLimits)
+	bareSite, _ := tarbundle.Parse(raw, "", tarbundle.SiteLimits)
+	p, _, err = WorkFromDeliverable(WorkDeliverable{Artifact: wire.Artifact{Kind: store.ArtifactKindSite}}, WorkSnapshot{Site: bareSite, Cover: img}, m)
+	if c, found, _ := WorkCover(p); err != nil || !found || !bytes.Equal(c.Data, img) {
+		t.Fatalf("a site without a cover took %+v %v", c, err)
+	}
+	p, _, err = WorkFromDeliverable(WorkDeliverable{Artifact: wire.Artifact{Kind: store.ArtifactKindHTML}}, WorkSnapshot{Name: "game.html", Data: []byte("<!doctype html><title>g</title>"), Cover: img}, m)
+	if c, found, _ := WorkCover(p); err != nil || !found || !bytes.Equal(c.Data, img) {
+		t.Fatalf("a single HTML file's cover = %+v %v", c, err)
 	}
 	withManifest := siteFiles(t)
 	withManifest[ManifestFile] = []byte("{}")

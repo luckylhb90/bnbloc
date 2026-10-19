@@ -216,6 +216,7 @@ func (s *Service) routes() []route {
 		gated("POST /v1/content-components/{id}/use-app", create, s.handleUseApp).spends(costBudget).with(needContent),
 		gated("POST /v1/content-components/{id}/make-similar", create, s.handleMakeSimilar).spends(costBudget).with(needContent),
 		gated("POST /v1/rooms/{roomId}/artifacts/{artifactId}/publish-work", drive, s.handlePublishWork).spends(costBudget).with(needContent),
+		gated("POST /v1/rooms/{roomId}/artifacts/{artifactId}/work-cover", drive, s.handleDrawWorkCover).spends(costBudget).with(needContent),
 		// AI assist (assist.go): the assist model behind manual entry points.
 		member("GET /v1/assist", s.handleAssistStatus).with(needContent),
 		gated("POST /v1/assist/{task}", drive, s.handleAssist).spends(costBudget).with(needContent),

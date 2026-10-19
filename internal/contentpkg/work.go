@@ -431,14 +431,16 @@ func WorkFromDeliverable(d WorkDeliverable, snap WorkSnapshot, m Manifest) (*Pac
 	files := map[string][]byte{}
 	m.Kind, m.File = KindWork, ""
 	if snap.Site != nil {
-		if snap.Cover != nil {
-			return nil, nil, errors.New("a site's cover is its own cover file: save it in the site's folder")
-		}
 		if _, ok := snap.Site.File(ManifestFile); ok {
 			return nil, nil, fmt.Errorf("the site holds a %s of its own: rename it, then publish again", ManifestFile)
 		}
 		for _, f := range snap.Site.Paths() {
 			files[f], _ = snap.Site.File(f)
+		}
+		if _, own, _ := tarbundle.SiteCover(snap.Site); !own {
+			if err := placeCover(files, snap.Cover); err != nil {
+				return nil, nil, err
+			}
 		}
 		m.Type = WorkTypeOf(d)
 		m.Recipe = placeReferences(m.Recipe, snap.References, files)
@@ -451,8 +453,8 @@ func WorkFromDeliverable(d WorkDeliverable, snap WorkSnapshot, m Manifest) (*Pac
 	d.FileName, d.Head = name, workHead(snap.Data)
 	m.Type = WorkTypeOf(d)
 	if wire.WorkTypeIsSite(m.Type) {
-		if snap.Cover != nil {
-			return nil, nil, errors.New("a site's cover is its own cover file: save it in the site's folder")
+		if err := placeCover(files, snap.Cover); err != nil {
+			return nil, nil, err
 		}
 		files[SiteEntry] = snap.Data
 		m.Recipe = placeReferences(m.Recipe, snap.References, files)
@@ -473,6 +475,21 @@ func WorkFromDeliverable(d WorkDeliverable, snap WorkSnapshot, m Manifest) (*Pac
 	}
 	m.Recipe = placeReferences(m.Recipe, snap.References, files)
 	return Pack(m, files, Options{})
+}
+
+// placeCover puts a site's given cover (nil: none) at its root under the
+// cover name its bytes sniff as (docs/prd/2026-10-19-work-covers.md §2.1:
+// a single HTML file could carry none before).
+func placeCover(files map[string][]byte, cover []byte) error {
+	if cover == nil {
+		return nil
+	}
+	name, err := tarbundle.CoverFile(cover)
+	if err != nil {
+		return fmt.Errorf("the cover: %w", err)
+	}
+	files[name] = cover
+	return nil
 }
 
 // placeReferences puts the reference files into files under references/,

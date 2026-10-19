@@ -48,7 +48,9 @@ import (
 
 // Bounds of the gallery's requests.
 const (
-	maxWorkRequestBytes = 64 << 10
+	// maxWorkRequestBytes bounds a publish request: its fields and a
+	// chosen cover, a data URL (base64 is 4/3 of the bytes).
+	maxWorkRequestBytes = 64<<10 + wire.MaxWorkCoverBytes*4/3 + 64
 	// appCopyTimeout bounds a copy's room calls (a site snapshot upload of
 	// up to tarbundle.SiteLimits).
 	appCopyTimeout = 2 * time.Minute
@@ -82,12 +84,13 @@ func (s *Service) handlePublishWork(w http.ResponseWriter, r *http.Request, call
 	if !writeDeliverableErr(w, err) {
 		return
 	}
-	if d.Snapshot.Site == nil {
-		if d.Snapshot.Cover, err = s.turnCover(ctx, actor.Claims, roomID, d); err != nil {
-			obs.ServerError(w, "load the work's cover failed", err)
-			httpx.Error(w, "load the work's cover failed", http.StatusBadGateway)
-			return
-		}
+	if d.Snapshot.Cover, err = s.workCover(ctx, actor.Claims, roomID, d, in.Cover); errors.Is(err, errBadCover) {
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	} else if err != nil {
+		obs.ServerError(w, "load the work's cover failed", err)
+		httpx.Error(w, "load the work's cover failed", http.StatusBadGateway)
+		return
 	}
 	art := d.Artifact
 	m := contentpkg.Manifest{
@@ -271,6 +274,59 @@ func (s *Service) deliverableVersion(ctx context.Context, claims auth.Claims, ro
 		}
 	}
 	return art, wire.ArtifactVersion{ArtifactID: art.ArtifactID, Version: art.CurrentVersion}, nil
+}
+
+// errBadCover: the cover the request carries is not a cover image.
+var errBadCover = errors.New("the cover is not a PNG, WebP or JPEG image within the cover cap")
+
+// workCover is the cover a deliverable publishes with
+// (docs/prd/2026-10-19-work-covers.md §2), under a site's own cover file
+// (WorkFromDeliverable keeps that): the one the person chose (chosen, a
+// data URL; errBadCover when it is none), the producing turn's, an image's
+// own image fitted to the cover cap, the room's thumbnail of the version;
+// nil for none (the generated cover). An image that already fits is its
+// own cover (WorkCover), so it is not copied.
+func (s *Service) workCover(ctx context.Context, claims auth.Claims, roomID string, d deliverable, chosen string) ([]byte, error) {
+	if chosen = strings.TrimSpace(chosen); chosen != "" {
+		data, _, err := decodeDataURLImage(chosen)
+		if err != nil {
+			return nil, errBadCover
+		}
+		if _, err := tarbundle.CoverFile(data); err != nil {
+			return nil, errBadCover
+		}
+		return data, nil
+	}
+	if d.Snapshot.Site == nil {
+		if cover, err := s.turnCover(ctx, claims, roomID, d); err != nil || cover != nil {
+			return cover, err
+		}
+		if d.Artifact.Kind == store.ArtifactKindImage {
+			if _, err := tarbundle.CoverFile(d.Snapshot.Data); err == nil {
+				return nil, nil
+			}
+			if cover, err := tarbundle.FitCover(d.Snapshot.Data); err == nil {
+				return cover, nil
+			}
+		}
+	}
+	return s.versionThumbnail(ctx, claims, roomID, d), nil
+}
+
+// versionThumbnail is the thumbnail the room stored for the deliverable's
+// version (a viewer's first page of a deck, a PDF, a document), nil when
+// it has none or it cannot be read: a cover is never worth failing a
+// publish over.
+func (s *Service) versionThumbnail(ctx context.Context, claims auth.Claims, roomID string, d deliverable) []byte {
+	path := "/v1/rooms/" + url.PathEscape(roomID) + "/artifacts/" + url.PathEscape(d.Artifact.ArtifactID) + "/versions/" + strconv.Itoa(d.Version.Version) + "/thumbnail"
+	data, err := s.roomBackendBytes(ctx, path, claims, wire.MaxWorkCoverBytes)
+	if err != nil {
+		return nil
+	}
+	if _, err := tarbundle.CoverFile(data); err != nil {
+		return nil
+	}
+	return data
 }
 
 // turnCover is the cover a single-file deliverable's producing turn saved

@@ -106,6 +106,28 @@ type WorkPublishRequest struct {
 	Recipe        *WorkRecipe `json:"recipe,omitempty"`
 	RecipePrompt  string      `json:"recipePrompt,omitempty"`
 	IncludeRecipe *bool       `json:"includeRecipe,omitempty"`
+	// Cover is the cover the person chose in the publish dialog (an AI
+	// cover, docs/prd/2026-10-19-work-covers.md §2.2): a data URL of a
+	// PNG, WebP or JPEG within MaxWorkCoverBytes. A site's own cover file
+	// still wins.
+	Cover string `json:"cover,omitempty"`
+}
+
+// WorkCoverRequest asks for an AI cover for a deliverable about to be
+// published (POST /v1/rooms/{roomId}/artifacts/{artifactId}/work-cover,
+// docs/prd/2026-10-19-work-covers.md §2.2): the work's title and
+// description as the dialog has them (empty: the deliverable's own).
+type WorkCoverRequest struct {
+	DisplayName string `json:"displayName,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+// WorkCoverReply is the drawn cover: a data URL within MaxWorkCoverBytes,
+// which the publish request carries back as its cover when the person
+// keeps it.
+type WorkCoverReply struct {
+	Cover string `json:"cover"`
+	Model string `json:"model,omitempty"`
 }
 
 // WorkRecipe is how a work was made (works PRD §3): the request that

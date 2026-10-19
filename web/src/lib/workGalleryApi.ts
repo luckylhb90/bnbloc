@@ -3,7 +3,7 @@ import type { ContentComponent, ContentComponentDetail } from "./contentComponen
 import { noteSaved } from "./contentComponentsApi.ts";
 import { roomPath } from "./roomId.ts";
 import type { AppDemo, AppUseReply, MakeSimilarDraft, WorkPublishRequest, WorkRecipeCapture } from "./workGallery.ts";
-import type { AppUseRequest, MakeSimilarRequest } from "./wire.gen.ts";
+import type { AppUseRequest, MakeSimilarRequest, WorkCoverReply, WorkCoverRequest } from "./wire.gen.ts";
 
 const enc = encodeURIComponent;
 
@@ -32,6 +32,10 @@ export const workGalleryApi = {
     req<MakeSimilarDraft>(`/v1/content-components/${enc(id)}/make-similar`, { method: "POST", body: JSON.stringify(body) }),
   // What publishing a deliverable's current version would capture.
   recipe: (roomId: string, artifactId: string) => req<WorkRecipeCapture>(roomPath(roomId, "artifacts", artifactId, "recipe")),
+  // An AI cover for a deliverable about to be published (work covers PRD
+  // §2.2): drawn only when the person asks, kept only if they publish it.
+  makeCover: (roomId: string, artifactId: string, body: WorkCoverRequest) =>
+    req<WorkCoverReply>(roomPath(roomId, "artifacts", artifactId, "work-cover"), { method: "POST", body: JSON.stringify(body) }),
   // A deliverable's current version as a work of the caller's (a new
   // version of a work the organization uses announces where it went).
   publish: (roomId: string, artifactId: string, body: WorkPublishRequest) =>

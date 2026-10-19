@@ -5245,6 +5245,28 @@ export interface WorkPublishRequest {
   recipe?: WorkRecipe;
   recipePrompt?: string;
   includeRecipe?: boolean;
+  // Cover is the cover the person chose in the publish dialog (an AI
+  // cover, docs/prd/2026-10-19-work-covers.md §2.2): a data URL of a
+  // PNG, WebP or JPEG within MaxWorkCoverBytes. A site's own cover file
+  // still wins.
+  cover?: string;
+}
+
+// WorkCoverRequest asks for an AI cover for a deliverable about to be
+// published (POST /v1/rooms/{roomId}/artifacts/{artifactId}/work-cover,
+// docs/prd/2026-10-19-work-covers.md §2.2): the work's title and
+// description as the dialog has them (empty: the deliverable's own).
+export interface WorkCoverRequest {
+  displayName?: string;
+  description?: string;
+}
+
+// WorkCoverReply is the drawn cover: a data URL within MaxWorkCoverBytes,
+// which the publish request carries back as its cover when the person
+// keeps it.
+export interface WorkCoverReply {
+  cover: string;
+  model?: string;
 }
 
 // WorkRecipe is how a work was made (works PRD §3): the request that
