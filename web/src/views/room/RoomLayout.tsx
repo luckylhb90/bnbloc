@@ -21,6 +21,7 @@ export function DismissibleLayer({
   onClose,
   surfaceClassName,
   surfaceProps,
+  modal = true,
   children,
 }: {
   readonly label: string;
@@ -28,24 +29,31 @@ export function DismissibleLayer({
   readonly onClose: () => void;
   readonly surfaceClassName: string;
   readonly surfaceProps?: DismissibleLayerSurfaceProps;
+  // modal=false floats the surface over the page without a backdrop: what
+  // is beside it stays usable, and only its own close button closes it
+  // (no outside click, no Escape, no focus trap). The element tree is the
+  // same either way, so switching keeps the surface's content mounted.
+  readonly modal?: boolean;
   readonly children: ReactNode;
 }) {
   const panelRef = useRef<HTMLDivElement | null>(null);
-  useModalLayer(panelRef, { onEscape: onClose });
+  useModalLayer(panelRef, { open: modal, onEscape: onClose });
 
   return (
-    <div className="fixed inset-0 z-40 flex">
-      <button
-        type="button"
-        aria-label={closeLabel}
-        tabIndex={-1}
-        className="absolute inset-0 bg-black/60 animate-in"
-        onClick={onClose}
-      />
+    <div className={cn("fixed inset-0 z-40 flex", !modal && "pointer-events-none")}>
+      {modal && (
+        <button
+          type="button"
+          aria-label={closeLabel}
+          tabIndex={-1}
+          className="absolute inset-0 bg-black/60 animate-in"
+          onClick={onClose}
+        />
+      )}
       <div
         ref={panelRef}
         role="dialog"
-        aria-modal="true"
+        aria-modal={modal}
         aria-label={label}
         tabIndex={-1}
         {...surfaceProps}
@@ -53,6 +61,7 @@ export function DismissibleLayer({
           "animate-in relative min-h-0 border-[var(--color-border-strong)] bg-[var(--color-surface)] shadow-[var(--shadow-diffuse)] focus:outline-none",
           surfaceProps?.className,
           surfaceClassName,
+          !modal && "pointer-events-auto",
         )}
       >
         {children}
@@ -220,11 +229,16 @@ export function PreviewDock({
   );
 
   if (mode !== "inline") {
+    // A live view floats beside the conversation instead (a sign-in reads
+    // the chat, or a code sent to it): a click on the chat must not close
+    // it, and Escape and Tab are the page's keys.
+    const liveShown = mode === "overlay" && !!workbench.state.tabs.find((t) => t.key === workbench.state.active)?.liveJobId;
     return (
       <DismissibleLayer
         label="Preview"
         closeLabel="Close preview"
         onClose={onClose}
+        modal={!liveShown}
         surfaceClassName={cn(
           "ml-auto flex flex-col overflow-hidden border-l",
           mode === "full" ? "h-full w-full" : "my-4 mr-4 h-[calc(100%-2rem)] w-[min(42rem,calc(100%-2rem))] rounded-[var(--radius-xl)] border shadow-[var(--shadow-diffuse)]",

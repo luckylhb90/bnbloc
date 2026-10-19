@@ -183,8 +183,10 @@ func (s *Service) handleInternalLiveFrame(w http.ResponseWriter, r *http.Request
 			j = cur
 		}
 	}
-	reply := component.LiveFrameReply{Watching: now.Before(j.watchedTo), Controller: j.controllerLocked(now), Input: j.input}
-	j.input = nil
+	reply := component.LiveFrameReply{Watching: now.Before(j.watchedTo), Controller: j.controllerLocked(now)}
+	if !f.LeaveInput {
+		reply.Input, j.input = j.input, nil
+	}
 	l.mu.Unlock()
 	if changed && event.Seq > 0 {
 		s.publishLive(r.Context(), roomID, j.channel, event)

@@ -367,9 +367,23 @@ checkpoint as long as nobody answers.
   and the tool receives it **in the reply to its next frame post**.
   `focus` (bring the window forward) is the owner's alone and needs no
   control.
-- **Transport.** No new stream: the tool already posts every 250 ms
-  while someone controls, so input arrives within one post. No
-  connection to the machine, no inbound port, no bridge change.
+- **Transport.** No new stream, no connection to the machine, no
+  inbound port. While someone controls, the tool keeps one empty post
+  waiting for input (`WaitInput`, realtime answers as it is queued) and
+  runs what comes back at once, then looks at the page 60 ms later; its
+  frame posts say `LeaveInput`, so a keystroke never waits behind a
+  capture and its upload (found on QA, 2026-10-19: typing in a sign-in
+  felt choppy while each key rode the next frame's round trip).
+- **Typing.** The large view's keys land in a hidden text field over the
+  picture, placed where the person clicked: an input method (Chinese,
+  Japanese, Korean) composes there and its committed text goes to the
+  page as `text` (CDP `Input.insertText`); other keys go as keys. A page
+  that rewrites what is typed (an upper-casing code field) shows it as
+  it would locally.
+- **Beside the chat.** At medium width the workbench floats over the
+  room; while its live view is shown it floats without a backdrop, so
+  the conversation stays usable beside it and only its own close button
+  closes it.
 - Ownership is checked twice. Realtime admits only the controller's
   input; the gateway hands it only to the relay of the bound, running
   job.

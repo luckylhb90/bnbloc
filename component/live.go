@@ -53,6 +53,11 @@ type LiveFramePost struct {
 	// moment for their input before it answers (a long poll), so input
 	// reaches the tool as it is sent rather than at the next post.
 	WaitInput bool `json:"waitInput,omitempty"`
+	// LeaveInput: the post takes no input; it stays queued for the tool's
+	// WaitInput post. A tool that waits for input beside its frame posts
+	// sets it on the frames, so input runs as it arrives, in order, never
+	// behind a capture and its upload.
+	LeaveInput bool `json:"leaveInput,omitempty"`
 }
 
 // LiveFrameReply answers a post: whether someone watches the large view

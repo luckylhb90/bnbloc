@@ -141,6 +141,17 @@ func TestJobLiveView(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("the waiting post did not answer with the input")
 	}
+	// A frame that leaves the input takes none: it waits for the tool's
+	// waiting post.
+	if code, _ := call(http.MethodPost, "/v1/rooms/room-1/jobs/job-1/live/input", "maya", wire.LiveInputPost{Events: []component.LiveInput{{Type: component.LiveInputText, Text: "later"}}}); code != http.StatusNoContent {
+		t.Fatalf("input = %d", code)
+	}
+	if r := post(component.LiveFramePost{LeaveInput: true}); len(r.Input) != 0 || r.Controller != "maya" {
+		t.Fatalf("a leaving post took the input: %+v", r)
+	}
+	if r := post(component.LiveFramePost{WaitInput: true}); len(r.Input) != 1 || r.Input[0].Text != "later" {
+		t.Fatalf("the waiting post after a leaving one = %+v", r)
+	}
 
 	// Control lapses without renewal; then input is refused again.
 	now = now.Add(wire.LiveControlLapseMs*time.Millisecond + time.Second)

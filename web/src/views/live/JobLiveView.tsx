@@ -156,6 +156,14 @@ function isPasteKey(e: { readonly key: string; readonly metaKey: boolean; readon
   return (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "v";
 }
 
+// isImeKey: a key an input method takes (Chinese, Japanese, Korean...): it
+// composes in the view's own text field and arrives as text once chosen.
+// WebKit reports the key that commits a composition as 229 after its
+// compositionend, so the code is checked too.
+function isImeKey(e: React.KeyboardEvent): boolean {
+  return e.nativeEvent.isComposing || e.key === "Process" || e.keyCode === 229;
+}
+
 /** JobLiveView is the large view: the picture, who drives, take over /
  *  hand back for the owner, and "Open in the browser window" on their
  *  machine. */
@@ -183,6 +191,11 @@ export function JobLiveView({
   const queue = useRef<LiveInput[]>([]);
   const flushing = useRef(false);
   const lastMove = useRef(0);
+  // The keys land in a hidden text field over the picture: an input
+  // method composes there (its candidates show where the person clicked)
+  // and what it commits goes to the page as text.
+  const keysRef = useRef<HTMLTextAreaElement>(null);
+  const [caret, setCaret] = useState({ left: 0, top: 0 });
   const jobId = live?.jobId ?? "";
   const mine = !!subject && live?.owner === subject;
   const driving = mine && live?.controller === subject;
@@ -243,6 +256,13 @@ export function JobLiveView({
     return pointAt(img.getBoundingClientRect(), { width: live.width, height: live.height }, e.clientX, e.clientY);
   };
   const button = (b: number) => (b === 2 ? "right" : b === 1 ? "middle" : "left");
+  // What an input method put in the field goes to the page, once.
+  const sendTyped = () => {
+    const el = keysRef.current;
+    if (!el || !el.value) return;
+    send({ type: "text", text: el.value });
+    el.value = "";
+  };
 
   if (!live && !(bootstrap && url)) {
     return (
@@ -281,31 +301,45 @@ export function JobLiveView({
           </Button>
         )}
       </div>
-      <div
-        className={cn("relative min-h-0 flex-1 bg-[var(--color-surface)] outline-none", driving && "ring-2 ring-inset ring-[var(--color-accent)]")}
-        tabIndex={driving ? 0 : -1}
-        onKeyDown={(e) => {
-          if (!driving) return;
-          // Paste stays the browser's own: its paste event below carries
-          // this computer's clipboard to the page.
-          if (isPasteKey(e)) return;
-          e.preventDefault();
-          send(keyInput("down", e));
-        }}
-        onKeyUp={(e) => {
-          if (!driving || isPasteKey(e)) return;
-          e.preventDefault();
-          send(keyInput("up", e));
-        }}
-        onPaste={(e) => {
-          if (!driving) return;
-          const text = e.clipboardData.getData("text/plain");
-          if (text) {
-            e.preventDefault();
-            send({ type: "text", text });
-          }
-        }}
-      >
+      <div className={cn("relative min-h-0 flex-1 overflow-hidden bg-[var(--color-surface)]", driving && "ring-2 ring-inset ring-[var(--color-accent)]")}>
+        {driving && (
+          <textarea
+            ref={keysRef}
+            aria-label="Type on the page"
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
+            spellCheck={false}
+            rows={1}
+            data-live-keys
+            style={caret}
+            className="pointer-events-none absolute z-10 h-6 w-px resize-none overflow-hidden border-0 bg-transparent p-0 text-[16px] text-transparent caret-transparent opacity-0 outline-none"
+            onKeyDown={(e) => {
+              // An input method's keys compose here; paste stays the
+              // browser's own (its paste event carries this computer's
+              // clipboard). Every other key goes to the page as a key.
+              if (isImeKey(e) || isPasteKey(e)) return;
+              e.preventDefault();
+              send(keyInput("down", e));
+            }}
+            onKeyUp={(e) => {
+              if (isImeKey(e) || isPasteKey(e)) return;
+              e.preventDefault();
+              send(keyInput("up", e));
+            }}
+            onCompositionEnd={sendTyped}
+            onInput={(e) => {
+              // Text outside a composition here came from an input method
+              // too (its punctuation): the keys above typed none.
+              if (!(e.nativeEvent as InputEvent).isComposing) sendTyped();
+            }}
+            onPaste={(e) => {
+              const text = e.clipboardData.getData("text/plain");
+              e.preventDefault();
+              if (text) send({ type: "text", text });
+            }}
+          />
+        )}
         {url ? (
           <img
             ref={imgRef}
@@ -314,11 +348,15 @@ export function JobLiveView({
             draggable={false}
             className={cn("absolute inset-0 h-full w-full select-none object-contain", driving ? "cursor-default" : "cursor-not-allowed")}
             onContextMenu={(e) => driving && e.preventDefault()}
+            // The press must not take the focus from the keys' field.
+            onMouseDown={(e) => driving && e.preventDefault()}
             onPointerDown={(e) => {
               if (!driving) return;
               const p = point(e);
               if (!p) return;
-              (e.currentTarget.parentElement as HTMLElement | null)?.focus();
+              const box = e.currentTarget.getBoundingClientRect();
+              setCaret({ left: e.clientX - box.left, top: e.clientY - box.top });
+              keysRef.current?.focus({ preventScroll: true });
               e.currentTarget.setPointerCapture(e.pointerId);
               send({ type: "mouse", action: "down", ...p, button: button(e.button), clicks: e.detail || 1, modifiers: modifiers(e) });
             }}
