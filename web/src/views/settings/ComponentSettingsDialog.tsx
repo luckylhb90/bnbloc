@@ -3,8 +3,18 @@ import { useAuth } from "@/lib/auth";
 import { desktop } from "@/lib/desktop";
 import { signInLine } from "@/lib/mcpTools";
 import { can } from "@/lib/permissions";
-import { needsSetupText, ofScope, settingLabels, type ComponentSetting, type ComponentSettingsView, type DesktopComponentSettings } from "@/lib/componentSettings";
+import {
+  needsSetupText,
+  ofScope,
+  settingLabels,
+  type ComponentSetting,
+  type ComponentSettingScope,
+  type ComponentSettingsPage,
+  type ComponentSettingsView,
+  type DesktopComponentSettings,
+} from "@/lib/componentSettings";
 import { componentSettingsApi, type SettingsOwner } from "@/lib/componentSettingsApi";
+import { memberPageView, scopePageView, type SettingsPageScope } from "@/lib/settingsPageFrame";
 import { relativeTime } from "@/lib/format";
 import { Button } from "@/ui/Button";
 import { Card } from "@/ui/Card";
@@ -12,6 +22,7 @@ import { Dialog } from "@/ui/Dialog";
 import { ErrorBox } from "@/ui/ErrorBox";
 import { useToast } from "@/ui/Toast";
 import { SettingsForm } from "@/views/settings/SettingsForm";
+import { SettingsPageFrame } from "@/views/settings/SettingsPageFrame";
 import { errorText } from "@/lib/errors";
 
 // ComponentSettingsDialog is a component's settings, opened where the
@@ -20,25 +31,28 @@ import { errorText } from "@/lib/errors";
 // (docs/prd/2026-10-19-component-settings.md §2.2). It shows each scope the
 // viewer may set: their own (on this computer, in the desktop app), the
 // organization's (an org admin), the platform's (a super admin); a scope
-// they may not set but that is missing says who sets it.
+// they may not set but that is missing says who sets it. A component with
+// its own settings page shows that page in each scope's place instead of
+// the one form (SettingsPageFrame), each editing only its scope.
 
 /** The component the dialog is for, as the catalogs list it. */
 export interface SettingsTarget {
   readonly kind: string;
   readonly name: string;
   readonly settings?: readonly ComponentSetting[];
+  readonly settingsPage?: ComponentSettingsPage;
 }
 
 export function ComponentSettingsDialog({ target, onClose }: { readonly target: SettingsTarget | null; readonly onClose: () => void }) {
   if (!target) return null;
   return (
     <Dialog open onClose={onClose} title={`${target.name} settings`} description="Set it up here; it runs once every required setting is set." size="lg">
-      <SettingsSections target={target} />
+      <SettingsSections target={target} onClose={onClose} />
     </Dialog>
   );
 }
 
-function SettingsSections({ target }: { readonly target: SettingsTarget }) {
+function SettingsSections({ target, onClose }: { readonly target: SettingsTarget; readonly onClose: () => void }) {
   const { role } = useAuth();
   const declared = target.settings ?? [];
   const owners: SettingsOwner[] = [];
@@ -79,10 +93,12 @@ function SettingsSections({ target }: { readonly target: SettingsTarget }) {
     <div className="flex flex-col gap-4">
       {error && <ErrorBox>{error}</ErrorBox>}
       {declared.length === 0 && mine?.auth !== "oauth" && <p className="text-sm text-[var(--color-fg-subtle)]">This component has nothing to set.</p>}
-      {memberDeclared && <MemberSection item={mine} reload={load} />}
+      {memberDeclared && <MemberSection item={mine} reload={load} page={target.settingsPage} onClose={onClose} />}
       {owners.map((o) => {
         const view = views[o];
-        return view ? <ScopeSection key={o} owner={o} view={view} onSaved={(v) => setViews((cur) => ({ ...cur, [o]: v }))} target={ref} /> : null;
+        return view ? (
+          <ScopeSection key={o} owner={o} view={view} onSaved={(v) => setViews((cur) => ({ ...cur, [o]: v }))} target={ref} onClose={onClose} />
+        ) : null;
       })}
       {othersMissing.length > 0 && (
         <p className="text-sm text-[var(--color-warning)]">
@@ -94,9 +110,19 @@ function SettingsSections({ target }: { readonly target: SettingsTarget }) {
 }
 
 // MemberSection is the viewer's own settings, kept on this computer: the
-// one form, or the sign-in of a tool that takes one. In a browser there is
-// nowhere to keep them.
-function MemberSection({ item, reload }: { readonly item: DesktopComponentSettings | null | undefined; readonly reload: () => Promise<void> }) {
+// one form or the component's own page, and the sign-in of a tool that
+// takes one. In a browser there is nowhere to keep them.
+function MemberSection({
+  item,
+  reload,
+  page,
+  onClose,
+}: {
+  readonly item: DesktopComponentSettings | null | undefined;
+  readonly reload: () => Promise<void>;
+  readonly page?: ComponentSettingsPage;
+  readonly onClose: () => void;
+}) {
   if (item === undefined) return <p className="text-sm text-[var(--color-fg-subtle)]">Loading your settings…</p>;
   if (item === null) {
     return (
@@ -105,11 +131,35 @@ function MemberSection({ item, reload }: { readonly item: DesktopComponentSettin
       </p>
     );
   }
+  // The page reads and saves through this computer's own store, as the form.
+  const own = async () => {
+    const fresh = (await desktop.componentSettings())?.find((i) => i.kind === item.kind && i.name === item.name);
+    if (!fresh) throw new Error(`${item.name} is not installed on this computer`);
+    return memberPageView(fresh);
+  };
+  const calls: SettingsPageScope = {
+    load: own,
+    save: async (update) => {
+      await desktop.saveComponentSettings(item.kind, item.name, update);
+      await reload();
+      return own();
+    },
+  };
   return (
     <section aria-label="Your settings" className="flex flex-col gap-2">
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-fg-muted)]">Yours, on this computer</h3>
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-fg-muted)]">{scopeHeadings.member}</h3>
       {item.auth === "oauth" && <SignInCard item={item} reload={reload} />}
-      {(item.auth !== "oauth" || ofScope(item.fields, "member").length > 0) && (
+      {page && ofScope(item.fields, "member").length > 0 ? (
+        <SettingsPageFrame
+          key={page.bundle.sha256}
+          name={item.name}
+          scope="member"
+          scopeLabel={scopeHeadings.member}
+          page={{ entry: page.entry, bundleSha256: page.bundle.sha256 }}
+          calls={calls}
+          onClose={onClose}
+        />
+      ) : (item.auth !== "oauth" || ofScope(item.fields, "member").length > 0) && (
         <SettingsForm
           title={item.name}
           version={item.version}
@@ -131,6 +181,13 @@ function MemberSection({ item, reload }: { readonly item: DesktopComponentSettin
   );
 }
 
+// The heading of each scope's section (and of its settings page).
+const scopeHeadings: Record<ComponentSettingScope, string> = {
+  member: "Yours, on this computer",
+  org: "Your organization's (for every member)",
+  platform: "The platform's (for every organization)",
+};
+
 // ScopeSection is the organization's or the platform's settings, stored
 // sealed on the server.
 function ScopeSection({
@@ -138,20 +195,39 @@ function ScopeSection({
   view,
   target,
   onSaved,
+  onClose,
 }: {
   readonly owner: SettingsOwner;
   readonly view: ComponentSettingsView;
   readonly target: { readonly kind: string; readonly name: string };
   readonly onSaved: (view: ComponentSettingsView) => void;
+  readonly onClose: () => void;
 }) {
   const updated = view.updatedBy || view.updatedAtMs ? `Saved${view.updatedBy ? ` by ${view.updatedBy}` : ""}${view.updatedAtMs ? ` ${relativeTime(view.updatedAtMs)}` : ""}.` : "Not saved yet.";
+  // The page reads and saves through the scope's routes, as the form.
+  const calls: SettingsPageScope = {
+    load: async () => scopePageView(await componentSettingsApi.get(owner, target)),
+    save: async (update) => {
+      const saved = await componentSettingsApi.save(owner, target, update);
+      onSaved(saved);
+      return scopePageView(saved);
+    },
+  };
   return (
     <section aria-label={owner === "org" ? "Organization settings" : "Platform settings"} className="flex flex-col gap-2">
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-fg-muted)]">
-        {owner === "org" ? "Your organization's (for every member)" : "The platform's (for every organization)"}
-      </h3>
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-fg-muted)]">{scopeHeadings[view.scope]}</h3>
       {!view.available ? (
         <p className="text-sm text-[var(--color-fg-subtle)]">Settings are off on this deployment: the gateway has no secret store key (BNBLOC_SECRET_STORE_KEY).</p>
+      ) : view.page ? (
+        <SettingsPageFrame
+          key={view.page.bundleSha256}
+          name={view.name}
+          scope={view.scope}
+          scopeLabel={scopeHeadings[view.scope]}
+          page={view.page}
+          calls={calls}
+          onClose={onClose}
+        />
       ) : (
         <SettingsForm
           title={view.name}

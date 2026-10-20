@@ -25,7 +25,7 @@ import {
   type RoomsReply,
   type UnreadReply,
 } from "./wire.gen.ts";
-import { authedFetch, errorDetail } from "./session.ts";
+import { authedFetch, errorBody } from "./session.ts";
 import { downloadFilename, type RoomHandoffInfo, type RoomImportResult } from "./handoff.ts";
 import type { Grant } from "./sessionGrant.ts";
 import type { TenantPolicy } from "./shares.ts";
@@ -98,15 +98,18 @@ export type ReqAs = "json" | "none" | "text" | "blob" | "response";
 
 // req is the one authenticated request of the client (feature API modules
 // keep their endpoints beside their own types and call it too). A failure is
-// an ApiError carrying the server's message. A string body is JSON unless a
-// Content-Type says otherwise; a FormData or Blob body keeps the type the
-// browser or the caller sets.
+// an ApiError carrying the server's message (and the field it names). A
+// string body is JSON unless a Content-Type says otherwise; a FormData or
+// Blob body keeps the type the browser or the caller sets.
 export async function req<T>(path: string, opts: RequestInit & { as?: ReqAs } = {}): Promise<T> {
   const { as = "json", ...init } = opts;
   const headers = new Headers(init.headers);
   if (typeof init.body === "string" && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
   const res = await authedFetch(apiUrl(path), { ...init, headers });
-  if (!res.ok) throw new ApiError(res.status, await errorDetail(res));
+  if (!res.ok) {
+    const body = await errorBody(res);
+    throw new ApiError(res.status, body.message, body.field);
+  }
   switch (as) {
     case "none":
       return undefined as T;

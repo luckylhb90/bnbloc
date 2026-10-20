@@ -48,8 +48,10 @@ export const RULES = [
     id: 2,
     name: "a failed request becomes an ApiError only in the transports (lib/errors.ts owns the class)",
     pattern: /new ApiError\(/,
-    // lib/assist.ts reads a streamed assist reply (Server-Sent Events).
-    allowed: ["lib/api.ts", "lib/errors.ts", "lib/sharesApi.ts", "lib/artifactUpload.ts", "lib/releaseDownload.ts", "lib/assist.ts"],
+    // lib/assist.ts reads a streamed assist reply (Server-Sent Events);
+    // lib/desktop.ts answers the shell's member settings store refusing a
+    // value as the settings routes do (400 and the field).
+    allowed: ["lib/api.ts", "lib/errors.ts", "lib/sharesApi.ts", "lib/artifactUpload.ts", "lib/releaseDownload.ts", "lib/assist.ts", "lib/desktop.ts"],
     sample: { file: "lib/xApi.ts", text: "if (!res.ok) throw new ApiError(res.status, await errorDetail(res));" },
   },
   {

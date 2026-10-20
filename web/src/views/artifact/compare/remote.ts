@@ -1,7 +1,7 @@
-import { apiUrl } from "@/lib/config";
 import { runInHiddenFrame } from "@/lib/hiddenFrame";
-import { previewerFrameUrl, readPreviewerMessage, type ConvertFileSrc } from "@/lib/previewerFrame";
+import { previewerFrameUrl, readPreviewerMessage } from "@/lib/previewerFrame";
 import { freshPreviewer } from "../remotePreviewers";
+import { frameEnv } from "../siteFrameEnv";
 import type { CompareStrategy, UnitList } from "./registry";
 
 // An installed previewer that reads its format into units (capability
@@ -18,13 +18,7 @@ export function previewerUnits(name: string): CompareStrategy {
     async extract({ blob, file }, signal) {
       const desc = await freshPreviewer(name);
       if (!desc) throw new Error(`The ${name} previewer is no longer installed`);
-      const internals = window.__TAURI_INTERNALS__ as { convertFileSrc?: ConvertFileSrc } | undefined;
-      const src = previewerFrameUrl(desc, {
-        convertFileSrc: internals?.convertFileSrc,
-        apiUrl,
-        baseURI: document.baseURI,
-        hostOrigin: window.location.origin,
-      });
+      const src = previewerFrameUrl(desc, frameEnv());
       const bytes = await blob.arrayBuffer();
       const id = `u${Date.now().toString(36)}${(seq++).toString(36)}`;
       let asked = false;

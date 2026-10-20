@@ -9,6 +9,7 @@
 import { inDesktopShell } from "./config";
 import { api, type AgentTarget, type UpdatePolicy } from "./api";
 import type { ComponentSettingsUpdate, DesktopComponentSettings } from "./componentSettings";
+import { ApiError } from "./errors.ts";
 import { unframePackedSkill, type SkillsProvider, type SkillsSettings, type SkillsState } from "./localSkills";
 import type { SandboxMode, SandboxStatus, ShellEnvReload } from "./sandboxStatus";
 import { SESSION_KEY, parseSessionRecord, type SessionRecord } from "./sessionGrant";
@@ -295,6 +296,11 @@ export const desktop = {
     const t = tauri();
     if (!t) return;
     await t.invoke("component_settings_save", { kind, name, values: update.values, clear: update.clear ?? [] }).catch((e: unknown) => {
+      // A refused value reads as the settings routes' refusal: the reason
+      // and the setting it names (the shell answers {error, field}).
+      if (e && typeof e === "object" && "error" in e && typeof e.error === "string") {
+        throw "field" in e && typeof e.field === "string" ? new ApiError(400, e.error, e.field) : new Error(e.error);
+      }
       throw new Error(e instanceof Error ? e.message : String(e));
     });
   },

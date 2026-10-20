@@ -149,15 +149,21 @@ export async function authedFetch(
 // page during a restart, a router's plain 404) is never shown raw: it
 // becomes a sentence a person can act on.
 export async function errorDetail(res: Response): Promise<string> {
+  return (await errorBody(res)).message;
+}
+
+// errorBody is errorDetail with the request field the body names, when it
+// names one ({"error": …, "field": "<key>"}: a refused component setting).
+export async function errorBody(res: Response): Promise<{ readonly message: string; readonly field: string }> {
   const text = (await res.text().catch(() => "")).trim();
   try {
     const parsed: unknown = JSON.parse(text);
     if (parsed && typeof parsed === "object" && "error" in parsed && typeof parsed.error === "string" && parsed.error) {
-      return parsed.error;
+      return { message: parsed.error, field: "field" in parsed && typeof parsed.field === "string" ? parsed.field : "" };
     }
   } catch {
     // not the error body
   }
-  return statusText(res.status);
+  return { message: statusText(res.status), field: "" };
 }
 

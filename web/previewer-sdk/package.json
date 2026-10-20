@@ -11,6 +11,7 @@
     "./cover": "./src/cover.ts",
     "./pointing": "./src/pointing.ts",
     "./compare": "./src/compare.ts",
-    "./diff": "./src/diff.ts"
+    "./diff": "./src/diff.ts",
+    "./settings": "./src/settings.ts"
   }
 }

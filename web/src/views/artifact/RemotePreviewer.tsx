@@ -1,18 +1,11 @@
 import { useCallback, useEffect, useRef, useState, type ComponentType } from "react";
 import { WarningCircleIcon } from "@phosphor-icons/react";
 import { api } from "@/lib/api";
-import { apiUrl } from "@/lib/config";
-import {
-  previewerFrameUrl,
-  readPreviewerMessage,
-  themeFromBackground,
-  wantsThumbnail,
-  type ConvertFileSrc,
-  type PreviewerDescriptor,
-} from "@/lib/previewerFrame";
+import { previewerFrameUrl, readPreviewerMessage, wantsThumbnail, type PreviewerDescriptor } from "@/lib/previewerFrame";
 import { PREVIEWER_PROTOCOL, stateKey, type HostMessage } from "../../../previewer-sdk/src/protocol.ts";
 import type { ArtifactViewerProps, ViewerToolbarItem } from "./registry";
 import { freshPreviewer, installedPreviewer } from "./remotePreviewers";
+import { frameEnv, frameTheme } from "./siteFrameEnv";
 import { errorText } from "@/lib/errors";
 
 // RemotePreviewer hosts an installed previewer component: a third-party
@@ -32,15 +25,6 @@ import { errorText } from "@/lib/errors";
 //     capability.
 
 type Desc = PreviewerDescriptor;
-
-function runtimeEnv(): { convertFileSrc?: ConvertFileSrc } {
-  const internals = window.__TAURI_INTERNALS__ as { convertFileSrc?: ConvertFileSrc } | undefined;
-  return { convertFileSrc: internals?.convertFileSrc };
-}
-
-function currentTheme(): "light" | "dark" {
-  return themeFromBackground(getComputedStyle(document.documentElement).getPropertyValue("--color-bg"));
-}
 
 const hosts = new Map<string, ComponentType<ArtifactViewerProps>>();
 
@@ -149,7 +133,7 @@ function PreviewerFrame({
       type: "preview.init",
       protocol: PREVIEWER_PROTOCOL,
       file: { name: info.name, mimeType: info.mimeType, sizeBytes: bytes.size, version: v },
-      theme: currentTheme(),
+      theme: frameTheme(),
       viewport: { w: box?.clientWidth ?? 0, h: box?.clientHeight ?? 0 },
     });
     const buffer = await bytes.arrayBuffer();
@@ -238,12 +222,7 @@ function PreviewerFrame({
     return () => observer.disconnect();
   }, [post]);
 
-  const src = previewerFrameUrl(desc, {
-    ...runtimeEnv(),
-    apiUrl,
-    baseURI: document.baseURI,
-    hostOrigin: window.location.origin,
-  });
+  const src = previewerFrameUrl(desc, frameEnv());
   return (
     <div ref={boxRef} className="relative h-full min-h-[360px] w-full overflow-hidden">
       <iframe

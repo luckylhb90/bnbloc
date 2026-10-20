@@ -6,13 +6,23 @@
 // SyntaxError or a proxy's HTML page into toasts.
 
 // ApiError is a failed request: the HTTP status and the server's own
-// message (lib/session.ts errorDetail reads it from the body).
+// message (lib/session.ts errorBody reads it from the body), and the
+// request field a refusal is about when the server names one (a component
+// setting's key).
 export class ApiError extends Error {
   readonly status: number;
-  constructor(status: number, message: string) {
+  readonly field: string;
+  constructor(status: number, message: string, field = "") {
     super(message);
     this.status = status;
+    this.field = field;
   }
+}
+
+// errorField is the request field a failure is about ("" when it names
+// none): a form shows the reason at that field.
+export function errorField(e: unknown): string {
+  return e instanceof ApiError ? e.field : "";
 }
 
 // statusText is how a status reads when there is nothing better to say: the

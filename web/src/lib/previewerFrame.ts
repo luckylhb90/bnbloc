@@ -130,24 +130,45 @@ export type { ConvertFileSrc };
  *  for a configured gateway base). Always carries `#host=<origin>`. */
 export function previewerFrameUrl(
   desc: Pick<PreviewerDescriptor, "name" | "version" | "entry" | "frameUrl">,
-  env: { convertFileSrc?: ConvertFileSrc; apiUrl: (path: string) => string; baseURI: string; hostOrigin: string },
+  env: FrameEnv,
 ): string {
+  return frameSrc({ schemePath: `${desc.name}/${desc.version}/${desc.entry}`, gatewayPath: desc.frameUrl + desc.entry }, env);
+}
+
+/** Where a frame host runs: the desktop shell (convertFileSrc), else a
+ *  browser on the gateway (apiUrl, the document's base). */
+export interface FrameEnv {
+  readonly convertFileSrc?: ConvertFileSrc;
+  readonly apiUrl: (path: string) => string;
+  readonly baseURI: string;
+  readonly hostOrigin: string;
+}
+
+/** The iframe src of a frame bundle's document (a previewer's, a settings
+ *  page's): its path on the desktop's bnbloc-previewer scheme, or its
+ *  ticketed gateway path in a browser; always with `#host=<origin>`. */
+export function frameSrc(at: { readonly schemePath: string; readonly gatewayPath: string }, env: FrameEnv): string {
   const base = env.convertFileSrc
-    ? schemeUrl(env.convertFileSrc, PREVIEWER_SCHEME, `${desc.name}/${desc.version}/${desc.entry}`)
-    : new URL(env.apiUrl(desc.frameUrl + desc.entry), env.baseURI).href;
+    ? schemeUrl(env.convertFileSrc, PREVIEWER_SCHEME, at.schemePath)
+    : new URL(env.apiUrl(at.gatewayPath), env.baseURI).href;
   return `${base}#host=${encodeURIComponent(env.hostOrigin)}`;
 }
 
-/** Validates one inbound message event against the frame it must come from:
- *  the opaque origin "null" (a sandboxed frame's only possible origin), the
- *  frame's own window, and a known, well-formed, in-limit message. */
+/** Whether an inbound message event comes from a sandboxed frame's window:
+ *  the opaque origin "null" (such a frame's only possible origin) and the
+ *  frame's own window. Every frame host (a previewer, a settings page)
+ *  takes messages only so. */
+export function fromFrame(ev: { origin: string; source: unknown }, frameWindow: unknown): boolean {
+  return ev.origin === "null" && !!frameWindow && ev.source === frameWindow;
+}
+
+/** Validates one inbound message event against the frame it must come from
+ *  (fromFrame) and as a known, well-formed, in-limit message. */
 export function readPreviewerMessage(
   ev: { origin: string; source: unknown; data: unknown },
   frameWindow: unknown,
 ): FrameMessage | null {
-  if (ev.origin !== "null") return null;
-  if (!frameWindow || ev.source !== frameWindow) return null;
-  return readFrameMessage(ev.data);
+  return fromFrame(ev, frameWindow) ? readFrameMessage(ev.data) : null;
 }
 
 /** Whether the host takes a thumbnail the previewer produced: only when it
