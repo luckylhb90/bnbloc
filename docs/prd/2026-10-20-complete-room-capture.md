@@ -1,8 +1,12 @@
 # A room's whole way of working, captured by AI (2026-10-20)
 
-Status: proposed. Owner: the room package capture
-(`services/gateway/room_components.go`, `component-draft`), the room
-package kind (`internal/contentpkg/room.go`), the room-saving assist.
+Status: slice 1 built (§6: the room-saving assist's "depends on" and
+instructions over the room's conversation; `INSTRUCTIONS.md`, apps made in
+the room and ticked files in the package; the tools its runs had as
+`requires.mcp`). Owner: the room package capture
+(`services/gateway/room_components.go` and `room_capture.go`,
+`component-draft`), the room package kind (`internal/contentpkg/room.go`
+and `room_carry.go`), the room-saving assist (`describe-room`).
 
 Saving a room as a component should carry how the room is actually used,
 not only its settings: what the conversation taught the agent, the apps
@@ -101,7 +105,143 @@ the member decides what goes into the package.
 ## 5. Build order
 
 1. The assist's "depends on" and instructions; `INSTRUCTIONS.md`, apps and
-   files in the package; tools as `requires.mcp`.
+   files in the package; tools as `requires.mcp`. **Built** (§6).
 2. Agent schedules picked at install; "Try as a newcomer".
 3. QA acceptance: one member sets a room up by talking and publishes it;
    another installs it and sends the same request.
+
+## 6. Slice 1 as built
+
+The reference is docs/architecture/content-components.md ("Room
+packages") and docs/architecture/ai-assist.md (`describe-room`, the
+`conversation` context). What the slice decided, against the code:
+
+- **The assist reads the room's conversation through a new context,
+  `conversation`** (`wire.AssistContextConversation`; a capability any
+  assist may declare, not a room-saving use case). The gateway reads it
+  as the member (`assistConversation`, `services/gateway/assist_conversation.go`):
+  the room's default channel and up to 11 more of the room service's
+  listing (which never lists the people chat), each channel's latest 80
+  rows through the one history read (`roomHistory`) and the one row
+  decoder (`roomlog.DecodeRow`), merged by room sequence, newest first.
+  `assist.NewConversation` (`internal/assist/conversation.go`) keeps the
+  newest within its budget: at most 80 lines, each cut to 1,500
+  characters, 20,000 characters together (about 6,000 tokens beside the
+  task's instructions and its 2,000-token reply), shown oldest first in a
+  fenced `<conversation>` block that says how many older messages it left
+  out. Its golden is `internal/assist/testdata/golden/room.txt`.
+- **`describe-room` 1.2.0** declares `conversation` (no longer `room`:
+  the setup it reads is `<text>`) and answers, beside the listing and the
+  findings, `instructions` (text) and `dependsOn` (items of `what`,
+  `kind` — `instructions`, `app`, `file`, `tool`, `schedule`, `agent`,
+  `data` or `other` — `included` `yes`/`no` and `why`). `included` is the
+  AI's word that the package should carry it; the dialog matches each one
+  to the tick box it names and shows the box's real state
+  (`web/src/lib/roomCapture.ts`). The findings cover the instructions too
+  (`package.instructions`). Its static text stays in the package
+  (`INSTRUCTIONS.md`, about 860 tokens: its own budget of 900 in
+  `assists_test.go`, since it runs once per save and does three jobs);
+  everything dynamic comes per call. `wire.MaxAssistText` is 16,000
+  characters (it was 8,000) so a package's every text and its
+  instructions fit the check.
+- **The run records did not keep tools.** A run's diagnostics held its
+  reply and usage only. The bridge now reports the MCP tool components
+  attached to the turn's session (`wire.RunDiagTools`,
+  `wire.AgentRunTools{mcp}`, after they are fitted to the target, on the
+  running, reflowing and final reports; `jobContent.withTools`), and the
+  run record shows them (`wire.AgentRun.Tools`). This is what the session
+  had, not which tool calls the agent made: no record of tool calls
+  exists, and the core's live activity is transient. The draft reads the
+  room's latest 100 runs through activity's room route as the editor (the
+  gateway's own run reads stay `read_records`'); a tool the editor may use
+  becomes a `wire.RoomDraftTool` with the permission a package declares
+  for it (`contentpkg.MCPPermission`, now the one rule `checkMCPReference`
+  uses too); one they may not use, or run records that cannot be read,
+  are said in `left`. Runs from before this bridge report no tools.
+- **The package carries** (`internal/contentpkg/room_carry.go`):
+  `INSTRUCTIONS.md` (an expert's bound, 64 KiB); `appSnapshots`
+  (`{title, dir}`, each a site under `apps/<name>` with `index.html` or
+  `dist/index.html`, no agent configuration); `files` (`{name, path,
+  sizeBytes}`, each under `files/<name>`, at most `wire.MaxRoomFiles`
+  = 20). The apps' sites and the files together stay within
+  `wire.MaxRoomCarryBytes` (64 MiB, one site snapshot's cap; a test holds
+  them equal), and works plus apps made here within `contentpkg.MaxRoomApps`
+  (10). `RoomLimits` grows to that bound; the room kind is now a
+  `Snapshot` kind (an app's scripts run only in the site frame, and a
+  listing never opens its bundle). A new version keeps the edited
+  version's apps and files the form names by folder and path
+  (`fromForm` now receives the base version).
+- **How instructions install (the decision).** A room's instructions
+  live in one place, its room expert: a room property would have needed a
+  new column, a route and a second way for instructions to reach agents
+  beside the expert's. So a package carries `INSTRUCTIONS.md` or names
+  `requires.expert`, never both (the validator refuses both; the dialog
+  asks the member to untick the expert or clear the instructions; the
+  agent's save leaves the expert out and says so). Install makes a
+  private expert of the installer's from them (`installInstructions`:
+  named after the new room, "<room> instructions"), turns it on in the
+  room and makes it the room's expert through `setRoomExpert`, the one
+  writer; the installer edits it in their Library like any expert. A
+  failed install deletes it with the room.
+- **Save.** A content save takes an `include` (`wire.RoomInclude`: the
+  room, the apps made in it and the room files, by artifact id). The
+  gateway reads each as the saver reads it through `currentDeliverable`
+  (the one site/file snapshot reader the works use) into the form's
+  `Captured` (`roomIncluded`, `services/gateway/room_capture.go`): only
+  the room's owner or admins, a job's grant only for its own room, the
+  counts and the 64 MiB bound checked before more is read. The bytes never
+  pass through the client.
+- **Install** (`installRoom`, one cleanup): after the packs, the
+  instructions' expert; the works' apps (`copyApp`); the apps made in the
+  source room, each its folder's site as `WorkSite` copies a work's
+  (`contentpkg.RoomSite`), through `copySite` (a fresh, empty data space;
+  no work, so no `app-copy` use); the files through `createRoomArtifact`
+  (extracted from `copySite`: the gateway's one creation of a deliverable
+  from bytes), typed by `store.ArtifactMIME` and
+  `store.ArtifactKindForFile`. `requires.mcp` tools the installer may
+  use but has not added are `toolsToAdd`; the install dialog offers Add
+  for each (`RoomToolsToAdd`: the member catalog's install, then the
+  tool's settings when it needs any). A failure once the room exists
+  deletes the room (its channels, schedules, apps and files), uncounts the
+  work copies and deletes the instructions' expert.
+- **Capture.** `component-draft` offers `madeApps` (every site made in the
+  room, an app or not, with its current version's size), `files` (the
+  room's other deliverables, at most 50 offered, the rest said) and
+  `tools`; "app made here: publish it as a work" is gone from `left`, and
+  "the data of its apps" is said there. The dialog
+  (`SaveRoomComponentDialog`, `RoomCaptureSections`) ticks the apps and
+  tools and leaves the files for the saver to tick, shows each size and
+  the total against the bound (refused past it before saving), the
+  instructions as an editable draft and "depends on" as a checklist.
+  "Fill with AI" fills the listing and the instructions and ticks what
+  `dependsOn` says the package should carry. Nothing is saved until Save.
+- **`save_component` kind `room`** takes `instructions` and `include:
+  {apps, files}` (artifact ids the agent and the person agreed on), and
+  requires the draft's tools; with instructions the room's expert is left
+  out and the result says so. The session prefix grew by about 30 tokens
+  (two parameter notes cut to pay part): the budget in
+  `services/bridge/prompt_test.go` is 3090.
+
+**Not in this slice.** Agent schedules picked at install and "Try as a
+newcomer" (slice 2). A capture of the room's own instructions when the
+room already has an expert merges nothing: the member chooses one. A room
+file's version history, an app's data and its share links never travel.
+
+**Design review (slice 1).**
+
+| Lens | Answer |
+|---|---|
+| Actors | The saver is the room's owner or an admin (draft, include); the installer owns the new room, its expert and its copies; the source room's members and agents are never named. |
+| Time and lifecycle | A version keeps its apps and files; the installer's expert outlives the room (their Library); runs before this bridge show no tools. |
+| Scale and cost | One assist call per Fill or Save check, its input bounded (20,000-character conversation, 16,000-character text); the draft reads one artifact page, one detail per offered deliverable and one run page; a package is at most 64 MiB beyond its text. |
+| Failure and recovery | A failed install deletes the room, its copies and the expert; unreadable run records leave the draft standing and say so. |
+| Boundaries and privacy | Conversation read as the saver, never the people chat; only ticked apps and files leave the room, read as the saver; the findings check the instructions; no app data travels. |
+| Abuse and untrusted input | Messages are fenced in their block; an include names only the saver's own room's deliverables; the validator refuses agent configuration in an app or as a file. |
+| One owner | `roomHistory` and `DecodeRow` for the conversation; `currentDeliverable` for snapshots; `copySite`/`createRoomArtifact` for deliverables; `setRoomExpert` for the expert; `MCPPermission` for a tool's permission; `WorkSite` for a site's files. |
+| Defaults and fallbacks | Apps and tools ticked, files not; without an assist model the dialog still saves; no instructions, no expert. |
+| External contracts | Additive wire fields; the room kind's new fields are refused by every other kind. |
+| Load on users and agents | One checklist and one draft to review; one more pair of `save_component` arguments (about 30 tokens). |
+| Release and compatibility | Pre-launch; no migration (the run diagnostics are JSON); an older bridge reports no tools. |
+| Observability | The install's audit row as before (it names the package and the room); the run records show the tools a session had. |
+| AI capability | The whole capture: dependencies, instructions, listing, findings; the member decides every tick. |
+| Component or platform | Platform capabilities only: a context, package parts and their install; no use case is named. |

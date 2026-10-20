@@ -1561,7 +1561,19 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `setRoomExpert` (the one writer of a room's expert) and `copyApp` (the
   one copy of an app, shared with "Use this app"), and deletes the room
   when a step fails once it exists. A `name@range` reference resolves for
-  a member only through `contentuse.Resolve`.
+  a member only through `contentuse.Resolve`. A package also carries the
+  room's `INSTRUCTIONS.md` (never beside `requires.expert`: install makes
+  them a private expert of the installer's, the room's expert), apps made
+  in the room (`appSnapshots`, sites under `apps/`) and ticked room files
+  (`files/`), within `wire.MaxRoomCarryBytes` together
+  (`contentpkg/room_carry.go`; docs/prd/2026-10-20-complete-room-capture.md).
+  A save takes them from the room only through its `include`, read as the
+  saver by `roomIncluded` over `currentDeliverable` (the client never
+  sends their bytes); install restores them through `copySite` and
+  `createRoomArtifact`, the gateway's one creation of a deliverable from
+  bytes. The tools a room's runs had come from the run records' `tools`
+  (`wire.RunDiagTools`, what the bridge attached to the session, never
+  the calls made), read through activity's room route.
 - **A room reads organization records only through its consent:
   `services/gateway/room_sources.go`** (docs/prd/2026-10-20-rooms-as-components.md
   §2.3, §7). An installed room package's asks (`room_source_grants`) wait
@@ -1592,7 +1604,7 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   Every gateway read of a room's history goes through it. Members of a
   covered room see which room reviews them (`GET /v1/rooms/{id}/sources`).
   A note to an organization's admins goes through `notifyOrgAdmins`
-  (room reports and source asks alike). A run's reply and usage summary
+  (room reports and source asks alike). A run's reply, usage and tools summary
   in its diagnostics is read only by `store.RunDiag`, a run page's cursor
   only by `store.AgentRunCursor`/`ParseAgentRunCursor`.
   `TestRoomSourceConsentSingleOwner` keeps grants, scopes, the gateway's

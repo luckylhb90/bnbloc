@@ -53,7 +53,8 @@ task declares and relays the reply. Nothing else calls a model.
   JSON the `fields` its reply holds (`{name, description, type, item}`:
   `type` is `text`, `list` — strings — or `items`, a list of objects whose
   text fields `item` names), the `context` it may receive (`room`,
-  `artifact`, `attachments`, `library`, `clock`, `capabilities`) and an
+  `artifact`, `attachments`, `library`, `clock`, `capabilities`,
+  `conversation`) and an
   optional `gate` (`{question, threshold}`: one line of at most 500
   characters, a probability above 0 and at most 1; below). Nothing
   else: no `requires`, no other files. An assist is no content use
@@ -69,15 +70,27 @@ task declares and relays the reply. Nothing else calls a model.
   request; `describe-work` (json: `displayName`, `description`,
   `category`, `tags`; artifact) drafts a work's gallery entry, its
   categories held to `wire.WorkCategories` by a test; `describe-room`
-  (json: `displayName`, `description`, `category`, `tags`, `welcome`,
-  and `findings` as `items` of `{field, quote, why}`; room) drafts a room
-  component's Library entry in the "Save as component" dialog from the
-  room and the setup being saved (the web sends it as `<text>`, with every
-  text the package would carry under `package`), its fields but
-  `findings` held to `contentpkg.Form`'s, and finds in that text what
-  should not leave the room (a secret, an internal link, a person's name,
-  private data: the kinds `web/src/lib/roomReview.ts` reads, held to the
-  item's description by a web test); the dialog runs it before a save.
+  (1.2.0; json: `displayName`, `description`, `category`, `tags`,
+  `welcome`, `instructions`, `dependsOn` as `items` of `{what, kind,
+  included, why}` and `findings` as `items` of `{field, quote, why}`;
+  conversation) reads a room being saved as a component
+  (docs/prd/2026-10-20-complete-room-capture.md): from the room's
+  conversation and the setup being saved (the web sends it as `<text>`:
+  the setup with the apps made in the room, its files with their sizes
+  and whether they are included and the tools its runs had, the current
+  values, and every text the package would carry under `package`, the
+  instructions included) it says what the room's way of working depends on
+  (`dependsOn`, kinds `instructions`, `app`, `file`, `tool`, `schedule`,
+  `agent`, `data`, `other`: the list `web/src/lib/roomCapture.ts` reads,
+  held to the item's description by a web test; `included` is `yes` when
+  the package should carry it), drafts the room's instructions from what
+  the conversation established and its Library entry, its fields but
+  `dependsOn` and `findings` held to `contentpkg.Form`'s, and finds in the
+  package's text what should not leave the room (a secret, an internal
+  link, a person's name, private data: the kinds `web/src/lib/roomReview.ts`
+  reads); the dialog runs it on "Fill with AI" and before a save. Its
+  instructions have their own budget (900 tokens: one call per save, three
+  jobs).
   `draft-expert`,
   `draft-skill-pack` and `draft-prompt-pack` (json; no context) fill the
   Library's form from a sentence (plus the form's current values the web
@@ -119,7 +132,7 @@ task declares and relays the reply. Nothing else calls a model.
 ## One run
 
 `POST /v1/assist/{task}` with `wire.AssistRequest`: the text (at most
-`wire.MaxAssistText` characters), and the ids of what it refers to —
+`wire.MaxAssistText` characters, 16,000), and the ids of what it refers to —
 `roomId`, `channelId` (the composer's channel), `expertId` (the expert
 picked for the message), `artifactId`, `attachmentIds` (at most
 `wire.MaxAssistAttachments`), `replySeq` (an agent reply in the
@@ -146,7 +159,15 @@ cost budget and the member's assist rate (20 a minute per replica share).
   `core/provider`), and with a room its agents (realtime's roster,
   `roomRoster`, by handle) and how many other people it has (the room
   service's members, agent hosts left out), plus `hasOwnAgent`; a list
-  past its bound says how many it left out. The room's recent messages
+  past its bound says how many it left out. The conversation
+  (`services/gateway/assist_conversation.go`, with a room): the room's
+  name and its latest messages across its channels as the member reads
+  them: the default channel and up to 11 more the room service lists
+  (never the people chat), each channel's latest 80 rows through
+  `roomHistory` and `roomlog.DecodeRow`, merged by room sequence; the
+  newest are kept within `assist.NewConversation`'s budget (80 lines,
+  each cut to 1,500 characters, 20,000 together) and shown oldest first,
+  saying how many older ones were left out. The room's recent messages
   are the channel's latest 10, oldest first; `replySeq` adds the turn:
   that reply's row and the request its payload's `sourceSeq` names
   (`assistTurn`, both through `roomlog.DecodeRow`; a sequence that is not
@@ -156,7 +177,7 @@ cost budget and the member's assist rate (20 a minute per replica share).
 - **The prompt** (`assist.Messages`): the instructions as the system
   message, then one user message introducing the blocks as data, with
   `<room>`, `<recent_messages>`, `<turn>`, `<artifact>`, `<attachments>`,
-  `<library>`, `<clock>`, `<capabilities>` and the member's `<text>`; the block tags inside untrusted text are neutralized,
+  `<library>`, `<clock>`, `<capabilities>`, `<conversation>` and the member's `<text>`; the block tags inside untrusted text are neutralized,
   so it cannot close its block or open another. Goldens pin the layout
   (`internal/assist/testdata/golden`).
 - **A text task** answers Server-Sent Events: `delta` `{text}` per piece,

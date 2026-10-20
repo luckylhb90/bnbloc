@@ -22,14 +22,16 @@ servers content requires, see "MCP tool components"):
 | Prompt pack | `bnbloc.prompt.package/v1` | `component.json` (its `prompts`), optional `README.md` (see "Prompt packs") |
 | Work | `bnbloc.work.package/v1` | `component.json` (`type`, `file`, `recipe`), a site folder (`index.html` at the root or `dist/index.html`) or one file at the root, optional cover (`cover.png`, `.webp`, `.jpg` or `.jpeg`), `README.md` and the recipe's `references/` (see "Works") |
 | Assist | `bnbloc.assist.package/v1` | `component.json` (`output`, `fields`, `context`), `INSTRUCTIONS.md` (the task's system prompt), optional `README.md` (see [AI assist](ai-assist.md)) |
-| Room | `bnbloc.room.package/v1` | `component.json` (`welcome`, `quickPrompts`, `channels`, `schedules`, `apps`, `sources`, `requires.expert`), optional `README.md` (see "Room packages") |
+| Room | `bnbloc.room.package/v1` | `component.json` (`welcome`, `quickPrompts`, `channels`, `schedules`, `apps`, `appSnapshots`, `files`, `sources`, `requires.expert`), optional `README.md` and `INSTRUCTIONS.md`, the apps made in the room under `apps/<name>/` and its files under `files/` (see "Room packages") |
 
 A package is a plain ustar bundle (`internal/tarbundle`, limit profile
 `tarbundle.ContentLimits`: 8 MiB, 512 files; a prompt pack's own profile,
 `contentpkg.PromptLimits`, is 1 MiB and 2 files; a work's,
 `contentpkg.WorkLimits`, a site snapshot's plus its references, cover and
 manifest; an assist's, `contentpkg.AssistLimits`, 64 KiB and 3 files; a room
-package's, `contentpkg.RoomLimits`, 1 MiB and 2 files). A bundle is
+package's, `contentpkg.RoomLimits`, what it carries (`wire.MaxRoomCarryBytes`,
+64 MiB, and a site snapshot's files plus `wire.MaxRoomFiles`) beside 1 MiB
+of text). A bundle is
 read within `contentpkg.BundleLimits()`, the widest registered profile,
 until its manifest names the kind (uploads, stored versions, imports). **One validator,
 `internal/contentpkg`**, backs every entry point (form saves, archive
@@ -241,8 +243,8 @@ owns. It replaced room templates (their table, routes and views are gone;
 `room_templates` stays in `schema.sql`, unused, for one release of version
 skew, and a later release drops it).
 
-- **Manifest** (`contentpkg/room.go`, nothing but `component.json` and an
-  optional `README.md`): `description` (the envelope's, within a room's
+- **Manifest** (`contentpkg/room.go`; `component.json`, an optional
+  `README.md`, and what it carries, below): `description` (the envelope's, within a room's
   bound: it becomes the room's description), `welcome` and `quickPrompts`
   (an expert's rules: text, or a ref to a prompt of a required pack),
   `channels` (names, never the default channel, unique regardless of
@@ -257,7 +259,25 @@ skew, and a later release drops it).
   recurs (no `once`), its text passes `schedule.CheckText` (realtime's own
   rule), its recurrence `schedule.Validate`, and its channel is one of the
   package's. No other kind carries these fields (`errRoomFields`). A room
-  package is no content use (`KindSpec.Use` false) and runs nothing.
+  package is no content use (`KindSpec.Use` false) and runs nothing; it
+  is a `Snapshot` kind (an app's scripts run only in the site frame, a
+  listing never opens its bundle).
+- **What a package carries beyond its setup**
+  (`contentpkg/room_carry.go`; docs/prd/2026-10-20-complete-room-capture.md):
+  `INSTRUCTIONS.md`, the room's instructions (an expert's bound; never
+  beside `requires.expert`: the instructions become the room's expert);
+  `appSnapshots` (`wire.RoomAppSnapshot`: `title`, `dir` =
+  `apps/<name>`, a site with `index.html` or `dist/index.html`, no agent
+  configuration), the apps made in the room; `files`
+  (`wire.RoomPackageFile`: `name`, `path` = `files/<name>`, `sizeBytes`,
+  at most `wire.MaxRoomFiles`), the room files the saver ticked. The
+  apps' sites and the files together stay within `wire.MaxRoomCarryBytes`
+  (one site snapshot's cap); works and apps made here together within
+  `contentpkg.MaxRoomApps`. Nothing else lies in the bundle. A form keeps
+  the edited version's apps and files it names by folder and path; a save
+  adds the room's through its `include` (below). `contentpkg.RoomSite` is
+  a carried app's site as `WorkSite` copies a work's, `RoomFile` a file's
+  bytes.
 - **Sources are asked for with a purpose; the organization admin grants
   them per room.** A package lists the records its scheduled tasks ask to
   read as `sources: [{name, purpose}]` (`wire.RoomSourceAsk`; the name from
@@ -320,16 +340,34 @@ skew, and a later release drops it).
   expert and the room's skill and prompt packs (each one the member can
   see, at the version in effect, as `name@^major`, `contentpkg.MajorRef`),
   and its apps that came from a work (the app's `app-copy` use names the
-  work). Everything else is said in `left` (members and agents, other
-  schedules, a notice's link, another member's private pack, an app made
-  in the room). The web's save dialog (`SaveRoomComponentDialog`, room
-  header, owner/admin) shows it all ticked; the member edits the text,
+  work); beside them what it can carry (`room_capture.go`): `madeApps`
+  (every site made in the room, with its current version's size),
+  `files` (its other deliverables, at most 50 offered) and `tools` (the
+  MCP tools its latest 100 runs had, from the run records' `tools`, read
+  through activity's room route as the editor, each with the permission
+  a package declares for it, `contentpkg.MCPPermission`). Everything
+  else is said in `left` (members and agents, other schedules, a notice's
+  link, another member's private pack, an app's data, a tool the editor
+  may not use, run records that could not be read). The web's save
+  dialog (`SaveRoomComponentDialog`, `RoomCaptureSections`, room header,
+  owner/admin) shows the setup, the apps made here and the tools ticked
+  and the files for the member to tick, with sizes and their total against
+  the bound; the member edits the text and the room's instructions,
   unticks parts, declares sources and saves through the content form
-  (`POST /v1/content-components`, or a new version of one of theirs): the
-  one validator and the one save decide. "Fill with AI" runs the built-in
-  `describe-room` assist (context `room`; `<text>` is the setup and the
-  current values) for the display name, description, category, tags and
-  welcome. The same assist checks the package's text before it leaves the
+  (`POST /v1/content-components`, or a new version of one of theirs) with
+  an `include` (`wire.RoomInclude`: the room and the ticked apps and files
+  by artifact id), which the gateway reads from the room as the saver
+  (`roomIncluded`, through `currentDeliverable`; the room's owner or
+  admins, a job's grant its own room only, within the bounds before more is
+  read): the one validator and the one save decide. "Fill with AI" runs
+  the built-in `describe-room` assist (context `conversation`; `<text>` is
+  the setup and the current values) for the display name, description,
+  category, tags, welcome and the room's instructions, and its
+  `dependsOn` (what the room's way of working relies on, carried or not
+  and why) becomes a checklist matched to the tick boxes
+  (`web/src/lib/roomCapture.ts`); Fill ticks what it says to carry. The
+  same assist checks the package's text, the instructions included,
+  before it leaves the
   room (on Save when the text changed since the last check;
   `web/src/lib/roomReview.ts`): its `findings` (a secret, an internal
   link, a person's name, private data, each by the text's key) are listed
@@ -345,11 +383,20 @@ skew, and a later release drops it).
   turned on (`putContentUse`; the expert made the room's by
   `setRoomExpert`, a team stays pinned only), and its apps copied in by
   `copyApp` (the copy "Use this app" makes: a fresh, empty data space,
-  counted as an `app-copy` use). A part the installer may not use, a tool
+  counted as an `app-copy` use). Its `INSTRUCTIONS.md` becomes a private
+  expert of the installer's ("<room> instructions", `installInstructions`)
+  turned on in the room and made its expert by `setRoomExpert`; its apps
+  made in the source room are copied by `copySite` (no work, no use
+  counted); its files are restored as the room's deliverables by
+  `createRoomArtifact` (the gateway's one creation of a deliverable from
+  bytes, `copySite`'s too). A `requires.mcp` tool the installer may use
+  but has not added is in `toolsToAdd` (the install dialog's Add, the
+  member catalog's install). A part the installer may not use, a tool
   they cannot reach and a schedule kind the deployment cannot run (503)
   are reported in `skipped`, never fatal. Anything else that fails once
-  the room exists deletes the room (and uncounts its app copies), so a
-  half-made room never lingers. The install counts as a use of the package
+  the room exists deletes the room (its deliverables with it), uncounts
+  its app copies and deletes the instructions' expert, so a half-made
+  room never lingers. The install counts as a use of the package
   (scope `room-install`, the room). The package's welcome and quick
   prompts become the new room's own (`POST /v1/rooms` carries them; a
   quick prompt naming a pack's prompt takes its text, resolved for the
