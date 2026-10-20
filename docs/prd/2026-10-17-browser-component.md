@@ -152,11 +152,11 @@ whether a page is a sign-in that waits for a person).
 
 | Tool | Does |
 |---|---|
-| `browser_open(url)` | The requester's browser for this room: the run's tab, opened on `url` (a later open in the same room navigates the same tab, and the run's sites grow by the new one's). Answers the page view. |
+| `browser_open(url, device?)` | The requester's browser for this room: the run's tab, opened on `url` (a later open in the same room navigates the same tab, and the run's sites grow by the new one's). `device` is `desktop` (default), `phone` or `tablet`: the tab shows pages as that device does (§2.8b); the run keeps its device until an open names another. Answers the page view. |
 | `browser_view(run, screenshot?)` | The page view: title, address, the page's text, and its controls, each with a stable number (the element's own id for as long as it exists), its role, label, value and state, off-screen ones marked. Fenced as the site's data. With `screenshot`, the picture too. |
 | `browser_find(run, what)` | The decision model ranks the page's controls for a description ("the Start button of Orion Training Course") and answers the likeliest few with their likelihood. Narrowing only: the agent decides. |
 | `browser_act(run, action, element?, text?, option?, key?, file?, confirmed?, then?)` | One action, then the page once it settled: `click`, `type` (replaces the field's text), `select` (a dropdown's option), `press` (Enter, Tab, Escape, arrows), `scroll` (`up` / `down`), `back`, `wait`, `upload`. An element off-screen is scrolled into view first. `then` lists more actions on the same page, done in order (choose an answer, then Submit); the call stops at the first that pauses or is refused, or once the page is another (a new address or a new tab), saying how many it did. `confirmed` covers every action of the call. On the page it started on, the call answers only what changed (new and gone text, new or changed controls, controls gone); a new page, or one that mostly changed, is answered whole. |
-| `browser_close(run?, procedure?, purpose?)` | Ends the run (or, without one, every run of the room the agent started for the person): its view leaves the room and its tab closes. With `procedure` (a name) and `purpose` (one sentence), the run's steps are first written as a skill pack draft (§5). |
+| `browser_close(run?, procedure?, purpose?, gif?)` | Ends the run (or, without one, every run of the room the agent started for the person): its view leaves the room and its tab closes. With `procedure` (a name) and `purpose` (one sentence), the run's steps are first written as a skill pack draft (§5). With `gif`, the run's pictures first become a GIF guide (§2.8b). |
 
 Guards stay inside `browser_act`, whatever the agent asks:
 
@@ -431,6 +431,32 @@ form to be filed, can check what was clicked without having watched.
 - **AI.** The replay's steps are plain data the room's agents read like
   any room file: "what did the run do on question 7" is answered from it,
   and it is the record a procedure is drawn from (§5).
+
+### 2.8b Device and GIF guides (added 2026-10-20)
+
+Why: a member wanted animated how-to GIFs of their company's real app for
+support agents; the agent could not see the app and invented screens.
+
+- **Device.** Emulated per CDP session (`Emulation.setDeviceMetricsOverride`,
+  `setTouchEmulationEnabled`, `setUserAgentOverride`): phone 390×844 at 3×,
+  tablet 820×1180 at 2×, with the user agent and client hints of Chrome on
+  Android (the engine that runs). Chrome keeps an emulation only while its
+  session is attached, and a session that emulated clears it for the page
+  when it leaves; so the device is the run's, applied on every attach, with
+  one emulating session at a time (a call or its keeper), and a
+  tab-presence check never attaches. An emulated tab is never fitted to its
+  window. Pictures stay one image pixel per CSS pixel, so a phone run's live
+  view and replay are phone-shaped. Input stays mouse events, which reach
+  click handlers under touch emulation. Not built: a new tab the page opens
+  is emulated after its first load (a reload could resubmit a form).
+- **GIF guide.** `browser-runs/<run>.gif`, a room file like the replay: the
+  run's pictured steps in order, 1.5 s each (the last 3 s), captioned with
+  the replay's step line, at most 480 px wide for phone runs and 800 for
+  others, at most 8 MB (shrink, then drop every other step, first and last
+  kept). Never a sign-in (§2.8a). The replay names the GIF; it cannot link
+  it (the runner frame allows no downloads).
+- **AI.** The agent writes the guide's text; the GIF carries the run's own
+  step lines. No new model client.
 
 ### 2.9 Untrusted pages
 
