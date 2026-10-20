@@ -126,7 +126,7 @@ the origin named in `#host=`.
 | host → page | `settings.init {protocol: 1, theme, scope}` | the answer to ready: `light`/`dark`, the scope the page edits |
 | page → host | `settings.get {id}` | `id` a non-negative integer the answer carries |
 | host → page | `settings.view {id, view}` | the answer to get, and to a save done |
-| page → host | `settings.set {id, values, clear?}` | values by key (`""` clears; a secret left out keeps the stored one); clear names stored values to remove |
+| page → host | `settings.set {id, values, clear?}` | values by key (`""` or `[]` clears; a secret left out keeps the stored one; a `lines` setting's a list of strings); clear names stored values to remove |
 | host → page | `settings.refused {id, reason, key?}` | a save (or read) refused: the platform's reason (≤ 500 characters) and the setting it names |
 | page → host | `settings.check {id}` | the component's own check (PRD §2.5) |
 | host → page | `settings.checked {id, supported}` | `supported: false` until checks are built |
@@ -139,7 +139,8 @@ A view:
   "scope": "org",
   "fields": [
     {"key": "apiKey", "label": "API key", "type": "secret", "required": true, "set": true},
-    {"key": "pageSize", "label": "Page size", "type": "number", "required": false, "set": true, "value": "50"}
+    {"key": "pageSize", "label": "Page size", "type": "number", "required": false, "set": true, "value": "50"},
+    {"key": "folders", "label": "Folders", "type": "lines", "required": false, "set": true, "value": ["~/notes", "~/drafts"]}
   ],
   "readOnly": [{"key": "apiBase", "label": "API base URL", "type": "url", "scope": "platform", "set": false}],
   "missing": ["apiBase"]
@@ -151,7 +152,14 @@ A view:
 of, only as set or not (a member's view: every other scope's; an admin's:
 those still missing); `missing` the required settings not set. `type` and
 `scope` are the platform's words, and a reader keeps a word it does not
-know: a page shows an unknown type as text.
+know: a page shows an unknown type as text. A `lines` setting's value and
+default are lists of strings both ways, as the component reads them from
+its settings file; the host stores a list as its lines (`storedValues`:
+each trimmed, the empty ones dropped, joined by "\n", the one form's rule),
+and refuses a list for a setting of any other type. The protocol bounds a
+list to 256 strings; the platform's own bounds are the declaration's
+(`wire.MaxComponentSettingLines`, `MaxComponentSettingLineBytes`), answered
+as a refusal.
 
 What the host enforces (`settingsPageHost`):
 

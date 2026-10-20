@@ -71,7 +71,11 @@ type ComponentSettingsPage struct {
 
 // The types of a setting (ComponentSetting.Type). A secret is write-only:
 // never shown back, only "set". A path is a path on the member's own
-// machine (member scope only).
+// machine (member scope only). Lines is a list of text lines (folders,
+// name patterns, names): stored and sent between the platform's pieces as
+// its lines joined by "\n" (so is a deliver.env value), and handed to the
+// component as a JSON array of strings in its settings file and on its
+// settings page.
 //
 //wire:union ComponentSettingType
 const (
@@ -82,6 +86,7 @@ const (
 	SettingBoolean = "boolean"
 	SettingChoice  = "choice"
 	SettingPath    = "path"
+	SettingLines   = "lines"
 )
 
 // Who sets a setting, and for whom it holds (ComponentSetting.Scope): the

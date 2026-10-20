@@ -2,10 +2,13 @@ import { useEffect, useState, type ReactNode } from "react";
 import {
   initialValues,
   isSecret,
+  linesProblem,
   missingRequired,
   needsSetupText,
+  parseLines,
   scopeText,
   settingInput,
+  settingsProblems,
   settingsUpdate,
   shownValue,
   type ComponentSetting,
@@ -14,11 +17,12 @@ import {
 } from "@/lib/componentSettings";
 import { Button } from "@/ui/Button";
 import { Card } from "@/ui/Card";
-import { Field, Input } from "@/ui/Input";
+import { Field, Input, Textarea } from "@/ui/Input";
 import { Switch } from "@/ui/Segment";
 import { Select } from "@/ui/Select";
 import { useToast } from "@/ui/Toast";
 import { errorText } from "@/lib/errors";
+import { FillFromNote } from "@/views/settings/FillFromNote";
 
 // SettingsForm is the one form for a component's settings
 // (docs/prd/2026-10-19-component-settings.md), wherever their scope is set:
@@ -27,8 +31,10 @@ import { errorText } from "@/lib/errors";
 // `fields` are the settings this form edits; `others` are settings of other
 // scopes, shown read-only as set or not (never a value). A secret is
 // write-only: left empty it keeps the stored one, and a stored optional
-// secret can be removed on save. The server (or the desktop shell) checks
-// every value against the declaration; its refusal is shown as is.
+// secret can be removed on save. A list (lines) is a textarea, one per
+// line. "Fill from a note" (FillFromNote) puts what an assist read from a
+// pasted note into the form for the person to check before saving. The server (or the desktop shell) checks every value against the
+// declaration; its refusal is shown as is.
 export function SettingsForm({
   title,
   version,
@@ -80,6 +86,11 @@ export function SettingsForm({
       toast.error(`Fill in ${missingNow.join(", ")}`);
       return;
     }
+    const problems = settingsProblems(fields, values);
+    if (problems.length > 0) {
+      toast.error(problems.join("; "));
+      return;
+    }
     setBusy(true);
     try {
       await onSave(settingsUpdate(fields, values, clear));
@@ -109,6 +120,15 @@ export function SettingsForm({
       )}
       {fields.length > 0 && asks && (
         <p className="text-xs text-[var(--color-fg-subtle)]">The component reads these values from the gateway itself: a change reaches it the next time it asks, without a reinstall.</p>
+      )}
+      {fields.length > 0 && onSave && (
+        <FillFromNote
+          fields={fields}
+          onApply={(filled) => {
+            setValues((cur) => ({ ...cur, ...filled }));
+            setClear((cur) => cur.filter((k) => !(k in filled)));
+          }}
+        />
       )}
       {fields.length > 0 && (
         <div className="flex flex-col gap-3">
@@ -166,6 +186,21 @@ function SettingInput({
     return (
       <Field label={label} hint={hint}>
         <Switch checked={shownValue(f, value) === "true"} onChange={(on) => onChange(on ? "true" : "false")} ariaLabel={f.label} />
+      </Field>
+    );
+  }
+  if (input.control === "lines") {
+    const lines = parseLines(value);
+    return (
+      <Field label={label} hint={hint ? `One per line. ${hint}` : "One per line."} error={linesProblem(lines) || undefined}>
+        <Textarea
+          rows={Math.min(10, Math.max(3, lines.length + 1))}
+          spellCheck={false}
+          className="font-mono text-xs"
+          value={value}
+          placeholder={f.default ?? ""}
+          onChange={(e) => onChange(e.target.value)}
+        />
       </Field>
     );
   }

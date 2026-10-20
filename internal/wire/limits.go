@@ -113,4 +113,10 @@ const (
 	// MaxComponentSettingValueBytes bounds one value (a key, a URL, a
 	// path: never a document).
 	MaxComponentSettingValueBytes = 4 << 10
+	// MaxComponentSettingLines and MaxComponentSettingLineBytes bound a
+	// lines value (a list of folders, patterns or names): at most this
+	// many lines, each trimmed, non-empty and at most this long. A lines
+	// value is held to these instead of MaxComponentSettingValueBytes.
+	MaxComponentSettingLines     = 64
+	MaxComponentSettingLineBytes = 512
 )

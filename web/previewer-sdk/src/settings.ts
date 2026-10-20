@@ -14,7 +14,7 @@
 
 import type { PreviewerEnv, Unsubscribe } from "./index.ts";
 import { hostOriginFromHash, type Theme } from "./protocol.ts";
-import { readHostAnswer, readUpdate, type HostAnswer, type SettingsPageUpdate, type SettingsPageView } from "./settingsProtocol.ts";
+import { readHostAnswer, readUpdate, type HostAnswer, type SettingValue, type SettingsPageUpdate, type SettingsPageView } from "./settingsProtocol.ts";
 
 export * from "./settingsProtocol.ts";
 
@@ -49,9 +49,9 @@ export interface SettingsPageClient {
   onInit(cb: (init: SettingsPageInit) => void): Unsubscribe;
   /** The scope's settings as they are stored (a secret only as set). */
   get(): Promise<SettingsPageView>;
-  /** Saves values (and clears keys); answers the view as stored, or rejects
-   *  with SettingsRefused. */
-  set(values: Readonly<Record<string, string>>, clear?: readonly string[]): Promise<SettingsPageView>;
+  /** Saves values (and clears keys; a lines setting's value is a list);
+   *  answers the view as stored, or rejects with SettingsRefused. */
+  set(values: Readonly<Record<string, SettingValue>>, clear?: readonly string[]): Promise<SettingsPageView>;
   check(): Promise<SettingsCheck>;
   /** Asks the host to close the page. */
   close(): void;
@@ -124,7 +124,7 @@ export function createSettingsPageClient(env: PreviewerEnv): SettingsPageClient 
     get: async () => expect(await request({ type: "settings.get" }), "settings.view").view,
     async set(values, clear = []) {
       const update: SettingsPageUpdate | null = readUpdate(values, clear);
-      if (!update) throw new Error("setSettings: values must be strings by key (see the settings page protocol)");
+      if (!update) throw new Error("setSettings: values must be strings (lists of strings for a lines setting) by key (see the settings page protocol)");
       return expect(await request({ type: "settings.set", ...update }), "settings.view").view;
     },
     async check() {
@@ -157,7 +157,7 @@ function client(): SettingsPageClient {
 
 export const onSettingsInit = (cb: (init: SettingsPageInit) => void): Unsubscribe => client().onInit(cb);
 export const getSettings = (): Promise<SettingsPageView> => client().get();
-export const setSettings = (values: Readonly<Record<string, string>>, clear?: readonly string[]): Promise<SettingsPageView> =>
+export const setSettings = (values: Readonly<Record<string, SettingValue>>, clear?: readonly string[]): Promise<SettingsPageView> =>
   client().set(values, clear);
 export const checkSettings = (): Promise<SettingsCheck> => client().check();
 export const closeSettings = (): void => client().close();

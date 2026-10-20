@@ -222,3 +222,31 @@ func TestDraftScheduleTask(t *testing.T) {
 		}
 	}
 }
+
+// fill-settings maps a note onto a declaration: a value per listed key,
+// every setting type explained, a secret only into a secret.
+func TestFillSettingsTask(t *testing.T) {
+	m := assistTask(t, "fill-settings")
+	if len(m.Fields) != 2 || m.Fields[0].Name != "values" || m.Fields[0].Type != wire.AssistFieldItems || m.Fields[1].Name != "notes" {
+		t.Fatalf("fill-settings fields = %+v", m.Fields)
+	}
+	var item []string
+	for _, f := range m.Fields[0].Item {
+		item = append(item, f.Name)
+	}
+	if !slices.Equal(item, []string{"key", "value"}) {
+		t.Fatalf("a value is %v", item)
+	}
+	p, _ := Get(IDPrefix + "fill-settings")
+	flat := strings.Join(strings.Fields(p.Validated.Instructions), " ")
+	for _, typ := range []string{wire.SettingText, wire.SettingSecret, wire.SettingURL, wire.SettingNumber, wire.SettingBoolean, wire.SettingChoice, wire.SettingPath, wire.SettingLines} {
+		if !strings.Contains(flat, "`"+typ+"`") {
+			t.Errorf("fill-settings does not explain the type %q", typ)
+		}
+	}
+	for _, want := range []string{"never invent", "only into a setting of type `secret`", "only the keys listed"} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("fill-settings does not say %q", want)
+		}
+	}
+}

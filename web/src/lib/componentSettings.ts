@@ -7,6 +7,7 @@
 // Components. The gateway (core/pkgmeta) and the desktop shell decide what a
 // value may be; these helpers only shape the form. Pure; the calls are in
 // componentSettingsApi.ts and lib/desktop.ts.
+import { MaxComponentSettingLineBytes, MaxComponentSettingLines } from "./wire.gen.ts";
 import type { ComponentSetting, ComponentSettingField, ComponentSettingScope, ComponentSettingType, ComponentSettingsUpdate } from "./wire.gen.ts";
 
 export type { ComponentSetting, ComponentSettingField, ComponentSettingScope, ComponentSettingsPage, ComponentSettingsUpdate, ComponentSettingsView } from "./wire.gen.ts";
@@ -49,7 +50,8 @@ export interface McpSignIn {
 export type SettingInput =
   | { readonly control: "input"; readonly type: "text" | "password" | "url" | "number" }
   | { readonly control: "switch" }
-  | { readonly control: "select" };
+  | { readonly control: "select" }
+  | { readonly control: "lines" };
 
 const inputs: Record<ComponentSettingType, SettingInput> = {
   text: { control: "input", type: "text" },
@@ -59,6 +61,7 @@ const inputs: Record<ComponentSettingType, SettingInput> = {
   number: { control: "input", type: "number" },
   boolean: { control: "switch" },
   choice: { control: "select" },
+  lines: { control: "lines" },
 };
 
 // settingInput is the control a setting renders as.
@@ -98,9 +101,63 @@ export function shownValue(f: Pick<ComponentSetting, "default">, value: string |
   return (value ?? "").trim() || (f.default ?? "");
 }
 
+// ---- A lines setting (a list: folders, name patterns, names) ----
+//
+// The form edits one per line in a textarea; the value is stored and sent
+// as its lines joined by "\n" (core/pkgmeta holds it to the wire bounds,
+// line by line), and a component reads it as a list.
+
+const utf8 = new TextEncoder();
+
+// parseLines is a textarea's text as a lines value's lines: each trimmed,
+// the empty ones dropped (a line break of any platform).
+export function parseLines(text: string): string[] {
+  return text
+    .split(/\r\n|\r|\n/)
+    .map((l) => l.trim())
+    .filter((l) => l !== "");
+}
+
+// linesValue is the stored form of a list: its lines (as parseLines reads
+// them) joined by "\n".
+export function linesValue(lines: readonly string[]): string {
+  return parseLines(lines.join("\n")).join("\n");
+}
+
+// linesProblem says why lines cannot be saved ("" when they can): more
+// lines, or a longer line, than the platform keeps (wire bounds).
+export function linesProblem(lines: readonly string[]): string {
+  if (lines.length > MaxComponentSettingLines) return `at most ${MaxComponentSettingLines} lines (this has ${lines.length})`;
+  const long = lines.findIndex((l) => utf8.encode(l).length > MaxComponentSettingLineBytes);
+  return long < 0 ? "" : `line ${long + 1} is longer than ${MaxComponentSettingLineBytes} bytes`;
+}
+
+// isLines: a list setting (one per line).
+export function isLines(s: Pick<ComponentSetting, "type">): boolean {
+  return s.type === "lines";
+}
+
+// formValue is a field's value as the form sends it: a list as its lines,
+// anything else trimmed.
+function formValue(f: Pick<ComponentSetting, "type">, v: string | undefined): string {
+  return isLines(f) ? parseLines(v ?? "").join("\n") : (v ?? "").trim();
+}
+
+// settingsProblems lists why the form's values cannot be saved yet, by the
+// field's label (the lines bounds; the platform checks the rest).
+export function settingsProblems(fields: readonly ComponentSettingField[], values: Readonly<Record<string, string>>): string[] {
+  const out: string[] = [];
+  for (const f of fields) {
+    const why = isLines(f) ? linesProblem(parseLines(values[f.key] ?? "")) : "";
+    if (why) out.push(`${f.label}: ${why}`);
+  }
+  return out;
+}
+
 // settingsUpdate builds the update a form sends for its fields: a secret
 // left empty is not sent (the stored one stays), any other field is sent
-// trimmed ("" clears it); `clear` names the stored secrets to remove.
+// trimmed, a list as its lines ("" clears it); `clear` names the stored
+// secrets to remove.
 export function settingsUpdate(
   fields: readonly ComponentSettingField[],
   values: Readonly<Record<string, string>>,
@@ -109,7 +166,7 @@ export function settingsUpdate(
   const out: Record<string, string> = {};
   for (const f of fields) {
     if (clear.includes(f.key)) continue;
-    const v = (values[f.key] ?? "").trim();
+    const v = formValue(f, values[f.key]);
     if (isSecret(f) && v === "") continue;
     out[f.key] = v;
   }
@@ -120,7 +177,7 @@ export function settingsUpdate(
 // empty (a stored secret or a default counts as filled).
 export function missingRequired(fields: readonly ComponentSettingField[], values: Readonly<Record<string, string>>): string[] {
   return fields
-    .filter((f) => f.required && !(values[f.key] ?? "").trim() && !(isSecret(f) && f.set) && !f.default)
+    .filter((f) => f.required && !formValue(f, values[f.key]) && !(isSecret(f) && f.set) && !f.default)
     .map((f) => f.label);
 }
 

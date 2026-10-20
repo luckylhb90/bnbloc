@@ -3,7 +3,9 @@
 Status: slice 1 built (2026-10-20, §5); slice 2's own settings page built
 (2026-10-20, §2.2a, §5); slice 3
 built (2026-10-20, §2.3, §5: endpoint components ask, in a staged
-migration); slices 4–5 proposed. Owner: the component contract
+migration); the `lines` type, local skills' own settings and "Fill from a
+note" built (2026-10-20, docs/prd/2026-10-20-lines-settings-and-local-skills-ai.md);
+slices 4–5 proposed. Owner: the component contract
 (`core/pkgmeta`), the settings store (`internal/componentsettings`), the
 one settings form.
 
@@ -48,7 +50,7 @@ outside QA too. Each is a migration of a slice (§5):
 |---|---|---|---|
 | browser | MCP tool | Chrome binary, profile and state directories, endpoint, model, call budget: env and flags nobody can set | 1 |
 | a chat bot plugin | plugin | app id, app key, bot id (`localSettings`); its API and websocket URLs baked into `sidecar.args` at publish | 1 |
-| local skills | plugin | extra skill folders, excludes and secret rules: a policy file only (its data directory and mounts are the platform's plumbing; its panel is the skills-provider capability's, not a settings page) | local skills' own slice |
+| local skills | plugin | extra skill folders, excludes and secret rules: a policy file only (its data directory and mounts are the platform's plumbing; its panel is the skills-provider capability's, not a settings page) | local skills' own slice (built 2026-10-20: five declared settings, four of them `lines`) |
 | acp | core | a config file: the agent list (command, args, env, models, permissions, profile) | 2, 5 |
 | a SAML auth provider | auth provider | IdP metadata URL, SP entity, ACS and login URLs, attribute mapping, SP certificate and key, allowed redirects: deployment env | 3 |
 | a chat notifier | notifier | API URL, app id and key, bot id, tenants, recipient map, signing secret: deployment env | 3 |
@@ -85,7 +87,14 @@ fields:
 - `key`: `[a-z][a-zA-Z0-9]{0,39}`, unique in the component.
 - `type`: `text`, `secret`, `url`, `number`, `boolean`, `choice` (with
   `options`), `path` (member scope only: a path on the member's own
-  machine). A `secret` is write-only: never shown back, only "set".
+  machine), `lines` (a list of text lines: folders, name patterns, names;
+  at most `wire.MaxComponentSettingLines` lines of at most
+  `wire.MaxComponentSettingLineBytes` bytes, each trimmed and non-empty,
+  instead of one value's 4 KiB). A `secret` is write-only: never shown
+  back, only "set". A `lines` value is stored, sent between the platform's
+  pieces and delivered as an env var as its lines joined by "\n"; the
+  settings file and a settings page carry it as a JSON array of strings;
+  the one form edits it as a textarea, one per line (added 2026-10-20).
 - `scope`: who sets it, and for whom it holds:
   - `platform`: the super admin, for the whole deployment;
   - `org`: an organization admin, for their organization;
@@ -220,7 +229,16 @@ organization or a member (decided 2026-10-20):
   setup note a vendor sent (an email, a README section), and the assist
   maps it onto the declared fields (a JSON assist whose output schema is
   the declaration, secrets included only into the form, never stored by
-  the assist or logged). The admin checks and saves.
+  the assist or logged). The admin checks and saves. **Built 2026-10-20**
+  as "Fill from a note" on the one form (every scope, the member's too):
+  the `fill-settings` assist answers `values` (`key`, `value` items) and
+  `notes`; the web sends the form's fields (key, type, label, help,
+  options) and the note as the text, keeps only the form's own keys and a
+  value the field can hold (a list within the bounds, a switch, one of a
+  choice's options), shows a secret's value never (only that the note gave
+  one), and the person ticks what goes into the form; Save checks it like a
+  typed value. A component's own settings page has no such entry (its page
+  is its own).
 - **Check.** A component may declare `check` (a process run with
   `--check-settings`, or `POST /check` for an endpoint), which answers ok
   or a reason; the form offers "Check" and, on a failure, the assist
@@ -403,7 +421,9 @@ organization or a member (decided 2026-10-20):
    - *Not a migration.* Local skills' panel is the skills-provider
      capability's own view (pick folders natively, pack, publish), not a
      settings form, so it stays; its policy overrides become declared
-     settings in its own change.
+     settings in its own change (done 2026-10-20: its policy file is gone,
+     its five settings are set from its card like any component's, and the
+     panel opens from the same card).
    - *Not built.* `check()` (§2.5, slice 5); the platform console's package form for an
      MCP tool takes no page (the CLI does); a member's own values of a
      component that does not run on their device (§2.2, still slice 1's

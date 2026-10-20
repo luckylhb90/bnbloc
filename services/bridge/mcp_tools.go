@@ -132,7 +132,7 @@ func (b *Bridge) resolveMCP(tools []wire.ContentMCPTool, refs []wire.ContentRef,
 				server.Env = append(server.Env, corepkg.NameValue{Name: nv.Name, Value: nv.Value})
 			}
 			if len(t.Settings) > 0 {
-				file, err := b.writeSettingsFile(t.Name, tenantID, own, values)
+				file, err := b.writeSettingsFile(t.Name, tenantID, own, pkgmeta.SettingsFile(t.Settings, values))
 				if err != nil {
 					slog.Warn("bnbloc bridge MCP settings file not written",
 						"event", "bnbloc.bridge.mcp_settings_file_failed", "tool", t.Name, "error", err)
@@ -272,11 +272,12 @@ func (b *Bridge) settingsFilesDir() (string, error) {
 }
 
 // writeSettingsFile writes a stdio tool's settings file (every effective
-// value, secrets included; owner-only) and returns its path. A tool's file
+// value, secrets included, as pkgmeta.SettingsFile shapes it; owner-only)
+// and returns its path. A tool's file
 // is one per organization and per drive kind (the member's own values, or
 // none for a lent drive), rewritten whenever a session is set up, so a
 // running server reads the current values at its next start.
-func (b *Bridge) writeSettingsFile(name, tenantID string, own bool, values map[string]string) (string, error) {
+func (b *Bridge) writeSettingsFile(name, tenantID string, own bool, values map[string]any) (string, error) {
 	dir, err := b.settingsFilesDir()
 	if err != nil {
 		return "", err
@@ -287,9 +288,6 @@ func (b *Bridge) writeSettingsFile(name, tenantID string, own bool, values map[s
 	}
 	sum := sha256.Sum256([]byte(variant + ":" + tenantID))
 	path := filepath.Join(dir, name+"-"+hex.EncodeToString(sum[:6])+".json")
-	if values == nil {
-		values = map[string]string{}
-	}
 	return path, writeFileAtomic(path, values)
 }
 

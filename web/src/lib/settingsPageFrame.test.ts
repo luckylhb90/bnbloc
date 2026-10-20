@@ -1,4 +1,4 @@
-import { memberPageView, readSettingsPageMessage, scopePageView, settingsPageHost, settingsPageInit, settingsPageSrc, type SettingsPageScope } from "./settingsPageFrame.ts";
+import { memberPageView, readSettingsPageMessage, scopePageView, settingsPageHost, settingsPageInit, settingsPageSrc, storedValues, type SettingsPageScope } from "./settingsPageFrame.ts";
 import { ApiError } from "./errors.ts";
 import type { ComponentSettingsUpdate, ComponentSettingsView, DesktopComponentSettings } from "./componentSettings.ts";
 import type { HostAnswer, PageMessage } from "../../previewer-sdk/src/settingsProtocol.ts";
@@ -118,6 +118,24 @@ await test("a save names only keys of the scope, and a refusal comes back at its
   eq(saves.at(-1), { values: { pageSize: "10", apiKey: "" }, clear: ["apiKey"] }, "the update as sent");
   eq(await host.answer({ type: "settings.check", id: 8 }), { type: "settings.checked", id: 8, supported: false }, "no check yet");
   eq(await host.answer({ type: "settings.close" }), null, "close is the frame's");
+});
+
+// A lines setting is a list on the page and its lines joined by "\n" in
+// the store: the form's rule (trimmed, none empty) either way.
+await test("a list goes to the page as its lines and back as the stored value", async () => {
+  const item: DesktopComponentSettings = {
+    kind: "plugin", name: "skills", version: "1.0.0", state: "running", message: "", auth: "", missing: [],
+    fields: [{ key: "dirs", label: "Folders", type: "lines", scope: "member", set: true, value: "~/a\n~/b", default: "~/c" }],
+  };
+  eq(memberPageView(item).fields[0], { key: "dirs", label: "Folders", type: "lines", required: false, set: true, default: ["~/c"], value: ["~/a", "~/b"] }, "a list read");
+  const fields = memberPageView(item).fields;
+  eq(storedValues(fields, { dirs: [" ~/a ", "", "~/d"] }), { values: { dirs: "~/a\n~/d" } }, "a list stored");
+  eq(storedValues(fields, { dirs: "~/a\n\n~/e" }), { values: { dirs: "~/a\n~/e" } }, "a string taken as lines");
+  eq(storedValues([{ key: "note", type: "text" }], { note: ["x"] }), { notList: "note" }, "a list for a string");
+  const saves: ComponentSettingsUpdate[] = [];
+  const host = settingsPageHost({ load: async () => memberPageView(item), save: async (u) => (saves.push(u), memberPageView(item)) });
+  await host.answer({ type: "settings.set", id: 1, values: { dirs: ["~/x", "~/y"] } });
+  eq(saves, [{ values: { dirs: "~/x\n~/y" } }], "the update as sent");
 });
 
 // The example page (core/pkgmeta/testdata/settings-page/page.js), run in a

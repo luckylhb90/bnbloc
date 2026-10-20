@@ -21,7 +21,9 @@
 // the host: it never reads a secret's value (a secret is only set or not),
 // never names a setting the declaration lacks or another scope's, and never
 // reaches another component's values. The platform checks every value it
-// saves against the declaration, as it checks the one form's.
+// saves against the declaration, as it checks the one form's. A `lines`
+// setting's value (and default) is a list of strings both ways, as the
+// component reads it from its settings file; every other value a string.
 
 import type { Theme } from "./protocol.ts";
 
@@ -32,7 +34,11 @@ export const SETTINGS_PAGE_PROTOCOL = 1;
  *  platform's rule (the declaration), answered as a refusal. */
 export const SETTINGS_KEYS_LIMIT = 64;
 export const SETTING_VALUE_LIMIT = 16 * 1024;
+export const SETTING_LINES_LIMIT = 256;
 export const REASON_LIMIT = 500;
+
+/** A setting's value: a list for a `lines` setting, else a string. */
+export type SettingValue = string | readonly string[];
 
 /** One setting of the scope the page edits, as the page may know it: a
  *  secret's value never (`set` says whether one is stored). `type` and the
@@ -44,10 +50,10 @@ export interface SettingsPageField {
   readonly type: string;
   readonly help?: string;
   readonly required: boolean;
-  readonly default?: string;
+  readonly default?: SettingValue;
   readonly options?: readonly string[];
   readonly set: boolean;
-  readonly value?: string;
+  readonly value?: SettingValue;
 }
 
 /** A setting another scope sets (the platform's, the organization's), shown
@@ -69,10 +75,10 @@ export interface SettingsPageView {
   readonly missing: readonly string[];
 }
 
-/** A save: values by key ("" clears one; a secret left out keeps the stored
- *  one), clear names stored values to remove. */
+/** A save: values by key ("" or [] clears one; a secret left out keeps the
+ *  stored one), clear names stored values to remove. */
 export interface SettingsPageUpdate {
-  readonly values: Readonly<Record<string, string>>;
+  readonly values: Readonly<Record<string, SettingValue>>;
   readonly clear?: readonly string[];
 }
 
@@ -108,15 +114,20 @@ function keyList(value: unknown): readonly string[] | null {
   return Array.isArray(value) && value.length <= SETTINGS_KEYS_LIMIT && value.every(text) ? value : null;
 }
 
-/** Reads a save's values and clear list: string values by key, within the
- *  message bounds; null when malformed. */
+/** A value: a string, or a list of strings (a lines setting's). */
+function settingValue(value: unknown): value is SettingValue {
+  return text(value) || (Array.isArray(value) && value.length <= SETTING_LINES_LIMIT && value.every(text));
+}
+
+/** Reads a save's values and clear list: values by key (strings or lists
+ *  of strings), within the message bounds; null when malformed. */
 export function readUpdate(values: unknown, clear: unknown): SettingsPageUpdate | null {
   if (!isRecord(values)) return null;
   const entries = Object.entries(values);
   const keys = keyList(clear);
-  if (entries.length > SETTINGS_KEYS_LIMIT || !keys || !entries.every(([k, v]) => text(k) && text(v))) return null;
-  const out: Record<string, string> = {};
-  for (const [k, v] of entries) out[k] = v as string;
+  if (entries.length > SETTINGS_KEYS_LIMIT || !keys || !entries.every(([k, v]) => text(k) && settingValue(v))) return null;
+  const out: Record<string, SettingValue> = {};
+  for (const [k, v] of entries) out[k] = Array.isArray(v) ? [...(v as string[])] : (v as string);
   return keys.length > 0 ? { values: out, clear: keys } : { values: out };
 }
 
@@ -148,7 +159,7 @@ function readField(value: unknown): SettingsPageField | null {
   if (!isRecord(value)) return null;
   const { key, label, type, help, required, set, value: v, options } = value;
   if (!text(key) || !text(label) || !text(type) || typeof set !== "boolean" || typeof required !== "boolean") return null;
-  if ((help !== undefined && !text(help)) || (value.default !== undefined && !text(value.default)) || (v !== undefined && !text(v))) return null;
+  if ((help !== undefined && !text(help)) || (value.default !== undefined && !settingValue(value.default)) || (v !== undefined && !settingValue(v))) return null;
   const opts = keyList(options);
   if (!opts) return null;
   return {
@@ -158,7 +169,7 @@ function readField(value: unknown): SettingsPageField | null {
     required,
     set,
     ...(help !== undefined ? { help } : {}),
-    ...(value.default !== undefined ? { default: value.default as string } : {}),
+    ...(value.default !== undefined ? { default: value.default as SettingValue } : {}),
     ...(opts.length > 0 ? { options: opts } : {}),
     // A secret's value is never the page's, whatever arrives.
     ...(v !== undefined && type !== "secret" ? { value: v } : {}),

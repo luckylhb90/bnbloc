@@ -39,6 +39,7 @@ const (
 	SettingBoolean = wire.SettingBoolean
 	SettingChoice  = wire.SettingChoice
 	SettingPath    = wire.SettingPath
+	SettingLines   = wire.SettingLines
 
 	SettingScopePlatform = wire.SettingScopePlatform
 	SettingScopeOrg      = wire.SettingScopeOrg
@@ -47,10 +48,11 @@ const (
 
 // ComponentSettingsFileEnv names the file holding every value of a
 // component's settings (platform, organization and member values merged by
-// key; secrets included): an owner-only (0600) JSON object {key: value} the
-// platform writes before it starts the component's process (the bridge for
-// a stdio MCP tool, the desktop for a plugin) and rewrites when a value
-// changes.
+// key; secrets included): an owner-only (0600) JSON object {key: value}
+// (SettingsFile: a lines value as an array of strings, any other as a
+// string) the platform writes before it starts the component's process
+// (the bridge for a stdio MCP tool, the desktop for a plugin) and rewrites
+// when a value changes.
 const ComponentSettingsFileEnv = "BNBLOC_COMPONENT_SETTINGS_FILE"
 
 // Declaration bounds: a handful of short, form-sized fields.
@@ -72,7 +74,7 @@ func ValidSettingKey(key string) bool { return settingKeyRE.MatchString(key) }
 // (Go, the desktop, a component) parses it alike.
 var settingNumberRE = regexp.MustCompile(`^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$`)
 
-var settingTypes = []string{SettingText, SettingSecret, SettingURL, SettingNumber, SettingBoolean, SettingChoice, SettingPath}
+var settingTypes = []string{SettingText, SettingSecret, SettingURL, SettingNumber, SettingBoolean, SettingChoice, SettingPath, SettingLines}
 
 var settingScopes = []string{SettingScopePlatform, SettingScopeOrg, SettingScopeMember}
 
@@ -310,8 +312,12 @@ func validMCPHeader(name string) error {
 // CheckSettingValue is the one rule for a value of setting s (trimmed,
 // non-empty): text of at most MaxComponentSettingValueBytes, and for a url
 // an absolute http(s) URL, a number in decimal, a boolean "true" or
-// "false", a choice one of its options.
+// "false", a choice one of its options. A lines value is held to its own
+// bounds instead (checkSettingLines).
 func CheckSettingValue(s Setting, v string) error {
+	if s.Type == SettingLines && utf8.ValidString(v) && !strings.ContainsRune(v, 0) {
+		return checkSettingLines(v)
+	}
 	if len(v) > wire.MaxComponentSettingValueBytes || !utf8.ValidString(v) || strings.ContainsRune(v, 0) {
 		return fmt.Errorf("must be text of at most %d bytes", wire.MaxComponentSettingValueBytes)
 	}
@@ -335,6 +341,37 @@ func CheckSettingValue(s Setting, v string) error {
 		}
 	}
 	return nil
+}
+
+// checkSettingLines is the rule for a lines value as stored: its lines
+// joined by "\n" (SplitSettingLines), at most MaxComponentSettingLines,
+// each trimmed, non-empty and at most MaxComponentSettingLineBytes. A form
+// trims each line and drops the empty ones before it sends.
+func checkSettingLines(v string) error {
+	lines := SplitSettingLines(v)
+	if len(lines) > wire.MaxComponentSettingLines {
+		return fmt.Errorf("must be at most %d lines", wire.MaxComponentSettingLines)
+	}
+	for i, l := range lines {
+		switch {
+		case l == "":
+			return fmt.Errorf("has an empty line (line %d)", i+1)
+		case strings.TrimSpace(l) != l:
+			return fmt.Errorf("line %d starts or ends with spaces", i+1)
+		case len(l) > wire.MaxComponentSettingLineBytes:
+			return fmt.Errorf("line %d is longer than %d bytes", i+1, wire.MaxComponentSettingLineBytes)
+		}
+	}
+	return nil
+}
+
+// SplitSettingLines is a lines value's lines: the stored value split at
+// "\n" (none for an empty value).
+func SplitSettingLines(v string) []string {
+	if v == "" {
+		return nil
+	}
+	return strings.Split(v, "\n")
 }
 
 // SettingRefusal is why a save of settings was refused: the setting it is
@@ -452,6 +489,25 @@ func SettingsOfScope(decl []Setting, scopes ...string) []Setting {
 	return out
 }
 
+// SettingsFile is the content of the settings file a process component
+// reads (ComponentSettingsFileEnv) from its effective values
+// (EffectiveSettings): every value by key, a lines value as its lines (a
+// JSON array of strings), any other as its text.
+func SettingsFile(decl []Setting, effective map[string]string) map[string]any {
+	out := map[string]any{}
+	for _, s := range decl {
+		v, ok := effective[s.Key]
+		switch {
+		case !ok:
+		case s.Type == SettingLines:
+			out[s.Key] = SplitSettingLines(v)
+		default:
+			out[s.Key] = v
+		}
+	}
+	return out
+}
+
 // NameValue is one environment variable or request header.
 type NameValue struct {
 	Name  string
@@ -459,7 +515,8 @@ type NameValue struct {
 }
 
 // SettingsEnv is the environment a process component gets from its
-// effective values (EffectiveSettings): each deliver.env with a value.
+// effective values (EffectiveSettings): each deliver.env with a value (a
+// lines value as stored: its lines joined by "\n").
 func SettingsEnv(decl []Setting, effective map[string]string) []NameValue {
 	var out []NameValue
 	for _, s := range decl {

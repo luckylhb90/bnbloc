@@ -68,6 +68,7 @@ func codewordTool(sha string) wire.ContentMCPTool {
 		Settings: []wire.ComponentSetting{
 			{Key: "salt", Label: "Salt", Type: pkgmeta.SettingSecret, Scope: pkgmeta.SettingScopeMember, Required: true, Deliver: &wire.ComponentSettingDeliver{Env: "CODEWORD_SALT"}},
 			{Key: "lang", Label: "Language", Type: pkgmeta.SettingText, Scope: pkgmeta.SettingScopeMember, Deliver: &wire.ComponentSettingDeliver{Env: "CODEWORD_LANG"}},
+			{Key: "words", Label: "Words", Type: pkgmeta.SettingLines, Scope: pkgmeta.SettingScopeMember},
 		},
 		RequiredBy: []string{"cc_reviewer"},
 	}
@@ -109,7 +110,7 @@ func serverNamed(p *corepkg.AgentProfile, name string) *corepkg.MCPServer {
 func TestMCPToolsReachTheSession(t *testing.T) {
 	g := newContentFixtureGateway(t)
 	f := newMCPFixture(t)
-	f.setMember(t, "codeword", map[string]string{"salt": "member-salt", "other": "ignored"})
+	f.setMember(t, "codeword", map[string]string{"salt": "member-salt", "words": "alpha\nbeta", "other": "ignored"})
 	expert := g.pkg(reviewerForm("Use the tools."), "1.0.0")
 	expert.Source = wire.ContentSourceExpert
 	g.setEffective("job-1", wire.ContentEffective{Expert: &expert, MCP: []wire.ContentMCPTool{codewordTool(f.sha), searchTool()}})
@@ -125,15 +126,15 @@ func TestMCPToolsReachTheSession(t *testing.T) {
 		len(cw.Env) != 2 || cw.Env[0] != (corepkg.NameValue{Name: "CODEWORD_SALT", Value: "member-salt"}) || cw.Env[1].Name != pkgmeta.ComponentSettingsFileEnv {
 		t.Fatalf("codeword = %+v", cw)
 	}
-	// The settings file: every value, owner-only, in the bridge's private
-	// temp dir, never its state dir (confinement read-denies the desktop's
-	// data directory to a sandboxed tool).
+	// The settings file: every value (a lines value as a list), owner-only,
+	// in the bridge's private temp dir, never its state dir (confinement
+	// read-denies the desktop's data directory to a sandboxed tool).
 	if !strings.HasPrefix(filepath.Base(filepath.Dir(cw.Env[1].Value)), "bnbloc-bridge-settings-") {
 		t.Fatalf("settings file at %s", cw.Env[1].Value)
 	}
 	st, err := os.Stat(cw.Env[1].Value)
 	raw, _ := os.ReadFile(cw.Env[1].Value)
-	if err != nil || st.Mode().Perm() != 0o600 || string(raw) != "{\n  \"salt\": \"member-salt\"\n}" {
+	if err != nil || st.Mode().Perm() != 0o600 || string(raw) != "{\n  \"salt\": \"member-salt\",\n  \"words\": [\n    \"alpha\",\n    \"beta\"\n  ]\n}" {
 		t.Fatalf("settings file = %v %v %q", st, err, raw)
 	}
 	s := serverNamed(ps[0], "search")

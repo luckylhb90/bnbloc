@@ -19,13 +19,14 @@ import {
   SETTINGS_PAGE_PROTOCOL,
   type HostAnswer,
   type PageMessage,
+  type SettingValue,
   type SettingsPageField,
   type SettingsPageView,
 } from "../../previewer-sdk/src/settingsProtocol.ts";
 import type { Theme } from "../../previewer-sdk/src/protocol.ts";
 import { errorField, errorReason } from "./errors.ts";
 import { frameSrc, fromFrame, validBundlePath, type FrameEnv } from "./previewerFrame.ts";
-import type { ComponentSetting, ComponentSettingField, ComponentSettingScope, ComponentSettingsUpdate, ComponentSettingsView, DesktopComponentSettings } from "./componentSettings.ts";
+import { linesValue, parseLines, type ComponentSetting, type ComponentSettingField, type ComponentSettingScope, type ComponentSettingsUpdate, type ComponentSettingsView, type DesktopComponentSettings } from "./componentSettings.ts";
 
 export type { SettingsPageView };
 
@@ -55,6 +56,11 @@ export function settingsPageInit(theme: Theme, scope: ComponentSettingScope): Ho
   return { type: "settings.init", protocol: SETTINGS_PAGE_PROTOCOL, theme, scope };
 }
 
+/** A stored value as a page reads it: a lines setting's as its lines. */
+function pageValue(f: Pick<ComponentSetting, "type">, v: string): SettingValue {
+  return f.type === "lines" ? parseLines(v) : v;
+}
+
 function pageField(f: ComponentSettingField): SettingsPageField {
   return {
     key: f.key,
@@ -63,10 +69,10 @@ function pageField(f: ComponentSettingField): SettingsPageField {
     required: !!f.required,
     set: f.set,
     ...(f.help ? { help: f.help } : {}),
-    ...(f.default ? { default: f.default } : {}),
+    ...(f.default ? { default: pageValue(f, f.default) } : {}),
     ...(f.options?.length ? { options: f.options } : {}),
     // A secret's value is never the page's.
-    ...(f.type !== "secret" && f.value ? { value: f.value } : {}),
+    ...(f.type !== "secret" && f.value ? { value: pageValue(f, f.value) } : {}),
   };
 }
 
@@ -110,6 +116,20 @@ function refused(id: number, reason: string, key = ""): HostAnswer {
   return { type: "settings.refused", id, reason: fitReason(reason), ...(key ? { key } : {}) };
 }
 
+/** A page's values as the platform stores them: a lines setting's list as
+ *  its lines (the form's rule: trimmed, none empty, joined by "\n"), every
+ *  other value a string. The key of a list given for a setting that is not
+ *  a list, or null when every value fits. */
+export function storedValues(fields: readonly Pick<SettingsPageField, "key" | "type">[], values: Readonly<Record<string, SettingValue>>): { values: Record<string, string> } | { notList: string } {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(values)) {
+    const lines = fields.find((f) => f.key === k)?.type === "lines";
+    if (typeof v !== "string" && !lines) return { notList: k };
+    out[k] = lines ? linesValue(typeof v === "string" ? [v] : v) : (v as string);
+  }
+  return { values: out };
+}
+
 /** The host of one page frame: answers each request of the page for the
  *  one scope it edits (ready and close are the frame component's). A save
  *  naming a key that is not a field of the scope is refused here, before
@@ -133,7 +153,9 @@ export function settingsPageHost(scope: SettingsPageScope): { answer(msg: PageMe
             view ??= await scope.load();
             const outside = [...Object.keys(msg.values), ...(msg.clear ?? [])].find((k) => !fieldKey(k));
             if (outside !== undefined) return refused(msg.id, `"${outside}" is not a setting this page edits`);
-            view = await scope.save(msg.clear?.length ? { values: { ...msg.values }, clear: [...msg.clear] } : { values: { ...msg.values } });
+            const stored = storedValues(view.fields, msg.values);
+            if ("notList" in stored) return refused(msg.id, `"${stored.notList}" takes a string, not a list`, stored.notList);
+            view = await scope.save(msg.clear?.length ? { values: stored.values, clear: [...msg.clear] } : { values: stored.values });
             return { type: "settings.view", id: msg.id, view };
           } catch (e) {
             return refused(msg.id, errorReason(e) || "Could not save the settings", fieldKey(errorField(e)));

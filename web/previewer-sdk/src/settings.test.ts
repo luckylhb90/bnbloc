@@ -1,6 +1,6 @@
 import type { InboundEvent } from "./index.ts";
 import { createSettingsPageClient, SettingsRefused } from "./settings.ts";
-import { readHostAnswer, readPageMessage, SETTINGS_KEYS_LIMIT, SETTINGS_PAGE_PROTOCOL } from "./settingsProtocol.ts";
+import { readHostAnswer, readPageMessage, readView, SETTING_LINES_LIMIT, SETTINGS_KEYS_LIMIT, SETTINGS_PAGE_PROTOCOL } from "./settingsProtocol.ts";
 
 // Local runner, as index.test.ts.
 async function test(name: string, fn: () => void | Promise<void>): Promise<void> {
@@ -105,10 +105,19 @@ await test("page messages are validated", () => {
     { type: "settings.set", id: 1, values: ["a"] },
     { type: "settings.set", id: 1, values: many },
     { type: "settings.set", id: 1, values: {}, clear: [1] },
+    { type: "settings.set", id: 1, values: { dirs: ["a", 1] } },
+    { type: "settings.set", id: 1, values: { dirs: Array.from({ length: SETTING_LINES_LIMIT + 1 }, () => "x") } },
     { type: "settings.read", id: 1 },
     "settings.ready",
   ]) {
     eq(readPageMessage(bad), null, JSON.stringify(bad));
   }
   eq(readHostAnswer({ type: "settings.init", protocol: 2, theme: "light", scope: "org" }), null, "a newer protocol");
+});
+
+await test("a lines setting's value is a list both ways", () => {
+  eq(readPageMessage({ type: "settings.set", id: 5, values: { dirs: ["~/a", "~/b"], note: "x" } }), { type: "settings.set", id: 5, values: { dirs: ["~/a", "~/b"], note: "x" } }, "a list saved");
+  const field = { key: "dirs", label: "Folders", type: "lines", required: false, set: true, default: ["~/b"], value: ["~/a"] };
+  eq(readView({ scope: "member", fields: [field], readOnly: [], missing: [] })?.fields[0], field, "a list read");
+  eq(readView({ scope: "member", fields: [{ ...field, value: [1] }], readOnly: [], missing: [] }), null, "a list of strings only");
 });

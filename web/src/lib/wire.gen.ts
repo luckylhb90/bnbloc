@@ -1393,7 +1393,11 @@ export interface ComponentSettingsPage {
 
 // The types of a setting (ComponentSetting.Type). A secret is write-only:
 // never shown back, only "set". A path is a path on the member's own
-// machine (member scope only).
+// machine (member scope only). Lines is a list of text lines (folders,
+// name patterns, names): stored and sent between the platform's pieces as
+// its lines joined by "\n" (so is a deliver.env value), and handed to the
+// component as a JSON array of strings in its settings file and on its
+// settings page.
 export const SettingText = "text";
 export const SettingSecret = "secret";
 export const SettingURL = "url";
@@ -1401,6 +1405,7 @@ export const SettingNumber = "number";
 export const SettingBoolean = "boolean";
 export const SettingChoice = "choice";
 export const SettingPath = "path";
+export const SettingLines = "lines";
 
 // Who sets a setting, and for whom it holds (ComponentSetting.Scope): the
 // super admin for the deployment, an organization admin for their
@@ -3139,6 +3144,12 @@ export const MaxComponentSettings = 24;
 // MaxComponentSettingValueBytes bounds one value (a key, a URL, a
 // path: never a document).
 export const MaxComponentSettingValueBytes = 4096;
+// MaxComponentSettingLines and MaxComponentSettingLineBytes bound a
+// lines value (a list of folders, patterns or names): at most this
+// many lines, each trimmed, non-empty and at most this long. A lines
+// value is held to these instead of MaxComponentSettingValueBytes.
+export const MaxComponentSettingLines = 64;
+export const MaxComponentSettingLineBytes = 512;
 
 // ---- wire/mcp_tools.go ----
 
@@ -5543,8 +5554,8 @@ export type AssistFieldType = "text" | "list" | "items";
 export const AssistFieldTypeValues: readonly AssistFieldType[] = ["text", "list", "items"];
 export type AttachmentContent = "png" | "jpeg" | "gif" | "webp" | "pdf" | "zip" | "ole" | "text" | "isomedia" | "webm" | "mp3" | "wav" | "ogg";
 export const AttachmentContentValues: readonly AttachmentContent[] = ["png", "jpeg", "gif", "webp", "pdf", "zip", "ole", "text", "isomedia", "webm", "mp3", "wav", "ogg"];
-export type ComponentSettingType = "text" | "secret" | "url" | "number" | "boolean" | "choice" | "path";
-export const ComponentSettingTypeValues: readonly ComponentSettingType[] = ["text", "secret", "url", "number", "boolean", "choice", "path"];
+export type ComponentSettingType = "text" | "secret" | "url" | "number" | "boolean" | "choice" | "path" | "lines";
+export const ComponentSettingTypeValues: readonly ComponentSettingType[] = ["text", "secret", "url", "number", "boolean", "choice", "path", "lines"];
 export type ComponentSettingScope = "platform" | "org" | "member";
 export const ComponentSettingScopeValues: readonly ComponentSettingScope[] = ["platform", "org", "member"];
 export type ContentUseScope = "member" | "room" | "room-expert";

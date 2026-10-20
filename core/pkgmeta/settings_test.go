@@ -48,6 +48,7 @@ func TestSettingsDeclarationRefusals(t *testing.T) {
 		"duplicate option":     {[]map[string]any{text(map[string]any{"type": "choice", "options": []string{"a", "a"}})}, "duplicate option"},
 		"secret default":       {[]map[string]any{text(map[string]any{"type": "secret", "default": "x"})}, "a secret has no default"},
 		"bad default":          {[]map[string]any{text(map[string]any{"type": "number", "default": "many"})}, "default: must be a number"},
+		"bad lines default":    {[]map[string]any{text(map[string]any{"type": "lines", "default": "a\n\nb"})}, "default: has an empty line"},
 		"default not a choice": {[]map[string]any{text(map[string]any{"type": "choice", "options": []string{"a"}, "default": "b"})}, "must be one of a"},
 		"empty deliver":        {[]map[string]any{text(map[string]any{"deliver": map[string]any{}})}, "names no env, header or bearer"},
 		"header on a plugin":   {[]map[string]any{text(map[string]any{"deliver": map[string]any{"header": "X-Key"}})}, "only for an http MCP tool"},
@@ -75,6 +76,7 @@ func TestSettingsDeclarationRefusals(t *testing.T) {
 		{"key": "quality", "label": "Quality", "type": "choice", "scope": "member", "options": []string{"low", "high"}, "default": "low"},
 		{"key": "chrome", "label": "Chrome binary", "type": "path", "scope": "member", "deliver": map[string]any{"env": "BNBLOC_ACME_AUDITOR_CHROME"}},
 		{"key": "note", "label": "Note", "type": "text", "scope": "member", "help": "Anything."},
+		{"key": "folders", "label": "Folders", "type": "lines", "scope": "member", "default": "~/a\n~/b", "deliver": map[string]any{"env": "ACME_FOLDERS"}},
 	}
 	if _, err := ParsePackage(pluginWithSettings(t, ok...)); err != nil {
 		t.Fatalf("a full declaration: %v", err)
@@ -184,6 +186,7 @@ type settingFixture struct {
 		Effective map[string]string `json:"effective"`
 		Unset     []string          `json:"unset"`
 		Env       [][2]string       `json:"env"`
+		File      map[string]any    `json:"file"`
 	} `json:"effective"`
 }
 
@@ -228,6 +231,11 @@ func TestSettingValueRules(t *testing.T) {
 		}
 		if !slices.Equal(env, c.Env) {
 			t.Errorf("env %d = %v, want %v", i, env, c.Env)
+		}
+		got, _ := json.Marshal(SettingsFile(c.Settings, eff))
+		want, _ := json.Marshal(c.File)
+		if string(got) != string(want) {
+			t.Errorf("file %d = %s, want %s", i, got, want)
 		}
 	}
 	// Needs setup narrowed to the scopes a reader knows.

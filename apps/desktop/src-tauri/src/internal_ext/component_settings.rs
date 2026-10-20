@@ -7,7 +7,7 @@
 //!
 //! - The value rules: a Rust copy of `core/pkgmeta/settings.go`
 //!   (`check_setting_value`, `merge_settings`, `effective_settings`,
-//!   `unset_settings`, `settings_env`), pinned to it by
+//!   `unset_settings`, `settings_env`, `settings_file`), pinned to it by
 //!   `core/pkgmeta/testdata/setting_values.json`.
 //! - The member store: the member-scope values, entered in Settings →
 //!   Components through the Tauri commands below, one owner-only (0600)
@@ -19,8 +19,9 @@
 //!   gateway at every launch (`GET /v1/components/{name}/settings/resolved`,
 //!   secrets included, never logged), are merged with the member's by key,
 //!   and the plugin gets every value in an owner-only file named by
-//!   `BNBLOC_COMPONENT_SETTINGS_FILE` (`<member>/component-settings/launch/`)
-//!   plus each declared `deliver.env`.
+//!   `BNBLOC_COMPONENT_SETTINGS_FILE` (`<member>/component-settings/launch/`;
+//!   a `lines` value as a JSON array of strings) plus each declared
+//!   `deliver.env`.
 //! - Needs setup: a component whose required settings (any scope) are not
 //!   all set does not run. The catalog says which platform and organization
 //!   ones are missing (`settingsMissing`); the member store says the rest. A
@@ -44,6 +45,10 @@ pub(super) const SETTINGS_DIR_ENV: &str = "BNBLOC_COMPONENT_SETTINGS_DIR";
 const LAUNCH_DIR: &str = "launch";
 /// Bound on one value (wire.MaxComponentSettingValueBytes).
 const MAX_VALUE_BYTES: usize = 4 << 10;
+/// Bounds of a `lines` value, held instead of MAX_VALUE_BYTES
+/// (wire.MaxComponentSettingLines, wire.MaxComponentSettingLineBytes).
+const MAX_LINES: usize = 64;
+const MAX_LINE_BYTES: usize = 512;
 
 /// The scope each member sets for themselves (wire.SettingScopeMember).
 pub(super) const SCOPE_MEMBER: &str = "member";
@@ -167,9 +172,44 @@ fn number_syntax(v: &str) -> bool {
     rest.is_empty()
 }
 
+/// A `lines` value's lines: the stored value split at "\n" (none for an
+/// empty value; pkgmeta.SplitSettingLines).
+fn split_lines(v: &str) -> Vec<&str> {
+    if v.is_empty() {
+        Vec::new()
+    } else {
+        v.split('\n').collect()
+    }
+}
+
+/// The rule for a `lines` value as stored (pkgmeta checkSettingLines): at
+/// most MAX_LINES lines, each trimmed, non-empty and at most MAX_LINE_BYTES.
+fn check_lines(v: &str) -> Result<(), String> {
+    let lines = split_lines(v);
+    if lines.len() > MAX_LINES {
+        return Err(format!("must be at most {MAX_LINES} lines"));
+    }
+    for (i, l) in lines.iter().enumerate() {
+        let n = i + 1;
+        if l.is_empty() {
+            return Err(format!("has an empty line (line {n})"));
+        }
+        if l.trim() != *l {
+            return Err(format!("line {n} starts or ends with spaces"));
+        }
+        if l.len() > MAX_LINE_BYTES {
+            return Err(format!("line {n} is longer than {MAX_LINE_BYTES} bytes"));
+        }
+    }
+    Ok(())
+}
+
 /// The one rule for a value of setting `s` (trimmed, non-empty;
 /// pkgmeta.CheckSettingValue).
 pub(super) fn check_setting_value(s: &Setting, v: &str) -> Result<(), String> {
+    if s.kind == "lines" && !v.contains('\0') {
+        return check_lines(v);
+    }
     if v.len() > MAX_VALUE_BYTES || v.contains('\0') {
         return Err(format!("must be text of at most {MAX_VALUE_BYTES} bytes"));
     }
@@ -358,8 +398,29 @@ pub(super) fn settings_env(decl: &[Setting], effective: &Values) -> Vec<(String,
         .collect()
 }
 
+/// The settings file's content (pkgmeta.SettingsFile): every effective
+/// value by key, a `lines` value as its lines (a JSON array of strings),
+/// any other as its text.
+pub(super) fn settings_file(
+    decl: &[Setting],
+    effective: &Values,
+) -> serde_json::Map<String, serde_json::Value> {
+    decl.iter()
+        .filter_map(|s| {
+            let v = effective.get(&s.key)?;
+            let value = if s.kind == "lines" {
+                serde_json::Value::from(split_lines(v))
+            } else {
+                serde_json::Value::from(v.as_str())
+            };
+            Some((s.key.clone(), value))
+        })
+        .collect()
+}
+
 /// What a launch hands a process component: the effective values of the
-/// whole declaration (the settings file's content) and its env pairs. The
+/// whole declaration (the settings file's content, `settings_file`) and its
+/// env pairs. The
 /// gateway's values hold only for platform and organization settings, the
 /// member store's only for member ones.
 pub(super) fn launch_settings(
@@ -611,7 +672,9 @@ impl Adapter {
             ComponentKind::Plugin,
             &spec.name,
         )?;
-        save(&file, &effective)?;
+        let raw =
+            serde_json::to_vec(&settings_file(decl, &effective)).map_err(|e| e.to_string())?;
+        crate::files::atomic_write(&file, &raw)?;
         cmd.env(SETTINGS_FILE_ENV, &file);
         for (name, value) in env {
             cmd.env(name, value);
@@ -769,6 +832,7 @@ mod tests {
         effective: Values,
         unset: Vec<String>,
         env: Vec<(String, String)>,
+        file: serde_json::Map<String, serde_json::Value>,
     }
 
     fn fixture() -> Fixture {
@@ -814,6 +878,7 @@ mod tests {
                 "unset {i}"
             );
             assert_eq!(settings_env(&c.settings, &eff), c.env, "env {i}");
+            assert_eq!(settings_file(&c.settings, &eff), c.file, "file {i}");
         }
     }
 

@@ -1,10 +1,15 @@
+import settingValues from "../../../core/pkgmeta/testdata/setting_values.json" with { type: "json" };
 import {
   initialValues,
+  linesProblem,
+  linesValue,
   missingRequired,
   needsSetupText,
   ofScope,
+  parseLines,
   scopeText,
   settingInput,
+  settingsProblems,
   settingsSummary,
   settingsUpdate,
   shownValue,
@@ -72,4 +77,34 @@ test("needs setup names the missing settings by label", () => {
   equal(needsSetupText([], fields), "");
   equal(ofScope(fields, "member"), []);
   equal(settingsSummary(fields.slice(0, 2)), "apiBase (url, org) *, apiKey (secret, org) *");
+});
+
+const folders: ComponentSettingField = { key: "dirs", label: "Folders", type: "lines", scope: "member", set: true, value: "~/a\n~/b" };
+
+test("a list is edited one per line and sent as its lines", () => {
+  equal(settingInput("lines"), { control: "lines" });
+  equal(parseLines(" ~/a \r\n\n~/b\r~/c\n  "), ["~/a", "~/b", "~/c"]);
+  equal(linesValue(["~/a", " ", " ~/b"]), "~/a\n~/b");
+  equal(initialValues([folders]), { dirs: "~/a\n~/b" });
+  equal(settingsUpdate([folders], { dirs: "~/a\n\n  ~/c  \n" }), { values: { dirs: "~/a\n~/c" } });
+  equal(settingsUpdate([folders], { dirs: " \n " }), { values: { dirs: "" } });
+  equal(missingRequired([{ ...folders, required: true, set: false }], { dirs: "\n  \n" }), ["Folders"]);
+});
+
+test("a list is held to the platform's bounds before it is sent", () => {
+  equal(linesProblem([]), "");
+  equal(linesProblem(Array.from({ length: 65 }, (_, i) => `l${i}`)), "at most 64 lines (this has 65)");
+  equal(linesProblem(["ok", "é".repeat(257)]), "line 2 is longer than 512 bytes");
+  equal(settingsProblems([folders, fields[2]!], { dirs: "x".repeat(513), note: "x".repeat(9999) }), ["Folders: line 1 is longer than 512 bytes"]);
+});
+
+// The platform's own cases (core/pkgmeta's CheckSettingValue, the desktop's
+// copy): a value the form would send (its lines, trimmed, none empty) within
+// the bounds is exactly a value the platform keeps.
+test("the form's lines rule agrees with the platform's", () => {
+  for (const c of settingValues.values.filter((v) => v.setting.type === "lines")) {
+    const lines = c.value.split("\n");
+    const asSent = linesValue(lines) === c.value && !c.value.includes("\u0000");
+    equal([c.value.slice(0, 20), asSent && linesProblem(lines) === ""], [c.value.slice(0, 20), c.ok]);
+  }
 });

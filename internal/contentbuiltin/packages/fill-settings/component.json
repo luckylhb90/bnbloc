@@ -1,0 +1,23 @@
+{
+  "kind": "bnbloc.assist.package/v1",
+  "name": "fill-settings",
+  "version": "1.0.0",
+  "displayName": "Fill settings from a note",
+  "description": "Maps a setup note (an email, a README section) onto the settings a component declares, for a person to check and save.",
+  "category": "authoring",
+  "tags": ["assist", "components"],
+  "icon": "sparkle",
+  "output": "json",
+  "fields": [
+    {
+      "name": "values",
+      "description": "One object per setting the note gives a value for",
+      "type": "items",
+      "item": [
+        { "name": "key", "description": "The setting's key, as listed" },
+        { "name": "value", "description": "Its value from the note" }
+      ]
+    },
+    { "name": "notes", "description": "What the note leaves unclear, in one or two sentences" }
+  ]
+}
