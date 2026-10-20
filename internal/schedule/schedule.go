@@ -3,7 +3,7 @@
 // computation of its next run. It is pure (no I/O, no clock): realtime's
 // scheduler and the room package validator (contentpkg) both call it.
 //
-// Every recurrence kind except "once" compiles to one cron-like spec
+// Every clock recurrence kind except "once" compiles to one cron-like spec
 // (minute/hour/day-of-month/month/day-of-week sets) evaluated on the
 // schedule's LOCAL wall clock, so "daily at 09:00 Europe/Berlin" stays at
 // 09:00 across DST changes. Local times that do not exist (the spring-forward
@@ -78,8 +78,14 @@ func Validate(rec wire.ScheduleRecurrence, tz string) (wire.ScheduleRecurrence, 
 		}
 	case wire.RecurCron:
 		out.Cron = strings.Join(strings.Fields(rec.Cron), " ")
+	case wire.RecurEvent:
+		out, err := validateEvent(rec)
+		if err != nil {
+			return rec, nil, err
+		}
+		return out, loc, nil
 	default:
-		return rec, nil, fmt.Errorf("recurrence: unknown kind %q (once, daily, weekly, cron)", rec.Kind)
+		return rec, nil, fmt.Errorf("recurrence: unknown kind %q (once, daily, weekly, cron, event)", rec.Kind)
 	}
 	sp, err := compile(out)
 	if err != nil {
@@ -147,8 +153,12 @@ func LoadZone(tz string) (*time.Location, error) {
 
 // Next returns the first run of rec strictly after after, in loc. false when
 // the recurrence never fires again (a one-shot in the past, or a cron day
-// set that does not occur within the search horizon). rec must be valid.
+// set that does not occur within the search horizon) or not on the clock
+// (an event recurrence, OnEvent). rec must be valid.
 func Next(rec wire.ScheduleRecurrence, loc *time.Location, after time.Time) (time.Time, bool) {
+	if OnEvent(rec) {
+		return time.Time{}, false
+	}
 	if rec.Kind == wire.RecurOnce {
 		at := time.UnixMilli(rec.AtMs)
 		if at.After(after) {

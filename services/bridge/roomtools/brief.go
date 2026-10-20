@@ -58,7 +58,7 @@ var briefs = map[string]brief{
 		Params: map[string]string{"filter": "Field (dotted ok) to a value or {$eq $ne $in $gt $gte $lt $lte $exists}."},
 	},
 	"room_setup": {
-		Text: "This room's setup (description, welcome, quick prompts, expert, packs, channels, schedules, sources) as the person who asked you; " +
+		Text: "This room's setup as the person who asked you; " +
 			"make a change only after they agree. " +
 			"Actions: get set use unuse add_channel add_schedule remove_schedule ask_source (room_help room_setup).",
 	},

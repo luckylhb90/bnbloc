@@ -52,7 +52,15 @@ func (s *Service) runNotice(ctx context.Context, run *scheduleRun) wire.Schedule
 		body = text
 		run.record("compose", body)
 	} else {
-		body = truncateRunes(schedule.ExpandNotice(sc.Text, run.slot, loc, roomName), notify.MaxAlertTextRunes)
+		body = schedule.ExpandNotice(sc.Text, run.slot, loc, roomName)
+		if ev := schedule.RunEvent(sc); ev != nil {
+			// People read the notice: the event's facts as a plain last
+			// line, kept whole (the text is cut before them).
+			facts := schedule.EventLine(*ev)
+			room := max(1, notify.MaxAlertTextRunes-utf8.RuneCountInString(facts)-1)
+			body = strings.TrimSpace(truncateRunes(strings.TrimSpace(body), room) + "\n" + facts)
+		}
+		body = truncateRunes(body, notify.MaxAlertTextRunes)
 	}
 	// One slot is one notice, however many times it is claimed: the dedup key
 	// is the slot's, not the content's (a composed body differs between tries).
@@ -83,7 +91,7 @@ func (s *Service) composeNotice(ctx context.Context, run *scheduleRun, room *ass
 	if loc == nil {
 		clock = run.slot.UTC()
 	}
-	msgs := assist.Messages(noticeComposeInstructions, sc.Text, assist.Context{Room: room, Clock: clock})
+	msgs := assist.Messages(noticeComposeInstructions, schedule.RunText(sc), assist.Context{Room: room, Clock: clock})
 	reply, usage, err := s.assistClient().Call(ctx, model, msgs, nil)
 	s.auditModelRun(ctx, claims, "schedule:"+sc.ScheduleID, "room "+sc.RoomID, model, usage, err)
 	if err != nil {

@@ -80,6 +80,7 @@ func (s *Service) handlePlatformUpdateConfigPut(w http.ResponseWriter, r *http.R
 		httpx.Error(w, "save update config failed", http.StatusInternalServerError)
 		return
 	}
+	s.desktopPublished(r.Context(), cfg)
 	httpx.WriteJSON(w, http.StatusOK, cfg)
 }
 

@@ -310,6 +310,7 @@ func (s *Service) orgPublish(ctx context.Context, src store.ContentComponent, v 
 				return store.ContentComponent{}, err
 			}
 			row.LatestVersion = v.Version
+			s.orgPublished(ctx, row, v)
 			return row, nil
 		}
 		row := *org
@@ -334,6 +335,7 @@ func (s *Service) orgPublish(ctx context.Context, src store.ContentComponent, v 
 			}
 			row.Status = store.ContentStatusActive
 		}
+		s.orgPublished(ctx, row, v)
 		return row, nil
 	}
 	return store.ContentComponent{}, fmt.Errorf("publish %s: organization copy changed concurrently", src.ID)

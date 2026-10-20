@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/auth"
+	"github.com/luckylhb90/bnbloc/internal/buildinfo"
 	"github.com/luckylhb90/bnbloc/internal/config"
 	"github.com/luckylhb90/bnbloc/internal/coreset"
 	"github.com/luckylhb90/bnbloc/internal/extreg"
@@ -363,6 +364,9 @@ func main() {
 	}
 	peers.Start(context.Background())
 	svc.Peers = peers
+	// A build new to this deployment is the platform.deployed event: every
+	// replica asks at boot, one records it and hands it to the scheduler.
+	go svc.RecordDeploy(context.Background(), buildinfo.Get("bnbloc-gateway").Commit)
 	// The gateway is the public edge: /metrics is never served on its main
 	// listener; BNBLOC_METRICS_ADDR exposes it on an internal one.
 	if err := obs.ServeWithHealth("bnbloc-gateway", cfg.ListenAddr, svc.Handler(), tw.Health, obs.PublicListener()); err != nil {

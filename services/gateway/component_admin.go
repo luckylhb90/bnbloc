@@ -93,6 +93,7 @@ func (s *Service) handleInstallComponent(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	s.componentsChanged(r.Context(), "", "")
+	s.componentPublished(r.Context(), eventScopePlatform, rec.Kind, rec.Name, rec.Version, rec.ContentHash, extpipe.NormalizeRollout(rec.Rollout), rec.EnabledTenants)
 	httpx.WriteJSON(w, http.StatusOK, wire.PublishedComponent{PlatformComponent: component, Secret: secret})
 }
 

@@ -345,7 +345,7 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "This room's setup (description, welcome, quick prompts, expert, packs, channels, schedules, sources) as the person who asked you; make a change only after they agree. Actions: get set use unuse add_channel add_schedule remove_schedule ask_source (room_help room_setup).",
+      "description": "This room's setup as the person who asked you; make a change only after they agree. Actions: get set use unuse add_channel add_schedule remove_schedule ask_source (room_help room_setup).",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -421,12 +421,19 @@
                 },
                 "type": "array"
               },
+              "events": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
               "kind": {
                 "enum": [
                   "once",
                   "daily",
                   "weekly",
-                  "cron"
+                  "cron",
+                  "event"
                 ],
                 "type": "string"
               },

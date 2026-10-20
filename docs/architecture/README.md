@@ -53,6 +53,9 @@ extend it" references.
   probability, a choice, a score) through an admin-configured provider:
   `POST /v1/decisions`, `app.ai.decide`, the room relay; the request rules,
   caller auth, budget and audit.
+- [Room schedules](schedules.md) — scheduled tasks: recurrence kinds, the
+  scheduler's claims and its one run path, and tasks that run when the
+  platform changes (platform events recorded once by the gateway).
 - [Room tools](room-tools.md) — how an agent lists the room's agents and
   dispatches work to them (`ask_agent`): the bridge's loopback MCP server and
   its per-session bearers, the realtime dispatch route, its authority (the

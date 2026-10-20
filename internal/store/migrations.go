@@ -1711,6 +1711,15 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return addColumnIfMissing(ctx, db, "rooms", "quick_prompts_json", "MEDIUMTEXT NULL AFTER welcome")
 		},
 	},
+	{
+		// The platform event a schedule's pending run answers
+		// (docs/prd/2026-10-20-event-triggered-schedules.md). Additive: a
+		// nullable column the previous release never reads.
+		id: "2026_10_room_schedules_pending_event",
+		run: func(ctx context.Context, db sqlConn) error {
+			return addColumnIfMissing(ctx, db, "room_schedules", "pending_event_json", "JSON NULL AFTER updated_at_ms")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

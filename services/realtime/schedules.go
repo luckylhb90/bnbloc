@@ -144,6 +144,10 @@ func planNextRun(sc *wire.RoomSchedule, now time.Time) error {
 	if err := runnable(*sc); err != nil {
 		return err
 	}
+	if schedule.OnEvent(rec) {
+		// Runs when an event it follows arrives (platform_events.go).
+		return nil
+	}
 	next, ok := schedule.Next(rec, loc, now)
 	if !ok {
 		return errors.New("the schedule never fires (is the time in the past?)")
@@ -406,6 +410,9 @@ func (s *Service) handleRunSchedule(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
+	// A run started by hand answers no platform event (a pending one keeps
+	// its own run).
+	cur.Event = nil
 	now := time.Now()
 	if schedule.RunsAtGateway(cur.Recipient.Kind) {
 		s.runAtGatewayNow(w, r, cur, now)
@@ -436,7 +443,7 @@ func (s *Service) postScheduled(ctx context.Context, sc wire.RoomSchedule, slot 
 	post := ChatPost{
 		RoomID:      sc.RoomID,
 		Author:      sc.CreatedBy,
-		Text:        sc.Text,
+		Text:        schedule.RunText(sc),
 		ClientMsgID: schedule.RunSlotClientMsgID(sc.ScheduleID, slot),
 		ChannelID:   sc.ChannelID,
 		Scheduled:   &wire.ScheduledMarker{ScheduleID: sc.ScheduleID},
@@ -450,12 +457,13 @@ func (s *Service) postScheduled(ctx context.Context, sc wire.RoomSchedule, slot 
 
 // ---------------------------------------------------------------- scheduler
 
-// RunScheduler wakes at each minute boundary and runs the due schedules
-// until ctx ends. A nil schedule store runs nothing.
+// RunScheduler wakes at each minute boundary (and when a platform event
+// set runs, wakeScheduler) and runs the due schedules until ctx ends. A nil schedule store runs nothing.
 func (s *Service) RunScheduler(ctx context.Context) {
 	if s.Schedules == nil {
 		return
 	}
+	wake := s.schedulerWake()
 	for {
 		now := time.Now()
 		// One second past the boundary: a slot at HH:MM:00 is due by then.
@@ -464,6 +472,8 @@ func (s *Service) RunScheduler(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-time.After(wait):
+		case <-wake:
+			// A platform event set runs due now (platform_events.go).
 		}
 		s.RunDueSchedules(ctx, time.Now())
 	}
@@ -512,9 +522,12 @@ func (s *Service) runClaimedSchedule(ctx context.Context, sc wire.RoomSchedule, 
 		pause(wire.ScheduleRunError, err.Error())
 		return
 	}
-	if next, ok := schedule.NextRun(sc.Recurrence, loc, slot, now); ok {
+	switch next, ok := schedule.NextRun(sc.Recurrence, loc, slot, now); {
+	case ok:
 		res.NextRunAtMs = next.UnixMilli()
-	} else {
+	case schedule.OnEvent(sc.Recurrence):
+		// Runs again when the next event it follows arrives.
+	default:
 		res.Disable = true // a one-shot that fired, or nothing left to fire
 	}
 	if late := now.Sub(slot); late > scheduleMisfireGrace {

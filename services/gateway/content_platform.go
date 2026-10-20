@@ -193,6 +193,7 @@ func (s *Service) installPlatformContent(w http.ResponseWriter, r *http.Request,
 		signed = "signed by key " + keyID
 	}
 	s.auditContent(ctx, "install", claims.Subject, "", c, m.Version, contentshare.Label(c)+" v"+m.Version+" installed for every organization by "+claims.Subject+", "+signed+", publisher "+pkg.Publisher)
+	s.componentPublished(ctx, eventScopePlatform, shortKind(c.Kind), c.Name, m.Version, sha, extpipe.NormalizeRollout(req.Rollout), c.EnabledTenants)
 	httpx.WriteJSON(w, http.StatusOK, contentInstallReply{ID: c.ID, Name: c.Name, Kind: shortKind(c.Kind), Version: m.Version, Scope: string(c.Scope), Status: string(c.Status)})
 }
 

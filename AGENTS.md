@@ -2134,6 +2134,22 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   rewrites a locked id) and commit the lock with it. Immutable is not
   deploy-safe: a new migration also obeys "A migration only adds"
   (`TestMigrationsAreDeploySafe`).
+- **A schedule's recurrence is `once`, `daily`, `weekly`, `cron` or
+  `event`** (`internal/schedule.Validate`, the one validation; a room
+  package's schedules too). An `event` schedule runs when the platform
+  changes (docs/architecture/schedules.md): `platform.deployed`,
+  `component.published`, `desktop.published` (`wire.PlatformEventNames`, the
+  closed list). **Platform events have one owner:
+  `services/gateway/platform_events.go`** records each once
+  (`recordPlatformEvent` over `store.MovePlatformSetting`: one replica of a
+  deploy, one install of a version) and hands it to realtime's
+  `POST /internal/v1/platform-events`, which only sets runs
+  (`TriggerEventSchedule`, coalesced by `schedule.MinInterval`); the
+  scheduler runs them through its one run path, and a run's text gets the
+  event's facts only through `schedule.RunText` (fenced as data). A new
+  producer calls the owner's helper (`componentPublished`,
+  `desktopPublished`, `RecordDeploy`), never the publisher
+  (`TestPlatformEventsSingleOwner`).
 
 ### Observability
 

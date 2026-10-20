@@ -247,6 +247,9 @@ type Service struct {
 	// backs /v1/platform/org-sync/*. nil (no tenant store) skips sync at
 	// sign-in and answers the routes 501.
 	OrgSync *orgsync.Syncer
+	// eventRetry is the first wait between hand-offs of a platform event
+	// to realtime (0: platformEventRetry; platform_events.go).
+	eventRetry time.Duration
 }
 
 // Handler builds the gateway HTTP mux.

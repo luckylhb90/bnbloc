@@ -184,7 +184,7 @@ func (s *Service) runSchedule(ctx context.Context, sc wire.RoomSchedule, slot ti
 	if loc == nil {
 		clock = slot.UTC()
 	}
-	msgs := assist.Messages(scheduleRunInstructions, sc.Text, assist.Context{Room: s.scheduleRoom(ctx, claims, sc.RoomID), Clock: clock})
+	msgs := assist.Messages(scheduleRunInstructions, schedule.RunText(sc), assist.Context{Room: s.scheduleRoom(ctx, claims, sc.RoomID), Clock: clock})
 	for step := 0; step < maxScheduleSteps; step++ {
 		if !s.assistLimiter.get(assistRate, assistBurst, s.Peers.Size).allow(claims.Tenant + "/" + claims.Subject) {
 			return fail("the owner's AI rate is spent: the run stopped")

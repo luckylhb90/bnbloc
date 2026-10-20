@@ -7,8 +7,9 @@ import { defaultDisplayName, formatAgentHandle } from "./displayNames.ts";
 export type { RoomSchedule, ScheduleRecipient, ScheduleRecurrence, ScheduledMarker } from "./wire.gen.ts";
 import type { RoomSchedule, ScheduleRecipient, ScheduleRecurrence, ScheduledMarker } from "./wire.gen.ts";
 
-export type { RecurrenceKind } from "./wire.gen.ts";
-import type { RecurrenceKind } from "./wire.gen.ts";
+export type { PlatformEventName, RecurrenceKind } from "./wire.gen.ts";
+import type { PlatformEventName, RecurrenceKind } from "./wire.gen.ts";
+import { PlatformEventNames } from "./wire.gen.ts";
 
 export interface ScheduleInput {
   text: string;
@@ -53,8 +54,24 @@ export function scheduledMarker(payload: unknown): ScheduledMarker | undefined {
   return typeof id === "string" && id ? { scheduleId: id } : undefined;
 }
 
+// What each platform event a schedule may follow is called in the editor
+// and the list. The events are the server's closed list
+// (wire.PlatformEventNames); the record makes a new one fail to compile
+// here until it has words.
+const EVENT_LABELS: Record<PlatformEventName, string> = {
+  "platform.deployed": "bnbloc is deployed",
+  "component.published": "a component is published",
+  "desktop.published": "a desktop version is published",
+};
+
+/** The events a schedule may follow, in the server's order, with their words. */
+export const PLATFORM_EVENTS: readonly { readonly value: PlatformEventName; readonly label: string }[] = PlatformEventNames.filter(
+  (e): e is PlatformEventName => e in EVENT_LABELS,
+).map((value) => ({ value, label: EVENT_LABELS[value] }));
+
 // describeRecurrence renders a recurrence for the list ("Daily at 09:00",
-// "Mon, Wed at 17:15", "Once on …", "Cron 0 9 * * 1-5"), in its timezone.
+// "Mon, Wed at 17:15", "Once on …", "Cron 0 9 * * 1-5", "When bnbloc is
+// deployed"), in its timezone.
 export function describeRecurrence(r: ScheduleRecurrence, timezone: string): string {
   switch (r.kind) {
     case "once":
@@ -73,6 +90,12 @@ export function describeRecurrence(r: ScheduleRecurrence, timezone: string): str
     }
     case "cron":
       return `Cron ${r.cron ?? ""}`.trim();
+    case "event": {
+      const events = (r.events ?? []).map((e) =>
+        e === "component.published" && r.component ? `component ${r.component} is published` : (EVENT_LABELS[e] ?? e),
+      );
+      return `When ${events.join(" or ") || "the platform changes"}`;
+    }
   }
 }
 
@@ -226,6 +249,10 @@ export interface RecurrenceForm {
   time: string; // "HH:MM"
   days: number[];
   cron: string;
+  // The platform events an event schedule follows, and the one component
+  // it is limited to ("" any) when it follows component.published.
+  events: PlatformEventName[];
+  component: string;
 }
 
 // formFromRecurrence seeds the editor from a stored recurrence (or defaults:
@@ -238,6 +265,8 @@ export function formFromRecurrence(r: ScheduleRecurrence | undefined, timezone: 
     time: r?.time ?? "09:00",
     days: r?.days?.length ? [...r.days] : [1, 2, 3, 4, 5],
     cron: r?.cron ?? "0 9 * * 1-5",
+    events: r?.events?.length ? [...r.events] : ["platform.deployed"],
+    component: r?.component ?? "",
   };
 }
 
@@ -267,6 +296,12 @@ export function recurrenceFromForm(
       const cron = f.cron.trim().split(/\s+/).join(" ");
       if (cron.split(" ").length !== 5) return { error: "Cron needs 5 fields: minute hour day month weekday" };
       return { recurrence: { kind: "cron", cron } };
+    }
+    case "event": {
+      const events = PLATFORM_EVENTS.map((e) => e.value).filter((e) => f.events.includes(e));
+      if (events.length === 0) return { error: "Pick at least one change to run on" };
+      const component = events.includes("component.published") ? f.component.trim() : "";
+      return { recurrence: { kind: "event", events, ...(component ? { component } : {}) } };
     }
   }
 }

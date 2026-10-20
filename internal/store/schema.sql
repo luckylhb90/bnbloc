@@ -670,6 +670,7 @@ CREATE TABLE IF NOT EXISTS room_schedules (
   run_count        BIGINT NOT NULL DEFAULT 0,
   created_at_ms    BIGINT NOT NULL,
   updated_at_ms    BIGINT NOT NULL,
+  pending_event_json JSON NULL,
   KEY idx_room_schedules_room (tenant_id, room_id),
   KEY idx_room_schedules_due (enabled, next_run_at_ms),
   KEY idx_room_schedules_claim (claim_token)

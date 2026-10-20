@@ -50,6 +50,8 @@ func main() {
 		err = runAPITokens(os.Args[2:])
 	case "search":
 		err = runSearch(os.Args[2:])
+	case "schedules":
+		err = runSchedules(os.Args[2:])
 	case "org-sync":
 		err = runOrgSync(os.Args[2:])
 	case "version":
@@ -116,6 +118,12 @@ Desktop updates:
   bnbloc updates publish --archive <bnbloc.app.tar.gz> --signature <file.sig> --version <semver>
         [--notes <text> | --notes-file <file>] [--target darwin-aarch64|darwin-x86_64]
   bnbloc updates status
+
+Room schedules (as the signed-in member, or BNBLOC_API_TOKEN's subject):
+  bnbloc schedules list <room>            the room's scheduled tasks: id, creator, recipient, when, state
+  bnbloc schedules run [--dry] <room> <schedule>
+                                          run one now, as its creator (only the creator may);
+                                          an AI task's run that fails exits non-zero
 
 Post-deploy smoke:
   bnbloc smoke [--agent <provider|core/provider|targetId|owner/provider>] [--timeout 120s] [--keep]

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"net/url"
@@ -97,8 +99,31 @@ func (p *HTTPPublisher) ComponentsChanged(ctx context.Context, c wire.Components
 	p.post(ctx, "/internal/v1/components/changed", c.TenantID, buf, "components_changed")
 }
 
-// post makes one signed internal call to realtime as p.Service in tenantID.
+// PlatformEvent hands a recorded platform event to realtime's scheduler
+// (POST /internal/v1/platform-events), which sets the runs of the
+// schedules following it. Unlike a publish it reports failure: the event
+// is recorded once, so its recorder retries the hand-off.
+func (p *HTTPPublisher) PlatformEvent(ctx context.Context, ev wire.PlatformEvent) error {
+	if p == nil || p.BaseURL == "" {
+		return errors.New("no realtime configured")
+	}
+	buf, err := json.Marshal(ev)
+	if err != nil {
+		return err
+	}
+	return p.send(ctx, "/internal/v1/platform-events", "", buf)
+}
+
+// post makes one signed internal call to realtime as p.Service in tenantID,
+// best-effort: a failure is logged.
 func (p *HTTPPublisher) post(ctx context.Context, path, tenantID string, buf []byte, what string) {
+	if err := p.send(ctx, path, tenantID, buf); err != nil {
+		log.Printf("realtime publisher(%s): publish %s: %v", p.Service, what, err)
+	}
+}
+
+// send makes one signed internal call to realtime as p.Service in tenantID.
+func (p *HTTPPublisher) send(ctx context.Context, path, tenantID string, buf []byte) error {
 	// The publish outlives neither its timeout nor needs the caller's
 	// cancellation: a handler that has already written its response must still
 	// deliver the event.
@@ -106,8 +131,7 @@ func (p *HTTPPublisher) post(ctx context.Context, path, tenantID string, buf []b
 	defer cancel()
 	req, err := svcauth.Key(p.Key).NewRequest(pctx, http.MethodPost, p.BaseURL+path, bytes.NewReader(buf), svcauth.ServiceSubject(p.Service), tenantID)
 	if err != nil {
-		log.Printf("realtime publisher(%s): request: %v", p.Service, err)
-		return
+		return fmt.Errorf("request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	client := p.HTTP
@@ -116,11 +140,11 @@ func (p *HTTPPublisher) post(ctx context.Context, path, tenantID string, buf []b
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("realtime publisher(%s): publish %s: %v", p.Service, what, err)
-		return
+		return err
 	}
 	_ = resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
-		log.Printf("realtime publisher(%s): publish %s: status %d", p.Service, what, resp.StatusCode)
+		return fmt.Errorf("status %d", resp.StatusCode)
 	}
+	return nil
 }

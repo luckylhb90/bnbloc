@@ -68,6 +68,45 @@ func UpdatePlatformSetting(ctx context.Context, st PlatformSettingsStore, key, a
 	return "", ErrPlatformSettingChanged
 }
 
+// MovePlatformSetting moves key to value unless the stored value is
+// already the same (same(stored, value)). Of concurrent movers to one value
+// exactly one moves it: it gets moved=true and the value it replaced (""
+// when the key was unset); the others see the value already there. It is
+// the once-only record of a change (a platform event,
+// services/gateway/platform_events.go).
+func MovePlatformSetting(ctx context.Context, st PlatformSettingsStore, key, value, actor string, atMs int64, same func(stored, value string) bool) (prev string, moved bool, err error) {
+	for range maxSettingSwaps {
+		row, found, err := st.GetPlatformSetting(ctx, key)
+		if err != nil {
+			return "", false, err
+		}
+		if found && same(row.Value, value) {
+			return row.Value, false, nil
+		}
+		var cur *PlatformSetting
+		if found {
+			cur = &row
+		}
+		err = st.SwapPlatformSetting(ctx, cur, PlatformSetting{Key: key, Value: value, UpdatedAtMs: atMs, UpdatedBy: actor})
+		if errors.Is(err, ErrPlatformSettingChanged) {
+			continue
+		}
+		if err != nil {
+			return "", false, err
+		}
+		return cur.valueOrEmpty(), true, nil
+	}
+	return "", false, ErrPlatformSettingChanged
+}
+
+// valueOrEmpty is a read row's value ("" for none).
+func (p *PlatformSetting) valueOrEmpty() string {
+	if p == nil {
+		return ""
+	}
+	return p.Value
+}
+
 // MemoryPlatformSettings is an in-memory PlatformSettingsStore for dev/tests.
 type MemoryPlatformSettings struct {
 	mu       sync.Mutex

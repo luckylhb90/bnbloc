@@ -44,7 +44,55 @@ const (
 	// RecurCron runs on a five-field cron-lite expression
 	// ("minute hour day-of-month month day-of-week").
 	RecurCron = "cron"
+	// RecurEvent runs when the platform changes: once per platform event
+	// it follows (Events, Component), never on the clock
+	// (docs/prd/2026-10-20-event-triggered-schedules.md).
+	RecurEvent = "event"
 )
+
+// Platform events a schedule may follow (RecurEvent). Only the platform
+// sees them; the gateway records each once and hands it to realtime's
+// scheduler (POST /internal/v1/platform-events).
+//
+//wire:union PlatformEventName
+const (
+	// PlatformDeployed: the gateway started on a build whose version
+	// differs from the last one recorded (Version, Previous).
+	PlatformDeployed = "platform.deployed"
+	// ComponentPublished: a component (any kind) or platform content got a
+	// new version (Kind, Name, Version, Rollout).
+	ComponentPublished = "component.published"
+	// DesktopPublished: a desktop version was activated for the updater
+	// (Version, Targets).
+	DesktopPublished = "desktop.published"
+)
+
+// PlatformEventNames is the closed list of events a schedule may follow,
+// in the order an editor shows them.
+var PlatformEventNames = []string{PlatformDeployed, ComponentPublished, DesktopPublished}
+
+// PlatformEvent is one platform event: its name and its facts (public
+// facts only: versions and names, never a secret). Tenants are the
+// organizations whose schedules see it: none is every organization (a
+// deploy, a desktop version, a component published for the platform); an
+// organization's own component publish names only that organization.
+type PlatformEvent struct {
+	Event    string   `json:"event" tstype:"PlatformEventName"`
+	Version  string   `json:"version"`
+	Previous string   `json:"previous,omitempty"`
+	Kind     string   `json:"kind,omitempty"`
+	Name     string   `json:"name,omitempty"`
+	Rollout  string   `json:"rollout,omitempty"`
+	Targets  []string `json:"targets,omitempty"`
+	Tenants  []string `json:"tenants,omitempty"`
+	AtMs     int64    `json:"atMs"`
+}
+
+// PlatformEventReply is realtime's answer to a dispatched event: how many
+// schedules it set to run.
+type PlatformEventReply struct {
+	Triggered int `json:"triggered"`
+}
 
 // Schedule run outcomes recorded on the schedule (LastStatus).
 //
@@ -79,13 +127,17 @@ type ScheduleRecipient struct {
 
 // ScheduleRecurrence is when a schedule fires. Only the fields of its Kind
 // are meaningful: AtMs (once), Time (daily, weekly), Days (weekly), Cron
-// (cron).
+// (cron), Events and Component (event: the platform events it follows,
+// one to all of PlatformEventNames, and for component.published an
+// optional component name it is limited to).
 type ScheduleRecurrence struct {
-	Kind string `json:"kind" tstype:"RecurrenceKind"`
-	AtMs int64  `json:"atMs,omitempty"`
-	Time string `json:"time,omitempty"`
-	Days []int  `json:"days,omitempty"`
-	Cron string `json:"cron,omitempty"`
+	Kind      string   `json:"kind" tstype:"RecurrenceKind"`
+	AtMs      int64    `json:"atMs,omitempty"`
+	Time      string   `json:"time,omitempty"`
+	Days      []int    `json:"days,omitempty"`
+	Cron      string   `json:"cron,omitempty"`
+	Events    []string `json:"events,omitempty" tstype:"PlatformEventName"`
+	Component string   `json:"component,omitempty"`
 }
 
 // RoomSchedule is one scheduled prompt: Text posted into the room as
@@ -116,6 +168,11 @@ type RoomSchedule struct {
 	RunCount    int64 `json:"runCount"`
 	CreatedAtMs int64 `json:"createdAtMs"`
 	UpdatedAtMs int64 `json:"updatedAtMs"`
+	// Event is the platform event the schedule's pending (or claimed) run
+	// answers: set by the dispatch of an event it follows, cleared when
+	// that run completes. A run's text carries its facts
+	// (schedule.RunText).
+	Event *PlatformEvent `json:"event,omitempty"`
 }
 
 // ScheduleRunRequest is realtime's call to the gateway to run an ai

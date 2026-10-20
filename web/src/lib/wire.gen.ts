@@ -4888,6 +4888,50 @@ export const RecurWeekly = "weekly";
 // RecurCron runs on a five-field cron-lite expression
 // ("minute hour day-of-month month day-of-week").
 export const RecurCron = "cron";
+// RecurEvent runs when the platform changes: once per platform event
+// it follows (Events, Component), never on the clock
+// (docs/prd/2026-10-20-event-triggered-schedules.md).
+export const RecurEvent = "event";
+
+// Platform events a schedule may follow (RecurEvent). Only the platform
+// sees them; the gateway records each once and hands it to realtime's
+// scheduler (POST /internal/v1/platform-events).
+// PlatformDeployed: the gateway started on a build whose version
+// differs from the last one recorded (Version, Previous).
+export const PlatformDeployed = "platform.deployed";
+// ComponentPublished: a component (any kind) or platform content got a
+// new version (Kind, Name, Version, Rollout).
+export const ComponentPublished = "component.published";
+// DesktopPublished: a desktop version was activated for the updater
+// (Version, Targets).
+export const DesktopPublished = "desktop.published";
+
+// PlatformEventNames is the closed list of events a schedule may follow,
+// in the order an editor shows them.
+export const PlatformEventNames: readonly string[] = ["platform.deployed", "component.published", "desktop.published"];
+
+// PlatformEvent is one platform event: its name and its facts (public
+// facts only: versions and names, never a secret). Tenants are the
+// organizations whose schedules see it: none is every organization (a
+// deploy, a desktop version, a component published for the platform); an
+// organization's own component publish names only that organization.
+export interface PlatformEvent {
+  event: PlatformEventName;
+  version: string;
+  previous?: string;
+  kind?: string;
+  name?: string;
+  rollout?: string;
+  targets?: string[];
+  tenants?: string[];
+  atMs: number;
+}
+
+// PlatformEventReply is realtime's answer to a dispatched event: how many
+// schedules it set to run.
+export interface PlatformEventReply {
+  triggered: number;
+}
 
 // Schedule run outcomes recorded on the schedule (LastStatus).
 export const ScheduleRunOK = "ok";
@@ -4918,13 +4962,17 @@ export interface ScheduleRecipient {
 
 // ScheduleRecurrence is when a schedule fires. Only the fields of its Kind
 // are meaningful: AtMs (once), Time (daily, weekly), Days (weekly), Cron
-// (cron).
+// (cron), Events and Component (event: the platform events it follows,
+// one to all of PlatformEventNames, and for component.published an
+// optional component name it is limited to).
 export interface ScheduleRecurrence {
   kind: RecurrenceKind;
   atMs?: number;
   time?: string;
   days?: number[];
   cron?: string;
+  events?: PlatformEventName[];
+  component?: string;
 }
 
 // RoomSchedule is one scheduled prompt: Text posted into the room as
@@ -4955,6 +5003,11 @@ export interface RoomSchedule {
   runCount: number;
   createdAtMs: number;
   updatedAtMs: number;
+  // Event is the platform event the schedule's pending (or claimed) run
+  // answers: set by the dispatch of an event it follows, cleared when
+  // that run completes. A run's text carries its facts
+  // (schedule.RunText).
+  event?: PlatformEvent;
 }
 
 // ScheduleRunRequest is realtime's call to the gateway to run an ai
@@ -6099,8 +6152,10 @@ export type RoomSourceScope = "all" | "opted-in" | "none-private";
 export const RoomSourceScopeValues: readonly RoomSourceScope[] = ["all", "opted-in", "none-private"];
 export type ScheduleRecipientKind = "room" | "agent" | "ai" | "notice";
 export const ScheduleRecipientKindValues: readonly ScheduleRecipientKind[] = ["room", "agent", "ai", "notice"];
-export type RecurrenceKind = "once" | "daily" | "weekly" | "cron";
-export const RecurrenceKindValues: readonly RecurrenceKind[] = ["once", "daily", "weekly", "cron"];
+export type RecurrenceKind = "once" | "daily" | "weekly" | "cron" | "event";
+export const RecurrenceKindValues: readonly RecurrenceKind[] = ["once", "daily", "weekly", "cron", "event"];
+export type PlatformEventName = "platform.deployed" | "component.published" | "desktop.published";
+export const PlatformEventNameValues: readonly PlatformEventName[] = ["platform.deployed", "component.published", "desktop.published"];
 export type ScheduleRunStatus = "ok" | "error" | "skipped";
 export const ScheduleRunStatusValues: readonly ScheduleRunStatus[] = ["ok", "error", "skipped"];
 export type ShareAccess = "org" | "signed_in" | "anyone";

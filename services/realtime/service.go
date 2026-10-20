@@ -144,6 +144,9 @@ type Service struct {
 
 	liveOnce sync.Once
 	liveJobs *liveStore
+
+	wakeOnce sync.Once
+	wake     chan struct{}
 }
 
 func (s *Service) now() time.Time {
@@ -282,6 +285,9 @@ func (s *Service) Handler() http.Handler {
 	// within the organization admin's grant): the one history read, never
 	// the people chat.
 	mux.Handle("GET /internal/v1/rooms/{roomId}/history", services("gateway")(s.handleInternalHistory))
+	// A platform event the gateway recorded sets the runs of the schedules
+	// following it (platform_events.go). Not keyed: any replica serves it.
+	mux.Handle("POST /internal/v1/platform-events", services("gateway")(s.handleInternalPlatformEvent))
 	// Replica-to-replica routes (scaleout.go); the gateway also signals a
 	// component catalog change.
 	s.registerPeerRoutes(mux, services("realtime"), services("realtime", "gateway"))

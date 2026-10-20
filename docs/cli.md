@@ -328,6 +328,12 @@ archive as `--settings-page <dir|tar>`: checked like a previewer bundle
 before any upload, then uploaded and pinned
 ([architecture/settings-pages.md](./architecture/settings-pages.md)).
 
+Every publish above, and every content install below, that brings a new
+version (or new bytes under the same version) is the platform event
+`component.published` (kind, name, version, rollout): rooms' scheduled tasks
+that follow it run once ("Room schedules" below). Installing the same
+package again, or changing its rollout, is not.
+
 ## Promote content to every organization
 
 An expert, skill pack or prompt pack (a member's, or one an organization
@@ -399,3 +405,38 @@ mirror in `cmd/bnbloc/desktop_release.go`):
 
 Each stage prints `[n/6]`; a failure says which stages completed (for example
 "Release Hub saved, but updater configuration failed").
+
+Activating a new version for the updater (enabled, with at least one
+target's file) is the platform event `desktop.published`: rooms' scheduled
+tasks that follow it run (see "Room schedules" below). Saving the same
+version again (another target, new notes) is not a new event.
+
+## Room schedules
+
+```sh
+bnbloc schedules list <room>
+bnbloc schedules run [--dry] <room> <schedule>
+```
+
+A room's scheduled tasks from a script, as the signed-in member or, with
+`BNBLOC_API_TOKEN`, as the token's subject
+(docs/prd/2026-10-20-event-triggered-schedules.md §2.3). `list` prints each
+task's id, creator, recipient kind, when it runs (`on platform.deployed,…`
+for a task that runs when the platform changes), state, next run and last
+outcome (`GET /v1/rooms/{room}/schedules`). `run` is the room's "Run now"
+(`POST /v1/rooms/{room}/schedules/{schedule}/run`): only the task's creator
+may run it, so a CI job uses an API token whose subject is the task's
+creator (`bnbloc api-tokens create --label ci` issues one for yourself;
+the subject must still be a room member who may chat). A message to the room or an agent prints its sequence; an AI task
+or a notice runs to its end (up to 11 minutes) and prints what it did, and a
+run that failed exits non-zero. `--dry` asks an AI task or a notice what it
+would do: real reads, nothing sent, nothing recorded. A run started this way
+carries no platform event's facts.
+
+A task can also run on the platform's own changes (recurrence `event`):
+`platform.deployed` (a gateway started on a build new to the deployment),
+`component.published` (a component or platform content got a new version;
+an organization's own publish reaches only that organization) and
+`desktop.published` (above). They need no command: the gateway records each
+once and realtime's scheduler runs every task following it
+(docs/architecture/schedules.md).

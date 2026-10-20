@@ -54,6 +54,7 @@ import { runJSONAssist, useAssistTask } from "@/lib/assist";
 import { DRAFT_SCHEDULE, scheduleDraftFrom } from "@/lib/assistDrafts";
 import { isSubmitEnter } from "@/lib/keys";
 import { AssistButton, type AssistRunState } from "@/views/AssistButton";
+import { ScheduleEventFields } from "@/views/room/ScheduleEventFields";
 
 const SELECT =
   "h-9 w-full rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 text-sm text-[var(--color-fg)] focus:outline-none focus:border-[var(--color-accent)]";
@@ -63,6 +64,7 @@ const KINDS = [
   { value: "daily" as const, label: "Daily" },
   { value: "weekly" as const, label: "Weekly" },
   { value: "cron" as const, label: "Custom" },
+  { value: "event" as const, label: "When the platform changes" },
 ];
 
 // SchedulesDialog is the room's scheduled prompts panel (N2): every member
@@ -658,6 +660,7 @@ function ScheduleEditor({
             </div>
           </Field>
         )}
+        {form.kind === "event" && <ScheduleEventFields form={form} onChange={setForm} />}
         {form.kind === "cron" && (
           <Field label="Cron expression" hint="minute hour day month weekday, at least 5 minutes apart">
             <Input value={form.cron} onChange={(e) => setForm((f) => ({ ...f, cron: e.target.value }))} placeholder="0 9 * * 1-5" className="font-mono" />

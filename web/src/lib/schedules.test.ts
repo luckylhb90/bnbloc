@@ -1,4 +1,5 @@
 import {
+  PLATFORM_EVENTS,
   describeRecurrence,
   formFromRecurrence,
   recurrenceFromForm,
@@ -113,3 +114,33 @@ eq(noticeTargetLabel("group:Infra"), "group Infra", "group label");
 eq(noticeTargetLabel(["maya", "jack"]), "maya, jack", "logins label");
 eq(noticeTargetLabel("room"), "the room", "room label");
 eq(recipientLabel({ kind: "notice", to: "group:Infra", title: "t" }), "notice to group Infra", "a notice's recipient label");
+
+// An event schedule (docs/prd/2026-10-20-event-triggered-schedules.md): the
+// editor offers the server's closed list, sends the events in that order,
+// and a component name only with component publishing.
+{
+  const now = Date.UTC(2026, 9, 8, 12, 0);
+  eq(
+    PLATFORM_EVENTS.map((e) => e.value),
+    ["platform.deployed", "component.published", "desktop.published"],
+    "the events are the server's list, in its order",
+  );
+  const f = { ...formFromRecurrence(undefined, "UTC", now), kind: "event" as const };
+  eq(f.events, ["platform.deployed"], "a new event schedule follows deploys");
+  eq(recurrenceFromForm(f, "UTC", now).recurrence, { kind: "event", events: ["platform.deployed"] }, "deploys");
+  eq(
+    recurrenceFromForm({ ...f, events: ["desktop.published", "component.published"], component: " browser " }, "UTC", now).recurrence,
+    { kind: "event", events: ["component.published", "desktop.published"], component: "browser" },
+    "events in the list's order, the component trimmed",
+  );
+  eq(
+    recurrenceFromForm({ ...f, events: ["platform.deployed"], component: "browser" }, "UTC", now).recurrence,
+    { kind: "event", events: ["platform.deployed"] },
+    "a component name only goes with component publishing",
+  );
+  eq(recurrenceFromForm({ ...f, events: [] }, "UTC", now).error, "Pick at least one change to run on", "an event schedule follows something");
+  const round = formFromRecurrence({ kind: "event", events: ["component.published"], component: "browser" }, "UTC", now);
+  eq([round.kind, round.events, round.component], ["event", ["component.published"], "browser"], "event round trip");
+  eq(describeRecurrence({ kind: "event", events: ["platform.deployed", "desktop.published"] }, "UTC"), "When bnbloc is deployed or a desktop version is published", "events described");
+  eq(describeRecurrence({ kind: "event", events: ["component.published"], component: "browser" }, "UTC"), "When component browser is published", "a component filter described");
+}
