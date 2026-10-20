@@ -203,26 +203,76 @@ pub(super) fn check_setting_value(s: &Setting, v: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Why a save was refused (pkgmeta.SettingRefusal): the setting it is about
+/// and the reason, worded with its label. The web reads it as the settings
+/// routes' refusal (`{"error", "field"}`), so a form or a component's
+/// settings page shows it at that field.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct SettingRefusal {
+    #[serde(rename = "field")]
+    pub(super) key: String,
+    #[serde(rename = "error")]
+    pub(super) reason: String,
+}
+
+impl SettingRefusal {
+    fn new(key: &str, reason: String) -> Self {
+        Self {
+            key: key.to_string(),
+            reason,
+        }
+    }
+}
+
+impl std::fmt::Display for SettingRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.reason)
+    }
+}
+
+/// A failed save of the member's own values: a refused value, or anything
+/// else (an unknown component, an unreadable file) as its message alone.
+#[derive(Debug, serde::Serialize)]
+#[serde(untagged)]
+pub enum SettingsSaveError {
+    Refused(SettingRefusal),
+    Failed { error: String },
+}
+
+impl From<String> for SettingsSaveError {
+    fn from(error: String) -> Self {
+        Self::Failed { error }
+    }
+}
+
+impl From<SettingRefusal> for SettingsSaveError {
+    fn from(refusal: SettingRefusal) -> Self {
+        Self::Refused(refusal)
+    }
+}
+
 /// Apply an update to the stored values of one scope (pkgmeta.MergeSettings):
 /// an absent key is left as it is, an empty value clears it (an empty secret
 /// keeps the stored one), a key in `clear` is cleared. Every key named must
 /// be a setting of the scope, every value valid, every required setting of
 /// the scope set in the end (a default counts); values of keys the
 /// declaration no longer has in the scope are dropped. Returns the values to
-/// store and the keys whose stored value changed.
+/// store and the keys whose stored value changed; a refusal names the first
+/// setting refused (pkgmeta.SettingRefusal).
 pub(super) fn merge_settings(
     decl: &[Setting],
     scope: &str,
     current: &Values,
     update: &Values,
     clear: &[String],
-) -> Result<(Values, Vec<String>), String> {
+) -> Result<(Values, Vec<String>), SettingRefusal> {
     let in_scope = |key: &str| decl.iter().find(|s| s.scope == scope && s.key == key);
     // BTreeMap keys come sorted, as pkgmeta checks them.
     for key in update.keys().chain(clear) {
         if in_scope(key).is_none() {
-            return Err(format!(
-                "{key:?} is not a {scope} setting of this component"
+            return Err(SettingRefusal::new(
+                key,
+                format!("{key:?} is not a {scope} setting of this component"),
             ));
         }
     }
@@ -243,7 +293,8 @@ pub(super) fn merge_settings(
                     .unwrap_or_default(),
                 Some(v) => {
                     if !v.is_empty() {
-                        check_setting_value(s, v).map_err(|e| format!("{} {e}", s.label))?;
+                        check_setting_value(s, v)
+                            .map_err(|e| SettingRefusal::new(&s.key, format!("{} {e}", s.label)))?;
                     }
                     v.to_string()
                 }
@@ -255,7 +306,7 @@ pub(super) fn merge_settings(
     }
     if let Some(key) = unset_settings(decl, &next, &[scope]).first() {
         let label = in_scope(key).map(|s| s.label.as_str()).unwrap_or(key);
-        return Err(format!("{label} is required"));
+        return Err(SettingRefusal::new(key, format!("{label} is required")));
     }
     let mut changed: Vec<String> = current
         .iter()
@@ -626,7 +677,7 @@ impl Adapter {
         name: &str,
         values: Values,
         clear: Vec<String>,
-    ) -> Result<(), String> {
+    ) -> Result<(), SettingsSaveError> {
         let kind = parse_kind(kind)?;
         let decl = self
             .component_settings_decl(kind, name)
@@ -707,6 +758,8 @@ mod tests {
         changed: Vec<String>,
         #[serde(default)]
         error: String,
+        #[serde(default)]
+        refused: String,
     }
 
     #[derive(serde::Deserialize)]
@@ -743,9 +796,10 @@ mod tests {
             if !c.error.is_empty() {
                 let err = got.expect_err(&format!("merge {i} must fail"));
                 assert!(
-                    err.contains(&c.error),
-                    "merge {i}: {err:?} lacks {:?}",
-                    c.error
+                    err.reason.contains(&c.error) && err.key == c.refused,
+                    "merge {i}: {err:?} lacks {:?} about {:?}",
+                    c.error,
+                    c.refused
                 );
                 continue;
             }
@@ -868,6 +922,35 @@ mod tests {
             Some("bot needs setup: ORGKEY, APPKEY (the Components page)")
         );
         assert_eq!(needs_setup("bot", &decl(), &[]), None);
+    }
+
+    /// A refused save reaches the web as the settings routes' refusal: the
+    /// reason and the setting's key; any other failure as its message.
+    #[test]
+    fn a_refused_save_names_the_field() {
+        let refused: SettingsSaveError = merge_settings(
+            &decl(),
+            "member",
+            &Values::new(),
+            &values(&[("quality", "max")]),
+            &[],
+        )
+        .expect_err("not a member setting")
+        .into();
+        let json = serde_json::to_value(&refused).unwrap();
+        assert_eq!(json["field"], "quality", "{json}");
+        assert!(
+            json["error"]
+                .as_str()
+                .unwrap()
+                .contains("is not a member setting"),
+            "{json}"
+        );
+        let failed = SettingsSaveError::from("notes is not installed".to_string());
+        assert_eq!(
+            serde_json::to_value(&failed).unwrap(),
+            serde_json::json!({"error": "notes is not installed"})
+        );
     }
 
     #[test]

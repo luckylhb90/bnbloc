@@ -197,7 +197,7 @@ fn component_settings_save(
     name: String,
     values: std::collections::BTreeMap<String, String>,
     clear: Vec<String>,
-) -> Result<(), String> {
+) -> Result<(), internal_ext::SettingsSaveError> {
     state.save_component_settings(&kind, &name, values, clear)
 }
 

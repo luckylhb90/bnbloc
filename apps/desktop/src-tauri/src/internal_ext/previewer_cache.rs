@@ -12,7 +12,8 @@
 //! re-list the catalog per file request), and parsed bundles by sha256
 //! (bounded LRU). Every sidecar reconcile drops entries whose previewer left
 //! the catalog, so an uninstall or rollout change stops serving within one
-//! poll.
+//! poll. A component's settings page bundle is the same format, named by
+//! its pin instead (settings_page_bundle) and kept in the same caches.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
@@ -172,6 +173,39 @@ impl Adapter {
                 pin
             }
         };
+        self.verified_bundle(&state, &pin).await
+    }
+
+    /// The verified bundle of a component's settings page, by the pin of
+    /// the settings view or catalog naming it (src/previewer_scheme.rs):
+    /// downloaded from the gateway's artifact route with the member's
+    /// session, which decides whether they may read it. Kept like a
+    /// previewer's bundle; a reconcile drops it from memory and disk (the
+    /// next frame downloads it again).
+    pub(crate) async fn settings_page_bundle(
+        &self,
+        sha256: &Sha256Pin,
+    ) -> Result<Arc<Bundle>, PreviewerError> {
+        let state = self
+            .app
+            .try_state::<PreviewerBundles>()
+            .ok_or_else(|| PreviewerError::Unavailable("previewer cache not ready".into()))?;
+        let pin = BundlePin {
+            // The gateway's content-addressed artifact path of the pin
+            // (pkgmeta.GatewayArtifactPath), on the signed-in gateway.
+            url: format!("/v1/artifacts/sha256/{sha256}"),
+            sha256: sha256.clone(),
+        };
+        self.verified_bundle(&state, &pin).await
+    }
+
+    /// The parsed bundle `pin` names: from memory, else its verified
+    /// archive (one fetch per bundle at a time).
+    async fn verified_bundle(
+        &self,
+        state: &PreviewerBundles,
+        pin: &BundlePin,
+    ) -> Result<Arc<Bundle>, PreviewerError> {
         if let Some(bundle) = state.cached_bundle(&pin.sha256) {
             return Ok(bundle);
         }
@@ -180,7 +214,7 @@ impl Adapter {
         if let Some(bundle) = state.cached_bundle(&pin.sha256) {
             return Ok(bundle);
         }
-        let raw = self.bundle_bytes(&pin).await?;
+        let raw = self.bundle_bytes(pin).await?;
         let bundle = Arc::new(parse_ustar(&raw).map_err(PreviewerError::BadArtifact)?);
         state.remember_bundle(&pin.sha256, Arc::clone(&bundle));
         Ok(bundle)

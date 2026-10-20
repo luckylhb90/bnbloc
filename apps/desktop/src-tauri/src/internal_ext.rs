@@ -41,7 +41,7 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use tauri::{AppHandle, Manager};
 
-pub use component_settings::ComponentSettingsView;
+pub use component_settings::{ComponentSettingsView, SettingsSaveError};
 use gateway_client::GatewayClient;
 pub use sidecar_model::AdapterStatus;
 use sidecar_model::{GatewayAccess, Inner, ManagedSidecar, SidecarSpec};

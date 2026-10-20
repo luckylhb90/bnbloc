@@ -68,6 +68,40 @@ fn refuses_malformed_and_traversing_paths() {
 }
 
 #[test]
+fn settings_pages_are_named_by_their_exact_pin() {
+    let sha = "c".repeat(64);
+    assert_eq!(
+        parse_target(&format!("/_settings/{sha}/pages/index.html")),
+        Some(SchemeTarget::SettingsPage {
+            sha256: Sha256Pin::parse(&sha).unwrap(),
+            file: "pages/index.html".into(),
+        })
+    );
+    assert!(matches!(
+        preflight(&Method::GET, &format!("/_settings/{sha}/page.js")),
+        Ok(SchemeTarget::SettingsPage { .. })
+    ));
+    for path in [
+        format!("/_settings/{}/index.html", "C".repeat(64)),
+        format!("/_settings/{}/index.html", "c".repeat(63)),
+        format!("/_settings/{sha}"),
+        format!("/_settings/{sha}/"),
+        format!("/_settings/{sha}/../index.html"),
+        format!("/_settings/{sha}/%2e%2e/index.html"),
+        format!("/_settings//{sha}/index.html"),
+        "/_settings/index.html".to_string(),
+    ] {
+        assert_eq!(parse_target(&path), None, "{path} must be refused");
+    }
+    // A previewer's path is unchanged; `_settings` is never a package name.
+    assert!(matches!(
+        parse_target("/sprite-sheet/1.0.0/index.html"),
+        Some(SchemeTarget::Previewer(_))
+    ));
+    assert_eq!(parse_path(&format!("/_settings/{sha}/index.html")), None);
+}
+
+#[test]
 fn refuses_non_read_methods() {
     for method in [
         Method::POST,

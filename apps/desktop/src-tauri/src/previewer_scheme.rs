@@ -15,6 +15,14 @@
 //! internal_ext/previewer_bundle.rs). Bundles never get network access:
 //! `connect-src 'none'` and no network source anywhere in the policy.
 //!
+//! A component's own settings page (docs/architecture/settings-pages.md) is
+//! a bundle of the same format, served the same way under
+//! `/_settings/{sha256}/{path…}` (`_settings` is never a package name): by
+//! the pin of the settings view or catalog that names it, downloaded with
+//! the member's session (the gateway lets them download the page bundle of
+//! a component listed to them, and a super admin any), so an admin sets up
+//! a component the member catalog does not list yet.
+//!
 //! Statuses: 404 bad path / not installed / unknown file, 405 non-read
 //! method, 502 refused artifact (sha256 mismatch, off-origin URL, malformed
 //! archive), 503 no session or catalog unreachable (retry).
@@ -24,6 +32,7 @@ use std::borrow::Cow;
 use tauri::http::{header, Method, Request, Response, StatusCode};
 use tauri::{AppHandle, Manager, UriSchemeResponder};
 
+use crate::internal_ext::pin::Sha256Pin;
 use crate::internal_ext::previewer_bundle::{valid_bundle_path, valid_package_version, Bundle};
 use crate::internal_ext::previewer_cache::PreviewerError;
 use crate::internal_ext::sidecar_model::valid_package_name;
@@ -53,6 +62,37 @@ pub(crate) struct PreviewerPath {
     pub(crate) name: String,
     pub(crate) version: String,
     pub(crate) file: String,
+}
+
+/// What a scheme request names: a file of an installed previewer, or a file
+/// of a component's settings page bundle by its pin.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum SchemeTarget {
+    Previewer(PreviewerPath),
+    SettingsPage { sha256: Sha256Pin, file: String },
+}
+
+/// The first path segment of a settings page bundle's files.
+const SETTINGS_PAGE_SEGMENT: &str = "_settings";
+
+/// Parses a request path into its target; None for anything malformed. A
+/// settings page's pin is 64 lower-case hex digits exactly.
+pub(crate) fn parse_target(path: &str) -> Option<SchemeTarget> {
+    let Some(rest) = path
+        .strip_prefix('/')
+        .and_then(|p| p.strip_prefix(SETTINGS_PAGE_SEGMENT))
+        .and_then(|p| p.strip_prefix('/'))
+    else {
+        return parse_path(path).map(SchemeTarget::Previewer);
+    };
+    let (sha, file) = rest.split_once('/')?;
+    let sha256 = Sha256Pin::parse(sha)
+        .ok()
+        .filter(|pin| pin.as_str() == sha)?;
+    valid_bundle_path(file).then(|| SchemeTarget::SettingsPage {
+        sha256,
+        file: file.to_string(),
+    })
 }
 
 /// Parses `/{name}/{version}/{path…}`; None for anything malformed (empty or
@@ -126,11 +166,11 @@ fn content_type(file: &str) -> &'static str {
 }
 
 /// Checks method and path before anything is resolved or downloaded.
-pub(crate) fn preflight(method: &Method, path: &str) -> Result<PreviewerPath, Resp> {
+pub(crate) fn preflight(method: &Method, path: &str) -> Result<SchemeTarget, Resp> {
     if method != Method::GET && method != Method::HEAD {
         return Err(status_only(StatusCode::METHOD_NOT_ALLOWED));
     }
-    parse_path(path).ok_or_else(|| status_only(StatusCode::NOT_FOUND))
+    parse_target(path).ok_or_else(|| status_only(StatusCode::NOT_FOUND))
 }
 
 /// Serves `file` out of a verified bundle. Pure, so headers are unit-tested.
@@ -188,13 +228,22 @@ pub(crate) fn handle(app: &AppHandle, request: Request<Vec<u8>>, responder: UriS
         let Some(adapter) = app.try_state::<Adapter>().map(|s| s.inner().clone()) else {
             return responder.respond(status_only(StatusCode::SERVICE_UNAVAILABLE));
         };
-        let resp = match adapter
-            .previewer_bundle(&target.name, &target.version)
-            .await
-        {
-            Ok(bundle) => serve(&method, &bundle, &target.file, &frame_ancestors(&app)),
+        let (bundle, file, label) = match &target {
+            SchemeTarget::Previewer(p) => (
+                adapter.previewer_bundle(&p.name, &p.version).await,
+                &p.file,
+                format!("previewer:{}@{}", p.name, p.version),
+            ),
+            SchemeTarget::SettingsPage { sha256, file } => (
+                adapter.settings_page_bundle(sha256).await,
+                file,
+                format!("settings page:{sha256}"),
+            ),
+        };
+        let resp = match bundle {
+            Ok(bundle) => serve(&method, &bundle, file, &frame_ancestors(&app)),
             Err(err) => {
-                eprintln!("[previewer:{}@{}] {err:?}", target.name, target.version);
+                eprintln!("[{label}] {err:?}");
                 error_response(&err)
             }
         };
