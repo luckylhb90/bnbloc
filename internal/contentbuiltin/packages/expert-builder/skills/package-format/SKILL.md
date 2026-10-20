@@ -181,10 +181,10 @@ add scripts only when the person asks for them.
 | every package | files in the package | 512 files |
 | every package | package size | 8 MiB |
 | expert | INSTRUCTIONS.md | 64 KiB |
-| expert | quickPrompts | 12 entries |
-| expert | quickPrompts[].title | 80 characters |
-| expert | quickPrompts[].prompt | 4000 characters |
-| expert | welcome | 4000 characters |
+| expert, room package | quickPrompts | 12 entries |
+| expert, room package | quickPrompts[].title | 80 characters |
+| expert, room package | quickPrompts[].prompt | 4000 characters |
+| expert, room package | welcome | 4000 characters |
 | expert, skill pack | skills | 64 entries |
 | expert, skill pack | SKILL.md | 64 KiB |
 | expert, skill pack | SKILL.md description | 1024 characters |
@@ -216,4 +216,13 @@ add scripts only when the person asks for them.
 | assist | fields[].description | 300 characters |
 | assist | files in the package | 3 files |
 | assist | package size | 64 KiB |
+| room package | description (the room's) | 500 characters |
+| room package | channels | 20 entries |
+| room package | channels[] | 80 characters |
+| room package | schedules | 20 entries |
+| room package | schedules[].text | 16 KiB |
+| room package | apps | 10 entries |
+| room package | README.md | 64 KiB |
+| room package | files in the package | 2 files |
+| room package | package size | 1 MiB |
 <!-- limits:end -->

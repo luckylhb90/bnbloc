@@ -1799,12 +1799,17 @@ export interface ContentComponent {
   recipe?: WorkRecipe;
   // Team is a team expert's roster (as its manifest names it).
   team?: ContentTeam;
+  // Room is a room package's setup (its channels, schedules, apps and
+  // sources); absent for the other kinds.
+  room?: RoomSpec;
   createdAtMs: number;
   updatedAtMs: number;
 }
 
-// ContentRequires mirrors a manifest's requires.
+// ContentRequires mirrors a manifest's requires (Expert: a room
+// package's room expert, "name@range").
 export interface ContentRequires {
+  expert?: string;
   skills?: string[];
   prompts?: string[];
   mcp?: ContentMCPRequirement[];
@@ -4169,6 +4174,103 @@ export interface TenantRetentionView {
   limits: RetentionLimits;
 }
 
+// ---- wire/room_components.go ----
+
+// RoomSourceRuns is the organization's agent conversations: request
+// and reply text, the agent, the outcome, the room and the time.
+export const RoomSourceRuns = "runs";
+
+// RoomSources are the sources a room package may declare: the one list.
+export const RoomSources: readonly string[] = ["runs"];
+
+// RoomPackageSchedule is a scheduled task of a room package: an AI task
+// or a notice to the room's members (Recipient kind "ai" or "notice"),
+// its text and when it recurs. Channel is a channel name of the package
+// ("" the room's default channel). Installing creates it disabled, owned
+// by the installer.
+export interface RoomPackageSchedule {
+  channel?: string;
+  text: string;
+  recipient: ScheduleRecipient;
+  recurrence: ScheduleRecurrence;
+  timezone: string;
+}
+
+// RoomSpec is a room package's setup on its Library view (the room
+// expert, skill packs and prompt packs are its requires). Apps are works
+// by "name@range".
+export interface RoomSpec {
+  channels: string[];
+  schedules: RoomPackageSchedule[];
+  apps: string[];
+  sources: RoomSource[];
+}
+
+// RoomDraftPart is a component a room uses, as a draft captured it: its
+// id, names, the version in effect and Ref, the "name@^major" a package
+// names it by.
+export interface RoomDraftPart {
+  id: string;
+  name: string;
+  displayName?: string;
+  version: string;
+  ref: string;
+}
+
+// RoomComponentDraft answers GET /v1/rooms/{roomId}/component-draft: what
+// "Save as component" captures of a room for its owner or an admin, to be
+// reviewed and saved as a room package through the content form. Name is
+// a package name proposed from the room's. Left says, a line each, what
+// of the room a package does not hold.
+export interface RoomComponentDraft {
+  roomId: string;
+  name: string;
+  displayName: string;
+  description: string;
+  channels: string[];
+  schedules: RoomPackageSchedule[];
+  expert?: RoomDraftPart;
+  skills: RoomDraftPart[];
+  prompts: RoomDraftPart[];
+  apps: RoomDraftPart[];
+  left: string[];
+}
+
+// RoomInstallRequest is POST /v1/content-components/{id}/create-room: the
+// version to install (default the latest) and the new room's id (one is
+// made when empty), name (default the component's) and visibility
+// ("private" by default, or "shared").
+export interface RoomInstallRequest {
+  version?: string;
+  roomId?: string;
+  name?: string;
+  visibility?: string;
+}
+
+// RoomInstallReply is what installing a room package set up: the new room,
+// From ("name@version"), its channels, the ids of its schedules (all
+// paused), the room expert, the packs turned on and the apps copied in
+// (labels), what was left out and why (Skipped), and what the room asks
+// for that nobody granted: its sources (none is read until the
+// organization's admin consents) and its MCP tools. Welcome and
+// QuickPrompts are the package's, for the room's first visit.
+export interface RoomInstallReply {
+  roomId: string;
+  name: string;
+  componentId: string;
+  from: string;
+  channels: string[];
+  schedules: string[];
+  expert?: string;
+  enabled: string[];
+  apps: string[];
+  skipped: string[];
+  sources: RoomSource[];
+  tools: string[];
+  welcome?: string;
+  quickPrompts?: ContentQuickPrompt[];
+}
+
 // ---- wire/rooms.go ----
 
 // RoomSummary is one room of the caller's own room list
@@ -4270,8 +4372,9 @@ export interface UnreadReply {
 // ---- wire/schedules.go ----
 
 // MaxChatTextBytes is the product cap on one chat message's text. realtime
-// enforces it on every post; schedule and template validation use the same
-// bound so a stored scheduled prompt always fits the post it becomes.
+// enforces it on every post; schedule validation (a room package's
+// schedules too) uses the same bound so a stored scheduled prompt always
+// fits the post it becomes.
 export const MaxChatTextBytes = 16384;
 
 // Schedule recipient kinds: a people-only room message, a message
@@ -4400,84 +4503,6 @@ export interface ScheduleAction {
 // posted, so clients can badge it. A typed message never carries it.
 export interface ScheduledMarker {
   scheduleId: string;
-}
-
-// Room template visibility values: private is the author only, tenant is
-// every member of the author's tenant.
-export const TemplatePrivate = "private";
-export const TemplateTenant = "tenant";
-
-// TemplateAgent is a suggested agent of a template: a HINT only. After a
-// room is created from the template the UI offers to invite the owner and
-// to request that owner's borrow authorization; nothing is ever granted
-// automatically.
-export interface TemplateAgent {
-  ownerId: string;
-  provider: string;
-  core?: string;
-}
-
-// TemplateSchedule is a schedule captured in a template. Channel is a channel
-// NAME of the template (ids are per room); empty means the default channel.
-// Instantiation creates it disabled, owned by the member who instantiated.
-export interface TemplateSchedule {
-  channel?: string;
-  text: string;
-  recipient: ScheduleRecipient;
-  recurrence: ScheduleRecurrence;
-  timezone: string;
-}
-
-// TemplateContentUse is a content component a template turns on in every
-// room made from it: a room content use, pinned to Version or following the
-// latest when empty.
-export interface TemplateContentUse {
-  componentId: string;
-  version?: string;
-}
-
-// RoomTemplateBody is what a template sets up in a new room. A template's
-// starters are its prompt packs' (PromptPacks become the new room's prompt
-// pack uses); it has no starter list of its own.
-export interface RoomTemplateBody {
-  roomDescription?: string;
-  channels: string[];
-  promptPacks: TemplateContentUse[];
-  suggestedAgents: TemplateAgent[];
-  defaultMembers: string[];
-  schedules: TemplateSchedule[];
-}
-
-// RoomTemplate is one template in the tenant's template library.
-export interface RoomTemplate {
-  templateId: string;
-  tenantId: string;
-  name: string;
-  description?: string;
-  visibility: TemplateVisibility;
-  createdBy: string;
-  body: RoomTemplateBody;
-  useCount: number;
-  createdAtMs: number;
-  updatedAtMs: number;
-}
-
-// RoomTemplateInstance is the instantiate response: the new room and what
-// the template set up in it. SuggestedAgents are returned for the UI's
-// follow-up offers; no grant is created for any agent. PromptPacks are the
-// component ids turned on in the room; FailedPromptPacks the template's
-// packs the creator may not use, left out.
-export interface RoomTemplateInstance {
-  roomId: string;
-  name: string;
-  templateId: string;
-  channels: string[];
-  addedMembers: string[];
-  failedMembers?: string[];
-  schedules: string[];
-  promptPacks: string[];
-  failedPromptPacks?: string[];
-  suggestedAgents: TemplateAgent[];
 }
 
 // ---- wire/search_reindex.go ----
@@ -5304,7 +5329,7 @@ export interface MemberRemovedPayload {
 
 // EventMemberJoined (MemberJoinedPayload) is published by bnbloc-room,
 // transient, when a person becomes a member of a room (added, joined a
-// shared room, redeemed an invite, a template's default member). Realtime's
+// shared room, redeemed an invite). Realtime's
 // publish tap gives the new member the room's standing content shares
 // (internal/contentshare); clients may refresh their member lists on it.
 export const EventMemberJoined = "member_joined";
@@ -5574,14 +5599,14 @@ export type MediaVideoAspect = "16:9" | "9:16";
 export const MediaVideoAspectValues: readonly MediaVideoAspect[] = ["16:9", "9:16"];
 export type MediaVideoStatus = "rendering" | "done" | "failed";
 export const MediaVideoStatusValues: readonly MediaVideoStatus[] = ["rendering", "done", "failed"];
+export type RoomSource = "runs";
+export const RoomSourceValues: readonly RoomSource[] = ["runs"];
 export type ScheduleRecipientKind = "room" | "agent" | "ai" | "notice";
 export const ScheduleRecipientKindValues: readonly ScheduleRecipientKind[] = ["room", "agent", "ai", "notice"];
 export type RecurrenceKind = "once" | "daily" | "weekly" | "cron";
 export const RecurrenceKindValues: readonly RecurrenceKind[] = ["once", "daily", "weekly", "cron"];
 export type ScheduleRunStatus = "ok" | "error" | "skipped";
 export const ScheduleRunStatusValues: readonly ScheduleRunStatus[] = ["ok", "error", "skipped"];
-export type TemplateVisibility = "private" | "tenant";
-export const TemplateVisibilityValues: readonly TemplateVisibility[] = ["private", "tenant"];
 export type ShareAccess = "org" | "signed_in" | "anyone";
 export const ShareAccessValues: readonly ShareAccess[] = ["org", "signed_in", "anyone"];
 export type ShareRefusalCode = "share_sign_in_required" | "share_org_only";
@@ -5636,8 +5661,8 @@ export const ComponentRuntimeValues: readonly ComponentRuntime[] = ["stdio", "en
 export type ComponentRollout = "auto" | "optin" | "off";
 export const ComponentRolloutValues: readonly ComponentRollout[] = ["auto", "optin", "off"];
 // A content component kind's short name (the contentpkg registry).
-export type ContentKind = "assist" | "expert" | "prompt" | "skill" | "work";
-export const ContentKindValues: readonly ContentKind[] = ["assist", "expert", "prompt", "skill", "work"];
+export type ContentKind = "assist" | "expert" | "prompt" | "room" | "skill" | "work";
+export const ContentKindValues: readonly ContentKind[] = ["assist", "expert", "prompt", "room", "skill", "work"];
 
 // ---- tables computed by their Go owners ----
 // The job statuses store.AgentJobStatus.Terminal reports finished; every

@@ -61,8 +61,6 @@ func TestRouteLabel(t *testing.T) {
 		"/v1/my/plugin-events/ack/ack":                     "/v1/my/plugin-events/:id/ack",
 		"/v1/rooms/r/schedules/sch_1/run":                  "/v1/rooms/:id/schedules/:id/run",
 		"/v1/rooms/r/schedules/run":                        "/v1/rooms/:id/schedules/:id",
-		"/v1/room-templates/tpl_1/instantiate":             "/v1/room-templates/:id/instantiate",
-		"/v1/tenant/room-templates/tpl_1":                  "/v1/tenant/room-templates/:id",
 		"/v1/rooms/r/artifacts/art_1/versions/3/content":   "/v1/rooms/:id/artifacts/:id/versions/:id/content",
 		"/v1/content-components":                           "/v1/content-components",
 		"/v1/content-components/import":                    "/v1/content-components/import",
@@ -96,7 +94,7 @@ func TestRouteLabel(t *testing.T) {
 		"/internal/v1/rooms/r/dispatch":                    "/internal/v1/rooms/:id/dispatch",
 		"/v1/rooms/r/dispatch":                             "/v1/rooms/:id/dispatch",
 		"/v1/rooms/r/team-plan":                            "/v1/rooms/:id/team-plan",
-		"/v1/tenant/components/notes/settings":                "/v1/tenant/components/:id/settings",
+		"/v1/tenant/components/notes/settings":             "/v1/tenant/components/:id/settings",
 		"/v1/platform/components/settings/settings":        "/v1/platform/components/:id/settings",
 		"/v1/components/notes/settings/resolved":           "/v1/components/:id/settings/resolved",
 		// content sharing and approval

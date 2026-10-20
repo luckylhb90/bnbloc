@@ -81,13 +81,18 @@ type ContentComponent struct {
 	// carries none.
 	Recipe *WorkRecipe `json:"recipe,omitempty"`
 	// Team is a team expert's roster (as its manifest names it).
-	Team        *ContentTeam `json:"team,omitempty"`
-	CreatedAtMs int64        `json:"createdAtMs"`
-	UpdatedAtMs int64        `json:"updatedAtMs"`
+	Team *ContentTeam `json:"team,omitempty"`
+	// Room is a room package's setup (its channels, schedules, apps and
+	// sources); absent for the other kinds.
+	Room        *RoomSpec `json:"room,omitempty"`
+	CreatedAtMs int64     `json:"createdAtMs"`
+	UpdatedAtMs int64     `json:"updatedAtMs"`
 }
 
-// ContentRequires mirrors a manifest's requires.
+// ContentRequires mirrors a manifest's requires (Expert: a room
+// package's room expert, "name@range").
 type ContentRequires struct {
+	Expert      string                  `json:"expert,omitempty"`
 	Skills      []string                `json:"skills,omitempty"`
 	Prompts     []string                `json:"prompts,omitempty"`
 	MCP         []ContentMCPRequirement `json:"mcp,omitempty"`

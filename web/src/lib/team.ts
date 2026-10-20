@@ -192,7 +192,7 @@ export function lastRoom(subject: string): string | null {
 
 // The Library tab to open (a save toast's "Open in Library"). Taken once on
 // the page's mount.
-export type LibraryTabName = "experts" | "skills" | "prompts" | "assists" | "tools" | "templates" | "works";
+export type LibraryTabName = "experts" | "skills" | "prompts" | "assists" | "tools" | "rooms" | "works";
 let pendingLibraryTab: LibraryTabName | null = null;
 export function queueLibraryTab(tab: LibraryTabName): void {
   pendingLibraryTab = tab;

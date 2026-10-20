@@ -57,15 +57,6 @@ type Service struct {
 	ArtifactMaxBytes int64
 	// RoomImports records the provenance of rooms created by an import.
 	RoomImports store.RoomImportStore
-	// Templates is the tenant room-template library (N3); Schedules lets a
-	// template capture a room's schedules and create them (disabled) in a
-	// new room. Nil Templates answers the template routes 503.
-	Templates store.RoomTemplateStore
-	Schedules store.RoomScheduleStore
-	// Content is the content store under the built-in overlay: a
-	// template's prompt packs are checked against it and turned on in a
-	// room made from it. Nil refuses a template with prompt packs (503).
-	Content store.ContentComponentStore
 	// Tenants is the tenant registry: the org policy switches (public share
 	// links) and org roles (an org admin may revoke any share link). Nil
 	// answers the share routes 503.
@@ -200,7 +191,6 @@ func (s *Service) Handler() http.Handler {
 	mux.HandleFunc("DELETE /v1/rooms/{roomId}/members/{userId}", s.handleRemoveMember)
 	mux.HandleFunc("POST /v1/rooms/{roomId}/invites", s.handleCreateInvite)
 	mux.HandleFunc("POST /v1/invites/{code}/redeem", s.handleRedeem)
-	s.registerTemplateRoutes(mux)
 	s.registerShareRoutes(mux)
 	s.registerProfileRoutes(mux)
 	s.registerAgentHostRoutes(mux)

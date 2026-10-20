@@ -522,35 +522,44 @@ func (s *Service) handleUseApp(w http.ResponseWriter, r *http.Request, caller au
 		httpx.Error(w, fmt.Sprintf("%s is a %s: only an app is used as a copy", c.Name, pkg.Manifest.Type), http.StatusBadRequest)
 		return
 	}
-	snapshot, err := tarbundle.PackFiles(contentpkg.WorkSite(pkg), tarbundle.SiteLimits)
-	if err != nil {
-		obs.ServerError(w, "pack the app's site failed", err)
-		httpx.Error(w, "pack the app's site failed", http.StatusInternalServerError)
-		return
-	}
-	title := firstNonEmpty(c.DisplayName, c.Name)
 	ctx, cancel := context.WithTimeout(ctx, appCopyTimeout)
 	defer cancel()
 	reply := wire.AppUseReply{From: c.Name + "@" + v.Version}
-	owner, roomID, created, ok := s.galleryRoom(ctx, w, claims, in.RoomID, in.NewRoom, title)
+	owner, roomID, created, ok := s.galleryRoom(ctx, w, claims, in.RoomID, in.NewRoom, firstNonEmpty(c.DisplayName, c.Name))
 	if !ok {
 		return
 	}
 	reply.RoomID, reply.CreatedRoom = roomID, created
-	if reply.ArtifactID, reply.Version, err = s.copySite(ctx, owner, roomID, title, c.Name, reply.From, snapshot); err != nil {
+	var err error
+	if reply.ArtifactID, reply.Version, err = s.copyApp(ctx, claims.Subject, owner, roomID, c, v, pkg); err != nil {
 		s.writeRoomBackendErr(w, "copy the app into the room failed", err)
 		return
 	}
-	now := s.nowTime().UnixMilli()
-	if err := s.ContentComponents.PutContentUse(ctx, store.ContentUse{TenantID: owner.Tenant, ScopeKind: store.ContentUseAppCopy, ScopeID: reply.ArtifactID,
-		ComponentID: c.ID, Kind: c.Kind, PinnedVersion: v.Version, CreatedBy: claims.Subject, CreatedAtMs: now}); err != nil {
-		obs.ServerError(w, "count the app's use failed", err)
-		httpx.Error(w, "count the app's use failed", http.StatusInternalServerError)
-		return
-	}
-	s.auditContent(ctx, "use", claims.Subject, owner.Tenant, c, v.Version,
-		contentshare.Label(c)+" v"+v.Version+" copied by "+claims.Subject+" into room "+roomID+" as site "+reply.ArtifactID)
 	httpx.WriteJSON(w, http.StatusCreated, reply)
+}
+
+// copyApp copies an app work's version (pkg, an app) into roomID as a new
+// site of the member in owner (copySite: a fresh, empty data space) and
+// counts the copy as a use of the work (scope app-copy) by actor: the one
+// copy of an app, for "Use this app" and a room package's install alike.
+// It answers the new site's artifact id and version.
+func (s *Service) copyApp(ctx context.Context, actor string, owner auth.Claims, roomID string, c store.ContentComponent, v store.ContentComponentVersion, pkg *contentpkg.Package) (string, int, error) {
+	snapshot, err := tarbundle.PackFiles(contentpkg.WorkSite(pkg), tarbundle.SiteLimits)
+	if err != nil {
+		return "", 0, fmt.Errorf("pack the app's site: %w", err)
+	}
+	from := c.Name + "@" + v.Version
+	artifactID, version, err := s.copySite(ctx, owner, roomID, firstNonEmpty(c.DisplayName, c.Name), c.Name, from, snapshot)
+	if err != nil {
+		return "", 0, err
+	}
+	if err := s.ContentComponents.PutContentUse(ctx, store.ContentUse{TenantID: owner.Tenant, ScopeKind: store.ContentUseAppCopy, ScopeID: artifactID,
+		ComponentID: c.ID, Kind: c.Kind, PinnedVersion: v.Version, CreatedBy: actor, CreatedAtMs: s.nowTime().UnixMilli()}); err != nil {
+		return "", 0, fmt.Errorf("count the app's use: %w", err)
+	}
+	s.auditContent(ctx, "use", actor, owner.Tenant, c, v.Version,
+		contentshare.Label(c)+" v"+v.Version+" copied by "+actor+" into room "+roomID+" as site "+artifactID)
+	return artifactID, version, nil
 }
 
 // galleryWork reads a gallery request on a work: the work visible to the

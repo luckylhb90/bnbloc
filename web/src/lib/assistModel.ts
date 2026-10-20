@@ -11,6 +11,7 @@ import { workNameFrom, type PublishWorkForm } from "./workGallery.ts";
  *  organization or member may restyle them). */
 export const ENHANCE_PROMPT = "enhance-prompt";
 export const DESCRIBE_WORK = "describe-work";
+export const DESCRIBE_ROOM = "describe-room";
 
 /** assistTask finds a runnable task in a status: null when assists are
  *  unavailable or the task does not exist. */

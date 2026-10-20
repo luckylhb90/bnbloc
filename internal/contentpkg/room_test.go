@@ -1,0 +1,183 @@
+package contentpkg
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/luckylhb90/bnbloc/internal/tarbundle"
+	"github.com/luckylhb90/bnbloc/internal/wire"
+)
+
+// aiTask is a room package schedule: a daily AI task in the room's default
+// channel.
+func aiTask() map[string]any {
+	return map[string]any{"text": "Summarize yesterday's work.", "recipient": map[string]any{"kind": wire.ScheduleRecipientAI},
+		"recurrence": map[string]any{"kind": wire.RecurDaily, "time": "09:00"}, "timezone": "UTC"}
+}
+
+// roomBundle is a room package with a channel, an AI task, a room expert,
+// a prompt pack, an app and a source; extra manifest fields are set or
+// removed (nil), and files added or removed ("").
+func roomBundle(t *testing.T, extra map[string]any, files map[string]string) []byte {
+	t.Helper()
+	m := map[string]any{"kind": KindRoom, "name": "weekly-review", "version": "1.0.0", "displayName": "Weekly review",
+		"description": "Reviews the week's work.", "welcome": "Turn the schedule on to start.",
+		"quickPrompts": []map[string]any{{"title": "Plan", "prompt": "Plan the week."}, {"ref": "review-prompts/recap"}},
+		"channels":     []string{"reports"}, "schedules": []map[string]any{aiTask()},
+		"requires": map[string]any{"expert": "reviewer@^1", "skills": []string{"charts@^2"}, "prompts": []string{"review-prompts@^1"}},
+		"apps":     []string{"triage-board@^1"}, "sources": []string{wire.RoomSourceRuns}}
+	for k, v := range extra {
+		if v == nil {
+			delete(m, k)
+			continue
+		}
+		m[k] = v
+	}
+	all := map[string][]byte{ManifestFile: manifestJSON(t, m)}
+	for k, v := range files {
+		if v == "" {
+			delete(all, k)
+			continue
+		}
+		all[k] = []byte(v)
+	}
+	raw, err := tarbundle.PackFiles(all, tarbundle.ContentLimits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+func TestRoomPackageValidation(t *testing.T) {
+	p, err := Validate(roomBundle(t, nil, map[string]string{ReadmeFile: "# Weekly review\n"}), "", Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := p.Manifest.RoomSpec()
+	if spec == nil || spec.Channels[0] != "reports" || spec.Schedules[0].Recipient.Kind != wire.ScheduleRecipientAI ||
+		spec.Apps[0] != "triage-board@^1" || spec.Sources[0] != wire.RoomSourceRuns || p.Manifest.Requires.Expert != "reviewer@^1" {
+		t.Fatalf("room spec = %+v (requires %+v)", spec, p.Manifest.Requires)
+	}
+	notice := map[string]any{"text": "Week {week}: the review is due.", "recurrence": map[string]any{"kind": wire.RecurWeekly, "time": "08:30", "days": []int{1}},
+		"timezone": "Europe/Berlin", "channel": "reports",
+		"recipient": map[string]any{"kind": wire.ScheduleRecipientNotice, "to": wire.AppNotifyRoom, "title": "Weekly review"}}
+	if _, err := Validate(roomBundle(t, map[string]any{"schedules": []map[string]any{aiTask(), notice}}, nil), "", Options{}); err != nil {
+		t.Fatalf("an AI task and a notice to the room: %v", err)
+	}
+	if _, err := Validate(roomBundle(t, map[string]any{"schedules": nil, "requires": nil, "apps": nil, "sources": nil, "channels": nil, "quickPrompts": nil}, nil), "", Options{}); err != nil {
+		t.Fatalf("a room package of only a description: %v", err)
+	}
+	with := func(field string, edit func(map[string]any)) []map[string]any {
+		s := aiTask()
+		edit(s)
+		return []map[string]any{s}
+	}
+	bad := []struct {
+		name  string
+		extra map[string]any
+		files map[string]string
+		want  string
+	}{
+		{"a schedule that posts as a person", map[string]any{"schedules": with("recipient", func(s map[string]any) {
+			s["recipient"] = map[string]any{"kind": wire.ScheduleRecipientRoom}
+		})}, nil, "AI task or a notice"},
+		{"a schedule that drives an agent", map[string]any{"schedules": with("recipient", func(s map[string]any) {
+			s["recipient"] = map[string]any{"kind": wire.ScheduleRecipientAgent, "ownerId": "maya", "provider": "codex"}
+		})}, nil, "AI task or a notice"},
+		{"a notice to named people", map[string]any{"schedules": with("recipient", func(s map[string]any) {
+			s["recipient"] = map[string]any{"kind": wire.ScheduleRecipientNotice, "to": []string{"maya"}, "title": "Hi"}
+		})}, nil, "names no people"},
+		{"a notice to a group", map[string]any{"schedules": with("recipient", func(s map[string]any) {
+			s["recipient"] = map[string]any{"kind": wire.ScheduleRecipientNotice, "to": "group:team", "title": "Hi"}
+		})}, nil, "names no people"},
+		{"an unknown notice name", map[string]any{"schedules": with("text", func(s map[string]any) {
+			s["text"] = "{wek}"
+			s["recipient"] = map[string]any{"kind": wire.ScheduleRecipientNotice, "to": wire.AppNotifyRoom, "title": "Hi"}
+		})}, nil, "not a name a notice knows"},
+		{"an AI task without text", map[string]any{"schedules": with("text", func(s map[string]any) { s["text"] = " " })}, nil, "text is required"},
+		{"a one-time run", map[string]any{"schedules": with("recurrence", func(s map[string]any) {
+			s["recurrence"] = map[string]any{"kind": wire.RecurOnce, "atMs": 1}
+		})}, nil, "recurs"},
+		{"no timezone", map[string]any{"schedules": with("timezone", func(s map[string]any) { delete(s, "timezone") })}, nil, "timezone"},
+		{"a channel not listed", map[string]any{"schedules": with("channel", func(s map[string]any) { s["channel"] = "elsewhere" })}, nil, "not one of the package's channels"},
+		{"the default channel listed", map[string]any{"channels": []string{"General"}}, nil, "every room has it"},
+		{"a channel twice", map[string]any{"channels": []string{"reports", "Reports"}}, nil, "twice"},
+		{"a padded channel", map[string]any{"channels": []string{" reports"}}, nil, "surrounding spaces"},
+		{"too many channels", map[string]any{"channels": names("c", maxRoomChannels+1), "schedules": nil}, nil, "at most"},
+		{"an unknown source", map[string]any{"sources": []string{"mail"}}, nil, "source \"mail\""},
+		{"a source twice", map[string]any{"sources": []string{wire.RoomSourceRuns, wire.RoomSourceRuns}}, nil, "twice"},
+		{"a bad app reference", map[string]any{"apps": []string{"Triage Board"}}, nil, "apps"},
+		{"an app twice", map[string]any{"apps": []string{"board@^1", "board@^2"}}, nil, "twice"},
+		{"a bad expert reference", map[string]any{"requires": map[string]any{"expert": "reviewer@nope"}}, nil, "requires.expert"},
+		{"a quick prompt of a pack not required", map[string]any{"quickPrompts": []map[string]any{{"ref": "other/x"}}}, nil, "requires.prompts"},
+		{"a description past a room's", map[string]any{"description": strings.Repeat("d", maxRoomDescription+1)}, nil, "room's description"},
+		{"scripts", map[string]any{"requires": map[string]any{"permissions": []string{PermScripts}}}, nil, "no scripts"},
+		{"skills", map[string]any{"skills": []string{"x"}}, nil, "skills"},
+		{"an extra file", nil, map[string]string{"INSTRUCTIONS.md": "x"}, "holds only"},
+	}
+	for _, c := range bad {
+		_, err := Validate(roomBundle(t, c.extra, c.files), "", Options{})
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: err = %v, want %q", c.name, err, c.want)
+		}
+	}
+}
+
+// names are n distinct names with a prefix.
+func names(prefix string, n int) []string {
+	out := make([]string, n)
+	for i := range out {
+		out[i] = prefix + strings.Repeat("x", i+1)
+	}
+	return out
+}
+
+// A room's fields belong to the room kind: no other kind carries them,
+// from a manifest or a form.
+func TestRoomFieldsOnlyInRoomPackages(t *testing.T) {
+	for _, extra := range []map[string]any{
+		{"channels": []string{"reports"}},
+		{"sources": []string{wire.RoomSourceRuns}},
+		{"apps": []string{"board@^1"}},
+		{"schedules": []map[string]any{aiTask()}},
+		{"requires": map[string]any{"expert": "reviewer@^1"}},
+	} {
+		if _, err := Validate(assistBundle(t, extra, nil), "", Options{}); err == nil || !strings.Contains(err.Error(), "belong to a room package") {
+			t.Errorf("an assist with %v: err = %v", extra, err)
+		}
+	}
+	f := Form{Kind: "expert", Name: "x", Instructions: "Do it.", Channels: []string{"reports"}}
+	if _, _, err := Build(f, "1.0.0", Options{}, nil); err == nil || !strings.Contains(err.Error(), "belong to a room package") {
+		t.Errorf("an expert form with channels: err = %v", err)
+	}
+}
+
+// The form lays a room package out as its manifest alone.
+func TestRoomPackageFromForm(t *testing.T) {
+	f := Form{Kind: "room", Name: "weekly-review", Description: "Reviews the week.", Welcome: " Hello ",
+		Requires: Requires{Expert: "reviewer@^1"}, Channels: []string{" reports "}, Sources: []string{wire.RoomSourceRuns},
+		Schedules: []wire.RoomPackageSchedule{{Text: "Go.", Recipient: wire.ScheduleRecipient{Kind: wire.ScheduleRecipientAI},
+			Recurrence: wire.ScheduleRecurrence{Kind: wire.RecurDaily, Time: "09:00"}, Timezone: "UTC", Channel: "reports"}}}
+	p, _, err := Build(f, "1.0.0", Options{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := p.Bundle.Paths(); len(got) != 1 || got[0] != ManifestFile {
+		t.Fatalf("files = %v", got)
+	}
+	if m := p.Manifest; m.Welcome != "Hello" || m.Channels[0] != "reports" || m.Requires.Expert != "reviewer@^1" || len(m.Schedules) != 1 {
+		t.Fatalf("manifest = %+v", m)
+	}
+	f.Instructions = "Be a reviewer."
+	if _, _, err := Build(f, "1.0.0", Options{}, nil); err == nil {
+		t.Error("a room form with instructions saved")
+	}
+}
+
+func TestMajorRef(t *testing.T) {
+	for in, want := range map[[2]string]string{{"charts", "2.3.1"}: "charts@^2", {"charts", "0.4.0"}: "charts@^0", {"charts", "x"}: "charts"} {
+		if got := MajorRef(in[0], in[1]); got != want {
+			t.Errorf("MajorRef(%v) = %q, want %q", in, got, want)
+		}
+	}
+}

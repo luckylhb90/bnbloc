@@ -672,10 +672,10 @@ CREATE TABLE IF NOT EXISTS room_schedules (
   KEY idx_room_schedules_claim (claim_token)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Room templates (N3): a reusable room setup (description, channels, prompt
--- packs, suggested agents, default members, disabled schedules). visibility
--- is 'private' (author only) or 'tenant'. Suggested agents are hints only:
--- instantiating never grants borrow authorization.
+-- Room templates (N3), retired: room packages (bnbloc.room.package/v1,
+-- docs/prd/2026-10-20-rooms-as-components.md) replaced them, and no code
+-- reads or writes this table. A release after the one that stopped using
+-- it drops it (AGENTS.md, "A migration only adds"); nothing is kept.
 CREATE TABLE IF NOT EXISTS room_templates (
   template_id   VARCHAR(64) PRIMARY KEY,
   tenant_id     VARCHAR(64) NOT NULL,

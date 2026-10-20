@@ -1,0 +1,19 @@
+{
+  "kind": "bnbloc.assist.package/v1",
+  "name": "describe-room",
+  "version": "1.0.0",
+  "displayName": "Describe a room component",
+  "description": "Drafts a room component's Library entry (its name, description, category, tags and welcome) from the room and the setup being saved.",
+  "category": "authoring",
+  "tags": ["assist", "rooms"],
+  "icon": "sparkle",
+  "output": "json",
+  "fields": [
+    { "name": "displayName", "description": "The component's name in the Library" },
+    { "name": "description", "description": "One or two sentences: what a room made from it is for" },
+    { "name": "category", "description": "One lower-case word for its kind of work" },
+    { "name": "tags", "description": "Three to five tags", "type": "list" },
+    { "name": "welcome", "description": "What a new room made from it says first" }
+  ],
+  "context": ["room"]
+}

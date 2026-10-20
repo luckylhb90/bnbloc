@@ -252,8 +252,8 @@ func TestBuiltinsHardCodeNoLanguage(t *testing.T) {
 func TestBuilderQuickPromptsServeTheWorkshop(t *testing.T) {
 	qps := builder(t).Validated.Manifest.QuickPrompts
 	for _, k := range contentpkg.Kinds() {
-		if k.Snapshot {
-			continue // a work is published from a deliverable, not drafted in the workshop
+		if k.Snapshot || k.Kind == contentpkg.KindRoom {
+			continue // a work is published from a deliverable, a room package saved from a room: neither is drafted in the workshop
 		}
 		n := 0
 		for _, q := range qps {

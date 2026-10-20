@@ -11,6 +11,7 @@ import { Select } from "@/ui/Select";
 import { useToast } from "@/ui/Toast";
 import { ContentByline } from "@/views/library/ContentSharing";
 import { TeamBadge, TeamRoster } from "@/views/library/ContentFormExtras";
+import { RoomSetup } from "@/views/library/RoomSetup";
 import { errorText } from "@/lib/errors";
 
 // PermissionBadges shows what a component declares (scripts, local tools,
@@ -188,6 +189,7 @@ export function ContentViewDialog({
                   </ul>
                 </section>
               )}
+              {c.room && <RoomSetup component={c} />}
               {(c.skills?.length ?? 0) > 0 && (
                 <section>
                   <h3 className="mb-1 text-xs font-medium uppercase tracking-wide text-[var(--color-fg-muted)]">Skills</h3>
@@ -203,7 +205,7 @@ export function ContentViewDialog({
                   </div>
                 </section>
               )}
-              {(c.requires.skills?.length ?? 0) > 0 && (
+              {!c.room && (c.requires.skills?.length ?? 0) > 0 && (
                 <p className="text-xs text-[var(--color-fg-muted)]">Needs skill packs: {c.requires.skills?.join(", ")}</p>
               )}
               <section>

@@ -14,10 +14,10 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
-// The one room-creation and join paths. POST /v1/rooms, a handoff import,
-// and a template instantiation all create rooms through createRoom; every
-// other membership a person gains (POST .../members, a template's default
-// members, joining a shared room, redeeming an invite) goes through
+// The one room-creation and join paths. POST /v1/rooms (a room package's
+// install creates its room through it too) and a handoff import create
+// rooms through createRoom; every other membership a person gains (POST
+// .../members, joining a shared room, redeeming an invite) goes through
 // addMember or redeemInvite, so their invariants (default channel created
 // atomically, owner never granted or changed by an add) hold for every
 // caller and each join announces member_joined (TestJoinsAnnounced).

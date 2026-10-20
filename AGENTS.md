@@ -1530,11 +1530,28 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
 - **Every starter prompt is a prompt pack's** (`starterChoices`): the
   room's packs' starters, then the built-in packs' (`starters`). Never add
   a starter list of the web's own, nor of any other record: a room
-  template names prompt packs (`body.promptPacks`), which a room made from
-  it gets as room content uses (`services/room/template_packs.go`:
-  `contentuse.Usable` for the creator, then `PutContentUse`).
+  package requires prompt packs (`requires.prompts`), which a room made
+  from it gets as room content uses (resolved for the installer).
   `TestOneStarterMechanism` fails on a starter list in Go, the schema or
   the web.
+- **A room's setup is a content kind, `bnbloc.room.package/v1`**
+  (`contentpkg/room.go`; docs/prd/2026-10-20-rooms-as-components.md,
+  docs/architecture/content-components.md "Room packages"); room
+  templates are gone. Its schedules are AI tasks and notices to the room
+  only (never one that posts as a person or drives an agent), checked by
+  the schedule rules' owners (`schedule.CheckText`, `schedule.Validate`);
+  its `sources` come from the one list `wire.RoomSources` and are declared
+  and shown, never granted. A room's draft is only
+  `GET /v1/rooms/{roomId}/component-draft` (its owner or an admin) and is
+  saved through the content form like every kind; a room is made from one
+  only by `POST /v1/content-components/{id}/create-room`
+  (`services/gateway/room_components.go`), which goes through the
+  backends' own routes as the installer (`POST /v1/rooms`, channels,
+  realtime's schedules created disabled), `putContentUse` and
+  `setRoomExpert` (the one writer of a room's expert) and `copyApp` (the
+  one copy of an app, shared with "Use this app"), and deletes the room
+  when a step fails once it exists. A `name@range` reference resolves for
+  a member only through `contentuse.Resolve`.
 - **Content requests on behalf of a job** (room tools `save_component`,
   `get_component`, …) use the `?job=&room=` grant and act as the job's human
   requester under the dispatch authority rules. Never save content as the

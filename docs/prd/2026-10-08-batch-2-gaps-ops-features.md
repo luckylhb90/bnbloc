@@ -30,7 +30,7 @@ tables (both schema files + migrations.go), UI entries. Lands only after
 |---|---|---|
 | N1 | Reply from the messenger | A member replies to a notification in the enterprise messenger; the reply is posted into the room as that member (addressed like the original thread: to the agent for agent results). Generic signed reply seam in public code; messenger specifics in the private notifier. |
 | N2 | Scheduled prompts | A room member schedules a prompt (cron-like: daily/weekly/at time, timezone) addressed to an agent or the room; at the time it is posted as that member through the normal chat path (borrow rules apply). List/pause/delete; multi-replica safe. |
-| N3 | Room templates | Create a room from a template (agents to invite/authorize hints, starter prompts, description, default members); save a room as a template; tenant-shared or private. |
+| N3 | Room templates (superseded 2026-10-20 by room components) | Create a room from a template (agents to invite/authorize hints, starter prompts, description, default members); save a room as a template; tenant-shared or private. |
 | N4 | Browser push | Web Push (service worker + VAPID) as a built-in notification channel for browser members, honouring the same prefs/mutes. |
 
 ## Implementation notes
@@ -394,6 +394,14 @@ message, posted at a time, as that member, through the normal chat path.
   rate limit; obs route labels.
 
 ### N3
+
+**Superseded 2026-10-20** by room components
+([`2026-10-20-rooms-as-components.md`](2026-10-20-rooms-as-components.md),
+slice 1): a room's setup is the content kind `bnbloc.room.package/v1`, saved
+from a room and installed as a room. The template table's code, routes,
+store, views and tests below were deleted then (pre-launch, no data kept);
+`room_templates` stays unused in `schema.sql` for one release and a later
+release drops it. What follows records what N3 was.
 
 - **Owner**: the room service (it owns rooms, members, channels). Room
   creation, member add and channel creation were each reduced to one helper

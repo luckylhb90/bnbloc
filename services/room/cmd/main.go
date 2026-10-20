@@ -6,7 +6,6 @@ import (
 
 	"github.com/luckylhb90/bnbloc/internal/appdata"
 	"github.com/luckylhb90/bnbloc/internal/config"
-	"github.com/luckylhb90/bnbloc/internal/contentbuiltin"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/sealbox"
@@ -45,11 +44,6 @@ func main() {
 	}
 	svc.ArtifactMaxBytes = maxBytes
 	svc.RoomImports = backends.RoomImports
-	svc.Templates = backends.Templates
-	svc.Schedules = backends.Schedules
-	// A template's prompt packs: the content store under the built-in
-	// overlay, as the gateway and realtime read it.
-	svc.Content = contentbuiltin.Overlay(backends.ContentComponents)
 	// Interactive apps' data is sealed under the deployment's secret store
 	// key (appdata.Cipher); without it the app data routes answer 503.
 	box, err := sealbox.FromEnv()

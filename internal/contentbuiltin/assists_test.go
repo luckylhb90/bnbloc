@@ -177,6 +177,28 @@ func TestLibraryDraftTasksFillTheForm(t *testing.T) {
 	}
 }
 
+// describe-room fills the room component's save dialog: its fields are
+// the content form's (contentpkg.Form), read from the room and the setup
+// being saved, and it describes the setup, never the room's people.
+func TestDescribeRoomFillsTheSaveDialog(t *testing.T) {
+	m := assistTask(t, "describe-room", wire.AssistContextRoom)
+	fieldsFill(t, "describe-room", m, jsonKeys(contentpkg.Form{}), nil)
+	got := []string{}
+	for _, f := range m.Fields {
+		got = append(got, f.Name)
+	}
+	if strings.Join(got, ",") != "displayName,description,category,tags,welcome" {
+		t.Fatalf("describe-room fields = %v", got)
+	}
+	p, _ := Get(IDPrefix + "describe-room")
+	flat := strings.Join(strings.Fields(p.Validated.Instructions), " ")
+	for _, want := range []string{"<room>", "<recent_messages>", "<text>", "at most 32 characters", "never a conversation of the room or the people in it"} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("describe-room does not say %q", want)
+		}
+	}
+}
+
 // plan-room proposes from the library: names only it lists.
 func TestPlanRoomTask(t *testing.T) {
 	m := assistTask(t, "plan-room", wire.AssistContextLibrary)

@@ -1,9 +1,10 @@
-# Content components: experts, skill packs, prompt packs and works
+# Content components: experts, skill packs, prompt packs, works and rooms
 
 Design: [`docs/prd/2026-10-12-experts-and-teams.md`](../prd/2026-10-12-experts-and-teams.md)
 (delivery steps 1, 3 and 4, and the "Gap closure"); works:
 [`docs/prd/2026-10-13-app-gallery.md`](../prd/2026-10-13-app-gallery.md) and
-[`docs/prd/2026-10-13-works-gallery-and-make-similar.md`](../prd/2026-10-13-works-gallery-and-make-similar.md). This is the durable reference for how content components
+[`docs/prd/2026-10-13-works-gallery-and-make-similar.md`](../prd/2026-10-13-works-gallery-and-make-similar.md); room packages:
+[`docs/prd/2026-10-20-rooms-as-components.md`](../prd/2026-10-20-rooms-as-components.md). This is the durable reference for how content components
 are stored, who may use them, how they are shared and published, how a turn
 wears them, and the HTTP surface.
 
@@ -21,12 +22,14 @@ servers content requires, see "MCP tool components"):
 | Prompt pack | `bnbloc.prompt.package/v1` | `component.json` (its `prompts`), optional `README.md` (see "Prompt packs") |
 | Work | `bnbloc.work.package/v1` | `component.json` (`type`, `file`, `recipe`), a site folder (`index.html` at the root or `dist/index.html`) or one file at the root, optional cover (`cover.png`, `.webp`, `.jpg` or `.jpeg`), `README.md` and the recipe's `references/` (see "Works") |
 | Assist | `bnbloc.assist.package/v1` | `component.json` (`output`, `fields`, `context`), `INSTRUCTIONS.md` (the task's system prompt), optional `README.md` (see [AI assist](ai-assist.md)) |
+| Room | `bnbloc.room.package/v1` | `component.json` (`welcome`, `quickPrompts`, `channels`, `schedules`, `apps`, `sources`, `requires.expert`), optional `README.md` (see "Room packages") |
 
 A package is a plain ustar bundle (`internal/tarbundle`, limit profile
 `tarbundle.ContentLimits`: 8 MiB, 512 files; a prompt pack's own profile,
 `contentpkg.PromptLimits`, is 1 MiB and 2 files; a work's,
 `contentpkg.WorkLimits`, a site snapshot's plus its references, cover and
-manifest; an assist's, `contentpkg.AssistLimits`, 64 KiB and 3 files). A bundle is
+manifest; an assist's, `contentpkg.AssistLimits`, 64 KiB and 3 files; a room
+package's, `contentpkg.RoomLimits`, 1 MiB and 2 files). A bundle is
 read within `contentpkg.BundleLimits()`, the widest registered profile,
 until its manifest names the kind (uploads, stored versions, imports). **One validator,
 `internal/contentpkg`**, backs every entry point (form saves, archive
@@ -230,6 +233,78 @@ file uploads without an archive. Each kind reads its foreign formats in its
 names, declares `scripts` when a skill ships scripts, and stops an archive
 bomb at the cap.
 
+## Room packages
+
+A room package (docs/prd/2026-10-20-rooms-as-components.md §2.1) is a
+room's setup, saved from a room and installed as a new room the installer
+owns. It replaced room templates (their table, routes and views are gone;
+`room_templates` stays in `schema.sql`, unused, for one release of version
+skew, and a later release drops it).
+
+- **Manifest** (`contentpkg/room.go`, nothing but `component.json` and an
+  optional `README.md`): `description` (the envelope's, within a room's
+  bound: it becomes the room's description), `welcome` and `quickPrompts`
+  (an expert's rules: text, or a ref to a prompt of a required pack),
+  `channels` (names, never the default channel, unique regardless of
+  case), `schedules` (`wire.RoomPackageSchedule`: `channel`, `text`,
+  `recipient`, `recurrence`, `timezone`), `requires.expert` (the room
+  expert, one `name@range`), `requires.skills`/`prompts` (packs turned on
+  in the room), `requires.mcp` (as for any content), `apps` (works by
+  `name@range`) and `sources` (`wire.RoomSources`, the one list; today
+  `runs`). A schedule is an AI task or a notice to the room's members
+  (`to: "room"`): one that posts as a person or drives an agent would act
+  as whoever installs it, and a notice names no people or group. It
+  recurs (no `once`), its text passes `schedule.CheckText` (realtime's own
+  rule), its recurrence `schedule.Validate`, and its channel is one of the
+  package's. No other kind carries these fields (`errRoomFields`). A room
+  package is no content use (`KindSpec.Use` false) and runs nothing.
+- **Sources are declared, never granted.** A package lists the records its
+  scheduled tasks ask to read; the Library, the install dialog and the new
+  room's first-visit card show each as "asks to read …, needs your
+  organization admin's consent". Nothing reads one yet (slice 2 adds the
+  consent and `read_records`).
+- **Save as component.** `GET /v1/rooms/{roomId}/component-draft` (the
+  room's owner or an admin, `roomEditorClaims`;
+  `services/gateway/room_components.go`) reads the room through the
+  backends' own routes as that member: its name and description, its
+  channels, its schedules (realtime) that a package may hold, the room
+  expert and the room's skill and prompt packs (each one the member can
+  see, at the version in effect, as `name@^major`, `contentpkg.MajorRef`),
+  and its apps that came from a work (the app's `app-copy` use names the
+  work). Everything else is said in `left` (members and agents, other
+  schedules, a notice's link, another member's private pack, an app made
+  in the room). The web's save dialog (`SaveRoomComponentDialog`, room
+  header, owner/admin) shows it all ticked; the member edits the text,
+  unticks parts, declares sources and saves through the content form
+  (`POST /v1/content-components`, or a new version of one of theirs): the
+  one validator and the one save decide. "Fill with AI" runs the built-in
+  `describe-room` assist (context `room`; `<text>` is the setup and the
+  current values) for the display name, description, category, tags and
+  welcome.
+- **Install.** `POST /v1/content-components/{id}/create-room`
+  (`wire.RoomInstallRequest`, room creation's permission; a room package
+  visible to the caller) makes the room through the same routes a member's
+  clicks take, as the installer: `POST /v1/rooms` (the package's
+  description), its channels, its schedules through realtime's
+  `POST …/schedules` with `enabled: false` (owned by the installer;
+  realtime checks them), the room expert, skill and prompt packs resolved
+  for the installer (`contentuse.Resolve`, the `name@range` rule) and
+  turned on (`putContentUse`; the expert made the room's by
+  `setRoomExpert`, a team stays pinned only), and its apps copied in by
+  `copyApp` (the copy "Use this app" makes: a fresh, empty data space,
+  counted as an `app-copy` use). A part the installer may not use, a tool
+  they cannot reach and a schedule kind the deployment cannot run (503)
+  are reported in `skipped`, never fatal. Anything else that fails once
+  the room exists deletes the room (and uncounts its app copies), so a
+  half-made room never lingers. The install counts as a use of the package
+  (scope `room-install`, the room). The reply (`wire.RoomInstallReply`)
+  is kept by the web for the room's first visit (`RoomStartCard`: the
+  welcome, the quick prompts as composer drafts, the paused schedules,
+  what was left out, the sources asked for).
+- **Where they appear.** The Library's Rooms tab (`RoomsTab`: view, new
+  version, share, publish, delete, "Create a room"), and Plaza's "New
+  room" → "From a room component…".
+
 ## Prompt packs
 
 A curated, versioned set of prompts with variables, used from the composer
@@ -276,11 +351,12 @@ prompts: [{id, title, body, variables: [{name, label?, default?, options?}], tag
   `starters` pack holds the general-purpose ones). The pack's author flags
   them; the room's owner chooses by turning the pack on, so a room keeps no
   second list of its own, and the web keeps none either. A member's own
-  packs add no starters. A room template names prompt packs
-  (`body.promptPacks`, captured from the room's prompt-pack uses by "Save
-  as template"); a room made from it gets them as room uses (those the
-  creator may use, `contentuse.Usable`), so its starters come the same way.
-  `TestOneStarterMechanism` fails on a second starter list.
+  packs add no starters. A room package requires prompt packs
+  (`requires.prompts`, captured from the room's prompt-pack uses by "Save
+  as component"); a room made from it gets them as room uses (those the
+  installer may use, `contentuse.Resolve`), so its starters come the same
+  way (see "Room packages"). `TestOneStarterMechanism` fails on a second
+  starter list.
 - **The personal pack.** "Save as prompt" on a message
   (`POST /v1/content-components/prompts`) appends the prompt to the
   member's own pack `my-prompts` ("My prompts") as a new version (patch
@@ -447,7 +523,7 @@ previewer artifacts; `RetentionStore.ReferencedBlobKeys` includes
 `content_drafts.bundle_blob_key`, so blob collection never deletes a
 version's bundle (or a draft's while its row exists). Deleting a component deletes its rows; the
 collection reclaims the bundle. Content components and their publish
-requests are user content (like room templates): no retention purge applies
+requests are user content: no retention purge applies
 to them. A shared copy, an org publication and a platform row reference the
 same content-addressed bundles as the versions they were made from (version
 rows are cloned, bytes never), so blob collection keeps a bundle while any
@@ -498,8 +574,7 @@ Design: PRD §1 "Sources, scopes and trust" and "Status: step 4".
 - **Room shares stand.** A share with a room is recorded
   (`content_room_shares`; the reply's `room`); a member who joins the room
   later gets a copy too. Every human join in bnbloc-room (add member, join a
-  shared room, redeem an invite, a template's default members; never a
-  re-role) publishes a transient `member_joined` room event (`{userId}`);
+  shared room, redeem an invite; never a re-role) publishes a transient `member_joined` room event (`{userId}`);
   realtime's internal publish tap (`services/realtime/content_shares.go`)
   hands the joiner a copy of each standing room share
   (`contentshare.GrantRoomShares`: never the author's own, never a share
@@ -858,7 +933,7 @@ store and the artifact entitlement). JSON shapes: `internal/wire/content_compone
 
 | Route | What |
 |---|---|
-| `GET /v1/content-components?kind=expert\|skill\|prompt\|work` | The caller's Library (`contentuse.Visible`): their own components and the copies they hold plus org/platform ones visible to them, at the latest version, with usage counts (`runs`, `members`), the caller's star and the organization's count (`favorite`, `favoriteCount`), a work's `coverUrl`, `workType`, `workFile` and `recipe`, a team's roster (`team`), `mine`/`removable`, a copy's `sharedBy`/`sourceId`/`sourceLatestVersion` and the author's `publication` |
+| `GET /v1/content-components?kind=expert\|skill\|prompt\|work\|assist\|room` | The caller's Library (`contentuse.Visible`): their own components and the copies they hold plus org/platform ones visible to them, at the latest version, with usage counts (`runs`, `members`), the caller's star and the organization's count (`favorite`, `favoriteCount`), a work's `coverUrl`, `workType`, `workFile` and `recipe`, a team's roster (`team`), `mine`/`removable`, a copy's `sharedBy`/`sourceId`/`sourceLatestVersion` and the author's `publication` |
 | `POST /v1/content-components` | Save a new component: `{form, version?}` (JSON) or a package archive (`component.json` names it). 201 detail; 409 duplicate name; 400 validator message. With `?job=&room=`: a save by the bridge running the job, as its requester (below) |
 | `POST /v1/content-components/import?kind=&name=` | Import an archive (tar, tar.gz, zip) or a single markdown/json file of prompts as a new component; `?id=` imports a new version of the caller's component |
 | `POST /v1/content-drafts?job=&room=` | The bridge running a job stages an unsaved expert or skill pack for a quick try (archive body; as the job's requester; 201 `wire.ContentDraft`); see [room-tools.md](room-tools.md), "Quick tries of drafts" |
@@ -879,6 +954,8 @@ store and the artifact entitlement). JSON shapes: `internal/wire/content_compone
 | `PUT\|DELETE /v1/content-components/{id}/favorite` | Star (a component the caller sees) or unstar it; 204 |
 | `POST /v1/content-components/{id}/use-app` | Copy a visible app work into a room the caller owns or a new room (`wire.AppUseRequest`); 201 `wire.AppUseReply {roomId, artifactId, version, createdRoom?, from}` |
 | `POST /v1/content-components/{id}/make-similar` | A draft of a visible work's recipe in a room the caller owns or a new room (`wire.MakeSimilarRequest`); 201 `wire.MakeSimilarDraft` (see "Works") |
+| `GET /v1/rooms/{roomId}/component-draft` | What "Save as component" captures of a room (its owner or an admin): `wire.RoomComponentDraft` (see "Room packages") |
+| `POST /v1/content-components/{id}/create-room` | A new room of the caller's from a visible room package (`wire.RoomInstallRequest`, room creation's permission); 201 `wire.RoomInstallReply`; a failure once the room exists deletes it |
 | `GET /v1/tenant/content-requests[?status=all]` | Org admins: publish requests of the organization (pending by default) with the approved version |
 | `GET /v1/tenant/content-requests/{id}` | Org admins: the review (`wire.ContentReview`: the requested version, `scriptFiles`, `previous`, `files` changes) |
 | `POST /v1/tenant/content-requests/{id}/approve\|decline` | Org admins: `{note?}`; approve publishes the version to the organization |

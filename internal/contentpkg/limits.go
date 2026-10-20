@@ -9,7 +9,7 @@ import (
 // authoring guidance states it.
 type Limit struct {
 	// Applies says which packages it bounds ("every package", "expert",
-	// "skill pack", "prompt pack", "team expert", "work", "assist").
+	// "skill pack", "prompt pack", "team expert", "work", "assist", "room package").
 	Applies string
 	// Field is what is bounded: a manifest field, a file or the bundle
 	// ("displayName", "prompts[].body", "INSTRUCTIONS.md").
@@ -35,7 +35,7 @@ const (
 // here (the Expert builder's package-format skill does, and its test fails
 // when the skill drifts), so no limit is written down twice.
 func Limits() []Limit {
-	const all, expert, skill, prompt, team, work, assist = "every package", "expert", "skill pack", "prompt pack", "team expert", "work", "assist"
+	const all, expert, skill, prompt, team, work, assist, room = "every package", "expert", "skill pack", "prompt pack", "team expert", "work", "assist", "room package"
 	return []Limit{
 		{all, "name", maxName, UnitChars},
 		{all, "displayName", maxDisplayName, UnitChars},
@@ -48,10 +48,10 @@ func Limits() []Limit {
 		{all, "files in the package", tarbundle.ContentLimits.MaxFiles, UnitFiles},
 		{all, "package size", tarbundle.ContentLimits.MaxBytes, UnitBytes},
 		{expert, InstructionsFile, maxInstructions, UnitBytes},
-		{expert, "quickPrompts", maxQuickPrompts, UnitItems},
-		{expert, "quickPrompts[].title", maxQuickTitle, UnitChars},
-		{expert, "quickPrompts[].prompt", maxQuickPrompt, UnitChars},
-		{expert, "welcome", maxWelcome, UnitChars},
+		{expert + ", " + room, "quickPrompts", maxQuickPrompts, UnitItems},
+		{expert + ", " + room, "quickPrompts[].title", maxQuickTitle, UnitChars},
+		{expert + ", " + room, "quickPrompts[].prompt", maxQuickPrompt, UnitChars},
+		{expert + ", " + room, "welcome", maxWelcome, UnitChars},
 		{expert + ", " + skill, "skills", maxSkillsInPack, UnitItems},
 		{expert + ", " + skill, "SKILL.md", maxInstructions, UnitBytes},
 		{expert + ", " + skill, "SKILL.md description", maxSkillDesc, UnitChars},
@@ -83,5 +83,14 @@ func Limits() []Limit {
 		{assist, "fields[].description", maxAssistFieldDesc, UnitChars},
 		{assist, "files in the package", AssistLimits.MaxFiles, UnitFiles},
 		{assist, "package size", AssistLimits.MaxBytes, UnitBytes},
+		{room, "description (the room's)", maxRoomDescription, UnitChars},
+		{room, "channels", maxRoomChannels, UnitItems},
+		{room, "channels[]", maxRoomChannelName, UnitChars},
+		{room, "schedules", maxRoomSchedules, UnitItems},
+		{room, "schedules[].text", wire.MaxChatTextBytes, UnitBytes},
+		{room, "apps", maxRoomApps, UnitItems},
+		{room, ReadmeFile, maxInstructions, UnitBytes},
+		{room, "files in the package", RoomLimits.MaxFiles, UnitFiles},
+		{room, "package size", RoomLimits.MaxBytes, UnitBytes},
 	}
 }

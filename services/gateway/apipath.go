@@ -295,10 +295,6 @@ func (s *Service) route(p apiPath) string {
 		if p.is("v1", "platform", "search", "reindex") || p.is("v1", "platform", "search", "status") {
 			return s.Backends.Realtime
 		}
-		// Org-admin moderation of tenant room templates (N3), likewise.
-		if p.section() == "tenant" && len(p.segs) >= 3 && p.segs[2] == "room-templates" {
-			return s.Backends.Room
-		}
 		// The org-admin list of public artifact share links: the room
 		// service owns artifacts and their links.
 		if p.is("v1", "tenant", "shares") {
@@ -309,10 +305,6 @@ func (s *Service) route(p apiPath) string {
 		// gates each (see requiredPermission).
 		return s.Backends.ShareAgent
 	case "invites", "users":
-		return s.Backends.Room
-	case "room-templates":
-		// Room templates (N3): the room service owns rooms, members and
-		// channels a template sets up.
 		return s.Backends.Room
 	default:
 		return ""
@@ -409,18 +401,12 @@ func (p apiPath) isRoomDispatch(method string) bool {
 }
 
 // createsRoom reports the POST routes that create a room, which carry room
-// creation's permission and rate limit: the collection, a handoff import, a
-// template instantiation, and a local agent run (it adopts the agent's
-// workspace as a room and drives the agent there; every role that may create
-// a room may drive an agent).
+// creation's permission and rate limit: the collection, a handoff import
+// and a local agent run (it adopts the agent's workspace as a room and
+// drives the agent there; every role that may create a room may drive an
+// agent).
 func (p apiPath) createsRoom() bool {
-	return p.is("v1", "rooms") || p.isRoomImport() || p.isTemplateInstantiate() || p.is("v1", "local-agent", "run")
-}
-
-// isTemplateInstantiate reports /v1/room-templates/{id}/instantiate: it
-// creates a room, so it carries room creation's permission and rate limit.
-func (p apiPath) isTemplateInstantiate() bool {
-	return len(p.segs) == 4 && p.section() == "room-templates" && p.segs[3] == "instantiate"
+	return p.is("v1", "rooms") || p.isRoomImport() || p.is("v1", "local-agent", "run")
 }
 
 // isRoomImport reports /v1/rooms/import: a handoff package import creates a

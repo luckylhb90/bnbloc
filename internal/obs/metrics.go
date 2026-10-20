@@ -179,8 +179,7 @@ var routeWords = map[string]bool{
 	"content-components": true, "content-uses": true, "effective": true,
 	"refresh": true, "fork": true, "sessions": true,
 	"team": true, "borrow": true, "usage-report": true, "quota-requests": true, "decline": true,
-	"schedules": true, "room-templates": true, "from-room": true, "instantiate": true,
-	"api-tokens": true, "api-token": true, "alerts": true,
+	"schedules": true, "api-tokens": true, "api-token": true, "alerts": true,
 	"plugin-events": true, "ack": true,
 	"reserve": true, "budget": true, "budgets": true,
 	"audit-log": true, "org-sync": true, "rules": true, "preview": true, "deprovision": true, "resync": true,
@@ -196,6 +195,8 @@ var routeWords = map[string]bool{
 	// the works gallery: a deliverable published as a work, its recipe,
 	// and a draft started from one.
 	"publish-work": true, "recipe": true, "make-similar": true,
+	// room components: a room's draft and a room made from one.
+	"component-draft": true, "create-room": true,
 	// component settings: /v1/{platform,org}/components/{name}/settings and
 	// a member's /v1/components/{name}/settings/resolved.
 	"org": true, "resolved": true,
@@ -220,8 +221,7 @@ var idCollections = map[string]bool{
 	"cores": true, "component-keys": true, "app-releases": true, "blobs": true,
 	"prompts": true, "tasks": true,
 	"sessions": true, "quota-requests": true,
-	"schedules": true, "room-templates": true,
-	"api-tokens": true, "plugin-events": true,
+	"schedules": true, "api-tokens": true, "plugin-events": true,
 	// platform-agents is not a collection: /v1/platform/platform-agents/usage
 	// names a route; a room's /platform-agents/{provider} still collapses
 	// (a provider is not a route word).

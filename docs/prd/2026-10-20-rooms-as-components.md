@@ -1,7 +1,9 @@
 # Rooms as components, and a room that reviews outcomes (2026-10-20)
 
-Status: proposed. Owner: the content component contract (a new kind), the
-schedule runs' sources, the room's own content.
+Status: slice 1 built (the room kind, save and install, templates folded
+in; §5, §6); slices 2 and 3 proposed. Owner: the content component
+contract (a new kind), the schedule runs' sources, the room's own
+content.
 
 A room's whole setup (its expert, skills, prompts, tools, apps, channels and
 scheduled AI tasks) can be saved as a component and installed as a new room.
@@ -117,7 +119,67 @@ person, a schedule runs only once the owner turns it on.
 ## 5. Build order (slices of §2)
 
 1. The room kind: save a room as a component, install it as a room;
-   templates folded in.
+   templates folded in. **Built** (§6).
 2. The `runs` source with consent, transparency and `read_records`.
 3. The outcome review room as built-in content; the digest and fixes as
    tasks.
+
+## 6. Slice 1 as built
+
+The reference is docs/architecture/content-components.md, "Room
+packages". What the slice decided, against the code:
+
+- **The manifest** (`contentpkg/room.go`, one validator):
+  `component.json` alone (and an optional `README.md`) with the room's
+  `description` (the envelope's, within a room's 500 characters: it
+  becomes the room's), `welcome` and `quickPrompts` (an expert's rules),
+  `channels`, `schedules`, `requires.expert` / `skills` / `prompts` /
+  `mcp`, `apps` (works by `name@range`) and `sources`
+  (`wire.RoomSources`, today `runs`). Its bounds are rows of
+  `contentpkg.Limits()` (so the builder's format skill lists them).
+- **Schedules a package holds** are AI tasks and notices to the room's
+  members that recur. A schedule that posts as a person or drives an
+  agent, a notice to named people or a group (a package names no people)
+  and a one-time run are refused by the validator and left out of a draft
+  with a line saying so; a notice's link (it points into the saved room)
+  is dropped, said too. The text and recurrence are checked by the
+  schedule rules' owners (`schedule.CheckText`, extracted from realtime's
+  route so both ask one function; `schedule.Validate`).
+- **Apps** are captured only when they came from a work: the copy's
+  `app-copy` use names the work. An app made in the room is left out with
+  "publish it as a work to include it". Install copies each through
+  `copyApp`, the copy "Use this app" makes (extracted, one owner).
+- **Save** reads the room through the backends' routes as its owner or
+  admin (`GET /v1/rooms/{roomId}/component-draft`) and saves through the
+  content form: no second save path. A part the saver cannot see (another
+  member's private pack pinned in the room) is left out, since nobody else
+  could install it. "Fill with AI" is the built-in `describe-room` assist.
+- **Install** (`POST /v1/content-components/{id}/create-room`) resolves
+  every reference for the installer (`contentuse.Resolve`, the existing
+  `name@range` rule, now exported) and reports what they may not use;
+  schedules are created disabled through realtime's own route; a failure
+  once the room exists deletes it. The welcome and quick prompts reach the
+  installer on the room's first visit (`RoomStartCard`, from the install
+  reply), like the template follow-ups did; a durable room welcome is not
+  in this slice.
+- **Sources** are declared in the save dialog and shown at install and on
+  the new room's card as asked for, never granted (slice 2).
+- **Templates folded in.** `services/room/templates.go`,
+  `template_packs.go`, `internal/store/room_templates.go`, the
+  `/v1/room-templates*` routes and gateway routing, the web's template
+  tab, dialogs, start card and their tests are deleted; the Library's tab
+  is "Rooms", the room header's button "Save as component", Plaza's "From
+  a room component…". Suggested agents and default members are not
+  carried: a package names no people (members invite them).
+- **Release safety.** A migration only adds (AGENTS.md): this release
+  stops reading and writing `room_templates`; it stays in `schema.sql`
+  (its columns allowed as retiring in `writeOnlyColumnAllowed`) and a
+  release after the one that ships this drops it (`retiredTables`). No data is kept.
+- **Design review notes.** Actors: the saver must be the room's owner or
+  an admin; the installer owns the new room and its paused schedules; the
+  package's author is never added. Boundaries: no people, messages, app
+  data or grants travel in a package. Failure: install is all or nothing
+  for the room, reported per part for what the installer may not use.
+  Cost: one assist call per "Fill with AI"; install does a bounded number
+  of backend calls (20 channels, 20 schedules, 10 apps, 32 requirements).
+

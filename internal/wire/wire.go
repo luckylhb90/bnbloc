@@ -93,7 +93,7 @@ type MemberRemovedPayload struct {
 
 // EventMemberJoined (MemberJoinedPayload) is published by bnbloc-room,
 // transient, when a person becomes a member of a room (added, joined a
-// shared room, redeemed an invite, a template's default member). Realtime's
+// shared room, redeemed an invite). Realtime's
 // publish tap gives the new member the room's standing content shares
 // (internal/contentshare); clients may refresh their member lists on it.
 const EventMemberJoined = "member_joined"

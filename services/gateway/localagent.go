@@ -280,8 +280,9 @@ func (s *Service) adoptRoom(ctx context.Context, roomID, subject, tenantID strin
 	}
 }
 
-// roomBackendError is a non-2xx answer from the room service, kept structured
-// so callers can act on the status (409 = id taken).
+// roomBackendError is a non-2xx answer from the room service (or realtime,
+// realtimeDo), kept structured so callers can act on the status (409 = id
+// taken).
 type roomBackendError struct {
 	Path   string
 	Status int
@@ -289,7 +290,7 @@ type roomBackendError struct {
 }
 
 func (e *roomBackendError) Error() string {
-	return fmt.Sprintf("room %s status %d: %s", e.Path, e.Status, e.Body)
+	return fmt.Sprintf("backend %s status %d: %s", e.Path, e.Status, e.Body)
 }
 
 // roomBackendCall calls the room service as subject in tenantID (the
@@ -305,7 +306,24 @@ func (s *Service) roomBackendDo(ctx context.Context, client *http.Client, method
 	if s.Backends.Room == "" {
 		return fmt.Errorf("room backend not configured")
 	}
-	resp, err := callBackendTyped(ctx, client, method, strings.TrimRight(s.Backends.Room, "/")+path, contentType, body, subject, tenantID)
+	return backendDo(ctx, client, s.Backends.Room, method, path, contentType, body, subject, tenantID, out)
+}
+
+// realtimeDo calls realtime as roomBackendDo calls the room service: a JSON
+// body (nil: none), a 2xx answer decoded into out, a non-2xx one a
+// *roomBackendError.
+func (s *Service) realtimeDo(ctx context.Context, method, path string, body []byte, subject, tenantID string, out any) error {
+	if s.Backends.Realtime == "" {
+		return fmt.Errorf("realtime backend not configured")
+	}
+	return backendDo(ctx, backendHTTP, s.Backends.Realtime, method, path, "application/json", body, subject, tenantID, out)
+}
+
+// backendDo is one signed call to the backend at base, as subject in
+// tenantID: a 2xx answer decoded into out (nil: discarded), a non-2xx one a
+// *roomBackendError.
+func backendDo(ctx context.Context, client *http.Client, base, method, path, contentType string, body []byte, subject, tenantID string, out any) error {
+	resp, err := callBackendTyped(ctx, client, method, strings.TrimRight(base, "/")+path, contentType, body, subject, tenantID)
 	if err != nil {
 		return err
 	}

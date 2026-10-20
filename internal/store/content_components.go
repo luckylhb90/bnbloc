@@ -133,6 +133,10 @@ const (
 	// scope id = the room). Never in effect for a turn: it counts the
 	// work's uses.
 	ContentUseMakeSimilar ContentUseScope = "make-similar"
+	// ContentUseRoomInstall: a room made from a room package
+	// (docs/prd/2026-10-20-rooms-as-components.md §2.1; scope id = the
+	// room). Never in effect for a turn: it counts the package's uses.
+	ContentUseRoomInstall ContentUseScope = "room-install"
 )
 
 // ContentUse enables or pins a component in a scope, at a pinned version

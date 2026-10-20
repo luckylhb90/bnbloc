@@ -93,7 +93,9 @@ func newAppGW(t *testing.T) *appGW {
 		t.Fatal(err)
 	}
 	e.blobs = disk
-	rt := &realtimehttp.Service{Hub: e.hub, Blobs: disk, Attachments: b.Attachments}
+	// Schedules are on (a room package's install creates them, disabled);
+	// no AI schedule runs here.
+	rt := &realtimehttp.Service{Hub: e.hub, Blobs: disk, Attachments: b.Attachments, Schedules: b.Schedules, AIRuns: noScheduleRuns{}}
 	rtSrv := httptest.NewServer(e.countAppCalls(svcauth.Middleware(appGWKey, rt.Handler())))
 	t.Cleanup(rtSrv.Close)
 

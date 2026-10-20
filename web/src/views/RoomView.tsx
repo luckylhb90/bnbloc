@@ -53,8 +53,8 @@ import { AutomateProvider, automateTaskSeed, type AutomateApp } from "@/views/ro
 import { useRoomFileAsk } from "@/views/workbench/useRoomFileAsk";
 import { JobLiveProvider, JobProgressProvider } from "@/views/room/JobProgressStrip";
 import { waitingFor, type JobLive } from "@/lib/jobLive";
-import { SaveTemplateDialog } from "@/views/room/SaveTemplateDialog";
-import { TemplateStartCard } from "@/views/room/TemplateStartCard";
+import { SaveRoomComponentDialog } from "@/views/room/SaveRoomComponentDialog";
+import { RoomStartCard } from "@/views/room/RoomStartCard";
 import { SchedulesDialog } from "@/views/room/SchedulesDialog";
 import { GroupChatsDialog } from "@/views/room/GroupChatsDialog";
 import { RunsDialog } from "@/views/room/RunsDialog";
@@ -99,7 +99,7 @@ export function RoomView({
   const [dialog, setDialog] = useState<RoomDialog>(null);
   const [confirmDelete, setConfirmDelete] = useState<FeedItem | null>(null);
   const [showSearch, setShowSearch] = useState(false);
-  const [savingTemplate, setSavingTemplate] = useState(false);
+  const [savingComponent, setSavingComponent] = useState(false);
   const [showSchedules, setShowSchedules] = useState(false);
   const [showGroups, setShowGroups] = useState(false);
   // An app's "Automate…" opens the schedules on a new AI task about it.
@@ -519,7 +519,7 @@ export function RoomView({
         onConfirmLeave={() => setDialog("leave")}
         onExportHandoff={canManageRoom ? () => void handoffExport.run() : undefined}
         exportingBytes={handoffExport.exporting ? handoffExport.progressBytes : null}
-        onSaveTemplate={canManageRoom ? () => setSavingTemplate(true) : undefined}
+        onSaveComponent={canManageRoom ? () => setSavingComponent(true) : undefined}
         onShowSchedules={member ? () => setShowSchedules(true) : undefined}
         onShowRuns={member ? () => setShowRuns(true) : undefined}
         onTogglePeopleChat={
@@ -542,7 +542,7 @@ export function RoomView({
       {/* The empty-room card already carries the same guidance. */}
       {!(handoff.show && feed.length === 0 && activity.working.size === 0) && <DesktopConnectBanner subject={subject} hasPlatformAgent={platformInRoom.length > 0} />}
       <HandoffBanner roomId={roomId} canInvite={canManageRoom} members={data.members} />
-      <TemplateStartCard roomId={roomId} subject={subject} members={data.members} canInvite={canManageRoom} />
+      <RoomStartCard roomId={roomId} />
 
       {/* Channel rail + feed + composer share one row; the rail scopes all
           three to the selected channel. */}
@@ -698,13 +698,7 @@ export function RoomView({
         onConfirmDelete={(it) => void deleteOwnMessage(it)}
         onQuotaChanged={pendingQuota.refresh}
       />
-      <SaveTemplateDialog
-        open={savingTemplate}
-        roomId={roomId}
-        roomName={room?.name || roomId}
-        roomAgents={roomAgents}
-        onClose={() => setSavingTemplate(false)}
-      />
+      <SaveRoomComponentDialog target={savingComponent ? { roomId } : null} onClose={() => setSavingComponent(false)} />
       {showSchedules && (
         <SchedulesDialog
           roomId={roomId}

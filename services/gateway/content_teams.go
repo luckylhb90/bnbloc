@@ -9,7 +9,6 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/contentuse"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
-	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
@@ -65,21 +64,44 @@ func (s *Service) roomExpertOf(ctx context.Context, roomID string) (string, erro
 	return uses[0].ComponentID, nil
 }
 
-// putRoomExpert makes one of a room's pinned experts the room's expert,
-// replacing the previous one: every agent turn in the room wears it under
-// the chat's own expert. A team cannot be the room's expert (every turn
-// would lead a team).
+// putRoomExpert makes one of a room's pinned experts the room's expert
+// (setRoomExpert) and answers the refusal.
 func (s *Service) putRoomExpert(w http.ResponseWriter, r *http.Request, claims auth.Claims, roomID string, c store.ContentComponent) {
-	ctx := r.Context()
+	var refused errRoomExpert
+	switch err := s.setRoomExpert(r.Context(), claims, roomID, c); {
+	case err == nil:
+		w.WriteHeader(http.StatusNoContent)
+	case errors.As(err, &refused):
+		httpx.Error(w, refused.Error(), http.StatusBadRequest)
+	default:
+		contentStoreErr(w, "set the room expert failed", err)
+	}
+}
+
+// errRoomExpert is why a component cannot be a room's expert.
+type errRoomExpert string
+
+func (e errRoomExpert) Error() string { return string(e) }
+
+const (
+	errRoomExpertKind   errRoomExpert = "the room expert must be an expert"
+	errRoomExpertPinned errRoomExpert = "pin the expert in the room first"
+	errRoomExpertTeam   errRoomExpert = "a team cannot be the room expert; pick it per message"
+)
+
+// setRoomExpert makes c, one of a room's pinned experts, the room's
+// expert, replacing the previous one: every agent turn in the room wears
+// it under the chat's own expert. A team cannot be the room's expert
+// (every turn would lead a team). claims are the room editor's
+// (contentUseScope). The one writer of a room's expert (the Library's
+// use route and a room package's install).
+func (s *Service) setRoomExpert(ctx context.Context, claims auth.Claims, roomID string, c store.ContentComponent) error {
 	if c.Kind != contentpkg.KindExpert {
-		httpx.Error(w, "the room expert must be an expert", http.StatusBadRequest)
-		return
+		return errRoomExpertKind
 	}
 	pins, err := s.ContentComponents.ListContentUses(ctx, store.ContentUseRoom, roomID)
 	if err != nil {
-		obs.ServerError(w, "list room content uses failed", err)
-		httpx.Error(w, "list room content uses failed", http.StatusInternalServerError)
-		return
+		return err
 	}
 	pinned, ok := "", false
 	for _, u := range pins {
@@ -88,48 +110,38 @@ func (s *Service) putRoomExpert(w http.ResponseWriter, r *http.Request, claims a
 		}
 	}
 	if !ok {
-		httpx.Error(w, "pin the expert in the room first", http.StatusBadRequest)
-		return
+		return errRoomExpertPinned
 	}
 	v, err := s.ContentComponents.GetContentComponentVersion(ctx, c.ID, firstNonEmpty(pinned, c.LatestVersion))
 	if err != nil {
-		contentStoreErr(w, "load content version failed", err)
-		return
+		return err
 	}
 	m, err := contentuse.Manifest(v)
 	if err != nil {
-		obs.ServerError(w, "decode content manifest failed", err)
-		httpx.Error(w, "decode content manifest failed", http.StatusInternalServerError)
-		return
+		return err
 	}
 	if m.Team != nil {
-		httpx.Error(w, "a team cannot be the room expert; pick it per message", http.StatusBadRequest)
-		return
+		return errRoomExpertTeam
 	}
 	current, err := s.ContentComponents.ListContentUses(ctx, store.ContentUseRoomExpert, roomID)
 	if err != nil {
-		obs.ServerError(w, "list room expert failed", err)
-		httpx.Error(w, "list room expert failed", http.StatusInternalServerError)
-		return
+		return err
 	}
 	for _, u := range current {
 		if u.ComponentID == c.ID {
 			continue
 		}
 		if err := s.ContentComponents.DeleteContentUse(ctx, store.ContentUseRoomExpert, roomID, u.ComponentID); err != nil {
-			obs.ServerError(w, "replace room expert failed", err)
-			httpx.Error(w, "replace room expert failed", http.StatusInternalServerError)
-			return
+			return err
 		}
 	}
 	u := store.ContentUse{TenantID: claims.Tenant, ScopeKind: store.ContentUseRoomExpert, ScopeID: roomID, ComponentID: c.ID, Kind: c.Kind,
 		CreatedBy: claims.Subject, CreatedAtMs: s.nowTime().UnixMilli()}
 	if err := s.ContentComponents.PutContentUse(ctx, u); err != nil {
-		contentStoreErr(w, "save content use failed", err)
-		return
+		return err
 	}
 	s.contentUsesChanged(ctx, claims, u.ScopeKind, roomID, c.ID)
-	w.WriteHeader(http.StatusNoContent)
+	return nil
 }
 
 // unpinRoomExpert clears the room's expert when its pin is removed (a room

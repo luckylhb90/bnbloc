@@ -9,7 +9,7 @@ export type { ChatExpert, ContentComponent, ContentComponentDetail, ContentMCPRe
 import type { ChatExpert, ContentComponent, ContentQuickPrompt, ContentRequires, ContentUse, ContentVersionDetail } from "./wire.gen.ts";
 
 export type { ContentKind } from "./wire.gen.ts";
-import type { AssistField, AssistSpec, ContentKind } from "./wire.gen.ts";
+import type { AssistField, AssistSpec, ContentKind, RoomSpec } from "./wire.gen.ts";
 import { ContentTagPattern, MaxContentTagRunes } from "./wire.gen.ts";
 
 // The built-in builder expert (shipped with the release, read-only, listed
@@ -30,17 +30,20 @@ export function isBuiltin(c: Pick<ContentComponent, "scope">): boolean {
 // app (docs/prd/2026-10-13-app-gallery.md) is published from a site and
 // listed in the gallery, not in a Library tab of the workshop's. An AI
 // assist (docs/prd/2026-10-13-ai-assist.md) is a task of the assist model,
-// listed in its own tab and never used in a room.
+// listed in its own tab and never used in a room. A room component
+// (docs/prd/2026-10-20-rooms-as-components.md) is a room's setup, saved
+// from a room and installed as a new room (lib/roomComponents.ts).
 export const CONTENT_KINDS: Readonly<Record<ContentKind, { readonly word: string; readonly label: string; readonly libraryTab: ContentLibraryTab | null; readonly packageKind: string }>> = {
   expert: { word: "expert", label: "Expert", libraryTab: "experts", packageKind: "bnbloc.expert.package/v1" },
   skill: { word: "skill pack", label: "Skill pack", libraryTab: "skills", packageKind: "bnbloc.skill.package/v1" },
   prompt: { word: "prompt pack", label: "Prompt pack", libraryTab: "prompts", packageKind: "bnbloc.prompt.package/v1" },
   work: { word: "work", label: "Work", libraryTab: null, packageKind: "bnbloc.work.package/v1" },
   assist: { word: "AI assist", label: "AI assist", libraryTab: "assists", packageKind: "bnbloc.assist.package/v1" },
+  room: { word: "room component", label: "Room", libraryTab: "rooms", packageKind: "bnbloc.room.package/v1" },
 };
 
 /** The Library tabs that list content components of a kind. */
-export type ContentLibraryTab = "experts" | "skills" | "prompts" | "assists";
+export type ContentLibraryTab = "experts" | "skills" | "prompts" | "assists" | "rooms";
 
 // The short kind of a content package's manifest kind.
 export const CONTENT_PACKAGE_KINDS: Readonly<Record<string, ContentKind>> = Object.fromEntries(
@@ -81,6 +84,8 @@ export interface ContentForm {
   team?: ContentFormTeam;
   // An AI assist's task (instructions is its system prompt).
   assist?: AssistSpec;
+  // A room component's setup (its room expert and packs are requires).
+  room?: RoomSpec;
 }
 
 export interface ContentFormRole {
@@ -170,8 +175,10 @@ export function formPayload(f: ContentForm): Record<string, unknown> {
   const tags = cleanTags(f.tags ?? []);
   if (tags.length > 0) out.tags = tags;
   const req = f.requires ?? {};
-  if ((req.skills?.length ?? 0) + (req.prompts?.length ?? 0) + (req.mcp?.length ?? 0) + (req.permissions?.length ?? 0) > 0) {
+  if ((req.expert ? 1 : 0) + (req.skills?.length ?? 0) + (req.prompts?.length ?? 0) + (req.mcp?.length ?? 0) + (req.permissions?.length ?? 0) > 0) {
     out.requires = {
+      // A room component's room expert.
+      ...(req.expert ? { expert: req.expert } : {}),
       ...(req.skills?.length ? { skills: req.skills } : {}),
       ...(req.prompts?.length ? { prompts: req.prompts } : {}),
       // MCP tools the content requires (the form edits them: contentFormRefs.ts).
@@ -191,8 +198,8 @@ export function formPayload(f: ContentForm): Record<string, unknown> {
     if (a.output === "json" && fields.length > 0) out.fields = fields;
     if ((a.context ?? []).length > 0) out.context = a.context;
   }
-  if (f.kind === "expert") {
-    out.instructions = f.instructions.trim();
+  if (f.kind === "expert") out.instructions = f.instructions.trim();
+  if (f.kind === "expert" || f.kind === "room") {
     const welcome = trimmed(f.welcome);
     if (welcome) out.welcome = welcome;
     // A quick prompt that points at a pack's prompt keeps its ref.
@@ -200,6 +207,15 @@ export function formPayload(f: ContentForm): Record<string, unknown> {
       .map((q) => (q.ref && !q.prompt.trim() ? { title: trimmed(q.title), ref: q.ref } : { title: trimmed(q.title), prompt: q.prompt.trim() }))
       .filter((q) => q.title || ("prompt" in q ? q.prompt : q.ref));
     if (qp.length > 0) out.quickPrompts = qp;
+  }
+  if (f.kind === "room") {
+    const room = f.room;
+    if (room?.channels.length) out.channels = room.channels;
+    if (room?.schedules.length) out.schedules = room.schedules;
+    if (room?.apps.length) out.apps = room.apps;
+    if (room?.sources.length) out.sources = room.sources;
+  }
+  if (f.kind === "expert") {
     const roles = (f.team?.members ?? [])
       .map((m) => ({ role: trimmed(m.role), expert: trimmed(m.expert), defaultAgent: trimmed(m.defaultAgent), description: trimmed(m.description) }))
       .filter((m) => m.role || m.expert);

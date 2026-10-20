@@ -30,12 +30,12 @@ export function CreateRoomDialog({
   open,
   onClose,
   onCreated,
-  onFromTemplate,
+  onFromComponent,
 }: {
   open: boolean;
   onClose: () => void;
   onCreated: (id: string) => void;
-  onFromTemplate?: () => void;
+  onFromComponent?: () => void;
 }) {
   const [id, setId] = useState("");
   const [name, setName] = useState("");
@@ -145,16 +145,16 @@ export function CreateRoomDialog({
       description="Rooms are private by default. You can change this anytime."
       footer={
         <>
-          {onFromTemplate && (
+          {onFromComponent && (
             <Button
               variant="outline"
               className="mr-auto"
               onClick={() => {
                 reset();
-                onFromTemplate();
+                onFromComponent();
               }}
             >
-              From template…
+              From a room component…
             </Button>
           )}
           <Button variant="ghost" onClick={close}>

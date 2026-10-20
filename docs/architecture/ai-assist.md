@@ -66,7 +66,11 @@ task declares and relays the reply. Nothing else calls a model.
   (text; room, attachments) rewrites the composer's text into a clear
   request; `describe-work` (json: `displayName`, `description`,
   `category`, `tags`; artifact) drafts a work's gallery entry, its
-  categories held to `wire.WorkCategories` by a test. `draft-expert`,
+  categories held to `wire.WorkCategories` by a test; `describe-room`
+  (json: `displayName`, `description`, `category`, `tags`, `welcome`;
+  room) drafts a room component's Library entry in the "Save as
+  component" dialog from the room and the setup being saved (the web sends
+  it as `<text>`), its fields held to `contentpkg.Form`'s. `draft-expert`,
   `draft-skill-pack` and `draft-prompt-pack` (json; no context) fill the
   Library's form from a sentence (plus the form's current values the web
   appends), their fields and item fields held to `contentpkg.Form`'s by a

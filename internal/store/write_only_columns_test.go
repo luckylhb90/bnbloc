@@ -42,6 +42,19 @@ var writeOnlyColumnAllowed = map[string]string{
 	"room_notes.type":                "retiring: the withdrawn room notes feature; dropped by the next release",
 	"room_notes.updated_at_ms":       "retiring: the withdrawn room notes feature; dropped by the next release",
 	"room_notes.verified_at_ms":      "retiring: the withdrawn room notes feature; dropped by the next release",
+	// Retiring: room packages replaced room templates on 2026-10-20
+	// (docs/prd/2026-10-20-rooms-as-components.md); no code reads or writes
+	// the table, which stays for one release of version skew.
+	"room_templates.body_json":     "retiring: room templates, replaced by room packages; dropped by the next release",
+	"room_templates.created_at_ms": "retiring: room templates, replaced by room packages; dropped by the next release",
+	"room_templates.created_by":    "retiring: room templates, replaced by room packages; dropped by the next release",
+	"room_templates.description":   "retiring: room templates, replaced by room packages; dropped by the next release",
+	"room_templates.name":          "retiring: room templates, replaced by room packages; dropped by the next release",
+	"room_templates.template_id":   "retiring: room templates, replaced by room packages; dropped by the next release",
+	"room_templates.tenant_id":     "retiring: room templates, replaced by room packages; dropped by the next release",
+	"room_templates.updated_at_ms": "retiring: room templates, replaced by room packages; dropped by the next release",
+	"room_templates.use_count":     "retiring: room templates, replaced by room packages; dropped by the next release",
+	"room_templates.visibility":    "retiring: room templates, replaced by room packages; dropped by the next release",
 	// Bookkeeping timestamps that predate the check; candidates for the
 	// next removal migration (or a reader that needs them).
 	"org_sync_default_rooms.granted_at_ms": "pre-existing: when organization sync granted the default room",

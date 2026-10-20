@@ -28,7 +28,7 @@ import type {
 // parser, a JSON reply onto the publish form) are lib/assistModel.ts.
 
 export type { AssistModelConfig, AssistModelTest, AssistModelUpdate, AssistOrgModel, AssistTask, AssistUsage } from "./wire.gen.ts";
-export { DESCRIBE_WORK, ENHANCE_PROMPT, workDraftPatch } from "./assistModel.ts";
+export { DESCRIBE_ROOM, DESCRIBE_WORK, ENHANCE_PROMPT, workDraftPatch } from "./assistModel.ts";
 
 const enc = encodeURIComponent;
 

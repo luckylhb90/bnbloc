@@ -275,6 +275,14 @@ func pinnedVersion(ctx context.Context, st store.ContentComponentStore, u store.
 	return c, v, err
 }
 
+// Resolve picks, for a "name@range" reference of kind, the highest
+// satisfying version among the components the viewer may use (the rule of
+// resolveReference, outside any room): a room package's parts as its
+// installer resolves them. found is false when none satisfies.
+func Resolve(ctx context.Context, st store.ContentComponentStore, v extpipe.Viewer, req, kind string) (store.ContentComponent, store.ContentComponentVersion, bool, error) {
+	return resolveReference(ctx, st, v, v.Tenant, nil, req, kind)
+}
+
 // resolveReference picks, for "name@range", the highest satisfying
 // version among the components of that kind and name the requester may use
 // and the room's (a room pin fixes its version): skill packs an expert

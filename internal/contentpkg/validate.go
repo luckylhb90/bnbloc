@@ -199,9 +199,17 @@ func validateEnvelope(m Manifest, opts Options) error {
 	if m.Kind != KindAssist && (m.Output != "" || len(m.Fields) > 0 || len(m.Context) > 0) {
 		return errAssistFields
 	}
+	if m.Kind != KindRoom && (m.Requires.Expert != "" || len(m.Channels)+len(m.Schedules)+len(m.Apps)+len(m.Sources) > 0) {
+		return errRoomFields
+	}
 	r := m.Requires
 	if len(r.Skills)+len(r.Prompts)+len(r.MCP)+len(r.Permissions) > maxRequires {
 		return fmt.Errorf("at most %d requirements", maxRequires)
+	}
+	if r.Expert != "" {
+		if err := checkReference("requires.expert", r.Expert); err != nil {
+			return err
+		}
 	}
 	for _, s := range r.Skills {
 		if err := checkReference("requires.skills", s); err != nil {

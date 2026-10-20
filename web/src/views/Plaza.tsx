@@ -18,7 +18,7 @@ import { Segment } from "@/ui/Segment";
 import { PageHeader, EmptyState } from "@/ui/Page";
 import { useToast } from "@/ui/Toast";
 import { SharedPrompts } from "@/views/library/SharedPrompts";
-import { InstantiateTemplateDialog } from "@/views/library/TemplateDialogs";
+import { CreateRoomFromComponentDialog } from "@/views/library/CreateRoomFromComponentDialog";
 import { WelcomeCard } from "@/views/WelcomeCard";
 import { WorkGallery } from "@/views/gallery/WorkGallery";
 import { CreateRoomDialog } from "@/views/CreateRoomDialog";
@@ -38,7 +38,7 @@ export function Plaza({ onOpen }: { onOpen: (id: string) => void }) {
   const [total, setTotal] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [fromTemplate, setFromTemplate] = useState(false);
+  const [fromComponent, setFromComponent] = useState(false);
   const [section, setSection] = useState<PlazaSection>("works");
   const toast = useToast();
   const { reauth, role } = useAuth();
@@ -186,16 +186,16 @@ export function Plaza({ onOpen }: { onOpen: (id: string) => void }) {
           toast.success(`Room “${id}” created`);
           onOpen(id);
         }}
-        onFromTemplate={() => {
+        onFromComponent={() => {
           setCreating(false);
-          setFromTemplate(true);
+          setFromComponent(true);
         }}
       />
-      <InstantiateTemplateDialog
-        open={fromTemplate}
-        onClose={() => setFromTemplate(false)}
+      <CreateRoomFromComponentDialog
+        open={fromComponent}
+        onClose={() => setFromComponent(false)}
         onCreated={(id) => {
-          setFromTemplate(false);
+          setFromComponent(false);
           onOpen(id);
         }}
       />

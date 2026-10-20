@@ -206,8 +206,6 @@ type Backends struct {
 	APITokens APITokenStore
 	// Schedules holds rooms' scheduled prompts (N2).
 	Schedules RoomScheduleStore
-	// Templates is the tenant room-template library (N3).
-	Templates RoomTemplateStore
 	// Budgets holds the tenants' monthly usage budgets (R12).
 	Budgets UsageBudgetStore
 	// OrgSync holds organization-sync state (R11): last asserted directory
@@ -270,7 +268,6 @@ func NewBackends(dsn string) (*Backends, error) {
 			RefreshTokens:     NewMemoryRefreshToken(),
 			APITokens:         NewMemoryAPITokens(),
 			Schedules:         NewMemoryRoomSchedules(),
-			Templates:         NewMemoryRoomTemplates(),
 			Budgets:           NewMemoryUsageBudgets(),
 			OrgSync:           NewMemoryOrgSync(),
 			Profiles:          NewMemoryUserProfiles(),
@@ -321,7 +318,6 @@ func newMySQLBackends(db *sql.DB) *Backends {
 		RefreshTokens:     NewMySQLRefreshToken(db),
 		APITokens:         NewMySQLAPITokens(db),
 		Schedules:         NewMySQLRoomSchedules(db),
-		Templates:         NewMySQLRoomTemplates(db),
 		Budgets:           NewMySQLUsageBudgets(db),
 		OrgSync:           NewMySQLOrgSync(db),
 		Profiles:          NewMySQLUserProfiles(db),

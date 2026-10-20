@@ -172,7 +172,7 @@ func contentView(c store.ContentComponent, v store.ContentComponentVersion, clai
 		ID: c.ID, Kind: shortKind(c.Kind), Name: c.Name, DisplayName: m.DisplayName, Description: m.Description,
 		Category: m.Category, Tags: m.Tags, Icon: m.Icon, Owner: c.Owner, Scope: string(c.Scope), Status: string(c.Status),
 		LatestVersion: c.LatestVersion, Version: v.Version, Permissions: m.Permissions(), NeedsSandbox: m.NeedsSandbox(),
-		Requires: wire.ContentRequires{Skills: m.Requires.Skills, Prompts: m.Requires.Prompts, Permissions: m.Requires.Permissions},
+		Requires: wire.ContentRequires{Expert: m.Requires.Expert, Skills: m.Requires.Skills, Prompts: m.Requires.Prompts, Permissions: m.Requires.Permissions},
 		Welcome:  m.Welcome, Uses: uses,
 		Team:     contentuse.TeamRoster(m.Team),
 		SharedBy: c.SharedBy, SourceID: c.SourceID,
@@ -185,6 +185,7 @@ func contentView(c store.ContentComponent, v store.ContentComponentVersion, clai
 		out.WorkType, out.WorkFile, out.Recipe = m.Type, m.File, m.Recipe
 	}
 	out.Assist = m.AssistSpec()
+	out.Room = m.RoomSpec()
 	held := ownedBy(c, claims)
 	out.Mine = held && c.Scope == store.ContentScopePersonal
 	out.Removable = held && (c.Scope == store.ContentScopePersonal || c.Scope == store.ContentScopeShared)

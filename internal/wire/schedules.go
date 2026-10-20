@@ -2,14 +2,14 @@ package wire
 
 import "encoding/json"
 
-// Scheduled prompts (N2) and room templates (N3). realtime serves schedules
-// (it owns chat publish and runs the scheduler); room serves templates (it
-// owns rooms, members, and channels). The JSON tags are the public contract
-// the web client reads.
+// Scheduled prompts (N2). realtime serves schedules (it owns chat publish
+// and runs the scheduler). The JSON tags are the public contract the web
+// client reads.
 
 // MaxChatTextBytes is the product cap on one chat message's text. realtime
-// enforces it on every post; schedule and template validation use the same
-// bound so a stored scheduled prompt always fits the post it becomes.
+// enforces it on every post; schedule validation (a room package's
+// schedules too) uses the same bound so a stored scheduled prompt always
+// fits the post it becomes.
 const MaxChatTextBytes = 16 * 1024
 
 // Schedule recipient kinds: a people-only room message, a message
@@ -150,86 +150,4 @@ type ScheduleAction struct {
 // posted, so clients can badge it. A typed message never carries it.
 type ScheduledMarker struct {
 	ScheduleID string `json:"scheduleId"`
-}
-
-// Room template visibility values: private is the author only, tenant is
-// every member of the author's tenant.
-//
-//wire:union TemplateVisibility
-const (
-	TemplatePrivate = "private"
-	TemplateTenant  = "tenant"
-)
-
-// TemplateAgent is a suggested agent of a template: a HINT only. After a
-// room is created from the template the UI offers to invite the owner and
-// to request that owner's borrow authorization; nothing is ever granted
-// automatically.
-type TemplateAgent struct {
-	OwnerID  string `json:"ownerId"`
-	Provider string `json:"provider"`
-	Core     string `json:"core,omitempty"`
-}
-
-// TemplateSchedule is a schedule captured in a template. Channel is a channel
-// NAME of the template (ids are per room); empty means the default channel.
-// Instantiation creates it disabled, owned by the member who instantiated.
-type TemplateSchedule struct {
-	Channel    string             `json:"channel,omitempty"`
-	Text       string             `json:"text"`
-	Recipient  ScheduleRecipient  `json:"recipient"`
-	Recurrence ScheduleRecurrence `json:"recurrence"`
-	Timezone   string             `json:"timezone"`
-}
-
-// TemplateContentUse is a content component a template turns on in every
-// room made from it: a room content use, pinned to Version or following the
-// latest when empty.
-type TemplateContentUse struct {
-	ComponentID string `json:"componentId"`
-	Version     string `json:"version,omitempty"`
-}
-
-// RoomTemplateBody is what a template sets up in a new room. A template's
-// starters are its prompt packs' (PromptPacks become the new room's prompt
-// pack uses); it has no starter list of its own.
-type RoomTemplateBody struct {
-	RoomDescription string               `json:"roomDescription,omitempty"`
-	Channels        []string             `json:"channels"`
-	PromptPacks     []TemplateContentUse `json:"promptPacks"`
-	SuggestedAgents []TemplateAgent      `json:"suggestedAgents"`
-	DefaultMembers  []string             `json:"defaultMembers"`
-	Schedules       []TemplateSchedule   `json:"schedules"`
-}
-
-// RoomTemplate is one template in the tenant's template library.
-type RoomTemplate struct {
-	TemplateID  string           `json:"templateId"`
-	TenantID    string           `json:"tenantId"`
-	Name        string           `json:"name"`
-	Description string           `json:"description,omitempty"`
-	Visibility  string           `json:"visibility" tstype:"TemplateVisibility"`
-	CreatedBy   string           `json:"createdBy"`
-	Body        RoomTemplateBody `json:"body"`
-	UseCount    int64            `json:"useCount"`
-	CreatedAtMs int64            `json:"createdAtMs"`
-	UpdatedAtMs int64            `json:"updatedAtMs"`
-}
-
-// RoomTemplateInstance is the instantiate response: the new room and what
-// the template set up in it. SuggestedAgents are returned for the UI's
-// follow-up offers; no grant is created for any agent. PromptPacks are the
-// component ids turned on in the room; FailedPromptPacks the template's
-// packs the creator may not use, left out.
-type RoomTemplateInstance struct {
-	RoomID            string          `json:"roomId"`
-	Name              string          `json:"name"`
-	TemplateID        string          `json:"templateId"`
-	Channels          []string        `json:"channels"`
-	AddedMembers      []string        `json:"addedMembers"`
-	FailedMembers     []string        `json:"failedMembers,omitempty"`
-	Schedules         []string        `json:"schedules"`
-	PromptPacks       []string        `json:"promptPacks"`
-	FailedPromptPacks []string        `json:"failedPromptPacks,omitempty"`
-	SuggestedAgents   []TemplateAgent `json:"suggestedAgents"`
 }

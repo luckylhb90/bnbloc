@@ -153,7 +153,7 @@ func (s *Service) handleCreateChannel(w http.ResponseWriter, r *http.Request) {
 
 // createChannel adds a non-default channel named name, created by creator
 // (the creator may later rename it). Every channel-adding path (the route, a
-// handoff import, a template instantiation) goes through it.
+// handoff import) goes through it.
 func (s *Service) createChannel(ctx context.Context, roomID, name, creator string) (store.RoomChannel, error) {
 	ch := store.RoomChannel{
 		ChannelID:   ids.New("ch_"),

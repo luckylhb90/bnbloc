@@ -45,7 +45,7 @@ export function RoomHeader({
   onExportHandoff,
   exportingBytes,
   borrowBadge = 0,
-  onSaveTemplate,
+  onSaveComponent,
   onShowSchedules,
   onShowRuns,
   onTogglePeopleChat,
@@ -76,8 +76,8 @@ export function RoomHeader({
   // Pending borrow quota requests awaiting this member (F3), shown on the
   // borrow-authorization icon.
   readonly borrowBadge?: number;
-  // Owner/admin only: save the room as a template (N3).
-  readonly onSaveTemplate?: () => void;
+  // Owner/admin only: save the room as a room component.
+  readonly onSaveComponent?: () => void;
   // Opens the room's scheduled prompts panel (N2).
   readonly onShowSchedules?: () => void;
   // Opens the room's agent run records (R10).
@@ -211,8 +211,8 @@ export function RoomHeader({
           <ListChecksIcon size={18} />
         </Button>
       )}
-      {onSaveTemplate && (
-        <Button variant="ghost" size="icon" title="Save as template" aria-label="Save room as template" onClick={onSaveTemplate} className="tap">
+      {onSaveComponent && (
+        <Button variant="ghost" size="icon" title="Save as component" aria-label="Save room as component" onClick={onSaveComponent} className="tap">
           <SquaresFourIcon size={18} />
         </Button>
       )}

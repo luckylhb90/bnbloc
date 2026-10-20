@@ -34,6 +34,13 @@ type Form struct {
 	Output  string             `json:"output,omitempty"`
 	Fields  []wire.AssistField `json:"fields,omitempty"`
 	Context []string           `json:"context,omitempty"`
+
+	// A room package's setup (room.go); its welcome and quick prompts are
+	// the fields above, its room expert and packs Requires.
+	Channels  []string                   `json:"channels,omitempty"`
+	Schedules []wire.RoomPackageSchedule `json:"schedules,omitempty"`
+	Apps      []string                   `json:"apps,omitempty"`
+	Sources   []string                   `json:"sources,omitempty"`
 }
 
 // FormSkill is one skill written in the form: its SKILL.md is generated
@@ -58,6 +65,9 @@ func Build(f Form, version string, opts Options, base *Package) (*Package, []byt
 	}
 	if spec.Kind != KindAssist && (f.Output != "" || len(f.Fields) > 0 || len(f.Context) > 0) {
 		return nil, nil, errAssistFields
+	}
+	if spec.Kind != KindRoom && len(f.Channels)+len(f.Schedules)+len(f.Apps)+len(f.Sources) > 0 {
+		return nil, nil, errRoomFields
 	}
 	m := Manifest{
 		Kind: spec.Kind, Name: strings.TrimSpace(f.Name), Version: version,

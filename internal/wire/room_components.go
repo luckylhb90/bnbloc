@@ -1,0 +1,109 @@
+package wire
+
+// Room components (docs/prd/2026-10-20-rooms-as-components.md §2.1): a
+// room's setup saved as a content component (contentpkg.KindRoom, its
+// manifest checked by contentpkg) and installed as a new room the
+// installer owns.
+
+// Room sources: the kinds of organization records a room package's
+// scheduled tasks may ask to read (§2.3). A package declares them and the
+// Library shows them; nothing grants or reads one yet (the consent and the
+// read come with slice 2).
+//
+//wire:union RoomSource
+const (
+	// RoomSourceRuns is the organization's agent conversations: request
+	// and reply text, the agent, the outcome, the room and the time.
+	RoomSourceRuns = "runs"
+)
+
+// RoomSources are the sources a room package may declare: the one list.
+var RoomSources = []string{RoomSourceRuns}
+
+// RoomPackageSchedule is a scheduled task of a room package: an AI task
+// or a notice to the room's members (Recipient kind "ai" or "notice"),
+// its text and when it recurs. Channel is a channel name of the package
+// ("" the room's default channel). Installing creates it disabled, owned
+// by the installer.
+type RoomPackageSchedule struct {
+	Channel    string             `json:"channel,omitempty"`
+	Text       string             `json:"text"`
+	Recipient  ScheduleRecipient  `json:"recipient"`
+	Recurrence ScheduleRecurrence `json:"recurrence"`
+	Timezone   string             `json:"timezone"`
+}
+
+// RoomSpec is a room package's setup on its Library view (the room
+// expert, skill packs and prompt packs are its requires). Apps are works
+// by "name@range".
+type RoomSpec struct {
+	Channels  []string              `json:"channels"`
+	Schedules []RoomPackageSchedule `json:"schedules"`
+	Apps      []string              `json:"apps"`
+	Sources   []string              `json:"sources" tstype:"RoomSource"`
+}
+
+// RoomDraftPart is a component a room uses, as a draft captured it: its
+// id, names, the version in effect and Ref, the "name@^major" a package
+// names it by.
+type RoomDraftPart struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	DisplayName string `json:"displayName,omitempty"`
+	Version     string `json:"version"`
+	Ref         string `json:"ref"`
+}
+
+// RoomComponentDraft answers GET /v1/rooms/{roomId}/component-draft: what
+// "Save as component" captures of a room for its owner or an admin, to be
+// reviewed and saved as a room package through the content form. Name is
+// a package name proposed from the room's. Left says, a line each, what
+// of the room a package does not hold.
+type RoomComponentDraft struct {
+	RoomID      string                `json:"roomId"`
+	Name        string                `json:"name"`
+	DisplayName string                `json:"displayName"`
+	Description string                `json:"description"`
+	Channels    []string              `json:"channels"`
+	Schedules   []RoomPackageSchedule `json:"schedules"`
+	Expert      *RoomDraftPart        `json:"expert,omitempty"`
+	Skills      []RoomDraftPart       `json:"skills"`
+	Prompts     []RoomDraftPart       `json:"prompts"`
+	Apps        []RoomDraftPart       `json:"apps"`
+	Left        []string              `json:"left"`
+}
+
+// RoomInstallRequest is POST /v1/content-components/{id}/create-room: the
+// version to install (default the latest) and the new room's id (one is
+// made when empty), name (default the component's) and visibility
+// ("private" by default, or "shared").
+type RoomInstallRequest struct {
+	Version    string `json:"version,omitempty"`
+	RoomID     string `json:"roomId,omitempty"`
+	Name       string `json:"name,omitempty"`
+	Visibility string `json:"visibility,omitempty"`
+}
+
+// RoomInstallReply is what installing a room package set up: the new room,
+// From ("name@version"), its channels, the ids of its schedules (all
+// paused), the room expert, the packs turned on and the apps copied in
+// (labels), what was left out and why (Skipped), and what the room asks
+// for that nobody granted: its sources (none is read until the
+// organization's admin consents) and its MCP tools. Welcome and
+// QuickPrompts are the package's, for the room's first visit.
+type RoomInstallReply struct {
+	RoomID       string               `json:"roomId"`
+	Name         string               `json:"name"`
+	ComponentID  string               `json:"componentId"`
+	From         string               `json:"from"`
+	Channels     []string             `json:"channels"`
+	Schedules    []string             `json:"schedules"`
+	Expert       string               `json:"expert,omitempty"`
+	Enabled      []string             `json:"enabled"`
+	Apps         []string             `json:"apps"`
+	Skipped      []string             `json:"skipped"`
+	Sources      []string             `json:"sources" tstype:"RoomSource"`
+	Tools        []string             `json:"tools"`
+	Welcome      string               `json:"welcome,omitempty"`
+	QuickPrompts []ContentQuickPrompt `json:"quickPrompts,omitempty"`
+}

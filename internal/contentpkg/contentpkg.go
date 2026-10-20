@@ -31,6 +31,7 @@ const (
 	KindPrompt = "bnbloc.prompt.package/v1"
 	KindWork   = "bnbloc.work.package/v1"
 	KindAssist = "bnbloc.assist.package/v1"
+	KindRoom   = "bnbloc.room.package/v1"
 )
 
 // ManifestFile is the manifest's path in every content bundle.
@@ -92,7 +93,8 @@ type Manifest struct {
 	Requires    Requires `json:"requires,omitempty"`
 
 	// Expert: the quick prompts and welcome card shown in the composer and
-	// the room (INSTRUCTIONS.md holds the always-on part).
+	// the room (INSTRUCTIONS.md holds the always-on part). A room package
+	// carries them too, for its room.
 	QuickPrompts []QuickPrompt `json:"quickPrompts,omitempty"`
 	Welcome      string        `json:"welcome,omitempty"`
 	// Team makes the expert a team: the lead wears it (INSTRUCTIONS.md is
@@ -120,12 +122,23 @@ type Manifest struct {
 	Output  string             `json:"output,omitempty"`
 	Fields  []wire.AssistField `json:"fields,omitempty"`
 	Context []string           `json:"context,omitempty"`
+
+	// Room: a room's setup (room.go): its channels by name, its scheduled
+	// tasks, its apps (works by "name@range") and the sources it asks for
+	// (wire.RoomSources). Its welcome and quick prompts are the expert's
+	// fields; its room expert, skill and prompt packs are its requires.
+	Channels  []string                   `json:"channels,omitempty"`
+	Schedules []wire.RoomPackageSchedule `json:"schedules,omitempty"`
+	Apps      []string                   `json:"apps,omitempty"`
+	Sources   []string                   `json:"sources,omitempty"`
 }
 
 // Requires lists what a package needs at use time: skill and prompt packs
 // by "name@range", MCP tools by name (with the keys of the tool's settings
-// it needs set), and the permissions it declares.
+// it needs set), and the permissions it declares. A room package names its
+// room expert ("name@range") too.
 type Requires struct {
+	Expert      string           `json:"expert,omitempty"`
 	Skills      []string         `json:"skills,omitempty"`
 	Prompts     []string         `json:"prompts,omitempty"`
 	MCP         []MCPRequirement `json:"mcp,omitempty"`

@@ -36,7 +36,7 @@ export const StorageKey = {
   onboarding: "bnbloc.onboarding.v1",
   workshopRoom: "bnbloc.workshopRoom",
   handoffBanner: "bnbloc.handoffBanner",
-  templateStart: "bnbloc.templateStart",
+  roomStart: "bnbloc.roomStart",
   workbench: "bnbloc.workbench",
   // A public link's app visitor token, per share (lib/appVisitor.ts).
   appVisitor: "bnbloc.appVisitor",

@@ -226,6 +226,10 @@ func (s *Service) routes() []route {
 		member("DELETE /v1/content-components/{id}/favorite", s.handleFavorite).spends(costBudget).with(needContent),
 		gated("POST /v1/content-components/{id}/use-app", create, s.handleUseApp).spends(costBudget).with(needContent),
 		gated("POST /v1/content-components/{id}/make-similar", create, s.handleMakeSimilar).spends(costBudget).with(needContent),
+		// Room packages (room_components.go): what a room's editor saves of
+		// it, and a new room made from one (room creation's permission).
+		member("GET /v1/rooms/{roomId}/component-draft", s.handleRoomComponentDraft).with(needContent),
+		gated("POST /v1/content-components/{id}/create-room", create, s.handleCreateRoomFromComponent).spends(costBudget).with(needContent),
 		gated("POST /v1/rooms/{roomId}/artifacts/{artifactId}/publish-work", drive, s.handlePublishWork).spends(costBudget).with(needContent),
 		gated("POST /v1/rooms/{roomId}/artifacts/{artifactId}/work-cover", drive, s.handleDrawWorkCover).spends(costBudget).with(needContent),
 		// AI assist (assist.go): the assist model behind manual entry points.

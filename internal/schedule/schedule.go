@@ -1,7 +1,7 @@
 // Package schedule is the recurrence engine of scheduled prompts (N2):
 // validation of a schedule's recurrence + timezone, and the DST-correct
 // computation of its next run. It is pure (no I/O, no clock): realtime's
-// scheduler and the room service's template instantiation both call it.
+// scheduler and the room package validator (contentpkg) both call it.
 //
 // Every recurrence kind except "once" compiles to one cron-like spec
 // (minute/hour/day-of-month/month/day-of-week sets) evaluated on the
