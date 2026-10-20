@@ -1,7 +1,8 @@
 # Components describe their own settings (2026-10-19)
 
-Status: slice 1 built (2026-10-20, §5); slices 2–5 proposed. Owner: the
-component contract (`core/pkgmeta`), the settings store
+Status: slice 1 built (2026-10-20, §5); slice 2's own settings page built
+(2026-10-20, §2.2a, §5), moving local skills to its page not yet; slices 3–5
+proposed. Owner: the component contract (`core/pkgmeta`), the settings store
 (`internal/componentsettings`), the one settings form.
 
 A component that needs a setting (a URL, a key, a model, a path, a switch)
@@ -145,7 +146,13 @@ would be (decided 2026-10-19).
 - **Declared.** `settingsPage` names an HTML file in the package (with its
   scripts and styles beside it, like a previewer's bundle). Without one,
   the one form renders the declaration (§2.2): most components write no
-  HTML.
+  HTML. Built as `"settingsPage": {"entry": "index.html", "bundle": {"url",
+  "sha256"}}` on a plugin or an MCP tool beside its `settings` (decided
+  2026-10-20): the bundle is a previewer bundle (the same archive format,
+  limits, probe and serving), pinned beside its entry rather than in
+  `artifacts`, which are a plugin's or a stdio tool's per-platform binaries
+  (an http tool has none). `Package.Pins` makes the install gate check it
+  like every artifact (`docs/architecture/settings-pages.md`).
 - **Sandboxed like a previewer.** The page runs in the platform's
   sandboxed frame (`docs/architecture/previewer-components.md`): an opaque
   origin, no network (`default-src 'none'`), no access to the console
@@ -158,6 +165,10 @@ would be (decided 2026-10-19).
     save; refused values answer the field's reason;
   - `check()`: the component's own check (§2.5), when it declares one;
   - `close()`.
+
+  The protocol (version 1: `settings.ready`/`init`, `get`/`set`/`check`
+  answered by `view`/`refused`/`checked`, `close`) and its security rules
+  are in `docs/architecture/settings-pages.md`.
 - **The dialog is the platform's.** Its title (the component and the
   scope), its Close, and a note that the page is the component's own sit
   outside the frame, so a page cannot pose as the console; the theme
@@ -331,6 +342,56 @@ organization or a member (decided 2026-10-20):
 2. **A component's own page.** `settingsPage`, the sandboxed dialog and
    its host API (`get`, `set`, `check`, `close`); a plugin with a
    hand-written view in the web (local skills) moves to its own page.
+
+   **Page built 2026-10-20** (commits 47c56bf6 platform, 831eb402 web,
+   ca81a50f desktop, and the docs beside this record;
+   `docs/architecture/settings-pages.md`):
+   - *Declaration.* `settingsPage {entry, bundle}` on plugins and MCP tools
+     (the field-to-kinds table), only beside `settings`, validated by
+     `core/pkgmeta/settings_page.go`: the entry by the one bundle entry
+     rule (`ValidBundleEntry`, now the previewer's too), the bundle a pin
+     or an upload placeholder never published. `Package.Pins` (every
+     `artifacts.<key>` and `settingsPage.bundle`) is what the complete,
+     gateway-URL and probe checks walk.
+   - *Install.* The bundle is probed like a previewer's
+     (`probeFrameBundle`: in the store, its sha256, a valid archive within
+     the previewer limits, holding the entry).
+   - *Serving.* A scope's settings view carries `page` (entry, pin and a
+     1-hour `settings-page-frame` ticket bound to the subject and
+     `<scope>:<kind>/<name>@<version>`);
+     `GET /v1/settings-pages/{kind}/{name}/{version}/{ticket}/{path...}`
+     serves the files through the previewer's code (`serveFrameFile`,
+     `frameCSP`), re-checking on every request that the component is at that
+     version and the holder may still set the scope (the platform's:
+     `manage_platform`; an organization's: `manage_org` and the component
+     visible to it). The desktop serves the same bundle at
+     `bnbloc-previewer://localhost/_settings/{sha256}/…`, downloaded by its
+     pin with the member's session; the artifact route lets anyone download
+     the page bundle of a component listed to them. Catalogs list
+     `settingsPage`.
+   - *Dialog.* Each scope section of the settings dialog shows the page
+     (`SettingsPageFrame`) instead of the one form, editing that scope
+     only, with the platform's chrome outside the frame (the component, the
+     scope, "This page is the component's own", Close). A member's own scope
+     is the desktop's; in a browser it says so, as the form does.
+   - *Host API.* `web/previewer-sdk/src/settingsProtocol.ts` (both sides)
+     and `@bnbloc/previewer-sdk/settings` (the page side);
+     `web/src/lib/settingsPageFrame.ts` (the host): a view with a secret
+     only as set and the other scopes only as set or not; a save naming a
+     key outside the scope refused before sending; the platform's refusal
+     back with the setting it names (`pkgmeta.SettingRefusal`, answered as
+     `{"error", "field"}` by the settings routes and the desktop's store,
+     which is pinned to it); `check()` answers `supported: false`.
+   - *Publishing.* `bnbloc cores publish-mcp` and `bnbloc components
+     publish-package` take `--settings-page <dir or tar>`, read with the
+     previewer's bundle input before any upload, then uploaded and pinned.
+   - *Example.* `core/pkgmeta/testdata/settings-page`, served by the
+     gateway's tests and driven through the host by the web's.
+   - *Not built.* Local skills' page (the move of a hand-written view);
+     `check()` (§2.5, slice 5); the platform console's package form for an
+     MCP tool takes no page (the CLI does); a member's own values of a
+     component that does not run on their device (§2.2, still slice 1's
+     gap).
 3. **Endpoint components ask.** `GET /v1/component-settings`; the notifier
    and the auth provider move their deployment environment into
    `settings`.

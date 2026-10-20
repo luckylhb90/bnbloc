@@ -316,6 +316,13 @@ bnbloc cores publish-mcp --package search.mcp.json   # runtime "endpoint"
 
 Manage it with the component routes and `?kind=mcp`.
 
+A plugin or MCP tool with its own settings page declares `settingsPage`
+(`{"entry": "index.html", "bundle": {"url": "", "sha256": ""}}`) and
+`publish-mcp` or `publish-package` takes the page's built directory or
+archive as `--settings-page <dir|tar>`: checked like a previewer bundle
+before any upload, then uploaded and pinned
+([architecture/settings-pages.md](./architecture/settings-pages.md)).
+
 ## Promote content to every organization
 
 An expert, skill pack or prompt pack (a member's, or one an organization

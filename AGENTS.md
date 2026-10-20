@@ -853,7 +853,14 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   /v1/platform/components/{name}/settings` and `GET/PUT
   /v1/tenant/components/{name}/settings`, every save audited by key, never by
   value; member values never leave the member's desktop. A secret is never
-  answered back, only "set".
+  answered back, only "set". A component's own settings page
+  (`settingsPage`, `docs/architecture/settings-pages.md`) is a previewer
+  bundle served by the previewer's code under its sandboxed frame; it edits
+  one scope only through the host (`web/src/lib/settingsPageFrame.ts`,
+  the protocol in `web/previewer-sdk/src/settingsProtocol.ts`), whose saves
+  are the scope's own calls. Never give a page a secret's value, a key
+  outside its scope or another route to the store; a pin a package carries
+  outside `artifacts` joins `Package.Pins`, which the install checks walk.
 - **Notifiers are endpoint components; realtime delivers.** A
   `bnbloc.notifier.package/v1` (runtime `endpoint`, contract
   `bnbloc.notifier.contract/v1`) installs through the same shared endpoint
