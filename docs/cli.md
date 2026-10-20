@@ -348,6 +348,29 @@ bnbloc content promote cc_01J… --version 1.2.0 --publisher acme
 Unpublish, restore or remove it in the platform console (Content) or with
 `/v1/platform/content-components/{id}/unpublish|restore` and `DELETE`.
 
+## Publish content from package directories
+
+Content kept in a repository (the default content, `bnbloc-default-content`,
+or an operator's own) is published from its package directories, with no
+component stored anywhere first
+(docs/prd/2026-10-20-no-built-in-content.md):
+
+```sh
+bnbloc content check --all packages          # the validator a save runs; --json for tooling
+bnbloc content publish --all packages --rollout auto   # or --dir packages/<name>
+bnbloc content contracts                     # what an assist under a task's name must answer
+```
+
+`publish` packs each directory with the platform's packer (hidden and junk
+files left out), validates every package before anything is uploaded (an
+assist named after a task the web runs must meet the task's output
+contract), uploads each bundle (`POST /v1/platform/artifacts`), pins it in
+the package, signs it with the publisher key (`--seckey`, `--unsigned` on a
+dev gateway) and installs it (`POST /v1/platform/components`). A version
+already installed with the same bytes is kept, so a rerun is safe; a new
+version adds a version to the same platform row; a version installed with
+other bytes is refused.
+
 ## Publish a desktop update
 
 ```sh

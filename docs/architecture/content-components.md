@@ -303,8 +303,9 @@ skew, and a later release drops it).
   (`GET /v1/tenant/room-sources/{roomId}/{source}`: owner, members with
   roles, the owner's AI tasks, the changes): made shared it is withdrawn,
   transferred it waits again, a new member and a grantee's task created
-  or changed since the consent are told to the admins (a change with the
-  built-in `explain-source-use` on the grantee's budget, shown until
+  or changed since the consent are told to the admins (a change with
+  `explain-source-use`, the organization's or the default, never a
+  member's copy, on the grantee's budget, shown until
   `POST …/ack` or a grant again). A room's members read its asks, the rooms that review it and its
   opt-ins at `GET /v1/rooms/{roomId}/sources` (the header's note,
   `RoomSourcesIndicator`); its owner opts it in at
@@ -313,8 +314,10 @@ skew, and a later release drops it).
   notification path, `notifyOrgAdmins`, as a room report, once a day). The
   console is Organization → Room sources (`RoomSourcesTab`,
   `RoomSourceDialog`: the purpose, whom it is read by, the room's members,
-  its owner's scheduled tasks and their changes, and the built-in
-  `explain-source-use` assist's explanation over the gateway's input,
+  its owner's scheduled tasks and their changes, and the
+  `explain-source-use` assist's explanation over the gateway's input (the
+  organization's version or the default: a consent task never resolves to
+  a member's own, `assist.ConsentScope`),
   which flags a task beyond the purpose). A schedule of the grantee reads a granted source only
   through the schedule-run tool `read_records`
   (`services/gateway/schedule_records.go`; offered to a room that asks for
@@ -364,7 +367,7 @@ skew, and a later release drops it).
   (`roomIncluded`, through `currentDeliverable`; the room's owner or
   admins, a job's grant its own room only, within the bounds before more is
   read): the one validator and the one save decide. "Fill with AI" runs
-  the built-in `describe-room` assist (context `conversation`; `<text>` is
+  the `describe-room` assist (context `conversation`; `<text>` is
   the setup and the current values) for the display name, description,
   category, tags, welcome and the room's instructions, and its
   `dependsOn` (what the room's way of working relies on, carried or not
@@ -455,7 +458,7 @@ prompts: [{id, title, body, variables: [{name, label?, default?, options?}], tag
   room (room use). The composer offers the prompts of the member's packs,
   then the room's (`GET /v1/content-uses?room=`), then every other prompt
   pack of the member's Library (`contentuse.Visible`: the org's and the
-  platform's published packs, the built-in ones): picking a prompt is the
+  platform's published packs, the default ones among them): picking a prompt is the
   opt-in, as picking an expert is, so a published pack's /commands work
   without turning it on first. Its picker searches them,
   a message that starts with `/word` lists matching slash commands, and a
@@ -465,11 +468,13 @@ prompts: [{id, title, body, variables: [{name, label?, default?, options?}], tag
   composer) is a prompt pack's prompt flagged `starter`
   (`starterChoices`, `web/src/lib/promptPacks.ts`): first those of the
   packs turned on for the room (at most 6, each pack once, in the room's
-  order), then those of the built-in packs (at most 6; the built-in
-  `starters` pack holds the general-purpose ones). The pack's author flags
-  them; the room's owner chooses by turning the pack on, so a room keeps no
-  second list of its own, and the web keeps none either. A member's own
-  packs add no starters. A room package requires prompt packs
+  order), then those of the Library's packs whose manifest sets
+  `everyRoom` (at most 6, any scope; the default `starters` pack holds the
+  general-purpose ones). The pack's author flags the prompts and, for a
+  pack meant for every empty room, the pack; the room's owner chooses the
+  rest by turning a pack on, so a room keeps no second list of its own,
+  and the web keeps none either. A pack without `everyRoom` adds starters
+  only to the rooms it is turned on for. A room package requires prompt packs
   (`requires.prompts`, captured from the room's prompt-pack uses by "Save
   as component"); a room made from it gets them as room uses (those the
   installer may use, `contentuse.Resolve`), so its starters come the same
@@ -484,7 +489,7 @@ prompts: [{id, title, body, variables: [{name, label?, default?, options?}], tag
   prompt_id, use_count, last_used_at_ms)` counts insertions per
   organization, one upsert per insertion
   (`POST /v1/content-components/{id}/prompts/{promptId}/use`, readable packs
-  only, built-in ones included), never per keystroke; views carry each
+  only), never per keystroke; views carry each
   prompt's `uses` in the caller's organization. Deleting the component
   deletes its counts.
 - **Expert quick prompts** may point at a pack's prompt (`{title?, ref:
@@ -494,73 +499,63 @@ prompts: [{id, title, body, variables: [{name, label?, default?, options?}], tag
   may use and the room's (`contentuse.ResolvePromptRef`); an unresolved
   one says which pack it needs.
 
-## Built-in content
+## Default content
 
-Some content ships with the release:
+The platform ships no content (docs/prd/2026-10-20-no-built-in-content.md):
+no prompt, expert or pack is embedded in a binary
+(`TestNoContentInThePlatform`). Its experts, skill packs, prompt packs and
+assists are the **default content**, a repository of its own
+(`bnbloc-default-content`), published by an operator as ordinary platform
+content (`bnbloc content publish --all packages`, rollout `auto`) and shown
+in the Library with a **Default** badge (platform scope is the default).
+Anyone copies and changes it; an organization replaces a package by
+publishing its own of the same name, a member by saving one (the nearest
+wins, as for assists). A new version is a new version of the same platform
+row, so a room or job pinned to an old one keeps it. Stored references to
+the retired `cc_builtin_<name>` ids resolve to nothing, like a deleted
+component (pre-launch: no mapping). What it holds:
 
-- The **Expert builder** (`cc_builtin_expert-builder`, 1.2.1) authors
-  experts, skill packs and prompt packs by conversation (PRD §5). The
-  Library's Experts, Skills and Prompts tabs open the workshop with "Create
-  with AI" and "Improve with AI" (`views/library/workshopFlow.ts`), prefilled
-  with the builder's own quick prompts read through the content API
-  (`workshopDraft`; the titles are pinned by
-  `TestBuilderQuickPromptsServeTheWorkshop`). Its always-on
-  `INSTRUCTIONS.md` holds the method, the quality bar and the rules (at most
-  1,500 tokens, `TestBuilderAlwaysOnBudget`). The package format,
-  requirements (prompt packs, MCP tools), teams, scripts and limits are its
-  embedded skill `package-format`, loaded on demand. The skill's limit table
-  is rendered from `contentpkg.Limits` (`TestBuilderLimitsMatchValidator`,
-  `-update` rewrites it; a limit stated elsewhere in the builder fails it),
-  and `references/examples.md` beside it holds one valid package per kind,
-  team included (`TestBuilderExamplesValidate`). It names no workspace path
-  (`TestBuilderNamesNoWorkspacePaths`) and no language: it answers in the
-  person's.
-- The **starter prompts** (`cc_builtin_starters`), a prompt pack whose
-  prompts are all starters: an empty room's general-purpose examples (see
-  "Prompt packs").
-- Interactive apps (`docs/prd/2026-10-12-interactive-apps.md` §4.6): the
-  **Interactive apps** skill pack (`cc_builtin_interactive-apps`, 1.3.1:
-  the app SDK, the platform's two rules, the visitor model, closing in the
-  app's code, publishing, mobile-first layout, the gallery cover (a
-  headless-browser screenshot of the first screen saved as `cover.png`,
-  its cap stated from `wire.MaxWorkCoverBytes`), publishing to the works
-  gallery (`save_component` with `artifactId` saves any deliverable as a
-  work with its recipe; a video's cover is a frame saved as `cover.png`
-  in the same turn), reading the data back with
-  `app_data`; its SDK section is pinned to the served `sdk.d.ts` by
-  `TestInteractiveAppsSkillMatchesSDK`, its long examples are
-  `references/examples.md`), the **App builder** expert
-  (`cc_builtin_app-builder`, requiring the skill pack) and the **App
-  starters** prompt pack (`cc_builtin_app-starters`: `/poll`, `/survey`,
-  `/signup`, `/app-report`, the App builder's quick prompts by `ref`). The
-  always-on parts are bounded by `TestAppBuiltinsAlwaysOnBudget`.
+- The **Expert builder** (`expert-builder`): authors experts, skill
+  packs, prompt packs and assists by conversation. The Library's tabs open
+  the workshop with "Create with AI" and "Improve with AI"
+  (`views/library/workshopFlow.ts`), which finds the builder by name among
+  the member's Library (`builderOf`, `lib/workshop.ts`: the nearest scope)
+  and prefills its quick prompts read through the content API
+  (`workshopDraft`); without one installed the workshop opens without it
+  and says so. Its format skill `package-format` points at the room
+  records' `content-limits.md` for the save's limits instead of copying
+  them.
+- The **starter prompts** (`starters`, `everyRoom`), the file, code and
+  diagram suggestion packs, the **Interactive apps** skill pack, the **App
+  builder** expert and the **App starters** pack (by name: `app-builder`
+  requires `interactive-apps@^1` and `app-starters@^1`), the media skill
+  pack, and the 13 assists behind the web's AI buttons.
 
-A built-in prompt text lives only in its package:
-`TestBuiltinPromptsStayOutOfTheWeb` fails on a copy in `web/src`. Built-in
-content is a content source, not a second library:
+The platform keeps the contracts the content uses, and serves them as data
+rather than letting content copy them:
 
-- **Source.** `internal/contentbuiltin` embeds package directories
-  (`packages/<name>/`, the directory is the package name), packs each with
-  `tarbundle.PackFiles` and validates it with `contentpkg` when the process
-  starts; an invalid built-in refuses to start (its test fails first). It is
-  versioned with the release: changing a built-in's files means bumping its
-  `component.json` version, so a pinned job or room use never sees other
-  bytes under one version.
-- **Overlay.** `contentbuiltin.Overlay(store)` wraps the content store the
-  gateway and realtime use (their `cmd` mains): reads of a `cc_builtin_<name>`
-  id answer from the binary, listings include built-ins when the query asks
-  for scope `builtin` or names their ids (built-ins have no tenant and no
-  owner), writes are refused (`ErrReadOnly`). Uses and acks of a built-in are
-  ordinary rows (a room may pin the builder; `PutContentUse` stores a
-  `cc_builtin_` id without a component row, the overlay vouches for it).
-- **Visibility.** Scope `builtin` in `extpipe.MemberVisibility`: visible
-  and usable by every signed-in member, owned by nobody (read-only in the
-  Library). The chat path (`contentuse.Usable`), `contentuse.Effective` and
-  the bundle entitlement treat it like any other component.
-- **Bundle.** Its artifact key is `builtin/<sha256>`; `GET /v1/artifacts/{key}`
-  serves it from the binary after the usual entitlement, and the gateway's
-  own views read it the same way. The blob store and its collection never
-  hold it.
+- **Assist output contracts** (`wire.AssistContracts`, see
+  docs/architecture/ai-assist.md): an assist saved or installed under a
+  task's name meets its contract (`contentpkg.CheckAssistContract`, on
+  `Options.Contracts`).
+- **Contract files in every pull workspace's records**
+  (`roomlog.ContractFiles`, rewritten only when they change): the app SDK
+  in demo mode and its declarations (`component.RoomAppSDKFile`,
+  `RoomAppSDKTypesFile`; `sdk.d.ts`'s caps and filter operators are pinned
+  to the server's by `TestTypesStateTheServersCaps`) and the content
+  limits (`component.RoomContentLimitsFile`, `contentpkg.LimitsDoc` from
+  `contentpkg.Limits`). Content names them by these paths within "bnbloc's
+  room records", never `.room/` itself.
+- **The format**, through the one validator: `bnbloc content check <dir>`
+  validates a package directory as a save would, and the default content's
+  CI runs it against the platform version it pins.
+
+Its own tests (budgets, the wording each assist states, the builder's
+examples validating, the interactive-apps skill's calls against
+`sdk.d.ts`, the starters, no prompt text copied into the platform's web)
+live in its repository; the platform keeps the contracts' tests
+(`internal/contentpkg/assist_contracts_test.go`), the resolution order and
+the consent exception (`internal/assist/tasks_test.go`).
 
 ## Storage
 
@@ -600,8 +595,8 @@ Tables (migration `2026_10_content_components`):
   `2026_10_agent_jobs_expert_usage`): an expert's runs and distinct
   requesters; a pack's members are its `member` uses. Each count stops at
   `store.MaxUsageCount` (a card's count is a badge, bounded like unread).
-  Every count is the caller's organization's: built-in and platform
-  content is used across organizations, so the use reads
+  Every count is the caller's organization's: platform content (the
+  default content too) is used across organizations, so the use reads
   (`CountContentUses`, `CountMemberUses`, on `idx_content_uses_component
   (component_id, tenant_id, scope_kind)`) and the prompt counts take the
   tenant (migration `2026_10_content_use_counts_tenant`).
@@ -662,7 +657,7 @@ use: an expert per message, a pack turned on; there is no second opt-in);
 retired (unpublished) content is hidden, pending content is its author's
 alone. `contentuse.Visible` is the one listing of what a member can see
 (their own and the copies they hold, their organization's, the platform's,
-the built-in ones): the Library, `name@range` resolution (skill and prompt
+the default content among them): the Library, `name@range` resolution (skill and prompt
 requirements, team roles) and prompt search all read it.
 
 `internal/contentuse` adds the room: a component pinned or enabled in a
@@ -991,7 +986,7 @@ tool by name and can never inline a command.
     requester of the turn being driven, on any drive (own, borrowed,
     platform); the gateway session never leaves the bridge; the bearer is
     revoked with the session binding. A route joins the list only with
-    job-grant admission. Platform content (a built-in pack) requiring a
+    job-grant admission. Platform content (a default pack) requiring a
     stdio tool does not force the sandbox; another member's still does.
 - **Which tools a turn gets** (`mcptool.Resolve`, browser PRD §3.6): the
   ones its content requires, plus every MCP tool its requester installed

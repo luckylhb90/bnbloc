@@ -201,12 +201,18 @@ text has one owner per category
   running deliverables since the bridge started, each gesture's live state
   bounded (`LiveGesture.BoundState`) and the trail fenced (a deliverable's
   code wrote it).
-- **`.room/app-sdk/sdk.js`** (`roomlog.AppSDKUpdate`): the interactive
+- **The platform's contract files** (`roomlog.ContractFiles`,
+  `ContractsUpdate`; docs/prd/2026-10-20-no-built-in-content.md §2.5),
+  written at a workspace's first pass and again only when one changes, at
+  the public paths of `component`: `.room/app-sdk/sdk.js`, the interactive
   apps' SDK in demo mode (`appsdk.DemoJS`: every call answered in the
-  page's memory, nothing sent), written at a workspace's first pass and
-  again only when the SDK changes. The `interactive-apps` skill's
-  self-test serves it as the page's `~app/sdk.js` before the agent says an
-  app works (`docs/prd/2026-10-13-interactive-apps-self-test.md`).
+  page's memory, nothing sent; the `interactive-apps` skill's self-test
+  serves it as the page's `~app/sdk.js` before the agent says an app
+  works, `docs/prd/2026-10-13-interactive-apps-self-test.md`);
+  `.room/app-sdk/sdk.d.ts`, its declarations (every call, its options, the
+  caps); `.room/content-limits.md`, the content validator's bounds
+  (`contentpkg.LimitsDoc`). Content refers to them instead of copying
+  them.
 - **`.room/apps.md`** (`roomlog.ReadApps`, `AppsFile`): the room's
   interactive apps, each with its producer and its collections' document
   counts, never a document's content. The apps are the listed deliverables

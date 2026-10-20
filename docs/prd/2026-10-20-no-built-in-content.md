@@ -1,8 +1,10 @@
 # No prompts in the platform: built-in content becomes default content (2026-10-20)
 
-Status: proposed. Owner: the content store and its scopes
-(`internal/contentbuiltin`, `internal/contentuse`, `services/gateway/content_platform.go`),
-the assist resolution (`internal/assist/tasks.go`), the CLI.
+Status: built 2026-10-20 (§7); the experience regression suite (§2.6) is a
+manual checklist until a deployment can drive it. Owner: the content store
+and its scopes (`internal/contentuse`, `services/gateway/content_platform.go`),
+the assist resolution and contracts (`internal/assist/tasks.go`,
+`wire.AssistContracts`), the CLI (`bnbloc content publish`).
 
 The platform binary ships no prompts. Its 22 built-in content packages
 (13 assists, 2 experts, 2 skill packs, 5 prompt packs, ~4,900 words of
@@ -203,3 +205,61 @@ Risks:
 | Load on users and agents | None new; agents' briefs unchanged. |
 | AI capability | Unchanged features; organizations can tune their AI. |
 | Cost | None at runtime. |
+
+## 7. Built (2026-10-20)
+
+- **Default content repository** `bnbloc-default-content`: the 22
+  packages, unchanged in format, each version bumped a minor; the interactive
+  apps skill and the builder's format skill point at the served files
+  (§2.5) instead of copying the SDK and the limit table; the `starters`
+  pack sets `everyRoom`. Its Go tests run against the platform pinned in
+  its `go.mod`, through the platform's CLI (a `tool` of its module) since a
+  component repository cannot import `internal/`: `bnbloc content check
+  --json` (the validator, contracts included), `bnbloc content contracts`,
+  the public `component` and `core` packages and `appsdk.Types`. CI and a
+  tag release (the set, the platform's check of each with its bundle's
+  sha256, `SHA256SUMS.txt`); publishing and signing stay the operator's
+  (`scripts/publish.sh`). §2.6's suite is `docs/experience-regression.md`
+  there, a manual checklist with a scripted part.
+- **CLI**: `bnbloc content check [--json] (<dir>... | --all <root>)`,
+  `bnbloc content contracts`, `bnbloc content publish (--dir <dir> | --all
+  <root>) [--publisher] [--rollout auto|off] [--seckey|--unsigned]`
+  (`cmd/bnbloc/content_publish.go`): every package packed (`tarbundle.Pack`)
+  and validated before any upload, then upload, `contentpkg.PlatformPackage`,
+  sign, install; a rerun is safe.
+- **Deleted**: `internal/contentbuiltin` (embed, overlay, ids, read-only
+  paths), the `builtin` scope (`store.ContentScopeBuiltin`,
+  `BuiltinContentIDPrefix` and the stores' row-less exemptions for it,
+  `extpipe` visibility, `contentuse.Visible`, the assist rank), the
+  gateway's built-in bundle serving and export refusal, `runBuiltinJSON`.
+  No migration (the scope was never stored). `TestNoContentInThePlatform`
+  (`internal/contentpkg`) refuses a content package in the repository and
+  the retired names; `TestOneStarterMechanism` moved there too.
+- **Contracts** (§2.3): `wire.AssistContracts` (13 tasks: output, fields
+  with types and item fields, required gate, closed values, `consent`),
+  generated into `wire.gen.ts`; `contentpkg.CheckAssistContract` at save,
+  import and platform install (`Options.Contracts`), never on stored reads.
+  The contract tests that tie fields to wire types live in
+  `internal/contentpkg/assist_contracts_test.go`.
+- **Consent exception** (§2.3): `assist.ConsentScope` in the one resolution,
+  so `POST /v1/assist/explain-source-use` (the grant dialog), the status
+  and the gateway's own run (`runConsentJSON`, replacing `runBuiltinJSON`)
+  all take the organization's version, else the platform's.
+- **Web** (§2.4): the builder by name (`builderOf`), starters from packs
+  with `everyRoom` (a new prompt-pack manifest field, validated, with a
+  switch in the pack editor), "Default" badges for platform scope,
+  `isBuiltin` and `BUILDER_EXPERT_ID` removed, task names from the
+  generated constants, web tests over `AssistContracts` instead of package
+  files.
+- **Contracts as files** (§2.5): `roomlog.ContractFiles` writes the demo
+  SDK, `sdk.d.ts` and `content-limits.md` (`contentpkg.LimitsDoc`) into
+  every pull workspace's records at `component.RoomAppSDKFile`,
+  `RoomAppSDKTypesFile`, `RoomContentLimitsFile`; `sdk.d.ts`'s caps and
+  filter operators are pinned to the server's
+  (`TestTypesStateTheServersCaps`, moved from the skill's test).
+
+Differences from the plan: starters needed a manifest field (`everyRoom`):
+a prompt's `starter` flag meant "when the pack is on for the room", and
+only the built-in scope made the general-purpose pack appear everywhere.
+The Library has no "copy" action for another's component; "Default" content
+is changed by saving one's own of the same name (as before for assists).

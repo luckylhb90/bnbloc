@@ -61,16 +61,40 @@ task declares and relays the reply. Nothing else calls a model.
   (`KindSpec.Use`): a room or member never turns one on, and it never
   reaches an agent's workspace.
 - **Resolution by name, nearest first** (`assist.Tasks`): the member's own,
-  a copy shared with them, their organization's, the platform's, the
-  built-in. An organization restyles `enhance-prompt` by publishing its own
-  of that name; a member by saving one. The Expert builder drafts assists
-  like any other kind.
-- **Built-ins** (`internal/contentbuiltin/packages`): `enhance-prompt`
+  a copy shared with them, their organization's, the platform's (the
+  default content). An organization restyles `enhance-prompt` by publishing
+  its own of that name; a member by saving one. The Expert builder drafts
+  assists like any other kind. **The consent exception**
+  (`assist.ConsentScope`, a contract's `consent`): `explain-source-use`
+  explains a grant only an organization admin decides, so it resolves to
+  the organization's version, else the platform's, never a member's own or
+  a shared copy, in a run, in the status (`GET /v1/assist`) and when the
+  gateway runs it itself (`runConsentJSON`).
+- **Output contracts** (`wire.AssistContracts`,
+  docs/prd/2026-10-20-no-built-in-content.md §2.3): the platform ships no
+  assist prompt, only the 13 task names its web and gateway run
+  (`wire.AssistTask*`, generated into `wire.gen.ts`) and what each must
+  answer: its `output`, the reply fields the caller reads with their types
+  and item fields, whether it must have a gate (a caller runs it gated) and
+  the closed `values` the caller acts on (find-a-way's causes and actions,
+  describe-room's dependency and finding kinds, describe-work's
+  categories, draft-schedule's kinds). A package saved or installed under
+  one of those names that does not meet its contract is refused
+  (`contentpkg.CheckAssistContract`, on `Options.Contracts`: a save, an
+  import, a platform install; reading stored content never), so a
+  replaced prompt may change the wording, never break the dialog. More
+  fields than the contract's are allowed; any other name is free. The
+  contracts' field shapes are held to the forms they fill
+  (`internal/contentpkg/assist_contracts_test.go`), and the web's closed
+  lists to their values (web tests over `AssistContracts`).
+  `bnbloc content contracts` prints them.
+- **The default assists** (the `bnbloc-default-content` repository,
+  published at platform scope; none ships in the binaries): `enhance-prompt`
   (text; room, attachments) rewrites the composer's text into a clear
   request; `describe-work` (json: `displayName`, `description`,
   `category`, `tags`; artifact) drafts a work's gallery entry, its
-  categories held to `wire.WorkCategories` by a test; `describe-room`
-  (1.2.0; json: `displayName`, `description`, `category`, `tags`,
+  categories the contract's values; `describe-room`
+  (json: `displayName`, `description`, `category`, `tags`,
   `welcome`, `instructions`, `dependsOn` as `items` of `{what, kind,
   included, why}` and `findings` as `items` of `{field, quote, why}`;
   conversation) reads a room being saved as a component
@@ -82,7 +106,7 @@ task declares and relays the reply. Nothing else calls a model.
   instructions included) it says what the room's way of working depends on
   (`dependsOn`, kinds `instructions`, `app`, `file`, `tool`, `schedule`,
   `agent`, `data`, `other`: the list `web/src/lib/roomCapture.ts` reads,
-  held to the item's description by a web test; `included` is `yes` when
+  the contract's values; `included` is `yes` when
   the package should carry it), drafts the room's instructions from what
   the conversation established and its Library entry, its fields but
   `dependsOn` and `findings` held to `contentpkg.Form`'s, and finds in the
@@ -117,17 +141,22 @@ task declares and relays the reply. Nothing else calls a model.
   purpose and the room owner's tasks as `<text>` (built by the gateway,
   `explainSourceInput` in `room_sources.go`, which the console passes
   through), and flags a task beyond the stated purpose; a task that
-  carries `before` changed after the grant, and the gateway runs the
-  built-in itself (`runBuiltinJSON`, on the grantee's model and budget) to
-  tell the admins what the change does
+  carries `before` changed after the grant, and the gateway runs it
+  itself (`runConsentJSON`: the organization's or the default, never the
+  grantee's copy; on the grantee's model and budget) to tell the admins
+  what the change does
   (`docs/prd/2026-10-20-rooms-as-components.md` §2.3, §7).
   `find-a-way` (json: `cause`, `summary`, `fixes` as `items` of
   `{action, target, why}`; room, capabilities; gated, threshold 0.7)
   says what stopped an agent's reply and proposes up to three fixes of the
-  web's closed list (`web/src/lib/deadEnd.ts`, which a web test holds to
-  the package's field descriptions;
-  `docs/prd/2026-10-20-never-a-dead-end.md`). Each stays within a token
-  budget (`assists_test.go`).
+  web's closed list (`web/src/lib/deadEnd.ts`, held to the contract's
+  values by a web test; `docs/prd/2026-10-20-never-a-dead-end.md`). Each
+  stays within a token budget, and states what its contract and callers
+  need, in the default content's own tests.
+- **No assist installed for a task**: its button is hidden
+  (`useAssistTask`) and the manual path works; the gateway's own run of
+  `explain-source-use` is skipped, logged, and the change is still told
+  to the admins without an explanation.
 
 ## One run
 

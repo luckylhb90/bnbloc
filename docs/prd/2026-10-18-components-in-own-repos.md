@@ -28,8 +28,11 @@ What stays, and why:
 
 - `cmd/bnbloc-vmexec`: generic Sandbox Protocol tooling the platform's
   hybrid execution defines; any sandbox runtime package ships it as a file.
-- `internal/contentbuiltin`: built-in content embedded in the binaries by
-  design (scope `builtin`), versioned with the release.
+- ~~`internal/contentbuiltin`: built-in content embedded in the binaries by
+  design (scope `builtin`), versioned with the release.~~ Superseded
+  2026-10-20 by docs/prd/2026-10-20-no-built-in-content.md: the content
+  left the platform too, for its own repository (`bnbloc-default-content`),
+  published at platform scope like any content.
 - The host side of a component contract: Settings → Skills
   (`web/src/lib/localSkills.ts`, `apps/desktop/.../skills_provider.rs`), the
   previewer host and SDK (`web/previewer-sdk`), the room relay, the live view.

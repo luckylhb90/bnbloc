@@ -77,9 +77,11 @@ mean "persist the health-check discussion").
   job's grant (`GET /v1/components?job=&room=`)
 - `live.md` — what members did in running deliverables (`roomlog.LiveFile`,
   the trail fenced as data a deliverable's code wrote)
-- `app-sdk/sdk.js` — the app SDK in demo mode, for an agent's self-test of
-  an interactive app (`roomlog.AppSDKUpdate`, written once per workspace
-  and again only when it changes)
+- `app-sdk/sdk.js`, `app-sdk/sdk.d.ts`, `content-limits.md` — the
+  platform's contract files: the app SDK in demo mode (an agent's
+  self-test of an interactive app), its declarations and the content
+  limits (`roomlog.ContractFiles`, written once per workspace and again
+  only when one changes)
 
 `artifacts.md`, `library.md` and `live.md` are rewritten every turn
 (`roomRecordFiles`); a read that fails renders as unreadable, never as

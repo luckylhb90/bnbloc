@@ -120,6 +120,31 @@ Supervision of sidecar processes is exclusively the desktop's sidecar
 manager — the server never launches a component process; persisted records
 rehydrate at gateway boot.
 
+### Default content
+
+The binaries ship no content (docs/prd/2026-10-20-no-built-in-content.md).
+The experts, skill packs, prompt packs and the AI assists behind the web's
+AI buttons are the **default content**, the `bnbloc-default-content`
+repository, published at platform scope like any content. Until it is
+published on a deployment, the AI buttons are hidden, an empty room shows
+no starters and the Library's workshop has no Expert builder; agents and
+every manual path work. Publish it right after the first deploy, and each
+new release of that repository, from its checkout (as a super admin, with
+the publisher key registered above):
+
+```bash
+scripts/publish.sh --gateway https://<host> --rollout auto
+# the same as: bnbloc content publish --all packages --gateway https://<host> --rollout auto
+```
+
+Each package is packed, checked by the platform's validator (an assist
+under a task's name must meet that task's output contract), uploaded,
+signed and installed for every organization; publishing again is safe (a
+version already installed with the same bytes is kept, a new version is
+added to the same platform row). Then check `GET /v1/assist` lists the 13
+tasks of `bnbloc content contracts`, an empty room shows the starters and
+the Library's "Create with AI" opens the workshop with the Expert builder.
+
 ## What the production overlay changes
 
 `compose.yml` targets a developer laptop. `deploy/compose.prod.yml`:
@@ -231,7 +256,8 @@ bnbloc login --gateway https://<host>       # once per operator machine
 bnbloc smoke --gateway https://<host>       # add --agent <your agent> when a bridge is online
 ```
 
-Run it after every deploy and upgrade; a deploy is done only when it passes.
+Run it after every deploy and upgrade; a deploy is done only when it passes
+and the [default content](#default-content) is published.
 Schedule it nightly with alerting — inside the deployment (below, no CI
 system needed) or through the [`nightly-smoke` workflow](ci.md#nightly-smoke).
 
@@ -484,6 +510,15 @@ check refuses only a dangerous or malformed value, never one that means the
 same as unset.
 
 Upgrade notes:
+
+- **No built-in content (2026-10-20).** The binaries no longer embed the
+  default experts, packs and assists (docs/prd/2026-10-20-no-built-in-content.md).
+  Deploy the release, then publish the default content the same day
+  ([Default content](#default-content)); between the two, the AI buttons
+  are hidden and the workshop has no builder. No data migration: stored
+  references to the old `cc_builtin_*` ids (a room's builder expert,
+  favorites and prompt counts of built-ins) resolve to nothing, like a
+  deleted component.
 
 - **Data retention (2026-10-11)** adds migration `2026_10_data_retention`:
   four nullable columns on `tenants` and age/blob-key indexes on

@@ -265,6 +265,15 @@ Library).
   `component/` (or `core/`, `web/previewer-sdk`) with one owner, never copy
   it. `TestNoComponentCodeInThePlatform` refuses a component tree or package
   manifest coming back.
+- **No content here.** The platform ships no prompt, expert, skill pack,
+  prompt pack or assist (docs/prd/2026-10-20-no-built-in-content.md): they
+  are the default content, the `bnbloc-default-content` repository,
+  published at platform scope by an operator (`bnbloc content publish
+  --all packages`). `TestNoContentInThePlatform` refuses a content package
+  in the repository (outside test data) and the retired built-in scope's
+  names. What the platform keeps is the capability and its contracts: the
+  kinds and the validator, each assist task's output contract, the room
+  tools' briefs and the contract files served to rooms.
 - `deploy/` — `compose.prod.yml` (prod overlay), `Caddyfile`, `k8s/` (Helm),
   `prod/` (generated per-service + all-in-one + web Dockerfiles),
   `healthcheck/` (the static probe binary in every image), `schema.sql`.
@@ -1384,7 +1393,7 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
 - **Archives and directory packing have one owner: `internal/tarbundle`.**
   An upload of a foreign format is read by `ReadArchive` (an unsafe name is
   refused, never rewritten), and every directory pack (save_component's
-  draft, the CLI's previewer dir, the built-in packages) goes through
+  draft, the CLI's previewer and content package dirs) goes through
   `PackEntries`/`PackFS` with one exclusion rule (`Entry.Packed`: junk such
   as `.DS_Store`, hidden files, `core.ProtectedWorkspacePath`).
   `TestOnlyTarbundleReadsArchives` forbids `archive/tar|zip` elsewhere
@@ -1523,27 +1532,45 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   deliverable or a component is one of its working files, and never
   compute a producer, a Library listing or an app listing elsewhere.
 
-- **Built-in content is a content source**, not a second library:
-  `internal/contentbuiltin`, wrapped over the content store at gateway and
-  realtime startup, scope `builtin`, artifact key `builtin/<sha256>`.
-  Changing a built-in's files means bumping its `component.json` version.
-  A built-in prompt text lives only in its package: the web reads the
+- **Content is never platform code** (docs/prd/2026-10-20-no-built-in-content.md,
+  design-review lens 14). The default content is ordinary platform
+  content with ordinary ids: nothing in Go or the web names a content id
+  or a scope of its own; the web finds the Expert builder by name
+  (`builderOf`, the nearest `expert-builder`) and shows platform scope as
+  "Default". A prompt text lives only in its package: the web reads the
   builder's quick prompts (`workshopDraft`) and the starters through the
-  content API, never a copy (`TestBuiltinPromptsStayOutOfTheWeb`).
-- **The validator's bounds are one table, `contentpkg.Limits()`.** Text
-  that states a limit renders it from there: the builder's
-  `package-format` skill (`TestBuilderLimitsMatchValidator`, `-update`
-  rewrites its table). The builder's always-on `INSTRUCTIONS.md` stays
-  under 1,500 tokens (`TestBuilderAlwaysOnBudget`): what it needs only
-  while drafting goes into that skill. Built-in text names no workspace
-  path (core's lists own them) and no language.
+  content API, never a copy (the default content's
+  `TestPromptsStayOutOfThePlatform` scans this repository's web). With no
+  default content installed every feature still works: an AI button whose
+  task is missing is hidden, the workshop opens without a builder.
+- **Each assist task the web or the gateway runs by name has one output
+  contract: `wire.AssistContracts`** (output, the fields the caller reads
+  with their types, a required gate, the closed values it acts on, and
+  `consent`). The one check is `contentpkg.CheckAssistContract`, run at a
+  save, an import and a platform install (`Options.Contracts`), never on
+  stored reads. A new task name the web calls gets its contract here in the
+  same change; the web's task names are the generated `AssistTask*`
+  constants and its closed lists are pinned to the contract's values. A
+  task that explains an admin's decision (`consent`: `explain-source-use`)
+  resolves only through `assist.ConsentScope` (the organization's, else the
+  platform's, never a member's copy); the gateway's own runs go through
+  `runConsentJSON` and `assist.Task`, never a package it picks itself.
+- **The platform's contracts reach agents as files, never as copies in
+  content.** Every pull workspace's records hold the demo-mode app SDK, its
+  declarations and the content limits (`roomlog.ContractFiles`, at the
+  public paths `component.RoomAppSDKFile`, `RoomAppSDKTypesFile`,
+  `RoomContentLimitsFile`); `contentpkg.LimitsDoc` renders the validator's
+  one table of bounds, `contentpkg.Limits()`, and `sdk.d.ts` states the
+  server's caps and filter operators (`TestTypesStateTheServersCaps`).
+  Content names those files and states no limit of its own.
 - **Every starter prompt is a prompt pack's** (`starterChoices`): the
-  room's packs' starters, then the built-in packs' (`starters`). Never add
-  a starter list of the web's own, nor of any other record: a room
-  package requires prompt packs (`requires.prompts`), which a room made
-  from it gets as room content uses (resolved for the installer).
-  `TestOneStarterMechanism` fails on a starter list in Go, the schema or
-  the web.
+  room's packs' starters, then those of the packs whose manifest sets
+  `everyRoom` (any scope; the default `starters` pack). Never add a starter
+  list of the web's own, nor of any other record: a room package requires
+  prompt packs (`requires.prompts`), which a room made from it gets as
+  room uses (resolved for the installer). `TestOneStarterMechanism`
+  (`internal/contentpkg`) fails on a starter list in Go, the schema or the
+  web.
 - **A room's setup is a content kind, `bnbloc.room.package/v1`**
   (`contentpkg/room.go`; docs/prd/2026-10-20-rooms-as-components.md,
   docs/architecture/content-components.md "Room packages"); room
@@ -1593,8 +1620,9 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   read (`heldGrant`) and when the console opens the ask: the room made
   shared withdraws it, a new owner pauses it, a new member and a
   grantee's task created or changed since the consent are told to the
-  admins (the latter with the built-in `explain-source-use` on the
-  grantee's budget, shown until an admin acknowledges); only
+  admins (the latter with `explain-source-use`, the organization's or
+  the default, never the grantee's copy, on the grantee's budget, shown
+  until an admin acknowledges); only
   `room_sources.go` changes a grant. A schedule reads only through the
   schedule-run tool `read_records` (`schedule_records.go`, never an agent
   tool), within the grant as `heldGrant` answers it at each call, for a
@@ -1623,8 +1651,8 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `bnbloc.prompt.package/v1` manifest; "Save as prompt" appends to the
   member's `my-prompts` pack; count insertions with `RecordContentPromptUse`
   (once per insertion). Never add a second prompt store or route.
-- **A use count is one organization's.** Built-in and platform content is
-  used by every organization, so every use-count write and read takes the
+- **A use count is one organization's.** Platform content (the default
+  content too) is used by every organization, so every use-count write and read takes the
   caller's effective tenant (`RecordContentPromptUse`,
   `ContentPromptUses`, `CountContentUses`, `CountMemberUses`; an empty
   tenant is `tenant.ErrNoTenant`), and `content_prompt_uses` keys on it.
@@ -1817,18 +1845,19 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   returns is fenced (`roomlog.Fence`) and bounded (`maxAppDataText`, a find
   cut there continues with `next`). The bridge's gateway client carries a
   write's conditions as `RawBody.Header` (`If-Match`, `If-None-Match`).
-  The built-in `interactive-apps` skill pack documents the SDK; its SDK
-  section is pinned to `sdk.d.ts` (`TestInteractiveAppsSkillMatchesSDK`:
-  a renamed or added SDK method fails until the skill follows), the
-  `app-builder` expert requires it, and `app-starters` holds `/poll`,
-  `/survey`, `/signup`, `/app-report`. Before an agent finishes an app the
+  The default content's `interactive-apps` skill pack teaches building on
+  the SDK and points at its declarations in the room records
+  (`component.RoomAppSDKTypesFile`) instead of copying them; its tests
+  hold every SDK call it shows to `sdk.d.ts`. The `app-builder` expert
+  requires it by name, and `app-starters` holds `/poll`, `/survey`,
+  `/signup`, `/app-report`. Before an agent finishes an app the
   skill makes it test the page in a headless browser (no console errors,
   a visible main view, the main action written and read back) and never
   call it done when a check failed or could not run
   (`docs/prd/2026-10-13-interactive-apps-self-test.md`); the harness is
   its `references/self-test.md`, and the SDK it serves is the demo-mode
   one bnbloc writes into every pull workspace as `.room/app-sdk/sdk.js`
-  (`roomlog.AppSDKUpdate` over `appsdk.DemoJS`, rewritten only when it
+  (`roomlog.ContractFiles` over `appsdk.DemoJS`, rewritten only when it
   changes; never a second SDK file).
 - **"Is this deliverable an app" has one owner: `store.Artifact.IsApp`**
   (`internal/store/artifact_apps.go`, `docs/prd/2026-10-13-app-gallery.md`
