@@ -221,7 +221,11 @@ packages". What the slice decided, against the code:
   once the room exists deletes it. The welcome and quick prompts reach the
   installer on the room's first visit (`RoomStartCard`, from the install
   reply), like the template follow-ups did; a durable room welcome is not
-  in this slice.
+  in this slice. (Since 2026-10-20 a room keeps its own welcome and quick
+  prompts, which an install sets and every member sees while the room is
+  empty; the installer-only browser copy is gone, and an agent sets a room
+  up and saves it as this kind from the conversation:
+  docs/prd/2026-10-20-room-setup-by-conversation.md.)
 - **Sources** are declared in the save dialog and shown at install and on
   the new room's card as asked for, never granted (slice 2).
 - **Templates folded in.** `services/room/templates.go`,

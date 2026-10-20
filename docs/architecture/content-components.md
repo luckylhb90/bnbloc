@@ -350,10 +350,14 @@ skew, and a later release drops it).
   are reported in `skipped`, never fatal. Anything else that fails once
   the room exists deletes the room (and uncounts its app copies), so a
   half-made room never lingers. The install counts as a use of the package
-  (scope `room-install`, the room). The reply (`wire.RoomInstallReply`)
-  is kept by the web for the room's first visit (`RoomStartCard`: the
-  welcome, the quick prompts as composer drafts, the paused schedules,
-  what was left out, the sources waiting for the admin's consent).
+  (scope `room-install`, the room). The package's welcome and quick
+  prompts become the new room's own (`POST /v1/rooms` carries them; a
+  quick prompt naming a pack's prompt takes its text, resolved for the
+  installer), shown to every member while the room is empty
+  (`RoomStartCard`; docs/prd/2026-10-20-room-setup-by-conversation.md).
+  The install dialog says what was left out (`skipped`) before the room
+  opens; the paused schedules and the waiting sources are the room's own
+  state (its Schedules, the note under its name).
 - **Where they appear.** The Library's Rooms tab (`RoomsTab`: view, new
   version, share, publish, delete, "Create a room"), and Plaza's "New
   room" → "From a room component…".
@@ -643,8 +647,9 @@ Design: PRD §1 "Sources, scopes and trust" and "Status: step 4".
   sandbox on the holder's own agent too, and a copy's permissions are
   confirmed on first use (`acked` only for content the caller wrote).
 - **Organization scope** is a second row, approved version by version.
-  `POST …/{id}/publish {scope: "org", version?, note?}` (the author; the
-  room tools' `publish_component` with a job grant) opens a publish request
+  `POST …/{id}/publish {scope: "org", version?, note?}` (the author; never
+  a job's grant: the room tools' `publish_component` puts a card in the
+  room that only the author sees, and their click calls it) opens a publish request
   for a version (default the latest); a newer request withdraws a pending
   one, and the organization's current version cannot be requested again.
   **Whether a publish waits for an admin is the organization's setting**
@@ -652,8 +657,8 @@ Design: PRD §1 "Sources, scopes and trust" and "Status: step 4".
   `required`, edited by org admins in Organization → Settings through
   `PUT /v1/tenant/settings`), for every kind. Its one reader is
   `contentshare.NeedsApproval`, and the gateway's one publish path is
-  `publishToOrg` (the publish route, `publish_component` and a new
-  version's resubmission all call it; `TestOrgPublishDecidedByNeedsApproval`).
+  `publishToOrg` (the publish route and a new version's resubmission
+  call it; `TestOrgPublishDecidedByNeedsApproval`).
   With `none` the version is published at once (the org row created or
   moved forward and active, a pending request superseded, an audit
   `publish` row, the room tools' `content_saved` action `published`; a

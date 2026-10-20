@@ -766,8 +766,15 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   tool without a brief is refused). Never put a tool's rules in the session
   guidance, and never add a tool whose brief needs a paragraph. An agent acts
   for the person who asked it only through its job's grant, as that person, on
-  routes people already use (`services/gateway/agent_door.go`: schedules, an AI
-  task or a notice only, and the room's group names).
+  routes people already use: `room_setup` reads and changes the room's setup
+  through the agent door (`services/gateway/agent_door.go`: the room's
+  description only, its welcome and quick prompts, channels, schedules (an AI
+  task or a notice only) and group names) and the gateway's grant-honoring
+  routes (content uses, sources), the person's role in the room deciding,
+  each change audited (`room-setup`) and shown in the room as a line naming
+  who asked. Sharing beyond its author is never an agent's act:
+  `publish_component` puts a card only the person sees, and their click
+  publishes (the gateway refuses a job's `org` publish).
 - **Plugins are typed sidecar packages, never cores.** A plugin package
   declares `kind: "bnbloc.plugin.package/v1"`,
   `contract: "bnbloc.plugin.contract/v1"`, and `runtime: "sidecar"`, with
@@ -1662,8 +1669,9 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   owner: `contentshare.NeedsApproval(tenant)`** (the tenant settings'
   `publishApproval`, `required` by default, `none` publishes at once,
   still audited and removable by admins; every kind). The gateway's one
-  publish path is `publishToOrg` (the publish route, `publish_component`,
-  a new version's resubmission); it alone opens a request
+  publish path is `publishToOrg` (the publish route, a member's click on
+  a `publish_component` card included, a new version's resubmission; a
+  job's grant never publishes to the organization); it alone opens a request
   (`openPublishRequest`) or publishes (`orgPublish`, beside an admin's
   approval), and nothing else reads the setting
   (`TestOrgPublishDecidedByNeedsApproval`). Platform content arrives only as a signed package on
