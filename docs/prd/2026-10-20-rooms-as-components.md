@@ -83,7 +83,10 @@ platform.
   these capabilities, kept in its own repository and published to the
   Library like any member's content: anyone copies it and changes its
   prompt, its schedule or anything else. It is never compiled into the
-  platform or its built-in content.
+  platform or its built-in content. Published 2026-10-20:
+  `github.com/luckylhb90/bnbloc-sample-outcome-review` (`outcome-review`
+  0.1.0: a welcome, two quick prompts, one daily AI task in plain words,
+  the `runs` source with its purpose), shared with every organization.
 
 ### 2.3 Reading other rooms: a consented source
 
