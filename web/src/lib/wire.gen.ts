@@ -4368,10 +4368,12 @@ export const RoomSourceScopes: readonly string[] = ["all", "opted-in", "none-pri
 
 // RoomSourceGrant is one room's ask for a source and the organization
 // admin's answer, on the console (GET /v1/tenant/room-sources). From is
-// the package it was installed from ("name@version") and Schedules that
-// version's scheduled tasks (what would read: the grant dialog's AI
-// summary reads them with the purpose). Scope "" is waiting for the
-// admin (never granted, or withdrawn).
+// the package it was installed from ("name@version"). Scope "" is waiting
+// for the admin (never granted, withdrawn, or paused when the room's owner
+// changed). Grantee is the person the grant is pinned to (the room's owner
+// when it was granted): only their schedules read it. Changed counts the
+// grantee's tasks changed since the admin consented to them, until an
+// admin acknowledges.
 export interface RoomSourceGrant {
   roomId: string;
   roomName: string;
@@ -4379,12 +4381,13 @@ export interface RoomSourceGrant {
   purpose: string;
   componentId: string;
   from: string;
-  schedules: RoomPackageSchedule[];
   askedBy: string;
   askedAtMs: number;
   scope?: RoomSourceScope;
+  grantee?: string;
   decidedBy?: string;
   decidedAtMs?: number;
+  changed?: number;
 }
 
 // RoomSourceGrantsReply is GET /v1/tenant/room-sources: every ask of the
@@ -4393,27 +4396,72 @@ export interface RoomSourceGrantsReply {
   grants: RoomSourceGrant[];
 }
 
+// RoomSourceTask is one of a grantee's AI tasks in the reading room as the
+// admin consented to it: the schedule and its words.
+export interface RoomSourceTask {
+  scheduleId: string;
+  text: string;
+}
+
+// RoomSourceDrift is a grantee's AI task created or changed since the
+// admin consented: its words then (Before, "" for a new task) and now,
+// and the AI explanation the admins were sent (explain-source-use's
+// summary and mismatch; empty when no explanation could be made).
+export interface RoomSourceDrift {
+  scheduleId: string;
+  before: string;
+  after: string;
+  summary?: string;
+  mismatch?: string;
+  atMs: number;
+}
+
+// RoomSourceDetail is GET /v1/tenant/room-sources/{roomId}/{source}: one
+// ask with what its admin decides on. Shared: the reading room is shared
+// (a grant needs a private room: its members read what it reads). Owner:
+// the room's owner, the person a grant is pinned to. Members: the room's
+// human members now. Tasks: the owner's AI tasks in the room now (what
+// would read). Drift: the grantee's tasks changed since the admin
+// consented. ExplainInput: the explain-source-use assist's <text> for the
+// ask (its purpose and the tasks, a changed one with its words before).
+export interface RoomSourceDetail {
+  grant: RoomSourceGrant;
+  shared: boolean;
+  owner: string;
+  members: RoomMember[];
+  tasks: RoomSchedule[];
+  drift: RoomSourceDrift[];
+  explainInput: string;
+}
+
 // RoomSourceDecision is PUT /v1/tenant/room-sources/{roomId}/{source}:
-// the scope the admin grants (DELETE withdraws).
+// the scope the admin grants and the person it is read by, the room's
+// owner as the admin saw them (a grant to someone no longer the owner is
+// refused). DELETE withdraws.
 export interface RoomSourceDecision {
   scope: RoomSourceScope;
+  grantee: string;
 }
 
 // RoomSourceAskState is a source the room asks to read and where it
-// stands (Scope "" = waiting for the organization admin).
+// stands (Scope "" = waiting for the organization admin) and the person
+// a grant is pinned to.
 export interface RoomSourceAskState {
   source: RoomSource;
   purpose: string;
   scope?: RoomSourceScope;
+  grantee?: string;
 }
 
 // RoomReviewer is a room that reads this room's records under a grant:
-// its name always (members are told which room does), its id only when
-// the caller is a member of it (they may open it).
+// its name always (members are told which room does) and the person whose
+// tasks read, its id only when the caller is a member of it (they may
+// open it).
 export interface RoomReviewer {
   source: RoomSource;
   roomName: string;
   roomId?: string;
+  grantee: string;
 }
 
 // RoomSourcesInfo is GET /v1/rooms/{roomId}/sources for a member: what the

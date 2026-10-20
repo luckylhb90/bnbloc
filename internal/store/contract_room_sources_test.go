@@ -2,12 +2,17 @@ package store
 
 import (
 	"errors"
+	"reflect"
 	"testing"
+
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // A room asks for a source once, waiting; the admin's decision sets its
-// scope and who decided, a withdrawal empties it again and the ask (its
-// purpose, its alias key) stays. Asks are listed newest first per tenant;
+// scope, its grantee, its watch and who decided; the watch changes only
+// while the grant is the grantee's; a withdrawal empties the scope, the
+// grantee and the watch again and the ask (its purpose, its alias key)
+// stays. Asks are listed newest first per tenant;
 // opt-ins are set and cleared idempotently per source; both go with the
 // room.
 func TestContractRoomSourceStore(t *testing.T) {
@@ -37,14 +42,36 @@ func TestContractRoomSourceStore(t *testing.T) {
 		if list, _ := s.RoomSourceGrants(tenantCtx(uniq("t-x-"))); len(list) != 0 {
 			t.Fatalf("another tenant lists %v", list)
 		}
-		g, err := s.DecideRoomSource(ctx, reader, "runs", "opted-in", "olga", 30)
-		if err != nil || g.Scope != "opted-in" || g.DecidedBy != "olga" || g.DecidedAtMs != 30 || g.AliasKey != "k1" {
+		watch := RoomSourceWatch{Members: []string{"maya", "jack"}, Tasks: []wire.RoomSourceTask{{ScheduleID: "sch_1", Text: "Review yesterday."}}}
+		g, err := s.DecideRoomSource(ctx, RoomSourceDecision{RoomID: reader, Source: "runs", Scope: "opted-in", Grantee: "maya", Watch: watch, By: "olga", AtMs: 30})
+		if err != nil || g.Scope != "opted-in" || g.DecidedBy != "olga" || g.DecidedAtMs != 30 || g.AliasKey != "k1" || g.Grantee != "maya" ||
+			!reflect.DeepEqual(g.Watch, watch) {
 			t.Fatalf("grant = %+v, %v", g, err)
 		}
-		if g, err = s.DecideRoomSource(ctx, reader, "runs", "", "olga", 40); err != nil || g.Scope != "" || g.Purpose != "Judge outcomes." {
-			t.Fatalf("withdraw = %+v, %v", g, err)
+		// The watch changes only while the grant is still the grantee's.
+		drift := watch
+		drift.Members = append(drift.Members, "nora")
+		drift.Drift = []wire.RoomSourceDrift{{ScheduleID: "sch_1", Before: "Review yesterday.", After: "Rank everyone.", Mismatch: "ranks people", AtMs: 35}}
+		if err := s.SetRoomSourceWatch(ctx, reader, "runs", "jack", RoomSourceWatch{}); err != nil {
+			t.Fatal(err)
 		}
-		if _, err := s.DecideRoomSource(ctx, reader, "mail", "all", "olga", 50); !errors.Is(err, ErrRoomSourceNotFound) {
+		if err := s.SetRoomSourceWatch(ctx, reader, "runs", "maya", drift); err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := s.GetRoomSourceGrant(ctx, reader, "runs"); !reflect.DeepEqual(got.Watch, drift) {
+			t.Fatalf("the watch = %+v, want %+v", got.Watch, drift)
+		}
+		if g, err = s.DecideRoomSource(ctx, RoomSourceDecision{RoomID: reader, Source: "runs", Grantee: "maya", Watch: watch, By: "olga", AtMs: 40}); err != nil ||
+			g.Scope != "" || g.Purpose != "Judge outcomes." || g.Grantee != "" || len(g.Watch.Members)+len(g.Watch.Tasks)+len(g.Watch.Drift) != 0 {
+			t.Fatalf("withdraw = %+v, %v (no grantee, no watch)", g, err)
+		}
+		if err := s.SetRoomSourceWatch(ctx, reader, "runs", "", drift); err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := s.GetRoomSourceGrant(ctx, reader, "runs"); len(got.Watch.Members) != 0 {
+			t.Fatalf("a waiting ask took a watch: %+v", got.Watch)
+		}
+		if _, err := s.DecideRoomSource(ctx, RoomSourceDecision{RoomID: reader, Source: "mail", Scope: "all", By: "olga", AtMs: 50}); !errors.Is(err, ErrRoomSourceNotFound) {
 			t.Fatalf("deciding a source never asked = %v", err)
 		}
 		if _, err := s.GetRoomSourceGrant(tenantCtx(uniq("t-x-")), reader, "runs"); !errors.Is(err, ErrRoomSourceNotFound) {

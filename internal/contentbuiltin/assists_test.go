@@ -177,22 +177,36 @@ func TestLibraryDraftTasksFillTheForm(t *testing.T) {
 	}
 }
 
-// describe-room fills the room component's save dialog: its fields are
-// the content form's (contentpkg.Form), read from the room and the setup
-// being saved, and it describes the setup, never the room's people.
+// describe-room fills the room component's save dialog: its fields but
+// findings are the content form's (contentpkg.Form), read from the room
+// and the setup being saved, and it describes the setup, never the room's
+// people. Its findings are items of field, quote and why: what in the
+// package's text should not leave the room, of the kinds the save
+// dialog's closed list reads (web/src/lib/roomComponents.ts, held to the
+// item's description by a web test).
 func TestDescribeRoomFillsTheSaveDialog(t *testing.T) {
 	m := assistTask(t, "describe-room", wire.AssistContextRoom)
-	fieldsFill(t, "describe-room", m, jsonKeys(contentpkg.Form{}), nil)
+	form := m
+	form.Fields = slices.DeleteFunc(slices.Clone(m.Fields), func(f wire.AssistField) bool { return f.Name == "findings" })
+	fieldsFill(t, "describe-room", form, jsonKeys(contentpkg.Form{}), nil)
 	got := []string{}
 	for _, f := range m.Fields {
-		got = append(got, f.Name)
+		got = append(got, f.Name+":"+f.Type)
 	}
-	if strings.Join(got, ",") != "displayName,description,category,tags,welcome" {
+	if strings.Join(got, ",") != "displayName:,description:,category:,tags:list,welcome:,findings:items" {
 		t.Fatalf("describe-room fields = %v", got)
+	}
+	var item []string
+	for _, it := range m.Fields[5].Item {
+		item = append(item, it.Name)
+	}
+	if strings.Join(item, ",") != "field,quote,why" || !strings.Contains(m.Fields[5].Item[2].Description, "secret, internal-link, personal-name or private-data") {
+		t.Fatalf("a finding = %+v", m.Fields[5].Item)
 	}
 	p, _ := Get(IDPrefix + "describe-room")
 	flat := strings.Join(strings.Fields(p.Validated.Instructions), " ")
-	for _, want := range []string{"<room>", "<recent_messages>", "<text>", "at most 32 characters", "never a conversation of the room or the people in it"} {
+	for _, want := range []string{"<room>", "<recent_messages>", "<text>", "at most 32 characters", "never a conversation of the room or the people in it",
+		"`package`", "`quickPrompt:<n>`", "`schedule:<n>`", "`channel:<n>`", "`secret`", "`internal-link`", "`personal-name`", "`private-data`", "never guess"} {
 		if !strings.Contains(flat, want) {
 			t.Errorf("describe-room does not say %q", want)
 		}
@@ -364,7 +378,8 @@ func TestExplainSourceUseTask(t *testing.T) {
 	}
 	p, _ := Get(IDPrefix + "explain-source-use")
 	flat := strings.Join(strings.Fields(p.Validated.Instructions), " ")
-	for _, want := range []string{"<text>", "`purpose`", "`scheduledTasks`", "read_records", "an empty string when every task fits", "singles out people", "never guess"} {
+	for _, want := range []string{"<text>", "`purpose`", "`scheduledTasks`", "`before`", "changed after the admin consented", "judged by its words now",
+		"read_records", "an empty string when every task fits", "singles out people", "never guess"} {
 		if !strings.Contains(flat, want) {
 			t.Errorf("explain-source-use does not say %q", want)
 		}

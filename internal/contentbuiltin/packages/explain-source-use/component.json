@@ -1,9 +1,9 @@
 {
   "kind": "bnbloc.assist.package/v1",
   "name": "explain-source-use",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "displayName": "Explain a room's use of organization records",
-  "description": "For an organization admin deciding whether a room may read organization records: says in plain words what the room's scheduled tasks would do with them, and whether that fits the purpose the room states.",
+  "description": "For an organization admin deciding whether a room may read organization records: says in plain words what the room's scheduled tasks would do with them, and whether that fits the purpose the room states; for a task changed after the grant, what the change does.",
   "category": "authoring",
   "tags": ["assist", "rooms", "admin"],
   "icon": "sparkle",

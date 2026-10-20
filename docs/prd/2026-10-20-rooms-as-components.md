@@ -3,8 +3,11 @@
 Status: slice 1 built (the room kind, save and install, templates folded
 in; §5, §6); slice 2 built (the `runs` source: consent, transparency,
 `read_records`; §7), with each record's turn (the run's last reply, the
-request's file names) added on 2026-10-20 (§7, "The record's turn");
-slice 3 withdrawn as a platform slice: the platform ships no review room,
+request's file names) added on 2026-10-20 (§7, "The record's turn"),
+and the grant pinned to a private room's owner and watched (members,
+ownership, changed tasks) plus the AI check of a package's text before
+it is saved, from the review of 2026-10-20 (§7, "A grant pinned to a
+person"; §6, "Checked before it leaves the room"); slice 3 withdrawn as a platform slice: the platform ships no review room,
 a member builds one on slices 1 and 2, and a sample is published to the
 Library from its own repository (§2.2, §5). Owner: the content component
 contract (a new kind), the schedule runs' sources, the room's own
@@ -98,8 +101,23 @@ platform.
   (all rooms, rooms that opt in, or none of private rooms), for which
   purpose (the package's stated purpose is shown). It can be withdrawn at
   any time.
+- **What a reading room reads, its members read**: a grant is only for a
+  private room (invite only), and the admin sees its members (names,
+  roles) before granting. Made shared (anyone could join it from the
+  plaza), its grant is withdrawn; a member who joins after the grant is
+  told to the admins, naming the room and the person (the grant holds).
+- **A grant is pinned to a person**: "this room, read by <its owner>".
+  Only that person's scheduled tasks read it, while they own the room; a
+  transfer of the room sends the grant back to waiting. A room admin's
+  task reads nothing.
+- **The tasks the admin consented to stay consented**: a task of that
+  person created or changed after the grant is told to the admins with an
+  AI explanation of the change against the purpose; the console shows it
+  until an admin acknowledges it or grants again. It notifies, never
+  blocks.
 - Transparency: members of a reviewed room see, in its info, that the
-  organization reviews conversation outcomes and which room does.
+  organization reviews conversation outcomes, which room does and whose
+  tasks read.
 - The platform adds one schedule-run tool, `read_records(source, since,
   until)`, answering only what the consent allows, counted against the
   run's budget and audited. It knows sources, never goals or reviews.
@@ -108,9 +126,12 @@ platform.
 
 A review room's AI is its own: its schedule's prompt judges the goal, the
 outcome, the cause and the fix. The platform's AI here is the grant
-dialog's `explain-source-use` (§7). AI proposes and people decide: a
-schedule runs only once its owner turns it on, a source is read only once
-the admin grants it.
+dialog's `explain-source-use`, the same explanation of a task changed
+after the grant (§7), and `describe-room`'s check of a package's text
+before it is saved (§6). AI proposes and people decide: a schedule runs
+only once its owner turns it on, a source is read only once the admin
+grants it, a changed task is told and not blocked, a package is saved
+when its member says so.
 
 ## 3. Design review
 
@@ -118,7 +139,7 @@ the admin grants it.
 |---|---|
 | Component or platform | A review is a member's content (a room and its package). The platform adds a kind, an install flow, a consented source and `read_records`, none of which names goals or reviews; it ships no review room (a sample lives in its own repository, published to the Library). |
 | One owner | Room templates fold into the room kind; one consent owner for sources; whatever a review room keeps lives in its own app data. |
-| Boundaries and privacy | Reading other rooms needs the admin's consent per installed room, shown to the members it covers. The review is about whether the product served people, not about ranking them: the digest groups by cause and room; the requester's name is shown only to the organization's admins. |
+| Boundaries and privacy | Reading other rooms needs the admin's consent per installed room, shown to the members it covers. The review is about whether the product served people, not about ranking them: the digest groups by cause and room; the requester's name is shown only to the organization's admins. What the reading room reads its members read: a grant is for a private room only, its members are shown at the grant and each new one is told; a grant is pinned to the owner it was granted to. A saved package is checked by AI for secrets, internal links, names and private data before it leaves the room. |
 | Load on agents | No new agent tool; `read_records` is a schedule-run tool. |
 | Load on users | Install one room; turn its schedule on. |
 | Cost | One model call per conversation judged, in batches, within the organization's assist budget; the room can sample. |
@@ -139,6 +160,11 @@ the admin grants it.
    the organization's budget.
 4. **A room package asks for more than it needs.** A source is shown with
    its purpose at install; the admin grants or not.
+5. **The grant outgrows its consent.** The owner shares the room, makes
+   a friend a room admin, hands the room over or rewrites the task after
+   the grant: shared withdraws, only the pinned owner's tasks read, a
+   transfer pauses, a new member and a changed task are told to the
+   admins with what changed (§7).
 
 ## 5. Build order (slices of §2)
 
@@ -209,6 +235,22 @@ packages". What the slice decided, against the code:
   stops reading and writing `room_templates`; it stays in `schema.sql`
   (its columns allowed as retiring in `writeOnlyColumnAllowed`) and a
   release after the one that ships this drops it (`retiredTables`). No data is kept.
+- **Checked before it leaves the room** (added 2026-10-20, review). A
+  package's text (display name, description, welcome, quick prompts,
+  scheduled tasks, channel names, sources' purposes) can carry what its
+  room should keep: a token, an internal link, a colleague's name, a
+  customer's details. The one `describe-room` assist (1.1.0) also answers
+  `findings`, items of `field` (the text's key in its `<text>`'s
+  `package`), `quote` and `why` (`secret`, `internal-link`,
+  `personal-name` or `private-data`, then a sentence). The save dialog
+  runs it on Save when the text changed since the last check (and with
+  "Fill with AI"), lists what it found with "Fix" (focus the field to
+  edit it; a scheduled task or channel the dialog does not edit is left
+  out, a quick prompt removed) and "Ignore", and the button reads "Save
+  anyway": saving stays the member's decision; an AI failure is said and
+  the next Save saves unchecked. The helpers are pure
+  (`web/src/lib/roomReview.ts`, node-tested; the kinds held to the
+  package's item description by a test).
 - **Design review notes.** Actors: the saver must be the room's owner or
   an admin; the installer owns the new room and its paused schedules; the
   package's author is never added. Boundaries: no people, messages, app
@@ -266,8 +308,9 @@ decided, against the code:
   say so in its summary) and answers only:
   - within the grant at the moment of the call (no grant, waiting or
     withdrawn: refused);
-  - for a schedule whose owner is the room's owner or an admin now (the
-    grant is the room's; a member's own schedule in it reads nothing);
+  - for a schedule of the person the grant is pinned to, while they own
+    the room (below, "A grant pinned to a person"; a room admin's or a
+    member's own schedule in it reads nothing);
   - finished runs (the terminal statuses) in `[since, until)`: RFC 3339
     times or dates in the schedule's timezone, by default the 24 hours
     before the slot, never past the slot, at most 31 days;
@@ -293,9 +336,11 @@ decided, against the code:
     as `deny`.
 - **AI.** The grant dialog runs the built-in assist `explain-source-use`
   (json: `summary`, `uses`, `mismatch`; through the assist route, the
-  admin's budget; no new model client) over the purpose and the package
-  version's scheduled tasks the console lists, and flags a task beyond
-  the purpose. The admin decides.
+  admin's budget; no new model client) over the purpose and the room
+  owner's scheduled AI tasks (its input built by the gateway,
+  `explainSourceInput`, the one builder; slice 2 first read the package
+  version's tasks), and flags a task beyond the purpose. The admin
+  decides.
 - **One owner each, collapsed while building.** A run's reply and usage
   summary in its diagnostics is read only by `store.RunDiag` (activity's
   run records and its team plan's cost sample used private copies); a
@@ -362,6 +407,75 @@ now carries the run's last reply and its request's files by name:
   (schedule-run tool only). AI: the reply is what a review room's prompt
   judges by.
 
+**A grant pinned to a person (added 2026-10-20, review).** Slice 2's
+grant was the room's, so three things outgrew the admin's consent:
+`read_records` output lands in the reading room, so every member of it
+reads other rooms' conversations (and a shared room is anyone's to
+join); the room's owner could make anyone a room admin, whose schedules
+then read; and the owner could rewrite a task after the admin consented
+to its words. The consent's one owner (`room_sources.go`) now keeps:
+
+- **A private room only.** `PUT /v1/tenant/room-sources/{roomId}/{source}`
+  refuses (409) a shared reading room; the console's ask
+  (`GET /v1/tenant/room-sources/{roomId}/{source}`, `wire.RoomSourceDetail`)
+  shows whether it is shared, its owner, its members (names, roles) and
+  its owner's AI tasks now.
+- **Read by a person.** The decision names the grantee
+  (`wire.RoomSourceDecision.grantee`), the room's owner as the admin saw
+  them (409 when that is no longer the owner); the grant keeps it
+  (`room_source_grants.grantee`) with what the admin consented to
+  (`watch_json`: the room's members, the grantee's AI tasks' words).
+  `read_records` reads only for a schedule whose owner is the grantee;
+  the console, the room's note and the covered rooms' note name them.
+- **The watch** (`watchGrant`): a granted ask is checked against its room
+  (from the room store, `RoomMembers`, and realtime's schedules as the
+  grantee) when a change the edge proxies may affect it succeeds (the
+  room's PATCH, a transfer, a join, an added member, an invite's
+  redemption, a schedule's create or edit: `apiPath.changesSourceRoom`,
+  the proxy's `afterSourceRoomChange`), before every `read_records` call
+  (`heldGrant`, so a change made where the edge did not see it still
+  holds before a read) and when the console opens the ask. Then:
+  - the room shared: the grant is withdrawn (audited `withdraw`, the
+    admins told through `notifyOrgAdmins`);
+  - its owner not the grantee: the grant is paused, back to waiting
+    (audited `pause`, told); the admin grants it again to the new owner;
+  - a member the admins were not told of: told, naming the room and the
+    person. **Notify only, the grant holds**: a private room's members
+    are invited by its owner, the admin can withdraw at once, and pausing
+    on every invitation would stop a review room each time a colleague
+    joins it;
+  - a grantee's AI task new or changed since the consent: kept as the
+    grant's drift (before, after) with `explain-source-use` run on it
+    (the built-in, never a same-named one a member saved; on the
+    grantee's model, budget and rate: its input carries each changed
+    task's `before`) and told with the words before and after and the
+    explanation, the mismatch first. It notifies, never blocks; the
+    console marks the ask "changed since granted" and shows the diff
+    until an admin acknowledges
+    (`POST /v1/tenant/room-sources/{roomId}/{source}/ack`, audited) or
+    grants again (a grant consents to the tasks as they are). A task
+    changed back, or deleted, leaves the drift; one change is told once.
+  The watch changes a grant only while it is still the same grantee's
+  (`SetRoomSourceWatch`), and its notices are deduplicated per event.
+- **Release safety.** The migration `2026_10_room_source_watch` adds two
+  columns (`grantee` with a default, `watch_json` nullable); a grant
+  made before it has no grantee, so it reads nothing until the admin
+  grants it again (pre-launch: no backfill).
+- **Design review.** Actors: the admin consents to a room, a person and
+  their tasks; a room admin reads nothing; the members who read the
+  output are shown, and new ones told. Time and lifecycle: shared
+  withdraws, transfer pauses, a changed task is told once and shown
+  until acknowledged. Scale and cost: the watch is one grant read per
+  change the edge proxies on a room (a member list and a schedule list
+  more only when granted), one model call per changed task on the
+  grantee's budget. Failure: a watch failure is logged and the next
+  read watches again before reading; a missing explanation is said in
+  the notice. One owner: the consent (`room_sources.go`, archtest: only
+  it changes a grant, `read_records` reads through `heldGrant`), the
+  admins' notices (`notifyOrgAdmins`), the assist's one input builder
+  (`explainSourceInput`) and one JSON run (`completeJSONTask`). AI: the
+  explanation proposes, the admin decides; nothing is blocked by it.
+
 **Not in this slice.**
 
 - The find-a-way card's cause and the member's choice
@@ -370,29 +484,24 @@ now carries the run's last reply and its request's files by name:
   "report" is a notification not linked to its run. `read_records`
   carries the run's outcome, failure sentence, request, files and last
   reply; a review room judges the cause from those itself.
-- The AI explanation reads the package version's scheduled tasks, not the
-  room's current ones: a task edited in the room after the grant is not
-  re-explained. The grant is the room's, so the console shows which
-  component and version it came from; comparing the room's schedules with
-  the package's is a later step.
 
 **Design review (slice 2).**
 
 | Lens | Answer |
 |---|---|
-| Actors | The installer asks (recorded at install); the org admin grants, withdraws and sees names; the room's owner opts it in; the reading room's owner or admins ask the admin and own the schedules that read; a member's own schedule in the reading room reads nothing; members (visitors too) of covered rooms see who reviews them; a non-member of a room reads nothing of its sources. |
-| Time and lifecycle | A withdrawal holds at the next read (the grant is read at each call); a deleted room loses its asks and opt-ins; an alias is stable for an ask's life, a re-install is a new ask. |
+| Actors | The installer asks (recorded at install); the org admin grants (to a private room, read by its owner), withdraws, acknowledges changed tasks and sees names; the room's owner opts it in; the reading room's owner or admins ask the admin; only the grantee's schedules read (a room admin's or a member's own reads nothing); the reading room's members read the output and are shown to the admin (new ones told); members (visitors too) of covered rooms see who reviews them and whose tasks read; a non-member of a room reads nothing of its sources. |
+| Time and lifecycle | A withdrawal holds at the next read (the grant is watched at each call); the room made shared withdraws it, a transfer pauses it, a new member and a changed task are told once (the change shown until acknowledged); a deleted room loses its asks and opt-ins; an alias is stable for an ask's life, a re-install is a new ask. |
 | Scale and cost | Bounded per call and per run (records, bytes, store pages, reads); the run's model steps stay 8; the console lists at most 500 asks. |
 | Failure | A store failure answers the model "could not be read" and is not audited as a read; the ask route reports whether an admin was notified. |
 | Boundaries and privacy | Only finished runs of covered rooms, never the reading room's own, never the people chat (no agent runs there); names only for an org admin's schedule; the audit never holds a record. |
-| Abuse | Records are fenced as data; the ask to admins is deduplicated per day and spends the cost budget; the explanation flags tasks beyond the purpose. |
+| Abuse | Records are fenced as data; the ask to admins is deduplicated per day and spends the cost budget; the explanation flags tasks beyond the purpose, at the grant and for each task changed after it (on the grantee's AI budget, the built-in assist only); an owner cannot widen the audience (shared withdraws, members are told) or the readers (room admins read nothing, a transfer pauses). |
 | One owner | The consent (`room_sources.go`, archtest), the admins' notification (`notifyOrgAdmins`), the run diagnostics (`store.RunDiag`), the cursor. |
 | Defaults | A new ask waits; the dialog proposes `opted-in`, the narrowest scope; an unknown visibility is private. |
 | Load on agents | None: `read_records` is a schedule-run tool. |
 | Load on users | One note in the header; one dialog for the admin; one switch for an owner. |
-| Release | Additive tables; no data kept from slice 1 (pre-launch). |
-| Observability | Every grant, withdrawal, opt-in and read is in the organization's audit log ("Room sources"). |
-| AI capability | `explain-source-use` summarizes and flags; the admin decides. |
+| Release | Additive tables, then additive columns (`grantee`, `watch_json`); no data kept from slice 1, a grant without a grantee pauses (pre-launch). |
+| Observability | Every grant, withdrawal, pause, acknowledgment, opt-in and read is in the organization's audit log ("Room sources"). |
+| AI capability | `explain-source-use` summarizes and flags, at the grant and for a task changed after it; the admin decides, nothing is blocked. |
 | Component or platform | The platform keeps only the consent, the read and the audit; the review itself stays content (slice 3). |
 
 **Pre-mortem (slice 2).** 1. A member builds a reading room and reads

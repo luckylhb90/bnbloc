@@ -133,6 +133,28 @@ func (p apiPath) searchRoom(r *http.Request) string {
 	return room
 }
 
+// changesSourceRoom reports a request whose success may change what a room
+// source's grant holds for its reading room (room_sources.go,
+// watchRoomSources): its visibility (PATCH /v1/rooms/{id}), its owner
+// (POST …/transfer), its members (POST …/join, POST …/members, an invite's
+// redemption: POST /v1/invites/{code}/redeem, whose room is in the
+// answer) or its schedules (POST …/schedules, PATCH …/schedules/{id}).
+func (p apiPath) changesSourceRoom(method string) bool {
+	switch {
+	case isInviteRedeem(method, p):
+		return true
+	case p.RoomID == "" || p.isRoomImport():
+		return false
+	case method == http.MethodPatch && len(p.segs) == 3:
+		return true
+	case method == http.MethodPost && len(p.segs) == 4:
+		return p.RoomSub == "transfer" || p.RoomSub == "join" || p.RoomSub == "members" || p.RoomSub == "schedules"
+	case method == http.MethodPatch && len(p.segs) == 5:
+		return p.RoomSub == "schedules"
+	}
+	return false
+}
+
 // endsMembership reports a request that ends a room membership: removing a
 // member (DELETE /v1/rooms/{id}/members/{user}), leaving (POST
 // /v1/rooms/{id}/leave, the caller), or deleting the room (every member,

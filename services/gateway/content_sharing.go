@@ -201,7 +201,9 @@ func (s *Service) shareRecipients(w http.ResponseWriter, r *http.Request, claims
 			httpx.Error(w, "list room members failed", http.StatusBadGateway)
 			return nil, nil, false
 		}
-		candidates = append(candidates, members...)
+		for _, m := range members {
+			candidates = append(candidates, m.UserID)
+		}
 	}
 	seen := map[string]bool{}
 	var recipients []string

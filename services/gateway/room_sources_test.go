@@ -42,9 +42,9 @@ func newSourcesGW(t *testing.T) *sourcesGW {
 	}
 	e.gw.OrgAdmins = func(string) ([]string, error) { return []string{"olga"}, nil }
 	g := &sourcesGW{appGW: e, model: model, sink: sink, outbox: outbox}
-	// A realtime that keeps history: read_records reads each run's turn
-	// through it.
-	rt := &realtimehttp.Service{Hub: e.hub, Chat: e.b.Chat, Membership: membership.NewRoomClient(e.roomURL)}
+	// A realtime that keeps history and schedules: read_records reads each
+	// run's turn through it, the consent the grantee's tasks.
+	rt := &realtimehttp.Service{Hub: e.hub, Chat: e.b.Chat, Schedules: e.b.Schedules, AIRuns: noScheduleRuns{}, Membership: membership.NewRoomClient(e.roomURL)}
 	rtSrv := httptest.NewServer(svcauth.Middleware(appGWKey, rt.Handler()))
 	t.Cleanup(rtSrv.Close)
 	e.gw.Backends.Realtime = rtSrv.URL
@@ -124,19 +124,23 @@ func (g *sourcesGW) orgAdmin() string {
 	return "Authorization: Bearer " + g.gw.Signer.Issue(auth.Claims{Subject: "olga", Tenant: g.tenant, Role: string(store.OrgRoleAdmin), ExpiresAtUnix: time.Now().Add(time.Hour).Unix()})
 }
 
-// decide grants scope ("" withdraws) as olga.
+// decide grants scope, read by maya, the reading room's owner ("" withdraws)
+// as olga.
 func (g *sourcesGW) decide(scope string) {
 	g.t.Helper()
-	path := "/v1/tenant/room-sources/" + g.roomID + "/" + wire.RoomSourceRuns
-	var r resp
-	if scope == "" {
-		r = g.call(http.MethodDelete, path, nil, g.orgAdmin())
-	} else {
-		r = g.call(http.MethodPut, path, wire.RoomSourceDecision{Scope: scope}, g.orgAdmin())
-	}
-	if r.status != http.StatusOK {
+	if r := g.decideAs(scope, "maya"); r.status != http.StatusOK {
 		g.t.Fatalf("decide %q = %d %s", scope, r.status, r.body)
 	}
+}
+
+// decideAs is olga's decision: scope read by grantee ("" withdraws).
+func (g *sourcesGW) decideAs(scope, grantee string) resp {
+	g.t.Helper()
+	path := "/v1/tenant/room-sources/" + g.roomID + "/" + wire.RoomSourceRuns
+	if scope == "" {
+		return g.call(http.MethodDelete, path, nil, g.orgAdmin())
+	}
+	return g.call(http.MethodPut, path, wire.RoomSourceDecision{Scope: scope, Grantee: grantee}, g.orgAdmin())
 }
 
 // read runs owner's schedule once with the given read_records calls and
@@ -242,8 +246,8 @@ func TestRoomSourceConsentScopes(t *testing.T) {
 		t.Fatalf("scope opted-in = %s", roomsOf(recs))
 	}
 
-	// jack's schedule (a member, not the room's owner or admin).
-	if out := g.read("jack", runs); !strings.Contains(out[0], "owner or admins") {
+	// jack's schedule (a member, not the person the grant is pinned to).
+	if out := g.read("jack", runs); !strings.Contains(out[0], "read by maya: only their schedules read it") {
 		t.Fatalf("a member's schedule read = %q", out)
 	}
 
@@ -475,26 +479,38 @@ func TestRoomSourcesTransparencyAndAsk(t *testing.T) {
 	if r := g.call(http.MethodPut, "/v1/tenant/room-sources/"+g.roomID+"/runs", wire.RoomSourceDecision{Scope: "everything"}, g.orgAdmin()); r.status != http.StatusBadRequest {
 		t.Fatalf("an unknown scope = %d", r.status)
 	}
-	if r := g.call(http.MethodPut, "/v1/tenant/room-sources/shared/runs", wire.RoomSourceDecision{Scope: wire.RoomSourceScopeAll}, g.orgAdmin()); r.status != http.StatusNotFound {
+	if r := g.call(http.MethodPut, "/v1/tenant/room-sources/"+g.roomID+"/runs", wire.RoomSourceDecision{Scope: wire.RoomSourceScopeAll}, g.orgAdmin()); r.status != http.StatusBadRequest {
+		t.Fatalf("a grant read by nobody = %d", r.status)
+	}
+	if r := g.call(http.MethodPut, "/v1/tenant/room-sources/shared/runs", wire.RoomSourceDecision{Scope: wire.RoomSourceScopeAll, Grantee: "jack"}, g.orgAdmin()); r.status != http.StatusNotFound {
 		t.Fatalf("a grant to a room that asks nothing = %d", r.status)
 	}
 }
 
 // The consent has one owner: room_sources.go reads and changes grants and
-// opt-ins and alone decides a scope; the schedule run (whether to offer
-// read_records) and read_records (the grant at the call) only read a
-// grant; the install records an ask through askRoomSources. read_records
-// is the gateway's one reader of the organization's runs.
+// opt-ins, alone decides a scope and alone watches a grant (heldGrant,
+// watchGrant); the schedule run (whether to offer read_records) only
+// reads whether a room asks; read_records reads its grant only through
+// heldGrant, so the watch runs before every read; the install records an
+// ask through askRoomSources. read_records is the gateway's one reader of
+// the organization's runs.
 func TestRoomSourceConsentSingleOwner(t *testing.T) {
-	grantCalls := regexp.MustCompile(`\.(AskRoomSource|RoomSourceGrants|GetRoomSourceGrant|DecideRoomSource|SetRoomSourceOptIn|RoomSourceOptIns)\(`)
+	grantChanges := regexp.MustCompile(`\.(AskRoomSource|DecideRoomSource|SetRoomSourceWatch|SetRoomSourceOptIn)\(`)
+	grantReads := regexp.MustCompile(`\.(RoomSourceGrants|GetRoomSourceGrant|RoomSourceOptIns)\(`)
 	scope := regexp.MustCompile(`wire\.RoomSourceScope(All|OptedIn|NonePrivate)\b`)
-	reads := map[string]bool{"services/gateway/room_sources.go": true, "services/gateway/schedule_records.go": true, "services/gateway/schedule_run.go": true}
+	reads := map[string]bool{"services/gateway/room_sources.go": true, "services/gateway/schedule_run.go": true}
 	archtest.Scan(t, archtest.Opts{Lang: archtest.Go, Roots: []string{"services", "cmd", "internal"}}, func(rel string, src []byte) {
 		if strings.HasPrefix(rel, "internal/store/") {
 			return
 		}
-		if grantCalls.Match(src) && !reads[rel] {
-			t.Errorf("%s reads or changes a room source's grant; room_sources.go is the consent's one owner", rel)
+		if grantChanges.Match(src) && rel != "services/gateway/room_sources.go" {
+			t.Errorf("%s changes a room source's grant; room_sources.go is the consent's one owner", rel)
+		}
+		if grantReads.Match(src) && !reads[rel] {
+			t.Errorf("%s reads a room source's grant itself; room_sources.go is the consent's one owner (heldGrant)", rel)
+		}
+		if rel == "services/gateway/schedule_records.go" && !strings.Contains(string(src), "s.heldGrant(") {
+			t.Errorf("read_records reads its grant without heldGrant: the watch would not run before a read")
 		}
 		if scope.Match(src) && rel != "services/gateway/room_sources.go" && !strings.HasPrefix(rel, "internal/wire/") {
 			t.Errorf("%s decides on a grant's scope; sourceCover.covers (room_sources.go) is the one rule", rel)

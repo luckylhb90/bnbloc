@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/netip"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -126,9 +127,10 @@ type tenantWiring struct {
 	OrgSync *orgsync.Syncer
 	// MemberCount counts distinct members across tenants (adoption stats).
 	MemberCount func() (int, error)
-	// RoomMembers lists a room's human members and OrgAdmins an
-	// organization's org admins (content sharing and approval).
-	RoomMembers func(ctx context.Context, roomID string) ([]string, error)
+	// RoomMembers lists a room's human members (with their roles) and
+	// OrgAdmins an organization's org admins (content sharing and
+	// approval, room sources).
+	RoomMembers func(ctx context.Context, roomID string) ([]store.Membership, error)
 	OrgAdmins   func(tenantID string) ([]string, error)
 	// TenantSettings reads an organization's settings (publish approval).
 	TenantSettings func(ctx context.Context, tenantID string) (store.Tenant, error)
@@ -207,20 +209,14 @@ func resolveTenantWiring() tenantWiring {
 		}
 		return len(seen), nil
 	}
-	// A room's human members (a content share with a room); ctx carries the
-	// room's tenant.
-	roomMembers := func(ctx context.Context, roomID string) ([]string, error) {
+	// A room's human members (a content share with a room, a room source's
+	// watch); ctx carries the room's tenant.
+	roomMembers := func(ctx context.Context, roomID string) ([]store.Membership, error) {
 		members, err := backends.Room.Members(ctx, roomID)
 		if err != nil {
 			return nil, err
 		}
-		var out []string
-		for _, m := range members {
-			if !m.AgentHost {
-				out = append(out, m.UserID)
-			}
-		}
-		return out, nil
+		return slices.DeleteFunc(members, func(m store.Membership) bool { return !m.Human() }), nil
 	}
 	orgAdmins := func(tenantID string) ([]string, error) {
 		members, err := tenants.ListMembers(context.Background(), tenantID)

@@ -1686,6 +1686,19 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return createSchemaTable(ctx, db, "room_source_opt_ins")
 		},
 	},
+	{
+		// A grant pinned to a person and what its admins were told since
+		// (docs/prd/2026-10-20-rooms-as-components.md §7, "A grant pinned
+		// to a person"). Additive: a column with a default and a nullable one.
+		id: "2026_10_room_source_watch",
+		run: func(ctx context.Context, db sqlConn) error {
+			if err := addColumnIfMissing(ctx, db, "room_source_grants", "grantee",
+				"VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '' AFTER decided_at_ms"); err != nil {
+				return err
+			}
+			return addColumnIfMissing(ctx, db, "room_source_grants", "watch_json", "MEDIUMTEXT NULL AFTER grantee")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

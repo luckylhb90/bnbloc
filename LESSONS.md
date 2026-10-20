@@ -412,6 +412,19 @@ Evidence: docs/bugs/2026-10-20-assist-recent-messages-oldest.md (design
 review lens 9 now asks).
 Seen 1× (2026-10-20).
 
+### Pin a consent to what was consented to: the audience of its output, the person, the words
+
+The room sources' grant was the room's: what `read_records` read landed
+in a room any member (or, once shared, anyone) read; its owner could make
+anyone a room admin whose tasks then read; the task's words could change
+the day after the admin approved them. Each was a review finding before
+release. A grant now needs a private room, is pinned to its owner and
+watches its members, its owner and its tasks.
+
+Evidence: docs/prd/2026-10-20-rooms-as-components.md §7 ("A grant pinned
+to a person"); `services/gateway/room_sources.go` `watchGrant`.
+Seen 1× (2026-10-20).
+
 ## Done right
 
 ### Replay a member's long task across a release, not just a smoke reply

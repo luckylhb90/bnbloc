@@ -8,6 +8,7 @@ import { refreshRoomSources, roomSourcesApi, useRoomSources } from "@/lib/roomSo
 import { Button } from "@/ui/Button";
 import { useToast } from "@/ui/Toast";
 import { useDismissOnOutside } from "@/ui/useDismissOnOutside";
+import { UserName } from "@/views/UserName";
 
 // RoomSourcesIndicator is the room header's note on organization records
 // (docs/prd/2026-10-20-rooms-as-components.md §2.3), beside the platform
@@ -53,8 +54,8 @@ export function RoomSourcesIndicator({ roomId, me }: { readonly roomId: string; 
             <div key={`${r.source}:${r.roomId ?? r.roomName}`} className="mb-2">
               <p className="font-medium text-[var(--color-fg)]">{reviewLine(r)}</p>
               <p className="mt-1 text-xs text-[var(--color-fg-muted)]">
-                Its scheduled tasks read the requests, replies and outcomes of this room&apos;s agent conversations, as your organization&apos;s admin
-                granted. {r.roomId ? <a className="underline" href={routeHash({ kind: "room", roomId: r.roomId })}>Open it</a> : "You are not a member of it."}
+                The scheduled tasks of <UserName id={r.grantee} />, its owner, read the requests, replies and outcomes of this room&apos;s agent
+                conversations, as your organization&apos;s admin granted. {r.roomId ? <a className="underline" href={routeHash({ kind: "room", roomId: r.roomId })}>Open it</a> : "You are not a member of it."}
               </p>
             </div>
           ))}
@@ -89,7 +90,14 @@ function AskLine({ roomId, ask, mayAsk }: { readonly roomId: string; readonly as
     <div className="flex flex-col gap-1">
       <p className="font-medium text-[var(--color-fg)]">This room asks to read {ROOM_SOURCE_LABELS[ask.source]}</p>
       <p className="text-xs text-[var(--color-fg-muted)]">To: {ask.purpose}</p>
-      <p className="text-xs text-[var(--color-fg-subtle)]">{sourceState(ask.scope)}</p>
+      <p className="text-xs text-[var(--color-fg-subtle)]">
+        {sourceState(ask.scope)}
+        {ask.scope && ask.grantee && (
+          <>
+            , read by <UserName id={ask.grantee} />: only their scheduled tasks read it, and the room&apos;s members read what they post
+          </>
+        )}
+      </p>
       {!ask.scope && mayAsk && (
         <Button size="sm" variant="outline" onClick={() => void askAdmin()} disabled={busy} className="self-start">
           {busy ? "Asking…" : "Ask admin"}

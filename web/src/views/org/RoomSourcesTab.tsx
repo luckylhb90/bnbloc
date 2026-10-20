@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ArrowClockwiseIcon } from "@phosphor-icons/react";
 import { errorText } from "@/lib/errors";
 import { exactTime, formatDate } from "@/lib/format";
-import { ROOM_SOURCE_LABELS, sourceState, type RoomSourceGrant } from "@/lib/roomSources";
+import { ROOM_SOURCE_LABELS, grantState, type RoomSourceGrant } from "@/lib/roomSources";
 import { roomSourcesApi } from "@/lib/roomSourcesApi";
 import { ErrorBox } from "@/ui/ErrorBox";
 import { listPlaceholder } from "@/ui/QueryState";
@@ -12,8 +12,10 @@ import { RoomSourceDialog } from "@/views/org/RoomSourceDialog";
 // RoomSourcesTab is the organization admin's list of rooms that ask to
 // read organization records (docs/prd/2026-10-20-rooms-as-components.md
 // §2.3): each room, the component it was installed from, its stated
-// purpose and where the ask stands. "Decide…" opens the grant dialog
-// (the scope, an AI explanation, grant or withdraw).
+// purpose and where the ask stands (whom a grant is read by, and tasks
+// changed since it was granted). "Decide…" opens the grant dialog (the
+// room's members, its tasks and their changes, the scope, an AI
+// explanation, grant, acknowledge or withdraw).
 export function RoomSourcesTab() {
   const [grants, setGrants] = useState<RoomSourceGrant[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -35,7 +37,7 @@ export function RoomSourcesTab() {
   return (
     <section className="flex flex-col gap-2">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-sm text-[var(--color-fg-muted)]">Rooms whose scheduled tasks ask to read records of the whole organization. Nothing is read until you grant it.</p>
+        <p className="text-sm text-[var(--color-fg-muted)]">Rooms whose scheduled tasks ask to read records of the whole organization. Nothing is read until you grant it, to a private room, read by its owner.</p>
         <button
           type="button"
           onClick={() => void load()}
@@ -77,7 +79,14 @@ export function RoomSourcesTab() {
                     <UserName id={g.askedBy} />
                     <span className="block">{formatDate(g.askedAtMs)}</span>
                   </td>
-                  <td className="px-3 py-2 text-xs text-[var(--color-fg-muted)]">{sourceState(g.scope)}</td>
+                  <td className={`px-3 py-2 text-xs ${g.scope && g.changed ? "text-[var(--color-danger)]" : "text-[var(--color-fg-muted)]"}`}>
+                    {grantState(g)}
+                    {g.scope && g.grantee && (
+                      <span className="block text-[var(--color-fg-muted)]">
+                        Read by <UserName id={g.grantee} />
+                      </span>
+                    )}
+                  </td>
                   <td className="px-3 py-2 text-right">
                     <button
                       type="button"

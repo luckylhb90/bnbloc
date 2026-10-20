@@ -16,6 +16,7 @@ import (
 	"net/http/httptest"
 	"net/textproto"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -151,6 +152,10 @@ func newAppGW(t *testing.T) *appGW {
 	e.jobs = store.NewMemoryBridgeJobs()
 	e.gw.ContentJobs, e.gw.AgentRuns = e.jobs, e.jobs
 	e.gw.RoomSources, e.gw.RoomInfo = b.RoomSources, b.Room.GetRoom
+	e.gw.RoomMembers = func(ctx context.Context, roomID string) ([]store.Membership, error) {
+		members, err := b.Room.Members(ctx, roomID)
+		return slices.DeleteFunc(members, func(m store.Membership) bool { return !m.Human() }), err
+	}
 	e.srv = httptest.NewServer(e.gw.Handler())
 	t.Cleanup(e.srv.Close)
 

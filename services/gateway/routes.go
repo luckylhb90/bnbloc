@@ -56,7 +56,7 @@ type dependency struct {
 var (
 	needContent = dependency{"content components", func(s *Service) bool { return s.ContentComponents != nil }}
 	needOrgSync = dependency{"organization sync", func(s *Service) bool { return s.OrgSync != nil }}
-	needSources = dependency{"room sources", func(s *Service) bool { return s.RoomSources != nil && s.RoomInfo != nil }}
+	needSources = dependency{"room sources", func(s *Service) bool { return s.RoomSources != nil && s.RoomInfo != nil && s.RoomMembers != nil }}
 )
 
 // route is one gateway-served route. A session route runs session after
@@ -289,6 +289,8 @@ func (s *Service) routes() []route {
 		gated("POST /v1/tenant/content-components/{id}/restore", org, s.handleOrgContentStatus(store.ContentStatusActive)).with(needContent),
 		gated("DELETE /v1/tenant/content-components/{id}", org, s.handleRemoveOrgContent).with(needContent),
 		gated("GET /v1/tenant/room-sources", org, s.handleListRoomSources).with(needSources),
+		gated("GET /v1/tenant/room-sources/{roomId}/{source}", org, s.handleRoomSourceDetail).with(needSources),
+		gated("POST /v1/tenant/room-sources/{roomId}/{source}/ack", org, s.handleAckRoomSource).with(needSources),
 		gated("PUT /v1/tenant/room-sources/{roomId}/{source}", org, s.handleDecideRoomSource(false)).with(needSources),
 		gated("DELETE /v1/tenant/room-sources/{roomId}/{source}", org, s.handleDecideRoomSource(true)).with(needSources),
 

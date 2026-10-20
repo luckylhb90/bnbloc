@@ -1,9 +1,9 @@
 {
   "kind": "bnbloc.assist.package/v1",
   "name": "describe-room",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "displayName": "Describe a room component",
-  "description": "Drafts a room component's Library entry (its name, description, category, tags and welcome) from the room and the setup being saved.",
+  "description": "Drafts a room component's Library entry (its name, description, category, tags and welcome) from the room and the setup being saved, and flags what in the package's text should not leave the room: secrets, internal links, people's names, private data.",
   "category": "authoring",
   "tags": ["assist", "rooms"],
   "icon": "sparkle",
@@ -13,7 +13,17 @@
     { "name": "description", "description": "One or two sentences: what a room made from it is for" },
     { "name": "category", "description": "One lower-case word for its kind of work" },
     { "name": "tags", "description": "Three to five tags", "type": "list" },
-    { "name": "welcome", "description": "What a new room made from it says first" }
+    { "name": "welcome", "description": "What a new room made from it says first" },
+    {
+      "name": "findings",
+      "description": "Text of the package that should not leave the room, one item each; none when nothing should not",
+      "type": "items",
+      "item": [
+        { "name": "field", "description": "Where it is: a key of the package in <text>, exactly as given" },
+        { "name": "quote", "description": "The words in question, as written, at most 80 characters" },
+        { "name": "why", "description": "secret, internal-link, personal-name or private-data, a colon, then one short sentence" }
+      ]
+    }
   ],
   "context": ["room"]
 }

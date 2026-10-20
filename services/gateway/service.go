@@ -61,9 +61,11 @@ type Service struct {
 	// for room reach (after the token's baked list), human membership and
 	// room roles (roomMember). nil refuses every live lookup.
 	Membership membership.Directory
-	// RoomMembers lists a room's human members (content shares with a
-	// room); ctx carries the room's tenant. nil refuses room shares.
-	RoomMembers func(ctx context.Context, roomID string) ([]string, error)
+	// RoomMembers lists a room's human members with their roles, from the
+	// room store (content shares with a room; a room source's watch reads
+	// the owner and the members from it); ctx carries the room's tenant.
+	// nil refuses room shares and answers the source routes 503.
+	RoomMembers func(ctx context.Context, roomID string) ([]store.Membership, error)
 	// OrgAdmins lists an organization's org admins (content publish
 	// requests notify them). nil notifies nobody.
 	OrgAdmins func(tenantID string) ([]string, error)
@@ -141,8 +143,8 @@ type Service struct {
 	// owner); RoomInfo reads a room of the ctx tenant (a grant's scope
 	// needs its visibility, its records its name); AgentRuns is the run
 	// records' read side a granted read_records answers from. nil
-	// RoomSources or RoomInfo answers the source routes 503 and offers no
-	// read_records.
+	// RoomSources, RoomInfo or RoomMembers answers the source routes 503
+	// and refuses every read_records call.
 	RoomSources store.RoomSourceStore
 	RoomInfo    func(ctx context.Context, roomID string) (store.Room, error)
 	AgentRuns   store.AgentRunReader
@@ -760,6 +762,10 @@ func (s *Service) proxyAs(w http.ResponseWriter, r *http.Request, p apiPath, cla
 	} else if p.isArtifactShareLink(r.Method) {
 		// A creator's copy of their link again leaves as its URL too.
 		proxy.ModifyResponse = s.withShareLinkURL(r)
+	} else if p.changesSourceRoom(r.Method) {
+		// A room whose grant this change may break, or tell the admins of
+		// (room_sources.go), is checked before the answer leaves.
+		proxy.ModifyResponse = s.afterSourceRoomChange(r, p, claims)
 	}
 	proxy.ServeHTTP(w, r)
 }

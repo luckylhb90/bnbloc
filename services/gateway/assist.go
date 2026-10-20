@@ -15,6 +15,7 @@ import (
 
 	"github.com/luckylhb90/bnbloc/internal/assist"
 	"github.com/luckylhb90/bnbloc/internal/auth"
+	"github.com/luckylhb90/bnbloc/internal/contentbuiltin"
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/contentuse"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
@@ -212,17 +213,50 @@ func (s *Service) handleAssist(w http.ResponseWriter, r *http.Request, claims au
 
 // assistJSON runs a JSON task and answers its fields.
 func (s *Service) assistJSON(w http.ResponseWriter, r *http.Request, claims auth.Claims, task assistTask, model assist.Model, msgs []assist.Message) {
-	text, usage, err := s.assistClient().Complete(r.Context(), model, msgs, true)
-	var fields map[string]any
-	if err == nil {
-		fields, err = assist.Fields(text, task.Package.Manifest.Fields)
-	}
-	s.auditAssist(r.Context(), claims, task, model, usage, err)
+	fields, usage, err := s.completeJSONTask(r.Context(), claims, task, model, msgs)
 	if err != nil {
 		writeAssistModelErr(w, err)
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, wire.AssistJSONReply{Fields: fields, Usage: usage})
+}
+
+// completeJSONTask is one run of a JSON task: the model's reply read as
+// the task's fields, audited (auditAssist). The assist route's runs and
+// the platform's own (runBuiltinJSON) go through it.
+func (s *Service) completeJSONTask(ctx context.Context, claims auth.Claims, task assistTask, model assist.Model, msgs []assist.Message) (map[string]any, wire.AssistUsage, error) {
+	text, usage, err := s.assistClient().Complete(ctx, model, msgs, true)
+	var fields map[string]any
+	if err == nil {
+		fields, err = assist.Fields(text, task.Package.Manifest.Fields)
+	}
+	s.auditAssist(ctx, claims, task, model, usage, err)
+	return fields, usage, err
+}
+
+// runBuiltinJSON runs the built-in JSON assist name over text for claims
+// (their organization's model, their assist rate and budget), with no
+// context: a run the platform makes itself, so it takes the built-in
+// package, never one a member or organization saved under that name.
+// errAssistUnavailable when assists are off.
+func (s *Service) runBuiltinJSON(ctx context.Context, claims auth.Claims, name, text string) (map[string]any, error) {
+	model, ok, err := s.assistModel(ctx, claims)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, errAssistUnavailable
+	}
+	p, found := contentbuiltin.Get(contentbuiltin.IDPrefix + name)
+	if !found || p.Validated.Manifest.Output != wire.AssistOutputJSON {
+		return nil, fmt.Errorf("no built-in JSON assist %q", name)
+	}
+	if !s.assistLimiter.get(assistRate, assistBurst, s.Peers.Size).allow(claims.Tenant + "/" + claims.Subject) {
+		return nil, errors.New("too many AI assists: try again in a minute")
+	}
+	task := assistTask{Component: p.Component, Version: p.Version, Package: p.Validated}
+	fields, _, err := s.completeJSONTask(ctx, claims, task, model, assist.Messages(p.Validated.Instructions, text, assist.Context{}))
+	return fields, err
 }
 
 // assistText runs a text task as Server-Sent Events: "delta" {text} per

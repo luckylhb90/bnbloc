@@ -1066,9 +1066,11 @@ CREATE TABLE IF NOT EXISTS app_keys (
 -- docs/prd/2026-10-20-rooms-as-components.md §2.3): recorded when a room
 -- package asking for it is installed (the package, its version and its
 -- stated purpose), answered by the organization's admin with a scope
--- ('' = waiting: never granted, or withdrawn). alias_key keys the opaque
--- per-ask alias a reader who may not see names reads a person as.
--- Deleted with the room.
+-- ('' = waiting: never granted, withdrawn or paused). alias_key keys the
+-- opaque per-ask alias a reader who may not see names reads a person as.
+-- grantee is the person a grant is pinned to (the room's owner when
+-- granted); watch_json what the admins consented to and were told since
+-- (store.RoomSourceWatch: members, tasks, drift). Deleted with the room.
 CREATE TABLE IF NOT EXISTS room_source_grants (
   tenant_id          VARCHAR(64) NOT NULL,
   room_id            VARCHAR(64) NOT NULL,
@@ -1083,6 +1085,8 @@ CREATE TABLE IF NOT EXISTS room_source_grants (
   asked_at_ms        BIGINT NOT NULL,
   decided_by         VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '',
   decided_at_ms      BIGINT NOT NULL DEFAULT 0,
+  grantee            VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '',
+  watch_json         MEDIUMTEXT NULL,
   PRIMARY KEY (tenant_id, room_id, source_name),
   KEY idx_room_source_grants_asked (tenant_id, asked_at_ms)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

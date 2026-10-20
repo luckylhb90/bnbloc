@@ -4,7 +4,6 @@ import { contentLabel, type ContentComponent } from "@/lib/contentComponents";
 import { contentApi } from "@/lib/contentComponentsApi";
 import { errorText } from "@/lib/errors";
 import {
-  describeRoomInput,
   partKey,
   roomContentForm,
   roomDraftPatch,
@@ -18,6 +17,7 @@ import {
 } from "@/lib/roomComponents";
 import { ROOM_SOURCE_LABELS, type RoomSourceAsk } from "@/lib/roomSources";
 import { roomComponentsApi } from "@/lib/roomComponentsApi";
+import { FINDING_LABELS, findingId, findingWhere, fixFinding, openFindings, reviewKey, roomFindings, roomReviewInput, type RoomFinding } from "@/lib/roomReview";
 import { MaxRoomSourcePurpose, RoomSourceValues } from "@/lib/wire.gen";
 import { Button } from "@/ui/Button";
 import { Dialog } from "@/ui/Dialog";
@@ -42,7 +42,12 @@ const check = "flex items-start gap-2 rounded-[var(--radius)] px-2 py-1 text-sm 
 // text, unticks parts, declares the sources its tasks ask for, and saves
 // through the content form (contentApi.create / newVersion). "Fill with
 // AI" (the describe-room assist) drafts the name, description, category,
-// tags and welcome; nothing is saved until they press Save.
+// tags and welcome; nothing is saved until they press Save. The same
+// assist checks the package's text before it leaves the room (on Save,
+// when the text changed since the last check; lib/roomReview.ts): what
+// should not leave (a secret, an internal link, a person's name, private
+// data) is listed with "Fix" (edit that field, or leave the part out) and
+// "Ignore"; "Save anyway" keeps saving the member's decision.
 export function SaveRoomComponentDialog({ target, onClose, onSaved }: { readonly target: RoomSaveTarget | null; readonly onClose: () => void; readonly onSaved?: () => void }) {
   const toast = useToast();
   const describe = useAssistTask(DESCRIBE_ROOM);
@@ -53,6 +58,9 @@ export function SaveRoomComponentDialog({ target, onClose, onSaved }: { readonly
   const [failure, setFailure] = useState("");
   const [busy, setBusy] = useState(false);
   const [filling, setFilling] = useState(false);
+  const [findings, setFindings] = useState<readonly RoomFinding[]>([]);
+  const [ignored, setIgnored] = useState<readonly string[]>([]);
+  const [reviewed, setReviewed] = useState("");
   const roomId = target && "roomId" in target ? target.roomId : "";
   const component = target && "component" in target ? target.component : null;
 
@@ -61,6 +69,9 @@ export function SaveRoomComponentDialog({ target, onClose, onSaved }: { readonly
     setForm(component ? roomSaveFromComponent(component) : null);
     setSaveAs(component?.id ?? "");
     setLeft([]);
+    setFindings([]);
+    setIgnored([]);
+    setReviewed("");
     if (!roomId) return;
     let live = true;
     void Promise.all([
@@ -87,13 +98,23 @@ export function SaveRoomComponentDialog({ target, onClose, onSaved }: { readonly
   const next = mine.find((c) => c.id === saveAs) ?? component;
   const problem = form ? roomSaveProblem(next ? { ...form, name: next.name } : form) : null;
 
+  const open = form ? openFindings(findings, form, ignored) : [];
+  // review runs describe-room over f: its draft (answered) and its findings.
+  const review = async (f: RoomSaveForm) => {
+    const r = await runJSONAssist(describe?.name ?? "", { text: roomReviewInput(f), ...(roomId ? { roomId } : {}) });
+    setFindings(roomFindings(r.fields ?? {}, f));
+    return r.fields ?? {};
+  };
+
   const fill = async () => {
     if (!describe || !form || filling) return;
     setFilling(true);
     setFailure("");
     try {
-      const r = await runJSONAssist(describe.name, { text: describeRoomInput(form), ...(roomId ? { roomId } : {}) });
-      setForm((f) => (f ? { ...f, ...roomDraftPatch(r.fields ?? {}, f) } : f));
+      const fields = await review(form);
+      const next = { ...form, ...roomDraftPatch(fields, form) };
+      setForm(next);
+      setReviewed(reviewKey(next));
     } catch (e) {
       setFailure(errorText(e, "Could not fill it in with AI"));
     } finally {
@@ -101,10 +122,38 @@ export function SaveRoomComponentDialog({ target, onClose, onSaved }: { readonly
     }
   };
 
+  const fix = (x: RoomFinding) => {
+    if (!form) return;
+    const fx = fixFinding(form, x);
+    if ("edit" in fx) {
+      document.getElementById(`room-save-${fx.edit}`)?.focus();
+      return;
+    }
+    setForm(fx.form);
+    toast.info(fx.label);
+  };
+
   const submit = async () => {
     if (!form || problem || busy) return;
     setBusy(true);
     setFailure("");
+    // The text is checked before it leaves the room, once per change; what
+    // the check finds is the member's to fix, ignore or save anyway.
+    if (describe && reviewed !== reviewKey(form)) {
+      try {
+        const fields = await review(form);
+        setReviewed(reviewKey(form));
+        if (openFindings(roomFindings(fields, form), form, ignored).length > 0) {
+          setBusy(false);
+          return;
+        }
+      } catch (e) {
+        setReviewed(reviewKey(form));
+        setFailure(`${errorText(e, "AI could not check the text")}: press Save again to save it unchecked`);
+        setBusy(false);
+        return;
+      }
+    }
     try {
       const f = roomContentForm(next ? { ...form, name: next.name } : form);
       const d = next ? await contentApi.newVersion(next.id, f, next.latestVersion) : await contentApi.create(f);
@@ -131,7 +180,7 @@ export function SaveRoomComponentDialog({ target, onClose, onSaved }: { readonly
             Cancel
           </Button>
           <Button variant="primary" onClick={() => void submit()} disabled={!form || !!problem || busy}>
-            {busy ? "Saving…" : next ? "Save new version" : "Save"}
+            {saveLabel(busy, !!form && reviewed !== reviewKey(form), !!describe, open.length > 0, !!next)}
           </Button>
         </>
       }
@@ -164,10 +213,10 @@ export function SaveRoomComponentDialog({ target, onClose, onSaved }: { readonly
             </Field>
           )}
           <Field label="Display name">
-            <Input value={form.displayName} onChange={(e) => set({ displayName: e.target.value })} />
+            <Input id="room-save-displayName" value={form.displayName} onChange={(e) => set({ displayName: e.target.value })} />
           </Field>
           <Field label="Description" hint="What a room made from it is for; it becomes the new room's description.">
-            <Textarea value={form.description} onChange={(e) => set({ description: e.target.value })} rows={2} maxLength={500} />
+            <Textarea id="room-save-description" value={form.description} onChange={(e) => set({ description: e.target.value })} rows={2} maxLength={500} />
           </Field>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Category">
@@ -178,7 +227,7 @@ export function SaveRoomComponentDialog({ target, onClose, onSaved }: { readonly
             </Field>
           </div>
           <Field label="Welcome" hint="What a new room made from it shows first.">
-            <Textarea value={form.welcome} onChange={(e) => set({ welcome: e.target.value })} rows={2} />
+            <Textarea id="room-save-welcome" value={form.welcome} onChange={(e) => set({ welcome: e.target.value })} rows={2} />
           </Field>
           <RoomParts form={form} onToggle={(key, on) => setForm((f) => (f ? toggleRoomPart(f, key, on) : f))} />
           <SourcesField
@@ -195,10 +244,56 @@ export function SaveRoomComponentDialog({ target, onClose, onSaved }: { readonly
               </ul>
             </section>
           )}
+          {open.length > 0 && <Findings form={form} findings={open} onFix={fix} onIgnore={(x) => setIgnored((l) => [...l, findingId(x)])} />}
           {(failure || problem) && <ErrorBox>{failure || problem}</ErrorBox>}
         </div>
       )}
     </Dialog>
+  );
+}
+
+/** saveLabel is the save button's words: while saving, whether the text
+ *  is checked first, and "Save anyway" while findings are open. */
+function saveLabel(busy: boolean, unchecked: boolean, checks: boolean, findings: boolean, version: boolean): string {
+  if (busy) return checks && unchecked ? "Checking…" : "Saving…";
+  if (findings) return "Save anyway";
+  return version ? "Save new version" : "Save";
+}
+
+/** Findings lists what the AI check found in the package's text, each with
+ *  where it is, the words, why, and "Fix" or "Ignore". */
+function Findings({
+  form,
+  findings,
+  onFix,
+  onIgnore,
+}: {
+  readonly form: RoomSaveForm;
+  readonly findings: readonly RoomFinding[];
+  readonly onFix: (x: RoomFinding) => void;
+  readonly onIgnore: (x: RoomFinding) => void;
+}) {
+  return (
+    <section aria-label="Before it leaves the room" role="alert" className="flex flex-col gap-2 rounded-[var(--radius-lg)] border border-[var(--color-danger)]/30 bg-[var(--color-danger)]/5 px-3 py-2">
+      <span className={heading}>Before it leaves the room (AI)</span>
+      {findings.map((x) => (
+        <div key={findingId(x)} className="flex flex-col gap-1 text-xs">
+          <p>
+            <span className="font-medium">{x.kind ? FINDING_LABELS[x.kind] : "Check this"}</span> in {findingWhere(form, x).toLowerCase()}
+            {x.quote && <q className="mx-1 break-words text-[var(--color-fg-muted)]">{x.quote}</q>}
+          </p>
+          {x.why && <p className="text-[var(--color-fg-muted)]">{x.why}</p>}
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" onClick={() => onFix(x)}>
+              Fix
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => onIgnore(x)}>
+              Ignore
+            </Button>
+          </div>
+        </div>
+      ))}
+    </section>
   );
 }
 
@@ -261,6 +356,7 @@ function SourcesField({ sources, onChange }: { readonly sources: readonly RoomSo
             {ask && (
               <Field label="Purpose" hint="What the room's scheduled tasks read it for. The admin decides on this purpose, and members of the rooms it covers are told.">
                 <Textarea
+                  id={`room-save-source:${name}`}
                   value={ask.purpose}
                   rows={2}
                   maxLength={MaxRoomSourcePurpose}

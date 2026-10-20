@@ -272,20 +272,31 @@ skew, and a later release drops it).
   `room_source_opt_ins`)) or withdraws it (`DELETE`, back to waiting), both
   audited (`wire.AuditKindSource`); `sourceCover.covers` is the one rule of
   which rooms' records a grant reaches (never the reading room itself).
-  A room's members read its asks, the rooms that review it and its
+  A grant is only for a private reading room (its members read what it
+  reads) and is pinned to its owner (`wire.RoomSourceDecision.grantee`,
+  the owner the admin saw); `watchGrant` checks it on a successful change
+  the edge proxies to the room (visibility, owner, members, schedules),
+  before every read and when the console opens the ask
+  (`GET /v1/tenant/room-sources/{roomId}/{source}`: owner, members with
+  roles, the owner's AI tasks, the changes): made shared it is withdrawn,
+  transferred it waits again, a new member and a grantee's task created
+  or changed since the consent are told to the admins (a change with the
+  built-in `explain-source-use` on the grantee's budget, shown until
+  `POST …/ack` or a grant again). A room's members read its asks, the rooms that review it and its
   opt-ins at `GET /v1/rooms/{roomId}/sources` (the header's note,
   `RoomSourcesIndicator`); its owner opts it in at
   `PUT …/sources/{source}/opt-in` (room settings); its owner or an admin
   asks the admins at `POST …/sources/{source}/ask-admin` (the admins' one
   notification path, `notifyOrgAdmins`, as a room report, once a day). The
   console is Organization → Room sources (`RoomSourcesTab`,
-  `RoomSourceDialog`: the purpose, the package's scheduled tasks and the
-  built-in `explain-source-use` assist's explanation, which flags a task
-  beyond the purpose). A schedule of the room reads a granted source only
+  `RoomSourceDialog`: the purpose, whom it is read by, the room's members,
+  its owner's scheduled tasks and their changes, and the built-in
+  `explain-source-use` assist's explanation over the gateway's input,
+  which flags a task beyond the purpose). A schedule of the grantee reads a granted source only
   through the schedule-run tool `read_records`
   (`services/gateway/schedule_records.go`; offered to a room that asks for
-  a source): within the grant at the moment of the call, for a schedule
-  whose owner is the room's owner or an admin, finished runs only (the
+  a source): within the grant as it holds at the moment of the call
+  (`heldGrant`), for a schedule of the grantee, finished runs only (the
   request cut to 1500 bytes and its files by name, the run's last reply
   cut to 2000 bytes, the agent, the outcome and its failure sentence, the
   room and the time), people named only for an organization admin's
@@ -318,7 +329,11 @@ skew, and a later release drops it).
   one validator and the one save decide. "Fill with AI" runs the built-in
   `describe-room` assist (context `room`; `<text>` is the setup and the
   current values) for the display name, description, category, tags and
-  welcome.
+  welcome. The same assist checks the package's text before it leaves the
+  room (on Save when the text changed since the last check;
+  `web/src/lib/roomReview.ts`): its `findings` (a secret, an internal
+  link, a person's name, private data, each by the text's key) are listed
+  with "Fix" and "Ignore", and saving stays the member's ("Save anyway").
 - **Install.** `POST /v1/content-components/{id}/create-room`
   (`wire.RoomInstallRequest`, room creation's permission; a room package
   visible to the caller) makes the room through the same routes a member's

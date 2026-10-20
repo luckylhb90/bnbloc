@@ -1,15 +1,16 @@
 // Room sources (docs/prd/2026-10-20-rooms-as-components.md §2.3): what a
 // room component asks to read of the organization, the organization
-// admin's grant and who reviews a room. The shapes are
-// internal/wire/room_sources.go's (wire.gen.ts); the rule of what a grant
-// covers is the gateway's (room_sources.go), never re-decided here. The
-// helpers are pure: words, the save form's check, the grant dialog's AI
-// input and reply. The requests are lib/roomSourcesApi.ts.
+// admin's grant (to a private room, read by its owner) and who reviews a
+// room. The shapes are internal/wire/room_sources.go's (wire.gen.ts); the
+// rule of what a grant covers and when it holds is the gateway's
+// (room_sources.go), never re-decided here, and so is the grant dialog's
+// AI input (RoomSourceDetail.explainInput). The helpers are pure: words,
+// the save form's check, a changed task's diff, the AI's reply. The
+// requests are lib/roomSourcesApi.ts.
 
-import { describeRecurrence, recipientLabel } from "./schedules.ts";
-import { MaxRoomSourcePurpose, type RoomReviewer, type RoomSource, type RoomSourceAsk, type RoomSourceGrant, type RoomSourceScope } from "./wire.gen.ts";
+import { MaxRoomSourcePurpose, type RoomReviewer, type RoomSource, type RoomSourceAsk, type RoomSourceDrift, type RoomSourceScope } from "./wire.gen.ts";
 
-export type { RoomReviewer, RoomSourceAsk, RoomSourceAskState, RoomSourceGrant, RoomSourcesInfo, RoomSourceScope } from "./wire.gen.ts";
+export type { RoomReviewer, RoomSourceAsk, RoomSourceAskState, RoomSourceDetail, RoomSourceDrift, RoomSourceGrant, RoomSourcesInfo, RoomSourceScope } from "./wire.gen.ts";
 
 /** What a source holds, in words (wire.RoomSources). */
 export const ROOM_SOURCE_LABELS: Readonly<Record<RoomSource, string>> = {
@@ -37,8 +38,17 @@ export function sourceState(scope: RoomSourceScope | "" | undefined): string {
   return scope ? `Granted: ${SCOPE_LABELS[scope].label.toLowerCase()}` : "Waiting for your organization admin";
 }
 
-/** reviewLine is what a member of a covered room reads (PRD §2.3,
- *  transparency): the room that reviews it. */
+/** grantState is an ask's state on the console: a grant whose tasks
+ *  changed since the admin consented says so until it is acknowledged. */
+export function grantState(g: { readonly scope?: RoomSourceScope; readonly changed?: number }): string {
+  const state = sourceState(g.scope);
+  if (!g.scope || !g.changed) return state;
+  return `${state} · ${g.changed === 1 ? "a task" : `${g.changed} tasks`} changed since granted`;
+}
+
+/** reviewLine is what a member of a covered room reads first (PRD §2.3,
+ *  transparency): the room that reviews it (the note names whose tasks
+ *  read, r.grantee, by their display name). */
 export function reviewLine(r: RoomReviewer): string {
   return `This organization reviews conversation outcomes in ${r.roomName}`;
 }
@@ -54,15 +64,29 @@ export function sourcesProblem(sources: readonly RoomSourceAsk[]): string | null
   return null;
 }
 
-/** explainSourceInput is explain-source-use's <text>: the ask, its purpose
- *  and the package's scheduled tasks in their own words, as JSON. */
-export function explainSourceInput(g: RoomSourceGrant): string {
-  return JSON.stringify({
-    source: g.source,
-    reads: ROOM_SOURCE_LABELS[g.source],
-    purpose: g.purpose,
-    scheduledTasks: g.schedules.map((s) => ({ by: recipientLabel(s.recipient), when: describeRecurrence(s.recurrence, s.timezone), task: s.text })),
-  });
+/** A changed task as the console shows it: added or changed, its words
+ *  then and now, and the AI's explanation the admins were sent. */
+export interface DriftView {
+  readonly scheduleId: string;
+  readonly change: "added" | "changed";
+  readonly before: string;
+  readonly after: string;
+  readonly explanation: string;
+  readonly beyond: boolean;
+}
+
+/** driftView is a changed task for the console (a mismatch is the
+ *  explanation shown first). */
+export function driftView(d: RoomSourceDrift): DriftView {
+  const mismatch = d.mismatch?.trim() ?? "";
+  return {
+    scheduleId: d.scheduleId,
+    change: d.before ? "changed" : "added",
+    before: d.before,
+    after: d.after,
+    explanation: mismatch || d.summary?.trim() || "No AI explanation could be made: read the task against the purpose.",
+    beyond: mismatch !== "",
+  };
 }
 
 /** The grant dialog's AI explanation: what the tasks do with the records

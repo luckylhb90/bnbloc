@@ -53,11 +53,11 @@ func newSharingGateway(t *testing.T) *sharingGateway {
 		}
 		return "", tid == "other" && (user == "eve" || user == "kim")
 	}
-	g.svc.RoomMembers = func(_ context.Context, room string) ([]string, error) {
+	g.svc.RoomMembers = func(_ context.Context, room string) ([]store.Membership, error) {
 		if room != "room-1" {
 			return nil, nil
 		}
-		return []string{"maya", "jack", "bob"}, nil
+		return []store.Membership{{UserID: "maya", Role: store.RoleOwner}, {UserID: "jack", Role: store.RoleMember}, {UserID: "bob", Role: store.RoleMember}}, nil
 	}
 	g.svc.OrgAdmins = func(tid string) ([]string, error) {
 		if tid == "home" {

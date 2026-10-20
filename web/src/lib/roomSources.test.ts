@@ -1,5 +1,5 @@
 import explainSourceUse from "../../../internal/contentbuiltin/packages/explain-source-use/component.json" with { type: "json" };
-import { EXPLAIN_SOURCE_USE, explainReply, explainSourceInput, reviewLine, SCOPE_LABELS, sourceAsk, sourcesProblem, sourceState, type RoomSourceGrant } from "./roomSources.ts";
+import { driftView, EXPLAIN_SOURCE_USE, explainReply, grantState, reviewLine, SCOPE_LABELS, sourceAsk, sourcesProblem, sourceState } from "./roomSources.ts";
 import { RoomSourceScopeValues } from "./wire.gen.ts";
 
 function assert(condition: boolean, message: string): void {
@@ -17,31 +17,29 @@ assert((sourcesProblem([{ name: "runs", purpose: "  " }]) ?? "").includes("purpo
 assert(sourcesProblem([{ name: "runs", purpose: "p".repeat(501) }]) !== null, "a purpose within its bound");
 eq(sourcesProblem([{ name: "runs", purpose: "Judge outcomes." }]), null, "a source with its purpose");
 
-// Where an ask stands, and what a reviewed room's members read.
+// Where an ask stands, whose tasks read a grant, and what a reviewed
+// room's members read.
 eq(sourceState(undefined), "Waiting for your organization admin", "waiting");
 eq(sourceState("none-private"), "Granted: all but private rooms", "granted");
-eq(reviewLine({ source: "runs", roomName: "Outcome review" }), "This organization reviews conversation outcomes in Outcome review", "the transparency line");
+eq(grantState({ scope: "all" }), "Granted: all rooms", "a grant as consented");
+eq(grantState({ scope: "all", changed: 2 }), "Granted: all rooms · 2 tasks changed since granted", "a grant whose tasks changed");
+eq(grantState({ changed: 1 }), "Waiting for your organization admin", "a waiting ask has no changes to show");
+eq(reviewLine({ source: "runs", roomName: "Outcome review", grantee: "maya" }), "This organization reviews conversation outcomes in Outcome review", "the transparency line");
 eq(Object.keys(SCOPE_LABELS).sort(), [...RoomSourceScopeValues].sort(), "every scope has its words");
 
-// explain-source-use reads the ask, the purpose and the tasks; its reply
-// is the package's fields.
-{
-  const g: RoomSourceGrant = {
-    roomId: "r1",
-    roomName: "Review",
-    source: "runs",
-    purpose: "Judge outcomes.",
-    componentId: "cc_1",
-    from: "outcome-review@1.0.0",
-    askedBy: "maya",
-    askedAtMs: 1,
-    schedules: [{ text: "Read yesterday's runs and post the misses.", recipient: { kind: "ai" }, recurrence: { kind: "daily", time: "09:00" }, timezone: "UTC" }],
-  };
-  const input = JSON.parse(explainSourceInput(g)) as { purpose: string; reads: string; scheduledTasks: { task: string; when: string }[] };
-  eq([input.purpose, input.reads.includes("agent conversations"), input.scheduledTasks[0].task], ["Judge outcomes.", true, "Read yesterday's runs and post the misses."], "the AI's input");
-  assert(input.scheduledTasks[0].when.length > 0, "each task says when it runs");
-  eq(explainSourceUse.name, EXPLAIN_SOURCE_USE, "the built-in assist's name");
-  eq(explainSourceUse.fields.map((f) => f.name), ["summary", "uses", "mismatch"], "the reply's fields are the package's");
-  eq(explainReply({ summary: " Posts a digest. ", uses: ["Digest", 3, " "], mismatch: " Names people. " }), { summary: "Posts a digest.", uses: ["Digest"], mismatch: "Names people." }, "a reply read");
-  eq(explainReply({ summary: "", uses: [] }), null, "an empty reply");
-}
+// A changed task on the console: its words then and now, the mismatch
+// first.
+eq(
+  driftView({ scheduleId: "s1", before: "Review yesterday.", after: "Rank everyone.", summary: "Ranks members.", mismatch: " It ranks people. ", atMs: 1 }),
+  { scheduleId: "s1", change: "changed", before: "Review yesterday.", after: "Rank everyone.", explanation: "It ranks people.", beyond: true },
+  "a change beyond the purpose",
+);
+eq(driftView({ scheduleId: "s2", before: "", after: "Post a digest.", summary: "Posts a digest.", atMs: 1 }).change, "added", "a task added since the grant");
+eq(driftView({ scheduleId: "s2", before: "", after: "Post a digest.", summary: "Posts a digest.", atMs: 1 }).explanation, "Posts a digest.", "a change within the purpose");
+assert(driftView({ scheduleId: "s3", before: "a", after: "b", atMs: 1 }).explanation.includes("No AI explanation"), "a change without an explanation says so");
+
+// explain-source-use's reply is the package's fields.
+eq(explainSourceUse.name, EXPLAIN_SOURCE_USE, "the built-in assist's name");
+eq(explainSourceUse.fields.map((f) => f.name), ["summary", "uses", "mismatch"], "the reply's fields are the package's");
+eq(explainReply({ summary: " Posts a digest. ", uses: ["Digest", 3, " "], mismatch: " Names people. " }), { summary: "Posts a digest.", uses: ["Digest"], mismatch: "Names people." }, "a reply read");
+eq(explainReply({ summary: "", uses: [] }), null, "an empty reply");

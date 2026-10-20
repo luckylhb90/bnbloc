@@ -21,9 +21,11 @@ import (
 // schedule-run tool through which a room's scheduled task reads a source
 // its organization's admin granted the room (room_sources.go owns the
 // grant and what it covers). It is offered only to a room that asks for a
-// source and answers only within the grant at the moment of the call (a
-// withdrawal holds at the next read), for a schedule whose owner is the
-// room's owner or an admin. It knows sources, never goals or reviews.
+// source and answers only within the grant as it holds at the moment of
+// the call (heldGrant watches it first: a withdrawal, a room turned shared
+// or a new owner holds at the next read), for a schedule of the person the
+// grant is pinned to (its grantee, the room's owner). It knows sources,
+// never goals or reviews.
 //
 // Bounds: maxScheduleReads calls a run; each returns at most
 // maxRecordsPerRead records within maxRecordsBytes (a page with "next"
@@ -122,10 +124,10 @@ func (r *scheduleRun) readRecords(ctx context.Context, raw json.RawMessage) (str
 			Outcome: wire.AuditOutcomeDeny, Detail: "schedule " + r.sc.ScheduleID + ": " + span + ": " + why})
 		return "", errors.New(why)
 	}
-	if s.RoomSources == nil || s.AgentRuns == nil || s.RoomInfo == nil {
+	if s.RoomSources == nil || s.AgentRuns == nil || s.RoomInfo == nil || s.RoomMembers == nil {
 		return deny("this deployment keeps no records to read")
 	}
-	g, err := s.RoomSources.GetRoomSourceGrant(tctx, r.sc.RoomID, in.Source)
+	g, err := s.heldGrant(tctx, r.claims.Tenant, r.sc.RoomID, in.Source, sourceChange{actor: sourceWatcher, origin: r.origin})
 	switch {
 	case errors.Is(err, store.ErrRoomSourceNotFound):
 		return deny("this room does not ask to read " + in.Source)
@@ -133,9 +135,8 @@ func (r *scheduleRun) readRecords(ctx context.Context, raw json.RawMessage) (str
 		return "", errors.New("the room's grant could not be read")
 	case g.Scope == "":
 		return deny("the organization's admin has not granted this room " + in.Source + " (it waits for their consent)")
-	}
-	if _, ok := s.roomEditorClaims(r.claims, r.sc.RoomID); !ok {
-		return deny("only a schedule of the room's owner or admins reads its sources")
+	case r.sc.CreatedBy != g.Grantee:
+		return deny("the organization's admin granted it to this room read by " + g.Grantee + ": only their schedules read it")
 	}
 	cover, err := s.coverOf(tctx, g)
 	if err != nil {

@@ -1562,10 +1562,20 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   withdraws it, audited (`wire.AuditKindSource`); `sourceCover.covers` is
   the one rule of which rooms a grant reaches (never the reading room; a
   room of unknown visibility is private; `opted-in` reads the owner's
-  opt-ins, `room_source_opt_ins`). A schedule reads only through the
+  opt-ins, `room_source_opt_ins`). A grant is only for a private reading
+  room and is pinned to its owner (`grantee`); `watchGrant` is the one
+  check that it still holds, run on a successful change the edge proxies
+  (`apiPath.changesSourceRoom`, `afterSourceRoomChange`), before every
+  read (`heldGrant`) and when the console opens the ask: the room made
+  shared withdraws it, a new owner pauses it, a new member and a
+  grantee's task created or changed since the consent are told to the
+  admins (the latter with the built-in `explain-source-use` on the
+  grantee's budget, shown until an admin acknowledges); only
+  `room_sources.go` changes a grant. A schedule reads only through the
   schedule-run tool `read_records` (`schedule_records.go`, never an agent
-  tool), within the grant at each call, for a schedule of the room's owner
-  or an admin, bounded and audited (range and count, never a record);
+  tool), within the grant as `heldGrant` answers it at each call, for a
+  schedule of the grantee, bounded and audited (range and count, never a
+  record);
   names reach only an organization admin's schedule (`readerSeesNames`),
   everyone else reads the ask's aliases (`sourceAlias`). A record's turn
   (the request's file names, the run's last reply) is read through the

@@ -69,10 +69,16 @@ task declares and relays the reply. Nothing else calls a model.
   request; `describe-work` (json: `displayName`, `description`,
   `category`, `tags`; artifact) drafts a work's gallery entry, its
   categories held to `wire.WorkCategories` by a test; `describe-room`
-  (json: `displayName`, `description`, `category`, `tags`, `welcome`;
-  room) drafts a room component's Library entry in the "Save as
-  component" dialog from the room and the setup being saved (the web sends
-  it as `<text>`), its fields held to `contentpkg.Form`'s. `draft-expert`,
+  (json: `displayName`, `description`, `category`, `tags`, `welcome`,
+  and `findings` as `items` of `{field, quote, why}`; room) drafts a room
+  component's Library entry in the "Save as component" dialog from the
+  room and the setup being saved (the web sends it as `<text>`, with every
+  text the package would carry under `package`), its fields but
+  `findings` held to `contentpkg.Form`'s, and finds in that text what
+  should not leave the room (a secret, an internal link, a person's name,
+  private data: the kinds `web/src/lib/roomReview.ts` reads, held to the
+  item's description by a web test); the dialog runs it before a save.
+  `draft-expert`,
   `draft-skill-pack` and `draft-prompt-pack` (json; no context) fill the
   Library's form from a sentence (plus the form's current values the web
   appends), their fields and item fields held to `contentpkg.Form`'s by a
@@ -95,9 +101,13 @@ task declares and relays the reply. Nothing else calls a model.
   `explain-source-use` (json: `summary`, `uses` as a list, `mismatch`; no
   context) explains to an organization admin what a room's scheduled tasks
   would do with organization records it asks to read, from the ask's
-  purpose and the package's tasks the console sends as `<text>`
-  (`web/src/lib/roomSources.ts`), and flags a task beyond the stated
-  purpose (`docs/prd/2026-10-20-rooms-as-components.md` §2.3).
+  purpose and the room owner's tasks as `<text>` (built by the gateway,
+  `explainSourceInput` in `room_sources.go`, which the console passes
+  through), and flags a task beyond the stated purpose; a task that
+  carries `before` changed after the grant, and the gateway runs the
+  built-in itself (`runBuiltinJSON`, on the grantee's model and budget) to
+  tell the admins what the change does
+  (`docs/prd/2026-10-20-rooms-as-components.md` §2.3, §7).
   `find-a-way` (json: `cause`, `summary`, `fixes` as `items` of
   `{action, target, why}`; room, capabilities; gated, threshold 0.7)
   says what stopped an agent's reply and proposes up to three fixes of the
