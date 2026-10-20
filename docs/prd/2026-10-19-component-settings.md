@@ -1,7 +1,7 @@
 # Components describe their own settings (2026-10-19)
 
 Status: slice 1 built (2026-10-20, §5); slice 2's own settings page built
-(2026-10-20, §2.2a, §5), moving local skills to its page not yet; slice 3
+(2026-10-20, §2.2a, §5); slice 3
 built (2026-10-20, §2.3, §5: endpoint components ask, in a staged
 migration); slices 4–5 proposed. Owner: the component contract
 (`core/pkgmeta`), the settings store (`internal/componentsettings`), the
@@ -48,7 +48,7 @@ outside QA too. Each is a migration of a slice (§5):
 |---|---|---|---|
 | browser | MCP tool | Chrome binary, profile and state directories, endpoint, model, call budget: env and flags nobody can set | 1 |
 | a chat bot plugin | plugin | app id, app key, bot id (`localSettings`); its API and websocket URLs baked into `sidecar.args` at publish | 1 |
-| local skills | plugin | data directory, mounts; a shipped default policy; a hand-written page here | 1, 2 |
+| local skills | plugin | extra skill folders, excludes and secret rules: a policy file only (its data directory and mounts are the platform's plumbing; its panel is the skills-provider capability's, not a settings page) | local skills' own slice |
 | acp | core | a config file: the agent list (command, args, env, models, permissions, profile) | 2, 5 |
 | a SAML auth provider | auth provider | IdP metadata URL, SP entity, ACS and login URLs, attribute mapping, SP certificate and key, allowed redirects: deployment env | 3 |
 | a chat notifier | notifier | API URL, app id and key, bot id, tenants, recipient map, signing secret: deployment env | 3 |
@@ -354,8 +354,7 @@ organization or a member (decided 2026-10-20):
      (`component.settings/member/…`) and the endpoint components' ask
      (slice 3) are not built.
 2. **A component's own page.** `settingsPage`, the sandboxed dialog and
-   its host API (`get`, `set`, `check`, `close`); a plugin with a
-   hand-written view in the web (local skills) moves to its own page.
+   its host API (`get`, `set`, `check`, `close`).
 
    **Page built 2026-10-20** (commits 47c56bf6 platform, 831eb402 web,
    ca81a50f desktop, and the docs beside this record;
@@ -401,8 +400,11 @@ organization or a member (decided 2026-10-20):
      previewer's bundle input before any upload, then uploaded and pinned.
    - *Example.* `core/pkgmeta/testdata/settings-page`, served by the
      gateway's tests and driven through the host by the web's.
-   - *Not built.* Local skills' page (the move of a hand-written view);
-     `check()` (§2.5, slice 5); the platform console's package form for an
+   - *Not a migration.* Local skills' panel is the skills-provider
+     capability's own view (pick folders natively, pack, publish), not a
+     settings form, so it stays; its policy overrides become declared
+     settings in its own change.
+   - *Not built.* `check()` (§2.5, slice 5); the platform console's package form for an
      MCP tool takes no page (the CLI does); a member's own values of a
      component that does not run on their device (§2.2, still slice 1's
      gap).
