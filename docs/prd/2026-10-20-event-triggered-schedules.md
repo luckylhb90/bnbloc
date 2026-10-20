@@ -94,6 +94,8 @@ agent task runs on the machine whose agent it names. Separate PRD.
 
 ## 6. Slice 1 as built
 
+Landed in dcd5af2d (2026-10-20).
+
 - **Events** (`wire.PlatformEventNames`, the closed list; `wire.PlatformEvent`).
   One owner, `services/gateway/platform_events.go`: `RecordDeploy` at boot
   (the build's commit, `buildinfo`; compared with `buildinfo.SameCommit`, so
