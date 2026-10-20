@@ -119,7 +119,7 @@ person, a schedule runs only once the owner turns it on.
 ## 5. Build order (slices of §2)
 
 1. The room kind: save a room as a component, install it as a room;
-   templates folded in. **Built** (§6).
+   templates folded in. **Built** (§6; commits 435ed025, 74124c84).
 2. The `runs` source with consent, transparency and `read_records`.
 3. The outcome review room as built-in content; the digest and fixes as
    tasks.
