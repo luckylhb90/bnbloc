@@ -157,7 +157,10 @@ decided, against the code:
   and the new `POST /v1/rooms/{id}/sources/{source}` (the owner or admins:
   the room's own ask, recorded by `askRoomSource`, the one writer of an
   ask that a package's install uses too; an ask made in the room names no
-  package, so the console says "Asked in the room by …"). The requester's
+  package, so the console says "Asked in the room by …"; the console reads
+  the room's own owner, members and tasks for every ask, and the grant
+  rules (a private reading room, pinned to its owner, watched) are the
+  consent owner's, unchanged). The requester's
   role decides: a plain member's agent is refused the welcome, the
   description, the room's packs and a source ask with the route's own
   words, and may add a channel as the member may.
@@ -210,10 +213,6 @@ decided, against the code:
 
 - An agent removes no source ask and no channel; the room's settings and
   the Organization console do.
-- For an ask made in the room, the console shows no scheduled tasks to
-  judge the purpose against (a package's ask shows its version's): the
-  room's own tasks are a later step, as the slice 2 note on the current
-  tasks says.
 - Other members see a change to the welcome when they reload the room:
   no room event carries a room's details (its name, description or
   welcome) today, and clients reread them only on load, so none is
