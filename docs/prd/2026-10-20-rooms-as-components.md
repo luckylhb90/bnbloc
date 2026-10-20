@@ -2,14 +2,18 @@
 
 Status: slice 1 built (the room kind, save and install, templates folded
 in; §5, §6); slice 2 built (the `runs` source: consent, transparency,
-`read_records`; §7); slice 3 proposed. Owner: the content component
+`read_records`; §7), with each record's turn (the run's last reply, the
+request's file names) added on 2026-10-20 (§7, "The record's turn");
+slice 3 withdrawn as a platform slice: the platform ships no review room,
+a member builds one on slices 1 and 2, and a sample is published to the
+Library from its own repository (§2.2, §5). Owner: the content component
 contract (a new kind), the schedule runs' sources, the room's own
 content.
 
 A room's whole setup (its expert, skills, prompts, tools, apps, channels and
 scheduled AI tasks) can be saved as a component and installed as a new room.
-The first room built this way reviews the organization's conversations every
-day, judges whether each reached its goal, and sends what failed and what
+A room built this way can review the organization's conversations every
+day, judge whether each reached its goal, and send what failed and what
 would have helped. A member builds it in a room; nothing about it is in the
 platform.
 
@@ -51,31 +55,42 @@ platform.
 - Room templates become this kind (one owner): their table, routes and
   views go, pre-launch, no compatibility.
 
-### 2.2 The outcome review room (built in a room, shipped as content)
+### 2.2 An outcome review room (a member builds it; the platform ships none)
 
-- **Every day** (a scheduled AI task), it reads the organization's
-  conversations of the day within its consent, and for each judges:
-  - what the member wanted (the goal, in their words),
-  - reached, partly or not, with the evidence (the turn that shows it),
-  - when not: why (no access, a file that did not arrive, a capability
-    missing, the agent's mistake, the member gave up), and **what would
-    have helped**: a component to install, a source to connect, an agent
-    or person to bring in, a bug to fix.
-- Judgments go into the room's own app data (a table app), so the room can
-  filter, comment and track them; nothing is stored in the platform.
-- **The digest**: a message in the room and a notification to the people
-  the room names: the misses first, grouped by cause, with the fixes
-  proposed. A fix becomes a task in the room in one click; a person
-  decides.
-- It is a room package shipped with the platform's built-in content, and
-  anyone may change its prompt, causes or digest in their copy.
+- **The platform ships no review room.** How a review room judges, what
+  it keeps, its causes, columns, schedule, digest or follow-up are its
+  owner's decisions, made in their room with AI; the platform names none
+  of them (no built-in room package, expert, app, cause list or task
+  mechanism for it).
+- **A member builds it on the base capabilities**: the room package kind
+  (§2.1), the `runs` source with the organization admin's consent and the
+  schedule-run tool `read_records` (§2.3), and what any room has: an AI
+  schedule whose prompt is the review (what to judge, the causes, the
+  digest, whom to notify), an app an agent makes on request (say, a table
+  of judgments in the room's own app data), the schedule tools
+  `app_data` (reads only: list, find, get), `post_message`, `notify` and
+  `ask_agent` (a room agent, whose room tool `app_data` also writes).
+- What such a room can do, as its owner chooses: every day, read the
+  day's conversations within its consent; for each, the goal in the
+  member's words, reached or not with the evidence, why (a record carries
+  the request, its files by name, the agent's last reply and the outcome,
+  §7), and what would have helped; post a digest and notify the people it
+  names; keep the judgments in its app through a room agent it asks; a
+  person marks a wrong judgment there, and the next run reads the marks
+  (`app_data` find). A schedule run cannot write app data itself today:
+  a run's `app_data` reads only (schedule_run.go).
+- **A sample** of such a room is offered as a room package made only with
+  these capabilities, kept in its own repository and published to the
+  Library like any member's content: anyone copies it and changes its
+  prompt, its schedule or anything else. It is never compiled into the
+  platform or its built-in content.
 
 ### 2.3 Reading other rooms: a consented source
 
 - A room package may ask for a **source**, with its **purpose**: a kind
   of organization record its scheduled tasks may read. The first is `runs`: agent conversations
-  of the organization (request and reply text, the agent, the outcome
-  status, the room and time).
+  of the organization (request and reply text, the request's files by
+  name, the agent, the outcome status, the room and time).
 - Consent is the organization admin's, per installed room: what it reads
   (all rooms, rooms that opt in, or none of private rooms), for which
   purpose (the package's stated purpose is shown). It can be withdrawn at
@@ -88,16 +103,18 @@ platform.
 
 ### 2.4 AI
 
-The review is AI throughout: the goal, the judgment, the cause, the fix.
-AI proposes and people decide: a fix is a proposal, a task is created by a
-person, a schedule runs only once the owner turns it on.
+A review room's AI is its own: its schedule's prompt judges the goal, the
+outcome, the cause and the fix. The platform's AI here is the grant
+dialog's `explain-source-use` (§7). AI proposes and people decide: a
+schedule runs only once its owner turns it on, a source is read only once
+the admin grants it.
 
 ## 3. Design review
 
 | Lens | Answer |
 |---|---|
-| Component or platform | The review is content (a room package). The platform adds a kind, an install flow and a consented source, none of which names goals or reviews. |
-| One owner | Room templates fold into the room kind; one consent owner for sources; judgments live in the room's app data. |
+| Component or platform | A review is a member's content (a room and its package). The platform adds a kind, an install flow, a consented source and `read_records`, none of which names goals or reviews; it ships no review room (a sample lives in its own repository, published to the Library). |
+| One owner | Room templates fold into the room kind; one consent owner for sources; whatever a review room keeps lives in its own app data. |
 | Boundaries and privacy | Reading other rooms needs the admin's consent per installed room, shown to the members it covers. The review is about whether the product served people, not about ranking them: the digest groups by cause and room; the requester's name is shown only to the organization's admins. |
 | Load on agents | No new agent tool; `read_records` is a schedule-run tool. |
 | Load on users | Install one room; turn its schedule on. |
@@ -109,10 +126,13 @@ person, a schedule runs only once the owner turns it on.
 1. **People feel watched.** Consent is the admin's and visible to members;
    the purpose is the product's, and the digest leads with causes, not
    names.
-2. **Wrong judgments.** Each carries its evidence; a person marks it wrong
-   in the table, and the room learns from its own marks (they are in its
-   context next time).
-3. **Cost runs away.** Batches, a daily cap the room sets, sampling, and
+2. **Wrong judgments.** A record carries the request, its files and the
+   agent's last reply, so a judgment can cite its evidence; a room that
+   keeps judgments in a table app lets a person mark one wrong, and its
+   prompt can read the marks next time (the room's choice, not the
+   platform's).
+3. **Cost runs away.** `read_records` is bounded per call and per run
+   (§7); the rest is the room's prompt (batches, a cap, sampling) within
    the organization's budget.
 4. **A room package asks for more than it needs.** A source is shown with
    its purpose at install; the admin grants or not.
@@ -123,8 +143,17 @@ person, a schedule runs only once the owner turns it on.
    templates folded in. **Built** (§6; commits 435ed025, 74124c84).
 2. The `runs` source with consent, transparency and `read_records`.
    **Built** (§7; commits f8cc0fbc, 06ef1194).
-3. The outcome review room as built-in content; the digest and fixes as
-   tasks.
+3. ~~The outcome review room as built-in content; the digest and fixes as
+   tasks.~~ **Withdrawn** (2026-10-20, the owner: the platform provides
+   base capabilities only). A member builds a review room themselves (a
+   room, its AI schedule's prompt, any app they ask an agent to make) on
+   slices 1 and 2; the platform ships none, nor a cause list, columns, a
+   digest or a task mechanism for one. What judging needed from the
+   platform was the record's turn: `read_records` now gives each record
+   the run's last reply and its request's file names (§7, "The record's
+   turn"). A sample room package, made only with these capabilities, is
+   kept in its own repository and published to the Library like any
+   member's content (§2.2).
 
 ## 6. Slice 1 as built
 
@@ -242,17 +271,20 @@ decided, against the code:
   - per record: the run id, time, room name and id, requester, agent
     (`owner/provider`), whether it was borrowed or dispatched by another
     agent, the status and, for a failure, its member-facing sentence
-    (`AgentJobFailureReason.Text`), the request cut to 1500 bytes and the
-    reply as the run record keeps it (`wire.RunPreview`, 280 characters:
-    the run row holds only that preview, and reading the room's messages
-    would be a second read path; not added);
+    (`AgentJobFailureReason.Text`), the request cut to 1500 bytes, its
+    files by name and the run's last reply cut to 2000 bytes, read from
+    the room (below, "The record's turn"; slice 2 first shipped the run
+    record's 280-character preview of the first reply, too little to
+    judge a goal by);
   - people (the requester and the agent's owner) by name only when the
     schedule's owner is an organization admin (`readerSeesNames`, PRD
     §3), else as `member-<hmac>` of the ask's alias key: stable across
     reads of one grant, different across grants;
-  - at most 25 records and 18 KiB a page (`next` continues without
-    repeats), scanning at most 5 store pages a call, 4 calls a run
-    (beside the run's 8 model steps); the page is fenced as data;
+  - at most 12 records and 20 KiB a page (`next` continues without
+    repeats; a page always holds its first record), scanning at most 5
+    store pages a call, 4 calls a run (beside the run's 8 model steps);
+    the page is fenced as data and stays within one tool answer
+    (`maxScheduleToolText`, 24 KiB);
   - each call audited (the schedule, the source, the range, the count,
     the scope and whether names were shown; never a record), refusals
     as `deny`.
@@ -275,15 +307,66 @@ decided, against the code:
   with `"sources": ["runs"]` no longer validates (pre-launch: no
   compatibility); its author saves a new version with a purpose.
 
+**The record's turn (added 2026-10-20).** A 280-character preview of a
+run's first reply is too little to judge whether a goal was reached, and
+"a file that did not arrive" is a cause a review must see. Each record
+now carries the run's last reply and its request's files by name:
+
+- **One read of messages.** The run record holds the request's room
+  sequence (`MessageSeq`) and channel, not the reply's sequence (its
+  diagnostics keep the first reply's message id and preview). So the turn
+  is read from the room: `readTurn` (`schedule_records.go`) reads one
+  history page of the request's channel from the request on (200 room
+  sequences, realtime's largest page: `before` = the request's sequence
+  + 200) through the gateway's one history read, `roomHistory` (the
+  assist's `assistHistory`, renamed, which the room context and the turn
+  of `find-a-way` read), and the one row decoder (`roomlog.DecodeRow`).
+  The request's row names its files (at most 10 names of 120 bytes, "and
+  N more"; never their content); the reply is the last message of the
+  run's agent (`owner/provider`) whose `sourceSeq` is the request, cut to
+  2000 bytes.
+- **A consented read, not a membership.** The reading schedule's owner is
+  no member of the rooms a grant covers, and realtime's history route
+  answers members only. Realtime adds
+  `GET /internal/v1/rooms/{roomId}/history` for the gateway alone
+  (`svcauth.RequireService`), the same handler as the members' route
+  (`writeHistory`) without the membership: it reads as an agent does, so
+  the people chat answers 403, and the store scopes it to the signed
+  tenant. The gateway calls it only from `read_records`, after
+  `sourceCover.covers` decided the room (a `historyReader` with
+  `consented: true` appears only in `schedule_records.go`, and `/history`
+  only in `roomHistory`: `TestRoomSourceConsentSingleOwner`).
+- **What the read does not reach is said.** A reply deleted, later than
+  the page or unreadable (a realtime failure, logged) leaves the run
+  record's preview with `replyNote` saying so; fewer replies found than
+  the run posted says "the last of N replies read here; the run posted
+  M"; a request no longer in the room counts its files ("2 files (names
+  not read: …)").
+- **Bounds.** A record is at most about 4 KiB of text, so a page is at
+  most 12 records and 20 KiB (was 25 and 18 KiB), within one tool answer
+  (24 KiB); a page always holds its first record, so `next` always moves
+  on. One history page per record read: at most 12 a call, 48 a run.
+- **Design review.** Actors: only a schedule that may read the grant;
+  the gateway reads as itself, never as a member. Boundaries: only rows
+  of a covered room's run channel, never the people chat, never another
+  tenant; the audit still holds no record. Scale and cost: one bounded
+  history page per record. Failure: a history failure degrades a record
+  to its preview with a note, never fails the read. One owner:
+  `roomHistory` and realtime's `writeHistory`; no second message read.
+  Release: additive (an internal route the previous gateway never calls;
+  the previous realtime answers the new gateway's call 404, which reads
+  as "no longer holds" and leaves the preview). Load on agents: none
+  (schedule-run tool only). AI: the reply is what a review room's prompt
+  judges by.
+
 **Not in this slice.**
 
 - The find-a-way card's cause and the member's choice
   (docs/prd/2026-10-20-never-a-dead-end.md §5.2) are not persisted: the
   card's result lives in the member's session (a memo in the web), and a
-  "report" is a notification not linked to its run. Adding persistence was
-  out of scope here; `read_records` carries the run's outcome and failure
-  sentence only. Slice 3 decides whether the review needs the card's
-  cause (it can judge the cause from the request and reply itself).
+  "report" is a notification not linked to its run. `read_records`
+  carries the run's outcome, failure sentence, request, files and last
+  reply; a review room judges the cause from those itself.
 - The AI explanation reads the package version's scheduled tasks, not the
   room's current ones: a task edited in the room after the grant is not
   re-explained. The grant is the room's, so the console shows which

@@ -1,6 +1,6 @@
 # Never a dead end: when an agent can't, propose what would help (2026-10-20)
 
-Status: slice 1 built, slice 2 proposed. Owner: the assist seam (a gate
+Status: slice 1 built, slice 2 not planned (§5). Owner: the assist seam (a gate
 on an assist, a `capabilities` context), one built-in assist, the reply's
 card in the room.
 
@@ -174,9 +174,12 @@ buttons are the manual part, and the fallback with the model off.
 
 1. The gate on assists, the `capabilities` context, `find-a-way`, the card
    and the manual entry, with the six actions.
-2. The outcome review room (`docs/prd/2026-10-20-rooms-as-components.md`)
-   reads the cards' causes and what the member did with them as part of
-   the `runs` source. Not yet: the `runs` source (that PRD's §7) carries
-   each run's outcome and failure sentence, but the card's cause and the
-   member's choice are not persisted anywhere (the card's result is a
-   session memo in the web), so they are not in its records.
+2. ~~The outcome review room reads the cards' causes and what the member
+   did with them as part of the `runs` source.~~ Not planned (2026-10-20):
+   the platform ships no review room
+   (`docs/prd/2026-10-20-rooms-as-components.md` §2.2, §5); a review room
+   a member builds reads, through the `runs` source (that PRD's §7), each
+   run's outcome, failure sentence, request, its files by name and the
+   agent's last reply, and judges the cause itself. The card's cause and
+   the member's choice stay unpersisted (the card's result is a session
+   memo in the web), so no record holds them.
