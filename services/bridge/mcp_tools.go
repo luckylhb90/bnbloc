@@ -423,20 +423,33 @@ func (c *jobContent) fitMCPToTarget(profile bool, transports []string) {
 	c.mcp.servers = kept
 }
 
-// withTools adds the MCP tools attached to the turn's session to a
-// job-status diagnostics map (wire.RunDiagTools, by name: the run record
-// says which tools a room's runs had, never their settings), once they are
-// fitted to the target. The map is returned for chaining.
-func (c *jobContent) withTools(diag map[string]any) map[string]any {
-	if c == nil || len(c.mcp.servers) == 0 {
+// withTools adds the turn's tools to a job-status diagnostics map
+// (wire.RunDiagTools), the one writer of that key: the MCP tools attached
+// to the turn's session, by name, once they are fitted to the target (the
+// run record says which tools a room's runs had, never their settings), and
+// ran, the room tool calls the run made (the outcome's report only:
+// Bridge.roomCalls; tool, action and outcome, never arguments). The map is
+// returned for chaining.
+func (c *jobContent) withTools(diag map[string]any, ran wire.AgentRunTools) map[string]any {
+	if c != nil {
+		for _, s := range c.mcp.servers {
+			ran.MCP = append(ran.MCP, s.Name)
+		}
+	}
+	if len(ran.MCP) == 0 && len(ran.Calls) == 0 && ran.CallsDropped == 0 {
 		return diag
 	}
-	names := make([]string, 0, len(c.mcp.servers))
-	for _, s := range c.mcp.servers {
-		names = append(names, s.Name)
-	}
-	diag[wire.RunDiagTools] = wire.AgentRunTools{MCP: names}
+	diag[wire.RunDiagTools] = ran
 	return diag
+}
+
+// roomToolCalls takes the room tool calls job made (none without room
+// tools): once, for its outcome's report.
+func (b *Bridge) roomToolCalls(jobID string) wire.AgentRunTools {
+	if b.roomCalls == nil {
+		return wire.AgentRunTools{}
+	}
+	return b.roomCalls(jobID)
 }
 
 // relayedMCP names the content's room-credential servers still attached.

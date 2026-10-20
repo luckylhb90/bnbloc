@@ -95,7 +95,7 @@ type Job struct {
 	// (not a schedule's post, not another agent's dispatch): the turn in
 	// which a "the person answered" checkpoint may hold (relay session).
 	ByRequester bool
-	// Workspace reads the session's workspace files (save_component); nil
+	// Workspace reads the session's workspace files (components save); nil
 	// when the core offers no session files.
 	Workspace Workspace
 	// Team is the roster when the turn wears a team expert (team.go).

@@ -4,6 +4,7 @@ import { agentRunsApi } from "@/lib/agentRunsApi";
 import { messageJumps } from "@/lib/team";
 import { Segment } from "@/ui/Segment";
 import { RunsBrowser, type RunAgentFilter } from "@/views/runs/RunsBrowser";
+import { RoomToolUse } from "@/views/team/RoomToolUse";
 
 const SCOPES = [
   { value: "tenant" as const, label: "Team" },
@@ -37,6 +38,7 @@ export function TeamRunsTab({
   return (
     <div className="flex flex-col gap-3">
       {canSeeTeam && <Segment options={SCOPES} value={scope} onChange={setScope} className="w-40" />}
+      {effective === "tenant" && <RoomToolUse />}
       <RunsBrowser
         key={effective}
         load={load}

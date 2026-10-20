@@ -390,11 +390,11 @@ const errPlatformPublish = "publishing to every organization is a platform admin
 // docs/prd/2026-10-20-room-setup-by-conversation.md §2.3), so text an
 // agent read can never publish for them. publishToOrg, the one way to the
 // organization, answers it.
-var errJobWidens = errors.New("publishing to the organization is the member's own click: publish_component asks them in the room")
+var errJobWidens = errors.New("publishing to the organization is the member's own click: components publish asks them in the room")
 
 // handlePublishContent changes who can use the caller's component: org
 // opens a publish request, personal takes it out of the organization,
-// platform is a super admin's action. The room tools' publish_component
+// platform is a super admin's action. The room tools' components publish
 // calls it with a job grant, acting as the job's requester, to withdraw
 // only (errJobWidens).
 func (s *Service) handlePublishContent(w http.ResponseWriter, r *http.Request, caller auth.Claims) {
@@ -511,7 +511,7 @@ type orgPublishResult struct {
 }
 
 // publishToOrg is the ONE way a member's publish reaches the organization:
-// the publish route (a member's click, a publish_component card's too) and
+// the publish route (a member's click, a components publish card's too) and
 // a new version's resubmission call it, for every content kind. The organization's
 // settings decide through contentshare.NeedsApproval: by default it opens
 // a request an org admin approves (openPublishRequest, notifying the

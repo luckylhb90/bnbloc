@@ -440,3 +440,49 @@ func TestMCPHeaders(t *testing.T) {
 		t.Fatalf("oauth = %v", got)
 	}
 }
+
+// The room tool calls a run made reach its run record with its outcome,
+// beside the tools the session had, taken once: the running reports carry
+// none (docs/prd/2026-10-20-fewer-sharper-room-tools.md §2.3).
+func TestRoomToolCallsReachTheOutcome(t *testing.T) {
+	g := newContentFixtureGateway(t)
+	expert := g.pkg(reviewerForm("Review."), "1.0.0")
+	expert.Source = wire.ContentSourceExpert
+	g.setEffective("job-1", wire.ContentEffective{Expert: &expert})
+	b := contentBridge(g, &profileProv{})
+	var taken []string
+	b.roomCalls = func(job string) wire.AgentRunTools {
+		taken = append(taken, job)
+		return wire.AgentRunTools{Calls: []wire.AgentRunToolCall{
+			{Tool: "components", Action: "save", Outcome: wire.ToolCallRefused},
+			{Tool: "read_room", Outcome: wire.ToolCallOK},
+		}, CallsDropped: 3}
+	}
+	b.runBridgeJob(context.Background(), contentJob("job-1", expert.ComponentID))
+
+	if strings.Join(taken, ",") != "job-1" {
+		t.Fatalf("calls taken for %v; want job-1 once", taken)
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	outcomes := 0
+	for _, st := range g.statuses {
+		d, _ := st["diagnostics"].(map[string]any)
+		tools, _ := d[wire.RunDiagTools].(map[string]any)
+		switch st["status"] {
+		case "replied", "failed":
+			outcomes++
+			raw, _ := json.Marshal(tools)
+			if string(raw) != `{"calls":[{"action":"save","outcome":"refused","tool":"components"},{"outcome":"ok","tool":"read_room"}],"callsDropped":3}` {
+				t.Errorf("the outcome's tools = %s", raw)
+			}
+		default:
+			if tools != nil {
+				t.Errorf("a %v report carries tools %v", st["status"], tools)
+			}
+		}
+	}
+	if outcomes != 1 {
+		t.Fatalf("%d outcome reports", outcomes)
+	}
+}

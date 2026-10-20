@@ -45,7 +45,7 @@ func onDisk(c workspacePathCase) (string, bool) {
 // is covered by the sandbox's deny-write list, is part of the turn fence's
 // fingerprint, and is cleared from a sandbox workdir by its reset; an
 // ordinary project file is none of those.
-// The sync ignore and save_component's packer read the same table in their
+// The sync ignore and components save's packer read the same table in their
 // own packages.
 func TestBnblocOwnedPathAgreesEverywhere(t *testing.T) {
 	const workdir = "/w/space"

@@ -9,7 +9,7 @@ import (
 )
 
 // Staged drafts (docs/prd/2026-10-12-experts-and-teams.md, "Runtime gap
-// closure" 4): a job dispatched by try_draft records the staged draft as
+// closure" 4): a job dispatched by components try records the staged draft as
 // its expert (an id with store.ContentDraftIDPrefix). It resolves only for
 // that job: a draft the job's parent staged, in the job's room and tenant,
 // before it expires. Its trust owner is the draft's author (the agent owner

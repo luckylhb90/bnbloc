@@ -50,21 +50,25 @@ var reviewerDraft = fakeWorkspace{
 	"notes.md":                        "not part of the draft",
 }
 
-func tryDraftCall(t *testing.T, srv *Server, token string, args map[string]any) (string, bool) {
+func componentsTryCall(t *testing.T, srv *Server, token string, args map[string]any) (string, bool) {
 	t.Helper()
-	return toolText(t, post(t, srv, token, rpc(1, "tools/call", map[string]any{"name": "try_draft", "arguments": args}), nil))
+	withAction := map[string]any{"action": "try"}
+	for k, v := range args {
+		withAction[k] = v
+	}
+	return toolText(t, post(t, srv, token, rpc(1, "tools/call", map[string]any{"name": "components", "arguments": withAction}), nil))
 }
 
 // A draft is validated, staged under the bound job's grant (only the
 // draft's files), and dispatched through the dispatch door to the
 // requester's own other agent wearing it; the reply comes back like
 // ask_agent's, marked as a try.
-func TestTryDraftStagesAndDispatches(t *testing.T) {
+func TestComponentsTryStagesAndDispatches(t *testing.T) {
 	gw := draftGateway(draftRoster, 200)
 	srv, token, sess := startServer(t, gw)
 	sess.Bind(Job{JobID: "job_lead", RequesterUserID: "maya", ChannelID: "ch_general", MessageSeq: 30, Workspace: reviewerDraft})
 
-	text, isErr := tryDraftCall(t, srv, token, map[string]any{"dir": "drafts/reviewer", "task": "Review this NDA: ..."})
+	text, isErr := componentsTryCall(t, srv, token, map[string]any{"dir": "drafts/reviewer", "task": "Review this NDA: ..."})
 	if isErr || !strings.Contains(text, `"status":"replied"`) || !strings.Contains(text, `"agent":"maya/opencode"`) ||
 		!strings.Contains(text, `"draft":{`) || !strings.Contains(text, "nothing was saved") {
 		t.Fatalf("try = %s", text)
@@ -98,7 +102,7 @@ func TestTryDraftStagesAndDispatches(t *testing.T) {
 	}
 
 	// A named agent is used as named.
-	if text, isErr := tryDraftCall(t, srv, token, map[string]any{"dir": "drafts/reviewer", "task": "t", "handle": "bob/claude"}); isErr || !strings.Contains(text, `"agent":"bob/claude"`) {
+	if text, isErr := componentsTryCall(t, srv, token, map[string]any{"dir": "drafts/reviewer", "task": "t", "handle": "bob/claude"}); isErr || !strings.Contains(text, `"agent":"bob/claude"`) {
 		t.Fatalf("named try = %s", text)
 	}
 }
@@ -107,7 +111,7 @@ func TestTryDraftStagesAndDispatches(t *testing.T) {
 // or a room without another agent stops before anything is staged; a
 // dispatch guard's refusal comes back as a tool error and counts against a
 // team's request.
-func TestTryDraftRefusals(t *testing.T) {
+func TestComponentsTryRefusals(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		ws     fakeWorkspace
@@ -127,7 +131,7 @@ func TestTryDraftRefusals(t *testing.T) {
 			gw := draftGateway(tc.roster, 200)
 			srv, token, sess := startServer(t, gw)
 			sess.Bind(Job{JobID: "job_lead", RequesterUserID: "maya", ChannelID: "ch_general", MessageSeq: 30, Workspace: tc.ws})
-			text, isErr := tryDraftCall(t, srv, token, tc.args)
+			text, isErr := componentsTryCall(t, srv, token, tc.args)
 			if !isErr || !strings.Contains(text, tc.want) {
 				t.Fatalf("try = %v %s; want an error with %q", isErr, text, tc.want)
 			}
@@ -140,7 +144,7 @@ func TestTryDraftRefusals(t *testing.T) {
 	// Not answering a request: nothing to stage under.
 	gw := draftGateway(draftRoster, 200)
 	srv, token, _ := startServer(t, gw)
-	if text, isErr := tryDraftCall(t, srv, token, map[string]any{"dir": "drafts/reviewer", "task": "t"}); !isErr || !strings.Contains(text, "only while you are answering") {
+	if text, isErr := componentsTryCall(t, srv, token, map[string]any{"dir": "drafts/reviewer", "task": "t"}); !isErr || !strings.Contains(text, "only while you are answering") {
 		t.Fatalf("unbound try = %s", text)
 	}
 
@@ -149,7 +153,7 @@ func TestTryDraftRefusals(t *testing.T) {
 	gw = draftGateway(draftRoster, 409)
 	srv, token, sess := startServer(t, gw)
 	sess.Bind(Job{JobID: "job_lead", RequesterUserID: "maya", ChannelID: "ch_general", MessageSeq: 30, Workspace: reviewerDraft, Team: releaseTeam()})
-	text, isErr := tryDraftCall(t, srv, token, map[string]any{"dir": "drafts/reviewer", "task": "t"})
+	text, isErr := componentsTryCall(t, srv, token, map[string]any{"dir": "drafts/reviewer", "task": "t"})
 	if !isErr || !strings.Contains(text, "8 tasks") {
 		t.Fatalf("refused dispatch = %v %s", isErr, text)
 	}

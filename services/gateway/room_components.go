@@ -49,7 +49,7 @@ import (
 // room_capture.go.
 
 // handleRoomComponentDraft answers what "Save as component" captures of a
-// room: its owner's or an admin's (the room editors'). save_component's
+// room: its owner's or an admin's (the room editors'). components save's
 // room kind reads it through a job's grant, as the job's requester: the
 // same capture as the dialog's.
 func (s *Service) handleRoomComponentDraft(w http.ResponseWriter, r *http.Request, caller auth.Claims) {

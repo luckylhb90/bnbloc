@@ -202,6 +202,9 @@ type Bridge struct {
 	summarizer roomlog.Summarizer
 	// toolLauncher starts stdio MCP tools (mcp_tool_exec.go; "" none).
 	toolLauncher string
+	// roomCalls answers the room tool calls a job made, once, for its
+	// outcome's run record (EnableRoomTools; nil without room tools).
+	roomCalls func(jobID string) wire.AgentRunTools
 	// settingsTmp makes the private directory of the stdio tools' settings
 	// files once, when there is no StateDir (mcp_tools.go).
 	settingsTmp    sync.Once

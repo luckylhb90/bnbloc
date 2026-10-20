@@ -11,7 +11,7 @@ import (
 // Content drafts (docs/prd/2026-10-12-experts-and-teams.md, "Runtime gap
 // closure" 4): an unsaved expert or skill pack an agent drafted in its
 // workspace (the Expert builder), staged so another agent of the room can
-// wear it for one quick try (the room tools' try_draft). A draft is not a
+// wear it for one quick try (the room tools' components try). A draft is not a
 // content component: no Library, listing, search, visibility rule or usage
 // count reads this table. It is scoped to the job that staged it (only a
 // job that job dispatches may wear it, in its room) and expires; the

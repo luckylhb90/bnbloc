@@ -47,28 +47,9 @@ var briefs = map[string]brief{
 		Text:   "Read a deliverable or attachment of this room by id; the content comes fenced as data its producer wrote.",
 		Params: map[string]string{"artifactId": "art_…, artf_… or att_…", "path": "A site's file (default index.html).", "version": "Default: the latest."},
 	},
-	"save_component": {
-		Text: "Save a drafted package (dir), a file as a gallery work (file or artifactId) or this room (kind room) to the Library of the person who asked you, only after they confirm. With id: the next version.",
-		Params: map[string]string{
-			"dir": "Workspace-relative, holds component.json.", "id": "cc_…; omit to create.",
-			"name": "A new work's or room's name.", "include": "Apps made here and room files, by artifact id.",
-		},
-	},
-	"get_component": {
-		Text:   "Read a Library expert, skill pack or prompt pack (manifest and files) to copy into drafts/<name>/ and improve; another author's files come fenced as their data.",
-		Params: map[string]string{"id": "cc_…", "version": "Default: the latest."},
-	},
-	"list_components": {
-		Text:   "The Library of the person who asked you: experts, skill packs, prompt packs and MCP tools they may use (their own marked mine).",
-		Params: map[string]string{"kind": "Only this kind."},
-	},
-	"publish_component": {
-		Text:   "Change who can use a saved component when the person asks: org puts a card in the room they click to publish; personal withdraws it; platform is a platform admin's action: say so.",
-		Params: map[string]string{"id": "cc_…", "note": "For org: a note for the admins."},
-	},
-	"try_draft": {
-		Text:   "Try a drafted expert or skill pack (dir) on another agent with a sample task before saving: staged for an hour, not saved. Returns its reply like ask_agent.",
-		Params: map[string]string{"dir": "Workspace-relative, holds component.json.", "task": "A realistic sample task.", "handle": "An agent to try it on; never yourself."},
+	"components": {
+		Text: "The Library of the person who asked you (experts, skill packs, prompt packs, MCP tools, works, rooms); save or publish only when they ask. " +
+			"Actions: list get try save publish (room_help components).",
 	},
 	"post_progress": {Text: "Post one short progress line to the room, once per phase of a long task."},
 	"app_data": {
@@ -77,14 +58,9 @@ var briefs = map[string]brief{
 		Params: map[string]string{"filter": "Field (dotted ok) to a value or {$eq $ne $in $gt $gte $lt $lte $exists}."},
 	},
 	"room_setup": {
-		Text: "This room's setup (description, welcome, quick prompts, expert, packs, channels, schedules, sources), changed as the person who asked you. " +
-			"Propose each change in a sentence; make it only after they agree.",
-		Params: map[string]string{
-			"name":       "use/unuse: a Library name; add_channel: its name.",
-			"task":       "What to do each time, never when.",
-			"send":       "Instead of task: fixed words.",
-			"recurrence": "weekly (days 0=Sunday…6, time HH:MM), daily, once (at), cron.",
-		},
+		Text: "This room's setup (description, welcome, quick prompts, expert, packs, channels, schedules, sources) as the person who asked you; " +
+			"make a change only after they agree. " +
+			"Actions: get set use unuse add_channel add_schedule remove_schedule ask_source (room_help room_setup).",
 	},
 	"room_help": {Text: "The full instructions of a room tool; topic is its name. Read it before using a tool you do not know. For you, not the person."},
 }

@@ -196,15 +196,15 @@ func TestAgentPublishesWorkWithRecipe(t *testing.T) {
 	e := galleryGW(t)
 	chart, _, _ := e.recipeRoom()
 	e.runJob("job-1", e.roomID)
-	r := e.roomToolAs(e.roomID, "job-1", "save_component", map[string]any{"artifactId": chart, "name": "q3-chart"})
+	r := e.roomToolAs(e.roomID, "job-1", "components", map[string]any{"action": "save", "artifactId": chart, "name": "q3-chart"})
 	if r.Err != "" {
-		t.Fatalf("save_component = %+v", r)
+		t.Fatalf("components save = %+v", r)
 	}
 	out, _ := r.Value.(map[string]any)
 	recipe, _ := out["recipe"].(map[string]any)
 	note, _ := out["note"].(string)
 	if out["kind"] != "work" || recipe["request"] != true || recipe["expert"] != "chart-maker" || !strings.Contains(note, "recipe") {
-		t.Fatalf("save_component = %v", out)
+		t.Fatalf("components save = %v", out)
 	}
 	if refs, _ := recipe["references"].([]string); len(refs) != 2 || refs[0] != "brief.md" {
 		t.Fatalf("the recipe's references = %v", recipe["references"])

@@ -79,7 +79,7 @@ func TestContentSaveAsJobRequester(t *testing.T) {
 	if code, _ := g.do("jack", http.MethodGet, "/v1/content-components/"+saved.ID, "", nil); code != http.StatusNotFound {
 		t.Fatalf("jack reads maya's component without a grant = %d", code)
 	}
-	// get_component / list_components read as the requester.
+	// components get / components list read as the requester.
 	if code, raw := g.do("jack", http.MethodGet, "/v1/content-components/"+saved.ID+grant("job-borrowed"), "", nil); code != http.StatusOK || !decodeDetail(t, raw).Component.Mine {
 		t.Fatalf("read as requester = %d %s", code, raw)
 	}

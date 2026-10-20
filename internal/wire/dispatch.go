@@ -62,7 +62,7 @@ type DispatchRequest struct {
 	// labels the dispatch with it.
 	Role string `json:"role,omitempty"`
 	// Draft asks the target to wear a staged draft (ContentDraft.ID, the
-	// room tools' try_draft) instead of an Expert: admitted only for a
+	// room tools' components try) instead of an Expert: admitted only for a
 	// draft the parent job staged in this room, before it expires.
 	Draft string `json:"draft,omitempty"`
 }

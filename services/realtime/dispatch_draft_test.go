@@ -13,7 +13,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
-// A quick try (try_draft) dispatches with a staged draft: admitted only
+// A quick try (components try) dispatches with a staged draft: admitted only
 // for a draft the parent job staged in this room before it expires, then
 // pinned on the job as its expert ("Reviewer (draft)"), marked on the
 // message and audited as a try. Every other dispatch guard still applies.

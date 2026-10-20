@@ -152,7 +152,7 @@ func (w sessionWorkspace) CopyDeliverables(ctx context.Context) map[string]strin
 }
 
 // Deliverable is the room deliverable of workspace file rel, published now
-// when its current content is not yet (save_component): a file the agent
+// when its current content is not yet (components save): a file the agent
 // wrote this turn has an id before the turn's own publish pass, and before
 // the room records (.room/artifacts.md, written at turn start) list it.
 // Any file but bnbloc's own may be named, build output included: naming it

@@ -68,11 +68,67 @@ func contentEnv(ws Workspace, gw Gateway, bound bool) *Env {
 	return &Env{Session: sess, Gateway: gw}
 }
 
+// componentsCall calls the components tool with action and args (a JSON
+// object without the action).
+func componentsCall(action string, env *Env, args json.RawMessage) Result {
+	var in map[string]any
+	if err := json.Unmarshal(args, &in); err != nil || in == nil {
+		in = map[string]any{}
+	}
+	in["action"] = action
+	raw, _ := json.Marshal(in)
+	return componentsTool().Call(context.Background(), env, raw)
+}
+
+// The components tool takes each action's own parameters: a parameter of
+// another action is refused naming the action that takes it (before any
+// call), an unknown action names the actions, and list keeps its kinds.
+func TestComponentsActionsTakeTheirOwnParameters(t *testing.T) {
+	gw := &recordingGateway{reply: func(string, string) ([]byte, error) { return []byte(savedDetail), nil }}
+	env := contentEnv(fakeWorkspace{}, gw, true)
+	for _, tc := range []struct {
+		args, want string
+	}{
+		{`{"action":"save","dir":"drafts/x","scope":"org"}`, "scope is not a parameter of save (it is publish's); save takes dir, file,"},
+		{`{"action":"get","id":"cc_1","task":"t"}`, "task is not a parameter of get (it is try's)"},
+		{`{"action":"publish","id":"cc_1","scope":"org","dir":"d"}`, "dir is not a parameter of publish (it is try and save's)"},
+		{`{"action":"list","color":"red"}`, `invalid arguments: unknown parameter "color"; list takes kind`},
+		{`{"action":"list","kind":"room"}`, "list's kind is one of expert, skill, prompt, mcp"},
+		{`{"action":"delete","id":"cc_1"}`, "action must be one of list, get, try, save, publish"},
+		{`{}`, "action must be one of"},
+		{`{"action":7}`, "action is a string"},
+	} {
+		if res := componentsTool().Call(context.Background(), env, json.RawMessage(tc.args)); !strings.Contains(res.Err, tc.want) {
+			t.Errorf("%s: err = %q, want %q", tc.args, res.Err, tc.want)
+		}
+	}
+	if len(gw.calls) != 0 {
+		t.Fatalf("a refused call reached the gateway: %+v", gw.calls)
+	}
+	// Every parameter of the schema belongs to an action, and every action's
+	// parameter is in the schema: one list, no orphan.
+	props := componentsTool().InputSchema["properties"].(map[string]any)
+	taken := map[string]bool{"action": true}
+	for _, a := range componentsActions {
+		for _, p := range a.params {
+			if _, ok := props[p]; !ok {
+				t.Errorf("an action takes %q, which the schema lacks", p)
+			}
+			taken[p] = true
+		}
+	}
+	for p := range props {
+		if !taken[p] {
+			t.Errorf("the schema lists %q, which no action takes", p)
+		}
+	}
+}
+
 const savedDetail = `{"component":{"id":"cc_1","kind":"expert","name":"reviewer","displayName":"Reviewer","scope":"personal","latestVersion":"1.0.0","version":"1.0.0","mine":true}}`
 
-// save_component packs exactly the draft directory and posts it, as an
+// components save packs exactly the draft directory and posts it, as an
 // archive, to the content routes with the bound job's grant.
-func TestSaveComponentPacksDraftUnderJobGrant(t *testing.T) {
+func TestComponentsSavePacksDraftUnderJobGrant(t *testing.T) {
 	ws := fakeWorkspace{
 		"drafts/reviewer/component.json":        `{"kind":"bnbloc.expert.package/v1","name":"reviewer","version":"1.0.0","displayName":"Reviewer"}`,
 		"drafts/reviewer/INSTRUCTIONS.md":       "Review.\n",
@@ -82,7 +138,7 @@ func TestSaveComponentPacksDraftUnderJobGrant(t *testing.T) {
 		"drafts/other/reviewer/component.json":  `{}`,
 	}
 	gw := &recordingGateway{reply: func(string, string) ([]byte, error) { return []byte(savedDetail), nil }}
-	res := saveComponent(context.Background(), contentEnv(ws, gw, true), json.RawMessage(`{"dir":"./drafts/reviewer/"}`))
+	res := componentsCall("save", contentEnv(ws, gw, true), json.RawMessage(`{"dir":"./drafts/reviewer/"}`))
 	if res.Err != "" {
 		t.Fatalf("save = %s", res.Err)
 	}
@@ -112,7 +168,7 @@ func TestSaveComponentPacksDraftUnderJobGrant(t *testing.T) {
 
 	// With id: a new version of that component.
 	gw.calls = nil
-	if res := saveComponent(context.Background(), contentEnv(ws, gw, true), json.RawMessage(`{"dir":"drafts/reviewer","id":"cc_1"}`)); res.Err != "" {
+	if res := componentsCall("save", contentEnv(ws, gw, true), json.RawMessage(`{"dir":"drafts/reviewer","id":"cc_1"}`)); res.Err != "" {
 		t.Fatalf("save version = %s", res.Err)
 	}
 	if u, _ := url.Parse(gw.calls[0].Path); u.Path != "/v1/content-components/cc_1/versions" || u.Query().Get("job") != "job-1" {
@@ -121,7 +177,7 @@ func TestSaveComponentPacksDraftUnderJobGrant(t *testing.T) {
 }
 
 // Refusals reach the agent as tool errors it can act on.
-func TestSaveComponentRefusals(t *testing.T) {
+func TestComponentsSaveRefusals(t *testing.T) {
 	ws := fakeWorkspace{"drafts/x/component.json": `{}`, "drafts/y/INSTRUCTIONS.md": "x"}
 	ok := &recordingGateway{reply: func(string, string) ([]byte, error) { return []byte(savedDetail), nil }}
 	for _, tc := range []struct {
@@ -145,7 +201,7 @@ func TestSaveComponentRefusals(t *testing.T) {
 		{"no such file", contentEnv(ws, ok, true), `{"file":"out/missing.pptx"}`, "cannot be a deliverable"},
 		{"work fields on a package", contentEnv(ws, ok, true), `{"dir":"drafts/x","request":"make a deck"}`, "are a work's"},
 	} {
-		if res := saveComponent(context.Background(), tc.env, json.RawMessage(tc.args)); !strings.Contains(res.Err, tc.want) {
+		if res := componentsCall("save", tc.env, json.RawMessage(tc.args)); !strings.Contains(res.Err, tc.want) {
 			t.Errorf("%s: err = %q, want %q", tc.name, res.Err, tc.want)
 		}
 	}
@@ -153,18 +209,18 @@ func TestSaveComponentRefusals(t *testing.T) {
 	refused := &recordingGateway{reply: func(string, string) ([]byte, error) {
 		return nil, &StatusError{Status: 400, Body: []byte("package has no INSTRUCTIONS.md\n")}
 	}}
-	res := saveComponent(context.Background(), contentEnv(ws, refused, true), json.RawMessage(`{"dir":"drafts/x"}`))
+	res := componentsCall("save", contentEnv(ws, refused, true), json.RawMessage(`{"dir":"drafts/x"}`))
 	if !strings.Contains(res.Err, "package has no INSTRUCTIONS.md") {
 		t.Fatalf("validator message = %q", res.Err)
 	}
 }
 
-// publish_component never shares by itself: "org" reads the component
+// components publish never shares by itself: "org" reads the component
 // under the job's grant and puts a card for the requester in the room (a
 // publish-proposal notice naming what would be shared and with whom), with
 // no call to the publish route; "personal" withdraws through the route;
 // "platform" is refused locally; another author's component is refused.
-func TestPublishComponentScopes(t *testing.T) {
+func TestComponentsPublishScopes(t *testing.T) {
 	mine := `{"component":{"id":"cc_1","kind":"room","name":"weekly-review","displayName":"Weekly review","latestVersion":"1.2.0","mine":true}}`
 	gw := &recordingGateway{reply: func(method, p string) ([]byte, error) {
 		switch {
@@ -175,7 +231,7 @@ func TestPublishComponentScopes(t *testing.T) {
 		}
 		return []byte(`{}`), nil
 	}}
-	res := publishComponent(context.Background(), contentEnv(nil, gw, true), json.RawMessage(`{"id":"cc_1","scope":"org","note":"for reviews"}`))
+	res := componentsCall("publish", contentEnv(nil, gw, true), json.RawMessage(`{"id":"cc_1","scope":"org","note":"for reviews"}`))
 	if res.Err != "" {
 		t.Fatal(res.Err)
 	}
@@ -197,7 +253,7 @@ func TestPublishComponentScopes(t *testing.T) {
 		t.Fatalf("card = %+v", payload)
 	}
 
-	res = publishComponent(context.Background(), contentEnv(nil, gw, true), json.RawMessage(`{"id":"cc_1","scope":"personal"}`))
+	res = componentsCall("publish", contentEnv(nil, gw, true), json.RawMessage(`{"id":"cc_1","scope":"personal"}`))
 	last := gw.calls[len(gw.calls)-1]
 	if res.Err != "" || last.Method != "POST" || !strings.HasPrefix(last.Path, "/v1/content-components/cc_1/publish?") {
 		t.Fatalf("withdraw = %+v, calls %+v", res, gw.calls)
@@ -211,7 +267,7 @@ func TestPublishComponentScopes(t *testing.T) {
 		}
 	}
 	n := len(gw.calls)
-	res = publishComponent(context.Background(), contentEnv(nil, gw, true), json.RawMessage(`{"id":"cc_1","scope":"platform"}`))
+	res = componentsCall("publish", contentEnv(nil, gw, true), json.RawMessage(`{"id":"cc_1","scope":"platform"}`))
 	if !strings.Contains(res.Err, "platform admin") || len(gw.calls) != n {
 		t.Fatalf("platform publish = %q (calls %d)", res.Err, len(gw.calls))
 	}
@@ -219,14 +275,14 @@ func TestPublishComponentScopes(t *testing.T) {
 	theirs := &recordingGateway{reply: func(string, string) ([]byte, error) {
 		return []byte(`{"component":{"id":"cc_2","kind":"expert","name":"reviewer","latestVersion":"1.0.0","mine":false}}`), nil
 	}}
-	res = publishComponent(context.Background(), contentEnv(nil, theirs, true), json.RawMessage(`{"id":"cc_2","scope":"org"}`))
+	res = componentsCall("publish", contentEnv(nil, theirs, true), json.RawMessage(`{"id":"cc_2","scope":"org"}`))
 	if !strings.Contains(res.Err, "only its author shares it") || len(theirs.calls) != 1 {
 		t.Fatalf("another author's = %q, calls %+v", res.Err, theirs.calls)
 	}
 }
 
-// get_component reads the latest version's files under the job's grant.
-func TestGetComponentReadsLatestFiles(t *testing.T) {
+// components get reads the latest version's files under the job's grant.
+func TestComponentsGetReadsLatestFiles(t *testing.T) {
 	gw := &recordingGateway{reply: func(_ string, p string) ([]byte, error) {
 		if strings.Contains(p, "/versions/") {
 			return []byte(`{"component":{"id":"cc_1","kind":"expert","name":"reviewer","version":"1.2.0","latestVersion":"1.2.0","mine":true},
@@ -234,7 +290,7 @@ func TestGetComponentReadsLatestFiles(t *testing.T) {
 		}
 		return []byte(`{"component":{"id":"cc_1","latestVersion":"1.2.0"}}`), nil
 	}}
-	res := getComponent(context.Background(), contentEnv(nil, gw, true), json.RawMessage(`{"id":"cc_1"}`))
+	res := componentsCall("get", contentEnv(nil, gw, true), json.RawMessage(`{"id":"cc_1"}`))
 	if res.Err != "" {
 		t.Fatal(res.Err)
 	}
@@ -249,7 +305,7 @@ func TestGetComponentReadsLatestFiles(t *testing.T) {
 
 // Another author's component (a shared copy's included) comes back fenced
 // as that author's data; the requester's own is not.
-func TestGetComponentFencesOthersFiles(t *testing.T) {
+func TestComponentsGetFencesOthersFiles(t *testing.T) {
 	for _, c := range []struct {
 		name, component, author string
 	}{
@@ -261,7 +317,7 @@ func TestGetComponentFencesOthersFiles(t *testing.T) {
 			return []byte(`{"component":{"id":"cc_1","kind":"expert","name":"reviewer","version":"1.2.0","latestVersion":"1.2.0",` + c.component + `},
 				"files":[{"path":"INSTRUCTIONS.md","sizeBytes":8,"text":"Review.\n"}]}`), nil
 		}}
-		res := getComponent(context.Background(), contentEnv(nil, gw, true), json.RawMessage(`{"id":"cc_1","version":"1.2.0"}`))
+		res := componentsCall("get", contentEnv(nil, gw, true), json.RawMessage(`{"id":"cc_1","version":"1.2.0"}`))
 		if res.Err != "" {
 			t.Fatal(res.Err)
 		}
@@ -281,11 +337,11 @@ func TestGetComponentFencesOthersFiles(t *testing.T) {
 // requester's (the gateway proposes it, orgProposed): the tool puts the
 // publish card for that version in the room and tells the agent it
 // reaches the organization only by their click.
-func TestSaveComponentProposesTheNewVersion(t *testing.T) {
+func TestComponentsSaveProposesTheNewVersion(t *testing.T) {
 	ws := fakeWorkspace{"drafts/reviewer/component.json": `{}`, "drafts/reviewer/INSTRUCTIONS.md": "Review.\n"}
 	detail := `{"component":{"id":"cc_1","kind":"expert","name":"reviewer","displayName":"Reviewer","scope":"personal","latestVersion":"1.1.0"},"orgProposed":"1.1.0"}`
 	gw := &recordingGateway{reply: func(string, string) ([]byte, error) { return []byte(detail), nil }}
-	res := saveComponent(context.Background(), contentEnv(ws, gw, true), json.RawMessage(`{"dir":"drafts/reviewer","id":"cc_1"}`))
+	res := componentsCall("save", contentEnv(ws, gw, true), json.RawMessage(`{"dir":"drafts/reviewer","id":"cc_1"}`))
 	if res.Err != "" {
 		t.Fatalf("save = %s", res.Err)
 	}
@@ -301,7 +357,7 @@ func TestSaveComponentProposesTheNewVersion(t *testing.T) {
 	}
 	// A save the organization does not use puts no card.
 	plain := &recordingGateway{reply: func(string, string) ([]byte, error) { return []byte(savedDetail), nil }}
-	if res := saveComponent(context.Background(), contentEnv(ws, plain, true), json.RawMessage(`{"dir":"drafts/reviewer","id":"cc_1"}`)); res.Err != "" || len(plain.calls) != 1 {
+	if res := componentsCall("save", contentEnv(ws, plain, true), json.RawMessage(`{"dir":"drafts/reviewer","id":"cc_1"}`)); res.Err != "" || len(plain.calls) != 1 {
 		t.Fatalf("plain save = %+v, calls %d", res, len(plain.calls))
 	}
 }
@@ -309,11 +365,11 @@ func TestSaveComponentProposesTheNewVersion(t *testing.T) {
 // A workspace file saves as a work through its deliverable, published first
 // (one the agent wrote this turn is in no room record yet), with the
 // agent's own description and "how it was made" request.
-func TestSaveComponentSavesAWorkspaceFileAsAWork(t *testing.T) {
+func TestComponentsSaveSavesAWorkspaceFileAsAWork(t *testing.T) {
 	ws := fakeWorkspace{"work/out/deck.pptx": "PK"}
 	work := `{"component":{"id":"cc_9","kind":"work","name":"deck","displayName":"Deck","scope":"personal","latestVersion":"1.0.0","mine":true}}`
 	gw := &recordingGateway{reply: func(string, string) ([]byte, error) { return []byte(work), nil }}
-	res := saveComponent(context.Background(), contentEnv(ws, gw, true), json.RawMessage(
+	res := componentsCall("save", contentEnv(ws, gw, true), json.RawMessage(
 		`{"file":"work/out/deck.pptx","name":"deck","category":"office","description":"A 39-slide layout gallery.","request":"Make a layout gallery deck from our template"}`))
 	if res.Err != "" {
 		t.Fatalf("save = %s", res.Err)

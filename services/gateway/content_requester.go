@@ -16,8 +16,8 @@ import (
 
 // Content requests on behalf of a running job's requester
 // (docs/prd/2026-10-12-experts-and-teams.md §5, docs/architecture/
-// room-tools.md): the room tools' save_component, get_component and
-// list_components call the ordinary content routes from the bridge running
+// room-tools.md): the room tools' components save, components get and
+// components list call the ordinary content routes from the bridge running
 // a job, with a ?job=&room= grant. The authority model is dispatch's: the
 // bridge never acts as itself or its owner; a grant is admitted only while
 // the job is live and leased by a bridge of the caller (store.JobLeasedBy)

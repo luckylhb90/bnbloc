@@ -160,8 +160,8 @@ func TestPublishAppFromSite(t *testing.T) {
 	}
 }
 
-// The agent publishes an app with the room tools' save_component: kind app
-// and the site's artifact id, as the job's requester. publish_component
+// The agent publishes an app with the room tools' components save: kind app
+// and the site's artifact id, as the job's requester. components publish
 // shares nothing: it puts a card for her in the room, and her click on it
 // (the publish route, as her) shares it.
 func TestAgentPublishesAppThroughRoomTools(t *testing.T) {
@@ -170,23 +170,23 @@ func TestAgentPublishesAppThroughRoomTools(t *testing.T) {
 	e.runJob("job-1", e.roomID)
 	activity := newRecorder(t)
 	e.gw.Backends.Activity = activity.srv.URL
-	r := e.roomToolAs(e.roomID, "job-1", "save_component", map[string]any{"artifactId": site, "name": "lunch-poll", "category": wire.WorkCategoryLife})
+	r := e.roomToolAs(e.roomID, "job-1", "components", map[string]any{"action": "save", "artifactId": site, "name": "lunch-poll", "category": wire.WorkCategoryLife})
 	if r.Err != "" {
-		t.Fatalf("save_component = %+v", r)
+		t.Fatalf("components save = %+v", r)
 	}
 	out, _ := r.Value.(map[string]any)
 	if out["kind"] != "work" || out["name"] != "lunch-poll" || out["version"] != "1.0.0" {
-		t.Fatalf("save_component = %v", out)
+		t.Fatalf("components save = %v", out)
 	}
 	comps, err := e.b.ContentComponents.ListContentComponents(e.ctx(), store.ContentComponentQuery{Owner: "maya", Kind: "bnbloc.work.package/v1"})
 	if err != nil || len(comps) != 1 || comps[0].Scope != store.ContentScopePersonal || comps[0].TenantID != e.tenant {
 		t.Fatalf("maya's apps = %+v, %v (saved for the job's requester)", comps, err)
 	}
-	if r := e.roomToolAs(e.roomID, "job-1", "save_component", map[string]any{"artifactId": site, "id": comps[0].ID}); r.Err != "" || r.Value.(map[string]any)["version"] != "1.0.1" {
+	if r := e.roomToolAs(e.roomID, "job-1", "components", map[string]any{"action": "save", "artifactId": site, "id": comps[0].ID}); r.Err != "" || r.Value.(map[string]any)["version"] != "1.0.1" {
 		t.Fatalf("a new version = %+v", r)
 	}
-	if r := e.roomToolAs(e.roomID, "job-1", "publish_component", map[string]any{"id": comps[0].ID, "scope": "org"}); r.Err != "" {
-		t.Fatalf("publish_component = %+v", r)
+	if r := e.roomToolAs(e.roomID, "job-1", "components", map[string]any{"action": "publish", "id": comps[0].ID, "scope": "org"}); r.Err != "" {
+		t.Fatalf("components publish = %+v", r)
 	}
 	card, _ := activity.last()
 	if card.path != "/v1/rooms/"+e.roomID+"/agent-activity/messages" || !strings.Contains(card.body, `"notice":"publish-proposal"`) ||

@@ -12,7 +12,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/tarbundle"
 )
 
-// save_component never packs a protected workspace path (the workspace path
+// components save never packs a protected workspace path (the workspace path
 // table, core/testdata/workspace_paths.json): room history, the agent
 // config the session wears, or project config a harness executes on the
 // host would otherwise ship inside a shareable component.

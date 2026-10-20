@@ -136,7 +136,7 @@ func (s *Service) auditExpertUse(ctx context.Context, e *chatExpert, job store.A
 	}
 	action, what := "use", "expert "
 	if e.Draft {
-		// A quick try of an unsaved draft (try_draft): not a use of a
+		// A quick try of an unsaved draft (components try): not a use of a
 		// component.
 		action, what = "try", "draft "
 	}

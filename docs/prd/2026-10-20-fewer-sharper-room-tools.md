@@ -1,6 +1,6 @@
 # Fewer, sharper room tools as the platform grows (2026-10-20)
 
-Status: proposed. Owner: the room tools (`services/bridge/roomtools`), the
+Status: slice 1 built (§5). Owner: the room tools (`services/bridge/roomtools`), the
 session guidance (`roomlog.SessionGuidance`), the prompt budgets
 (`services/bridge/prompt_test.go`).
 
@@ -87,6 +87,32 @@ rewording. People decide.
 
 ## 5. Build order
 
-1. Record tool calls; the `components` merge; the budget rule.
+1. Record tool calls; the `components` merge; the budget rule. **Built
+   2026-10-20.**
 2. Situation-dependent listing with `tools/list_changed`; the admins' AI
    summary.
+
+### Slice 1, as built
+
+- **Records.** The room tools server records every `tools/call` of a
+  session bound to a job (`roomtools/calls.go`): tool, action (only a value
+  of the tool's `action` enum), outcome `ok` | `refused` (the tool's own
+  check, a gateway 4xx) | `error` (a 5xx, a transport failure, an
+  unreadable answer). The job's outcome report takes them once, beside the
+  session's MCP tools in `wire.AgentRunTools` (`calls`, `callsDropped`;
+  at most `wire.MaxRunToolCalls` = 200 a run). Org admins read sums per
+  tool and action at `GET /v1/tenant/jobs/tool-calls?from=&to=` (at most
+  `wire.MaxToolUseRuns` = 5,000 runs a read, saying where it stopped),
+  shown under Team, Runs, "Room tool use". A per-tool view over time
+  (a chart) is left for the AI summary's slice: the read takes any range.
+- **`components`** (list get try save publish) replaces `list_components`,
+  `get_component`, `try_draft`, `save_component` and `publish_component`;
+  each action keeps its parameters, checks and result, and a parameter of
+  another action is refused naming the action that takes it. `room_setup`'s
+  brief has the same shape (one sentence and its actions; its parameter
+  notes moved to `room_help room_setup`).
+- **Budgets.** tools/list 2,351 → 1,787 tokens (budget 2,630 → 1,790), the
+  session prefix 3,090 → 2,520 (budget 3,090 → 2,520); guidance 740 → 734.
+  `TestPromptBudgets` states the rule: never raised for a tool or action.
+- The default content's expert builder and interactive apps packages name
+  the `components` actions (their minor versions bumped).

@@ -105,6 +105,7 @@ func (s *Service) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/rooms/{roomId}/jobs/{jobId}", s.handleRoomRun)
 	mux.HandleFunc("GET /v1/my/jobs", s.handleRuns(wire.RunScopeSelf))
 	mux.HandleFunc("GET /v1/tenant/jobs", s.handleRuns(wire.RunScopeTenant))
+	mux.HandleFunc("GET /v1/tenant/jobs/tool-calls", s.handleToolUse)
 	return svcauth.EnsureTenant(mux)
 }
 

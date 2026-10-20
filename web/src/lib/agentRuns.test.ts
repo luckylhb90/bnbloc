@@ -1,10 +1,13 @@
 import {
   isFailedRun,
   mergeRunPages,
+  refusalShare,
   runDurationMs,
   runPhaseSteps,
   runsPath,
   statusParam,
+  toolUseLabel,
+  toolUsePath,
   type AgentRun,
 } from "./agentRuns.ts";
 
@@ -91,6 +94,17 @@ test("isFailedRun covers both failure statuses", () => {
   assert.equal(isFailedRun({ status: "failed" }), true);
   assert.equal(isFailedRun({ status: "timed_out" }), true);
   assert.equal(isFailedRun({ status: "cancelled" }), false);
+});
+
+test("toolUsePath reads the last days up to now, now included", () => {
+  assert.equal(toolUsePath(7, 1_000_000_000), "/v1/tenant/jobs/tool-calls?from=395200001&to=1000000001");
+});
+
+test("toolUseLabel and refusalShare describe a tool use row", () => {
+  assert.equal(toolUseLabel({ tool: "components", action: "save" }), "components · save");
+  assert.equal(toolUseLabel({ tool: "read_room" }), "read_room");
+  assert.equal(refusalShare({ calls: 8, refused: 1, errors: 1 }), "25%");
+  assert.equal(refusalShare({ calls: 0, refused: 0, errors: 0 }), "");
 });
 
 test("mergeRunPages appends older runs without duplicates", () => {

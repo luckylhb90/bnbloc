@@ -90,7 +90,7 @@ func readArtifact(ctx context.Context, env *Env, args json.RawMessage) Result {
 	}
 	var detail wire.ArtifactDetail
 	if err := json.Unmarshal(raw, &detail); err != nil {
-		return toolError("unreadable deliverable %s: %v", id, err)
+		return failure("unreadable deliverable %s: %v", id, err)
 	}
 	art := detail.Artifact
 	if art.RoomID != room {
@@ -106,7 +106,7 @@ func readArtifact(ctx context.Context, env *Env, args json.RawMessage) Result {
 	}
 	var reply wire.ArtifactVersionReply
 	if err := json.Unmarshal(raw, &reply); err != nil {
-		return toolError("unreadable deliverable version: %v", err)
+		return failure("unreadable deliverable version: %v", err)
 	}
 	v := reply.Version
 	producer, _ := roomlog.VersionProducer(ctx, gatewayFetch(env), room, v)
@@ -194,7 +194,7 @@ func readAttachment(ctx context.Context, env *Env, room, id string) Result {
 	}
 	var meta wire.ChatAttachment
 	if err := json.Unmarshal(raw, &meta); err != nil {
-		return toolError("unreadable attachment %s: %v", id, err)
+		return failure("unreadable attachment %s: %v", id, err)
 	}
 	out := map[string]any{
 		"attachmentId": meta.ID, "filename": meta.Filename, "mimeType": meta.ContentType, "sizeBytes": meta.Size,

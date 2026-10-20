@@ -506,7 +506,7 @@ func TestContentPlatformPromote(t *testing.T) {
 }
 
 // A job's grant never publishes to the organization: sharing beyond its
-// author is the member's own click (publish_component puts a card in the
+// author is the member's own click (components publish puts a card in the
 // room instead). The grant still withdraws, as the requester; the
 // member's own publish goes through.
 func TestContentPublishRefusedToAJob(t *testing.T) {

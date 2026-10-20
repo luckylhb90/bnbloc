@@ -136,7 +136,7 @@ func askAgent(ctx context.Context, env *Env, args json.RawMessage) Result {
 // and what the target wears; the parent and recipient are filled here)
 // through the gateway's dispatch door, where every dispatch guard applies,
 // then waits for it like ask_agent: the outcome map (nil when the dispatch
-// was refused) and the tool result carrying it. ask_agent and try_draft
+// was refused) and the tool result carrying it. ask_agent and components try
 // share it.
 func dispatchTask(ctx context.Context, env *Env, job Job, target roomAgent, label string, req wire.DispatchRequest, waitSeconds *int) (map[string]any, Result) {
 	scope := env.Session.Scope()

@@ -29,11 +29,69 @@ const (
 )
 
 // AgentRunTools is the run summary's tools (RunDiagTools): the MCP tool
-// components attached to the turn's session, by name. The record keeps what
-// the session had, never which tool calls the agent made.
+// components attached to the turn's session, by name, and the room tool
+// calls the run made (docs/prd/2026-10-20-fewer-sharper-room-tools.md §2.3):
+// each call's tool, action and outcome, never its arguments or result.
+// Calls keeps the first MaxRunToolCalls; CallsDropped counts the rest.
 type AgentRunTools struct {
-	MCP []string `json:"mcp"`
+	MCP          []string           `json:"mcp,omitempty"`
+	Calls        []AgentRunToolCall `json:"calls,omitempty"`
+	CallsDropped int                `json:"callsDropped,omitempty"`
 }
+
+// MaxRunToolCalls bounds the room tool calls one run record keeps.
+const MaxRunToolCalls = 200
+
+// Outcomes of a room tool call (AgentRunToolCall.Outcome): ok; refused
+// (the tool or the platform said no to the call as made: its arguments, a
+// permission, a guard); error (the platform failed: a gateway 5xx, a
+// transport error, an unreadable answer).
+//
+//wire:union ToolCallOutcome
+const (
+	ToolCallOK      = "ok"
+	ToolCallRefused = "refused"
+	ToolCallError   = "error"
+)
+
+// AgentRunToolCall is one room tool call of a run: the tool, its action
+// when the tool has actions, and the outcome. Nothing the agent sent or
+// read is kept.
+type AgentRunToolCall struct {
+	Tool    string `json:"tool"`
+	Action  string `json:"action,omitempty"`
+	Outcome string `json:"outcome" tstype:"ToolCallOutcome"`
+}
+
+// RoomToolUse is one row of the tool use read (GET
+// /v1/tenant/jobs/tool-calls): a tool, or one action of it, with how often
+// runs called it and how those calls ended.
+type RoomToolUse struct {
+	Tool    string `json:"tool"`
+	Action  string `json:"action,omitempty"`
+	Calls   int    `json:"calls"`
+	Refused int    `json:"refused"`
+	Errors  int    `json:"errors"`
+}
+
+// RoomToolUseReply is GET /v1/tenant/jobs/tool-calls?from=&to=: the room
+// tool calls of the organization's runs created in [FromMs, ToMs), most
+// called first. Runs counts the runs read; Truncated says the read stopped
+// at MaxToolUseRuns, so the counts cover only the newest runs (created
+// from OldestMs on). Dropped counts calls the runs did not keep (beyond
+// MaxRunToolCalls a run), which no row counts.
+type RoomToolUseReply struct {
+	FromMs    int64         `json:"fromMs"`
+	ToMs      int64         `json:"toMs"`
+	Runs      int           `json:"runs"`
+	Truncated bool          `json:"truncated,omitempty"`
+	OldestMs  int64         `json:"oldestMs,omitempty"`
+	Dropped   int           `json:"dropped,omitempty"`
+	Tools     []RoomToolUse `json:"tools"`
+}
+
+// MaxToolUseRuns bounds the runs one tool use read reads.
+const MaxToolUseRuns = 5000
 
 // RunPreviewRunes bounds every text preview a run record carries.
 const RunPreviewRunes = 280

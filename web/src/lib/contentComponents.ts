@@ -418,7 +418,7 @@ export interface ExpertMarker {
   readonly name: string;
   readonly displayName?: string;
   readonly version: string;
-  // An unsaved draft worn for a quick try (the builder's try_draft).
+  // An unsaved draft worn for a quick try (the builder's components try).
   readonly draft?: boolean;
 }
 

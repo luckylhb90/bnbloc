@@ -75,7 +75,7 @@ const (
 	// a line each, under the job's progress session).
 	NoticeRoomSetup = "room-setup"
 	// NoticePublishProposal asks the person who asked the agent to share a
-	// component (publish_component): payload.proposal is a PublishProposal,
+	// component (components publish): payload.proposal is a PublishProposal,
 	// shown to them only.
 	NoticePublishProposal = "publish-proposal"
 )

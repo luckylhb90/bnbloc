@@ -20,7 +20,7 @@ func namedExpert(name string) map[string]any {
 }
 
 // The member catalog with a job grant is the requester's Library as an agent
-// reads it (the room tools' list_components, the bridge's .room/library.md):
+// reads it (the room tools' components list, the bridge's .room/library.md):
 // exactly what the visibility owners admit for the requester, content and MCP
 // tools only. The private component of another member never appears, the
 // bridge owner's own included.

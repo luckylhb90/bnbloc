@@ -16,7 +16,7 @@ import (
 // (a job's requester), read through the member catalog with the job's grant
 // (GET /v1/components?job=&room=: the gateway acts as the requester and
 // admits exactly what contentuse.Visible and extpipe.MemberVisibility admit;
-// nothing here re-derives visibility). The room tools' list_components and
+// nothing here re-derives visibility). The room tools' components list and
 // the bridge's .room/library.md both read it through ReadLibrary.
 
 // MaxLibraryItems bounds .room/library.md: the most recently updated items.
@@ -88,7 +88,7 @@ func LibraryFile(items []LibraryItem, err error) NamedFile {
 	b.WriteString("\n")
 	b.WriteString("bnbloc's Library: experts, skill packs, prompt packs and MCP tools this person may use. One Library, shared by\n")
 	b.WriteString("every agent and core in the room and visible to the person; a component an agent saved for them is here.\n")
-	b.WriteString("Read-only snapshot from this turn, most recently updated first (list_components and get_component read it live).\n\n")
+	b.WriteString("Read-only snapshot from this turn, most recently updated first (the components tool reads it live).\n\n")
 	switch {
 	case err != nil:
 		b.WriteString("(the Library could not be read this turn; this is not a sign that it is empty)\n")

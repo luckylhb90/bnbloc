@@ -804,7 +804,7 @@ CREATE TABLE IF NOT EXISTS content_component_versions (
 
 -- Staged drafts of content components (an expert or skill pack an agent
 -- drafted and another agent of the room wears for one quick try, the room
--- tools' try_draft). Never listed: no content component row exists. Scoped
+-- tools' components try). Never listed: no content component row exists. Scoped
 -- to the job that staged it (job_id) and its room; expired rows are deleted
 -- by the retention pass, then blob collection reclaims the bundle.
 CREATE TABLE IF NOT EXISTS content_drafts (

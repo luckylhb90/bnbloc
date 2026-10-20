@@ -40,6 +40,7 @@ func (b *Bridge) EnableRoomTools(shimCommand string) (stop func(), err error) {
 	st.Addr = srv.Addr()
 	st.save(b.cfg.StateDir)
 	b.AddSessionContributor(&roomToolsContributor{srv: srv, shimCommand: shimCommand, key: st.key})
+	b.roomCalls = srv.TakeCalls
 	return func() { _ = srv.Close() }, nil
 }
 

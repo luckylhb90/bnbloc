@@ -773,7 +773,23 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   parameters, and a note only where a name does not explain itself; the full
   description is `room_help(<tool>)` (`services/bridge/roomtools/brief.go`; a
   tool without a brief is refused). Never put a tool's rules in the session
-  guidance, and never add a tool whose brief needs a paragraph. An agent acts
+  guidance, and never add a tool whose brief needs a paragraph. **One tool
+  per domain, with an `action`**
+  (`docs/prd/2026-10-20-fewer-sharper-room-tools.md`): its brief is one
+  sentence and the action names, each action's parameters and rules are in
+  `room_help <tool>`, and a parameter of another action is refused naming
+  the action that takes it. The tools are `list_room_agents`, `ask_agent`,
+  `room_status`, `read_room`, `read_artifact`, `components` (list get try
+  save publish: the Library of the person who asked), `post_progress`,
+  `app_data`, `room_setup` and `room_help`. `TestPromptBudgets` holds
+  tools/list and the session prefix at their last measured size: a new tool
+  or action fits by merging or shortening, never by raising the budget.
+  Every call is recorded on the run (`roomtools/calls.go`: the tool, the
+  action, ok/refused/error, never arguments or results; at most
+  `wire.MaxRunToolCalls` a run, the rest counted) beside the session's MCP
+  tools under `wire.RunDiagTools`, whose one writer is the bridge's
+  `withTools`; org admins read calls and refusals per tool at
+  `GET /v1/tenant/jobs/tool-calls` (Team, Runs, "Room tool use"). An agent acts
   for the person who asked it only through its job's grant, as that person, on
   routes people already use: `room_setup` reads and changes the room's setup
   through the agent door (`services/gateway/agent_door.go`: the room's
@@ -783,7 +799,7 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   routes (content uses, sources), the person's role in the room deciding,
   each change audited (`room-setup`) and shown in the room as a line naming
   who asked. Sharing beyond its author is never an agent's act:
-  `publish_component` puts a card only the person sees, and their click
+  `components publish` puts a card only the person sees, and their click
   publishes (the gateway refuses a job's `org` publish).
 - **Plugins are typed sidecar packages, never cores.** A plugin package
   declares `kind: "bnbloc.plugin.package/v1"`,
@@ -1356,7 +1372,7 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   deliverable becomes a work only through `POST
   /v1/rooms/{roomId}/artifacts/{artifactId}/publish-work`
   (`contentpkg.WorkFromDeliverable`, a room member who may post:
-  `deliverableOwner`; the room tools' `save_component` with `artifactId`);
+  `deliverableOwner`; the room tools' `components save` with `artifactId`);
   an app's copy only through `POST /v1/content-components/{id}/use-app`
   (`contentpkg.WorkSite`, a new site artifact, so a fresh empty data
   space; scope `app-copy`). A listing never opens a work's bundle (its
@@ -1392,7 +1408,7 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   itself; scope `make-similar` counts it.
 - **Archives and directory packing have one owner: `internal/tarbundle`.**
   An upload of a foreign format is read by `ReadArchive` (an unsafe name is
-  refused, never rewritten), and every directory pack (save_component's
+  refused, never rewritten), and every directory pack (`components save`'s
   draft, the CLI's previewer and content package dirs) goes through
   `PackEntries`/`PackFS` with one exclusion rule (`Entry.Packed`: junk such
   as `.DS_Store`, hidden files, `core.ProtectedWorkspacePath`).
@@ -1506,7 +1522,7 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   the run record, marked not in this workspace) and `.room/library.md`
   (`ReadLibrary`: `GET /v1/components?job=&room=`, the requester's Library
   as the gateway's visibility owners admit it; the room tools'
-  `list_components` reads the same) and `.room/apps.md` (`ReadApps`, the
+  `components list` reads the same) and `.room/apps.md` (`ReadApps`, the
   room's interactive apps with their collections' counts, written by
   `AppsUpdate` once the room has an app and every turn after, so it never
   goes stale; `CtxState.AppsListed`). An agent with tools reads a
@@ -1642,8 +1658,8 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   only by `store.AgentRunCursor`/`ParseAgentRunCursor`.
   `TestRoomSourceConsentSingleOwner` keeps grants, scopes, the gateway's
   run reads and its history reads in their owners.
-- **Content requests on behalf of a job** (room tools `save_component`,
-  `get_component`, …) use the `?job=&room=` grant and act as the job's human
+- **Content requests on behalf of a job** (the room tool `components`:
+  save, get, …) use the `?job=&room=` grant and act as the job's human
   requester under the dispatch authority rules. Never save content as the
   bridge owner or the agent; a borrowed or platform agent saves no
   script-bearing package.
@@ -1715,7 +1731,7 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `publishApproval`, `required` by default, `none` publishes at once,
   still audited and removable by admins; every kind). The gateway's one
   publish path is `publishToOrg` (the publish route, a member's click on
-  a `publish_component` card included, a new version's resubmission); a
+  a `components publish` card included, a new version's resubmission); a
   job's grant never gets through it (`errJobWidens`: neither a publish
   nor a saved version's resubmission, which the room tools turn into the
   member's publish card); it alone opens a request
@@ -1740,7 +1756,7 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   pending per component). Room-tool saves announce themselves with a
   `content_saved` room event; never poll the Library to find a save. MCP
   packages are assembled only by `pkgmeta.PrepareMCP`/`AssembleMCP`.
-- **A quick try wears a staged draft, never a component:** `try_draft` stages
+- **A quick try wears a staged draft, never a component:** `components try` stages
   through `POST /v1/content-drafts` (job grant) into `content_drafts`
   (expiring, never listed); only a job dispatched by the staging job, in its
   room and before expiry, wears it. Its trust owner is the staging agent's

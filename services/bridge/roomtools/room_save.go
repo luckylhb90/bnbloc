@@ -12,7 +12,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
-// save_component's room kind (docs/prd/2026-10-20-room-setup-by-conversation.md
+// components save's room kind (docs/prd/2026-10-20-room-setup-by-conversation.md
 // §2.3, docs/prd/2026-10-20-complete-room-capture.md §2.1): this room saved
 // as a room component in the requester's Library. The room is captured by
 // the same owner as the room's "Save as component"
@@ -24,10 +24,10 @@ import (
 // id: the gateway reads them from the room); the rest is the room as the
 // draft holds it, the MCP tools its runs had required.
 
-// contentKindRoom is save_component's kind for this room.
+// contentKindRoom is components save's kind for this room.
 const contentKindRoom = "room"
 
-// saveArgs are save_component's arguments.
+// saveArgs are components save's arguments.
 type saveArgs struct {
 	Dir          string       `json:"dir"`
 	File         string       `json:"file"`
@@ -44,7 +44,7 @@ type saveArgs struct {
 	Include      *roomInclude `json:"include"`
 }
 
-// roomInclude is save_component's include: the apps made in this room and
+// roomInclude is components save's include: the apps made in this room and
 // the room files the package carries, by artifact id.
 type roomInclude struct {
 	Apps  []string `json:"apps"`

@@ -14,7 +14,7 @@ type ContentUsesChanged struct {
 }
 
 // EventContentSaved is a transient room event: the room tools saved a
-// content component (save_component) for the job's requester, in the
+// content component (components save) for the job's requester, in the
 // job's room, or the save of a new version sent it to the organization. The
 // workshop shows the save from it ("Saved expert …" with "Open in Library"
 // and "Try it now") instead of re-listing the Library after every agent
@@ -40,7 +40,7 @@ type ContentSaved struct {
 	DisplayName string `json:"displayName,omitempty"`
 	Version     string `json:"version"`
 	// Action is saved (a new component or version), submitted (a publish
-	// request to the organization, opened by publish_component or by the
+	// request to the organization, opened by components publish or by the
 	// save of a new version of a component the organization uses) or
 	// published (the same, where the organization requires no approval).
 	Action string `json:"action" tstype:"ContentSavedAction"`
@@ -51,7 +51,7 @@ type ContentSaved struct {
 }
 
 // PublishProposal is what an agent proposes to share for the person who
-// asked it (publish_component, docs/prd/2026-10-20-room-setup-by-conversation.md
+// asked it (components publish, docs/prd/2026-10-20-room-setup-by-conversation.md
 // §2.3): a notice row of kind NoticePublishProposal carries it as
 // payload.proposal. Clients show it, as a card with a Publish button, only
 // to For (the job's requester); the share happens when they click it (the

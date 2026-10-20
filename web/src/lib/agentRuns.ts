@@ -11,9 +11,11 @@ export type {
   AgentRun,
   AgentRunAgent,
   AgentRunsReply,
+  RoomToolUse,
+  RoomToolUseReply,
   RunScope,
 } from "./wire.gen.ts";
-import type { AgentRun, AgentRunAgent, RunScope } from "./wire.gen.ts";
+import type { AgentRun, AgentRunAgent, RoomToolUse, RunScope } from "./wire.gen.ts";
 import { roomPath } from "./roomId.ts";
 
 // Status filter choices the run views offer ("" = every status).
@@ -134,4 +136,23 @@ export function runAgentLabel(a: AgentRunAgent, nameOf: (id: string) => string =
 export function mergeRunPages(loaded: readonly AgentRun[], older: readonly AgentRun[]): AgentRun[] {
   const seen = new Set(loaded.map((r) => r.jobId));
   return [...loaded, ...older.filter((r) => !seen.has(r.jobId))];
+}
+
+// toolUsePath is the organization's room tool use over the runs created in
+// the last `days` days up to nowMs (GET /v1/tenant/jobs/tool-calls).
+export function toolUsePath(days: number, nowMs: number): string {
+  const to = Math.floor(nowMs) + 1;
+  return `/v1/tenant/jobs/tool-calls?from=${to - days * 24 * 3600 * 1000}&to=${to}`;
+}
+
+// toolUseLabel names a tool use row: the tool, and its action when it has one.
+export function toolUseLabel(row: Pick<RoomToolUse, "tool" | "action">): string {
+  return row.action ? `${row.tool} · ${row.action}` : row.tool;
+}
+
+// refusalShare is how many of a row's calls did not succeed (refused or
+// failed), as a whole percentage ("" with no calls).
+export function refusalShare(row: Pick<RoomToolUse, "calls" | "refused" | "errors">): string {
+  if (row.calls <= 0) return "";
+  return `${Math.round(((row.refused + row.errors) / row.calls) * 100)}%`;
 }

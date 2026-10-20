@@ -16,7 +16,7 @@ import (
 )
 
 // Quick tries of unsaved drafts (docs/prd/2026-10-12-experts-and-teams.md,
-// "Runtime gap closure" 4). The room tools' try_draft stages the expert or
+// "Runtime gap closure" 4). The room tools' components try stages the expert or
 // skill pack an agent drafted in its workspace here, then dispatches a
 // sample task to another agent wearing it (wire.DispatchRequest.Draft).
 // Staging is a request on behalf of the running job's requester (the

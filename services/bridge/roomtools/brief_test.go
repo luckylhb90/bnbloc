@@ -64,12 +64,10 @@ func TestBriefKeepsTheSchemaShape(t *testing.T) {
 // and a size that stays a brief.
 func TestBriefsKeepTheirConstraintsAndStayShort(t *testing.T) {
 	for name, want := range map[string][]string{
-		"save_component":    {"only after they confirm"},
-		"publish_component": {"when the person asks", "they click to publish", "platform"},
-		"app_data":          {"wipe", "only when the person asked", "confirm"},
-		"ask_agent":         {"under their authority"},
-		"try_draft":         {"not saved"},
-		"room_setup":        {"as the person who asked you", "only after they agree"},
+		"components": {"only when they ask", "Actions: list get try save publish", "room_help components"},
+		"app_data":   {"wipe", "only when the person asked", "confirm"},
+		"ask_agent":  {"under their authority"},
+		"room_setup": {"as the person who asked you", "only after they agree", "Actions: get set use unuse"},
 	} {
 		for _, s := range want {
 			if !strings.Contains(briefs[name].Text, s) {
@@ -90,18 +88,18 @@ func TestRoomHelp(t *testing.T) {
 	help, _ := reg.Lookup("room_help")
 	call := func(args string) Result { return help.Call(context.Background(), &Env{}, json.RawMessage(args)) }
 
-	r := call(`{"topic":"save_component"}`)
+	r := call(`{"topic":"components"}`)
 	if r.Err != "" {
 		t.Fatal(r.Err)
 	}
 	text := r.Value.(map[string]any)["instructions"].(string)
-	full, _ := reg.Lookup("save_component")
-	for _, want := range []string{full.Description, "Parameters:", "- dir (string): Workspace-relative directory holding component.json", "- kind (string) one of [\"room\"]"} {
+	full, _ := reg.Lookup("components")
+	for _, want := range []string{full.Description, "Parameters:", "- dir (string): For try and save: the workspace-relative directory holding component.json", "- kind (string) one of [\"expert\",\"skill\",\"prompt\",\"mcp\",\"room\"]", "- action (string, required) one of [\"list\",\"get\",\"try\",\"save\",\"publish\"]"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the manual lacks %q:\n%s", want, text)
 		}
 	}
-	if r := call(`{"topic":"nope"}`); !strings.Contains(r.Err, "no tool named") || !strings.Contains(r.Err, "save_component") {
+	if r := call(`{"topic":"nope"}`); !strings.Contains(r.Err, "no tool named") || !strings.Contains(r.Err, "components") {
 		t.Errorf("an unknown topic names the tools: %q", r.Err)
 	}
 	list := call(`{}`).Value.(map[string]any)["topics"].([]string)

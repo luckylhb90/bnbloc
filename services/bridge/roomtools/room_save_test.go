@@ -1,7 +1,6 @@
 package roomtools
 
 import (
-	"context"
 	"encoding/json"
 	"net/url"
 	"strings"
@@ -25,14 +24,14 @@ var roomDraftJSON, _ = json.Marshal(wire.RoomComponentDraft{RoomID: "room-1", Na
 // the apps made here and room files to carry, by id, as the save's include
 // of this room; the tools its runs had are required with their
 // permissions. Neither belongs to another kind's save.
-func TestSaveComponentRoomCarries(t *testing.T) {
+func TestComponentsSaveRoomCarries(t *testing.T) {
 	gw := &recordingGateway{reply: func(method, p string) ([]byte, error) {
 		if method == "GET" {
 			return roomDraftJSON, nil
 		}
 		return []byte(`{"component":{"id":"cc_9","kind":"room","name":"weekly-review","latestVersion":"1.0.0","mine":true}}`), nil
 	}}
-	res := saveComponent(context.Background(), contentEnv(nil, gw, true), json.RawMessage(
+	res := componentsCall("save", contentEnv(nil, gw, true), json.RawMessage(
 		`{"kind":"room","instructions":" Review the week in three bullets. ","include":{"apps":["art_board"],"files":["art_faq","art_tpl"]}}`))
 	if res.Err != "" {
 		t.Fatal(res.Err)
@@ -50,29 +49,29 @@ func TestSaveComponentRoomCarries(t *testing.T) {
 		t.Fatalf("note = %s", note)
 	}
 	gw.calls = nil
-	if res := saveComponent(context.Background(), contentEnv(nil, gw, true), json.RawMessage(`{"kind":"room"}`)); res.Err != "" {
+	if res := componentsCall("save", contentEnv(nil, gw, true), json.RawMessage(`{"kind":"room"}`)); res.Err != "" {
 		t.Fatal(res.Err)
 	}
 	if body := gw.calls[1].Body.(map[string]any); body["include"] != nil || body["form"].(contentpkg.Form).Requires.Expert != "reviewer@^1" {
 		t.Fatalf("a plain save = %+v", body)
 	}
-	if res := saveComponent(context.Background(), contentEnv(nil, gw, true), json.RawMessage(`{"artifactId":"art_x","instructions":"x"}`)); !strings.Contains(res.Err, "are a room's") {
+	if res := componentsCall("save", contentEnv(nil, gw, true), json.RawMessage(`{"artifactId":"art_x","instructions":"x"}`)); !strings.Contains(res.Err, "are a room's") {
 		t.Fatalf("instructions on a work = %q", res.Err)
 	}
 }
 
-// save_component's room kind captures this room through component-draft
+// components save's room kind captures this room through component-draft
 // (the dialog's capture) under the job's grant and saves the content form
 // of it with the agent's listing; with id it is a new version; sources
 // default to the room's own asks.
-func TestSaveComponentRoom(t *testing.T) {
+func TestComponentsSaveRoom(t *testing.T) {
 	gw := &recordingGateway{reply: func(method, p string) ([]byte, error) {
 		if method == "GET" {
 			return roomDraftJSON, nil
 		}
 		return []byte(`{"component":{"id":"cc_9","kind":"room","name":"weekly-review","latestVersion":"1.0.0","mine":true}}`), nil
 	}}
-	res := saveComponent(context.Background(), contentEnv(nil, gw, true), json.RawMessage(
+	res := componentsCall("save", contentEnv(nil, gw, true), json.RawMessage(
 		`{"kind":"room","name":"weekly-review","displayName":"Weekly review","description":"Reviews the week's conversations.","category":"review","tags":["review"]}`))
 	if res.Err != "" {
 		t.Fatal(res.Err)
@@ -99,7 +98,7 @@ func TestSaveComponentRoom(t *testing.T) {
 	// A new version of their own keeps the draft's listing where the agent
 	// gives none.
 	gw.calls = nil
-	if res := saveComponent(context.Background(), contentEnv(nil, gw, true), json.RawMessage(`{"kind":"room","id":"cc_9"}`)); res.Err != "" {
+	if res := componentsCall("save", contentEnv(nil, gw, true), json.RawMessage(`{"kind":"room","id":"cc_9"}`)); res.Err != "" {
 		t.Fatal(res.Err)
 	}
 	if !strings.HasPrefix(gw.calls[1].Path, "/v1/content-components/cc_9/versions?") {
@@ -113,7 +112,7 @@ func TestSaveComponentRoom(t *testing.T) {
 	refused := &recordingGateway{reply: func(string, string) ([]byte, error) {
 		return nil, &StatusError{Status: 403, Body: []byte(`{"error":"only the room's owner or admins save it as a component"}`)}
 	}}
-	if res := saveComponent(context.Background(), contentEnv(nil, refused, true), json.RawMessage(`{"kind":"room"}`)); !strings.Contains(res.Err, "only the room's owner or admins") || len(refused.calls) != 1 {
+	if res := componentsCall("save", contentEnv(nil, refused, true), json.RawMessage(`{"kind":"room"}`)); !strings.Contains(res.Err, "only the room's owner or admins") || len(refused.calls) != 1 {
 		t.Fatalf("refused = %q, calls %d", res.Err, len(refused.calls))
 	}
 }

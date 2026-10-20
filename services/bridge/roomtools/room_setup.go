@@ -51,7 +51,7 @@ func roomSetupTool() Tool {
 			"text people wrote comes fenced as their data. " +
 			"set: the description (the room's owner only), the welcome and the quick prompts (its owner or admins; quickPrompts replaces the list: " +
 			"a title and the text a click puts into the message box). An empty room shows the welcome and quick prompts to every member. " +
-			"use / unuse: an expert, skill pack or prompt pack from their Library (list_components) by name, turned on or off in the room " +
+			"use / unuse: an expert, skill pack or prompt pack from their Library (components list) by name, turned on or off in the room " +
 			"(an expert becomes the room's expert, worn by every agent turn here). " +
 			"add_channel: a new channel by name. " +
 			"add_schedule: a notice sends fixed words to the room, to logins or to a connected group chat at set times, with no AI " +
@@ -224,7 +224,7 @@ func (c setupCall) get(ctx context.Context) Result {
 	}
 	var room wire.RoomDetail
 	if err := json.Unmarshal(raw, &room); err != nil {
-		return toolError("the room answered an unreadable result: %v", err)
+		return failure("the room answered an unreadable result: %v", err)
 	}
 	// Each quick prompt is its title, a line break and its text.
 	prompts := make([]string, 0, len(room.QuickPrompts))
@@ -243,7 +243,7 @@ func (c setupCall) get(ctx context.Context) Result {
 		} `json:"channels"`
 	}
 	if err := json.Unmarshal(raw, &channels); err != nil {
-		return toolError("the channels answered an unreadable result: %v", err)
+		return failure("the channels answered an unreadable result: %v", err)
 	}
 	names := []string{}
 	for _, ch := range channels.Channels {
@@ -302,7 +302,7 @@ func (c setupCall) schedules(ctx context.Context, out map[string]any) *Result {
 		Schedules []wire.RoomSchedule `json:"schedules"`
 	}
 	if err := json.Unmarshal(raw, &reply); err != nil {
-		r := toolError("the schedules answered an unreadable result: %v", err)
+		r := failure("the schedules answered an unreadable result: %v", err)
 		return &r
 	}
 	list := make([]map[string]any, 0, len(reply.Schedules))
@@ -387,7 +387,7 @@ func (c setupCall) set(ctx context.Context, in setupArgs) Result {
 func (c setupCall) use(ctx context.Context, in setupArgs) Result {
 	name := strings.TrimSpace(in.Name)
 	if name == "" {
-		return toolError("name is required: a Library component's name (list_components)")
+		return toolError("name is required: a Library component's name (components list)")
 	}
 	items, err := roomlog.ReadLibrary(ctx, gatewayFetch(c.env), c.room, c.job.JobID, in.Kind)
 	if err != nil {
@@ -401,7 +401,7 @@ func (c setupCall) use(ctx context.Context, in setupArgs) Result {
 	}
 	switch {
 	case len(found) == 0:
-		return toolError("no expert, skill pack or prompt pack named %q in the Library of the person who asked you (list_components names them)", name)
+		return toolError("no expert, skill pack or prompt pack named %q in the Library of the person who asked you (components list names them)", name)
 	case len(found) > 1 && in.Kind == "":
 		return toolError("%q names more than one component: give kind (expert, skill or prompt)", name)
 	}
@@ -489,7 +489,7 @@ func (c setupCall) addSchedule(ctx context.Context, in setupArgs) Result {
 	}
 	var sc wire.RoomSchedule
 	if err := json.Unmarshal(raw, &sc); err != nil {
-		return toolError("the schedule answered an unreadable result: %v", err)
+		return failure("the schedule answered an unreadable result: %v", err)
 	}
 	when := whenText(sc.Recurrence, sc.Timezone)
 	c.announce(ctx, "scheduled "+what+", "+when)

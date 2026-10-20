@@ -1,5 +1,5 @@
 import { req } from "./api.ts";
-import { runsPath, type AgentRun, type AgentRunsReply, type RunListQuery } from "./agentRuns.ts";
+import { runsPath, toolUsePath, type AgentRun, type AgentRunsReply, type RoomToolUseReply, type RunListQuery } from "./agentRuns.ts";
 import { roomPath } from "./roomId.ts";
 
 // Agent run records (R10), served by activity. A room's runs need room
@@ -13,4 +13,7 @@ export const agentRunsApi = {
   // only for the agent's owner and org admins (O4).
   detail: (roomId: string, jobId: string) =>
     req<AgentRun>(roomPath(roomId, "jobs", jobId)),
+  // The organization's room tool calls, refusals and errors per tool over
+  // the runs of the last `days` days (manage_org).
+  toolUse: (days: number) => req<RoomToolUseReply>(toolUsePath(days, Date.now())),
 };

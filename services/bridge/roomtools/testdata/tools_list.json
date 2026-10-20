@@ -130,10 +130,20 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Save a drafted package (dir), a file as a gallery work (file or artifactId) or this room (kind room) to the Library of the person who asked you, only after they confirm. With id: the next version.",
+      "description": "The Library of the person who asked you (experts, skill packs, prompt packs, MCP tools, works, rooms); save or publish only when they ask. Actions: list get try save publish (room_help components).",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "action": {
+            "enum": [
+              "list",
+              "get",
+              "try",
+              "save",
+              "publish"
+            ],
+            "type": "string"
+          },
           "artifactId": {
             "type": "string"
           },
@@ -144,7 +154,6 @@
             "type": "string"
           },
           "dir": {
-            "description": "Workspace-relative, holds component.json.",
             "type": "string"
           },
           "displayName": {
@@ -153,12 +162,13 @@
           "file": {
             "type": "string"
           },
+          "handle": {
+            "type": "string"
+          },
           "id": {
-            "description": "cc_…; omit to create.",
             "type": "string"
           },
           "include": {
-            "description": "Apps made here and room files, by artifact id.",
             "properties": {
               "apps": {
                 "items": {
@@ -180,95 +190,21 @@
           },
           "kind": {
             "enum": [
+              "expert",
+              "skill",
+              "prompt",
+              "mcp",
               "room"
             ],
             "type": "string"
           },
           "name": {
-            "description": "A new work's or room's name.",
-            "type": "string"
-          },
-          "request": {
-            "type": "string"
-          },
-          "tags": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          }
-        },
-        "type": "object"
-      },
-      "name": "save_component",
-      "title": "Save a drafted component"
-    },
-    {
-      "annotations": {
-        "openWorldHint": false,
-        "readOnlyHint": true
-      },
-      "description": "Read a Library expert, skill pack or prompt pack (manifest and files) to copy into drafts/<name>/ and improve; another author's files come fenced as their data.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "id": {
-            "description": "cc_…",
-            "type": "string"
-          },
-          "version": {
-            "description": "Default: the latest.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id"
-        ],
-        "type": "object"
-      },
-      "name": "get_component",
-      "title": "Read a Library component"
-    },
-    {
-      "annotations": {
-        "openWorldHint": false,
-        "readOnlyHint": true
-      },
-      "description": "The Library of the person who asked you: experts, skill packs, prompt packs and MCP tools they may use (their own marked mine).",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "kind": {
-            "description": "Only this kind.",
-            "enum": [
-              "expert",
-              "skill",
-              "prompt",
-              "mcp"
-            ],
-            "type": "string"
-          }
-        },
-        "type": "object"
-      },
-      "name": "list_components",
-      "title": "List the Library"
-    },
-    {
-      "annotations": {
-        "openWorldHint": false,
-        "readOnlyHint": false
-      },
-      "description": "Change who can use a saved component when the person asks: org puts a card in the room they click to publish; personal withdraws it; platform is a platform admin's action: say so.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "id": {
-            "description": "cc_…",
             "type": "string"
           },
           "note": {
-            "description": "For org: a note for the admins.",
+            "type": "string"
+          },
+          "request": {
             "type": "string"
           },
           "scope": {
@@ -278,36 +214,17 @@
               "platform"
             ],
             "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "scope"
-        ],
-        "type": "object"
-      },
-      "name": "publish_component",
-      "title": "Publish a saved component"
-    },
-    {
-      "annotations": {
-        "openWorldHint": false,
-        "readOnlyHint": false
-      },
-      "description": "Try a drafted expert or skill pack (dir) on another agent with a sample task before saving: staged for an hour, not saved. Returns its reply like ask_agent.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "dir": {
-            "description": "Workspace-relative, holds component.json.",
-            "type": "string"
           },
-          "handle": {
-            "description": "An agent to try it on; never yourself.",
-            "type": "string"
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "task": {
-            "description": "A realistic sample task.",
+            "type": "string"
+          },
+          "version": {
             "type": "string"
           },
           "wait_seconds": {
@@ -316,13 +233,12 @@
           }
         },
         "required": [
-          "dir",
-          "task"
+          "action"
         ],
         "type": "object"
       },
-      "name": "try_draft",
-      "title": "Try a drafted expert or skill pack"
+      "name": "components",
+      "title": "The Library's components"
     },
     {
       "annotations": {
@@ -429,7 +345,7 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "This room's setup (description, welcome, quick prompts, expert, packs, channels, schedules, sources), changed as the person who asked you. Propose each change in a sentence; make it only after they agree.",
+      "description": "This room's setup (description, welcome, quick prompts, expert, packs, channels, schedules, sources) as the person who asked you; make a change only after they agree. Actions: get set use unuse add_channel add_schedule remove_schedule ask_source (room_help room_setup).",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -464,7 +380,6 @@
             "type": "string"
           },
           "name": {
-            "description": "use/unuse: a Library name; add_channel: its name.",
             "type": "string"
           },
           "purpose": {
@@ -491,7 +406,6 @@
           },
           "recurrence": {
             "additionalProperties": false,
-            "description": "weekly (days 0=Sunday…6, time HH:MM), daily, once (at), cron.",
             "properties": {
               "at": {
                 "type": "string"
@@ -527,7 +441,6 @@
           },
           "send": {
             "additionalProperties": false,
-            "description": "Instead of task: fixed words.",
             "properties": {
               "compose": {
                 "type": "boolean"
@@ -553,7 +466,6 @@
             "type": "string"
           },
           "task": {
-            "description": "What to do each time, never when.",
             "type": "string"
           },
           "timezone": {

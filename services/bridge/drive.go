@@ -9,6 +9,7 @@ import (
 	corepkg "github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/internal/shareagent"
 	"github.com/luckylhb90/bnbloc/internal/store"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // The drive pipeline. A claimed job runs through eight named stages, in
@@ -341,13 +342,13 @@ func (b *Bridge) driveTurn(ctx context.Context, d *drive) (driveResult, error) {
 	if len(d.content.missing) > 0 {
 		running["contentMissing"] = d.content.missing
 	}
-	if err := b.reportJobStatus(ctx, d.job.JobID, store.AgentJobRunning, "", d.content.withTools(running)); err != nil {
+	if err := b.reportJobStatus(ctx, d.job.JobID, store.AgentJobRunning, "", d.content.withTools(running, wire.AgentRunTools{})); err != nil {
 		slog.Debug("bnbloc bridge job running status failed", "event", "bnbloc.bridge.job_status_failed", "job", d.job.JobID, "error", err)
 	}
 	return b.driveClaim(ctx, d, func(rs *roomSession) {
 		// Publish the bound session so a cancel arriving mid-turn can interrupt it.
 		d.run.bind(d.core, rs)
-		diag := d.content.withTools(d.agent())
+		diag := d.content.withTools(d.agent(), wire.AgentRunTools{})
 		diag["workspaceId"], diag["sessionId"] = rs.workspaceID, rs.sessionID
 		b.reportJobStatus(ctx, d.job.JobID, store.AgentJobReflowing, "", diag)
 	})
@@ -368,13 +369,16 @@ func (b *Bridge) settle(ctx context.Context, d *drive, res driveResult, err erro
 	if d.reservationID != "" {
 		go b.settleBorrow(b.detached(ctx), d.job.RoomID, d.owner, d.core, d.job.Provider, d.reservationID, res.usage.recordFields(d.job.Model))
 	}
+	// The room tool calls are taken once, whatever the outcome: an aborted
+	// job's are dropped with it.
+	calls := b.roomToolCalls(d.job.JobID)
 	if d.run.aborted() {
 		slog.Info("bnbloc bridge job abandoned after abort",
 			"event", "bnbloc.bridge.job_abandoned", "job", d.job.JobID)
 		return
 	}
 	b.publishTurn(ctx, d)
-	diag := d.content.withTools(d.agent())
+	diag := d.content.withTools(d.agent(), calls)
 	if res.sessionID != "" {
 		diag["workspaceId"], diag["sessionId"] = res.workspaceID, res.sessionID
 	}

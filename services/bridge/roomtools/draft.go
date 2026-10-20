@@ -10,31 +10,13 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
-// try_draft (docs/prd/2026-10-12-experts-and-teams.md, "Runtime gap
+// components try (docs/prd/2026-10-12-experts-and-teams.md, "Runtime gap
 // closure" 4): the Expert builder tries an unsaved draft for real. The
 // draft in the workspace is packed and validated here (the agent fixes what
 // the validator says), staged on the gateway as an ephemeral draft of the
 // bound job (POST /v1/content-drafts with the job grant: never listed,
 // expiring), and a sample task is dispatched to another agent of the room
 // wearing it, through the same dispatch door and guards as ask_agent.
-
-func tryDraftTool() Tool {
-	return Tool{
-		Name:  "try_draft",
-		Title: "Try a drafted expert or skill pack",
-		Description: "Try the expert or skill pack drafted in a directory of your workspace (for example drafts/contract-reviewer) before it is saved: " +
-			"it is validated (an error says what to fix), staged for one hour without being saved to anyone's Library, and a sample task is sent " +
-			"to another agent of the room wearing it, for the person who asked you. Returns that agent's reply and files, like ask_agent. " +
-			"Without handle, the person's own other agent is used, else another agent of the room.",
-		InputSchema: objectSchema(map[string]any{
-			"dir":          map[string]any{"type": "string", "description": "Workspace-relative directory holding component.json, e.g. drafts/contract-reviewer."},
-			"task":         map[string]any{"type": "string", "description": "A realistic, self-contained sample task for the drafted expert or skill."},
-			"handle":       map[string]any{"type": "string", "description": `Optional agent to try it on, from list_room_agents (e.g. "jack/codex"); never yourself.`},
-			"wait_seconds": map[string]any{"type": "integer", "minimum": 0, "description": waitDescription("")},
-		}, "dir", "task"),
-		Call: tryDraft,
-	}
-}
 
 func tryDraft(ctx context.Context, env *Env, args json.RawMessage) Result {
 	var in struct {
@@ -53,7 +35,7 @@ func tryDraft(ctx context.Context, env *Env, args json.RawMessage) Result {
 	case len(in.Task) > maxTaskBytes:
 		return toolError("task is too long (at most %d bytes)", maxTaskBytes)
 	}
-	job, grant, refused := jobGrant(env, "try_draft")
+	job, grant, refused := jobGrant(env, "components")
 	if refused != nil {
 		return *refused
 	}
@@ -66,7 +48,7 @@ func tryDraft(ctx context.Context, env *Env, args json.RawMessage) Result {
 	}
 	ws := env.Session.workspace()
 	if ws == nil {
-		return toolError("try_draft cannot read your workspace: this agent's core does not expose its files. Answer the sample task in the draft's role yourself and say it was not a real try")
+		return toolError("components try cannot read your workspace: this agent's core does not expose its files. Answer the sample task in the draft's role yourself and say it was not a real try")
 	}
 	bundle, _, err := packDir(ctx, ws, dir)
 	if err != nil {
@@ -89,7 +71,7 @@ func tryDraft(ctx context.Context, env *Env, args json.RawMessage) Result {
 	}
 	var draft wire.ContentDraft
 	if err := json.Unmarshal(raw, &draft); err != nil || draft.ID == "" {
-		return toolError("staging %s answered an unreadable result", dir)
+		return failure("staging %s answered an unreadable result", dir)
 	}
 	label := target.Handle + " (trying " + firstNonEmptyString(draft.DisplayName, draft.Name) + ")"
 	out, res := dispatchTask(ctx, env, job, target, label, wire.DispatchRequest{Text: in.Task, Draft: draft.ID}, in.WaitSeconds)

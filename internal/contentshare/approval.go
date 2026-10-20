@@ -8,7 +8,7 @@ import (
 // NeedsApproval is the ONE answer to "does a member's publish to this
 // organization wait for an org admin" (docs/prd/2026-10-13-app-gallery.md
 // §11), for every content kind and every publish path (the publish route,
-// a member's click on a publish_component card included, a new version's
+// a member's click on a components publish card included, a new version's
 // resubmission): only
 // an organization whose admins set publishApproval to "none" publishes at
 // once. Anything else, the default "required" and an unset or unknown

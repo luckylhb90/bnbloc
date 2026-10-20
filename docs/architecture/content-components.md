@@ -128,7 +128,7 @@ its data.
   fields the request leaves out). Only an owner of the room's
   deliverables, a member who may post in it (`membership.Member.MayChat`,
   `deliverableOwner`), publishes one; `?job=` acts for the job's
-  requester (the room tools' `save_component` with `artifactId`). A site
+  requester (the room tools' `components save` with `artifactId`). A site
   holding a `component.json` of its own is refused. The data space is
   never read. Org and platform publishing are the existing flows.
 - **Recipe** (works PRD §3; `wire.WorkRecipe` in the manifest's `recipe`):
@@ -621,7 +621,7 @@ Tables (migration `2026_10_content_components`):
   `pending_key` (the component id while pending) admits one pending request
   per component. Deleted with the component.
 - `content_drafts`: unsaved experts and skill packs staged for one quick
-  try (`cd_…`; the room tools' `try_draft`, "Quick tries of drafts" in
+  try (`cd_…`; the room tools' `components try`, "Quick tries of drafts" in
   [room-tools.md](room-tools.md)): tenant, room, the staging job,
   requester, author (the staging agent's owner), kind, name, version,
   manifest, bundle key, `expires_at_ms` (one hour; migration
@@ -704,7 +704,7 @@ Design: PRD §1 "Sources, scopes and trust" and "Status: step 4".
   confirmed on first use (`acked` only for content the caller wrote).
 - **Organization scope** is a second row, approved version by version.
   `POST …/{id}/publish {scope: "org", version?, note?}` (the author; never
-  a job's grant: the room tools' `publish_component` puts a card in the
+  a job's grant: the room tools' `components publish` puts a card in the
   room that only the author sees, and their click calls it) opens a publish request
   for a version (default the latest); a newer request withdraws a pending
   one, and the organization's current version cannot be requested again.
@@ -743,7 +743,7 @@ Design: PRD §1 "Sources, scopes and trust" and "Status: step 4".
   pending per component: it supersedes the older one; the admins are
   notified only when none was pending) and the save's reply carries it as
   `resubmitted`; the web tells the author. A version saved through a
-  job's grant (the room tools' `save_component`) never goes to the
+  job's grant (the room tools' `components save`) never goes to the
   organization by itself (`errJobWidens`, the one rule that a job's grant
   never widens who sees content, in `publishToOrg`): the reply carries it
   as `orgProposed` and the tool puts the publish card in the room, which
@@ -1107,8 +1107,8 @@ in Library", "Try it now") from it. Nothing re-lists the Library to find a
 save.
 
 **Requests on behalf of a job's requester.** The room tools
-(`save_component`, `get_component`, `list_components`, `publish_component`,
-`try_draft`; see [`room-tools.md`](room-tools.md)) call
+(`components save`, `components get`, `components list`, `components publish`,
+`components try`; see [`room-tools.md`](room-tools.md)) call
 `POST /v1/content-components`, `POST …/{id}/versions`, `GET …/{id}`,
 `GET …/{id}/versions/{v}`, `POST …/{id}/publish`,
 `GET /v1/content-components` and `POST /v1/content-drafts` with a
@@ -1147,6 +1147,6 @@ the job requester's Library: `contentComponents` (`contentuse.Visible`) and
 only the MCP tools of `components` (`extpipe.MemberVisibility`, each with
 `publishedAtMs`, when the platform installed that version), never the
 executable catalog a desktop supervises. `roomlog.ReadLibrary` is its one
-reader: the room tools' `list_components` and the bridge's
+reader: the room tools' `components list` and the bridge's
 `.room/library.md` (room-tools.md, "What every agent is told"). Nothing on
 the agent side re-derives visibility.

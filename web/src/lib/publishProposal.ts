@@ -1,5 +1,5 @@
 // A publish proposal (docs/prd/2026-10-20-room-setup-by-conversation.md
-// §2.3): publish_component never shares a component by itself; it puts a
+// §2.3): components publish never shares a component by itself; it puts a
 // card in the room, a notice row carrying payload.proposal
 // (internal/wire/content_events.go PublishProposal), that only the person
 // who asked the agent is shown. Their click on Publish calls the publish

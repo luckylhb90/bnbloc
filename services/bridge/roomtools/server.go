@@ -39,6 +39,7 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // Protocol versions. Modern requests carry their version per request;
@@ -92,6 +93,9 @@ type Server struct {
 	// of a job they drove that waits for a person (relay.go, PRD §3.7).
 	// One is dropped once its views are refused or go quiet (retiredIdle).
 	retired map[[sha256.Size]byte]*retiredSession
+	// calls are the tool calls made for each job, until its outcome takes
+	// them (calls.go).
+	calls callRecord
 }
 
 // retiredSession is a revoked session's live-view remainder: the jobs it
@@ -496,7 +500,7 @@ func (c *call) dispatch(ctx context.Context) (any, *rpcError) {
 		}
 		tool, ok := c.srv.tools.Lookup(p.Name)
 		if !ok {
-			return nil, &rpcError{Code: codeInvalidParams, Message: "unknown tool: " + p.Name}
+			return nil, &rpcError{Code: codeInvalidParams, Message: "unknown tool: " + p.Name + "; the tools are " + strings.Join(c.srv.tools.Names(), ", ")}
 		}
 		env := &Env{
 			Session:  c.sess,
@@ -504,7 +508,9 @@ func (c *call) dispatch(ctx context.Context) (any, *rpcError) {
 			Config:   c.srv.cfg,
 			Progress: c.progressFunc(),
 		}
+		job := c.sess.current().JobID // the job the call is made for, as it starts
 		res := tool.Call(ctx, env, p.Arguments)
+		c.srv.calls.add(job, wire.AgentRunToolCall{Tool: tool.Name, Action: actionOf(tool, p.Arguments), Outcome: res.outcome()})
 		return c.complete(res.wire()), nil
 	default:
 		return nil, &rpcError{Code: codeMethodNotFound, Message: "method not found: " + c.req.Method}

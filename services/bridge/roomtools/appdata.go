@@ -261,7 +261,7 @@ func (c appCall) find() Result {
 	}
 	var page wire.AppDocPage
 	if err := json.Unmarshal(raw, &page); err != nil {
-		return toolError("unreadable app data page: %v", err)
+		return failure("unreadable app data page: %v", err)
 	}
 	var (
 		text      strings.Builder
@@ -320,7 +320,7 @@ func (c appCall) document(method, rest string, body any, header http.Header) Res
 	}
 	var doc map[string]any
 	if err := json.Unmarshal(raw, &doc); err != nil {
-		return toolError("unreadable app document: %v", err)
+		return failure("unreadable app document: %v", err)
 	}
 	line := docJSON(doc)
 	out := map[string]any{"artifactId": c.in.ArtifactID, "collection": c.in.Collection}
@@ -349,7 +349,7 @@ func (c appCall) file() Result {
 	}
 	var f wire.AppFile
 	if err := json.Unmarshal(raw, &f); err != nil {
-		return toolError("unreadable app file: %v", err)
+		return failure("unreadable app file: %v", err)
 	}
 	out := map[string]any{"artifactId": c.in.ArtifactID, "id": f.ID, "name": roomlog.Fence(appDataAuthor, f.Name), "type": f.Type, "size": f.Size,
 		"uploadedBy": f.Author, "uploadedAt": f.CreatedAt}
@@ -385,7 +385,7 @@ func (c appCall) wipe() Result {
 	}
 	var wiped wire.AppDataWiped
 	if err := json.Unmarshal(raw, &wiped); err != nil {
-		return toolError("unreadable wipe result: %v", err)
+		return failure("unreadable wipe result: %v", err)
 	}
 	return Result{Value: map[string]any{"artifactId": c.in.ArtifactID, "deleted": wiped.Deleted}}
 }

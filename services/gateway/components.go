@@ -17,7 +17,7 @@ import (
 // member may use and their Library's content components. With a ?job=&room=
 // grant (contentGrant: the bridge running the job acts as its requester) it
 // is the requester's Library as an agent reads it (the room tools'
-// list_components, the bridge's .room/library.md): content components and
+// components list, the bridge's .room/library.md): content components and
 // MCP tools only, never the executable catalog a desktop supervises.
 func (s *Service) handleComponents(w http.ResponseWriter, r *http.Request, caller auth.Claims) {
 	actor, ok := s.contentCaller(w, r, caller, grantHonored)

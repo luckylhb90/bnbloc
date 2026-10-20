@@ -62,7 +62,7 @@ const (
 // theirs (componentId). Only an owner of the room's deliverables publishes
 // one: a member who may chat in it (membership.Member.MayChat, the app
 // data owner rule). With ?job= the bridge running the job publishes for
-// its requester (jobGrant, the content routes' admission; save_component
+// its requester (jobGrant, the content routes' admission; components save
 // with artifactId).
 func (s *Service) handlePublishWork(w http.ResponseWriter, r *http.Request, caller auth.Claims) {
 	ctx := r.Context()

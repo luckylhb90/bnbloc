@@ -353,11 +353,65 @@ export const RunDiagUsage = "usage";
 export const RunDiagTools = "tools";
 
 // AgentRunTools is the run summary's tools (RunDiagTools): the MCP tool
-// components attached to the turn's session, by name. The record keeps what
-// the session had, never which tool calls the agent made.
+// components attached to the turn's session, by name, and the room tool
+// calls the run made (docs/prd/2026-10-20-fewer-sharper-room-tools.md §2.3):
+// each call's tool, action and outcome, never its arguments or result.
+// Calls keeps the first MaxRunToolCalls; CallsDropped counts the rest.
 export interface AgentRunTools {
-  mcp: string[];
+  mcp?: string[];
+  calls?: AgentRunToolCall[];
+  callsDropped?: number;
 }
+
+// MaxRunToolCalls bounds the room tool calls one run record keeps.
+export const MaxRunToolCalls = 200;
+
+// Outcomes of a room tool call (AgentRunToolCall.Outcome): ok; refused
+// (the tool or the platform said no to the call as made: its arguments, a
+// permission, a guard); error (the platform failed: a gateway 5xx, a
+// transport error, an unreadable answer).
+export const ToolCallOK = "ok";
+export const ToolCallRefused = "refused";
+export const ToolCallError = "error";
+
+// AgentRunToolCall is one room tool call of a run: the tool, its action
+// when the tool has actions, and the outcome. Nothing the agent sent or
+// read is kept.
+export interface AgentRunToolCall {
+  tool: string;
+  action?: string;
+  outcome: ToolCallOutcome;
+}
+
+// RoomToolUse is one row of the tool use read (GET
+// /v1/tenant/jobs/tool-calls): a tool, or one action of it, with how often
+// runs called it and how those calls ended.
+export interface RoomToolUse {
+  tool: string;
+  action?: string;
+  calls: number;
+  refused: number;
+  errors: number;
+}
+
+// RoomToolUseReply is GET /v1/tenant/jobs/tool-calls?from=&to=: the room
+// tool calls of the organization's runs created in [FromMs, ToMs), most
+// called first. Runs counts the runs read; Truncated says the read stopped
+// at MaxToolUseRuns, so the counts cover only the newest runs (created
+// from OldestMs on). Dropped counts calls the runs did not keep (beyond
+// MaxRunToolCalls a run), which no row counts.
+export interface RoomToolUseReply {
+  fromMs: number;
+  toMs: number;
+  runs: number;
+  truncated?: boolean;
+  oldestMs?: number;
+  dropped?: number;
+  tools: RoomToolUse[];
+}
+
+// MaxToolUseRuns bounds the runs one tool use read reads.
+export const MaxToolUseRuns = 5000;
 
 // RunPreviewRunes bounds every text preview a run record carries.
 export const RunPreviewRunes = 280;
@@ -2288,7 +2342,7 @@ export interface ContentAdminComponent {
 // ---- wire/content_drafts.go ----
 
 // ContentDraft answers POST /v1/content-drafts?job=&room= (the room tools'
-// try_draft): a staged, unsaved expert or skill pack that a job the staging
+// components try): a staged, unsaved expert or skill pack that a job the staging
 // job dispatches may wear until ExpiresAtMs. It is never listed in a
 // Library. Dispatch it with DispatchRequest.Draft = ID.
 export interface ContentDraft {
@@ -2316,7 +2370,7 @@ export interface ContentUsesChanged {
 }
 
 // EventContentSaved is a transient room event: the room tools saved a
-// content component (save_component) for the job's requester, in the
+// content component (components save) for the job's requester, in the
 // job's room, or the save of a new version sent it to the organization. The
 // workshop shows the save from it ("Saved expert …" with "Open in Library"
 // and "Try it now") instead of re-listing the Library after every agent
@@ -2338,7 +2392,7 @@ export interface ContentSaved {
   displayName?: string;
   version: string;
   // Action is saved (a new component or version), submitted (a publish
-  // request to the organization, opened by publish_component or by the
+  // request to the organization, opened by components publish or by the
   // save of a new version of a component the organization uses) or
   // published (the same, where the organization requires no approval).
   action: ContentSavedAction;
@@ -2349,7 +2403,7 @@ export interface ContentSaved {
 }
 
 // PublishProposal is what an agent proposes to share for the person who
-// asked it (publish_component, docs/prd/2026-10-20-room-setup-by-conversation.md
+// asked it (components publish, docs/prd/2026-10-20-room-setup-by-conversation.md
 // §2.3): a notice row of kind NoticePublishProposal carries it as
 // payload.proposal. Clients show it, as a card with a Publish button, only
 // to For (the job's requester); the share happens when they click it (the
@@ -2675,7 +2729,7 @@ export interface DispatchRequest {
   // labels the dispatch with it.
   role?: string;
   // Draft asks the target to wear a staged draft (ContentDraft.ID, the
-  // room tools' try_draft) instead of an Expert: admitted only for a
+  // room tools' components try) instead of an Expert: admitted only for a
   // draft the parent job staged in this room, before it expires.
   draft?: string;
 }
@@ -3155,7 +3209,7 @@ export const NoticeFileEdit = "file-edit";
 // a line each, under the job's progress session).
 export const NoticeRoomSetup = "room-setup";
 // NoticePublishProposal asks the person who asked the agent to share a
-// component (publish_component): payload.proposal is a PublishProposal,
+// component (components publish): payload.proposal is a PublishProposal,
 // shown to them only.
 export const NoticePublishProposal = "publish-proposal";
 
@@ -6001,6 +6055,8 @@ export interface MakeSimilarDraft {
 // ---- wire unions (//wire:union) ----
 export type RunScope = "room" | "self" | "tenant";
 export const RunScopeValues: readonly RunScope[] = ["room", "self", "tenant"];
+export type ToolCallOutcome = "ok" | "refused" | "error";
+export const ToolCallOutcomeValues: readonly ToolCallOutcome[] = ["ok", "refused", "error"];
 export type AppErrorCode = "visitor_token_required" | "visitor_token_invalid";
 export const AppErrorCodeValues: readonly AppErrorCode[] = ["visitor_token_required", "visitor_token_invalid"];
 export type AppExportFormat = "json" | "csv";

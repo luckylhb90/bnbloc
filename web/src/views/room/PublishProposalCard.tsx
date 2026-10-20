@@ -6,7 +6,7 @@ import { proposalLabel, type PublishProposal } from "@/lib/publishProposal";
 import { Button } from "@/ui/Button";
 
 // PublishProposalCard is an agent's proposal to share a component of the
-// member's with their organization (publish_component): only they see it
+// member's with their organization (components publish): only they see it
 // (feedItemFromEvent), and nothing is shared until they click Publish,
 // which calls the publish route as them. What the click did stays on the
 // card.

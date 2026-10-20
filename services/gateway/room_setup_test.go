@@ -16,7 +16,7 @@ import (
 	"github.com/luckylhb90/bnbloc/services/bridge/roomtools"
 )
 
-// The room tool room_setup and save_component's room kind
+// The room tool room_setup and components save's room kind
 // (docs/prd/2026-10-20-room-setup-by-conversation.md) against the real
 // gateway, room service and realtime (galleryGW): every change through the
 // agent door or a content route's grant, as the person who asked.
@@ -250,9 +250,9 @@ func TestRoomSetupAgentSchedule(t *testing.T) {
 	}
 }
 
-// save_component's room kind saves this room into the requester's Library
+// components save's room kind saves this room into the requester's Library
 // through the dialog's capture; a plain member's agent is refused by it.
-// publish_component offers it to her as a card; her click shares it.
+// components publish offers it to her as a card; her click shares it.
 func TestSaveRoomComponentThroughRoomTools(t *testing.T) {
 	e := galleryGW(t)
 	activity := newRecorder(t)
@@ -264,10 +264,10 @@ func TestSaveRoomComponentThroughRoomTools(t *testing.T) {
 	}
 	e.setupJob("job-maya", e.roomID, "maya")
 	e.setupJob("job-jack", e.roomID, "jack")
-	if r := e.toolFor(e.roomID, "job-jack", "jack", "save_component", map[string]any{"kind": "room"}); !strings.Contains(r.Err, "only the room's owner or admins save it") {
+	if r := e.toolFor(e.roomID, "job-jack", "jack", "components", map[string]any{"action": "save", "kind": "room"}); !strings.Contains(r.Err, "only the room's owner or admins save it") {
 		t.Fatalf("a member's agent = %q", r.Err)
 	}
-	r := e.toolFor(e.roomID, "job-maya", "maya", "save_component", map[string]any{"kind": "room", "name": "weekly-review", "displayName": "Weekly review",
+	r := e.toolFor(e.roomID, "job-maya", "maya", "components", map[string]any{"action": "save", "kind": "room", "name": "weekly-review", "displayName": "Weekly review",
 		"description": "Reviews the week.", "category": "review", "tags": []string{"review"}})
 	if r.Err != "" {
 		t.Fatal(r.Err)
@@ -286,7 +286,7 @@ func TestSaveRoomComponentThroughRoomTools(t *testing.T) {
 		t.Fatalf("the package = %+v, %v", m, err)
 	}
 
-	if r := e.toolFor(e.roomID, "job-maya", "maya", "publish_component", map[string]any{"id": c.ID, "scope": "org"}); r.Err != "" {
+	if r := e.toolFor(e.roomID, "job-maya", "maya", "components", map[string]any{"action": "publish", "id": c.ID, "scope": "org"}); r.Err != "" {
 		t.Fatal(r.Err)
 	}
 	if cards := roomLines(activity, wire.NoticePublishProposal); len(cards) != 1 || !strings.Contains(cards[0], "Weekly review v1.0.0") {

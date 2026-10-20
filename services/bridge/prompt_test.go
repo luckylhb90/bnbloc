@@ -57,8 +57,9 @@ func tokens(s string) int { return (len(s) + 3) / 4 }
 
 // TestPromptBudgets bounds every fixed model-facing surface. The per-turn
 // ones ride every turn; the session prefix (guidance + tools/list) rides
-// every request of a session as a cached prefix. A budget that no longer
-// holds is a decision: trim the text, or raise the budget in review.
+// every request of a session as a cached prefix. A per-turn or guidance
+// budget that no longer holds is a decision: trim the text, or raise the
+// budget in review. The room tools' budgets are never raised (below).
 func TestPromptBudgets(t *testing.T) {
 	entry := roomlog.Entry{Seq: 1, Speaker: "maya", Text: "x", To: "maya/codex"}
 	line := roomlog.Line(entry)
@@ -104,19 +105,15 @@ func TestPromptBudgets(t *testing.T) {
 		// the body) beside the AI task.
 		{"session guidance (tools, .room/)", guidance, 745},
 		{"session guidance (tools, .room/, team lead)", team, 825},
-		// +80 on 2026-10-14: save_component takes a workspace file and a
-		// work's description and "how it was made" request
-		// (docs/bugs/2026-10-14-work-save-misses-new-files.md).
-		{"tools/list", toolsList, 2630},
-		// +120 on 2026-10-20: room_setup replaces schedules with the room's
-		// whole setup (description, welcome and quick prompts, expert and
-		// packs, channels, sources) and save_component saves this room
-		// (docs/prd/2026-10-20-room-setup-by-conversation.md); briefs cut.
-		// +30 on 2026-10-20: save_component's room instructions and include
-		// (docs/prd/2026-10-20-complete-room-capture.md); two notes cut.
-		// +0 on 2026-10-20: room_setup's agent (a schedule asking one of the
-		// room's agents, same PRD, slice 2), paid by three notes cut.
-		{"session prefix (guidance + tools/list)", guidance + toolsList, 3090},
+		// The room tools only shrink (docs/prd/2026-10-20-fewer-sharper-room-tools.md
+		// §2.3): a new tool or action fits these budgets by merging or
+		// shortening, never by raising them. Each is the size measured at its
+		// last cut, rounded up to the nearest 10. 2026-10-20: the five content
+		// tools became one components tool (list get try save publish) and
+		// room_setup's brief one sentence and its actions, details in
+		// room_help: tools/list 2,351 -> 1,787, session prefix 3,090 -> 2,520.
+		{"tools/list", toolsList, 1790},
+		{"session prefix (guidance + tools/list)", guidance + toolsList, 2520},
 	} {
 		got := tokens(c.text)
 		t.Logf("%-48s %5d tokens (budget %d)", c.name, got, c.budget)

@@ -48,6 +48,10 @@ type Result struct {
 	// Image, when set, is shown to the agent as MCP image content after
 	// the value's text (an app's uploaded photo).
 	Image *Image
+	// failed marks an Err that is the platform's failure (a gateway 5xx, a
+	// transport error, an unreadable answer), not a refusal of the call as
+	// made: the record of calls tells them apart (calls.go).
+	failed bool
 }
 
 // Image is a raster image a tool hands the agent to look at.
@@ -58,6 +62,13 @@ type Image struct {
 
 func toolError(format string, args ...any) Result {
 	return Result{Err: fmt.Sprintf(format, args...)}
+}
+
+// failure is a tool error that is the platform's failure, not a refusal.
+func failure(format string, args ...any) Result {
+	r := toolError(format, args...)
+	r.failed = true
+	return r
 }
 
 // wire renders the MCP CallToolResult: the value as structured content plus
@@ -160,7 +171,7 @@ func DefaultRegistry() *Registry {
 	r := NewRegistry()
 	for _, t := range []Tool{
 		listRoomAgentsTool(), askAgentTool(), roomStatusTool(), readRoomTool(), readArtifactTool(),
-		saveComponentTool(), getComponentTool(), listComponentsTool(), publishComponentTool(), tryDraftTool(),
+		componentsTool(),
 		postProgressTool(), appDataTool(), roomSetupTool(),
 	} {
 		if err := r.Register(t); err != nil {
@@ -194,21 +205,29 @@ func httpStatusText(status int) string {
 	return fmt.Sprintf("%d %s", status, http.StatusText(status))
 }
 
-// refusal renders a gateway refusal ({code, error} body) for the agent.
+// refusal renders a gateway refusal ({code, error} body) for the agent. A
+// 4xx is a refusal of the call as made; a 5xx or a transport error is the
+// platform's failure (Result.failed).
 func refusal(what string, err error) Result {
 	var se *StatusError
-	if errors.As(err, &se) {
-		var body httpx.ErrorBody
-		if json.Unmarshal(se.Body, &body) == nil && body.Error != "" {
-			if body.Code != "" {
-				return toolError("%s refused (%s): %s", what, body.Code, body.Error)
-			}
-			return toolError("%s refused: %s", what, body.Error)
-		}
-		if msg := strings.TrimSpace(string(se.Body)); msg != "" && len(msg) < 300 {
-			return toolError("%s failed (%s): %s", what, httpStatusText(se.Status), msg)
-		}
-		return toolError("%s failed (%s)", what, httpStatusText(se.Status))
+	if !errors.As(err, &se) {
+		return failure("%s failed: %v", what, err)
 	}
-	return toolError("%s failed: %v", what, err)
+	r := gatewayRefusal(what, se)
+	r.failed = se.Status >= http.StatusInternalServerError
+	return r
+}
+
+func gatewayRefusal(what string, se *StatusError) Result {
+	var body httpx.ErrorBody
+	if json.Unmarshal(se.Body, &body) == nil && body.Error != "" {
+		if body.Code != "" {
+			return toolError("%s refused (%s): %s", what, body.Code, body.Error)
+		}
+		return toolError("%s refused: %s", what, body.Error)
+	}
+	if msg := strings.TrimSpace(string(se.Body)); msg != "" && len(msg) < 300 {
+		return toolError("%s failed (%s): %s", what, httpStatusText(se.Status), msg)
+	}
+	return toolError("%s failed (%s)", what, httpStatusText(se.Status))
 }
