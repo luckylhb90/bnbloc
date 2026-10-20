@@ -16,7 +16,7 @@ export function PublishProposalCard({ proposal }: { readonly proposal: PublishPr
   const publish = async () => {
     setState({ busy: true });
     try {
-      const reply = await contentSharingApi.publish(proposal.componentId, "org", proposal.note);
+      const reply = await contentSharingApi.publish(proposal.componentId, "org", proposal.note, proposal.version);
       setState({ done: reply.note || "Published to your organization." });
     } catch (e) {
       setState({ error: errorText(e, "Could not publish it") });
@@ -27,7 +27,7 @@ export function PublishProposalCard({ proposal }: { readonly proposal: PublishPr
       <div className="flex items-start gap-2">
         <ShareNetworkIcon size={16} className="mt-0.5 shrink-0 text-[var(--color-accent)]" aria-hidden="true" />
         <p className="min-w-0 flex-1">
-          Your agent proposes sharing the {proposalLabel(proposal)} with your organization. Only you see this; nothing is shared until you publish it.
+          Your agent proposes publishing the {proposalLabel(proposal)} to your organization. Only you see this; nothing is shared until you publish it.
         </p>
       </div>
       {proposal.note && <p className="pl-6 text-xs text-[var(--color-fg-muted)]">Note for the admins: {proposal.note}</p>}

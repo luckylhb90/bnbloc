@@ -186,9 +186,17 @@ decided, against the code:
   its version and the organization; the web shows it, as a card with
   Publish, only to the requester (`feedItemFromEvent` drops it for anyone
   else), and the click calls the publish route as them; the result stays
-  on the card. The gateway refuses a job's grant on an `org` publish
-  (`errAgentPublish`, 403), so no path lets an agent share alone.
-  `personal` (withdrawing) still goes through with the grant.
+  on the card; the card names its version and the click publishes that
+  one. One rule, one place: a job's grant never widens who sees content
+  (`errJobWidens`, checked in `publishToOrg`, the one way to the
+  organization), so the gateway refuses a job's `org` publish (403) and a
+  new version saved through a job's grant (`save_component` with `id`, any
+  kind) of a component the organization uses stays a version in the
+  requester's Library: the save's reply says `orgProposed` and the tool
+  posts the same card for that version, whose click goes through the
+  publish route under the unchanged approval rules. A member's own save
+  still resubmits as before. `personal` (withdrawing) still goes through
+  with the grant.
 - **Load on agents.** One tool for one; the session prefix grew by about
   110 tokens (room_setup's wider schema and `save_component`'s room kind,
   with briefs cut to pay part of it): the budget in
@@ -206,12 +214,10 @@ decided, against the code:
   judge the purpose against (a package's ask shows its version's): the
   room's own tasks are a later step, as the slice 2 note on the current
   tasks says.
-- The resubmission of a new version of a component the organization
-  already uses (a save, `save_component` with `id` included) still goes to
-  the organization by itself, as before: a request an admin approves, or
-  published at once where the organization requires no approval.
-- Other members see a change to the welcome when they reload the room
-  (no room event carries it).
+- Other members see a change to the welcome when they reload the room:
+  no room event carries a room's details (its name, description or
+  welcome) today, and clients reread them only on load, so none is
+  emitted for this either; adding one is its own change.
 
 **Design review (slice 1).**
 
@@ -222,8 +228,8 @@ decided, against the code:
 | Scale and cost | Each change spends the requester's cost budget; `get` reads six routes; bounds are the package's. |
 | Failure | A refusal comes back in the route's words and shows no line; a line that cannot be posted leaves the change made and audited. |
 | Boundaries and privacy | Only the requester's rights in this room; capture holds no people or messages; publishing is the member's click. |
-| Abuse | Text people wrote comes back fenced; the door admits the description only on a room patch, an AI task or notice only on a schedule; a publish through a job is refused at the gateway. |
-| One owner | `checkStart` for the bounds; `roomDraft` for capture; `askRoomSource` for asks; `auditAgentSetup` for the audit; `publishToOrg` for publishing. |
+| Abuse | Text people wrote comes back fenced; the door admits the description only on a room patch, an AI task or notice only on a schedule; a publish or a saved version through a job never reaches the organization. |
+| One owner | `checkStart` for the bounds; `roomDraft` for capture; `askRoomSource` for asks; `auditAgentSetup` for the audit; `publishToOrg` for publishing, where `errJobWidens` keeps every job's publish and saved version from the organization. |
 | Defaults | A room has no welcome until someone sets one; an expert is pinned at the version the requester sees. |
 | Load on users and agents | One tool replaces one; one card instead of an unseen publish. |
 | Release | Additive columns; pre-launch, `schedules` and the browser copy go. |

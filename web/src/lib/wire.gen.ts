@@ -1902,6 +1902,12 @@ export interface ContentComponentDetail {
   // organization at once: it uses the component and requires no
   // approval (contentshare.NeedsApproval).
   orgPublished?: string;
+  // OrgProposed is the version a save through a job's grant left with
+  // its author although the organization uses the component (or a
+  // request was pending): a job never takes content to the organization,
+  // so it reaches it only when the author publishes it (the room tools
+  // put that card in the room).
+  orgProposed?: string;
 }
 
 // ContentFile is one file of a version: its text when it is UTF-8 and

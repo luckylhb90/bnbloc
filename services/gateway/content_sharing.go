@@ -382,17 +382,21 @@ func (s *Service) handleUpdateContentCopy(w http.ResponseWriter, r *http.Request
 // errPlatformPublish answers a member asking for platform scope.
 const errPlatformPublish = "publishing to every organization is a platform admin action: they export it as a package, sign it and install it (bnbloc content promote). Ask a platform admin; to reach your organization, publish it with scope org"
 
-// errAgentPublish refuses a publication through a job's grant: sharing
-// beyond its author is the member's own click (publish_component proposes
-// it to them in the room, docs/prd/2026-10-20-room-setup-by-conversation.md
-// §2.3), so text an agent read can never publish for them.
-const errAgentPublish = "publishing to the organization is the member's own click: publish_component asks them in the room"
+// errJobWidens is the one rule that a job's grant never widens who sees
+// content: an agent acting for a member never takes their component to
+// the organization, neither by publishing it nor by a saved version's
+// resubmission. Sharing beyond its author is the member's own click (the
+// room tools put a card in the room that only they see,
+// docs/prd/2026-10-20-room-setup-by-conversation.md §2.3), so text an
+// agent read can never publish for them. publishToOrg, the one way to the
+// organization, answers it.
+var errJobWidens = errors.New("publishing to the organization is the member's own click: publish_component asks them in the room")
 
 // handlePublishContent changes who can use the caller's component: org
 // opens a publish request, personal takes it out of the organization,
 // platform is a super admin's action. The room tools' publish_component
 // calls it with a job grant, acting as the job's requester, to withdraw
-// only (errAgentPublish).
+// only (errJobWidens).
 func (s *Service) handlePublishContent(w http.ResponseWriter, r *http.Request, caller auth.Claims) {
 	actor, ok := s.contentCaller(w, r, caller, grantHonored)
 	if !ok {
@@ -420,10 +424,6 @@ func (s *Service) handlePublishContent(w http.ResponseWriter, r *http.Request, c
 	}
 	switch in.Scope {
 	case wire.ContentScopeOrg:
-		if actor.Job != nil {
-			httpx.Error(w, errAgentPublish, http.StatusForbidden)
-			return
-		}
 		s.requestOrgPublication(w, r, actor, c, strings.TrimSpace(in.Version), note)
 	case wire.ContentScopePersonal:
 		s.withdrawOrgPublication(w, r, claims, c)
@@ -474,6 +474,9 @@ func (s *Service) requestOrgPublication(w http.ResponseWriter, r *http.Request, 
 	}
 	res, err := s.publishToOrg(ctx, r, actor, c, v, note, org, true)
 	switch {
+	case errors.Is(err, errJobWidens):
+		httpx.Error(w, err.Error(), http.StatusForbidden)
+		return
 	case errors.Is(err, errStaleRequest):
 		httpx.Error(w, "the organization already uses a newer version: publish that one or a newer one", http.StatusConflict)
 		return
@@ -498,10 +501,13 @@ func (s *Service) requestOrgPublication(w http.ResponseWriter, r *http.Request, 
 }
 
 // orgPublishResult is what a publish to the organization did: opened a
-// request for an org admin, or published version published at once.
+// request for an org admin, or published version published at once; or,
+// for a version a job saved, proposed: the version only its author's
+// click sends (errJobWidens).
 type orgPublishResult struct {
 	request   *wire.ContentPublishRequest
 	published string
+	proposed  string
 }
 
 // publishToOrg is the ONE way a member's publish reaches the organization:
@@ -513,8 +519,12 @@ type orgPublishResult struct {
 // it publishes v at once (orgPublish), withdraws any pending request it
 // supersedes and audits the publication, which admins can still
 // unpublish, restore or remove. org is c's organization row (nil before a
-// first publication); the caller has checked the organization's name.
+// first publication); the caller has checked the organization's name. A
+// job's grant never gets here (errJobWidens).
 func (s *Service) publishToOrg(ctx context.Context, r *http.Request, actor contentActor, c store.ContentComponent, v store.ContentComponentVersion, note string, org *store.ContentComponent, notifyAdmins bool) (orgPublishResult, error) {
+	if actor.Job != nil {
+		return orgPublishResult{}, errJobWidens
+	}
 	settings, err := s.tenantSettings(ctx, c.TenantID)
 	if err != nil {
 		return orgPublishResult{}, err
@@ -620,7 +630,8 @@ func (s *Service) openPublishRequest(ctx context.Context, r *http.Request, actor
 
 // resubmitOrgPublication publishes a new version the author just saved to
 // the organization (publishToOrg: a request, or at once where the
-// organization requires no approval) when their component is in use by
+// organization requires no approval; a version a job saved is only
+// proposed, errJobWidens) when their component is in use by
 // the organization (an active org row) or has a request pending ("Gap
 // closure" 5): one pending request per component (the new one supersedes
 // it), and the admins are notified only when none was pending, so repeated
@@ -657,6 +668,11 @@ func (s *Service) resubmitOrgPublication(ctx context.Context, r *http.Request, a
 		note = "Opened automatically for the new version " + version + " (replaces the request for " + pending[0].Version + ")."
 	}
 	res, err := s.publishToOrg(ctx, r, actor, c, v, note, org, len(pending) == 0)
+	if errors.Is(err, errJobWidens) {
+		// Saved through a job's grant: the version stays the author's until
+		// they publish it (the room tools offer them the card).
+		return orgPublishResult{proposed: v.Version}
+	}
 	if err != nil {
 		slog.Warn("bnbloc gateway: resubmit to the organization failed", "event", "bnbloc.content.resubmit_failed", "component", c.ID, "error", err)
 		return orgPublishResult{}

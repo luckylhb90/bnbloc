@@ -681,13 +681,18 @@ Design: PRD §1 "Sources, scopes and trust" and "Status: step 4".
   row holds (published or unpublished) is a 409 that says who holds it and
   to rename (the author saves it under a new name); the store refuses the
   clash as well (`ErrContentOrgNameTaken`). **A new version resubmits
-  itself:** when the author saves a new version (form, archive, import or
-  the room tools) of a component the organization uses (an active org row)
+  itself:** when the author saves a new version (form, archive or import)
+  of a component the organization uses (an active org row)
   or with a request pending, the gateway opens the request for it (one
   pending per component: it supersedes the older one; the admins are
   notified only when none was pending) and the save's reply carries it as
-  `resubmitted`; the web tells the author, `save_component` tells the
-  agent. An unpublished or withdrawn publication is not resubmitted. Admins unpublish
+  `resubmitted`; the web tells the author. A version saved through a
+  job's grant (the room tools' `save_component`) never goes to the
+  organization by itself (`errJobWidens`, the one rule that a job's grant
+  never widens who sees content, in `publishToOrg`): the reply carries it
+  as `orgProposed` and the tool puts the publish card in the room, which
+  only the author sees; their click sends it through the publish route,
+  under the same approval rules. An unpublished or withdrawn publication is not resubmitted. Admins unpublish
   (`retired`: hidden from the Library and new use; rooms that pinned it
   keep their version), restore or remove it (rows and uses deleted); the
   author's `publish {scope: "personal"}` withdraws a pending request and
@@ -1023,7 +1028,7 @@ store and the artifact entitlement). JSON shapes: `internal/wire/content_compone
 | `PUT /v1/platform/components/{name}/tenants?kind=expert\|skill\|prompt` | Super admins: `{enabledTenants: [...]}` or `{allTenants: true}` for platform content (the component tenant scope route) |
 | `GET /v1/platform/content-components/{id}/package[?version=&publisher=]` | Super admins: the signable package of a version (install it with `POST /v1/platform/components`) |
 | `POST /v1/platform/content-components/{id}/unpublish\|restore`, `DELETE /v1/platform/content-components/{id}` | Super admins: platform content |
-| `POST /v1/content-components/{id}/versions` | New immutable version: `{form, baseVersion, version?}` (the base's extra files carry over) or an archive; owner only; strictly newer. The detail carries `resubmitted` (the publish request it opened) when the organization uses the component |
+| `POST /v1/content-components/{id}/versions` | New immutable version: `{form, baseVersion, version?}` (the base's extra files carry over) or an archive; owner only; strictly newer. The detail carries `resubmitted` (the publish request it opened) or `orgPublished` when the organization uses the component; through a job's grant `orgProposed` instead (nothing goes to the organization) |
 | `GET /v1/content-components/{id}/versions/{v}[?room=]` | The version: component as of it, instructions, skill bodies, files (text when viewable) |
 | `POST /v1/content-components/{id}/versions/{v}/ack[?room=]` | Confirm the version's declared permissions |
 | `GET /v1/content-uses[?room=]` | The caller's member uses and a room's uses, each with its component at the version in effect and `updateAvailable`; `roomExpert` names the room's expert |

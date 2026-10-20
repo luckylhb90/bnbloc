@@ -1670,8 +1670,10 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `publishApproval`, `required` by default, `none` publishes at once,
   still audited and removable by admins; every kind). The gateway's one
   publish path is `publishToOrg` (the publish route, a member's click on
-  a `publish_component` card included, a new version's resubmission; a
-  job's grant never publishes to the organization); it alone opens a request
+  a `publish_component` card included, a new version's resubmission); a
+  job's grant never gets through it (`errJobWidens`: neither a publish
+  nor a saved version's resubmission, which the room tools turn into the
+  member's publish card); it alone opens a request
   (`openPublishRequest`) or publishes (`orgPublish`, beside an admin's
   approval), and nothing else reads the setting
   (`TestOrgPublishDecidedByNeedsApproval`). Platform content arrives only as a signed package on

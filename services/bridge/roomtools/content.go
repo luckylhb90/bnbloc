@@ -235,17 +235,10 @@ type componentDetail struct {
 		// Recipe is a saved work's: how it was made.
 		Recipe *wire.WorkRecipe `json:"recipe"`
 	} `json:"component"`
-	// Resubmitted is the publish request the save opened by itself: the
-	// organization uses the component, so the new version waits for an
-	// org admin's approval.
-	Resubmitted *struct {
-		ID              string `json:"id"`
-		Version         string `json:"version"`
-		ApprovedVersion string `json:"approvedVersion"`
-	} `json:"resubmitted"`
-	// OrgPublished is the version the save published to the organization
-	// at once (it uses the component and requires no approval).
-	OrgPublished string `json:"orgPublished"`
+	// OrgProposed is the version the save left with its author although
+	// their organization uses the component: a job's save never reaches
+	// the organization, so the tool offers them the publish card.
+	OrgProposed string `json:"orgProposed"`
 }
 
 func saveComponent(ctx context.Context, env *Env, args json.RawMessage) Result {
@@ -359,16 +352,15 @@ func saveComponent(ctx context.Context, env *Env, args json.RawMessage) Result {
 			"Anyone it is shared with installs it as a new room of theirs, without this room's members or messages. "+
 			"publish_component offers to share it with their organization (they publish it with a click).", c.Name, c.LatestVersion)
 	}
-	if rs := d.Resubmitted; rs != nil {
-		keep := ""
-		if rs.ApprovedVersion != "" {
-			keep = "; members keep using version " + rs.ApprovedVersion + " until then"
+	if v := d.OrgProposed; v != "" {
+		// Their organization uses it: the new version reaches it only by
+		// their click on the card.
+		if err := postPublishCard(ctx, env, job, publishCard{ID: c.ID, Kind: c.Kind, Name: c.Name, DisplayName: c.DisplayName, Version: v}, ""); err != nil {
+			out["note"] = out["note"].(string) + fmt.Sprintf(" Their organization uses this component; version %s reaches it only when they publish it from their Library (the card for it could not be put in the room). Tell them.", v)
+		} else {
+			out["proposed"] = ScopeOrg
+			out["note"] = out["note"].(string) + fmt.Sprintf(" Their organization uses this component; version %s reaches it only when they click Publish on the card in the room, shown only to them. Tell them.", v)
 		}
-		out["resubmitted"] = map[string]any{"request": rs.ID, "version": rs.Version, "approvedVersion": rs.ApprovedVersion}
-		out["note"] = out["note"].(string) + fmt.Sprintf(" Their organization uses this component, so version %s was sent to its admins for approval%s. Tell them.", rs.Version, keep)
-	}
-	if d.OrgPublished != "" {
-		out["note"] = out["note"].(string) + fmt.Sprintf(" Their organization uses this component and publishes without approval: its members use version %s now. Tell them.", d.OrgPublished)
 	}
 	return Result{Value: out}
 }
@@ -446,16 +438,29 @@ func proposePublish(ctx context.Context, env *Env, job Job, grant url.Values, id
 	if !c.Mine || c.SharedBy != "" {
 		return toolError("%s is not a component of the person who asked you: only its author shares it", c.Name)
 	}
-	label := firstNonEmptyString(c.DisplayName, c.Name)
-	p := wire.PublishProposal{ComponentID: c.ID, Kind: c.Kind, Name: c.Name, DisplayName: c.DisplayName, Version: c.LatestVersion,
-		Scope: ScopeOrg, Note: note, For: job.RequesterUserID}
-	text := fmt.Sprintf("%s's agent proposes sharing %s v%s with the organization", job.RequesterUserID, label, c.LatestVersion)
-	if err := postNotice(ctx, env, job, wire.NoticePublishProposal, text, false, map[string]any{"proposal": p}); err != nil {
+	if err := postPublishCard(ctx, env, job, publishCard{ID: c.ID, Kind: c.Kind, Name: c.Name, DisplayName: c.DisplayName, Version: c.LatestVersion}, note); err != nil {
 		return refusal("putting the publish card in the room", err)
 	}
 	return Result{Value: map[string]any{"id": c.ID, "proposed": ScopeOrg, "version": c.LatestVersion,
 		"note": fmt.Sprintf("Nothing is shared yet: a card in the room, shown only to %s, asks them to publish %s version %s to their organization. "+
-			"It is shared when they click Publish (their organization may then need an admin's approval). Tell them.", job.RequesterUserID, label, c.LatestVersion)}}
+			"It is shared when they click Publish (their organization may then need an admin's approval). Tell them.",
+			job.RequesterUserID, firstNonEmptyString(c.DisplayName, c.Name), c.LatestVersion)}}
+}
+
+// publishCard is the component and version a publish card offers.
+type publishCard struct {
+	ID, Kind, Name, DisplayName, Version string
+}
+
+// postPublishCard puts the card that offers the requester to publish
+// version p of their component to their organization (a notice row
+// carrying a wire.PublishProposal, shown only to them): the one builder of
+// it, for publish_component and for a saved version the organization uses.
+func postPublishCard(ctx context.Context, env *Env, job Job, p publishCard, note string) error {
+	proposal := wire.PublishProposal{ComponentID: p.ID, Kind: p.Kind, Name: p.Name, DisplayName: p.DisplayName, Version: p.Version,
+		Scope: ScopeOrg, Note: note, For: job.RequesterUserID}
+	text := fmt.Sprintf("%s's agent proposes publishing %s v%s to the organization", job.RequesterUserID, firstNonEmptyString(p.DisplayName, p.Name), p.Version)
+	return postNotice(ctx, env, job, wire.NoticePublishProposal, text, false, map[string]any{"proposal": proposal})
 }
 
 func getComponent(ctx context.Context, env *Env, args json.RawMessage) Result {

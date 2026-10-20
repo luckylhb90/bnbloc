@@ -129,7 +129,7 @@ testJobEventIsTheProjection();
 // the feed shows it only to the person the agent asked for.
 function testPublishProposalCard(): void {
   const proposal = { componentId: "cc_9", kind: "room", name: "weekly-review", version: "1.0.0", scope: "org", for: "maya" };
-  const text = "maya's agent proposes sharing weekly-review v1.0.0 with the organization";
+  const text = "maya's agent proposes publishing weekly-review v1.0.0 to the organization";
   const [ev] = normalized({
     kind: "agent_messages",
     sequence: 9,

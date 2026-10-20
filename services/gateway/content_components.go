@@ -743,7 +743,7 @@ func (s *Service) addContentVersion(w http.ResponseWriter, r *http.Request, acto
 	s.contentSaved(ctx, actor, next, v.Version, wire.ContentSavedSaved, false)
 	res := s.resubmitOrgPublication(ctx, r, actor, next, v.Version)
 	s.writeContentDetailWith(w, r, claims, next, http.StatusCreated, func(d *wire.ContentComponentDetail) {
-		d.Resubmitted, d.OrgPublished = res.request, res.published
+		d.Resubmitted, d.OrgPublished, d.OrgProposed = res.request, res.published, res.proposed
 	})
 }
 

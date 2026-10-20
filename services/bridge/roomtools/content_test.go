@@ -193,7 +193,7 @@ func TestPublishComponentScopes(t *testing.T) {
 	payload := batch.Messages[0].Payload.(map[string]any)
 	p, _ := payload["proposal"].(wire.PublishProposal)
 	if payload["notice"] != wire.NoticePublishProposal || p.ComponentID != "cc_1" || p.Version != "1.2.0" || p.Scope != "org" || p.For != "maya" || p.Note != "for reviews" ||
-		!strings.Contains(payload["text"].(string), "maya's agent proposes sharing Weekly review v1.2.0") {
+		!strings.Contains(payload["text"].(string), "maya's agent proposes publishing Weekly review v1.2.0") {
 		t.Fatalf("card = %+v", payload)
 	}
 
@@ -277,11 +277,13 @@ func TestGetComponentFencesOthersFiles(t *testing.T) {
 	}
 }
 
-// A save the organization's publication resubmits tells the agent to say
-// so: the new version waits for an org admin.
-func TestSaveComponentReportsResubmission(t *testing.T) {
+// A new version of a component the organization uses stays the
+// requester's (the gateway proposes it, orgProposed): the tool puts the
+// publish card for that version in the room and tells the agent it
+// reaches the organization only by their click.
+func TestSaveComponentProposesTheNewVersion(t *testing.T) {
 	ws := fakeWorkspace{"drafts/reviewer/component.json": `{}`, "drafts/reviewer/INSTRUCTIONS.md": "Review.\n"}
-	detail := `{"component":{"id":"cc_1","kind":"expert","name":"reviewer","scope":"personal","latestVersion":"1.1.0"},"resubmitted":{"id":"cpr_1","version":"1.1.0","approvedVersion":"1.0.0"}}`
+	detail := `{"component":{"id":"cc_1","kind":"expert","name":"reviewer","displayName":"Reviewer","scope":"personal","latestVersion":"1.1.0"},"orgProposed":"1.1.0"}`
 	gw := &recordingGateway{reply: func(string, string) ([]byte, error) { return []byte(detail), nil }}
 	res := saveComponent(context.Background(), contentEnv(ws, gw, true), json.RawMessage(`{"dir":"drafts/reviewer","id":"cc_1"}`))
 	if res.Err != "" {
@@ -289,8 +291,18 @@ func TestSaveComponentReportsResubmission(t *testing.T) {
 	}
 	out := res.Value.(map[string]any)
 	note, _ := out["note"].(string)
-	if out["resubmitted"] == nil || !strings.Contains(note, "version 1.1.0 was sent to its admins for approval; members keep using version 1.0.0 until then") {
+	if out["proposed"] != "org" || !strings.Contains(note, "version 1.1.0 reaches it only when they click Publish") {
 		t.Fatalf("result = %+v", out)
+	}
+	card := gw.calls[len(gw.calls)-1]
+	payload := card.Body.(wire.ReportMessagesInput).Messages[0].Payload.(map[string]any)
+	if p, _ := payload["proposal"].(wire.PublishProposal); card.Path != "/v1/rooms/room-1/agent-activity/messages" || p.ComponentID != "cc_1" || p.Version != "1.1.0" || p.For != "maya" {
+		t.Fatalf("card = %+v", payload)
+	}
+	// A save the organization does not use puts no card.
+	plain := &recordingGateway{reply: func(string, string) ([]byte, error) { return []byte(savedDetail), nil }}
+	if res := saveComponent(context.Background(), contentEnv(ws, plain, true), json.RawMessage(`{"dir":"drafts/reviewer","id":"cc_1"}`)); res.Err != "" || len(plain.calls) != 1 {
+		t.Fatalf("plain save = %+v, calls %d", res, len(plain.calls))
 	}
 }
 

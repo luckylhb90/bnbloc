@@ -18,8 +18,12 @@ export const contentSharingApi = {
     req<void>(`/v1/content-components/${enc(id)}/shares/rooms/${enc(roomId)}`, { method: "DELETE", as: "none" }),
   // A shared copy moves to its author's latest version.
   updateCopy: (id: string) => req<ContentComponentDetail>(`/v1/content-components/${enc(id)}/update`, { method: "POST" }),
-  publish: (id: string, scope: "org" | "personal", note?: string) =>
-    req<ContentPublishReply>(`/v1/content-components/${enc(id)}/publish`, { method: "POST", body: JSON.stringify({ scope, ...(note ? { note } : {}) }) }),
+  // version: the one to publish (default the latest; a publish card names its own).
+  publish: (id: string, scope: "org" | "personal", note?: string, version?: string) =>
+    req<ContentPublishReply>(`/v1/content-components/${enc(id)}/publish`, {
+      method: "POST",
+      body: JSON.stringify({ scope, ...(note ? { note } : {}), ...(version ? { version } : {}) }),
+    }),
 
   // Org admins.
   requests: (all: boolean) =>
