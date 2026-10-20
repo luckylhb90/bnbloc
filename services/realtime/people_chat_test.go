@@ -3,6 +3,7 @@ package realtimehttp
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/store"
+	"github.com/luckylhb90/bnbloc/internal/svcauth"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
@@ -200,5 +202,36 @@ func TestImportRefusesAgentRepliesInPeopleChat(t *testing.T) {
 	}
 	if r := channelPost(t, srv, "/internal/v1/rooms/room-1/import", "alice", batch(wire.KindChatMessage, `{"userId":"bob","text":"hi"}`)); r.StatusCode != http.StatusOK {
 		t.Fatalf("people chat message = %d, want 200", r.StatusCode)
+	}
+}
+
+// The internal history route is the gateway's consented read (read_records):
+// it reads a room's channel without a membership, as an agent does, so the
+// people chat stays closed to it; a member's identity is refused.
+func TestInternalHistoryIsTheGatewaysAndNeverThePeopleChat(t *testing.T) {
+	srv, _, people := newPeopleChatServer(t)
+	postChat(t, srv, "alice", "the sales sheet is attached", "ch_a")
+	postChat(t, srv, "alice", "just us", people)
+	get := func(user, channel string) (int, string) {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodGet, srv.URL+"/internal/v1/rooms/room-1/history?channelId="+channel, nil)
+		req.Header.Set("X-Bnbloc-User", user)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(body)
+	}
+	gateway := svcauth.ServiceSubject("gateway")
+	if code, body := get(gateway, "ch_a"); code != http.StatusOK || !strings.Contains(body, "the sales sheet is attached") {
+		t.Fatalf("the gateway's read of a channel = %d %s", code, body)
+	}
+	if code, body := get(gateway, people); code != http.StatusForbidden || strings.Contains(body, "just us") {
+		t.Fatalf("the gateway's read of the people chat = %d %s, want 403", code, body)
+	}
+	if code, _ := get("alice", "ch_a"); code != http.StatusForbidden {
+		t.Fatalf("a member on the internal route = %d, want 403", code)
 	}
 }

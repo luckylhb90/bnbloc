@@ -278,6 +278,10 @@ func (s *Service) Handler() http.Handler {
 	// Interactive apps' change feeds (app_events.go): the room's app_changed
 	// events only, for the gateway, which narrows them to one app.
 	mux.Handle("GET /internal/v1/rooms/{roomId}/app-events", services("gateway")(s.handleInternalAppEvents))
+	// A channel's history for the gateway's consented reads (read_records,
+	// within the organization admin's grant): the one history read, never
+	// the people chat.
+	mux.Handle("GET /internal/v1/rooms/{roomId}/history", services("gateway")(s.handleInternalHistory))
 	// Replica-to-replica routes (scaleout.go); the gateway also signals a
 	// component catalog change.
 	s.registerPeerRoutes(mux, services("realtime"), services("realtime", "gateway"))
@@ -813,6 +817,27 @@ func (s *Service) handleHistory(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	s.writeHistory(w, r, roomID, m.IsHuman())
+}
+
+// handleInternalHistory is the history page for the gateway's consented
+// reads (read_records, once the organization admin's grant covers the
+// room: the gateway's room_sources.go decides). The reader is no member of
+// the room, so it reads as an agent does: never the people chat. The rows
+// are the signed tenant's only (the store scopes every read by it).
+func (s *Service) handleInternalHistory(w http.ResponseWriter, r *http.Request) {
+	roomID, err := roomctx.Normalize(r.PathValue("roomId"))
+	if err != nil {
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	s.writeHistory(w, r, roomID, false)
+}
+
+// writeHistory is the one history read: the page of roomID's channel the
+// query names, for a person (human) or a reader the people chat is closed
+// to (an agent, a consented read).
+func (s *Service) writeHistory(w http.ResponseWriter, r *http.Request, roomID string, human bool) {
 	if s.Chat == nil {
 		writeFeedPage(w, nil)
 		return
@@ -827,7 +852,7 @@ func (s *Service) handleHistory(w http.ResponseWriter, r *http.Request) {
 		writeChannelErr(w, err)
 		return
 	}
-	if !m.IsHuman() && !s.agentMayReadChannel(w, r.Context(), roomID, channelID) {
+	if !human && !s.agentMayReadChannel(w, r.Context(), roomID, channelID) {
 		return
 	}
 	msgs, err := s.Chat.RoomHistory(r.Context(), roomID, channelID, before, limit)

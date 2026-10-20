@@ -286,12 +286,21 @@ skew, and a later release drops it).
   (`services/gateway/schedule_records.go`; offered to a room that asks for
   a source): within the grant at the moment of the call, for a schedule
   whose owner is the room's owner or an admin, finished runs only (the
-  request cut to 1500 bytes, the reply the run record's preview, the
-  agent, the outcome and its failure sentence, the room and the time),
-  people named only for an organization admin's schedule and otherwise
-  the ask's stable aliases (`sourceAlias`), at most 25 records and 18 KiB
-  a page (`next` continues), 4 reads a run, a range of at most 31 days,
-  each read audited (the range and the count, never a record).
+  request cut to 1500 bytes and its files by name, the run's last reply
+  cut to 2000 bytes, the agent, the outcome and its failure sentence, the
+  room and the time), people named only for an organization admin's
+  schedule and otherwise the ask's stable aliases (`sourceAlias`), at most
+  12 records and 20 KiB a page (`next` continues), 4 reads a run, a range
+  of at most 31 days, each read audited (the range and the count, never a
+  record). A record's turn is read from the room (`readTurn`) through the
+  gateway's one history read, `roomHistory`, as a consented read: realtime's
+  `GET /internal/v1/rooms/{roomId}/history` (the gateway only, no
+  membership, never the people chat; the same handler as the members'
+  history), one page of the request's channel from the request on. The
+  request's row names its files; the last message of the run's agent whose
+  `sourceSeq` is the request is the reply. A reply the page does not hold
+  stays the run record's preview, and `replyNote` says so (or that the
+  reply read is not the run's last).
 - **Save as component.** `GET /v1/rooms/{roomId}/component-draft` (the
   room's owner or an admin, `roomEditorClaims`;
   `services/gateway/room_components.go`) reads the room through the

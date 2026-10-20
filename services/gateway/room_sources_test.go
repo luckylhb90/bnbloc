@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"regexp"
 	"slices"
 	"strings"
@@ -12,8 +13,11 @@ import (
 
 	"github.com/luckylhb90/bnbloc/internal/archtest"
 	"github.com/luckylhb90/bnbloc/internal/auth"
+	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/store"
+	"github.com/luckylhb90/bnbloc/internal/svcauth"
 	"github.com/luckylhb90/bnbloc/internal/wire"
+	realtimehttp "github.com/luckylhb90/bnbloc/services/realtime"
 )
 
 // sourcesGW is the schedule rig with the organization's admin olga, the
@@ -38,6 +42,12 @@ func newSourcesGW(t *testing.T) *sourcesGW {
 	}
 	e.gw.OrgAdmins = func(string) ([]string, error) { return []string{"olga"}, nil }
 	g := &sourcesGW{appGW: e, model: model, sink: sink, outbox: outbox}
+	// A realtime that keeps history: read_records reads each run's turn
+	// through it.
+	rt := &realtimehttp.Service{Hub: e.hub, Chat: e.b.Chat, Membership: membership.NewRoomClient(e.roomURL)}
+	rtSrv := httptest.NewServer(svcauth.Middleware(appGWKey, rt.Handler()))
+	t.Cleanup(rtSrv.Close)
+	e.gw.Backends.Realtime = rtSrv.URL
 	for _, rm := range []struct {
 		id, owner string
 		vis       store.Visibility
@@ -61,16 +71,50 @@ func newSourcesGW(t *testing.T) *sourcesGW {
 }
 
 // job stores a finished run of owner's agent that requester asked for in
-// room, with its reply preview.
+// room (its request at room sequence atMs), with its reply preview.
 func (g *sourcesGW) job(id, room, requester, owner string, status store.AgentJobStatus, text string, atMs int64) {
 	g.t.Helper()
-	diag, _ := json.Marshal(map[string]any{wire.RunDiagReply: wire.AgentRunReply{MessageID: "m-" + id, Text: "Reply to " + text, Count: 1}})
-	j := store.AgentJob{JobID: id, RoomID: room, MessageSeq: atMs, RequesterUserID: requester, OwnerUserID: owner, Provider: "codex", MessageText: text,
-		Status: status, CreatedAtMs: atMs, DiagnosticsJSON: diag}
-	if status == store.AgentJobFailed {
+	g.putJob(store.AgentJob{JobID: id, RoomID: room, MessageSeq: atMs, RequesterUserID: requester, OwnerUserID: owner, Provider: "codex", MessageText: text,
+		Status: status, CreatedAtMs: atMs}, 1)
+}
+
+// putJob stores j with the run record's preview of its first reply and
+// the count of replies its run posted.
+func (g *sourcesGW) putJob(j store.AgentJob, replies int) {
+	g.t.Helper()
+	j.DiagnosticsJSON, _ = json.Marshal(map[string]any{wire.RunDiagReply: wire.AgentRunReply{MessageID: "m-" + j.JobID, Text: "Reply to " + j.MessageText, Count: replies}})
+	if j.Status == store.AgentJobFailed {
 		j.FailureReason = store.FailureAgentError
 	}
 	if _, err := g.jobs.PutAgentJob(g.ctx(), j); err != nil {
+		g.t.Fatal(err)
+	}
+}
+
+// ask stores user's request in room's default channel at seq, with files.
+func (g *sourcesGW) ask(room string, seq int64, user, text string, files ...string) {
+	g.t.Helper()
+	var atts []wire.ChatAttachment
+	for i, f := range files {
+		atts = append(atts, wire.ChatAttachment{ID: fmt.Sprintf("att-%d-%d", seq, i), Filename: f})
+	}
+	g.message(room, seq, wire.KindChatMessage, user, map[string]any{"userId": user, "text": text, "attachments": atts})
+}
+
+// answer stores agent's (owner/provider) reply to the request at source in
+// room's default channel at seq.
+func (g *sourcesGW) answer(room string, seq int64, agent string, source int64, text string) {
+	g.t.Helper()
+	owner, provider, _ := strings.Cut(agent, "/")
+	g.message(room, seq, wire.KindAgentMessages, owner, map[string]any{"agentSessionId": "s-" + agent, "messages": []any{map[string]any{"seq": seq,
+		"payload": map[string]any{"messageId": fmt.Sprint("msg-", seq), "role": "assistant", "text": text, "ownerUserId": owner, "provider": provider, "sourceSeq": source}}}})
+}
+
+// message stores one row of room's default channel at seq.
+func (g *sourcesGW) message(room string, seq int64, kind, author string, payload any) {
+	g.t.Helper()
+	raw, _ := json.Marshal(payload)
+	if err := g.b.Chat.AppendRoomMessage(g.ctx(), store.RoomMessage{RoomID: room, Seq: seq, Kind: kind, Author: author, Payload: raw, CreatedAtMs: seq}); err != nil {
 		g.t.Fatal(err)
 	}
 }
@@ -265,6 +309,45 @@ func TestRoomSourceAliasesAndAudit(t *testing.T) {
 	}
 }
 
+// A record carries the run's turn as its room holds it, read through the
+// gateway's one history read (realtime's internal route: the reading
+// schedule's owner is no member of the covered room): the request's files
+// by name and the last reply of the run's own agent to that request, cut
+// to its bound. Another agent's answer, an answer to another request and
+// one past the read are not it. What the read does not reach is said: the
+// run record's preview with a note, the files counted.
+func TestReadRecordsTurn(t *testing.T) {
+	g := newSourcesGW(t)
+	g.decide(wire.RoomSourceScopeAll)
+	at := time.Date(2026, 10, 14, 11, 0, 0, 0, time.UTC).UnixMilli()
+	g.putJob(store.AgentJob{JobID: "j-turn", RoomID: "shared", MessageSeq: at, RequesterUserID: "jack", OwnerUserID: "jack", Provider: "codex",
+		MessageText: "Clean the sample data", AttachmentIDs: []string{"att-1", "att-2"}, Status: store.AgentJobReplied, CreatedAtMs: at}, 3)
+	g.ask("shared", at, "jack", "Clean the sample data", "sample.csv", "notes.md")
+	g.answer("shared", at+1, "jack/codex", at, "Working on it.")
+	g.answer("shared", at+2, "nora/claude", at, "Another agent's answer.")
+	g.answer("shared", at+3, "jack/codex", at-7, "An answer to another request.")
+	g.answer("shared", at+4, "jack/codex", at, strings.Repeat("The sample has 40 bad rows. ", 120))
+	g.answer("shared", at+recordTurnRows+1, "jack/codex", at, "Past the read.")
+	g.putJob(store.AgentJob{JobID: "j-gone", RoomID: "open", MessageSeq: at + 10, RequesterUserID: "nora", OwnerUserID: "nora", Provider: "codex",
+		MessageText: "Merge the two sheets", AttachmentIDs: []string{"att-9", "att-10"}, Status: store.AgentJobReplied, CreatedAtMs: at + 10}, 1)
+
+	recs, _ := g.page(g.read("maya", `{"source":"runs","since":"2026-10-14","until":"2026-10-15"}`)[0])
+	byID := map[string]sourceRecord{}
+	for _, r := range recs {
+		byID[r.ID] = r
+	}
+	turn := byID["j-turn"]
+	if !slices.Equal(turn.Attachments, []string{"sample.csv", "notes.md"}) || !strings.HasPrefix(turn.Reply, "The sample has 40 bad rows.") ||
+		!strings.HasSuffix(turn.Reply, "…") || len(turn.Reply) > maxRecordReplyBytes || turn.ReplyNote != "the last of 2 replies read here; the run posted 3" {
+		t.Fatalf("a run's turn = attachments %q, reply %d bytes %.40q…, note %q", turn.Attachments, len(turn.Reply), turn.Reply, turn.ReplyNote)
+	}
+	gone := byID["j-gone"]
+	if gone.Reply != "Reply to Merge the two sheets" || !strings.Contains(gone.ReplyNote, "preview of the run's first reply") ||
+		len(gone.Attachments) != 1 || !strings.HasPrefix(gone.Attachments[0], "2 files (names not read") {
+		t.Fatalf("a turn the room no longer holds = %+v", gone)
+	}
+}
+
 // A read is bounded: at most maxRecordsPerRead records a page (next
 // continues where it stopped, nothing twice), at most maxScheduleReads
 // reads a run, a range of at most maxRecordRange.
@@ -273,14 +356,23 @@ func TestReadRecordsBounds(t *testing.T) {
 	g.decide(wire.RoomSourceScopeNonePrivate)
 	day := time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC).UnixMilli()
 	for i := range maxRecordsPerRead + 5 {
-		g.job(fmt.Sprintf("j-bulk-%02d", i), "shared", "jack", "jack", store.AgentJobReplied, strings.Repeat("long request ", 200), day+int64(i))
+		seq := day + int64(i)*10
+		g.job(fmt.Sprintf("j-bulk-%02d", i), "shared", "jack", "jack", store.AgentJobReplied, strings.Repeat("long request ", 200), seq)
+		g.answer("shared", seq+1, "jack/codex", seq, strings.Repeat("a long <reply> & more ", 200))
 	}
-	first, next := g.page(g.read("maya", `{"source":"runs"}`)[0])
+	out := g.read("maya", `{"source":"runs"}`)[0]
+	if len(out) > maxScheduleToolText {
+		t.Fatalf("a page of %d bytes is cut at the tool's %d", len(out), maxScheduleToolText)
+	}
+	first, next := g.page(out)
 	if len(first) == 0 || len(first) > maxRecordsPerRead || next == "" {
 		t.Fatalf("first page = %d records, next %q", len(first), next)
 	}
 	if n := len(first[0].Request); n > maxRecordRequestBytes {
 		t.Fatalf("a request of %d bytes", n)
+	}
+	if n := len(first[0].Reply); n > maxRecordReplyBytes || n < maxRecordReplyBytes-8 {
+		t.Fatalf("a reply of %d bytes, want the last reply cut to %d", n, maxRecordReplyBytes)
 	}
 	seen := map[string]bool{}
 	for _, r := range first {
@@ -409,6 +501,12 @@ func TestRoomSourceConsentSingleOwner(t *testing.T) {
 		}
 		if strings.HasPrefix(rel, "services/gateway/") && strings.Contains(string(src), ".ListAgentRuns(") && rel != "services/gateway/schedule_records.go" {
 			t.Errorf("%s reads the organization's runs; read_records (schedule_records.go) is the gateway's one reader, within a grant", rel)
+		}
+		if strings.HasPrefix(rel, "services/gateway/") && strings.Contains(string(src), "consented: true") && rel != "services/gateway/schedule_records.go" {
+			t.Errorf("%s reads a room's history as a consented read; read_records (schedule_records.go) alone does, within a grant", rel)
+		}
+		if strings.HasPrefix(rel, "services/gateway/") && strings.Contains(string(src), `"/history`) && rel != "services/gateway/assist.go" {
+			t.Errorf("%s reads a room's history itself; roomHistory (assist.go) is the gateway's one history read", rel)
 		}
 	})
 }

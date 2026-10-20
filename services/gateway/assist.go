@@ -504,7 +504,7 @@ func (s *Service) assistRoom(ctx context.Context, claims auth.Claims, roomID, ch
 // (realtime decides who reads it), oldest first, through the one history
 // row decoder.
 func (s *Service) assistRecent(ctx context.Context, claims auth.Claims, roomID, channelID string) ([]assist.Line, error) {
-	rows, err := s.assistHistory(ctx, claims, roomID, channelID, 0, 30)
+	rows, err := s.roomHistory(ctx, memberReader(claims), roomID, channelID, 0, 30)
 	if err != nil {
 		return nil, err
 	}
@@ -523,11 +523,25 @@ func (s *Service) assistRecent(ctx context.Context, claims auth.Claims, roomID, 
 	return lines, nil
 }
 
-// assistHistory is the one read of a room channel's history for an
-// assist, as its member (realtime decides who reads it): the newest limit
-// rows below the sequence before (0: from the newest), oldest first. A
-// room the member does not read is errAssistNotFound.
-func (s *Service) assistHistory(ctx context.Context, claims auth.Claims, roomID, channelID string, before int64, limit int) ([]roomlog.Row, error) {
+// historyReader is who reads a room's history through roomHistory: a
+// member (memberReader: realtime decides what they read), or the gateway
+// itself for a consented read (read_records alone, once the grant's cover
+// decided the room: realtime's internal route, never the people chat).
+type historyReader struct {
+	subject, tenant string
+	consented       bool
+}
+
+// memberReader is claims' member reading a room's history.
+func memberReader(claims auth.Claims) historyReader {
+	return historyReader{subject: claims.Subject, tenant: claims.Tenant}
+}
+
+// roomHistory is the gateway's one read of a room channel's history
+// (realtime's): the newest limit rows below the sequence before (0: from
+// the newest), oldest first. A room the reader does not read is
+// errAssistNotFound.
+func (s *Service) roomHistory(ctx context.Context, h historyReader, roomID, channelID string, before int64, limit int) ([]roomlog.Row, error) {
 	base := strings.TrimRight(s.Backends.Realtime, "/")
 	if base == "" {
 		return nil, nil
@@ -539,7 +553,11 @@ func (s *Service) assistHistory(ctx context.Context, claims auth.Claims, roomID,
 	if before > 0 {
 		q.Set("before", strconv.FormatInt(before, 10))
 	}
-	resp, err := callBackend(ctx, http.MethodGet, base+"/v1/rooms/"+url.PathEscape(roomID)+"/history?"+q.Encode(), nil, claims.Subject, claims.Tenant)
+	route := "/v1/rooms/"
+	if h.consented {
+		route = "/internal/v1/rooms/"
+	}
+	resp, err := callBackend(ctx, http.MethodGet, base+route+url.PathEscape(roomID)+"/history?"+q.Encode(), nil, h.subject, h.tenant)
 	if err != nil {
 		return nil, err
 	}

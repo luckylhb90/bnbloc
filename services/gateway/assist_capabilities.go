@@ -185,7 +185,7 @@ func (s *Service) assistTurn(ctx context.Context, claims auth.Claims, roomID, ch
 // assistRow is the entries of the one row at seq in the channel
 // (errAssistNotFound when there is none, or it holds no text).
 func (s *Service) assistRow(ctx context.Context, claims auth.Claims, roomID, channelID string, seq int64) ([]roomlog.Entry, error) {
-	rows, err := s.assistHistory(ctx, claims, roomID, channelID, seq+1, 1)
+	rows, err := s.roomHistory(ctx, memberReader(claims), roomID, channelID, seq+1, 1)
 	if err != nil {
 		return nil, err
 	}

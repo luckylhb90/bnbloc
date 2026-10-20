@@ -1567,14 +1567,19 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   tool), within the grant at each call, for a schedule of the room's owner
   or an admin, bounded and audited (range and count, never a record);
   names reach only an organization admin's schedule (`readerSeesNames`),
-  everyone else reads the ask's aliases (`sourceAlias`). Members of a
+  everyone else reads the ask's aliases (`sourceAlias`). A record's turn
+  (the request's file names, the run's last reply) is read through the
+  gateway's one history read, `roomHistory` (`assist.go`), as a consented
+  read: realtime's gateway-only `GET /internal/v1/rooms/{id}/history`, the
+  members' history handler without the membership, never the people chat.
+  Every gateway read of a room's history goes through it. Members of a
   covered room see which room reviews them (`GET /v1/rooms/{id}/sources`).
   A note to an organization's admins goes through `notifyOrgAdmins`
   (room reports and source asks alike). A run's reply and usage summary
   in its diagnostics is read only by `store.RunDiag`, a run page's cursor
   only by `store.AgentRunCursor`/`ParseAgentRunCursor`.
-  `TestRoomSourceConsentSingleOwner` keeps grants, scopes and the
-  gateway's run reads in their owners.
+  `TestRoomSourceConsentSingleOwner` keeps grants, scopes, the gateway's
+  run reads and its history reads in their owners.
 - **Content requests on behalf of a job** (room tools `save_component`,
   `get_component`, …) use the `?job=&room=` grant and act as the job's human
   requester under the dispatch authority rules. Never save content as the

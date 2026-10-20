@@ -17,8 +17,9 @@ version" resolved against old ones), and the order read backwards.
 ## Fix
 
 `assistRecent` keeps the page's order (oldest first) and its last 10
-lines. The history read is one function now (`assistHistory`), which the
-turn reads too, and says the order it answers.
+lines. The history read is one function now (`assistHistory`, since
+renamed `roomHistory` when `read_records` began reading through it too),
+which the turn reads too, and says the order it answers.
 
 Test: `TestAssistRecentMessagesAreTheLatest` (14 messages: the prompt holds
 messages 5 to 14 in order); it fails with the reverse put back.
