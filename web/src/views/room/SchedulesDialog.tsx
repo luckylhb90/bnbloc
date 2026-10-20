@@ -27,6 +27,7 @@ import {
   recurrenceFromForm,
   scheduleStatus,
   timezoneOptions,
+  waitsForAgent,
   type RecurrenceForm,
   type NoticeTarget,
   type RecurrenceKind,
@@ -74,6 +75,7 @@ export function SchedulesDialog({
   roomAgents,
   localTargets,
   aiTask,
+  editId,
   onClose,
 }: {
   readonly roomId: string;
@@ -85,6 +87,9 @@ export function SchedulesDialog({
   // Opens straight into a new AI task starting with this text (an app's
   // "Automate…").
   readonly aiTask?: string;
+  // Opens straight into this schedule's editor (the room's "pick an agent
+  // for" list).
+  readonly editId?: string;
   readonly onClose: () => void;
 }) {
   const toast = useToast();
@@ -113,6 +118,15 @@ export function SchedulesDialog({
       .then((r) => setChannels(r.channels ?? []))
       .catch(() => setChannels([]));
   }, [roomId, reload]);
+
+  // The schedule the dialog was opened for, once the list has it.
+  const [opened, setOpened] = useState(false);
+  useEffect(() => {
+    if (opened || !editId || !list) return;
+    setOpened(true);
+    const s = list.find((x) => x.scheduleId === editId);
+    if (s) setEditing(s);
+  }, [editId, list, opened]);
 
   const channelName = (id?: string) => (id ? channels.find((c) => c.channelId === id)?.name : undefined);
 
@@ -166,6 +180,7 @@ export function SchedulesDialog({
           <ul className="flex flex-col gap-2">
             {list.map((s) => {
               const mine = sameUser(s.createdBy, subject);
+              const waiting = waitsForAgent(s.recipient);
               const status = scheduleStatus(s);
               const ch = channelName(s.channelId);
               return (
@@ -200,7 +215,12 @@ export function SchedulesDialog({
                         <PauseIcon size={14} /> Pause
                       </Button>
                     )}
-                    {!s.enabled && mine && (
+                    {waiting && mine && (
+                      <Button size="sm" variant="outline" onClick={() => setEditing(s)}>
+                        <PencilSimpleIcon size={14} /> Pick an agent
+                      </Button>
+                    )}
+                    {!s.enabled && mine && !waiting && (
                       <Button
                         size="sm"
                         variant="ghost"
@@ -210,7 +230,7 @@ export function SchedulesDialog({
                         <PlayIcon size={14} /> Resume
                       </Button>
                     )}
-                    {mine && (
+                    {mine && !waiting && (
                       <Button
                         size="sm"
                         variant="ghost"
@@ -276,9 +296,11 @@ export function SchedulesDialog({
   );
 }
 
-// recipientKey identifies a recipient option ("room" or the agent identity).
+// recipientKey identifies a recipient option ("room", "pick" for an agent
+// not picked yet, or the agent identity).
 function recipientKey(r: ScheduleRecipient): string {
   if (r.kind === "room" || r.kind === "ai" || r.kind === "notice") return r.kind;
+  if (waitsForAgent(r)) return "pick";
   return agentIdentity({ ownerId: r.ownerId ?? "", core: r.core || undefined, provider: r.provider ?? "" });
 }
 
@@ -347,7 +369,7 @@ function ScheduleEditor({
         out.push({ key: recipientKey(r), group: g.group, label: `${row.provider} — ${row.self ? "yours" : nameOf(row.ownerId)}`, recipient: r });
       }
     }
-    if (recipient.kind === "agent" && !out.some((o) => o.key === recipientKey(recipient))) {
+    if (recipient.kind === "agent" && !waitsForAgent(recipient) && !out.some((o) => o.key === recipientKey(recipient))) {
       out.push({ key: recipientKey(recipient), group: "not currently online", label: recipientLabel(recipient, nameOf), recipient });
     }
     return out;
@@ -399,6 +421,9 @@ function ScheduleEditor({
     } else if (!text.trim()) {
       setErr(recipient.kind === "ai" ? "Write the task" : "Write the message to post");
       return;
+    } else if (waitsForAgent(recipient)) {
+      setErr("Pick one of the agents to send it to");
+      return;
     }
     const built = recurrenceFromForm(form, timezone);
     if (!built.recurrence) {
@@ -414,7 +439,7 @@ function ScheduleEditor({
     try {
       if (schedule) {
         await schedulesApi.update(roomId, schedule.scheduleId, body);
-        toast.success("Schedule saved");
+        toast.success(waitsForAgent(schedule.recipient) ? "Agent picked: turn the schedule on with Resume" : "Schedule saved");
       } else {
         await schedulesApi.create(roomId, { ...body, enabled });
         toast.success(enabled ? "Schedule created" : "Schedule created (paused)");
@@ -552,6 +577,11 @@ function ScheduleEditor({
                 setRecipient(o ? o.recipient : { kind: e.target.value === "ai" ? "ai" : e.target.value === "notice" ? "notice" : "room" });
               }}
             >
+              {waitsForAgent(recipient) && (
+                <option value="pick" disabled>
+                  Choose an agent…
+                </option>
+              )}
               <option value="room">The room (people only)</option>
               <option value="notice">Notice: send a message to the room, a group chat or people</option>
               <option value="ai">AI: carry out the task</option>

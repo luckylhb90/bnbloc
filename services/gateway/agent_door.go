@@ -10,6 +10,7 @@ import (
 
 	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
+	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
@@ -31,7 +32,7 @@ import (
 //	GET    /v1/rooms/{id}/channels           its channels
 //	POST   /v1/rooms/{id}/channels           a new channel
 //	GET    /v1/rooms/{id}/schedules          the room's schedules
-//	POST   /v1/rooms/{id}/schedules          a new schedule, an AI task or a notice only
+//	POST   /v1/rooms/{id}/schedules          a new schedule: an AI task, a notice or a request to one of the room's agents
 //	DELETE /v1/rooms/{id}/schedules/{sid}    one of the requester's own
 //	GET    /v1/rooms/{id}/groups             the connected group chats' names
 //
@@ -42,8 +43,9 @@ import (
 // package (component-draft, room_components.go).
 //
 // Nothing else is opened: the room's name, visibility and sync, its members,
-// a schedule that posts as the person or drives an agent, editing or running a
-// schedule stay the person's. A notice goes where the person could send one
+// a schedule that posts as the person, editing or running a schedule stay the
+// person's. A request to an agent asks one of the room's agents online now,
+// the ones the room's Schedules dialog offers the person (agentScheduleTarget). A notice goes where the person could send one
 // themselves (the room, their organization's logins, a group chat their room
 // connected), through the one notify path. Every change spends the requester's
 // cost budget and is audited when the backend has answered (allowed or
@@ -105,7 +107,7 @@ func (s *Service) agentDoor(w http.ResponseWriter, r *http.Request, p apiPath, c
 	if r.Method == http.MethodGet {
 		return actor.Claims, nil, true
 	}
-	if !s.agentChangeAllowed(w, r, p) || !s.spend(w, actor.Claims, costBudget) {
+	if !s.agentChangeAllowed(w, r, p, actor.Claims) || !s.spend(w, actor.Claims, costBudget) {
 		return caller, nil, false
 	}
 	action, what := p.agentChange(r.Method)
@@ -113,9 +115,11 @@ func (s *Service) agentDoor(w http.ResponseWriter, r *http.Request, p apiPath, c
 }
 
 // agentChangeAllowed applies the door's own limits to a change: a schedule
-// is an AI task or a notice, and a room patch changes the description only.
-// The body is read to check and put back for the proxy.
-func (s *Service) agentChangeAllowed(w http.ResponseWriter, r *http.Request, p apiPath) bool {
+// is an AI task, a notice or a request to an agent of the room the
+// requester (claims) may ask (agentScheduleTarget), and a room patch
+// changes the description only. The body is read to check and put back
+// for the proxy.
+func (s *Service) agentChangeAllowed(w http.ResponseWriter, r *http.Request, p apiPath, claims auth.Claims) bool {
 	if (p.RoomSub != "schedules" && p.RoomSub != "") || r.Method == http.MethodDelete {
 		return true
 	}
@@ -137,11 +141,44 @@ func (s *Service) agentChangeAllowed(w http.ResponseWriter, r *http.Request, p a
 	var in struct {
 		Recipient wire.ScheduleRecipient `json:"recipient"`
 	}
-	if json.Unmarshal(raw, &in) != nil || !(in.Recipient.Kind == wire.ScheduleRecipientAI || in.Recipient.Kind == wire.ScheduleRecipientNotice) {
-		httpx.Error(w, `an agent schedules AI tasks and notices only (recipient kind "ai" or "notice"): a schedule that posts as the person or drives an agent is theirs to create`, http.StatusForbidden)
+	if json.Unmarshal(raw, &in) != nil {
+		httpx.Error(w, "invalid json body", http.StatusBadRequest)
 		return false
 	}
-	return true
+	switch in.Recipient.Kind {
+	case wire.ScheduleRecipientAI, wire.ScheduleRecipientNotice:
+		return true
+	case wire.ScheduleRecipientAgent:
+		return s.agentScheduleTarget(w, r, claims, p.RoomID, in.Recipient)
+	}
+	httpx.Error(w, `an agent schedules AI tasks, notices and requests to an agent only (recipient kind "ai", "notice" or "agent"): a schedule that posts as the person is theirs to create`, http.StatusForbidden)
+	return false
+}
+
+// agentScheduleTarget admits a request to an agent an agent schedules for
+// the requester (claims) when it names one of the room's agents online now
+// (realtime's roster, roomRoster): the agents the room's Schedules dialog
+// offers them. Another member's agent is a borrow, refused at drive time
+// unless its owner authorized the requester, as for the dialog's.
+func (s *Service) agentScheduleTarget(w http.ResponseWriter, r *http.Request, claims auth.Claims, roomID string, rcpt wire.ScheduleRecipient) bool {
+	owner, provider, core := strings.TrimSpace(rcpt.OwnerID), strings.TrimSpace(rcpt.Provider), strings.TrimSpace(rcpt.Core)
+	if owner == "" || provider == "" {
+		httpx.Error(w, "a request to an agent names the agent (ownerId and provider): one of the room's agents", http.StatusBadRequest)
+		return false
+	}
+	roster, err := s.roomRoster(r.Context(), claims, roomID)
+	if err != nil {
+		obs.ServerError(w, "read the room's agents failed", err)
+		httpx.Error(w, "read the room's agents failed", http.StatusBadGateway)
+		return false
+	}
+	for _, a := range roster {
+		if a.OwnerUserID == owner && a.Provider == provider && (core == "" || a.Core == core) {
+			return true
+		}
+	}
+	httpx.Error(w, fmt.Sprintf("%s/%s is not one of the room's agents online now: a schedule asks one of those", owner, provider), http.StatusForbidden)
+	return false
 }
 
 // auditAgentSetup records a change of roomID's setup an agent made (or was

@@ -11,6 +11,8 @@ import {
   recipientLabel,
   scheduledMarker,
   scheduleStatus,
+  agentToPick,
+  waitsForAgent,
   type RoomSchedule,
 } from "./schedules.ts";
 
@@ -64,6 +66,21 @@ const base: RoomSchedule = {
 eq(scheduleStatus(base).tone, "ok", "active");
 eq(scheduleStatus({ ...base, enabled: false }).label, "Paused", "paused");
 eq(scheduleStatus({ ...base, enabled: false, lastError: "the room no longer exists" }).tone, "warn", "auto-paused");
+
+// A request to an agent that names none waits for its creator's pick.
+{
+  const waiting: RoomSchedule = { ...base, scheduleId: "w", enabled: false, recipient: { kind: "agent" }, createdAtMs: 2 };
+  assert(waitsForAgent(waiting.recipient), "an agent recipient without its agent waits");
+  assert(!waitsForAgent({ kind: "agent", ownerId: "bob", provider: "codex" }), "a named agent does not wait");
+  assert(!waitsForAgent({ kind: "ai" }) && !waitsForAgent({ kind: "room" }), "other kinds never wait");
+  eq(scheduleStatus(waiting), { tone: "warn", label: "Waiting for an agent" }, "waiting status");
+  eq(recipientLabel(waiting.recipient), "an agent you pick", "waiting label");
+  assert(!isBorrowedRecipient(waiting.recipient, "alice"), "an agent not picked yet is nobody's borrow");
+  const older = { ...waiting, scheduleId: "v", createdAtMs: 1 };
+  const theirs = { ...waiting, scheduleId: "x", createdBy: "bob" };
+  eq(agentToPick([waiting, base, theirs, older], "alice").map((s) => s.scheduleId), ["v", "w"], "my waiting schedules, oldest first");
+  eq(agentToPick([waiting], null), [], "nobody signed in picks nothing");
+}
 
 // Editor <-> wire recurrence.
 {

@@ -7,11 +7,12 @@ package wire
 // package also carries the room's instructions, the apps made in it and
 // the files its saver ticks.
 
-// RoomPackageSchedule is a scheduled task of a room package: an AI task
-// or a notice to the room's members (Recipient kind "ai" or "notice"),
-// its text and when it recurs. Channel is a channel name of the package
-// ("" the room's default channel). Installing creates it disabled, owned
-// by the installer.
+// RoomPackageSchedule is a scheduled task of a room package: an AI task,
+// a notice to the room's members or a request to an agent without the
+// agent (Recipient kind "ai", "notice" or "agent"), its text and when it
+// recurs. Channel is a channel name of the package ("" the room's default
+// channel). Installing creates it disabled, owned by the installer; a
+// request waits for the installer to pick one of their agents.
 type RoomPackageSchedule struct {
 	Channel    string             `json:"channel,omitempty"`
 	Text       string             `json:"text"`
@@ -146,7 +147,9 @@ type RoomInstallRequest struct {
 
 // RoomInstallReply is what installing a room package set up: the new room,
 // From ("name@version"), its channels, the ids of its schedules (all
-// paused), the room expert, the packs turned on and the apps copied in
+// paused) and, of them, the requests to an agent that wait for the
+// installer to pick one of their agents (WaitingForAgent: each one's text
+// in a line), the room expert, the packs turned on and the apps copied in
 // (labels), the expert made from the package's instructions (Instructions,
 // its label), the apps made in the source room and the files copied in
 // (labels), what was left out and why (Skipped), and what the room asks
@@ -156,20 +159,21 @@ type RoomInstallRequest struct {
 // Add). The package's welcome and quick prompts are the new room's own
 // (RoomDetail).
 type RoomInstallReply struct {
-	RoomID       string          `json:"roomId"`
-	Name         string          `json:"name"`
-	ComponentID  string          `json:"componentId"`
-	From         string          `json:"from"`
-	Channels     []string        `json:"channels"`
-	Schedules    []string        `json:"schedules"`
-	Expert       string          `json:"expert,omitempty"`
-	Enabled      []string        `json:"enabled"`
-	Apps         []string        `json:"apps"`
-	Instructions string          `json:"instructions,omitempty"`
-	MadeApps     []string        `json:"madeApps"`
-	Files        []string        `json:"files"`
-	Skipped      []string        `json:"skipped"`
-	Sources      []RoomSourceAsk `json:"sources"`
-	Tools        []string        `json:"tools"`
-	ToolsToAdd   []string        `json:"toolsToAdd"`
+	RoomID          string          `json:"roomId"`
+	Name            string          `json:"name"`
+	ComponentID     string          `json:"componentId"`
+	From            string          `json:"from"`
+	Channels        []string        `json:"channels"`
+	Schedules       []string        `json:"schedules"`
+	WaitingForAgent []string        `json:"waitingForAgent"`
+	Expert          string          `json:"expert,omitempty"`
+	Enabled         []string        `json:"enabled"`
+	Apps            []string        `json:"apps"`
+	Instructions    string          `json:"instructions,omitempty"`
+	MadeApps        []string        `json:"madeApps"`
+	Files           []string        `json:"files"`
+	Skipped         []string        `json:"skipped"`
+	Sources         []RoomSourceAsk `json:"sources"`
+	Tools           []string        `json:"tools"`
+	ToolsToAdd      []string        `json:"toolsToAdd"`
 }

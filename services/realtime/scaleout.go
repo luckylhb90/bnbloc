@@ -450,12 +450,14 @@ const (
 	scheduledPostEmpty          = "empty_message"
 	scheduledPostTooLong        = "message_too_long"
 	scheduledPostNotPermitted   = "not_permitted"
+	scheduledPostNoAgent        = "waits_for_agent"
 )
 
 var scheduledPostErrs = map[string]error{
 	scheduledPostUnknownChannel: errUnknownChannel,
 	scheduledPostEmpty:          errEmptyMessage,
 	scheduledPostTooLong:        errMessageTooLong,
+	scheduledPostNoAgent:        errWaitsForAgent,
 	// Every membership refusal of the creator (membership.IsRefusal).
 	scheduledPostNotPermitted: membership.ErrMayNotChat,
 }

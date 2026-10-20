@@ -8,6 +8,34 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
+// An agent recipient names its agent (owner and provider) or none of it:
+// the one without waits for an agent and stays one; half a target is
+// refused.
+func TestAgentRecipientWaitsForAgent(t *testing.T) {
+	waiting, err := NormalizeRecipient(wire.ScheduleRecipient{Kind: " agent ", OwnerID: " "})
+	if err != nil || !WaitsForAgent(waiting) || waiting.OwnerID != "" || waiting.Kind != wire.ScheduleRecipientAgent {
+		t.Fatalf("a target-less agent recipient = %+v, %v", waiting, err)
+	}
+	named, err := NormalizeRecipient(wire.ScheduleRecipient{Kind: wire.ScheduleRecipientAgent, OwnerID: "maya", Provider: "codex"})
+	if err != nil || WaitsForAgent(named) {
+		t.Fatalf("a named agent = %+v, %v", named, err)
+	}
+	for _, half := range []wire.ScheduleRecipient{{OwnerID: "maya"}, {Provider: "codex"}, {Core: "acme"}} {
+		half.Kind = wire.ScheduleRecipientAgent
+		if WaitsForAgent(half) {
+			t.Errorf("%+v waits for an agent", half)
+		}
+		if _, err := NormalizeRecipient(half); err == nil {
+			t.Errorf("half a target %+v was accepted", half)
+		}
+	}
+	for _, k := range []string{wire.ScheduleRecipientAI, wire.ScheduleRecipientRoom, wire.ScheduleRecipientNotice, ""} {
+		if WaitsForAgent(wire.ScheduleRecipient{Kind: k}) {
+			t.Errorf("kind %q waits for an agent", k)
+		}
+	}
+}
+
 func mustZone(t *testing.T, tz string) *time.Location {
 	t.Helper()
 	loc, err := LoadZone(tz)

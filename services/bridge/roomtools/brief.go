@@ -80,9 +80,9 @@ var briefs = map[string]brief{
 		Text: "This room's setup (description, welcome, quick prompts, expert, packs, channels, schedules, sources), changed as the person who asked you. " +
 			"Propose each change in a sentence; make it only after they agree.",
 		Params: map[string]string{
-			"name":       "use/unuse: a Library name; add_channel: the channel.",
-			"task":       "An AI task: what to do each time, never when.",
-			"send":       "Instead of task: fixed words to send.",
+			"name":       "use/unuse: a Library name; add_channel: its name.",
+			"task":       "What to do each time, never when.",
+			"send":       "Instead of task: fixed words.",
 			"recurrence": "weekly (days 0=Sunday…6, time HH:MM), daily, once (at), cron.",
 		},
 	},

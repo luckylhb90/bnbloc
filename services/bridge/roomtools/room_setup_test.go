@@ -271,3 +271,46 @@ func TestRoomSetupNotice(t *testing.T) {
 		t.Fatalf("lines = %v", l)
 	}
 }
+
+// With agent, the task is a request to one of the room's agents online now
+// (its handle resolved from the roster); a handle that names none, or an
+// agent without a task, is refused before anything changes.
+func TestRoomSetupAgentSchedule(t *testing.T) {
+	newGW := func() *fakeGateway {
+		base := setupGateway("")
+		inner := base.handle
+		base.handle = func(method, path string, body []byte) (int, any) {
+			if p, _, _ := strings.Cut(path, "?"); method == "GET" && p == "/v1/rooms/room-1/agents" {
+				return 200, map[string]any{"agents": []wire.RosterAgent{{OwnerUserID: "jack", Core: "acme", Provider: "claude"}, {OwnerUserID: "maya", Provider: "codex"}}}
+			}
+			return inner(method, path, body)
+		}
+		return base
+	}
+	gw := newGW()
+	r := runSetup(setupEnv(t, gw, true), `{"action":"add_schedule","task":"What changed since yesterday?","agent":"@jack/claude","timezone":"Asia/Shanghai","recurrence":{"kind":"weekly","days":[4],"time":"10:00"}}`)
+	if r.Err != "" {
+		t.Fatal(r.Err)
+	}
+	var body map[string]any
+	_ = json.Unmarshal(gw.callsTo("POST", "/v1/rooms/room-1/schedules")[0].Body, &body)
+	rcpt, _ := body["recipient"].(map[string]any)
+	if body["text"] != "What changed since yesterday?" || rcpt["kind"] != wire.ScheduleRecipientAgent || rcpt["ownerId"] != "jack" || rcpt["provider"] != "claude" || rcpt["core"] != "acme" {
+		t.Fatalf("the schedule sent = %v", body)
+	}
+	if l := lines(gw); len(l) != 1 || l[0] != "maya's agent scheduled a request to jack/claude, every Thursday at 10:00 (Asia/Shanghai)" {
+		t.Fatalf("lines = %v", l)
+	}
+	for name, tc := range map[string]struct{ args, want string }{
+		"not in the room": {`{"action":"add_schedule","task":"x","agent":"olaf/codex","timezone":"UTC","recurrence":{"kind":"daily","time":"09:00"}}`, "not one of the room's agents"},
+		"with send":       {`{"action":"add_schedule","send":{"to":"room","title":"x"},"agent":"jack/claude","timezone":"UTC","recurrence":{"kind":"daily","time":"09:00"}}`, "agent goes with task"},
+	} {
+		gw := newGW()
+		if r := runSetup(setupEnv(t, gw, true), tc.args); !strings.Contains(r.Err, tc.want) {
+			t.Errorf("%s: %q", name, r.Err)
+		}
+		if posts := gw.callsTo("POST", "/v1/rooms/room-1/schedules"); len(posts) != 0 {
+			t.Errorf("%s: a refused schedule was posted", name)
+		}
+	}
+}

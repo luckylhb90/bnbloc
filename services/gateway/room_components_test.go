@@ -12,6 +12,7 @@ import (
 
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/ids"
+	"github.com/luckylhb90/bnbloc/internal/schedule"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
@@ -36,9 +37,10 @@ func (e *appGW) schedule(room, channel, text string, rcpt wire.ScheduleRecipient
 // reviewRoom sets maya's room up as a room worth saving: a "reports"
 // channel, the room expert (her organization's reviewer), two skill packs
 // (her own charts, her organization's palettes), a prompt pack, an app
-// copied in from her organization's lunch-poll work, and five schedules:
-// an AI task in reports and a notice to the room (kept), and a message to
-// an agent, a one-time task and a notice to named people (left out).
+// copied in from her organization's lunch-poll work, and six schedules:
+// an AI task in reports, a notice to the room and a request to jack's
+// agent (kept, the request without its agent), and a message posted as
+// her, a one-time task and a notice to named people (left out).
 func (e *appGW) reviewRoom() {
 	e.t.Helper()
 	expert := e.content(store.ContentScopeOrg, contentpkg.KindExpert, "reviewer", map[string]any{})
@@ -61,7 +63,8 @@ func (e *appGW) reviewRoom() {
 	daily := wire.ScheduleRecurrence{Kind: wire.RecurDaily, Time: "09:00"}
 	e.schedule(e.roomID, reports, "Summarize yesterday.", wire.ScheduleRecipient{Kind: wire.ScheduleRecipientAI}, daily)
 	e.schedule(e.roomID, "", "Week {week}", wire.ScheduleRecipient{Kind: wire.ScheduleRecipientNotice, To: json.RawMessage(`"room"`), Title: "Review", URL: "/rooms/x"}, daily)
-	e.schedule(e.roomID, "", "Status?", wire.ScheduleRecipient{Kind: wire.ScheduleRecipientAgent, OwnerID: "jack", Provider: "codex"}, daily)
+	e.schedule(e.roomID, reports, "Status?", wire.ScheduleRecipient{Kind: wire.ScheduleRecipientAgent, OwnerID: "jack", Provider: "codex", Core: "acme"}, daily)
+	e.schedule(e.roomID, "", "Morning, all.", wire.ScheduleRecipient{Kind: wire.ScheduleRecipientRoom}, daily)
 	e.schedule(e.roomID, "", "Once.", wire.ScheduleRecipient{Kind: wire.ScheduleRecipientAI}, wire.ScheduleRecurrence{Kind: wire.RecurOnce, AtMs: 1})
 	e.schedule(e.roomID, "", "Hi", wire.ScheduleRecipient{Kind: wire.ScheduleRecipientNotice, To: json.RawMessage(`["jack"]`), Title: "Hi"}, daily)
 
@@ -117,9 +120,15 @@ func TestRoomComponentDraft(t *testing.T) {
 	for _, sc := range d.Schedules {
 		kinds[sc.Recipient.Kind] = sc
 	}
-	if ai, notice := kinds[wire.ScheduleRecipientAI], kinds[wire.ScheduleRecipientNotice]; len(d.Schedules) != 2 || ai.Channel != "reports" ||
+	if ai, notice := kinds[wire.ScheduleRecipientAI], kinds[wire.ScheduleRecipientNotice]; len(d.Schedules) != 3 || ai.Channel != "reports" ||
 		notice.Text != "Week {week}" || notice.Channel != "" || notice.Recipient.URL != "" {
 		t.Fatalf("draft schedules = %+v", d.Schedules)
+	}
+	// The request to an agent keeps its text, recurrence and channel; its
+	// agent is taken out (a package names nobody's agent).
+	if ask := kinds[wire.ScheduleRecipientAgent]; ask.Text != "Status?" || ask.Channel != "reports" || ask.Recurrence.Time != "09:00" || ask.Timezone != "UTC" ||
+		ask.Recipient.OwnerID != "" || ask.Recipient.Provider != "" || ask.Recipient.Core != "" {
+		t.Fatalf("draft request to an agent = %+v", ask)
 	}
 	if d.Expert == nil || d.Expert.Ref != "reviewer@^1" || len(d.Prompts) != 1 || d.Prompts[0].Ref != "review-prompts@^1" ||
 		len(d.Apps) != 1 || d.Apps[0].Ref != "lunch-poll@^1" {
@@ -134,11 +143,53 @@ func TestRoomComponentDraft(t *testing.T) {
 		t.Fatalf("draft skills = %v", skills)
 	}
 	left := strings.Join(d.Left, "\n")
-	for _, want := range []string{"1 schedule posting as a person or driving an agent", "1 schedule notifying named people", "1 schedule running once",
-		"the link of 1 scheduled notice", "members and their agents"} {
+	for _, want := range []string{"1 schedule posting as a person (", "1 schedule notifying named people", "1 schedule running once",
+		"the link of 1 scheduled notice", "the agent of 1 scheduled request (whoever installs it picks one of their agents)", "members and their agents"} {
 		if !strings.Contains(left, want) {
 			t.Errorf("left = %q, want %q", left, want)
 		}
+	}
+}
+
+// A package's request to an agent installs paused and waiting for one: its
+// installer can neither turn it on nor run it until they pick one of their
+// agents for it (the schedules dialog's edit, realtime's route through the
+// gateway), then they turn it on.
+func TestInstalledRequestWaitsForAnAgent(t *testing.T) {
+	e := galleryGW(t)
+	e.reviewRoom()
+	d, _ := e.draft("maya", e.roomID)
+	pkg := e.saveRoomPackage("maya", roomForm(d, "weekly-review"))
+	if r := e.call(http.MethodPost, "/v1/content-components/"+pkg.ID+"/create-room", wire.RoomInstallRequest{RoomID: "jacks-review"}, e.as("jack")); r.status != http.StatusCreated {
+		t.Fatalf("create-room = %d %s", r.status, r.body)
+	}
+	scheds, _ := e.b.Schedules.ListSchedules(e.ctx(), "jacks-review")
+	var ask wire.RoomSchedule
+	for _, sc := range scheds {
+		if sc.Recipient.Kind == wire.ScheduleRecipientAgent {
+			ask = sc
+		}
+	}
+	if ask.ScheduleID == "" || ask.Text != "Status?" || !schedule.WaitsForAgent(ask.Recipient) || ask.Enabled {
+		t.Fatalf("the installed request = %+v", ask)
+	}
+	path := "/v1/rooms/jacks-review/schedules/" + ask.ScheduleID
+	if r := e.call(http.MethodPatch, path, map[string]any{"enabled": true}, e.as("jack")); r.status != http.StatusBadRequest || !strings.Contains(string(r.body), "waits for an agent") {
+		t.Fatalf("turned on without an agent = %d %s", r.status, r.body)
+	}
+	if r := e.call(http.MethodPost, path+"/run", nil, e.as("jack")); r.status != http.StatusConflict {
+		t.Fatalf("run without an agent = %d %s", r.status, r.body)
+	}
+	pick := map[string]any{"recipient": wire.ScheduleRecipient{Kind: wire.ScheduleRecipientAgent, OwnerID: "jack", Provider: "claude"}}
+	if r := e.call(http.MethodPatch, path, pick, e.as("jack")); r.status != http.StatusOK {
+		t.Fatalf("pick an agent = %d %s", r.status, r.body)
+	}
+	if r := e.call(http.MethodPatch, path, map[string]any{"enabled": true}, e.as("jack")); r.status != http.StatusOK {
+		t.Fatalf("turn it on = %d %s", r.status, r.body)
+	}
+	got, err := e.b.Schedules.GetSchedule(e.ctx(), "jacks-review", ask.ScheduleID)
+	if err != nil || !got.Enabled || got.NextRunAtMs == 0 || got.Recipient.OwnerID != "jack" || got.Recipient.Provider != "claude" || got.Text != "Status?" {
+		t.Fatalf("after the pick = %+v, %v", got, err)
 	}
 }
 
@@ -204,7 +255,7 @@ func TestCreateRoomFromComponent(t *testing.T) {
 	e.reviewRoom()
 	d, _ := e.draft("maya", e.roomID)
 	pkg := e.saveRoomPackage("maya", roomForm(d, "weekly-review"))
-	if pkg.Kind != "room" || pkg.Room == nil || !slices.Equal(pkg.Room.Sources, []wire.RoomSourceAsk{reviewAsk}) || pkg.Requires.Expert != "reviewer@^1" || len(pkg.Room.Schedules) != 2 {
+	if pkg.Kind != "room" || pkg.Room == nil || !slices.Equal(pkg.Room.Sources, []wire.RoomSourceAsk{reviewAsk}) || pkg.Requires.Expert != "reviewer@^1" || len(pkg.Room.Schedules) != 3 {
 		t.Fatalf("the package's view = %+v", pkg)
 	}
 
@@ -214,7 +265,8 @@ func TestCreateRoomFromComponent(t *testing.T) {
 		t.Fatalf("create-room = %d %s", r.status, r.body)
 	}
 	if got.RoomID != "jacks-review" || got.From != "weekly-review@1.0.0" || !slices.Equal(got.Channels, []string{"reports"}) || got.Expert != "Reviewer" ||
-		!slices.Equal(got.Sources, []wire.RoomSourceAsk{reviewAsk}) || len(got.Apps) != 1 || len(got.Schedules) != 2 {
+		!slices.Equal(got.Sources, []wire.RoomSourceAsk{reviewAsk}) || len(got.Apps) != 1 || len(got.Schedules) != 3 ||
+		!slices.Equal(got.WaitingForAgent, []string{"Status?"}) {
 		t.Fatalf("reply = %+v", got)
 	}
 	if !slices.Equal(got.Skipped, []string{"skill pack charts@^1 (not one you can use)"}) {
@@ -239,15 +291,18 @@ func TestCreateRoomFromComponent(t *testing.T) {
 		}
 	}
 	scheds, _ := e.b.Schedules.ListSchedules(e.ctx(), "jacks-review")
-	if len(scheds) != 2 || reports == "" {
+	if len(scheds) != 3 || reports == "" {
 		t.Fatalf("schedules = %+v (reports %q)", scheds, reports)
 	}
 	for _, sc := range scheds {
 		if sc.Enabled || sc.CreatedBy != "jack" || sc.NextRunAtMs != 0 {
 			t.Fatalf("a schedule not paused or not jack's: %+v", sc)
 		}
-		if want := map[string]string{wire.ScheduleRecipientAI: reports, wire.ScheduleRecipientNotice: ""}[sc.Recipient.Kind]; sc.ChannelID != want {
+		if want := map[string]string{wire.ScheduleRecipientAI: reports, wire.ScheduleRecipientNotice: "", wire.ScheduleRecipientAgent: reports}[sc.Recipient.Kind]; sc.ChannelID != want {
 			t.Fatalf("the %s schedule is in channel %q, want %q", sc.Recipient.Kind, sc.ChannelID, want)
+		}
+		if sc.Recipient.Kind == wire.ScheduleRecipientAgent && !schedule.WaitsForAgent(sc.Recipient) {
+			t.Fatalf("the request names an agent the package carried: %+v", sc.Recipient)
 		}
 	}
 	uses, _ := e.b.ContentComponents.ListContentUses(e.ctx(), store.ContentUseRoom, "jacks-review")

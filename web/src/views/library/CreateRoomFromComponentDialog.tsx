@@ -89,7 +89,7 @@ export function CreateRoomFromComponentDialog({
       const reply = await roomComponentsApi.createRoom(chosen.id, { roomId: id, name: id, visibility: vis });
       await reauth().catch(() => {});
       toast.success(`Room “${id}” created from ${contentLabel(chosen)}`);
-      if (reply.skipped.length > 0 || reply.toolsToAdd.length > 0) setMade(reply);
+      if (reply.skipped.length > 0 || reply.toolsToAdd.length > 0 || reply.waitingForAgent.length > 0) setMade(reply);
       else onCreated(id);
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) setErr("A room with this id already exists");
@@ -132,6 +132,16 @@ export function CreateRoomFromComponentDialog({
               <ul className="list-disc pl-5 text-[var(--color-fg-muted)]">
                 {made.skipped.map((s) => (
                   <li key={s}>{s}</li>
+                ))}
+              </ul>
+            </>
+          )}
+          {made.waitingForAgent.length > 0 && (
+            <>
+              <p>These scheduled requests ask an agent: in the room, pick one of your agents for each, then turn it on.</p>
+              <ul className="list-disc pl-5 text-[var(--color-fg-muted)]">
+                {made.waitingForAgent.map((s, i) => (
+                  <li key={i}>Pick an agent for: {s}</li>
                 ))}
               </ul>
             </>

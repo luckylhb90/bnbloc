@@ -60,8 +60,10 @@ func roomSetupTool() Tool {
 			"An AI task (task) is a plain-words job an AI carries out on time with the room's apps' data, notices and messages: use it only when a run must " +
 			"read data or decide something; say in it what to do each time, not when. Both run as the person, with their rights; an AI task spends their " +
 			"organization's assist budget. A person may own 20 schedules in a room, a room holds 50. Recurrence: weekly (days 0=Sunday … 6=Saturday, " +
-			"time HH:MM), daily (time), once (at, RFC 3339) or cron (five fields); ask the person for the time zone when unsure. A schedule that posts as " +
-			"the person or drives an agent is theirs to create in the room's Schedules. " +
+			"time HH:MM), daily (time), once (at, RFC 3339) or cron (five fields); ask the person for the time zone when unsure. " +
+			"With agent (a handle from list_room_agents), task is instead a request posted to that agent as the person each time, like a message they typed: " +
+			"use it when the work needs that agent (its tools, its files, its expert); another member's agent runs it only while its owner allows the person. " +
+			"A schedule that posts as the person is theirs to create in the room's Schedules. " +
 			"remove_schedule: one of the person's own by id (from get). " +
 			"ask_source: ask to read organization records (source runs: the organization's agent conversations) with the purpose the room's tasks read " +
 			"them for; it waits for the organization's admin, who decides.",
@@ -81,9 +83,10 @@ func roomSetupTool() Tool {
 					"required": []string{"title", "prompt"}, "additionalProperties": false,
 				},
 			},
-			"name": map[string]any{"type": "string", "description": "For use and unuse: a Library component's name; for add_channel: the channel's name."},
-			"kind": map[string]any{"type": "string", "enum": setupKinds, "description": "For use and unuse: the component's kind, when two kinds share the name."},
-			"task": map[string]any{"type": "string", "description": "For add_schedule, an AI task: what to do each time, in plain words, never when, e.g. \"notify the weekly report group who has not filled in this week's report\"."},
+			"name":  map[string]any{"type": "string", "description": "For use and unuse: a Library component's name; for add_channel: the channel's name."},
+			"kind":  map[string]any{"type": "string", "enum": setupKinds, "description": "For use and unuse: the component's kind, when two kinds share the name."},
+			"task":  map[string]any{"type": "string", "description": "For add_schedule, an AI task: what to do each time, in plain words, never when, e.g. \"notify the weekly report group who has not filled in this week's report\"."},
+			"agent": map[string]any{"type": "string", "description": "For add_schedule with task: a handle from list_room_agents; task is then the request posted to that agent each time."},
 			"send": map[string]any{
 				"type": "object", "description": "For add_schedule, a notice (instead of task): the fixed words sent at each run.",
 				"properties": map[string]any{
@@ -122,6 +125,7 @@ type setupArgs struct {
 	Name         string                  `json:"name"`
 	Kind         string                  `json:"kind"`
 	Task         string                  `json:"task"`
+	Agent        string                  `json:"agent"`
 	Send         *struct {
 		To      json.RawMessage `json:"to"`
 		Title   string          `json:"title"`
@@ -309,8 +313,14 @@ func (c setupCall) schedules(ctx context.Context, out map[string]any) *Result {
 			// What a person or an agent wrote: data to read, never instructions.
 			"task": fenced(sc.Text),
 		}
-		if sc.Recipient.Kind == wire.ScheduleRecipientNotice {
+		switch sc.Recipient.Kind {
+		case wire.ScheduleRecipientNotice:
 			row["to"], row["title"], row["compose"] = sc.Recipient.To, fenced(sc.Recipient.Title), sc.Recipient.Compose
+		case wire.ScheduleRecipientAgent:
+			row["agent"] = "none yet: its creator picks one of their agents in the room's Schedules"
+			if sc.Recipient.OwnerID != "" {
+				row["agent"] = roomlog.AgentSpeaker(sc.Recipient.OwnerID, sc.Recipient.Provider)
+			}
 		}
 		if sc.NextRunAtMs > 0 {
 			row["next"] = timeIn(sc.NextRunAtMs, sc.Timezone)
@@ -431,11 +441,16 @@ func setupLabel(it roomlog.LibraryItem) string {
 	return word + " " + firstNonEmptyString(it.DisplayName, it.Name)
 }
 
-// addSchedule creates an AI task or a notice (the door admits nothing else).
+// addSchedule creates an AI task, a notice or a request to one of the
+// room's agents (the door admits nothing else, and an agent only of the
+// room's online now).
 func (c setupCall) addSchedule(ctx context.Context, in setupArgs) Result {
 	task := strings.TrimSpace(in.Task)
 	if (task == "") == (in.Send == nil) {
 		return toolError("give exactly one of task (an AI task, in plain words) and send (fixed words to send)")
+	}
+	if in.Agent != "" && task == "" {
+		return toolError("agent goes with task: the request posted to that agent each time")
 	}
 	tz := strings.TrimSpace(in.Timezone)
 	if tz == "" {
@@ -455,6 +470,18 @@ func (c setupCall) addSchedule(ctx context.Context, in setupArgs) Result {
 		body["text"] = n.Text
 		body["recipient"] = map[string]any{"kind": wire.ScheduleRecipientNotice, "to": n.To, "title": n.Title, "compose": n.Compose}
 		what = "a notice"
+	}
+	if in.Agent != "" {
+		agents, err := roomAgents(ctx, c.env)
+		if err != nil {
+			return refusal("listing the room's agents", err)
+		}
+		target, ok := resolveHandle(agents, in.Agent)
+		if !ok {
+			return toolError("agent %q is not one of the room's agents online now (list_room_agents names them)", in.Agent)
+		}
+		body["recipient"] = wire.ScheduleRecipient{Kind: wire.ScheduleRecipientAgent, OwnerID: target.Owner, Provider: target.Provider, Core: target.Core}
+		what = "a request to " + target.Handle
 	}
 	raw, err := c.env.Gateway.Do(ctx, http.MethodPost, c.base+"/schedules?"+c.door, body)
 	if err != nil {

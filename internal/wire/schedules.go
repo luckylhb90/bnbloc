@@ -57,7 +57,9 @@ const (
 
 // ScheduleRecipient addresses a scheduled message. Kind "room" drives no
 // agent; kind "agent" carries the target agent's owner + provider (+ core
-// when the owner exposes more than one).
+// when the owner exposes more than one), or none of them: the schedule
+// waits for an agent (a room package's, until its installer picks one of
+// theirs) and is never enabled or run (schedule.WaitsForAgent).
 type ScheduleRecipient struct {
 	Kind     string `json:"kind" tstype:"ScheduleRecipientKind"`
 	OwnerID  string `json:"ownerId,omitempty"`

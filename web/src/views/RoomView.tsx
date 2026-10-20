@@ -57,6 +57,7 @@ import { JobLiveProvider, JobProgressProvider } from "@/views/room/JobProgressSt
 import { waitingFor, type JobLive } from "@/lib/jobLive";
 import { SaveRoomComponentDialog } from "@/views/room/SaveRoomComponentDialog";
 import { RoomStartCard } from "@/views/room/RoomStartCard";
+import { AgentPicksCard } from "@/views/room/AgentPicksCard";
 import { roomStartOf } from "@/lib/roomWelcome";
 import { SchedulesDialog } from "@/views/room/SchedulesDialog";
 import { GroupChatsDialog } from "@/views/room/GroupChatsDialog";
@@ -104,6 +105,10 @@ export function RoomView({
   const [showSearch, setShowSearch] = useState(false);
   const [savingComponent, setSavingComponent] = useState(false);
   const [showSchedules, setShowSchedules] = useState(false);
+  // A schedule to open in the Schedules dialog (an agent to pick for it),
+  // and the reload of the room's "pick an agent for" list when it closes.
+  const [scheduleToEdit, setScheduleToEdit] = useState<string | undefined>();
+  const [schedulesEpoch, setSchedulesEpoch] = useState(0);
   const [showGroups, setShowGroups] = useState(false);
   // An app's "Automate…" opens the schedules on a new AI task about it.
   const [automating, setAutomating] = useState<string | undefined>();
@@ -552,6 +557,17 @@ export function RoomView({
       <HandoffBanner roomId={roomId} canInvite={canManageRoom} members={data.members} />
       {/* An empty room shows its welcome and quick prompts to every member. */}
       {roomStart && feed.length === 0 && activity.working.size === 0 && <RoomStartCard roomId={roomId} start={roomStart} />}
+      {member && (
+        <AgentPicksCard
+          roomId={roomId}
+          subject={subject}
+          epoch={schedulesEpoch}
+          onPick={(id) => {
+            setScheduleToEdit(id);
+            setShowSchedules(true);
+          }}
+        />
+      )}
 
       {/* Channel rail + feed + composer share one row; the rail scopes all
           three to the selected channel. */}
@@ -718,9 +734,12 @@ export function RoomView({
           roomAgents={roomAgents}
           localTargets={agent.targets}
           aiTask={automating}
+          editId={scheduleToEdit}
           onClose={() => {
             setShowSchedules(false);
             setAutomating(undefined);
+            setScheduleToEdit(undefined);
+            setSchedulesEpoch((n) => n + 1);
           }}
         />
       )}

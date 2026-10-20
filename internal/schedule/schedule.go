@@ -92,8 +92,9 @@ func Validate(rec wire.ScheduleRecurrence, tz string) (wire.ScheduleRecurrence, 
 }
 
 // NormalizeRecipient validates a schedule recipient: "room" (or empty) is a
-// people-only message; "agent" needs the agent's owner and provider; "ai"
-// (a task the assist model carries out) takes nothing more.
+// people-only message; "agent" names the agent's owner and provider, or
+// none of its agent (it waits for one, WaitsForAgent); "ai" (a task the
+// assist model carries out) takes nothing more.
 func NormalizeRecipient(r wire.ScheduleRecipient) (wire.ScheduleRecipient, error) {
 	switch strings.TrimSpace(r.Kind) {
 	case "", wire.ScheduleRecipientRoom:
@@ -105,6 +106,9 @@ func NormalizeRecipient(r wire.ScheduleRecipient) (wire.ScheduleRecipient, error
 			Provider: strings.TrimSpace(r.Provider),
 			Core:     strings.TrimSpace(r.Core),
 		}
+		if WaitsForAgent(out) {
+			return out, nil
+		}
 		if out.OwnerID == "" || out.Provider == "" {
 			return out, errors.New("recipient: an agent recipient needs ownerId and provider")
 		}
@@ -115,6 +119,16 @@ func NormalizeRecipient(r wire.ScheduleRecipient) (wire.ScheduleRecipient, error
 		return normalizeNotice(r)
 	}
 	return r, fmt.Errorf("recipient: unknown kind %q (room, agent, ai, notice)", r.Kind)
+}
+
+// WaitsForAgent reports a schedule that asks an agent but names none (kind
+// "agent" without an owner, a provider or a core): a room package's, from
+// its install until the installer picks one of their agents for it. The
+// one rule of that state; such a schedule is never enabled or run
+// (realtime's runnable).
+func WaitsForAgent(r wire.ScheduleRecipient) bool {
+	return strings.TrimSpace(r.Kind) == wire.ScheduleRecipientAgent &&
+		strings.TrimSpace(r.OwnerID) == "" && strings.TrimSpace(r.Provider) == "" && strings.TrimSpace(r.Core) == ""
 }
 
 // LoadZone loads an IANA timezone. The process-local zone is refused: a

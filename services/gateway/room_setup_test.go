@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
+	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 	"github.com/luckylhb90/bnbloc/services/bridge/roomtools"
@@ -209,6 +210,46 @@ func TestRoomSetupAsAPlainMember(t *testing.T) {
 	}
 }
 
+// An agent schedules a request to one of the room's agents online now for
+// the person who asked it (the agents the Schedules dialog offers them):
+// the request is theirs, enabled, to that agent. The door refuses an agent
+// that is not in the room, and a request that names no agent.
+func TestRoomSetupAgentSchedule(t *testing.T) {
+	e := galleryGW(t)
+	e.rt.Roster.Advertise(e.roomID, "jack", []realtime.AgentRef{{Core: "acme", Provider: "claude"}})
+	e.setupJob("job-maya", e.roomID, "maya")
+	args := map[string]any{"action": "add_schedule", "task": "What changed since yesterday?", "agent": "jack/claude", "timezone": "UTC",
+		"recurrence": map[string]any{"kind": "daily", "time": "09:00"}}
+	if r := e.toolFor(e.roomID, "job-maya", "maya", "room_setup", args); r.Err != "" {
+		t.Fatalf("a request to jack's agent = %s", r.Err)
+	}
+	scheds, _ := e.b.Schedules.ListSchedules(e.ctx(), e.roomID)
+	if len(scheds) != 1 || scheds[0].CreatedBy != "maya" || !scheds[0].Enabled || scheds[0].Text != "What changed since yesterday?" ||
+		scheds[0].Recipient.Kind != wire.ScheduleRecipientAgent || scheds[0].Recipient.OwnerID != "jack" || scheds[0].Recipient.Provider != "claude" || scheds[0].Recipient.Core != "acme" {
+		t.Fatalf("schedules = %+v", scheds)
+	}
+	// The door itself: an agent not in the room, and a request naming none.
+	jack := "Authorization: Bearer " + e.session("jack")
+	for _, c := range []struct {
+		rcpt   wire.ScheduleRecipient
+		status int
+		want   string
+	}{
+		{wire.ScheduleRecipient{Kind: wire.ScheduleRecipientAgent, OwnerID: "olaf", Provider: "codex"}, http.StatusForbidden, "not one of the room's agents"},
+		{wire.ScheduleRecipient{Kind: wire.ScheduleRecipientAgent, OwnerID: "jack", Provider: "claude", Core: "other"}, http.StatusForbidden, "not one of the room's agents"},
+		{wire.ScheduleRecipient{Kind: wire.ScheduleRecipientAgent}, http.StatusBadRequest, "names the agent"},
+		{wire.ScheduleRecipient{Kind: wire.ScheduleRecipientRoom}, http.StatusForbidden, "posts as the person is theirs"},
+	} {
+		body := map[string]any{"text": "x", "recipient": c.rcpt, "timezone": "UTC", "recurrence": map[string]any{"kind": "daily", "time": "09:00"}}
+		if r := e.call(http.MethodPost, "/v1/rooms/"+e.roomID+"/schedules?job=job-maya", body, jack); r.status != c.status || !strings.Contains(string(r.body), c.want) {
+			t.Errorf("%+v = %d %s, want %d %q", c.rcpt, r.status, r.body, c.status, c.want)
+		}
+	}
+	if scheds, _ := e.b.Schedules.ListSchedules(e.ctx(), e.roomID); len(scheds) != 1 {
+		t.Fatalf("a refused request was stored: %+v", scheds)
+	}
+}
+
 // save_component's room kind saves this room into the requester's Library
 // through the dialog's capture; a plain member's agent is refused by it.
 // publish_component offers it to her as a card; her click shares it.
@@ -241,7 +282,7 @@ func TestSaveRoomComponentThroughRoomTools(t *testing.T) {
 	}
 	v, _ := e.b.ContentComponents.GetContentComponentVersion(e.ctx(), c.ID, "1.0.0")
 	var m contentpkg.Manifest
-	if err := json.Unmarshal(v.ManifestJSON, &m); err != nil || m.Welcome != text || m.Requires.Expert != "reviewer@^1" || len(m.Schedules) != 2 || !slices.Equal(m.Channels, []string{"reports"}) {
+	if err := json.Unmarshal(v.ManifestJSON, &m); err != nil || m.Welcome != text || m.Requires.Expert != "reviewer@^1" || len(m.Schedules) != 3 || !slices.Equal(m.Channels, []string{"reports"}) {
 		t.Fatalf("the package = %+v, %v", m, err)
 	}
 

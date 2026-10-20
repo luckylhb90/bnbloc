@@ -114,6 +114,8 @@ func TestPromptBudgets(t *testing.T) {
 		// (docs/prd/2026-10-20-room-setup-by-conversation.md); briefs cut.
 		// +30 on 2026-10-20: save_component's room instructions and include
 		// (docs/prd/2026-10-20-complete-room-capture.md); two notes cut.
+		// +0 on 2026-10-20: room_setup's agent (a schedule asking one of the
+		// room's agents, same PRD, slice 2), paid by three notes cut.
 		{"session prefix (guidance + tools/list)", guidance + toolsList, 3090},
 	} {
 		got := tokens(c.text)

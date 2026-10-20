@@ -4302,11 +4302,12 @@ export interface TenantRetentionView {
 
 // ---- wire/room_components.go ----
 
-// RoomPackageSchedule is a scheduled task of a room package: an AI task
-// or a notice to the room's members (Recipient kind "ai" or "notice"),
-// its text and when it recurs. Channel is a channel name of the package
-// ("" the room's default channel). Installing creates it disabled, owned
-// by the installer.
+// RoomPackageSchedule is a scheduled task of a room package: an AI task,
+// a notice to the room's members or a request to an agent without the
+// agent (Recipient kind "ai", "notice" or "agent"), its text and when it
+// recurs. Channel is a channel name of the package ("" the room's default
+// channel). Installing creates it disabled, owned by the installer; a
+// request waits for the installer to pick one of their agents.
 export interface RoomPackageSchedule {
   channel?: string;
   text: string;
@@ -4439,7 +4440,9 @@ export interface RoomInstallRequest {
 
 // RoomInstallReply is what installing a room package set up: the new room,
 // From ("name@version"), its channels, the ids of its schedules (all
-// paused), the room expert, the packs turned on and the apps copied in
+// paused) and, of them, the requests to an agent that wait for the
+// installer to pick one of their agents (WaitingForAgent: each one's text
+// in a line), the room expert, the packs turned on and the apps copied in
 // (labels), the expert made from the package's instructions (Instructions,
 // its label), the apps made in the source room and the files copied in
 // (labels), what was left out and why (Skipped), and what the room asks
@@ -4455,6 +4458,7 @@ export interface RoomInstallReply {
   from: string;
   channels: string[];
   schedules: string[];
+  waitingForAgent: string[];
   expert?: string;
   enabled: string[];
   apps: string[];
@@ -4769,7 +4773,9 @@ export const ScheduleRunSkipped = "skipped";
 
 // ScheduleRecipient addresses a scheduled message. Kind "room" drives no
 // agent; kind "agent" carries the target agent's owner + provider (+ core
-// when the owner exposes more than one).
+// when the owner exposes more than one), or none of them: the schedule
+// waits for an agent (a room package's, until its installer picks one of
+// theirs) and is never enabled or run (schedule.WaitsForAgent).
 export interface ScheduleRecipient {
   kind: ScheduleRecipientKind;
   ownerId?: string;

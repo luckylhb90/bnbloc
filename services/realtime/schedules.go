@@ -114,8 +114,23 @@ func gatewayRunsUnavailable(kind string) string {
 	return "AI schedules"
 }
 
+// errWaitsForAgent refuses to enable or run a schedule that asks an agent
+// but names none yet (schedule.WaitsForAgent).
+var errWaitsForAgent = errors.New("this schedule waits for an agent: pick one of your agents for it (edit it), then turn it on")
+
+// runnable is the one place that decides a schedule may be enabled or run:
+// one waiting for an agent may not (it would post a request to nobody, as
+// its creator).
+func runnable(sc wire.RoomSchedule) error {
+	if schedule.WaitsForAgent(sc.Recipient) {
+		return errWaitsForAgent
+	}
+	return nil
+}
+
 // planNextRun computes the next run of an enabled schedule from now; a
-// schedule that would never fire is rejected rather than silently stored.
+// schedule that would never fire, or may not run (runnable), is rejected
+// rather than silently stored.
 func planNextRun(sc *wire.RoomSchedule, now time.Time) error {
 	rec, loc, err := schedule.Validate(sc.Recurrence, sc.Timezone)
 	if err != nil {
@@ -125,6 +140,9 @@ func planNextRun(sc *wire.RoomSchedule, now time.Time) error {
 	sc.NextRunAtMs = 0
 	if !sc.Enabled {
 		return nil
+	}
+	if err := runnable(*sc); err != nil {
+		return err
 	}
 	next, ok := schedule.Next(rec, loc, now)
 	if !ok {
@@ -384,6 +402,10 @@ func (s *Service) handleRunSchedule(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, "only the creator may run this schedule", http.StatusForbidden)
 		return
 	}
+	if err := runnable(cur); err != nil {
+		httpx.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
 	now := time.Now()
 	if schedule.RunsAtGateway(cur.Recipient.Kind) {
 		s.runAtGatewayNow(w, r, cur, now)
@@ -405,8 +427,12 @@ func (s *Service) handleRunSchedule(w http.ResponseWriter, r *http.Request) {
 }
 
 // postScheduled posts sc's message as its creator through PostChat. slot
-// identifies the run (the dedupe key of its post).
+// identifies the run (the dedupe key of its post). A schedule that may not
+// run (runnable) posts nothing.
 func (s *Service) postScheduled(ctx context.Context, sc wire.RoomSchedule, slot time.Time) (int64, error) {
+	if err := runnable(sc); err != nil {
+		return 0, err
+	}
 	post := ChatPost{
 		RoomID:      sc.RoomID,
 		Author:      sc.CreatedBy,
@@ -523,7 +549,7 @@ func (s *Service) runClaimedSchedule(ctx context.Context, sc wire.RoomSchedule, 
 	case errors.Is(err, errUnknownChannel):
 		pause(wire.ScheduleRunError, "the schedule's channel no longer exists")
 		return
-	case errors.Is(err, errEmptyMessage), errors.Is(err, errMessageTooLong):
+	case errors.Is(err, errEmptyMessage), errors.Is(err, errMessageTooLong), errors.Is(err, errWaitsForAgent):
 		pause(wire.ScheduleRunError, err.Error())
 		return
 	default:

@@ -58,7 +58,8 @@ func (r *recorder) count() int {
 }
 
 // An agent schedules for the person who asked it: through its job's grant, as
-// that person, an AI task only, only while the job runs on its bridge.
+// that person, an AI task, a notice or a request to one of the room's agents,
+// only while the job runs on its bridge.
 func TestAgentDoorSchedulesAsTheRequester(t *testing.T) {
 	g := newContentGateway(t)
 	audit := store.NewMemoryExtensionAudit()
@@ -116,7 +117,8 @@ func TestAgentDoorSchedulesAsTheRequester(t *testing.T) {
 		t.Fatalf("no grant acts as the caller: %+v", got)
 	}
 
-	// An agent schedules AI tasks and notices only; a notice goes through.
+	// An agent schedules AI tasks, notices and requests to the room's agents
+	// only; a notice goes through.
 	notice := `{"text":"Fill it in.","recipient":{"kind":"notice","to":"group:Infra","title":"Weekly report"},"recurrence":{"kind":"weekly","time":"10:00","days":[4]},"timezone":"UTC"}`
 	if code, _ := g.do("jack", http.MethodPost, base+"?job=job-maya", "application/json", []byte(notice)); code != http.StatusOK {
 		t.Fatalf("a notice schedule by an agent = %d", code)
@@ -124,18 +126,34 @@ func TestAgentDoorSchedulesAsTheRequester(t *testing.T) {
 	if got, _ := back.last(); got.subject != "maya" || got.body != notice {
 		t.Fatalf("notice backend saw %+v", got)
 	}
-	n := back.count()
-	for name, body := range map[string]string{
-		"a message as the person": `{"text":"x","recipient":{"kind":"room"},"recurrence":{"kind":"daily","time":"09:00"},"timezone":"UTC"}`,
-		"an agent's turn":         `{"text":"x","recipient":{"kind":"agent","ownerId":"jack","provider":"codex"},"recurrence":{"kind":"daily","time":"09:00"},"timezone":"UTC"}`,
-		"no recipient":            `{"text":"x","recurrence":{"kind":"daily","time":"09:00"},"timezone":"UTC"}`,
-		"not json":                `nope`,
+	posts := func() int {
+		back.mu.Lock()
+		defer back.mu.Unlock()
+		n := 0
+		for _, s := range back.list {
+			if s.method == http.MethodPost && s.path == base {
+				n++
+			}
+		}
+		return n
+	}
+	n := posts()
+	for name, c := range map[string]struct {
+		body   string
+		status int
+		want   string
+	}{
+		"a message as the person":   {`{"text":"x","recipient":{"kind":"room"},"recurrence":{"kind":"daily","time":"09:00"},"timezone":"UTC"}`, http.StatusForbidden, "posts as the person is theirs"},
+		"no recipient":              {`{"text":"x","recurrence":{"kind":"daily","time":"09:00"},"timezone":"UTC"}`, http.StatusForbidden, "posts as the person is theirs"},
+		"an agent not online here":  {`{"text":"x","recipient":{"kind":"agent","ownerId":"jack","provider":"codex"},"recurrence":{"kind":"daily","time":"09:00"},"timezone":"UTC"}`, http.StatusForbidden, "not one of the room's agents"},
+		"a request naming no agent": {`{"text":"x","recipient":{"kind":"agent"},"recurrence":{"kind":"daily","time":"09:00"},"timezone":"UTC"}`, http.StatusBadRequest, "names the agent"},
+		"not json":                  {`nope`, http.StatusBadRequest, "invalid json"},
 	} {
-		if code, raw := g.do("jack", http.MethodPost, base+"?job=job-maya", "application/json", []byte(body)); code != http.StatusForbidden || !strings.Contains(string(raw), "AI tasks and notices only") {
+		if code, raw := g.do("jack", http.MethodPost, base+"?job=job-maya", "application/json", []byte(c.body)); code != c.status || !strings.Contains(string(raw), c.want) {
 			t.Errorf("%s = %d %s", name, code, raw)
 		}
 	}
-	if back.count() != n {
+	if posts() != n {
 		t.Fatal("a refused schedule reached the backend")
 	}
 

@@ -69,6 +69,13 @@ func TestRoomPackageValidation(t *testing.T) {
 	if _, err := Validate(roomBundle(t, map[string]any{"schedules": []map[string]any{aiTask(), notice}}, nil), "", Options{}); err != nil {
 		t.Fatalf("an AI task and a notice to the room: %v", err)
 	}
+	// A request to an agent is held without its agent: the installer picks one.
+	ask := map[string]any{"text": "What changed since yesterday?", "recipient": map[string]any{"kind": wire.ScheduleRecipientAgent},
+		"recurrence": map[string]any{"kind": wire.RecurWeekly, "time": "09:30", "days": []int{1, 2, 3, 4, 5}}, "timezone": "Asia/Shanghai", "channel": "reports"}
+	if p, err := Validate(roomBundle(t, map[string]any{"schedules": []map[string]any{ask}}, nil), "", Options{}); err != nil ||
+		p.Manifest.Schedules[0].Recipient.Kind != wire.ScheduleRecipientAgent || p.Manifest.Schedules[0].Recipient.OwnerID != "" {
+		t.Fatalf("a request to an agent without its agent: %v", err)
+	}
 	if _, err := Validate(roomBundle(t, map[string]any{"schedules": nil, "requires": nil, "apps": nil, "sources": nil, "channels": nil, "quickPrompts": nil}, nil), "", Options{}); err != nil {
 		t.Fatalf("a room package of only a description: %v", err)
 	}
@@ -85,10 +92,24 @@ func TestRoomPackageValidation(t *testing.T) {
 	}{
 		{"a schedule that posts as a person", map[string]any{"schedules": with("recipient", func(s map[string]any) {
 			s["recipient"] = map[string]any{"kind": wire.ScheduleRecipientRoom}
-		})}, nil, "AI task or a notice"},
-		{"a schedule that drives an agent", map[string]any{"schedules": with("recipient", func(s map[string]any) {
+		})}, nil, "one that posts as a person is not"},
+		{"a schedule that names no recipient", map[string]any{"schedules": with("recipient", func(s map[string]any) {
+			s["recipient"] = map[string]any{}
+		})}, nil, "one that posts as a person is not"},
+		{"a request naming its agent", map[string]any{"schedules": with("recipient", func(s map[string]any) {
 			s["recipient"] = map[string]any{"kind": wire.ScheduleRecipientAgent, "ownerId": "maya", "provider": "codex"}
-		})}, nil, "AI task or a notice"},
+		})}, nil, "names no agent"},
+		{"a request naming only a core", map[string]any{"schedules": with("recipient", func(s map[string]any) {
+			s["recipient"] = map[string]any{"kind": wire.ScheduleRecipientAgent, "core": "acme"}
+		})}, nil, "names no agent"},
+		{"a request without text", map[string]any{"schedules": with("recipient", func(s map[string]any) {
+			s["recipient"] = map[string]any{"kind": wire.ScheduleRecipientAgent}
+			s["text"] = ""
+		})}, nil, "text is required"},
+		{"a one-time request", map[string]any{"schedules": with("recipient", func(s map[string]any) {
+			s["recipient"] = map[string]any{"kind": wire.ScheduleRecipientAgent}
+			s["recurrence"] = map[string]any{"kind": wire.RecurOnce, "atMs": 1}
+		})}, nil, "recurs"},
 		{"a notice to named people", map[string]any{"schedules": with("recipient", func(s map[string]any) {
 			s["recipient"] = map[string]any{"kind": wire.ScheduleRecipientNotice, "to": []string{"maya"}, "title": "Hi"}
 		})}, nil, "names no people"},

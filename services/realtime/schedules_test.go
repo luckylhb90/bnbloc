@@ -359,6 +359,60 @@ func TestSchedulePermissions(t *testing.T) {
 	}
 }
 
+// A request to an agent that names none waits for one: it is created
+// paused only, is never enabled, run now or run by the scheduler, and its
+// creator picks an agent for it and then turns it on.
+func TestScheduleWaitingForAnAgent(t *testing.T) {
+	f := newSchedFixture(t)
+	waiting := map[string]any{"kind": "agent"}
+	if code, out := f.do("alice", http.MethodPost, "/v1/rooms/room-1/schedules", dailyBody("status?", waiting)); code != http.StatusBadRequest ||
+		!strings.Contains(string(out), "waits for an agent") {
+		t.Fatalf("an enabled create without an agent = %d %s", code, out)
+	}
+	off := dailyBody("status?", waiting)
+	off["enabled"] = false
+	sc := f.create("alice", off)
+	if sc.Enabled || sc.NextRunAtMs != 0 || !schedule.WaitsForAgent(sc.Recipient) {
+		t.Fatalf("created = %+v", sc)
+	}
+	path := "/v1/rooms/room-1/schedules/" + sc.ScheduleID
+	if code, out := f.do("alice", http.MethodPatch, path, map[string]any{"enabled": true}); code != http.StatusBadRequest || !strings.Contains(string(out), "pick one of your agents") {
+		t.Fatalf("enable without an agent = %d %s", code, out)
+	}
+	if code, out := f.do("alice", http.MethodPost, path+"/run", nil); code != http.StatusConflict {
+		t.Fatalf("run now without an agent = %d %s", code, out)
+	}
+	if _, err := f.svc.postScheduled(tenant.NewContext(context.Background(), tenant.Default), f.get(sc.ScheduleID), time.Now()); !errors.Is(err, errWaitsForAgent) {
+		t.Fatalf("a post without an agent = %v", err)
+	}
+	if got := f.get(sc.ScheduleID); got.Enabled || got.RunCount != 0 || len(f.history()) != 0 {
+		t.Fatalf("after the refusals = %+v, %d messages", got, len(f.history()))
+	}
+	// An enabled schedule cannot lose its agent either.
+	on := f.create("alice", dailyBody("standup", map[string]any{"kind": "agent", "ownerId": "bob", "provider": "codex"}))
+	if code, _ := f.do("alice", http.MethodPatch, "/v1/rooms/room-1/schedules/"+on.ScheduleID, map[string]any{"recipient": waiting}); code != http.StatusBadRequest {
+		t.Fatalf("an enabled schedule's agent removed = %d", code)
+	}
+	// The creator picks an agent, then turns it on.
+	if code, out := f.do("alice", http.MethodPatch, path, map[string]any{"recipient": map[string]any{"kind": "agent", "ownerId": "alice", "provider": "codex"}}); code != http.StatusOK {
+		t.Fatalf("pick an agent = %d %s", code, out)
+	}
+	if got := f.get(sc.ScheduleID); got.Enabled || got.Recipient.OwnerID != "alice" {
+		t.Fatalf("after the pick = %+v", got)
+	}
+	if code, out := f.do("alice", http.MethodPatch, path, map[string]any{"enabled": true}); code != http.StatusOK {
+		t.Fatalf("enable after the pick = %d %s", code, out)
+	}
+	got := f.get(sc.ScheduleID)
+	if !got.Enabled || got.NextRunAtMs == 0 {
+		t.Fatalf("after enable = %+v", got)
+	}
+	f.svc.RunDueSchedules(context.Background(), time.UnixMilli(got.NextRunAtMs).Add(time.Second))
+	if msgs := f.history(); len(msgs) != 2 {
+		t.Fatalf("the picked schedule's run posted %d messages, want 2 (with the other one's)", len(msgs))
+	}
+}
+
 func TestSchedulePerMemberCap(t *testing.T) {
 	f := newSchedFixture(t)
 	for i := 0; i < maxSchedulesPerMember; i++ {

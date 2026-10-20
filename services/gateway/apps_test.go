@@ -99,6 +99,7 @@ func newAppGW(t *testing.T) *appGW {
 	// Schedules are on (a room package's install creates them, disabled);
 	// no AI schedule runs here.
 	rt := &realtimehttp.Service{Hub: e.hub, Blobs: disk, Attachments: b.Attachments, Schedules: b.Schedules, AIRuns: noScheduleRuns{}}
+	e.rt = rt // its roster: the room's agents online (a test advertises them)
 	rtSrv := httptest.NewServer(e.countAppCalls(svcauth.Middleware(appGWKey, rt.Handler())))
 	t.Cleanup(rtSrv.Close)
 

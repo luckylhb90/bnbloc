@@ -18,8 +18,9 @@ import (
 // installer owns (the gateway's room_components.go). component.json holds
 // all of it: the room's description (the envelope's, within a room's
 // bound), its welcome and quick prompts, its channels by name, its
-// scheduled tasks (AI tasks and notices to the room's members, created
-// disabled on install), the room expert and the skill and prompt packs it
+// scheduled tasks (AI tasks, notices to the room's members and requests to
+// an agent without the agent, created disabled on install; a request waits
+// for the installer to pick one of their agents), the room expert and the skill and prompt packs it
 // turns on (requires), the MCP tools it needs (requires.mcp), its apps
 // (works by "name@range", copied in like "Use this app") and the sources
 // its tasks ask to read, each with its purpose (wire.RoomSourceAsk: the
@@ -148,8 +149,8 @@ type ScheduleMisfit int
 
 const (
 	ScheduleFits ScheduleMisfit = iota
-	// ScheduleAsPerson posts as a person or drives an agent: in a package
-	// it would act as whoever installs it.
+	// ScheduleAsPerson posts as a person: in a package it would post as
+	// whoever installs it, words they never wrote.
 	ScheduleAsPerson
 	// ScheduleToPeople is a notice to named people or a group: a package
 	// names no people.
@@ -159,12 +160,14 @@ const (
 )
 
 // RoomScheduleMisfit is the one rule of which schedules a room package
-// holds: AI tasks and notices to the room's members that recur. The
-// validator refuses the others and a room's draft leaves them out.
+// holds: AI tasks, notices to the room's members and requests to an agent
+// that recur. The validator refuses the others and a room's draft leaves
+// them out. A request to an agent is held without its agent
+// (PackageRecipient): the installer picks one of theirs.
 func RoomScheduleMisfit(r wire.ScheduleRecipient, rec wire.ScheduleRecurrence) ScheduleMisfit {
 	var to string
 	switch kind := strings.TrimSpace(r.Kind); {
-	case kind != wire.ScheduleRecipientAI && kind != wire.ScheduleRecipientNotice:
+	case kind != wire.ScheduleRecipientAI && kind != wire.ScheduleRecipientNotice && kind != wire.ScheduleRecipientAgent:
 		return ScheduleAsPerson
 	case kind == wire.ScheduleRecipientNotice && (json.Unmarshal(r.To, &to) != nil || strings.TrimSpace(to) != wire.AppNotifyRoom):
 		return ScheduleToPeople
@@ -174,17 +177,32 @@ func RoomScheduleMisfit(r wire.ScheduleRecipient, rec wire.ScheduleRecurrence) S
 	return ScheduleFits
 }
 
+// PackageRecipient is a fitting schedule's recipient as a package holds
+// it: a request to an agent without its agent (a package names no people
+// or their agents; it waits for the installer's pick,
+// schedule.WaitsForAgent), any other unchanged.
+func PackageRecipient(r wire.ScheduleRecipient) wire.ScheduleRecipient {
+	if strings.TrimSpace(r.Kind) == wire.ScheduleRecipientAgent {
+		return wire.ScheduleRecipient{Kind: wire.ScheduleRecipientAgent}
+	}
+	return r
+}
+
 // checkRoomSchedule: a schedule a package holds (RoomScheduleMisfit), its
-// recipient, its text by the schedule rule (schedule.CheckText), its
-// recurrence (schedule.Validate) and a channel of the package.
+// recipient (a request to an agent names none, PackageRecipient), its
+// text by the schedule rule (schedule.CheckText), its recurrence
+// (schedule.Validate) and a channel of the package.
 func checkRoomSchedule(s wire.RoomPackageSchedule, channels map[string]bool) error {
 	switch RoomScheduleMisfit(s.Recipient, s.Recurrence) {
 	case ScheduleAsPerson:
-		return errors.New("a room package's schedule is an AI task or a notice; one that posts as a person or drives an agent is not")
+		return errors.New("a room package's schedule is an AI task, a notice or a request to an agent; one that posts as a person is not")
 	case ScheduleToPeople:
 		return fmt.Errorf("a notice in a room package goes to the room's members (to %q): a package names no people or group", wire.AppNotifyRoom)
 	case ScheduleOnce:
 		return errors.New("a room package's schedule recurs (daily, weekly or cron): a one-time run belongs to one room")
+	}
+	if strings.TrimSpace(s.Recipient.Kind) == wire.ScheduleRecipientAgent && !schedule.WaitsForAgent(s.Recipient) {
+		return errors.New("a request to an agent in a room package names no agent (no ownerId, provider or core): whoever installs it picks one of theirs")
 	}
 	rcpt, err := schedule.NormalizeRecipient(s.Recipient)
 	if err != nil {

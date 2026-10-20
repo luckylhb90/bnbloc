@@ -143,7 +143,21 @@ export function zoneOffsetMs(ms: number, timezone: string): number {
 // the scheduling member: the run is a borrow, driven only while the owner's
 // per-room authorization allows it (the bridge enforces it at drive time).
 export function isBorrowedRecipient(r: ScheduleRecipient, me: string): boolean {
-  return r.kind === "agent" && r.ownerId !== me;
+  return r.kind === "agent" && !waitsForAgent(r) && r.ownerId !== me;
+}
+
+// waitsForAgent reports a request to an agent that names none yet (a room
+// package's, until its installer picks one of their agents): it is never
+// turned on or run (the server's schedule.WaitsForAgent decides; this
+// only shows it).
+export function waitsForAgent(r: ScheduleRecipient): boolean {
+  return r.kind === "agent" && !r.ownerId && !r.provider && !r.core;
+}
+
+// agentToPick is what a member still has to do in a room: their own
+// schedules that wait for them to pick an agent, oldest first.
+export function agentToPick(list: readonly RoomSchedule[], me: string | null): RoomSchedule[] {
+  return list.filter((s) => !!me && s.createdBy === me && waitsForAgent(s.recipient)).sort((a, b) => a.createdAtMs - b.createdAtMs);
 }
 
 // recipientLabel renders the recipient by display name ("room",
@@ -151,6 +165,7 @@ export function isBorrowedRecipient(r: ScheduleRecipient, me: string): boolean {
 export function recipientLabel(r: ScheduleRecipient, nameOf: (id: string) => string = defaultDisplayName): string {
   if (r.kind === "ai") return "AI";
   if (r.kind === "notice") return `notice to ${noticeTargetLabel(r.to)}`;
+  if (waitsForAgent(r)) return "an agent you pick";
   return r.kind === "agent" ? formatAgentHandle(nameOf(r.ownerId ?? ""), r.provider ?? "") : "room";
 }
 
@@ -197,6 +212,7 @@ export function noticeTargetLabel(to: unknown): string {
 
 // scheduleStatus summarizes a schedule's state for the list.
 export function scheduleStatus(s: RoomSchedule): { tone: "ok" | "warn" | "muted"; label: string } {
+  if (waitsForAgent(s.recipient)) return { tone: "warn", label: "Waiting for an agent" };
   if (!s.enabled) return { tone: s.lastError ? "warn" : "muted", label: s.lastError ? "Paused — " + s.lastError : "Paused" };
   if (s.lastStatus === "error" || s.lastStatus === "skipped") return { tone: "warn", label: s.lastError || s.lastStatus };
   return { tone: "ok", label: "Active" };

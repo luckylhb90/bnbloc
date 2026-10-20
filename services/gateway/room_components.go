@@ -19,6 +19,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/ids"
 	"github.com/luckylhb90/bnbloc/internal/obs"
+	"github.com/luckylhb90/bnbloc/internal/schedule"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
@@ -129,9 +130,10 @@ func (s *Service) roomDraft(ctx context.Context, claims auth.Claims, roomID stri
 	return d, nil
 }
 
-// draftSchedules captures the room's AI tasks and notices to its members
-// that recur (contentpkg's rule of a package's schedule); the others are
-// said in Left.
+// draftSchedules captures the room's AI tasks, notices to its members and
+// requests to an agent that recur (contentpkg's rule of a package's
+// schedule), a request without its agent (contentpkg.PackageRecipient);
+// the others, and the agents taken out, are said in Left.
 func (s *Service) draftSchedules(ctx context.Context, claims auth.Claims, roomID string, channels map[string]string, d *wire.RoomComponentDraft) error {
 	var list struct {
 		Schedules []wire.RoomSchedule `json:"schedules"`
@@ -140,7 +142,7 @@ func (s *Service) draftSchedules(ctx context.Context, claims auth.Claims, roomID
 		return err
 	}
 	misfits := map[contentpkg.ScheduleMisfit]int{}
-	links := 0
+	links, agents := 0, 0
 	for _, sc := range list.Schedules {
 		r := sc.Recipient
 		if m := contentpkg.RoomScheduleMisfit(r, sc.Recurrence); m != contentpkg.ScheduleFits {
@@ -151,14 +153,20 @@ func (s *Service) draftSchedules(ctx context.Context, claims auth.Claims, roomID
 			links++
 			r.URL = ""
 		}
-		d.Schedules = append(d.Schedules, wire.RoomPackageSchedule{Channel: channels[sc.ChannelID], Text: sc.Text, Recipient: r,
+		if r.Kind == wire.ScheduleRecipientAgent && r.OwnerID != "" {
+			agents++
+		}
+		d.Schedules = append(d.Schedules, wire.RoomPackageSchedule{Channel: channels[sc.ChannelID], Text: sc.Text, Recipient: contentpkg.PackageRecipient(r),
 			Recurrence: sc.Recurrence, Timezone: sc.Timezone})
+	}
+	if agents > 0 {
+		d.Left = append(d.Left, "the agent of "+plural(agents, "scheduled request")+" (whoever installs it picks one of their agents)")
 	}
 	for _, left := range []struct {
 		misfit contentpkg.ScheduleMisfit
 		what   string
 	}{
-		{contentpkg.ScheduleAsPerson, "posting as a person or driving an agent (a package's schedule is an AI task or a notice)"},
+		{contentpkg.ScheduleAsPerson, "posting as a person (a package's schedule is an AI task, a notice or a request to an agent)"},
 		{contentpkg.ScheduleToPeople, "notifying named people or a group (a package's notice goes to the room's members)"},
 		{contentpkg.ScheduleOnce, "running once (a package's schedule recurs)"},
 	} {
@@ -296,7 +304,7 @@ func (s *Service) installRoom(ctx context.Context, claims auth.Claims, c store.C
 	m := pkg.Manifest
 	roomID := firstNonEmpty(in.RoomID, ids.New("room-"))
 	reply = wire.RoomInstallReply{RoomID: roomID, Name: firstNonEmpty(in.Name, m.DisplayName, c.Name), ComponentID: c.ID, From: c.Name + "@" + v.Version,
-		Channels: []string{}, Schedules: []string{}, Enabled: []string{}, Apps: []string{}, MadeApps: []string{}, Files: []string{}, Skipped: []string{},
+		Channels: []string{}, Schedules: []string{}, WaitingForAgent: []string{}, Enabled: []string{}, Apps: []string{}, MadeApps: []string{}, Files: []string{}, Skipped: []string{},
 		Sources: []wire.RoomSourceAsk{}, Tools: []string{}, ToolsToAdd: []string{}}
 	prompts, err := s.roomQuickPrompts(ctx, claims, m, &reply)
 	if err != nil {
@@ -401,22 +409,29 @@ func (s *Service) roomQuickPrompts(ctx context.Context, claims auth.Claims, m co
 }
 
 // installSchedules creates the package's schedules in the room, disabled,
-// as the installer (realtime's own route and checks). A kind this
-// deployment cannot run (no AI runs: 503) is reported, not created.
+// as the installer (realtime's own route and checks). A request to an
+// agent names none (contentpkg.PackageRecipient), so it waits for the
+// installer to pick one of their agents (schedule.WaitsForAgent): it is
+// listed in WaitingForAgent. A kind this deployment cannot run (no AI
+// runs: 503) is reported, not created.
 func (s *Service) installSchedules(ctx context.Context, claims auth.Claims, roomID string, list []wire.RoomPackageSchedule, channelIDs map[string]string, reply *wire.RoomInstallReply) error {
 	for _, sc := range list {
-		body, _ := json.Marshal(map[string]any{"text": sc.Text, "recipient": sc.Recipient, "recurrence": sc.Recurrence,
+		body, _ := json.Marshal(map[string]any{"text": sc.Text, "recipient": contentpkg.PackageRecipient(sc.Recipient), "recurrence": sc.Recurrence,
 			"timezone": sc.Timezone, "channelId": channelIDs[strings.ToLower(sc.Channel)], "enabled": false})
 		var created wire.RoomSchedule
 		err := s.realtimeDo(ctx, http.MethodPost, "/v1/rooms/"+url.PathEscape(roomID)+"/schedules", body, claims.Subject, claims.Tenant, &created)
 		var rbe *roomBackendError
+		line := truncateRunes(strings.Join(strings.Fields(sc.Text), " "), 60)
 		switch {
 		case errors.As(err, &rbe) && rbe.Status == http.StatusServiceUnavailable:
-			reply.Skipped = append(reply.Skipped, fmt.Sprintf("schedule %q (%s)", truncateRunes(strings.Join(strings.Fields(sc.Text), " "), 60), rbe.Body))
+			reply.Skipped = append(reply.Skipped, fmt.Sprintf("schedule %q (%s)", line, rbe.Body))
 		case err != nil:
 			return fmt.Errorf("create a schedule: %w", err)
 		default:
 			reply.Schedules = append(reply.Schedules, created.ScheduleID)
+			if schedule.WaitsForAgent(created.Recipient) {
+				reply.WaitingForAgent = append(reply.WaitingForAgent, line)
+			}
 		}
 	}
 	return nil
