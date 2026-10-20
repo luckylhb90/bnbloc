@@ -14,7 +14,7 @@ import { usePromptChoices } from "./usePromptChoices";
 export interface ComposerPrompts {
   // The prompts of the member's packs and the room's.
   readonly choices: readonly PromptChoice[];
-  // An empty room's starter prompts: the room's packs', then the built-in
+  // An empty room's starter prompts: the room's packs', then the every-room
   // packs' (starterChoices).
   readonly starters: readonly PromptChoice[];
   // The /command menu: its matches (empty when closed) and highlight.

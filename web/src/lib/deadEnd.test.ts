@@ -1,4 +1,4 @@
-import findAWay from "../../../internal/contentbuiltin/packages/find-a-way/component.json" with { type: "json" };
+import { AssistContracts } from "./wire.gen.ts";
 import {
   createReplyMemo,
   DEAD_END_ACTIONS,
@@ -108,15 +108,16 @@ eq(DEAD_END_ACTIONS.map((action) => fixLabel({ action, target: "browser", why: "
   "Tell your admins",
 ], "the labels");
 
-// The built-in task names this closed list and these causes, so what it
-// proposes is what the card acts on.
+// The task's output contract (wire.AssistContracts) names this closed
+// list and these causes, so what any find-a-way proposes is what the card
+// acts on; the card runs it gated.
 {
-  assert(findAWay.name === FIND_A_WAY, "the built-in's name");
-  const fixes = findAWay.fields.find((f) => f.name === "fixes");
-  const action = fixes?.item?.find((f) => f.name === "action")?.description ?? "";
-  const cause = findAWay.fields.find((f) => f.name === "cause")?.description ?? "";
-  eq(action.split(/,\s*|\s+or\s+/), [...DEAD_END_ACTIONS], "the task's actions");
-  eq(cause.split(/,\s*|\s+or\s+/), [...DEAD_END_CAUSES], "the task's causes");
+  const contract = AssistContracts.find((c) => c.task === FIND_A_WAY);
+  const fixes = contract?.fields?.find((f) => f.name === "fixes");
+  eq(fixes?.item?.find((f) => f.name === "action")?.values, [...DEAD_END_ACTIONS], "the contract's actions");
+  eq(contract?.fields?.find((f) => f.name === "cause")?.values, [...DEAD_END_CAUSES], "the contract's causes");
+  eq(fixes?.item?.map((f) => f.name), ["action", "target", "why"], "a fix's fields");
+  assert(contract?.gate === true, "the contract asks for a gate");
 }
 
 // The card goes under a job's last stored reply (never a notice, an empty

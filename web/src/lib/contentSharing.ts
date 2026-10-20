@@ -2,7 +2,7 @@
 // and-teams.md, step 4): the wire shapes of shares, publish requests,
 // reviews and admin listings, and the pure helpers the Library and the
 // consoles render them with. Calls are in contentSharingApi.ts.
-import { contentLabel, isBuiltin, type ContentComponent, type ContentPublishRequest } from "./contentComponents.ts";
+import { contentLabel, type ContentComponent, type ContentPublishRequest } from "./contentComponents.ts";
 
 export type { ContentAdminComponent, ContentCopy, ContentFileChange, ContentPublishReply, ContentReview, ContentRoomShare, ContentShareReply, ContentShares } from "./wire.gen.ts";
 import type { ContentFileChange, ContentPublishReply, ContentShareReply, PublishApproval } from "./wire.gen.ts";
@@ -22,10 +22,10 @@ export function tenantScopeBody(text: string): { allTenants: true } | { enabledT
 }
 
 // A Library card's actions: only the author shares and publishes their
-// own component; a copy is updated from its author; built-in content does
-// neither.
-export function canShare(c: Pick<ContentComponent, "mine" | "scope">): boolean {
-  return c.mine && !isBuiltin(c);
+// own component (platform content, the default ones included, is never
+// a member's); a copy is updated from its author.
+export function canShare(c: Pick<ContentComponent, "mine">): boolean {
+  return c.mine;
 }
 
 export function updateAvailable(c: Pick<ContentComponent, "scope" | "sourceLatestVersion">): boolean {

@@ -44,10 +44,14 @@ func newSourcesGW(t *testing.T) *sourcesGW {
 	g := &sourcesGW{appGW: e, model: model, sink: sink, outbox: outbox}
 	// A realtime that keeps history and schedules: read_records reads each
 	// run's turn through it, the consent the grantee's tasks.
-	rt := &realtimehttp.Service{Hub: e.hub, Chat: e.b.Chat, Schedules: e.b.Schedules, AIRuns: noScheduleRuns{}, Membership: membership.NewRoomClient(e.roomURL)}
+	rt := &realtimehttp.Service{Hub: e.hub, Blobs: e.blobs, Chat: e.b.Chat, Schedules: e.b.Schedules, AIRuns: noScheduleRuns{}, Membership: membership.NewRoomClient(e.roomURL)}
 	rtSrv := httptest.NewServer(svcauth.Middleware(appGWKey, rt.Handler()))
 	t.Cleanup(rtSrv.Close)
 	e.gw.Backends.Realtime = rtSrv.URL
+	// explain-source-use is the default content's, published for every
+	// organization (the gateway runs the organization's or the platform's).
+	e.gw.ContentComponents = e.b.ContentComponents
+	e.publishDefault(assistForm(t, wire.AssistTaskExplainSourceUse, defaultAssists[wire.AssistTaskExplainSourceUse]))
 	for _, rm := range []struct {
 		id, owner string
 		vis       store.Visibility

@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/luckylhb90/bnbloc/core"
 )
 
 // MaxNameLen bounds a content component's or a skill's name.
@@ -17,6 +19,24 @@ const MaxNameLen = 63
 const (
 	ContentMaxBytes = 8 << 20
 	ContentMaxFiles = 512
+)
+
+// The platform's contracts every pull workspace holds as files in its room
+// records (docs/prd/2026-10-20-no-built-in-content.md §2.5), written by
+// bnbloc and rewritten only when they change. Content that guides an agent
+// (a skill, an expert's instructions) refers to them by these paths and
+// never copies what they say, so nothing drifts from the platform.
+const (
+	// RoomAppSDKFile is the interactive apps' SDK in demo mode: every call
+	// answered in the page's own memory, nothing sent (an agent's
+	// self-test of an app serves it as the page's ~app/sdk.js).
+	RoomAppSDKFile = core.RoomContextDir + "app-sdk/sdk.js"
+	// RoomAppSDKTypesFile is the SDK's declarations: every call, its
+	// options and the caps of an app's data.
+	RoomAppSDKTypesFile = core.RoomContextDir + "app-sdk/sdk.d.ts"
+	// RoomContentLimitsFile is the content validator's bounds: what a
+	// package may hold, per kind.
+	RoomContentLimitsFile = core.RoomContextDir + "content-limits.md"
 )
 
 var nameRE = regexp.MustCompile(fmt.Sprintf(`^[a-z0-9][a-z0-9-]{0,%d}$`, MaxNameLen-1))

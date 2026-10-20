@@ -24,19 +24,23 @@ func TestContentUseCountsTenantMigrationConvergesOldShape(t *testing.T) {
 		"DROP TABLE content_prompt_uses",
 		`CREATE TABLE content_prompt_uses (component_id VARCHAR(64) NOT NULL, prompt_id VARCHAR(64) NOT NULL,
   use_count BIGINT NOT NULL DEFAULT 0, last_used_at_ms BIGINT NOT NULL, PRIMARY KEY (component_id, prompt_id))`,
-		"INSERT INTO content_prompt_uses VALUES ('cc_builtin_starters', 'notes', 7, 1)",
+		"INSERT INTO content_prompt_uses VALUES ('cc_starters', 'notes', 7, 1)",
 		"ALTER TABLE content_component_uses DROP INDEX idx_content_uses_component, ADD KEY idx_content_uses_component (component_id)",
 	} {
 		if _, err := b.DB.ExecContext(ctx, q); err != nil {
 			t.Fatalf("%s: %v", q, err)
 		}
 	}
+	pack := ContentComponent{ID: "cc_starters", Kind: "bnbloc.prompt.package/v1", Name: "starters", Scope: ContentScopePlatform, Status: ContentStatusActive, CreatedAtMs: 1, UpdatedAtMs: 1}
+	if err := b.ContentComponents.CreateContentComponent(ctx, pack, contentVersion(pack.ID, "1.0.0", uniqBlobKey(), 1)); err != nil {
+		t.Fatal(err)
+	}
 	for i := 0; i < 2; i++ {
 		if err := run(ctx, b.DB); err != nil {
 			t.Fatalf("migration run %d: %v", i+1, err)
 		}
 		if i == 0 {
-			if err := b.ContentComponents.RecordContentPromptUse(ctx, "org-a", "cc_builtin_starters", "notes", 2); err != nil {
+			if err := b.ContentComponents.RecordContentPromptUse(ctx, "org-a", "cc_starters", "notes", 2); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -49,8 +53,8 @@ func TestContentUseCountsTenantMigrationConvergesOldShape(t *testing.T) {
 	if err != nil || strings.Join(cols, ",") != "component_id,tenant_id,scope_kind" {
 		t.Fatalf("use index = %v, %v", cols, err)
 	}
-	got, err := b.ContentComponents.ContentPromptUses(ctx, "org-a", []string{"cc_builtin_starters"})
-	if err != nil || got["cc_builtin_starters"]["notes"] != 1 {
+	got, err := b.ContentComponents.ContentPromptUses(ctx, "org-a", []string{"cc_starters"})
+	if err != nil || got["cc_starters"]["notes"] != 1 {
 		t.Fatalf("counts after the migration = %+v, %v; the shared counter is dropped, the new one kept", got, err)
 	}
 }

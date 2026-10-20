@@ -1,4 +1,4 @@
-import describeRoom from "../../../internal/contentbuiltin/packages/describe-room/component.json" with { type: "json" };
+import { AssistContracts, AssistTaskDescribeRoom } from "./wire.gen.ts";
 import { applyDependencies, DEPENDENCY_KINDS, roomChecklist, roomDependencies } from "./roomCapture.ts";
 import { partKey, roomSaveFromDraft, toggleRoomPart, type RoomComponentDraft } from "./roomComponents.ts";
 
@@ -97,10 +97,10 @@ const draft: RoomComponentDraft = {
   eq(applyDependencies(f, []), f, "no dependencies, no change");
 }
 
-// The kinds are describe-room's, in its order.
+// The kinds are describe-room's output contract's (wire.AssistContracts),
+// in its order.
 {
-  const dep = describeRoom.fields.find((f) => f.name === "dependsOn") as { item: { name: string; description: string }[] } | undefined;
-  eq(dep?.item.map((i) => i.name), ["what", "kind", "included", "why"], "a dependency's fields are the package's");
-  const kinds = dep?.item.find((i) => i.name === "kind")?.description ?? "";
-  eq(kinds, `${DEPENDENCY_KINDS.slice(0, -1).join(", ")} or ${DEPENDENCY_KINDS[DEPENDENCY_KINDS.length - 1]}`, "the kinds are the package's");
+  const dep = AssistContracts.find((c) => c.task === AssistTaskDescribeRoom)?.fields?.find((f) => f.name === "dependsOn");
+  eq(dep?.item?.map((i) => i.name), ["what", "kind", "included", "why"], "a dependency's fields are the contract's");
+  eq(dep?.item?.find((i) => i.name === "kind")?.values, [...DEPENDENCY_KINDS], "the kinds are the contract's");
 }

@@ -66,7 +66,7 @@ const req = (status: "pending" | "approved" | "declined", version: string, over 
 {
   assert(canShare(comp()), "author shares");
   assert(!canShare(comp({ mine: false, scope: "shared" })), "a copy is not re-shared");
-  assert(!canShare(comp({ mine: false, scope: "builtin" })), "built-in");
+  assert(!canShare(comp({ mine: false, scope: "platform", owner: "" })), "default content");
   assert(updateAvailable(comp({ scope: "shared", mine: false, sourceLatestVersion: "1.2.0" })), "update available");
   assert(!updateAvailable(comp({ scope: "shared", mine: false })), "no newer version");
 }

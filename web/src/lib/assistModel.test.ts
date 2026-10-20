@@ -1,6 +1,12 @@
-import { assistTask, createSSEParser, DESCRIBE_WORK, ENHANCE_PROMPT, workDraftPatch, type SSEEvent } from "./assistModel.ts";
+import { DRAFT_EXPERT, DRAFT_PROMPT_PACK, DRAFT_SCHEDULE, DRAFT_SKILL_PACK, PLAN_ROOM } from "./assistDrafts.ts";
+import { assistTask, createSSEParser, DESCRIBE_ROOM, DESCRIBE_WORK, ENHANCE_PROMPT, workDraftPatch, type SSEEvent } from "./assistModel.ts";
+import { FIND_A_WAY } from "./deadEnd.ts";
+import { EXPLAIN_SOURCE_USE } from "./roomSources.ts";
+import { FILL_SETTINGS } from "./settingsFill.ts";
+import { SUGGEST_SKILL_DIRS } from "./skillDirs.ts";
+import { REVIEW_SKILL } from "./skillReview.ts";
 import { publishWorkForm } from "./workGallery.ts";
-import type { AssistStatus } from "./wire.gen.ts";
+import { AssistContracts, AssistTaskNameValues, type AssistStatus } from "./wire.gen.ts";
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
@@ -39,7 +45,7 @@ eq(parse(["event: delta\n\ndata: y\n\n"]), [{ event: "message", data: "y" }], "a
 
 // A task in the status: hidden when unavailable or missing.
 {
-  const task = { name: ENHANCE_PROMPT, componentId: "cc_builtin_enhance-prompt", output: "text" as const };
+  const task = { name: ENHANCE_PROMPT, componentId: "cc_enhance", output: "text" as const };
   const on: AssistStatus = { available: true, tasks: [task] };
   eq(assistTask(on, ENHANCE_PROMPT), task, "a runnable task");
   eq(assistTask(on, DESCRIBE_WORK), null, "a missing task");
@@ -72,4 +78,13 @@ eq(parse(["event: delta\n\ndata: y\n\n"]), [{ event: "message", data: "y" }], "a
   );
   eq((workDraftPatch({ description: "x".repeat(900) }, form).description ?? "").length, 500, "the description within the form's bound");
   eq(workDraftPatch({ displayName: 3, tags: [1, 2] }, form), {}, "values of the wrong type are ignored");
+}
+
+// Every task the web runs by name has an output contract, and every
+// contract is a task the web (or the gateway) runs: one list, wire.AssistContracts.
+{
+  const web = [ENHANCE_PROMPT, DESCRIBE_WORK, DESCRIBE_ROOM, DRAFT_EXPERT, DRAFT_SKILL_PACK, DRAFT_PROMPT_PACK, PLAN_ROOM, DRAFT_SCHEDULE,
+    EXPLAIN_SOURCE_USE, REVIEW_SKILL, FILL_SETTINGS, SUGGEST_SKILL_DIRS, FIND_A_WAY];
+  eq([...web].sort(), [...AssistTaskNameValues].sort(), "the web's tasks are the contracts' names");
+  eq(AssistContracts.map((c) => c.task).sort(), [...AssistTaskNameValues].sort(), "one contract per task");
 }

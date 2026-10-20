@@ -9,7 +9,6 @@ import (
 
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
 	"github.com/luckylhb90/bnbloc/internal/auth"
-	"github.com/luckylhb90/bnbloc/internal/contentbuiltin"
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/contentshare"
 	"github.com/luckylhb90/bnbloc/internal/contentuse"
@@ -61,15 +60,11 @@ func (s *Service) handleListPlatformContent(w http.ResponseWriter, r *http.Reque
 }
 
 // handleExportContentPackage answers the signable package of one version
-// of any stored content component (a built-in already ships everywhere).
+// of any stored content component.
 // The response bytes are exactly what gets signed.
 func (s *Service) handleExportContentPackage(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	ctx := r.Context()
 	id := r.PathValue("id")
-	if contentbuiltin.IsBuiltinID(id) {
-		httpx.Error(w, "built-in content already reaches every organization", http.StatusConflict)
-		return
-	}
 	c, err := s.ContentComponents.GetContentComponent(ctx, id)
 	if err != nil {
 		contentStoreErr(w, "load content component failed", err)
@@ -162,7 +157,9 @@ func (s *Service) installPlatformContent(w http.ResponseWriter, r *http.Request,
 		httpx.Error(w, "read the package's bundle: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	cpkg, err := contentpkg.Validate(raw, sha, contentOptions())
+	// An install is a save: an assist under a task's name meets its
+	// output contract (contentpkg.Options.Contracts).
+	cpkg, err := contentpkg.Validate(raw, sha, contentpkg.Options{Contracts: true})
 	if err != nil {
 		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/luckylhb90/bnbloc/core"
+	"github.com/luckylhb90/bnbloc/component"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
@@ -80,20 +80,33 @@ func ReadmeFile(g Guidance) NamedFile {
 	return NamedFile{Name: ".room/README.md", Content: "# How this room works (read before judging anyone's work)\n\n" + SessionGuidance(g)}
 }
 
-// AppSDKPath is where a pull workspace holds the interactive apps' SDK in
-// demo mode (docs/prd/2026-10-13-interactive-apps-self-test.md): every
-// call answered in the page's own memory, nothing sent. An agent's
-// self-test of an app serves it as the page's SDK; the interactive-apps
-// skill names it within the room records.
-const AppSDKPath = core.RoomContextDir + "app-sdk/sdk.js"
+// ContractFiles are the platform's contracts a pull workspace holds as
+// files (docs/prd/2026-10-20-no-built-in-content.md §2.5), at the paths
+// the public contract names: the interactive apps' SDK in demo mode
+// (component.RoomAppSDKFile; every call answered in the page's own memory,
+// nothing sent: an agent's self-test of an app serves it as the page's
+// SDK, docs/prd/2026-10-13-interactive-apps-self-test.md), the SDK's
+// declarations (component.RoomAppSDKTypesFile) and the content
+// validator's bounds (component.RoomContentLimitsFile). Content that
+// guides an agent refers to them and copies none of it.
+func ContractFiles(sdkDemoJS, sdkTypes []byte, contentLimits string) []NamedFile {
+	return []NamedFile{
+		{Name: component.RoomAppSDKFile, Content: string(sdkDemoJS)},
+		{Name: component.RoomAppSDKTypesFile, Content: string(sdkTypes)},
+		{Name: component.RoomContentLimitsFile, Content: contentLimits},
+	}
+}
 
-// AppSDKUpdate is the demo-mode SDK js as a file when the workspace does
-// not hold it yet (st.AppSDKSum, like ReadmeUpdate): written at a
-// workspace's first pass and again only when the SDK changes.
-func AppSDKUpdate(st CtxState, js []byte) (f NamedFile, sum string, changed bool) {
-	h := sha256.Sum256(js)
-	sum = hex.EncodeToString(h[:])
-	return NamedFile{Name: AppSDKPath, Content: string(js)}, sum, sum != st.AppSDKSum
+// ContractsUpdate is files when the workspace does not hold them yet
+// (st.ContractsSum, like ReadmeUpdate): written at a workspace's first
+// pass and again only when one of them changes.
+func ContractsUpdate(st CtxState, files []NamedFile) (out []NamedFile, sum string, changed bool) {
+	h := sha256.New()
+	for _, f := range files {
+		h.Write([]byte(f.Name + "\x00" + f.Content + "\x00"))
+	}
+	sum = hex.EncodeToString(h.Sum(nil))
+	return files, sum, sum != st.ContractsSum
 }
 
 // ReadmeUpdate is .room/README.md when the session's workspace does not hold

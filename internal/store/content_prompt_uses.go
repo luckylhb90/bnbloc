@@ -10,13 +10,12 @@ import (
 // ContentPromptUseStore counts how often each prompt of a prompt pack was
 // inserted (docs/prd/2026-10-12-experts-and-teams.md §4 "Usage counts"):
 // one write per insertion in a composer, never per keystroke. Counts are
-// per organization: built-in and platform packs are used by every
+// per organization: platform packs are used by every
 // organization, and one's insertions never show in another's counts
 // (docs/bugs/2026-10-13-starters-and-shared-use-counts.md).
 type ContentPromptUseStore interface {
 	// RecordContentPromptUse counts one insertion of a pack's prompt in
-	// tenant. A built-in pack has no row; the built-in overlay vouches
-	// for it.
+	// tenant; a pack that does not exist is ErrContentNotFound.
 	RecordContentPromptUse(ctx context.Context, tenantID, componentID, promptID string, atMs int64) error
 	// ContentPromptUses returns tenant's use counts of the given
 	// components' prompts (component -> prompt -> uses; unused prompts are
@@ -30,7 +29,7 @@ func (s *MemoryContentComponents) RecordContentPromptUse(_ context.Context, tena
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.components[componentID]; !ok && !strings.HasPrefix(componentID, BuiltinContentIDPrefix) {
+	if _, ok := s.components[componentID]; !ok {
 		return ErrContentNotFound
 	}
 	if s.promptUses[componentID] == nil {
@@ -64,18 +63,10 @@ func (s *MemoryContentComponents) ContentPromptUses(_ context.Context, tenantID 
 
 // RecordContentPromptUse upserts the prompt's counter in tenant (one row
 // per tenant and prompt, written once per insertion). A component that
-// does not exist is ErrContentNotFound; a built-in one has no row to check
-// (the overlay checked that it exists).
+// does not exist is ErrContentNotFound.
 func (s *MySQLContentComponents) RecordContentPromptUse(ctx context.Context, tenantID, componentID, promptID string, atMs int64) error {
 	if tenantID == "" {
 		return tenant.ErrNoTenant
-	}
-	if strings.HasPrefix(componentID, BuiltinContentIDPrefix) {
-		_, err := s.DB.ExecContext(ctx, `INSERT INTO content_prompt_uses (component_id, tenant_id, prompt_id, use_count, last_used_at_ms)
-  VALUES (?, ?, ?, 1, ?)
-  ON DUPLICATE KEY UPDATE use_count = use_count + 1, last_used_at_ms = GREATEST(last_used_at_ms, VALUES(last_used_at_ms))`,
-			componentID, tenantID, promptID, atMs)
-		return err
 	}
 	res, err := s.DB.ExecContext(ctx, `INSERT INTO content_prompt_uses (component_id, tenant_id, prompt_id, use_count, last_used_at_ms)
   SELECT id, ?, ?, 1, ? FROM content_components WHERE id = ?

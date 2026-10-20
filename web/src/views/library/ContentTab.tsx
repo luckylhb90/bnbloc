@@ -10,7 +10,7 @@ import {
   UploadSimpleIcon,
   WrenchIcon,
 } from "@phosphor-icons/react";
-import { contentKindWord, contentLabel, isBuiltin, isTeam, matchesContent, usageLine, type ContentComponent } from "@/lib/contentComponents";
+import { contentKindWord, contentLabel, isTeam, matchesContent, usageLine, type ContentComponent } from "@/lib/contentComponents";
 import { relativeTime } from "@/lib/format";
 import { Button } from "@/ui/Button";
 import { Badge, Card, Skeleton } from "@/ui/Card";
@@ -42,7 +42,7 @@ const COPY: Record<"expert" | "skill" | "assist", { subtitle: string; empty: str
   assist: {
     subtitle: "Tasks of the AI assist behind manual entries (the composer's Enhance prompt, Fill with AI)",
     empty: "No AI assists",
-    hint: "The built-in ones run when your deployment has an assist model. Create one with the same name as a built-in to restyle it for you, or publish it to restyle it for your organization.",
+    hint: "The default ones are published by your platform's operators and run when your deployment has an assist model. Create one with the same name to restyle it for you, or publish it to restyle it for your organization.",
     search: "Search AI assists…",
   },
 };
@@ -52,7 +52,8 @@ const COPY: Record<"expert" | "skill" | "assist", { subtitle: string; empty: str
 // AI in the expert workshop, or manually), import, new version and delete;
 // a skill pack can be turned on for all the member's agents. An AI assist
 // is created manually only (the workshop drafts agents' content), never
-// imported and never used in a room. Built-in content is read-only.
+// imported and never used in a room. Platform content (the default ones
+// included) is read-only here: the member restyles it with their own.
 // skillOnText is the toast of turning a skill pack on or off for me.
 function skillOnText(c: ContentComponent, on: boolean): string {
   return on ? `${contentLabel(c)} is on for all your agents` : `${contentLabel(c)} is off for your agents`;
@@ -139,7 +140,7 @@ export function ContentTab({
                     </p>
                   </div>
                   {isTeam(c) && <TeamBadge />}
-                  {isBuiltin(c) && <Badge tone="accent">Built-in</Badge>}
+                  {c.scope === "platform" && <Badge tone="accent">Default</Badge>}
                   {c.category && <Badge>{c.category}</Badge>}
                 </div>
                 {c.description && <p className="line-clamp-3 text-sm text-[var(--color-fg-muted)]">{c.description}</p>}
@@ -165,7 +166,7 @@ export function ContentTab({
                 <div className="mt-auto flex items-center gap-2 pt-1 text-xs text-[var(--color-fg-subtle)]">
                   <span className="min-w-0 flex-1 truncate">
                     <ContentByline component={c} />
-                    {!isBuiltin(c) && ` · ${relativeTime(c.updatedAtMs)}`}
+                    {` · ${relativeTime(c.updatedAtMs)}`}
                     {c.uses > 0 ? ` · in use ${c.uses}×` : ""}
                     {usageLine(c) ? ` · ${usageLine(c)}` : ""}
                   </span>

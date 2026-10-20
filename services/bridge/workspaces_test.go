@@ -13,7 +13,9 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/luckylhb90/bnbloc/component"
 	corepkg "github.com/luckylhb90/bnbloc/core"
+	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/digest"
 	"github.com/luckylhb90/bnbloc/internal/roomlog"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -451,26 +453,34 @@ func TestDeliverableCopiesInTheWorkspace(t *testing.T) {
 	}
 }
 
-// A pull workspace holds the app SDK in demo mode for an agent's self-test
-// of an app (docs/prd/2026-10-13-interactive-apps-self-test.md): written
-// at the workspace's first pass, not again while it is unchanged, whichever
-// session drives.
-func TestWorkspaceHoldsTheDemoAppSDK(t *testing.T) {
+// A pull workspace holds the platform's contracts as files: the app SDK in
+// demo mode for an agent's self-test of an app
+// (docs/prd/2026-10-13-interactive-apps-self-test.md), its declarations
+// and the content limits (docs/prd/2026-10-20-no-built-in-content.md
+// §2.5): written at the workspace's first pass, not again while they are
+// unchanged, whichever session drives.
+func TestWorkspaceHoldsTheContracts(t *testing.T) {
 	g := newPullGateway(t)
 	c := newFSCore(t)
 	b := fsBridge(t, g, c, "")
 	fsDrive(t, b, "job-1", appBuilder())
 	fsDrive(t, b, "job-2", nil)
 	fsDrive(t, b, "job-3", nil)
-	got, err := os.ReadFile(filepath.Join(c.root, "ws1", filepath.FromSlash(roomlog.AppSDKPath)))
-	if err != nil || string(got) != string(appsdk.DemoJS) {
-		t.Fatalf("the workspace's SDK is not the demo-mode SDK (%v)", err)
-	}
-	c.mu.Lock()
-	n := c.writes[roomlog.AppSDKPath]
-	c.mu.Unlock()
-	if n != 1 {
-		t.Fatalf("the SDK was written %d times over three turns of two sessions, want once", n)
+	for path, want := range map[string]string{
+		component.RoomAppSDKFile:        string(appsdk.DemoJS),
+		component.RoomAppSDKTypesFile:   string(appsdk.Types),
+		component.RoomContentLimitsFile: contentpkg.LimitsDoc(),
+	} {
+		got, err := os.ReadFile(filepath.Join(c.root, "ws1", filepath.FromSlash(path)))
+		if err != nil || string(got) != want {
+			t.Fatalf("the workspace's %s is not the platform's (%v)", path, err)
+		}
+		c.mu.Lock()
+		n := c.writes[path]
+		c.mu.Unlock()
+		if n != 1 {
+			t.Fatalf("%s was written %d times over three turns of two sessions, want once", path, n)
+		}
 	}
 }
 

@@ -35,7 +35,7 @@ type LibraryItem struct {
 	Description string `json:"description,omitempty"`
 	Version     string `json:"version"`
 	// Scope is a content component's scope (personal, org, platform,
-	// shared, builtin); an MCP tool is the platform's.
+	// shared); an MCP tool is the platform's.
 	Scope string `json:"scope"`
 	// Mine marks the requester's own component.
 	Mine        bool  `json:"mine,omitempty"`

@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { BUILDER_EXPERT_ID, contentLabel, type ContentComponent } from "@/lib/contentComponents";
+import { contentLabel, type ContentComponent } from "@/lib/contentComponents";
 import { contentApi } from "@/lib/contentComponentsApi";
 import { platformAgentsApi } from "@/lib/platformAgentsApi";
 import { announcePromptPacksChanged } from "@/lib/promptPacksApi";
@@ -10,7 +10,9 @@ import { composerAgentPicks, composerDrafts, composerExpertPicks, queueLibraryTa
 import { routeHash } from "@/lib/useHashRoute";
 import {
   WORKSHOP_ROOM_NAME,
+  builderOf,
   cachedWorkshop,
+  isBuilder,
   libraryTabOf,
   rememberWorkshop,
   tryItDraft,
@@ -28,12 +30,13 @@ import { errorText } from "@/lib/errors";
 // Room ids are global: a taken id is retried with a fresh suffix.
 const CREATE_ATTEMPTS = 3;
 
-// pinsBuilder reports whether a room pins the builder expert (what makes a
-// room the member's workshop). A room that cannot be read is not it.
+// pinsBuilder reports whether a room pins an Expert builder (an expert
+// named expert-builder: what makes a room the member's workshop). A room
+// that cannot be read is not it.
 async function pinsBuilder(roomId: string): Promise<boolean> {
   try {
     const uses = await contentApi.uses(roomId);
-    return (uses.room ?? []).some((u) => u.componentId === BUILDER_EXPERT_ID);
+    return (uses.room ?? []).some((u) => isBuilder(u.component));
   } catch {
     return false;
   }
@@ -52,9 +55,10 @@ async function createWorkshopRoom(): Promise<string> {
 }
 
 // findOrCreateWorkshop returns the member's workshop room: the cached one,
-// else an owned private room pinning the builder (rooms named "Expert
-// workshop" first), else a new private room with the builder pinned.
-async function findOrCreateWorkshop(subject: string, reauth: () => Promise<void>): Promise<string> {
+// else an owned private room pinning a builder (rooms named "Expert
+// workshop" first), else a new private room with the builder pinned (when
+// one is installed).
+async function findOrCreateWorkshop(subject: string, reauth: () => Promise<void>, builder: ContentComponent | null): Promise<string> {
   const storage = browserStorage();
   const rooms = (await api.myRooms(subject)).rooms ?? [];
   for (const id of workshopCandidates(rooms, cachedWorkshop(storage, subject))) {
@@ -66,17 +70,19 @@ async function findOrCreateWorkshop(subject: string, reauth: () => Promise<void>
   const roomId = await createWorkshopRoom();
   // Refresh the session's room scope so the new room is reachable.
   await reauth().catch(() => {});
-  await contentApi.putUse("room", BUILDER_EXPERT_ID, { roomId });
+  if (builder) await contentApi.putUse("room", builder.id, { roomId });
   rememberWorkshop(storage, subject, roomId);
   return roomId;
 }
 
-// builderComponent is the built-in builder as the content API serves it
-// (its quick prompts are the workshop's prefills), or null when it cannot
-// be read: the workshop still opens, with an empty draft.
+// builderComponent is the Expert builder of the member's Library, found by
+// name (builderOf: the nearest scope's), as the content API lists it (its
+// quick prompts are the workshop's prefills), or null when none is
+// installed or the Library cannot be read: the workshop still opens, with
+// an empty draft and no expert picked.
 async function builderComponent(): Promise<ContentComponent | null> {
   try {
-    return (await contentApi.get(BUILDER_EXPERT_ID)).component;
+    return builderOf((await contentApi.list("expert")).components ?? []);
   } catch {
     return null;
   }
@@ -95,11 +101,11 @@ export function useOpenWorkshop(onOpenRoom: (roomId: string) => void): { readonl
       if (!subject || busy) return;
       setBusy(true);
       try {
-        const [roomId, offered, own, builder] = await Promise.all([
-          findOrCreateWorkshop(subject, reauth),
+        const builder = await builderComponent();
+        const [roomId, offered, own] = await Promise.all([
+          findOrCreateWorkshop(subject, reauth, builder),
           platformAgentsApi.available().then((r) => r.agents).catch(() => []),
           api.myAgents().then((r) => r.agents ?? []).catch(() => []),
-          builderComponent(),
         ]);
         const pick = workshopAgentPick(workshopAgent(offered, own, subject));
         if (pick && !pick.own) {
@@ -108,7 +114,8 @@ export function useOpenWorkshop(onOpenRoom: (roomId: string) => void): { readonl
         }
         if (pick) composerAgentPicks.queue(roomId, pick);
         else toast.info("Connect an agent to use the builder: install the desktop app or ask your admin for a platform agent");
-        composerExpertPicks.queue(roomId, { id: BUILDER_EXPERT_ID });
+        if (builder) composerExpertPicks.queue(roomId, { id: builder.id });
+        else toast.info("No Expert builder is installed: ask your admin to publish the default content, or describe what you want to your agent");
         const draft = workshopDraft(builder, req);
         if (draft) composerDrafts.queue(roomId, draft);
         onOpenRoom(roomId);

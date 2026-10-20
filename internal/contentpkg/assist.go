@@ -211,3 +211,50 @@ func (m Manifest) AssistSpec() *wire.AssistSpec {
 	}
 	return &wire.AssistSpec{Output: m.Output, Fields: m.Fields, Context: m.Context, Gate: m.Gate}
 }
+
+// CheckAssistContract holds an assist named after a task its callers run
+// (wire.AssistContracts) to that task's contract: the output, every
+// contract field declared in its type (an items field with the contract's
+// item fields), and a gate when the caller runs it gated. More fields than
+// the contract's are allowed; an assist of any other name is free.
+func CheckAssistContract(m Manifest) error {
+	c, ok := wire.AssistContractOf(m.Name)
+	if !ok {
+		return nil
+	}
+	if m.Output != c.Output {
+		return fmt.Errorf("the %s assist answers %s (its callers read it so): this one declares %q", c.Task, c.Output, m.Output)
+	}
+	if err := checkContractFields(c.Task, "", c.Fields, m.Fields); err != nil {
+		return err
+	}
+	if c.Gate && m.Gate == nil {
+		return fmt.Errorf("the %s assist declares a gate: its callers run it gated", c.Task)
+	}
+	return nil
+}
+
+func checkContractFields(task, in string, want []wire.AssistContractField, have []wire.AssistField) error {
+	for _, w := range want {
+		at := in + w.Name
+		i := slices.IndexFunc(have, func(f wire.AssistField) bool { return f.Name == w.Name })
+		if i < 0 {
+			return fmt.Errorf("the %s assist declares the field %q: its callers read it", task, at)
+		}
+		if got, wantType := fieldType(have[i].Type), fieldType(w.Type); got != wantType {
+			return fmt.Errorf("the %s assist's field %q is %s, not %s", task, at, wantType, got)
+		}
+		if err := checkContractFields(task, at+".", w.Item, have[i].Item); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// fieldType is a field's type, text when empty.
+func fieldType(t string) string {
+	if t == "" {
+		return wire.AssistFieldText
+	}
+	return t
+}

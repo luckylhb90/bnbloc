@@ -13,6 +13,7 @@ import (
 
 	corepkg "github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/core/protocol"
+	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/roomlog"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 	"github.com/luckylhb90/bnbloc/services/gateway/appsdk"
@@ -137,8 +138,9 @@ func (b *Bridge) attachmentMeta(ctx context.Context, room, id string) wire.ChatA
 // (roomlog owns their wording): the session's guidance (README.md, rendered
 // with its facts g) when the workspace does not hold its current text yet
 // (roomlog.ReadmeUpdate: once, not every turn; readmeSum is what to record
-// once written), the app SDK in demo mode the same way
-// (roomlog.AppSDKUpdate),
+// once written), the platform's contract files the same way (the app SDK
+// in demo mode, its declarations and the content limits:
+// roomlog.ContractsUpdate),
 // then the data rewritten every turn: the deliverables with their producers
 // (artifacts.md), the requester's Library (library.md, read with the job's
 // grant) and the live interaction trail (live.md: what members did inside
@@ -156,12 +158,14 @@ func (b *Bridge) roomRecordFiles(ctx context.Context, room, jobID string, self r
 	if changed {
 		files = append(files, readme)
 	}
-	// The app SDK in demo mode, for an agent's self-test of an app it
-	// builds (served as the page's ~app/sdk.js; nothing it does is sent).
-	sdk, sdkSum, changed := roomlog.AppSDKUpdate(st, appsdk.DemoJS)
-	next.AppSDKSum = sdkSum
+	// The platform's contracts as files: the app SDK in demo mode, for an
+	// agent's self-test of an app it builds (served as the page's
+	// ~app/sdk.js; nothing it does is sent), its declarations and the
+	// content limits, which content refers to instead of copying.
+	contracts, contractsSum, changed := roomlog.ContractsUpdate(st, roomlog.ContractFiles(appsdk.DemoJS, appsdk.Types, contentpkg.LimitsDoc()))
+	next.ContractsSum = contractsSum
 	if changed {
-		files = append(files, sdk)
+		files = append(files, contracts...)
 	}
 	apps, aerr := roomlog.ReadApps(ctx, b.gatewayGET, room, jobID, &b.producers)
 	if aerr != nil {
@@ -282,7 +286,7 @@ func (b *Bridge) materializeRoomContext(ctx context.Context, w corepkg.Workspace
 		index = append(index, rec)
 	}
 	records, recorded := b.roomRecordFiles(ctx, room, jobID, self, st, g, cp)
-	next.ReadmeSum, next.AppsListed, next.AppSDKSum = recorded.ReadmeSum, recorded.AppsListed, recorded.AppSDKSum
+	next.ReadmeSum, next.AppsListed, next.ContractsSum = recorded.ReadmeSum, recorded.AppsListed, recorded.ContractsSum
 	files = append(append(files, records...), roomlog.IndexFile(index))
 	for _, f := range files {
 		if err := w.WriteWorkspaceFile(ctx, ep, workspaceID, f.Name, f.Content); err != nil {

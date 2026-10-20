@@ -1,6 +1,5 @@
-import explainSourceUse from "../../../internal/contentbuiltin/packages/explain-source-use/component.json" with { type: "json" };
 import { driftView, EXPLAIN_SOURCE_USE, explainReply, grantState, reviewLine, SCOPE_LABELS, sourceAsk, sourcesProblem, sourceState } from "./roomSources.ts";
-import { RoomSourceScopeValues } from "./wire.gen.ts";
+import { AssistContracts, RoomSourceScopeValues } from "./wire.gen.ts";
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
@@ -38,8 +37,13 @@ eq(driftView({ scheduleId: "s2", before: "", after: "Post a digest.", summary: "
 eq(driftView({ scheduleId: "s2", before: "", after: "Post a digest.", summary: "Posts a digest.", atMs: 1 }).explanation, "Posts a digest.", "a change within the purpose");
 assert(driftView({ scheduleId: "s3", before: "a", after: "b", atMs: 1 }).explanation.includes("No AI explanation"), "a change without an explanation says so");
 
-// explain-source-use's reply is the package's fields.
-eq(explainSourceUse.name, EXPLAIN_SOURCE_USE, "the built-in assist's name");
-eq(explainSourceUse.fields.map((f) => f.name), ["summary", "uses", "mismatch"], "the reply's fields are the package's");
+// explain-source-use's reply is its output contract's fields
+// (wire.AssistContracts), and it explains a consent (resolved organization
+// then platform, never a member's copy).
+{
+  const contract = AssistContracts.find((c) => c.task === EXPLAIN_SOURCE_USE);
+  eq(contract?.fields?.map((f) => f.name), ["summary", "uses", "mismatch"], "the reply's fields are the contract's");
+  eq(contract?.consent, true, "a consent task");
+}
 eq(explainReply({ summary: " Posts a digest. ", uses: ["Digest", 3, " "], mismatch: " Names people. " }), { summary: "Posts a digest.", uses: ["Digest"], mismatch: "Names people." }, "a reply read");
 eq(explainReply({ summary: "", uses: [] }), null, "an empty reply");

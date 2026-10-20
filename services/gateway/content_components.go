@@ -17,7 +17,6 @@ import (
 
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
 	"github.com/luckylhb90/bnbloc/internal/auth"
-	"github.com/luckylhb90/bnbloc/internal/contentbuiltin"
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/contentshare"
 	"github.com/luckylhb90/bnbloc/internal/contentuse"
@@ -200,6 +199,7 @@ func contentView(c store.ContentComponent, v store.ContentComponentVersion, clai
 		out.QuickPrompts = append(out.QuickPrompts, wire.ContentQuickPrompt{Title: q.Title, Prompt: q.Prompt})
 	}
 	promptFields(m, &out)
+	out.EveryRoom = m.EveryRoom
 	// Content the caller wrote needs no confirmation; a copy someone shared
 	// with them does (the author is the trust owner).
 	authored := c.Author() != "" && c.Author() == claims.Subject && c.TenantID == claims.Tenant
@@ -833,9 +833,6 @@ var contentBundles = struct {
 func (s *Service) contentPackage(ctx context.Context, v store.ContentComponentVersion) (*contentpkg.Package, error) {
 	contentBundles.once.Do(func() { contentBundles.cache = tarbundle.NewCache(64 << 20) })
 	b, err := contentBundles.cache.LoadPinned(v.SHA256, contentpkg.BundleLimits(), func() ([]byte, error) {
-		if raw, ok := contentbuiltin.Bundle(v.BundleBlobKey); ok {
-			return raw, nil
-		}
 		return s.readArtifactBlob(ctx, v.BundleBlobKey, contentpkg.BundleLimits().MaxArchiveBytes())
 	})
 	if err != nil {

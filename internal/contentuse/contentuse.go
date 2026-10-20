@@ -354,7 +354,7 @@ func resolveReference(ctx context.Context, st store.ContentComponentStore, v ext
 
 // Visible lists the content components of a kind ("" = every kind) the
 // viewer may see, each once: their own (personal and the shared copies they
-// hold), their organization's, the platform's and the built-in ones, all
+// hold), their organization's and the platform's (the default content), all
 // through the one visibility function. It is the Library's listing and the
 // candidate set of name@range references.
 func Visible(ctx context.Context, st store.ContentComponentStore, v extpipe.Viewer, kind string) ([]store.ContentComponent, error) {
@@ -363,7 +363,6 @@ func Visible(ctx context.Context, st store.ContentComponentStore, v extpipe.View
 	queries := []store.ContentComponentQuery{
 		{TenantID: v.Tenant, Kind: kind, Scopes: []store.ContentScope{store.ContentScopeOrg}},
 		{Kind: kind, Scopes: []store.ContentScope{store.ContentScopePlatform}},
-		{Kind: kind, Scopes: []store.ContentScope{store.ContentScopeBuiltin}},
 	}
 	if v.Subject != "" {
 		own := store.ContentComponentQuery{TenantID: v.Tenant, Owner: v.Subject, Kind: kind, Scopes: []store.ContentScope{store.ContentScopePersonal, store.ContentScopeShared}}

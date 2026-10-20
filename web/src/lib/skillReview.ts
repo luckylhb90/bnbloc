@@ -1,7 +1,7 @@
 import { fieldList, fieldText } from "./assistDrafts.ts";
 import { cleanTags, tagProblem } from "./contentComponents.ts";
 import { slugify } from "./promptPacks.ts";
-import { MaxAssistText, type AssistJSONReply } from "./wire.gen.ts";
+import { AssistTaskReviewSkill, MaxAssistText, type AssistJSONReply } from "./wire.gen.ts";
 
 // Publishing a local skill to the library, its pure side: the files of the
 // packed skill (its provider's tar), the text the review-skill assist is
@@ -10,8 +10,8 @@ import { MaxAssistText, type AssistJSONReply } from "./wire.gen.ts";
 // publish stays the member's (views/skills/SkillPublishDialog.tsx); the
 // content validator owns what the entry may be. Unit-tested.
 
-/** The built-in assist that reviews a skill before it is published. */
-export const REVIEW_SKILL = "review-skill";
+/** The assist that reviews a skill before it is published (resolved by name; its output contract is wire.AssistContracts). */
+export const REVIEW_SKILL = AssistTaskReviewSkill;
 
 export interface TarFile {
   readonly path: string;

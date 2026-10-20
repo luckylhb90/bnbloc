@@ -14,6 +14,22 @@ export const MaxNameLen = 63;
 export const ContentMaxBytes = 8388608;
 export const ContentMaxFiles = 512;
 
+// The platform's contracts every pull workspace holds as files in its room
+// records (docs/prd/2026-10-20-no-built-in-content.md §2.5), written by
+// bnbloc and rewritten only when they change. Content that guides an agent
+// (a skill, an expert's instructions) refers to them by these paths and
+// never copies what they say, so nothing drifts from the platform.
+// RoomAppSDKFile is the interactive apps' SDK in demo mode: every call
+// answered in the page's own memory, nothing sent (an agent's
+// self-test of an app serves it as the page's ~app/sdk.js).
+export const RoomAppSDKFile = ".room/app-sdk/sdk.js";
+// RoomAppSDKTypesFile is the SDK's declarations: every call, its
+// options and the caps of an app's data.
+export const RoomAppSDKTypesFile = ".room/app-sdk/sdk.d.ts";
+// RoomContentLimitsFile is the content validator's bounds: what a
+// package may hold, per kind.
+export const RoomContentLimitsFile = ".room/content-limits.md";
+
 // ---- component/decision.go ----
 
 // Bounds of a choice question of the decision API (POST /v1/systemone,
@@ -1066,6 +1082,55 @@ export interface AssistModelTest {
   usage: AssistUsage;
 }
 
+// ---- wire/assist_contracts.go ----
+
+// The tasks the web and the gateway run by name.
+export const AssistTaskEnhancePrompt = "enhance-prompt";
+export const AssistTaskDescribeWork = "describe-work";
+export const AssistTaskDescribeRoom = "describe-room";
+export const AssistTaskDraftExpert = "draft-expert";
+export const AssistTaskDraftSkillPack = "draft-skill-pack";
+export const AssistTaskDraftPromptPack = "draft-prompt-pack";
+export const AssistTaskPlanRoom = "plan-room";
+export const AssistTaskDraftSchedule = "draft-schedule";
+export const AssistTaskExplainSourceUse = "explain-source-use";
+export const AssistTaskReviewSkill = "review-skill";
+export const AssistTaskFillSettings = "fill-settings";
+export const AssistTaskSuggestSkillDirs = "suggest-skill-dirs";
+export const AssistTaskFindAWay = "find-a-way";
+
+// AssistContract is what an assist named Task must answer: its output, the
+// fields of a JSON reply the caller reads (a package may declare more,
+// never fewer, and each in the contract's type), whether it must have a
+// gate (a caller that runs it gated), and whether it explains a consent.
+export interface AssistContract {
+  task: AssistTaskName;
+  output: AssistOutput;
+  fields?: AssistContractField[];
+  // Gate: the caller runs it gated (AssistRequest.Gated), so a package
+  // of this name declares a gate.
+  gate?: boolean;
+  // Consent: the gateway runs it to explain a decision only an
+  // organization admin makes (a room's source grant), so it resolves to
+  // the organization's version, else the platform's, never a member's
+  // own or a shared copy (internal/assist, ConsentTask).
+  consent?: boolean;
+}
+
+// AssistContractField is one field of a contract: its name and type
+// (AssistFieldTypes, empty = text), an items field's item fields, and
+// Values, the closed list the caller acts on (any other value is read as
+// the caller's fallback): the instructions should offer exactly these.
+export interface AssistContractField {
+  name: string;
+  type?: AssistFieldType;
+  item?: AssistContractField[];
+  values?: string[];
+}
+
+// AssistContracts are the contracts, one per task name.
+export const AssistContracts: readonly AssistContract[] = [{ task: "enhance-prompt", output: "text" }, { task: "describe-work", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "category", values: ["office", "data", "productivity", "content", "learning", "engineering", "finance", "life", "other"] }, { name: "tags", type: "list" }] }, { task: "describe-room", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "category" }, { name: "tags", type: "list" }, { name: "welcome" }, { name: "instructions" }, { name: "dependsOn", type: "items", item: [{ name: "what" }, { name: "kind", values: ["instructions", "app", "file", "tool", "schedule", "agent", "data", "other"] }, { name: "included", values: ["yes", "no"] }, { name: "why" }] }, { name: "findings", type: "items", item: [{ name: "field" }, { name: "quote" }, { name: "why", values: ["secret", "internal-link", "personal-name", "private-data"] }] }] }, { task: "draft-expert", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "instructions" }, { name: "welcome" }, { name: "quickPrompts", type: "items", item: [{ name: "title" }, { name: "prompt" }] }, { name: "tags", type: "list" }] }, { task: "draft-skill-pack", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "skills", type: "items", item: [{ name: "name" }, { name: "description" }, { name: "body" }] }, { name: "tags", type: "list" }] }, { task: "draft-prompt-pack", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "prompts", type: "items", item: [{ name: "title" }, { name: "body" }] }, { name: "tags", type: "list" }] }, { task: "plan-room", output: "json", fields: [{ name: "roomId" }, { name: "name" }, { name: "description" }, { name: "expert" }, { name: "skills", type: "list" }, { name: "firstMessage" }] }, { task: "draft-schedule", output: "json", fields: [{ name: "text" }, { name: "kind", values: ["once", "daily", "weekly", "cron"] }, { name: "time" }, { name: "days", type: "list" }, { name: "cron" }, { name: "at" }] }, { task: "explain-source-use", output: "json", fields: [{ name: "summary" }, { name: "uses", type: "list" }, { name: "mismatch" }], consent: true }, { task: "review-skill", output: "json", fields: [{ name: "findings", type: "list" }, { name: "name" }, { name: "displayName" }, { name: "description" }, { name: "tags", type: "list" }] }, { task: "fill-settings", output: "json", fields: [{ name: "values", type: "items", item: [{ name: "key" }, { name: "value" }] }, { name: "notes" }] }, { task: "suggest-skill-dirs", output: "json", fields: [{ name: "add", type: "items", item: [{ name: "path" }, { name: "why" }] }, { name: "notes" }] }, { task: "find-a-way", output: "json", fields: [{ name: "cause", values: ["access", "missing-file", "capability", "unclear", "agent-error", "other"] }, { name: "summary" }, { name: "fixes", type: "items", item: [{ name: "action", values: ["install", "ask-agent", "attach", "own-agent", "rephrase", "report"] }, { name: "target" }, { name: "why" }] }], gate: true }];
+
 // ---- wire/attachment_types.go ----
 
 // Content checks of an attachment type (AttachmentType.Content): what its
@@ -1813,6 +1878,10 @@ export interface ContentComponent {
   welcome?: string;
   // Prompts are a prompt pack's prompts (content_prompts.go).
   prompts?: ContentPrompt[];
+  // EveryRoom is a prompt pack's offer of its starter prompts to every
+  // empty room the member opens, not only the rooms it is turned on for
+  // (the default starters).
+  everyRoom?: boolean;
   // Assist is an assist's task (docs/prd/2026-10-13-ai-assist.md §3).
   assist?: AssistSpec;
   // Mine is true for the caller's own personal component: they author it
@@ -5944,6 +6013,8 @@ export type AssistSkipReason = "below" | "no-gate";
 export const AssistSkipReasonValues: readonly AssistSkipReason[] = ["below", "no-gate"];
 export type AssistFieldType = "text" | "list" | "items";
 export const AssistFieldTypeValues: readonly AssistFieldType[] = ["text", "list", "items"];
+export type AssistTaskName = "enhance-prompt" | "describe-work" | "describe-room" | "draft-expert" | "draft-skill-pack" | "draft-prompt-pack" | "plan-room" | "draft-schedule" | "explain-source-use" | "review-skill" | "fill-settings" | "suggest-skill-dirs" | "find-a-way";
+export const AssistTaskNameValues: readonly AssistTaskName[] = ["enhance-prompt", "describe-work", "describe-room", "draft-expert", "draft-skill-pack", "draft-prompt-pack", "plan-room", "draft-schedule", "explain-source-use", "review-skill", "fill-settings", "suggest-skill-dirs", "find-a-way"];
 export type AttachmentContent = "png" | "jpeg" | "gif" | "webp" | "pdf" | "zip" | "ole" | "text" | "isomedia" | "webm" | "mp3" | "wav" | "ogg";
 export const AttachmentContentValues: readonly AttachmentContent[] = ["png", "jpeg", "gif", "webp", "pdf", "zip", "ole", "text", "isomedia", "webm", "mp3", "wav", "ogg"];
 export type ComponentSettingType = "text" | "secret" | "url" | "number" | "boolean" | "choice" | "path" | "lines";

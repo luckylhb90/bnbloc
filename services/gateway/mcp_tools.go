@@ -56,7 +56,7 @@ func (s *Service) saveContentOptions(w http.ResponseWriter, r *http.Request, cla
 		httpx.Error(w, "load MCP tools failed", http.StatusInternalServerError)
 		return contentpkg.Options{}, false
 	}
-	return contentpkg.Options{MCPTool: func(name string) (contentpkg.MCPToolInfo, bool) {
+	return contentpkg.Options{Contracts: true, MCPTool: func(name string) (contentpkg.MCPToolInfo, bool) {
 		c, ok := cands[name]
 		if !ok || !c.Visibility.Visible || c.Config.MCP == nil {
 			return contentpkg.MCPToolInfo{}, false

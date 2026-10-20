@@ -126,7 +126,6 @@ eq([workTypeLabel("video"), workTypeLabel("other"), workTypeLabel("game"), workT
 
 // The author line: a person, or the platform.
 eq(workAuthor(work({ scope: "platform", owner: "ops" })), { kind: "platform" }, "platform scope");
-eq(workAuthor(work({ scope: "builtin", owner: "" })), { kind: "platform" }, "built-in content");
 eq(workAuthor(work({ scope: "org", owner: "maya" })), { kind: "person", id: "maya" }, "an organization work's author");
 eq(workAuthor(work({ scope: "shared", owner: "jack", sharedBy: "maya" })), { kind: "person", id: "maya" }, "a shared copy's author");
 eq(workAuthor(work({ scope: "personal", owner: "jack" })), { kind: "person", id: "jack" }, "a member's own work");

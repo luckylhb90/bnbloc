@@ -48,9 +48,10 @@ type CtxState struct {
 	// AppsListed: the workspace holds a .room/apps.md (the room
 	// had an app), so every pass rewrites it (AppsUpdate).
 	AppsListed bool
-	// AppSDKSum is the sum of the demo-mode app SDK last written into the
-	// workspace (AppSDKUpdate); empty until the first pull pass.
-	AppSDKSum string
+	// ContractsSum is the sum of the platform's contract files last
+	// written into the workspace (ContractsUpdate); empty until the first
+	// pull pass.
+	ContractsSum string
 	// Attachments are the room's attachments the workspace holds a copy of
 	// (id → path; Mirrored).
 	Attachments map[string]string `json:",omitempty"`

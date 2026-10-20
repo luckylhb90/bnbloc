@@ -20,12 +20,21 @@ import (
 //	bnbloc content export <id> [--version v] [--publisher p] [--out f]   the signable package
 //	bnbloc cores install --package f --signature f.minisig               install it signed
 //	bnbloc content promote <id> [--version v] [--publisher p] [--rollout auto|off] [--seckey f | --unsigned]
+//
+// and from package directories (content_publish.go): check, contracts,
+// publish.
 
 func runContent(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("content: expected a subcommand (export|promote)")
+		return fmt.Errorf("content: expected a subcommand (check|contracts|publish|export|promote)")
 	}
 	switch args[0] {
+	case "check":
+		return contentCheck(args[1:])
+	case "contracts":
+		return contentContracts(args[1:])
+	case "publish":
+		return contentPublish(args[1:])
 	case "export":
 		return contentExport(args[1:])
 	case "promote":

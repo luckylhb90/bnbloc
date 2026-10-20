@@ -127,14 +127,14 @@ export function galleryWorks(list: readonly ContentComponent[], f: GalleryFilter
     .sort((a, b) => b.updatedAtMs - a.updatedAtMs);
 }
 
-/** A work card's author: a person, or the platform (platform and built-in
- *  content, which no member authors). */
+/** A work card's author: a person, or the platform (platform content,
+ *  which no member authors). */
 export type WorkAuthor = { readonly kind: "platform" } | { readonly kind: "person"; readonly id: string };
 
 /** workAuthor: the platform for platform scope; a shared copy's author;
  *  else the member who owns it (an organization publication's author). */
 export function workAuthor(c: Pick<ContentComponent, "scope" | "owner" | "sharedBy">): WorkAuthor {
-  if (c.scope === "platform" || c.scope === "builtin") return { kind: "platform" };
+  if (c.scope === "platform") return { kind: "platform" };
   return { kind: "person", id: (c.scope === "shared" && c.sharedBy) || c.owner };
 }
 

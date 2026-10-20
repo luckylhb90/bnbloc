@@ -9,7 +9,8 @@ import { PROMPT_PACKS_CHANGED } from "@/lib/promptPacksApi";
 // composer and the selection action, reloaded when packs change.
 
 // libraryPromptPacks are the prompt packs of the member's Library (their
-// own, the org's and the platform's published ones, the built-in ones):
+// own, the org's and the platform's published ones, the default ones
+// among them):
 // loaded once per page and again when packs change (PROMPT_PACKS_CHANGED);
 // a failed load is retried.
 let libraryPacks: Promise<readonly ContentComponent[]> | null = null;

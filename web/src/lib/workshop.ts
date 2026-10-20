@@ -1,7 +1,7 @@
 // The expert workshop (docs/prd/2026-10-12-experts-and-teams.md §5,
 // authoring by conversation): "Create with AI" opens the member's private
-// workshop room with the built-in builder expert picked and an editable
-// prompt prefilled. The helpers here are pure (the prefill, which agent
+// workshop room with the Expert builder picked and an editable prompt
+// prefilled. The helpers here are pure (the prefill, which agent
 // runs the builder, which room is the workshop) so they
 // are unit-tested; the view wiring lives in views/library/workshopFlow.ts.
 
@@ -13,6 +13,33 @@ import { StorageKey, keyFor } from "./storageKeys.ts";
 
 export const WORKSHOP_ROOM_NAME = "Expert workshop";
 
+// BUILDER_EXPERT_NAME names the Expert builder: ordinary content (the
+// default content publishes it at platform scope), found by name, never by
+// an id (docs/prd/2026-10-20-no-built-in-content.md §2.4).
+export const BUILDER_EXPERT_NAME = "expert-builder";
+
+// SCOPE_RANK orders scopes nearest first, as the server resolves a name
+// (internal/assist scopeRank): the member's own, a copy shared with them,
+// their organization's, the platform's.
+const SCOPE_RANK: Readonly<Record<string, number>> = { personal: 0, shared: 1, org: 2, platform: 3 };
+
+// isBuilder: an expert named expert-builder.
+export function isBuilder(c: Pick<ContentComponent, "kind" | "name"> | undefined | null): boolean {
+  return !!c && c.kind === "expert" && c.name === BUILDER_EXPERT_NAME;
+}
+
+// builderOf is the Expert builder among the member's listed content: the
+// expert named expert-builder of the nearest scope (an organization's own
+// replaces the default), or null when none is installed.
+export function builderOf<T extends Pick<ContentComponent, "kind" | "name" | "scope">>(list: readonly T[]): T | null {
+  let best: T | null = null;
+  for (const c of list) {
+    if (!isBuilder(c)) continue;
+    if (!best || (SCOPE_RANK[c.scope] ?? 9) < (SCOPE_RANK[best.scope] ?? 9)) best = c;
+  }
+  return best;
+}
+
 // WorkshopRequest is what the workshop opens for: "Create with AI" of a
 // kind, or "Improve with AI" of a component.
 export type WorkshopRequest =
@@ -20,11 +47,12 @@ export type WorkshopRequest =
   | { readonly improve: Pick<ContentComponent, "id" | "kind" | "name" | "displayName"> };
 
 // workshopDraft is the prefilled, editable request: one of the builder's own
-// quick prompts (the built-in component's, read through the content API, so
+// quick prompts (the builder component's, read through the content API, so
 // the builder owns the wording): per kind the one titled "Create … <kind>",
 // and for a component the one titled "Improve …", whose first ___ names it
 // with its id so the builder loads the current version
-// (TestBuilderQuickPromptsServeTheWorkshop pins those titles).
+// (the default content's TestBuilderQuickPromptsServeTheWorkshop pins
+// those titles).
 export function workshopDraft(builder: Pick<ContentComponent, "quickPrompts"> | null, req: WorkshopRequest): string {
   const quick = builder?.quickPrompts ?? [];
   const titled = (prefix: string, word = "") =>

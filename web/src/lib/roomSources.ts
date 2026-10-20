@@ -8,7 +8,7 @@
 // the save form's check, a changed task's diff, the AI's reply. The
 // requests are lib/roomSourcesApi.ts.
 
-import { MaxRoomSourcePurpose, type RoomReviewer, type RoomSource, type RoomSourceAsk, type RoomSourceDrift, type RoomSourceScope } from "./wire.gen.ts";
+import { AssistTaskExplainSourceUse, MaxRoomSourcePurpose, type RoomReviewer, type RoomSource, type RoomSourceAsk, type RoomSourceDrift, type RoomSourceScope } from "./wire.gen.ts";
 
 export type { RoomReviewer, RoomSourceAsk, RoomSourceAskState, RoomSourceDetail, RoomSourceDrift, RoomSourceGrant, RoomSourcesInfo, RoomSourceScope } from "./wire.gen.ts";
 
@@ -17,8 +17,10 @@ export const ROOM_SOURCE_LABELS: Readonly<Record<RoomSource, string>> = {
   runs: "the organization's agent conversations",
 };
 
-/** The built-in assist the grant dialog runs (resolved by name). */
-export const EXPLAIN_SOURCE_USE = "explain-source-use";
+/** The assist the grant dialog runs (resolved by name, organization then
+ *  platform, never a member's copy; its output contract is
+ *  wire.AssistContracts). */
+export const EXPLAIN_SOURCE_USE = AssistTaskExplainSourceUse;
 
 /** A grant's scope: its label and what it covers, for the admin. */
 export const SCOPE_LABELS: Readonly<Record<RoomSourceScope, { readonly label: string; readonly hint: string }>> = {

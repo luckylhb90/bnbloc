@@ -7,7 +7,7 @@ const CHIP =
 // StarterPrompts are an empty room's starter prompts, shown above the
 // composer (PRD 2026-10-10 v2 §1): every one a prompt pack's starter
 // (starterChoices): the packs turned on for the room first, then the
-// built-in packs' general-purpose examples. Clicking one fills the composer
+// every-room packs' general-purpose examples (the default content's). Clicking one fills the composer
 // (a prompt with variables asks for them first); it never sends. The
 // composer renders them only while the feed is empty. The same row shows a
 // file's suggestions (lib/promptPacks fileSuggestions) under its heading

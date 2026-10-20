@@ -6,8 +6,10 @@
 // assist model) and the once-per-reply memo. Pure: the requests are
 // lib/assist.ts and lib/api.ts, the card views/room/DeadEndCard.tsx.
 
-/** The built-in assist that proposes the fixes (resolved by name). */
-export const FIND_A_WAY = "find-a-way";
+import { AssistTaskFindAWay } from "./wire.gen.ts";
+
+/** The assist that proposes the fixes (resolved by name; its output contract is wire.AssistContracts). */
+export const FIND_A_WAY = AssistTaskFindAWay;
 
 /** The closed list of actions a fix may take: each is wired to an existing
  *  flow by the card, nothing else is ever offered. */

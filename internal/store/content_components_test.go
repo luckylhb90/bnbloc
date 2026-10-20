@@ -123,20 +123,6 @@ func testContentComponentStore(t *testing.T, s ContentComponentStore, prefix str
 	if err := s.PutContentUse(ctx, ContentUse{TenantID: tid, ScopeKind: ContentUseMember, ScopeID: "maya", ComponentID: prefix + "-none", CreatedBy: "maya"}); !errors.Is(err, ErrContentNotFound) {
 		t.Fatalf("use of a missing component = %v", err)
 	}
-	// A built-in component has no row; its use is stored like any other
-	// (the built-in overlay vouches for it).
-	builtinUse := ContentUse{TenantID: tid, ScopeKind: ContentUseRoom, ScopeID: prefix + "-workshop", ComponentID: BuiltinContentIDPrefix + "expert-builder", Kind: "bnbloc.expert.package/v1", CreatedBy: "maya", CreatedAtMs: 22}
-	for i := 0; i < 2; i++ {
-		if err := s.PutContentUse(ctx, builtinUse); err != nil {
-			t.Fatalf("builtin use %d: %v", i, err)
-		}
-	}
-	if uses, err := s.ListContentUses(ctx, ContentUseRoom, prefix+"-workshop"); err != nil || len(uses) != 1 || uses[0].ComponentID != builtinUse.ComponentID {
-		t.Fatalf("builtin uses = %+v, %v", uses, err)
-	}
-	if err := s.DeleteContentUse(ctx, ContentUseRoom, prefix+"-workshop", builtinUse.ComponentID); err != nil {
-		t.Fatal(err)
-	}
 	uses, err := s.ListContentUses(ctx, ContentUseRoom, prefix+"-room")
 	if err != nil || len(uses) != 1 || uses[0].PinnedVersion != "" || uses[0].CreatedBy != "maya" || uses[0].Kind != c.Kind ||
 		uses[0].CreatedAtMs != 20 || uses[0].TenantID != tid {

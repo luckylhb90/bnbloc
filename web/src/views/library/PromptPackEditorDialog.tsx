@@ -257,6 +257,7 @@ export function PromptPackEditorDialog({
         <Field label="Description">
           <Input value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} />
         </Field>
+        <Switch checked={form.everyRoom} onChange={(on) => setForm((f) => ({ ...f, everyRoom: on }))} label="Offer its starters in every empty room" />
         {loading ? (
           <p className="text-sm text-[var(--color-fg-muted)]">Loading…</p>
         ) : (

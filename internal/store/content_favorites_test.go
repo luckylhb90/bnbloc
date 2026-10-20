@@ -11,15 +11,15 @@ import (
 
 // Favorites are a member's, in one organization: organization A's stars
 // never show in organization B's counts or listings; a repeat keeps the
-// first star; a missing component is refused (a built-in one has no row);
+// first star; a missing component is refused;
 // deleting the component deletes its stars.
 func TestContractContentFavoriteStore(t *testing.T) {
 	forEachBackend(t, func(t *testing.T, b *Backends) {
 		s, prefix := b.ContentComponents, uniq("fav-")
 		ctx := context.Background()
 		orgA, orgB := prefix+"-a", prefix+"-b"
-		app, other, builtin := prefix+"-app", prefix+"-other", BuiltinContentIDPrefix+"starters"
-		for _, id := range []string{app, other} {
+		app, other, builtin := prefix+"-app", prefix+"-other", prefix+"-starters"
+		for _, id := range []string{app, other, builtin} {
 			c := ContentComponent{ID: id, Kind: "bnbloc.work.package/v1", Name: id, Scope: ContentScopePlatform, Status: ContentStatusActive, CreatedAtMs: 1, UpdatedAtMs: 1}
 			if err := s.CreateContentComponent(ctx, c, contentVersion(id, "1.0.0", uniqBlobKey(), 1)); err != nil {
 				t.Fatal(err)

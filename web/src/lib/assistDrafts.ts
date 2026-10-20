@@ -2,7 +2,7 @@ import { cleanTags, splitList, tagProblem, type ContentComponent, type ContentFo
 import { emptyPromptDraft, slugify, syncVariables, uniqueId, type PromptDraft, type PromptPackForm } from "./promptPacks.ts";
 import { roomIdProblem } from "./roomId.ts";
 import type { RecurrenceForm } from "./schedules.ts";
-import { MaxAssistItems, MaxAssistText, type AssistJSONReply, type ContentQuickPrompt } from "./wire.gen.ts";
+import { AssistTaskDraftExpert, AssistTaskDraftPromptPack, AssistTaskDraftSchedule, AssistTaskDraftSkillPack, AssistTaskPlanRoom, MaxAssistItems, MaxAssistText, type AssistJSONReply, type ContentQuickPrompt } from "./wire.gen.ts";
 
 // The second round of AI assist (docs/prd/2026-10-13-ai-assist.md §6), its
 // pure side: a JSON task's reply onto the Library's forms (draft-expert,
@@ -12,12 +12,12 @@ import { MaxAssistItems, MaxAssistText, type AssistJSONReply, type ContentQuickP
 // Each mapping takes only what the form can hold: anything malformed is
 // dropped, never guessed, and the member edits the result before saving.
 
-/** The built-in tasks of the second round. */
-export const DRAFT_EXPERT = "draft-expert";
-export const DRAFT_SKILL_PACK = "draft-skill-pack";
-export const DRAFT_PROMPT_PACK = "draft-prompt-pack";
-export const PLAN_ROOM = "plan-room";
-export const DRAFT_SCHEDULE = "draft-schedule";
+/** The tasks of the second round (resolved by name; its output contract is wire.AssistContracts). */
+export const DRAFT_EXPERT = AssistTaskDraftExpert;
+export const DRAFT_SKILL_PACK = AssistTaskDraftSkillPack;
+export const DRAFT_PROMPT_PACK = AssistTaskDraftPromptPack;
+export const PLAN_ROOM = AssistTaskPlanRoom;
+export const DRAFT_SCHEDULE = AssistTaskDraftSchedule;
 
 type Fields = AssistJSONReply["fields"];
 

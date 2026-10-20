@@ -8,12 +8,16 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/contentuse"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/store"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // The tasks: assist components resolved by name, nearest first — the
-// member's own, a copy shared with them, their organization's, the
-// platform's, then the built-in — so an organization restyles a built-in
-// task by publishing its own of the same name, and a member by saving one.
+// member's own, a copy shared with them, their organization's, then the
+// platform's (the default content) — so an organization restyles a task
+// by publishing its own of the same name, and a member by saving one.
+// The one exception is a task that explains a consent
+// (wire.AssistContract.Consent, ConsentScope): it resolves to the
+// organization's, then the platform's, never a member's own copy.
 
 // scopeRank orders the scopes nearest first.
 var scopeRank = map[store.ContentScope]int{
@@ -21,10 +25,22 @@ var scopeRank = map[store.ContentScope]int{
 	store.ContentScopeShared:   1,
 	store.ContentScopeOrg:      2,
 	store.ContentScopePlatform: 3,
-	store.ContentScopeBuiltin:  4,
 }
 
-// Tasks lists the assists v may run, one per name (the nearest), by name.
+// ConsentScope reports whether an assist may answer for its name: any
+// scope, except for a task that explains a decision only an organization
+// admin makes (explain-source-use), which only the organization's or the
+// platform's version may answer, so a member's own copy never explains a
+// grant (docs/prd/2026-10-20-no-built-in-content.md §2.3).
+func ConsentScope(c store.ContentComponent) bool {
+	if ct, ok := wire.AssistContractOf(c.Name); ok && ct.Consent {
+		return c.Scope == store.ContentScopeOrg || c.Scope == store.ContentScopePlatform
+	}
+	return true
+}
+
+// Tasks lists the assists v may run, one per name (the nearest that
+// ConsentScope admits), by name.
 func Tasks(ctx context.Context, st store.ContentComponentStore, v extpipe.Viewer) ([]store.ContentComponent, error) {
 	out, err := usable(ctx, st, v, contentpkg.KindAssist)
 	if err != nil {
@@ -43,7 +59,7 @@ func usable(ctx context.Context, st store.ContentComponentStore, v extpipe.Viewe
 	}
 	nearest := map[string]store.ContentComponent{}
 	for _, c := range list {
-		if !extpipe.MemberVisibility(v, extpipe.GateForContent(c), 0).Installed {
+		if !extpipe.MemberVisibility(v, extpipe.GateForContent(c), 0).Installed || (kind == contentpkg.KindAssist && !ConsentScope(c)) {
 			continue
 		}
 		if have, ok := nearest[c.Name]; ok && scopeRank[have.Scope] <= scopeRank[c.Scope] {

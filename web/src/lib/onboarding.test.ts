@@ -62,20 +62,21 @@ function testDefaultPlatformAgent(): void {
   assert(defaultPlatformChoice([], "jack") === null, "platform agents off");
 }
 
-function promptPack(id: string, scope: string, prompts: { id: string; starter?: boolean }[]): ContentComponent {
+function promptPack(id: string, scope: string, prompts: { id: string; starter?: boolean; files?: boolean }[], everyRoom = false): ContentComponent {
   return {
     id,
     kind: "prompt",
     name: id,
     displayName: id,
-    owner: scope === "builtin" ? "" : "maya",
+    owner: scope === "platform" ? "" : "maya",
     scope,
     status: "active",
     latestVersion: "1.0.0",
     version: "1.0.0",
     permissions: [],
     requires: {},
-    prompts: prompts.map((p) => ({ id: p.id, title: `Title ${p.id}`, body: `Body ${p.id}`, uses: 0, ...(p.starter ? { starter: true } : {}) })),
+    prompts: prompts.map((p) => ({ id: p.id, title: `Title ${p.id}`, body: `Body ${p.id}`, uses: 0, ...(p.starter ? { starter: true } : {}), ...(p.files ? { files: { extensions: [".pdf"] } } : {}) })),
+    ...(everyRoom ? { everyRoom: true } : {}),
     mine: false,
     removable: false,
     acked: true,
@@ -91,18 +92,24 @@ function promptPack(id: string, scope: string, prompts: { id: string; starter?: 
 
 function testStarterPrompts(): void {
   // Every starter is a prompt pack's: the room's packs first, then the
-  // built-in packs of the Library; a member's own pack in the Library adds
-  // none, and only prompts flagged starter count.
-  const builtin = promptPack("cc_builtin_starters", "builtin", [{ id: "plan", starter: true }, { id: "hidden" }, { id: "sketch", starter: true }]);
+  // Library's packs that offer theirs in every room (everyRoom, at any
+  // scope); a pack without it adds none outside its rooms, a file-scoped
+  // starter is never a room starter, and only prompts flagged starter count.
+  const defaults = promptPack("cc_starters", "platform", [{ id: "plan", starter: true }, { id: "hidden" }, { id: "sketch", starter: true }, { id: "pdf", starter: true, files: true }], true);
   const personal = promptPack("cc_mine", "personal", [{ id: "mine", starter: true }]);
+  const orgEvery = promptPack("cc_org", "org", [{ id: "standup", starter: true }], true);
   const roomPack = promptPack("cc_room", "org", [{ id: "kickoff", starter: true }]);
   const roomUse = { componentId: roomPack.id, kind: "prompt", component: roomPack } as ContentUse;
-  const got = starterChoices([roomUse], [personal, builtin]);
+  const got = starterChoices([roomUse], [personal, defaults]);
   const ids = got.map((c) => `${c.source}:${c.prompt.id}`).join(",");
-  assert(ids === "room:kickoff,builtin:plan,builtin:sketch", `starters from the packs: ${ids}`);
-  const empty = starterChoices([], [builtin]);
-  assert(empty.length === 2 && empty.every((c) => c.source === "builtin" && c.componentId === builtin.id), "an empty room without packs shows the built-in pack's starters");
-  assert(starterChoices([], [personal]).length === 0, "no built-in pack, no starters: there is no list of the web's own");
+  assert(ids === "room:kickoff,library:plan,library:sketch", `starters from the packs: ${ids}`);
+  const empty = starterChoices([], [defaults]);
+  assert(empty.length === 2 && empty.every((c) => c.source === "library" && c.componentId === defaults.id), "an empty room without packs shows the every-room pack's starters");
+  assert(starterChoices([], [personal]).length === 0, "no every-room pack, no starters: there is no list of the web's own");
+  const org = starterChoices([], [orgEvery]).map((c) => c.prompt.id).join(",");
+  assert(org === "standup", `an organization's every-room pack adds its starters: ${org}`);
+  const mineEvery = starterChoices([], [promptPack("cc_mine2", "personal", [{ id: "mine", starter: true }], true)]).map((c) => c.prompt.id).join(",");
+  assert(mineEvery === "mine", `a member's own every-room pack adds its starters: ${mineEvery}`);
   const base = { feedLength: 0, working: 0, agentAvailable: true, people: false };
   assert(showStarterPrompts(base), "an empty feed with an agent");
   assert(!showStarterPrompts({ ...base, feedLength: 1 }), "gone after the first message");

@@ -1,6 +1,6 @@
 import { fieldItems, fieldText } from "./assistDrafts.ts";
 import { isLines, isSecret, linesProblem, linesValue, parseLines, type ComponentSetting } from "./componentSettings.ts";
-import { MaxAssistText, type AssistJSONReply } from "./wire.gen.ts";
+import { AssistTaskFillSettings, MaxAssistText, type AssistJSONReply } from "./wire.gen.ts";
 
 // "Fill from a note" on the one settings form (docs/prd/2026-10-19-
 // component-settings.md §2.5), its pure side: the text the fill-settings
@@ -12,8 +12,8 @@ import { MaxAssistText, type AssistJSONReply } from "./wire.gen.ts";
 // A secret's proposed value is never shown, only that there is one.
 // Unit-tested.
 
-/** The built-in assist that maps a note onto a declaration. */
-export const FILL_SETTINGS = "fill-settings";
+/** The assist that maps a note onto a declaration (resolved by name; its output contract is wire.AssistContracts). */
+export const FILL_SETTINGS = AssistTaskFillSettings;
 
 const NOTE = "\n\nNote:\n";
 

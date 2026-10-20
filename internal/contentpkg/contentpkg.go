@@ -104,8 +104,11 @@ type Manifest struct {
 	// Skill pack: the slugs of its skills (<slug>/SKILL.md each).
 	Skills []string `json:"skills,omitempty"`
 
-	// Prompt pack: its prompts (they live in the manifest).
-	Prompts []Prompt `json:"prompts,omitempty"`
+	// Prompt pack: its prompts (they live in the manifest), and whether
+	// its starters are offered in every empty room, not only in the rooms
+	// it is turned on for (the default starters).
+	Prompts   []Prompt `json:"prompts,omitempty"`
+	EveryRoom bool     `json:"everyRoom,omitempty"`
 
 	// Work: its type (wire.WorkType, derived from the deliverable by
 	// WorkTypeOf) and, for anything but a site or an app, its one file

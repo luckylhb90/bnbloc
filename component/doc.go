@@ -7,8 +7,9 @@
 //     tool is driving;
 //   - live.go: a job's live view as the tool posts it and reads it back;
 //   - fence.go: the fence around text someone else wrote, for an agent;
-//   - content.go: the content name rule, SKILL.md frontmatter and the
-//     content bundle caps;
+//   - content.go: the content name rule, SKILL.md frontmatter, the
+//     content bundle caps and the paths of the contract files a room's
+//     records hold (the app SDK, its declarations, the content limits);
 //   - mounts.go: the sandbox mounts descriptor a component writes.
 //
 // It imports only the standard library and core (TestComponentContractIsPublic).

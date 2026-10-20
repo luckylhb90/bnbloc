@@ -1,6 +1,9 @@
 package contentpkg
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/luckylhb90/bnbloc/internal/tarbundle"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
@@ -31,9 +34,10 @@ const (
 )
 
 // Limits is the one table of the validator's bounds, read from the same
-// constants its checks use. Guidance that states a limit renders it from
-// here (the Expert builder's package-format skill does, and its test fails
-// when the skill drifts), so no limit is written down twice.
+// constants its checks use. Nothing states a limit by copying it: an agent
+// reads them as LimitsDoc, the file every room's records hold
+// (component.RoomContentLimitsFile), and content that guides authoring
+// (the Expert builder) points there.
 func Limits() []Limit {
 	const all, expert, skill, prompt, team, work, assist, room = "every package", "expert", "skill pack", "prompt pack", "team expert", "work", "assist", "room package"
 	return []Limit{
@@ -99,4 +103,33 @@ func Limits() []Limit {
 		{room, "files in the package", RoomLimits.MaxFiles, UnitFiles},
 		{room, "package size", RoomLimits.MaxBytes, UnitBytes},
 	}
+}
+
+// LimitsDoc is Limits as the Markdown file an agent reads in its room's
+// records (component.RoomContentLimitsFile): what a package may hold, as
+// the validator checks it on save.
+func LimitsDoc() string {
+	var b strings.Builder
+	b.WriteString("# Content package limits\n\n")
+	b.WriteString("What bnbloc's validator allows in a content package (an expert, a skill pack, a prompt pack, an assist, a work, a room package); ")
+	b.WriteString("a save over any of them is refused. Generated from the validator's own checks and kept current by bnbloc.\n\n")
+	b.WriteString("| Applies to | Field | At most |\n|---|---|---|\n")
+	for _, l := range Limits() {
+		fmt.Fprintf(&b, "| %s | %s | %s |\n", l.Applies, l.Field, limitAmount(l))
+	}
+	return b.String()
+}
+
+// limitAmount states a limit's bound with its unit (bytes as KiB or MiB
+// when whole).
+func limitAmount(l Limit) string {
+	if l.Unit == UnitBytes {
+		switch {
+		case l.Max%(1<<20) == 0:
+			return fmt.Sprintf("%d MiB", l.Max>>20)
+		case l.Max%(1<<10) == 0:
+			return fmt.Sprintf("%d KiB", l.Max>>10)
+		}
+	}
+	return fmt.Sprintf("%d %s", l.Max, l.Unit)
 }

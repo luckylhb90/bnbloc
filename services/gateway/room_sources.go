@@ -674,7 +674,8 @@ func taskDrift(w store.RoomSourceWatch, tasks []wire.RoomSchedule, atMs int64) (
 	return drift, changed
 }
 
-// explainDrift asks explain-source-use (the built-in, for the grantee:
+// explainDrift asks explain-source-use (the organization's or the
+// platform's, never a member's copy: runConsentJSON; for the grantee:
 // their organization's model and AI budget) what the changed tasks do
 // against g's purpose; empty when it cannot (assists off, a failure,
 // logged).
@@ -684,7 +685,7 @@ func (s *Service) explainDrift(ctx context.Context, tenantID string, g store.Roo
 		before[c.ScheduleID] = &c.Before
 	}
 	only := slices.DeleteFunc(slices.Clone(tasks), func(t wire.RoomSchedule) bool { return before[t.ScheduleID] == nil })
-	fields, err := s.runBuiltinJSON(ctx, auth.Claims{Subject: g.Grantee, Tenant: tenantID}, "explain-source-use", explainSourceInput(g.Source, g.Purpose, only, before))
+	fields, err := s.runConsentJSON(ctx, auth.Claims{Subject: g.Grantee, Tenant: tenantID}, wire.AssistTaskExplainSourceUse, explainSourceInput(g.Source, g.Purpose, only, before))
 	if err != nil {
 		slog.Warn("bnbloc gateway: explain a reading room's changed task failed", "event", "bnbloc.room_source.explain_failed", "room", g.RoomID, "error", err)
 		return "", ""

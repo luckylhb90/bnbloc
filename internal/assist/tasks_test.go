@@ -8,10 +8,11 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/store"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // A task resolves nearest first: the member's own, their organization's,
-// the platform's, the built-in; another member's or organization's never.
+// the platform's; another member's or organization's never.
 func TestTasksResolveNearestFirst(t *testing.T) {
 	ctx := context.Background()
 	st := store.NewMemoryContentComponents()
@@ -57,6 +58,26 @@ func TestTasksResolveNearestFirst(t *testing.T) {
 	list, _ := Tasks(ctx, st, jack)
 	if len(list) != 3 || list[0].Name != "describe-work" || list[1].Name != "enhance-prompt" || list[2].ID != "j1" {
 		t.Fatalf("jack's tasks = %+v", list)
+	}
+
+	// A task that explains a consent (explain-source-use) resolves to the
+	// organization's, then the platform's: a member's own copy, or one
+	// shared with them, never answers it, in a run or in the status.
+	consent := wire.AssistTaskExplainSourceUse
+	put("pc", consent, store.ContentScopePlatform, "", "", active)
+	put("mc", consent, store.ContentScopePersonal, "acme", "maya", active)
+	if got := name(maya, consent); got != "pc" {
+		t.Errorf("maya's %s = %q, want the platform's (never her own)", consent, got)
+	}
+	put("oc", consent, store.ContentScopeOrg, "acme", "ada", active)
+	if got := name(maya, consent); got != "oc" {
+		t.Errorf("maya's %s = %q, want the organization's", consent, got)
+	}
+	list, _ = Tasks(ctx, st, maya)
+	for _, c := range list {
+		if c.Name == consent && c.ID != "oc" {
+			t.Errorf("the status lists %s as %s", consent, c.ID)
+		}
 	}
 }
 

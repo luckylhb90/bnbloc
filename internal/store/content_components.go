@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
-	"strings"
 	"sync"
 
 	"github.com/luckylhb90/bnbloc/internal/tenant"
@@ -35,17 +34,10 @@ const (
 	// ContentScopeOrg: the organization, after an org admin approved it.
 	ContentScopeOrg ContentScope = "org"
 	// ContentScopePlatform: every organization (rollout + tenant scope).
+	// The default content (docs/prd/2026-10-20-no-built-in-content.md) is
+	// platform content like any other: the binaries ship none.
 	ContentScopePlatform ContentScope = "platform"
-	// ContentScopeBuiltin: shipped inside the binaries
-	// (internal/contentbuiltin), read-only and visible to every member. It is
-	// never stored: the built-in source overlays it on this store.
-	ContentScopeBuiltin ContentScope = "builtin"
 )
-
-// BuiltinContentIDPrefix prefixes the ids of built-in components. They have
-// no rows here; a use of one (a room pinning the built-in builder) is stored
-// like any other, its existence vouched for by the built-in overlay.
-const BuiltinContentIDPrefix = "cc_builtin_"
 
 // ContentStatus is a component's publication state within its scope.
 type ContentStatus string
@@ -556,7 +548,7 @@ func contentUseKey(scopeKind ContentUseScope, scopeID, componentID string) strin
 func (s *MemoryContentComponents) PutContentUse(_ context.Context, u ContentUse) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.components[u.ComponentID]; !ok && !strings.HasPrefix(u.ComponentID, BuiltinContentIDPrefix) {
+	if _, ok := s.components[u.ComponentID]; !ok {
 		return ErrContentNotFound
 	}
 	k := contentUseKey(u.ScopeKind, u.ScopeID, u.ComponentID)

@@ -23,7 +23,7 @@ func TestContractContentComponentStorePromptUses(t *testing.T) {
 	})
 }
 
-// Use counts are per organization: built-in and platform content is used
+// Use counts are per organization: platform content is used
 // by every organization, and organization A's prompt insertions, member
 // uses and scope uses never show in organization B's counts (docs/bugs/
 // 2026-10-13-starters-and-shared-use-counts.md).
@@ -32,11 +32,15 @@ func TestContractContentComponentStoreTenantUseCounts(t *testing.T) {
 		s, prefix := b.ContentComponents, uniq("tuc-")
 		ctx := context.Background()
 		orgA, orgB := prefix+"-a", prefix+"-b"
-		platform, builtin := prefix+"-platform", BuiltinContentIDPrefix+"starters"
+		platform, builtin := prefix+"-platform", prefix+"-starters"
 		c := ContentComponent{ID: platform, Kind: "bnbloc.prompt.package/v1", Name: "shared-" + prefix,
 			Scope: ContentScopePlatform, Status: ContentStatusActive, CreatedAtMs: 1, UpdatedAtMs: 1}
-		if err := s.CreateContentComponent(ctx, c, contentVersion(platform, "1.0.0", uniqBlobKey(), 1)); err != nil {
-			t.Fatal(err)
+		for _, id := range []string{platform, builtin} {
+			row := c
+			row.ID, row.Name = id, "pack-"+id
+			if err := s.CreateContentComponent(ctx, row, contentVersion(id, "1.0.0", uniqBlobKey(), 1)); err != nil {
+				t.Fatal(err)
+			}
 		}
 		for _, id := range []string{platform, builtin} {
 			for i := 0; i < 3; i++ {

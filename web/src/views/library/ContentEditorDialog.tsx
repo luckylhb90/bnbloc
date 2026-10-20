@@ -154,7 +154,7 @@ export function ContentEditorDialog({
           : kind === "expert"
             ? "A role an agent wears: always-on instructions, optional skills and quick prompts."
             : kind === "assist"
-              ? "A task of the AI assist behind a manual entry: one with the same name as a built-in replaces it for you."
+              ? "A task of the AI assist behind a manual entry: one with the same name as the default replaces it for you."
               : "Capabilities an agent loads when a skill's description matches the task."
       }
       footer={

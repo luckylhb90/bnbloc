@@ -142,8 +142,9 @@ export function welcomeStart(
 }
 
 // The empty room's starter prompts are prompt packs' (starterChoices in
-// promptPacks.ts): the room's packs, then the built-in general-purpose
-// pack (internal/contentbuiltin/packages/starters).
+// promptPacks.ts): the room's packs, then the Library's packs that offer
+// their starters in every room (everyRoom: the default content's
+// general-purpose starters).
 //
 // showStarterPrompts: only on the room composer of an empty feed (nothing
 // sent, nothing working) with an agent to send to. They vanish with the

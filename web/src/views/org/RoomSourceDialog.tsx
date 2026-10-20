@@ -32,8 +32,9 @@ const alertBox = "flex items-start gap-1.5 rounded-[var(--radius)] border border
 // person a grant is read by (the room's owner), the room's members (they
 // read what it posts), its owner's scheduled tasks and those changed since
 // a grant, and an AI explanation of what they would do with the records
-// (the built-in explain-source-use assist over the gateway's input, run
-// once the ask is read) that flags a task going beyond the purpose. A
+// (the explain-source-use assist over the gateway's input, the
+// organization's or the platform's, never a member's copy, run once the
+// ask is read) that flags a task going beyond the purpose. A
 // shared room cannot be granted. The admin picks the scope and grants (a
 // grant again consents to the tasks as they are now), acknowledges the
 // changes, or withdraws; AI proposes, the admin decides.

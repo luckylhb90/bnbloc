@@ -1,7 +1,7 @@
 import { fieldItems, fieldText } from "./assistDrafts.ts";
 import { isLines, linesProblem, linesValue, parseLines, type ComponentSettingField } from "./componentSettings.ts";
 import type { SkillFolderCandidate } from "./localSkills.ts";
-import { MaxAssistText, type AssistJSONReply } from "./wire.gen.ts";
+import { AssistTaskSuggestSkillDirs, MaxAssistText, type AssistJSONReply } from "./wire.gen.ts";
 
 // Other tools' skill folders in the skills panel, the pure side: a skills
 // provider offers candidates (folders under the home holding skills, with a
@@ -13,8 +13,8 @@ import { MaxAssistText, type AssistJSONReply } from "./wire.gen.ts";
 // Without an assist model the candidates are still listed for ticking.
 // Unit-tested.
 
-/** The built-in assist that proposes skill folders. */
-export const SUGGEST_SKILL_DIRS = "suggest-skill-dirs";
+/** The assist that proposes skill folders (resolved by name; its output contract is wire.AssistContracts). */
+export const SUGGEST_SKILL_DIRS = AssistTaskSuggestSkillDirs;
 
 const MAX_LISTED = 40;
 

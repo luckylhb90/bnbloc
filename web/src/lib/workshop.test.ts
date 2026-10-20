@@ -3,7 +3,9 @@ import type { PlatformAgent } from "./platformAgents.ts";
 import {
   MAX_WORKSHOP_PROBES,
   WORKSHOP_ROOM_NAME,
+  builderOf,
   cachedWorkshop,
+  isBuilder,
   libraryTabOf,
   rememberWorkshop,
   tryItDraft,
@@ -117,3 +119,19 @@ eq(cachedWorkshop(storage, "Maya"), null, "Maya is another member");
 eq(cachedWorkshop(storage, "jack"), null, "another member");
 eq(cachedWorkshop(null, "maya"), null, "no storage");
 
+
+// The Expert builder is found by name, the nearest scope's: an
+// organization's own replaces the default (platform) one, a member's own
+// replaces both; no expert named expert-builder, no builder.
+{
+  const platform = comp({ id: "cc_default", name: "expert-builder", scope: "platform", owner: "", mine: false });
+  const org = comp({ id: "cc_org", name: "expert-builder", scope: "org", mine: false });
+  const mine = comp({ id: "cc_mine", name: "expert-builder", scope: "personal" });
+  const skill = comp({ id: "cc_skill", kind: "skill", name: "expert-builder", scope: "personal" });
+  eq(builderOf([platform])?.id, "cc_default", "the default builder");
+  eq(builderOf([platform, org])?.id, "cc_org", "the organization's replaces the default");
+  eq(builderOf([org, mine, platform])?.id, "cc_mine", "a member's own is the nearest");
+  eq(builderOf([skill, comp({})]), null, "no expert named expert-builder: none");
+  eq(builderOf([]), null, "nothing installed: none");
+  assert(isBuilder(platform) && !isBuilder(skill) && !isBuilder(undefined), "a builder is an expert of that name");
+}

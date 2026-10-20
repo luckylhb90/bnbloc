@@ -3,6 +3,7 @@ package contentpkg
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path"
 	"slices"
@@ -49,6 +50,11 @@ type Options struct {
 	// catalog, so a component uninstalled later never makes it invalid (use
 	// time reports the tool missing instead).
 	MCPTool func(name string) (MCPToolInfo, bool)
+	// Contracts holds an assist to its task's output contract when it
+	// takes the name of one (wire.AssistContracts): a save and a platform
+	// install do. Reading stored content does not, so a contract that
+	// changes in a release never makes a stored version unreadable.
+	Contracts bool
 }
 
 // MCPToolInfo describes the MCP tool component a reference names.
@@ -119,11 +125,22 @@ func validateWith(b *tarbundle.Bundle, rawManifest []byte, opts Options) (*Packa
 	if p.Scripts && !m.declares(PermScripts) {
 		return nil, fmt.Errorf("the package ships scripts but does not declare the %q permission", PermScripts)
 	}
+	if m.EveryRoom && m.Kind != KindPrompt {
+		return nil, errEveryRoom
+	}
 	if err := spec.validate(p); err != nil {
 		return nil, err
 	}
+	if opts.Contracts && m.Kind == KindAssist {
+		if err := CheckAssistContract(m); err != nil {
+			return nil, err
+		}
+	}
 	return p, nil
 }
+
+// errEveryRoom: only a prompt pack offers its starters in every room.
+var errEveryRoom = errors.New("everyRoom belongs to prompt packs: it offers a pack's starters in every empty room")
 
 // ScriptFiles lists the bundle's files that execute (a scripts/ or bin/
 // directory, or a script extension), sorted: what an approver reviews.

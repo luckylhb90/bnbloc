@@ -73,7 +73,7 @@ type PromptHit struct {
 
 // SearchPrompts finds the prompts, in the prompt packs the viewer can see
 // (Visible: their own and their shared copies, their organization's, the
-// platform's and the built-in ones), whose title, body, tags or slash
+// platform's), whose title, body, tags or slash
 // command contain text (case-insensitive): most recently updated packs
 // first, at most limit hits. The prompts live in the stored manifests, so no
 // bundle is read.

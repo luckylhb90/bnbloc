@@ -264,6 +264,7 @@ func promptPackFromForm(f Form, _ *Package, m *Manifest, _ map[string][]byte) er
 		p.Body = strings.TrimSpace(p.Body)
 		m.Prompts = append(m.Prompts, p)
 	}
+	m.EveryRoom = f.EveryRoom
 	return nil
 }
 

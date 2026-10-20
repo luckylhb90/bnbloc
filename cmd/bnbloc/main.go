@@ -97,6 +97,12 @@ Components:
         and a settingsPage's bundle (--settings-page) too
   bnbloc components rotate-secret <name> [--kind auth-provider]  new endpoint component credential (printed once)
   bnbloc components test <name>           send a test notification through a notifier to you
+  bnbloc content check [--json] (<dir>... | --all <root>)
+        validate content package directories as a save would (an assist under a task's name meets its contract)
+  bnbloc content contracts                print the assist output contracts (what a task's assist must answer)
+  bnbloc content publish (--dir <dir> | --all <root>) [--publisher p] [--rollout auto|off] [--seckey f | --unsigned]
+        pack, upload, sign and install content package directories for every organization
+        (the default content: bnbloc content publish --all packages from its repository)
   bnbloc content export <id> [--version v] [--publisher p] [--out f]
         the signable package of an expert, skill pack or prompt pack version (sign it offline,
         then bnbloc cores install --package f --signature <sig>)

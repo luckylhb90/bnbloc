@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { ArrowsClockwiseIcon, BuildingsIcon, ShareNetworkIcon } from "@phosphor-icons/react";
 import { api, type RoomSummary } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { contentLabel, isBuiltin, type ContentComponent } from "@/lib/contentComponents";
+import { contentLabel, type ContentComponent } from "@/lib/contentComponents";
 import {
   canShare,
   hasPendingRequest,
@@ -35,10 +35,10 @@ import { errorText } from "@/lib/errors";
 // sees who shared a copy and updates it to the author's latest.
 
 // ContentByline is a card's author line: you, the author of a copy, the
-// author of an organization component, or the platform.
+// author of an organization component, or the platform (the default
+// content its operators publish).
 export function ContentByline({ component: c }: { readonly component: ContentComponent }) {
-  if (isBuiltin(c)) return <>Built-in · bnbloc</>;
-  if (c.scope === "platform") return <>Platform</>;
+  if (c.scope === "platform") return <>Default · for every organization</>;
   if (c.scope === "shared" && c.sharedBy) {
     return (
       <>

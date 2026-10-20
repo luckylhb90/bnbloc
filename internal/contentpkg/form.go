@@ -26,6 +26,8 @@ type Form struct {
 	Welcome      string        `json:"welcome,omitempty"`
 	Skills       []FormSkill   `json:"skills,omitempty"`
 	Prompts      []Prompt      `json:"prompts,omitempty"`
+	// EveryRoom offers a prompt pack's starters in every empty room.
+	EveryRoom bool `json:"everyRoom,omitempty"`
 
 	// Team makes an expert a team (its roster).
 	Team *TeamSpec `json:"team,omitempty"`
@@ -72,6 +74,9 @@ func Build(f Form, version string, opts Options, base *Package) (*Package, []byt
 	}
 	if spec.Kind != KindAssist && (f.Output != "" || len(f.Fields) > 0 || len(f.Context) > 0 || f.Gate != nil) {
 		return nil, nil, errAssistFields
+	}
+	if spec.Kind != KindPrompt && f.EveryRoom {
+		return nil, nil, errEveryRoom
 	}
 	if spec.Kind != KindRoom && (len(f.Channels)+len(f.Schedules)+len(f.Apps)+len(f.AppSnapshots)+len(f.Files)+len(f.Sources) > 0 || f.Captured != nil) {
 		return nil, nil, errRoomFields

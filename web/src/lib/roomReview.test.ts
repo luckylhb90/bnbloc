@@ -1,4 +1,4 @@
-import describeRoom from "../../../internal/contentbuiltin/packages/describe-room/component.json" with { type: "json" };
+import { AssistContracts, AssistTaskDescribeRoom } from "./wire.gen.ts";
 import { partKey, roomSaveFromDraft, type RoomComponentDraft, type RoomPackageSchedule, type RoomSaveForm } from "./roomComponents.ts";
 import { FINDING_KINDS, findingId, findingWhere, fixFinding, openFindings, reviewKey, roomFindings, roomPackageTexts, roomReviewInput } from "./roomReview.ts";
 
@@ -109,10 +109,10 @@ const base: RoomSaveForm = {
   eq([x.kind, fixFinding(withInstructions, x), findingWhere(withInstructions, x)], ["private-data", { edit: "instructions" }, "Instructions"], "a finding in them");
 }
 
-// The kinds are describe-room's, in its order.
+// The kinds are describe-room's output contract's (wire.AssistContracts),
+// in its order: a finding's why starts with one.
 {
-  const findings = describeRoom.fields.find((f) => f.name === "findings") as { item: { name: string; description: string }[] } | undefined;
-  const why = findings?.item.find((i) => i.name === "why")?.description ?? "";
-  eq(findings?.item.map((i) => i.name), ["field", "quote", "why"], "a finding's fields are the package's");
-  assert(why.startsWith(`${FINDING_KINDS.slice(0, -1).join(", ")} or ${FINDING_KINDS[FINDING_KINDS.length - 1]}`), `the kinds are the package's: ${why}`);
+  const findings = AssistContracts.find((c) => c.task === AssistTaskDescribeRoom)?.fields?.find((f) => f.name === "findings");
+  eq(findings?.item?.map((i) => i.name), ["field", "quote", "why"], "a finding's fields are the contract's");
+  eq(findings?.item?.find((i) => i.name === "why")?.values, [...FINDING_KINDS], "the kinds are the contract's");
 }

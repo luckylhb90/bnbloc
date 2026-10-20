@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/auth"
-	"github.com/luckylhb90/bnbloc/internal/contentbuiltin"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/sealbox"
 	"github.com/luckylhb90/bnbloc/internal/sse"
@@ -73,7 +72,6 @@ func assistGW(t *testing.T) (*appGW, *assistModelFake, *recordedAudit) {
 		t.Fatal(err)
 	}
 	e.gw.SecretBox = box
-	e.gw.ContentComponents = contentbuiltin.Overlay(e.b.ContentComponents)
 	sink := &recordedAudit{}
 	e.gw.ExtAudit = sink
 	rt := &realtimehttp.Service{Hub: e.hub, Blobs: e.blobs, Attachments: e.b.Attachments, Chat: e.b.Chat, Membership: membership.NewRoomClient(e.roomURL)}
@@ -88,6 +86,7 @@ func assistGW(t *testing.T) (*appGW, *assistModelFake, *recordedAudit) {
 	if r.status != http.StatusOK {
 		t.Fatalf("configure the model = %d %s", r.status, r.body)
 	}
+	e.publishDefaultAssists()
 	sink.take()
 	return e, fake, sink
 }
@@ -156,7 +155,7 @@ func TestAssistModelSettings(t *testing.T) {
 }
 
 // Assists run only with a model and in an organization that did not turn
-// them off; the status lists the built-in tasks.
+// them off; the status lists the installed tasks.
 func TestAssistAvailability(t *testing.T) {
 	e, _, _ := assistGW(t)
 	var st wire.AssistStatus
@@ -267,7 +266,7 @@ func TestAssistDescribeWork(t *testing.T) {
 	}
 }
 
-// A member's own assist of a built-in's name replaces it for them alone;
+// A member's own assist of a default's name replaces it for them alone;
 // an assist is no content use; runs are held to the member's rate.
 func TestAssistOwnTaskUseAndRate(t *testing.T) {
 	e, fake, _ := assistGW(t)

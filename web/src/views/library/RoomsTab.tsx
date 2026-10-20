@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { DoorOpenIcon, EyeIcon, MagnifyingGlassIcon, PencilSimpleIcon, TrashIcon } from "@phosphor-icons/react";
-import { contentLabel, isBuiltin, matchesContent, type ContentComponent } from "@/lib/contentComponents";
+import { contentLabel, matchesContent, type ContentComponent } from "@/lib/contentComponents";
 import { relativeTime } from "@/lib/format";
 import { roomSetupSummary } from "@/lib/roomComponents";
 import { Button } from "@/ui/Button";
@@ -70,7 +70,7 @@ export function RoomsTab({ tabs, onOpenRoom }: { readonly tabs: React.ReactNode;
                       {c.name} · v{c.latestVersion}
                     </p>
                   </div>
-                  {isBuiltin(c) && <Badge tone="accent">Built-in</Badge>}
+                  {c.scope === "platform" && <Badge tone="accent">Default</Badge>}
                   {c.category && <Badge>{c.category}</Badge>}
                 </div>
                 {c.description && <p className="line-clamp-3 text-sm text-[var(--color-fg-muted)]">{c.description}</p>}
@@ -80,7 +80,7 @@ export function RoomsTab({ tabs, onOpenRoom }: { readonly tabs: React.ReactNode;
                 <div className="mt-auto flex items-center gap-2 pt-1 text-xs text-[var(--color-fg-subtle)]">
                   <span className="min-w-0 flex-1 truncate">
                     <ContentByline component={c} />
-                    {!isBuiltin(c) && ` · ${relativeTime(c.updatedAtMs)}`}
+                    {` · ${relativeTime(c.updatedAtMs)}`}
                     {c.uses > 0 ? ` · used ${c.uses}×` : ""}
                   </span>
                   <button type="button" onClick={() => setViewing(c)} title="View" aria-label={`View ${c.name}`} className="tactile hover:text-[var(--color-fg)]">

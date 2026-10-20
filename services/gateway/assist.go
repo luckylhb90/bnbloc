@@ -15,7 +15,6 @@ import (
 
 	"github.com/luckylhb90/bnbloc/internal/assist"
 	"github.com/luckylhb90/bnbloc/internal/auth"
-	"github.com/luckylhb90/bnbloc/internal/contentbuiltin"
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/contentuse"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
@@ -223,7 +222,7 @@ func (s *Service) assistJSON(w http.ResponseWriter, r *http.Request, claims auth
 
 // completeJSONTask is one run of a JSON task: the model's reply read as
 // the task's fields, audited (auditAssist). The assist route's runs and
-// the platform's own (runBuiltinJSON) go through it.
+// the gateway's own (runConsentJSON) go through it.
 func (s *Service) completeJSONTask(ctx context.Context, claims auth.Claims, task assistTask, model assist.Model, msgs []assist.Message) (map[string]any, wire.AssistUsage, error) {
 	text, usage, err := s.assistClient().Complete(ctx, model, msgs, true)
 	var fields map[string]any
@@ -234,12 +233,17 @@ func (s *Service) completeJSONTask(ctx context.Context, claims auth.Claims, task
 	return fields, usage, err
 }
 
-// runBuiltinJSON runs the built-in JSON assist name over text for claims
-// (their organization's model, their assist rate and budget), with no
-// context: a run the platform makes itself, so it takes the built-in
-// package, never one a member or organization saved under that name.
-// errAssistUnavailable when assists are off.
-func (s *Service) runBuiltinJSON(ctx context.Context, claims auth.Claims, name, text string) (map[string]any, error) {
+// runConsentJSON runs the consent task name (wire.AssistContract.Consent:
+// explain-source-use) over text for claims (their organization's model,
+// their assist rate and budget), with no context: a run the gateway makes
+// to explain an admin's decision, resolved like every run through
+// assist.Task, whose consent rule takes the organization's version, else
+// the platform's, never a member's own copy. errAssistUnavailable when
+// assists are off or no such task is installed.
+func (s *Service) runConsentJSON(ctx context.Context, claims auth.Claims, name, text string) (map[string]any, error) {
+	if ct, ok := wire.AssistContractOf(name); !ok || !ct.Consent || ct.Output != wire.AssistOutputJSON {
+		return nil, fmt.Errorf("%q is not a JSON consent task", name)
+	}
 	model, ok, err := s.assistModel(ctx, claims)
 	if err != nil {
 		return nil, err
@@ -247,15 +251,21 @@ func (s *Service) runBuiltinJSON(ctx context.Context, claims auth.Claims, name, 
 	if !ok {
 		return nil, errAssistUnavailable
 	}
-	p, found := contentbuiltin.Get(contentbuiltin.IDPrefix + name)
-	if !found || p.Validated.Manifest.Output != wire.AssistOutputJSON {
-		return nil, fmt.Errorf("no built-in JSON assist %q", name)
+	c, found, err := assist.Task(ctx, s.ContentComponents, viewerOf(claims), name)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, fmt.Errorf("%w: no %s assist is installed", errAssistUnavailable, name)
+	}
+	task, err := s.loadAssistTask(ctx, c)
+	if err != nil {
+		return nil, err
 	}
 	if !s.assistLimiter.get(assistRate, assistBurst, s.Peers.Size).allow(claims.Tenant + "/" + claims.Subject) {
 		return nil, errors.New("too many AI assists: try again in a minute")
 	}
-	task := assistTask{Component: p.Component, Version: p.Version, Package: p.Validated}
-	fields, _, err := s.completeJSONTask(ctx, claims, task, model, assist.Messages(p.Validated.Instructions, text, assist.Context{}))
+	fields, _, err := s.completeJSONTask(ctx, claims, task, model, assist.Messages(task.Package.Instructions, text, assist.Context{}))
 	return fields, err
 }
 

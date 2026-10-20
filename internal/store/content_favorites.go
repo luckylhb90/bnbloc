@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"sort"
-	"strings"
 
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 )
@@ -25,8 +24,7 @@ type ContentFavorite struct {
 type ContentFavoriteStore interface {
 	// PutContentFavorite stars a component for a member (a repeat keeps
 	// the first star). A component that does not exist is
-	// ErrContentNotFound; a built-in one has no row (the overlay vouches
-	// for it).
+	// ErrContentNotFound.
 	PutContentFavorite(ctx context.Context, f ContentFavorite) error
 	// DeleteContentFavorite removes a member's star (none is no error).
 	DeleteContentFavorite(ctx context.Context, tenantID, member, componentID string) error
@@ -55,7 +53,7 @@ func (s *MemoryContentComponents) PutContentFavorite(_ context.Context, f Conten
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.components[f.ComponentID]; !ok && !strings.HasPrefix(f.ComponentID, BuiltinContentIDPrefix) {
+	if _, ok := s.components[f.ComponentID]; !ok {
 		return ErrContentNotFound
 	}
 	k := favoriteKey(f.TenantID, f.Member, f.ComponentID)
@@ -119,16 +117,11 @@ func (s *MemoryContentComponents) CountContentFavorites(_ context.Context, tenan
 	return out, nil
 }
 
-// PutContentFavorite inserts the star when the component exists (a
-// built-in one has no row to check); a repeat matches the existing row.
+// PutContentFavorite inserts the star when the component exists; a repeat
+// matches the existing row.
 func (s *MySQLContentComponents) PutContentFavorite(ctx context.Context, f ContentFavorite) error {
 	if f.TenantID == "" {
 		return tenant.ErrNoTenant
-	}
-	if strings.HasPrefix(f.ComponentID, BuiltinContentIDPrefix) {
-		_, err := s.DB.ExecContext(ctx, `INSERT IGNORE INTO content_favorites (tenant_id, member_id, component_id, created_at_ms) VALUES (?, ?, ?, ?)`,
-			f.TenantID, f.Member, f.ComponentID, f.CreatedAtMs)
-		return err
 	}
 	res, err := s.DB.ExecContext(ctx, `INSERT INTO content_favorites (tenant_id, member_id, component_id, created_at_ms)
   SELECT ?, ?, id, ? FROM content_components WHERE id = ?

@@ -12,18 +12,6 @@ export type { ContentKind } from "./wire.gen.ts";
 import type { AssistField, AssistSpec, ContentKind, RoomSpec } from "./wire.gen.ts";
 import { ContentTagPattern, MaxContentTagRunes } from "./wire.gen.ts";
 
-// The built-in builder expert (shipped with the release, read-only, listed
-// for every member with scope "builtin"): it interviews the member, drafts
-// an expert or skill pack and saves it. A protocol constant of the product's
-// own built-in content, not deployment data.
-export const BUILDER_EXPERT_ID = "cc_builtin_expert-builder";
-
-// isBuiltin: content that ships with the release (read-only, owned by no
-// member).
-export function isBuiltin(c: Pick<ContentComponent, "scope">): boolean {
-  return c.scope === "builtin";
-}
-
 // CONTENT_KINDS is everything the client says about a content kind, one row
 // per kind (web L5): a Record over the generated ContentKind, so a kind the
 // server registers (contentpkg) fails to compile until it has its row. An

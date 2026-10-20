@@ -33,6 +33,10 @@ type ContentComponent struct {
 	Welcome      string               `json:"welcome,omitempty"`
 	// Prompts are a prompt pack's prompts (content_prompts.go).
 	Prompts []ContentPrompt `json:"prompts,omitempty"`
+	// EveryRoom is a prompt pack's offer of its starter prompts to every
+	// empty room the member opens, not only the rooms it is turned on for
+	// (the default starters).
+	EveryRoom bool `json:"everyRoom,omitempty"`
 	// Assist is an assist's task (docs/prd/2026-10-13-ai-assist.md §3).
 	Assist *AssistSpec `json:"assist,omitempty"`
 	// Mine is true for the caller's own personal component: they author it

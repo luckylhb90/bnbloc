@@ -1,17 +1,18 @@
 import { cleanTags, splitList, tagProblem } from "./contentComponents.ts";
-import { WorkCategoryValues, type AssistStatus, type AssistTask, type WorkCategory } from "./wire.gen.ts";
+import { AssistTaskDescribeRoom, AssistTaskDescribeWork, AssistTaskEnhancePrompt, WorkCategoryValues, type AssistStatus, type AssistTask, type WorkCategory } from "./wire.gen.ts";
 import { workNameFrom, type PublishWorkForm } from "./workGallery.ts";
 
 // The pure side of AI assist (docs/prd/2026-10-13-ai-assist.md §5; the
-// requests are lib/assist.ts): the built-in task names, a task in the
+// requests are lib/assist.ts): the task names, a task in the
 // status, the Server-Sent Events parser of a text task's stream, and a
 // describe-work reply onto the publish form. Unit-tested.
 
-/** The built-in tasks the web's entries run (resolved by name: an
- *  organization or member may restyle them). */
-export const ENHANCE_PROMPT = "enhance-prompt";
-export const DESCRIBE_WORK = "describe-work";
-export const DESCRIBE_ROOM = "describe-room";
+/** The tasks the web's entries run (resolved by name: an organization or
+ *  member may restyle them; their output contracts are
+ *  wire.AssistContracts). */
+export const ENHANCE_PROMPT = AssistTaskEnhancePrompt;
+export const DESCRIBE_WORK = AssistTaskDescribeWork;
+export const DESCRIBE_ROOM = AssistTaskDescribeRoom;
 
 /** assistTask finds a runnable task in a status: null when assists are
  *  unavailable or the task does not exist. */

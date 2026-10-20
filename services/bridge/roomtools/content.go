@@ -15,7 +15,7 @@ import (
 )
 
 // Content tools (docs/prd/2026-10-12-experts-and-teams.md §5): an agent
-// authoring an expert or a skill pack (the built-in Expert builder) saves
+// authoring an expert or a skill pack (the Expert builder) saves
 // the draft it wrote into its workspace, and reads the member's components
 // to improve one. Every call goes to the ordinary content routes with a
 // ?job=&room= grant: the gateway admits it only while the bound job runs on

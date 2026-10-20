@@ -205,31 +205,40 @@ eq(
 {
   const deck = { name: "q3.pptx", mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation", extension: "pptx" };
   const office = { extensions: [".pptx", ".docx", ".xlsx"] };
-  const builtin = pack("file-prompts", [
+  const defaults = pack("file-prompts", [
     prompt("tighten", { title: "Tighten the wording", starter: true, files: { extensions: [".pptx"] } }),
     prompt("summary", { title: "Summarize", starter: true, files: office }),
     prompt("not-starter", { files: { extensions: [".pptx"] } }),
     prompt("image", { title: "Describe it", starter: true, files: { mimeTypes: ["image/*"] } }),
-  ], { scope: "builtin" });
+  ], { scope: "platform" });
   const org = pack("finance", [prompt("org-summary", { title: "summarize", starter: true, files: { extensions: [".pptx"] }, uses: 3 })]);
   const roomPack = pack("room-kit", [prompt("kickoff", { title: "Kick off", starter: true })]);
-  const choices = promptChoices([], [use(roomPack, "room")], [org, builtin]);
+  const choices = promptChoices([], [use(roomPack, "room")], [org, defaults]);
   eq(
     fileSuggestions(choices, deck).map((c) => [c.pack, c.prompt.id]),
     [
       ["finance", "org-summary"],
       ["file-prompts", "tighten"],
     ],
-    "the most specific first, the Library before built-in, one per title, starters only",
+    "the most specific first, then the most used, one per title, starters only",
   );
   eq(fileSuggestions(choices, { name: "a.webp", mimeType: "image/webp", extension: "webp" }).map((c) => c.prompt.id), ["image"], "a wildcard match");
   eq(fileSuggestions(choices, { name: "notes.txt", mimeType: "text/plain", extension: "txt" }), [], "no match, no suggestions");
   // File suggestions are never room starters.
-  eq(starterChoices([use(roomPack, "room")], [builtin]).map((c) => c.prompt.id), ["kickoff"], "room starters skip file prompts");
+  eq(starterChoices([use(roomPack, "room")], [defaults]).map((c) => c.prompt.id), ["kickoff"], "room starters skip file prompts");
   // The scope round-trips through the Library form.
-  const back = promptPackPayload(formFromPack(builtin));
+  const back = promptPackPayload(formFromPack(defaults));
   eq((back.prompts as { files?: unknown }[])[0].files, { extensions: [".pptx"] }, "files round trip");
   eq((back.prompts as { files?: unknown }[])[3].files, { mimeTypes: ["image/*"] }, "mime round trip");
+}
+
+// ---- every-room starters round-trip through the Library form.
+{
+  const every = pack("starters", [prompt("plan", { title: "Plan", starter: true })], { scope: "platform", everyRoom: true });
+  const form = formFromPack(every);
+  eq(form.everyRoom, true, "the form reads everyRoom");
+  eq(promptPackPayload(form).everyRoom, true, "the payload keeps it");
+  eq(promptPackPayload({ ...form, everyRoom: false }).everyRoom, undefined, "off: not sent");
 }
 
 // ---- selection suggestions (docs/prd/2026-10-14-select-edit-review.md rule 2).
@@ -240,7 +249,7 @@ eq(
     prompt("rewrite", { title: "Rewrite this", starter: true, selection: ["text", "block"] }),
     prompt("slide", { title: "Tighten this slide", starter: true, selection: ["slide"], files: { extensions: [".pptx"] } }),
     prompt("cells", { title: "Add a total", starter: true, selection: ["cells"], files: { extensions: [".xlsx"] } }),
-  ], { scope: "builtin" });
+  ], { scope: "platform" });
   const choices = promptChoices([], [], [pack2]);
   eq(fileSuggestions(choices, deck).map((c) => c.prompt.id), ["tighten"], "no selection: the file's");
   eq(fileSuggestions(choices, deck, "slide").map((c) => c.prompt.id), ["slide"], "a slide: its suggestions");
@@ -258,12 +267,12 @@ eq(
   const generic = pack("file-prompts", [
     prompt("rewrite", { title: "Rewrite this", starter: true, selection: ["text", "block"] }),
     prompt("shorter", { title: "Make it shorter", starter: true, selection: ["text", "block"] }),
-  ], { scope: "builtin" });
+  ], { scope: "platform" });
   const diagrams = pack("diagram-prompts", [
     prompt("rename", { title: "Rename this", starter: true, selection: ["block"], files: { extensions: [".mmd", ".drawio"] } }),
     prompt("step", { title: "Add a step after this", starter: true, selection: ["block"], files: { extensions: [".mmd"] } }),
-  ], { scope: "builtin" });
-  const codePrompts = pack("code-prompts", [prompt("explain", { title: "Explain this code", starter: true, selection: ["text"], files: { extensions: [".py", ".go"] } })], { scope: "builtin" });
+  ], { scope: "platform" });
+  const codePrompts = pack("code-prompts", [prompt("explain", { title: "Explain this code", starter: true, selection: ["text"], files: { extensions: [".py", ".go"] } })], { scope: "platform" });
   const choices = promptChoices([], [], [generic, diagrams, codePrompts]);
   eq(fileSuggestions(choices, diagram, "block").map((c) => c.prompt.id), ["rename", "step"], "a diagram box: its own, never the text ones");
   eq(fileSuggestions(choices, code, "text").map((c) => c.prompt.id), ["explain"], "selected code: the code prompts replace the text ones");

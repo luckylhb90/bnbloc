@@ -3,7 +3,7 @@
 // helpers of the composer (prompt choices, /slash matching, variable
 // filling, insertion) and the Library form (drafts <-> payload, variables
 // kept in step with the body, prompts drafted from messages). Unit-tested.
-import { isBuiltin, type ContentComponent, type ContentUse } from "./contentComponents.ts";
+import type { ContentComponent, ContentUse } from "./contentComponents.ts";
 import { formatFileMatch, matchSpecificity, parseFileMatch, type FileFacts } from "./fileMatch.ts";
 
 export type { ContentPrompt } from "./wire.gen.ts";
@@ -19,15 +19,14 @@ export const PERSONAL_PROMPT_PACK = "my-prompts";
 
 // A prompt the composer offers: the prompt and the pack it comes from (its
 // version in effect, and where it comes from: a pack turned on for the
-// member or the room, any other pack of the member's Library, or a
-// built-in pack: its starters, or its prompts among the Library's).
+// member or the room, or any other pack of the member's Library).
 export interface PromptChoice {
   readonly prompt: ContentPrompt;
   readonly componentId: string;
   readonly pack: string;
   readonly packLabel: string;
   readonly version: string;
-  readonly source: "mine" | "room" | "library" | "builtin";
+  readonly source: "mine" | "room" | "library";
 }
 
 function packLabel(c: Pick<ContentComponent, "displayName" | "name">): string {
@@ -37,7 +36,7 @@ function packLabel(c: Pick<ContentComponent, "displayName" | "name">): string {
 // promptChoices lists the prompts of the packs turned on for the member,
 // then the room's, then every other prompt pack the member's Library holds
 // (library: contentuse.Visible — the org's and the platform's published
-// packs, the built-in ones, the member's own). Picking a prompt is the
+// packs, the default ones among them, the member's own). Picking a prompt is the
 // opt-in, as picking an expert is: a published pack needs no second "turn
 // on" before its /commands work. Each pack is listed once, at its first
 // source.
@@ -57,12 +56,12 @@ export function promptChoices(
   };
   for (const u of member) if (u.kind === "prompt") add(u.component, "mine");
   for (const u of room) if (u.kind === "prompt") add(u.component, "room");
-  for (const c of library) add(c, isBuiltin(c) ? "builtin" : "library");
+  for (const c of library) add(c, "library");
   return out;
 }
 
 // MAX_PACK_STARTERS bounds each part of an empty room's starters: the room
-// packs' and the built-in packs'.
+// packs' and the every-room packs'.
 export const MAX_PACK_STARTERS = 6;
 
 // packStarters are the room starters of prompt packs (flagged starter, not
@@ -84,19 +83,20 @@ function packStarters(packs: readonly ContentComponent[], source: PromptChoice["
 
 // starterChoices are an empty room's starter prompts, every one a prompt
 // pack's prompt its author flagged starter: first the packs turned on for
-// the room (the room's uses, in its order), then the built-in packs of the
-// Library (in every member's reach, like all built-in content), each part
-// at most MAX_PACK_STARTERS. A member's own packs add no starters: the
-// room's owner chose the room's.
+// the room (the room's uses, in its order), then the packs of the Library
+// whose manifest offers their starters in every room (everyRoom, at any
+// scope: the default starters are one), each part at most
+// MAX_PACK_STARTERS. Any other pack adds starters only where it is turned
+// on: the room's owner chose the room's.
 export function starterChoices(room: readonly ContentUse[], library: readonly ContentComponent[], limit = MAX_PACK_STARTERS): PromptChoice[] {
   const roomPacks = room.flatMap((u) => (u.kind === "prompt" && u.component ? [u.component] : []));
-  return [...packStarters(roomPacks, "room", limit), ...packStarters(library.filter(isBuiltin), "builtin", limit)];
+  return [...packStarters(roomPacks, "room", limit), ...packStarters(library.filter((c) => c.everyRoom), "library", limit)];
 }
 
 // MAX_FILE_SUGGESTIONS bounds a file's suggestions.
 export const MAX_FILE_SUGGESTIONS = 6;
 
-const SOURCE_ORDER: Readonly<Record<PromptChoice["source"], number>> = { room: 0, mine: 1, library: 2, builtin: 3 };
+const SOURCE_ORDER: Readonly<Record<PromptChoice["source"], number>> = { room: 0, mine: 1, library: 2 };
 
 // fileSuggestions are the suggestions for a file
 // (docs/prd/2026-10-14-file-prompts-and-compare.md rule 2), or for the part
@@ -109,7 +109,7 @@ const SOURCE_ORDER: Readonly<Record<PromptChoice["source"], number>> = { room: 0
 //   - without, the starters scoped to files that match it.
 // The most specific match first (a pack for .pptx before one for every
 // Office file; any file last), then the room's packs, the member's, the
-// Library's and the built-in ones, then the most used. One per title (two
+// Library's, then the most used. One per title (two
 // packs' "Proofread" show once), at most limit.
 export function fileSuggestions(
   choices: readonly PromptChoice[],
@@ -277,6 +277,9 @@ export interface PromptPackForm {
   displayName: string;
   description: string;
   prompts: PromptDraft[];
+  // everyRoom offers the pack's starters in every empty room, not only in
+  // the rooms it is turned on for.
+  everyRoom: boolean;
 }
 
 export function emptyPromptDraft(): PromptDraft {
@@ -284,7 +287,7 @@ export function emptyPromptDraft(): PromptDraft {
 }
 
 export function emptyPromptPackForm(): PromptPackForm {
-  return { name: "", displayName: "", description: "", prompts: [emptyPromptDraft()] };
+  return { name: "", displayName: "", description: "", prompts: [emptyPromptDraft()], everyRoom: false };
 }
 
 // slugify mirrors the server's name generation.
@@ -347,6 +350,7 @@ export function formFromPack(c: ContentComponent): PromptPackForm {
     displayName: c.displayName ?? "",
     description: c.description ?? "",
     prompts: (c.prompts ?? []).map(draftFromPrompt),
+    everyRoom: !!c.everyRoom,
   };
 }
 
@@ -380,6 +384,7 @@ export function promptPackPayload(f: PromptPackForm): Record<string, unknown> {
   const out: Record<string, unknown> = { kind: "prompt", name: f.name.trim() };
   if (f.displayName.trim()) out.displayName = f.displayName.trim();
   if (f.description.trim()) out.description = f.description.trim();
+  if (f.everyRoom) out.everyRoom = true;
   const drafts = f.prompts.filter((d) => d.title.trim() || d.body.trim());
   const ids = new Set(drafts.map((d) => d.id.trim()).filter(Boolean));
   out.prompts = drafts.map((d) => {

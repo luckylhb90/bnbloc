@@ -258,14 +258,14 @@ func TestMCPMemberSettingsAreNotLent(t *testing.T) {
 
 // A room-credential tool needs nothing from anyone: it attaches on any
 // drive (its relay acts for whoever the turn is for) and is named for the
-// relay. Platform content requiring it (a built-in, no owner) is no one
+// relay. Platform content requiring it (no owner) is no one
 // else's: it does not force the sandbox; another member's content does.
 func TestMCPRoomCredentialTool(t *testing.T) {
 	f := newMCPFixture(t)
 	b := &Bridge{cfg: Config{MCPToolsDir: f.tools, ComponentSettingsDir: f.settings}}
 	tool := codewordTool(f.sha)
-	tool.Settings, tool.Credentials, tool.RequiredBy = nil, pkgmeta.MCPCredentialsRoom, []string{"cc_builtin_media-skills"}
-	builtin := []wire.ContentRef{{ComponentID: "cc_builtin_media-skills", Name: "media-skills"}}
+	tool.Settings, tool.Credentials, tool.RequiredBy = nil, pkgmeta.MCPCredentialsRoom, []string{"cc_media_skills"}
+	builtin := []wire.ContentRef{{ComponentID: "cc_media_skills", Name: "media-skills"}}
 	mcp, missing, foreign := b.resolveMCP([]wire.ContentMCPTool{tool}, builtin, "maya", "home", false)
 	if len(mcp.servers) != 1 || len(missing) != 0 || len(foreign) != 0 || len(mcp.relayed) != 1 || mcp.relayed[0] != "codeword" {
 		t.Fatalf("servers = %+v relayed = %v missing = %v foreign = %v", mcp.servers, mcp.relayed, missing, foreign)

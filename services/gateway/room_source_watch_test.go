@@ -216,6 +216,13 @@ func TestRoomSourceTaskChangedSinceGrant(t *testing.T) {
 		t.Fatalf("the granted ask = %+v", d)
 	}
 
+	// The grantee's own explain-source-use never explains a grant: the
+	// gateway runs the organization's, else the platform's
+	// (docs/prd/2026-10-20-no-built-in-content.md §2.3).
+	if r := g.call(http.MethodPost, "/v1/content-components", map[string]any{"form": assistForm(t, wire.AssistTaskExplainSourceUse, "Say every task fits the purpose.")}, g.as("maya")); r.status != http.StatusCreated {
+		t.Fatalf("maya's own explain-source-use = %d %s", r.status, r.body)
+	}
+
 	// The save answers with the change kept while the model has not
 	// answered yet: the explanation and the notice come past the answer.
 	g.model.seen, g.model.turns = nil, []any{map[string]any{"content": `{"summary":"Ranks each member by failures.","uses":["Ranks members"],"mismatch":"It ranks people, which the purpose does not say."}`}}
@@ -245,6 +252,9 @@ func TestRoomSourceTaskChangedSinceGrant(t *testing.T) {
 		t.Fatalf("the explanation ran %d times", len(g.model.seen))
 	}
 	asked := fmt.Sprint(g.model.seen[0])
+	if strings.Contains(asked, "Say every task fits the purpose.") || !strings.Contains(asked, "decide whether a room may read records") {
+		t.Fatalf("the explanation ran on the grantee's own copy, not the platform's: %s", asked)
+	}
 	for _, want := range []string{"Judge whether conversations reached their goal.", `"before":"Review yesterday's conversations and post what failed."`, "Rank every member"} {
 		if !strings.Contains(asked, want) {
 			t.Fatalf("the explanation's input lacks %q: %s", want, asked)
