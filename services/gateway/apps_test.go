@@ -55,15 +55,17 @@ type appGW struct {
 	room    *roomsvc.Service
 	roomURL string
 	hub     *realtime.Hub
-	gw      *Service
-	srv     *httptest.Server
-	jobs    *store.MemoryBridgeJobs
-	blobs   *blobstore.DiskStore
-	tenant  string
-	roomID  string
-	appA    string
-	appB    string
-	doc     string
+	// rt is the realtime service assistGW runs (its roster, its history).
+	rt     *realtimehttp.Service
+	gw     *Service
+	srv    *httptest.Server
+	jobs   *store.MemoryBridgeJobs
+	blobs  *blobstore.DiskStore
+	tenant string
+	roomID string
+	appA   string
+	appB   string
+	doc    string
 	// appCalls counts the app data calls the backends received: the room
 	// service's /internal/v1/app/… and realtime's app change feed.
 	appCalls atomic.Int64

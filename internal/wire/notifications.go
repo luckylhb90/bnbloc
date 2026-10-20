@@ -39,6 +39,10 @@ const (
 	// room's members or to named people of the organization (app.notify):
 	// its title is the app's, and it links to the app.
 	NotificationAppNotice = "app_notice"
+	// NotificationRoomReport tells an organization's admins what a member
+	// could not get done in a room (POST /v1/rooms/{roomId}/report): the
+	// member's reviewed text, linked to the reply it is about.
+	NotificationRoomReport = "room_report"
 )
 
 // AdminAlertRequest is the body of POST /v1/platform/alerts. Recipients
@@ -79,7 +83,29 @@ type NotificationPrefs struct {
 	ContentShared  bool     `json:"contentShared"`
 	ContentReview  bool     `json:"contentReview"`
 	AppNotices     bool     `json:"appNotices"`
+	RoomReports    bool     `json:"roomReports"`
 	QuietRooms     []string `json:"quietRooms"`
+}
+
+// RoomReportRequest is POST /v1/rooms/{roomId}/report: a member's note to
+// the organization's admins of what the room could not do
+// (docs/prd/2026-10-20-never-a-dead-end.md §2.2, the "report" fix), the
+// text the member reviewed, and the reply it is about (its room sequence
+// and channel; 0 links the room).
+type RoomReportRequest struct {
+	Text      string `json:"text"`
+	Seq       int64  `json:"seq,omitempty"`
+	ChannelID string `json:"channelId,omitempty"`
+}
+
+// MaxRoomReportText bounds a room report's text.
+const MaxRoomReportText = 1000
+
+// RoomReportReply says whether the report was queued for an admin (false:
+// no notifier, push subscription or desktop reaches one, or every admin
+// turned room reports off).
+type RoomReportReply struct {
+	Queued bool `json:"queued"`
 }
 
 // NotificationTestResult answers a test send (POST

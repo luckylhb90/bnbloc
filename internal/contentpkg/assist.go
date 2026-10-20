@@ -25,6 +25,9 @@ const (
 	maxAssistFields       = 12
 	maxAssistFieldName    = 40
 	maxAssistFieldDesc    = 300
+	// maxAssistGateQuestion bounds a gate's question (one line, well within
+	// the decision model's wire.MaxDecisionInstructions).
+	maxAssistGateQuestion = 500
 )
 
 // AssistLimits is an assist's bundle profile: component.json,
@@ -35,7 +38,7 @@ var AssistLimits = tarbundle.Limits{MaxBytes: 64 << 10, MaxFiles: 3}
 // the web fills form fields by them).
 var assistFieldRE = regexp.MustCompile(fmt.Sprintf(`^[a-zA-Z][a-zA-Z0-9_]{0,%d}$`, maxAssistFieldName-1))
 
-var errAssistFields = errors.New("an output, fields and a context belong to an assist")
+var errAssistFields = errors.New("an output, fields, a context and a gate belong to an assist")
 
 func init() {
 	register(KindSpec{Kind: KindAssist, Short: "assist", Limits: AssistLimits,
@@ -43,8 +46,9 @@ func init() {
 }
 
 // validateAssist: INSTRUCTIONS.md (non-empty, bounded), an output, the
-// fields of a JSON output (none for text), a context of known names, no
-// requirements, and nothing else but component.json and README.md.
+// fields of a JSON output (none for text), a context of known names, an
+// optional gate, no requirements, and nothing else but component.json and
+// README.md.
 func validateAssist(p *Package) error {
 	m := p.Manifest
 	switch {
@@ -85,6 +89,25 @@ func validateAssist(p *Package) error {
 			return fmt.Errorf("context %q named twice", c)
 		}
 		seen[c] = true
+	}
+	return checkAssistGate(m.Gate)
+}
+
+// checkAssistGate: a gate (docs/prd/2026-10-20-never-a-dead-end.md §2.1)
+// asks one bounded, one-line question and runs the assist at a
+// probability of yes of at least its threshold, above 0 and at most 1.
+func checkAssistGate(g *wire.AssistGate) error {
+	if g == nil {
+		return nil
+	}
+	if strings.TrimSpace(g.Question) == "" {
+		return errors.New("gate: the question is required")
+	}
+	if err := checkText("gate question", g.Question, maxAssistGateQuestion, true); err != nil {
+		return err
+	}
+	if !(g.Threshold > 0 && g.Threshold <= 1) {
+		return fmt.Errorf("gate: threshold %v is not a probability above 0 and at most 1", g.Threshold)
 	}
 	return nil
 }
@@ -174,6 +197,9 @@ func assistFromForm(f Form, m *Manifest, files map[string][]byte) error {
 		m.Fields = append(m.Fields, fd)
 	}
 	m.Context = f.Context
+	if f.Gate != nil {
+		m.Gate = &wire.AssistGate{Question: strings.TrimSpace(f.Gate.Question), Threshold: f.Gate.Threshold}
+	}
 	files[InstructionsFile] = []byte(strings.TrimSpace(f.Instructions) + "\n")
 	return nil
 }
@@ -183,5 +209,5 @@ func (m Manifest) AssistSpec() *wire.AssistSpec {
 	if m.Kind != KindAssist {
 		return nil
 	}
-	return &wire.AssistSpec{Output: m.Output, Fields: m.Fields, Context: m.Context}
+	return &wire.AssistSpec{Output: m.Output, Fields: m.Fields, Context: m.Context, Gate: m.Gate}
 }

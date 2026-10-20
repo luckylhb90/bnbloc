@@ -442,6 +442,8 @@ func Allows(p store.NotificationPrefs, typ, roomID string) bool {
 		return p.ContentReview
 	case wire.NotificationAppNotice:
 		return p.AppNotices
+	case wire.NotificationRoomReport:
+		return p.RoomReports
 	}
 	return false
 }

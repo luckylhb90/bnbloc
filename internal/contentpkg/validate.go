@@ -196,7 +196,7 @@ func validateEnvelope(m Manifest, opts Options) error {
 	if m.Kind != KindWork && (m.Type != "" || m.File != "" || m.Recipe != nil) {
 		return fmt.Errorf("a type, a file and a recipe belong to a work")
 	}
-	if m.Kind != KindAssist && (m.Output != "" || len(m.Fields) > 0 || len(m.Context) > 0) {
+	if m.Kind != KindAssist && (m.Output != "" || len(m.Fields) > 0 || len(m.Context) > 0 || m.Gate != nil) {
 		return errAssistFields
 	}
 	if m.Kind != KindRoom && (m.Requires.Expert != "" || len(m.Channels)+len(m.Schedules)+len(m.Apps)+len(m.Sources) > 0) {

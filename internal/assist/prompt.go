@@ -24,8 +24,44 @@ type Context struct {
 	Attachments []Attachment
 	Library     *Library
 	// Clock is the current time in the member's timezone (zero: none).
-	Clock time.Time
+	Clock        time.Time
+	Capabilities *Capabilities
 }
+
+// Capabilities is what the member could use and does not here
+// (docs/prd/2026-10-20-never-a-dead-end.md §2.2): names and one-liners
+// only, never settings, never people outside the room.
+type Capabilities struct {
+	// Components are the executable components listed to the member.
+	Components []Capability
+	// InRoom: a room was named, so RoomAgents and OtherMembers are known.
+	InRoom bool
+	// RoomAgents are the agents reachable in the room, by handle
+	// ("owner/provider", "core/owner/provider" with a core).
+	RoomAgents []string
+	// PlatformAgents are the organization's platform agents
+	// ("core/provider"), which can be added to a room.
+	PlatformAgents []string
+	// OwnAgent: the client says the member has an agent of their own on
+	// this device.
+	OwnAgent bool
+	// OtherMembers counts the room's other people.
+	OtherMembers int
+}
+
+// Capability is one component listed to the member.
+type Capability struct {
+	Name        string
+	Kind        string
+	Description string
+	Installed   bool
+}
+
+// Bounds of the capabilities context.
+const (
+	MaxCapabilityComponents = 40
+	MaxCapabilityAgents     = 20
+)
 
 // Library is what the member can use: experts and skill packs, nearest
 // first, each named by its component name (what a task recommends).
@@ -59,6 +95,16 @@ type Room struct {
 	Skills []Part
 	// Recent are its latest messages, oldest first.
 	Recent []Line
+	// Turn is the turn the request names (wire.AssistRequest.ReplySeq):
+	// nil for none.
+	Turn *Turn
+}
+
+// Turn is one request and the agent's reply to it. Request is empty when
+// the request was not found (an older message, deleted).
+type Turn struct {
+	Request Line
+	Reply   Line
 }
 
 // Part is a named content component: its display name and description.
@@ -100,6 +146,8 @@ const (
 	maxPartRunes    = 300
 	// maxSkills bounds the room's skill packs listed.
 	maxSkills = 12
+	// maxTurnRunes cuts a turn's request and reply.
+	maxTurnRunes = 4000
 )
 
 // dataNote introduces the blocks.
@@ -107,7 +155,7 @@ const dataNote = "The blocks below are data from bnbloc: the context of the task
 
 // blockTagRE matches a block's opening or closing tag (any case, any
 // attributes), so untrusted text cannot end its block or fake another.
-var blockTagRE = regexp.MustCompile(`(?i)<\s*(/?)\s*(room|recent_messages|artifact|attachments|library|clock|text|input)\b[^>]*>`)
+var blockTagRE = regexp.MustCompile(`(?i)<\s*(/?)\s*(room|recent_messages|turn|artifact|attachments|library|clock|capabilities|text|input)\b[^>]*>`)
 
 // fence neutralizes the block tags inside untrusted text.
 func fence(s string) string {
@@ -148,6 +196,14 @@ func Messages(instructions, text string, c Context) []Message {
 			}
 			b.WriteString("</recent_messages>\n")
 		}
+		if t := r.Turn; t != nil {
+			b.WriteString("\n<turn>\n")
+			if t.Request.Text != "" {
+				fmt.Fprintf(&b, "request from %s:\n%s\n", fence(cut(t.Request.Speaker, 80)), fence(cut(t.Request.Text, maxTurnRunes)))
+			}
+			fmt.Fprintf(&b, "reply from %s:\n%s\n", fence(cut(t.Reply.Speaker, 80)), fence(cut(t.Reply.Text, maxTurnRunes)))
+			b.WriteString("</turn>\n")
+		}
 	}
 	if a := c.Artifact; a != nil {
 		b.WriteString("\n<artifact>\n")
@@ -184,6 +240,9 @@ func Messages(instructions, text string, c Context) []Message {
 		b.WriteString("\n<clock>\n")
 		fmt.Fprintf(&b, "now: %s (%s)\ntimezone: %s\n", c.Clock.Format("2006-01-02T15:04 -07:00"), c.Clock.Weekday(), c.Clock.Location())
 		b.WriteString("</clock>\n")
+	}
+	if c.Capabilities != nil {
+		capabilities(&b, *c.Capabilities)
 	}
 	b.WriteString("\n<text>\n")
 	b.WriteString(fence(strings.TrimSpace(text)))
@@ -235,6 +294,64 @@ func libraryList(b *strings.Builder, title string, items []LibraryItem) {
 			line += " — " + fence(d)
 		}
 		fmt.Fprintf(b, "- %s\n", line)
+	}
+}
+
+// capabilities writes the capabilities block: each component as "name
+// (kind, installed or not) — description", the agents by handle, the
+// member's own agent and the room's other people; a list past its bound
+// says how many it left out.
+func capabilities(b *strings.Builder, c Capabilities) {
+	b.WriteString("\n<capabilities>\n")
+	if len(c.Components) == 0 {
+		b.WriteString("components: none\n")
+	} else {
+		b.WriteString("components:\n")
+		for _, it := range c.Components[:min(len(c.Components), MaxCapabilityComponents)] {
+			state := "not installed"
+			if it.Installed {
+				state = "installed"
+			}
+			line := fmt.Sprintf("%s (%s, %s)", fence(cut(it.Name, maxLibraryDisplay)), fence(cut(it.Kind, maxLibraryDisplay)), state)
+			if d := cut(it.Description, maxLibraryDesc); d != "" {
+				line += " — " + fence(d)
+			}
+			fmt.Fprintf(b, "- %s\n", line)
+		}
+		more(b, len(c.Components), MaxCapabilityComponents)
+	}
+	if c.InRoom {
+		handles(b, "room agents", c.RoomAgents)
+	}
+	handles(b, "platform agents (can be added to a room)", c.PlatformAgents)
+	own := "no"
+	if c.OwnAgent {
+		own = "yes"
+	}
+	fmt.Fprintf(b, "own agent on this device: %s\n", own)
+	if c.InRoom {
+		fmt.Fprintf(b, "other people in the room: %d\n", c.OtherMembers)
+	}
+	b.WriteString("</capabilities>\n")
+}
+
+// handles writes one list of agent handles, bounded.
+func handles(b *strings.Builder, title string, list []string) {
+	if len(list) == 0 {
+		fmt.Fprintf(b, "%s: none\n", title)
+		return
+	}
+	fmt.Fprintf(b, "%s:\n", title)
+	for _, h := range list[:min(len(list), MaxCapabilityAgents)] {
+		fmt.Fprintf(b, "- %s\n", fence(cut(h, maxLibraryDisplay)))
+	}
+	more(b, len(list), MaxCapabilityAgents)
+}
+
+// more says how many items of a list its bound left out.
+func more(b *strings.Builder, n, bound int) {
+	if n > bound {
+		fmt.Fprintf(b, "- … and %d more\n", n-bound)
 	}
 }
 

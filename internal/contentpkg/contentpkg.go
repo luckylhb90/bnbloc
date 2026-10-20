@@ -117,11 +117,13 @@ type Manifest struct {
 	Recipe *wire.WorkRecipe `json:"recipe,omitempty"`
 
 	// Assist: the task's output (wire.AssistOutputs), the fields a JSON
-	// reply holds and the context it may receive (wire.AssistContexts);
-	// INSTRUCTIONS.md is its system prompt (assist.go).
+	// reply holds, the context it may receive (wire.AssistContexts) and
+	// the gate a run may ask first; INSTRUCTIONS.md is its system prompt
+	// (assist.go).
 	Output  string             `json:"output,omitempty"`
 	Fields  []wire.AssistField `json:"fields,omitempty"`
 	Context []string           `json:"context,omitempty"`
+	Gate    *wire.AssistGate   `json:"gate,omitempty"`
 
 	// Room: a room's setup (room.go): its channels by name, its scheduled
 	// tasks, its apps (works by "name@range") and the sources it asks for

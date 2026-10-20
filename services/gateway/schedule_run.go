@@ -507,20 +507,12 @@ func (r *scheduleRun) post(ctx context.Context, name, text string, recipient map
 
 // listAgents reads the room's agents online now (realtime's roster).
 func (r *scheduleRun) listAgents(ctx context.Context, _ json.RawMessage) (string, error) {
-	base := strings.TrimRight(r.s.Backends.Realtime, "/")
-	resp, err := callBackend(ctx, http.MethodGet, base+"/v1/rooms/"+url.PathEscape(r.sc.RoomID)+"/agents", nil, r.claims.Subject, r.claims.Tenant)
+	roster, err := r.s.roomRoster(ctx, r.claims, r.sc.RoomID)
 	if err != nil {
 		return "", errors.New("the room's agents could not be read")
 	}
-	defer resp.Body.Close()
-	var roster struct {
-		Agents []wire.RosterAgent `json:"agents"`
-	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&roster); err != nil {
-		return "", errors.New("the room's agents could not be read")
-	}
 	var names []string
-	for _, a := range roster.Agents {
+	for _, a := range roster {
 		names = append(names, a.OwnerUserID+"/"+a.Provider)
 	}
 	out, _ := json.Marshal(map[string]any{"agents": names})

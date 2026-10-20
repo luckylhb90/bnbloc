@@ -155,10 +155,10 @@ const (
 	decisionBurst = 120.0
 )
 
-// runDecision is the ONE owner of a decision call (the member route and an
+// runDecision is the ONE owner of a decision route (the member route and an
 // app's ~app/ai/decide): the caller's decision rate, the request's
-// validation, the provider, the call, the audit row (never the input, the
-// questions or the answers) and the reply.
+// validation, then callDecision (the provider, the call, the audit row:
+// never the input, the questions or the answers) and the reply.
 func (s *Service) runDecision(w http.ResponseWriter, r *http.Request, claims auth.Claims, ownAuth, auditName string, format decisionFormat) {
 	ctx := r.Context()
 	if !s.decisionLimiter.get(decisionRate, decisionBurst, s.Peers.Size).allow(claims.Tenant + "/" + claims.Subject) {
@@ -169,24 +169,39 @@ func (s *Service) runDecision(w http.ResponseWriter, r *http.Request, claims aut
 	if !ok {
 		return
 	}
-	p, has, err := s.decisionProvider(ctx, claims, ownAuth)
-	if err != nil {
+	reply, has, err := s.callDecision(ctx, claims, ownAuth, auditName, req)
+	switch {
+	case errors.Is(err, errDecisionProviderRead):
 		obs.ServerError(w, "read the decision provider failed", err)
 		httpx.Error(w, "read the decision provider failed", http.StatusInternalServerError)
-		return
+	case err != nil:
+		writeDecisionErr(w, err)
+	case !has:
+		httpx.Error(w, errDecisionsUnavailable.Error(), http.StatusConflict)
+	default:
+		httpx.WriteJSON(w, http.StatusOK, format.reply(reply))
+	}
+}
+
+// errDecisionProviderRead wraps a failure to read the provider settings.
+var errDecisionProviderRead = errors.New("read the decision provider")
+
+// callDecision is the one call of a decision provider once a caller is
+// admitted (runDecision; an assist's gate): the provider for the caller,
+// the call and its audit row. has false: no provider runs for the caller
+// (no call is made). A settings read failure wraps errDecisionProviderRead.
+func (s *Service) callDecision(ctx context.Context, claims auth.Claims, ownAuth, auditName string, req decision.Request) (wire.DecisionReply, bool, error) {
+	p, has, err := s.decisionProvider(ctx, claims, ownAuth)
+	if err != nil {
+		return wire.DecisionReply{}, false, fmt.Errorf("%w: %w", errDecisionProviderRead, err)
 	}
 	if !has {
-		httpx.Error(w, errDecisionsUnavailable.Error(), http.StatusConflict)
-		return
+		return wire.DecisionReply{}, false, nil
 	}
 	start := time.Now()
 	reply, err := p.Decide(ctx, req)
 	s.auditDecision(ctx, claims, auditName, p, req, reply.Usage, time.Since(start).Milliseconds(), err)
-	if err != nil {
-		writeDecisionErr(w, err)
-		return
-	}
-	httpx.WriteJSON(w, http.StatusOK, format.reply(reply))
+	return reply, true, err
 }
 
 // auditDecision records one decision call: the model, the question and

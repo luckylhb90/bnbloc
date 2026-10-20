@@ -47,6 +47,14 @@ func TestAssistValidation(t *testing.T) {
 	if _, err := Validate(assistBundle(t, map[string]any{"output": wire.AssistOutputText, "fields": nil}, nil), "", Options{}); err != nil {
 		t.Fatalf("a text assist: %v", err)
 	}
+	gated, err := Validate(assistBundle(t, map[string]any{"gate": map[string]any{"question": "Was it left undone?", "threshold": 1},
+		"context": []string{wire.AssistContextRoom, wire.AssistContextCapabilities}}, nil), "", Options{})
+	if err != nil {
+		t.Fatalf("a gated assist: %v", err)
+	}
+	if g := gated.Manifest.AssistSpec().Gate; g == nil || g.Question != "Was it left undone?" || g.Threshold != 1 {
+		t.Fatalf("the gate = %+v", g)
+	}
 	bad := []struct {
 		name  string
 		extra map[string]any
@@ -65,6 +73,12 @@ func TestAssistValidation(t *testing.T) {
 		{"empty instructions", nil, map[string]string{InstructionsFile: "  \n"}, "empty"},
 		{"too long instructions", nil, map[string]string{InstructionsFile: strings.Repeat("a", maxAssistInstructions+1)}, InstructionsFile},
 		{"another file", nil, map[string]string{"notes.md": "x"}, "holds only"},
+		{"gate without a question", map[string]any{"gate": map[string]any{"question": " ", "threshold": 0.5}}, nil, "question is required"},
+		{"gate question of two lines", map[string]any{"gate": map[string]any{"question": "Undone?\nReally?", "threshold": 0.5}}, nil, "one line"},
+		{"gate question too long", map[string]any{"gate": map[string]any{"question": strings.Repeat("a", maxAssistGateQuestion+1), "threshold": 0.5}}, nil, "longer than"},
+		{"gate threshold 0", map[string]any{"gate": map[string]any{"question": "Undone?"}}, nil, "threshold"},
+		{"gate threshold past 1", map[string]any{"gate": map[string]any{"question": "Undone?", "threshold": 1.5}}, nil, "threshold"},
+		{"gate threshold below 0", map[string]any{"gate": map[string]any{"question": "Undone?", "threshold": -0.2}}, nil, "threshold"},
 	}
 	for _, c := range bad {
 		if _, err := Validate(assistBundle(t, c.extra, c.files), "", Options{}); err == nil || !strings.Contains(err.Error(), c.want) {
@@ -86,6 +100,15 @@ func TestAssistFieldsBelongToAssists(t *testing.T) {
 	}
 	if p.Manifest.Output != wire.AssistOutputText || p.Instructions != "Polish the text.\n" {
 		t.Fatalf("built = %+v", p.Manifest)
+	}
+	// A gate is an assist's, and a form carries it.
+	gate := &wire.AssistGate{Question: "  Was it left undone?  ", Threshold: 0.7}
+	if _, _, err := Build(Form{Kind: "expert", Name: "x", Instructions: "Be helpful.", Gate: gate}, "1.0.0", Options{}, nil); err == nil || !strings.Contains(err.Error(), "belong to an assist") {
+		t.Fatalf("an expert form with a gate: %v", err)
+	}
+	p, _, err = Build(Form{Kind: "assist", Name: "polish", Instructions: "Polish the text.", Output: wire.AssistOutputText, Gate: gate}, "1.0.0", Options{}, nil)
+	if err != nil || p.Manifest.Gate.Question != "Was it left undone?" || p.Manifest.Gate.Threshold != 0.7 {
+		t.Fatalf("a gated form = %+v, %v", p, err)
 	}
 	if spec, _ := Lookup("assist"); spec.Use || spec.MemberUse {
 		t.Fatal("an assist is no content use")

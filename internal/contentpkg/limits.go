@@ -81,6 +81,7 @@ func Limits() []Limit {
 		{assist, "fields", maxAssistFields, UnitItems},
 		{assist, "fields[].name", maxAssistFieldName, UnitChars},
 		{assist, "fields[].description", maxAssistFieldDesc, UnitChars},
+		{assist, "gate.question", maxAssistGateQuestion, UnitChars},
 		{assist, "files in the package", AssistLimits.MaxFiles, UnitFiles},
 		{assist, "package size", AssistLimits.MaxBytes, UnitBytes},
 		{room, "description (the room's)", maxRoomDescription, UnitChars},

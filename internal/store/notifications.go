@@ -24,14 +24,17 @@ type NotificationPrefs struct {
 	// admins), or an admin decided the member's publish request.
 	ContentReview bool
 	// AppNotices: an interactive app sent the member a notice.
-	AppNotices  bool
+	AppNotices bool
+	// RoomReports: a member reported to the organization's admins what a
+	// room could not do (org admins).
+	RoomReports bool
 	QuietRooms  []string
 	UpdatedAtMs int64
 }
 
 // DefaultNotificationPrefs is the setting of a member who never saved any.
 func DefaultNotificationPrefs() NotificationPrefs {
-	return NotificationPrefs{Mentions: true, AgentFinished: true, AgentFailed: true, BorrowRequests: true, ContentShared: true, ContentReview: true, AppNotices: true, QuietRooms: []string{}}
+	return NotificationPrefs{Mentions: true, AgentFinished: true, AgentFailed: true, BorrowRequests: true, ContentShared: true, ContentReview: true, AppNotices: true, RoomReports: true, QuietRooms: []string{}}
 }
 
 // NotificationPrefsStore persists per-member notification settings keyed

@@ -235,6 +235,9 @@ func (s *Service) routes() []route {
 		// AI assist (assist.go): the assist model behind manual entry points.
 		member("GET /v1/assist", s.handleAssistStatus).with(needContent),
 		gated("POST /v1/assist/{task}", drive, s.handleAssist).spends(costBudget).with(needContent),
+		// A member's note to the admins of what a room could not do
+		// (room_report.go): it notifies people, so it spends the budget.
+		gated("POST /v1/rooms/{roomId}/report", drive, s.handleRoomReport).spends(costBudget),
 		member("GET /v1/rooms/{roomId}/artifacts/{artifactId}/recipe", s.handleDeliverableRecipe).with(needContent),
 		// Media model calls (media.go): speech to text, image and video
 		// generation through admin-configured providers. They feed message

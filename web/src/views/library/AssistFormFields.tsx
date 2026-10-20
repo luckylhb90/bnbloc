@@ -9,7 +9,8 @@ import { Select } from "@/ui/Select";
 // (docs/prd/2026-10-13-ai-assist.md §3): its instructions (the task's
 // system prompt), its output (streamed text, or a JSON object of named
 // fields an entry fills: each a text, a list of texts, or a list of items
-// whose own fields it names) and the context the server may give it.
+// whose own fields it names), the context the server may give it and its
+// optional gate (docs/prd/2026-10-20-never-a-dead-end.md §2.1).
 
 const CONTEXT_LABELS: Readonly<Record<AssistContext, string>> = {
   room: "The room (its expert, skills and recent messages)",
@@ -17,6 +18,7 @@ const CONTEXT_LABELS: Readonly<Record<AssistContext, string>> = {
   attachments: "Attached files (names and types)",
   library: "The member's library (the experts and skill packs they can use)",
   clock: "The current time in the member's timezone",
+  capabilities: "What the member could use (components, agents they can reach, other people in the room)",
 };
 
 const FIELD_TYPES: readonly { readonly value: AssistFieldType; readonly label: string }[] = [
@@ -99,6 +101,31 @@ export function AssistFormFields({ form, patch }: { readonly form: ContentForm; 
           </label>
         ))}
       </fieldset>
+      <Field
+        label="Gate (optional)"
+        hint="A yes/no question the decision model answers about the same context before a run the app starts on its own (after a turn); below the threshold nothing runs."
+      >
+        <div className="flex items-center gap-2">
+          <Input
+            className="flex-1"
+            value={spec.gate?.question ?? ""}
+            onChange={(e) => set({ gate: e.target.value ? { question: e.target.value, threshold: spec.gate?.threshold ?? 0.7 } : undefined })}
+            placeholder="Does the reply leave the request undone?"
+            aria-label="Gate question"
+          />
+          <Input
+            className="w-20 shrink-0"
+            type="number"
+            min={0.05}
+            max={1}
+            step={0.05}
+            disabled={!spec.gate}
+            value={spec.gate?.threshold ?? 0.7}
+            onChange={(e) => spec.gate && set({ gate: { ...spec.gate, threshold: Number(e.target.value) } })}
+            aria-label="Gate threshold"
+          />
+        </div>
+      </Field>
     </>
   );
 }

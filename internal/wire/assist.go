@@ -29,10 +29,15 @@ const (
 	AssistContextLibrary = "library"
 	// AssistContextClock: the current time in the member's timezone.
 	AssistContextClock = "clock"
+	// AssistContextCapabilities: what the member could use and does not
+	// here — the components listed to them, the agents they can reach, an
+	// agent of their own on this device, other members in the room
+	// (docs/prd/2026-10-20-never-a-dead-end.md §2.2).
+	AssistContextCapabilities = "capabilities"
 )
 
 // AssistContexts are the contexts an assist task may declare.
-var AssistContexts = []string{AssistContextRoom, AssistContextArtifact, AssistContextAttachments, AssistContextLibrary, AssistContextClock}
+var AssistContexts = []string{AssistContextRoom, AssistContextArtifact, AssistContextAttachments, AssistContextLibrary, AssistContextClock, AssistContextCapabilities}
 
 // Bounds of an assist request.
 const (
@@ -60,11 +65,39 @@ type AssistTask struct {
 }
 
 // AssistSpec is an assist component's task (its component.json output,
-// fields and context), on its Library view.
+// fields, context and gate), on its Library view.
 type AssistSpec struct {
 	Output  string        `json:"output" tstype:"AssistOutput"`
 	Fields  []AssistField `json:"fields,omitempty"`
 	Context []string      `json:"context,omitempty" tstype:"AssistContext"`
+	Gate    *AssistGate   `json:"gate,omitempty"`
+}
+
+// AssistGate is an assist's gate (docs/prd/2026-10-20-never-a-dead-end.md
+// §2.1): one yes/no question the decision model answers about the context
+// the assist reads. A gated run goes on only when the probability of yes
+// is at least Threshold (above 0, at most 1).
+type AssistGate struct {
+	Question  string  `json:"question"`
+	Threshold float64 `json:"threshold"`
+}
+
+// Why a gated run did not run its assist (AssistSkipped.Reason).
+//
+//wire:union AssistSkipReason
+const (
+	// AssistSkipBelow: the gate's answer was below its threshold, or the
+	// decision model declined the question.
+	AssistSkipBelow = "below"
+	// AssistSkipNoGate: no decision model runs for the caller.
+	AssistSkipNoGate = "no-gate"
+)
+
+// AssistSkipped answers a gated run that stopped at its gate: no chat
+// model was called.
+type AssistSkipped struct {
+	Skipped bool   `json:"skipped"`
+	Reason  string `json:"reason" tstype:"AssistSkipReason"`
 }
 
 // A JSON task's field shapes (AssistField.Type).
@@ -110,6 +143,16 @@ type AssistRequest struct {
 	// Timezone is the member's IANA timezone (the clock context; UTC when
 	// absent or unknown).
 	Timezone string `json:"timezone,omitempty"`
+	// ReplySeq names an agent reply in the channel (its room sequence):
+	// the room context then holds that turn, its request and the reply.
+	ReplySeq int64 `json:"replySeq,omitempty"`
+	// HasOwnAgent is the client's word that the member has an agent of
+	// their own on this device (the capabilities context).
+	HasOwnAgent bool `json:"hasOwnAgent,omitempty"`
+	// Gated asks the task's gate first (AssistGate): below it, or with no
+	// decision model for the caller, the answer is AssistSkipped; a task
+	// without a gate refuses it.
+	Gated bool `json:"gated,omitempty"`
 }
 
 // AssistUsage is a call's token counts and latency.

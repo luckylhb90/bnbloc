@@ -315,3 +315,36 @@ func TestSuggestSkillDirsTask(t *testing.T) {
 		}
 	}
 }
+
+// find-a-way proposes what would get an undone request done
+// (docs/prd/2026-10-20-never-a-dead-end.md §2.2): the turn and the
+// capabilities, a gate a client asks after each turn, the cause and fixes
+// the web's closed action list reads (web/src/lib/deadEnd.ts).
+func TestFindAWayTask(t *testing.T) {
+	m := assistTask(t, "find-a-way", wire.AssistContextRoom, wire.AssistContextCapabilities)
+	if m.Gate == nil || !strings.Contains(m.Gate.Question, "undone") || m.Gate.Threshold <= 0 || m.Gate.Threshold > 1 {
+		t.Fatalf("find-a-way gate = %+v", m.Gate)
+	}
+	got := []string{}
+	for _, f := range m.Fields {
+		got = append(got, f.Name+":"+f.Type)
+	}
+	if strings.Join(got, ",") != "cause:,summary:,fixes:items" {
+		t.Fatalf("find-a-way fields = %v", got)
+	}
+	var item []string
+	for _, it := range m.Fields[2].Item {
+		item = append(item, it.Name)
+	}
+	if strings.Join(item, ",") != "action,target,why" {
+		t.Fatalf("a fix's fields = %v", item)
+	}
+	p, _ := Get(IDPrefix + "find-a-way")
+	text := p.Validated.Instructions
+	for _, want := range []string{"`access`", "`missing-file`", "`capability`", "`unclear`", "`agent-error`", "`other`",
+		"`install`", "`ask-agent`", "`attach`", "`own-agent`", "`rephrase`", "`report`", "<turn>", "<capabilities>", "up to three", "never invent"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("find-a-way does not say %q", want)
+		}
+	}
+}

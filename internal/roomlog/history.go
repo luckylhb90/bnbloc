@@ -313,6 +313,7 @@ func DecodeRow(r Row) []Entry {
 					Notice      string `json:"notice"`
 					OwnerUserID string `json:"ownerUserId"`
 					Provider    string `json:"provider"`
+					SourceSeq   int64  `json:"sourceSeq"`
 				} `json:"payload"`
 			} `json:"messages"`
 		}
@@ -328,7 +329,7 @@ func DecodeRow(r Row) []Entry {
 			out = append(out, Entry{
 				Seq: r.Sequence, ChannelID: r.ChannelID, AtMs: r.AtUnixMs,
 				Speaker: AgentSpeaker(mp.OwnerUserID, mp.Provider), Kind: KindAgent, Text: mp.Text,
-				Owner: mp.OwnerUserID, Provider: mp.Provider, Session: p.AgentSessionID, Role: mp.Role,
+				Owner: mp.OwnerUserID, Provider: mp.Provider, Session: p.AgentSessionID, Role: mp.Role, SourceSeq: mp.SourceSeq,
 			})
 		}
 		return out

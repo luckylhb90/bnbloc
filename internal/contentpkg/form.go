@@ -34,6 +34,7 @@ type Form struct {
 	Output  string             `json:"output,omitempty"`
 	Fields  []wire.AssistField `json:"fields,omitempty"`
 	Context []string           `json:"context,omitempty"`
+	Gate    *wire.AssistGate   `json:"gate,omitempty"`
 
 	// A room package's setup (room.go); its welcome and quick prompts are
 	// the fields above, its room expert and packs Requires.
@@ -63,7 +64,7 @@ func Build(f Form, version string, opts Options, base *Package) (*Package, []byt
 	if base != nil && base.Manifest.Kind != spec.Kind {
 		return nil, nil, fmt.Errorf("a %s cannot become a %s", base.Manifest.Kind, spec.Kind)
 	}
-	if spec.Kind != KindAssist && (f.Output != "" || len(f.Fields) > 0 || len(f.Context) > 0) {
+	if spec.Kind != KindAssist && (f.Output != "" || len(f.Fields) > 0 || len(f.Context) > 0 || f.Gate != nil) {
 		return nil, nil, errAssistFields
 	}
 	if spec.Kind != KindRoom && len(f.Channels)+len(f.Schedules)+len(f.Apps)+len(f.Sources) > 0 {

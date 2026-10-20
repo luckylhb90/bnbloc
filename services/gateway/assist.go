@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -31,7 +32,7 @@ import (
 // the reply.
 //
 //	GET  /v1/assist                       whether assists run for the caller, and the tasks
-//	POST /v1/assist/{task}                one run: SSE for a text task, JSON for a JSON task
+//	POST /v1/assist/{task}                one run: SSE for a text task, JSON for a JSON task (gated: its gate first)
 //	GET  /v1/platform/assist-model        the platform's model (never its key)
 //	PUT  /v1/platform/assist-model        set it and the hosts organizations may use (super admin)
 //	POST /v1/platform/assist-model/test   one short completion
@@ -185,6 +186,10 @@ func (s *Service) handleAssist(w http.ResponseWriter, r *http.Request, claims au
 		contentStoreErr(w, "load the assist failed", err)
 		return
 	}
+	if req.Gated && task.Package.Manifest.Gate == nil {
+		httpx.Error(w, "this AI assist has no gate: run it without \"gated\"", http.StatusBadRequest)
+		return
+	}
 	actx, err := s.assistContext(ctx, claims, task.Package.Manifest.Context, req)
 	if err != nil {
 		writeAssistContextErr(w, err)
@@ -195,6 +200,9 @@ func (s *Service) handleAssist(w http.ResponseWriter, r *http.Request, claims au
 		return
 	}
 	msgs := assist.Messages(task.Package.Instructions, req.Text, actx)
+	if req.Gated && !s.assistGate(w, r, claims, task, msgs) {
+		return
+	}
 	if task.Package.Manifest.Output == wire.AssistOutputJSON {
 		s.assistJSON(w, r, claims, task, model, msgs)
 		return
@@ -343,12 +351,14 @@ func (e assistBadRequest) Error() string { return string(e) }
 
 // assistContext resolves the contexts the task declares (others are never
 // read, whatever the request names) as the member reads them: the room
-// (its name, expert, skill packs and recent messages), a deliverable of it
-// (title, type, file, the request that produced it), attachments of it
-// (names and types), the library (the experts and skill packs the member
-// may use) and the clock (now in the request's timezone).
+// (its name, expert, skill packs and recent messages, and the turn the
+// request names), a deliverable of it (title, type, file, the request that
+// produced it), attachments of it (names and types), the library (the
+// experts and skill packs the member may use), the clock (now in the
+// request's timezone) and the capabilities (what the member could use).
 func (s *Service) assistContext(ctx context.Context, claims auth.Claims, declared []string, req wire.AssistRequest) (assist.Context, error) {
 	var out assist.Context
+	var err error
 	roomID := strings.TrimSpace(req.RoomID)
 	wants := func(c string) bool { return slices.Contains(declared, c) }
 	if wants(wire.AssistContextClock) {
@@ -361,7 +371,13 @@ func (s *Service) assistContext(ctx context.Context, claims auth.Claims, declare
 		}
 		out.Library = lib
 	}
+	if wants(wire.AssistContextCapabilities) && roomID == "" {
+		if out.Capabilities, err = s.assistCapabilities(ctx, claims, auth.Claims{}, "", req.HasOwnAgent); err != nil {
+			return out, err
+		}
+	}
 	needsRoom := (wants(wire.AssistContextRoom) && roomID != "") ||
+		(wants(wire.AssistContextCapabilities) && roomID != "") ||
 		(wants(wire.AssistContextArtifact) && req.ArtifactID != "") ||
 		(wants(wire.AssistContextAttachments) && len(req.AttachmentIDs) > 0)
 	if !needsRoom {
@@ -375,11 +391,22 @@ func (s *Service) assistContext(ctx context.Context, claims auth.Claims, declare
 		return out, errAssistNotFound
 	}
 	if wants(wire.AssistContextRoom) {
-		room, err := s.assistRoom(ctx, rc, roomID, strings.TrimSpace(req.ChannelID), strings.TrimSpace(req.ExpertID))
+		channelID := strings.TrimSpace(req.ChannelID)
+		room, err := s.assistRoom(ctx, rc, roomID, channelID, strings.TrimSpace(req.ExpertID))
 		if err != nil {
 			return out, err
 		}
+		if req.ReplySeq > 0 {
+			if room.Turn, err = s.assistTurn(ctx, rc, roomID, channelID, req.ReplySeq); err != nil {
+				return out, err
+			}
+		}
 		out.Room = room
+	}
+	if wants(wire.AssistContextCapabilities) {
+		if out.Capabilities, err = s.assistCapabilities(ctx, claims, rc, roomID, req.HasOwnAgent); err != nil {
+			return out, err
+		}
 	}
 	if wants(wire.AssistContextArtifact) && req.ArtifactID != "" {
 		art, err := s.assistArtifact(ctx, rc, roomID, strings.TrimSpace(req.ArtifactID))
@@ -477,13 +504,40 @@ func (s *Service) assistRoom(ctx context.Context, claims auth.Claims, roomID, ch
 // (realtime decides who reads it), oldest first, through the one history
 // row decoder.
 func (s *Service) assistRecent(ctx context.Context, claims auth.Claims, roomID, channelID string) ([]assist.Line, error) {
+	rows, err := s.assistHistory(ctx, claims, roomID, channelID, 0, 30)
+	if err != nil {
+		return nil, err
+	}
+	var lines []assist.Line
+	for _, row := range rows {
+		for _, e := range roomlog.DecodeRow(row) {
+			if strings.TrimSpace(e.Text) == "" {
+				continue // a message that carried only files
+			}
+			lines = append(lines, assist.Line{Speaker: e.Speaker, Text: e.Text})
+		}
+	}
+	if len(lines) > assist.RecentMessages {
+		lines = lines[len(lines)-assist.RecentMessages:]
+	}
+	return lines, nil
+}
+
+// assistHistory is the one read of a room channel's history for an
+// assist, as its member (realtime decides who reads it): the newest limit
+// rows below the sequence before (0: from the newest), oldest first. A
+// room the member does not read is errAssistNotFound.
+func (s *Service) assistHistory(ctx context.Context, claims auth.Claims, roomID, channelID string, before int64, limit int) ([]roomlog.Row, error) {
 	base := strings.TrimRight(s.Backends.Realtime, "/")
 	if base == "" {
 		return nil, nil
 	}
-	q := url.Values{"limit": {"30"}}
+	q := url.Values{"limit": {strconv.Itoa(limit)}}
 	if channelID != "" {
 		q.Set("channelId", channelID)
+	}
+	if before > 0 {
+		q.Set("before", strconv.FormatInt(before, 10))
 	}
 	resp, err := callBackend(ctx, http.MethodGet, base+"/v1/rooms/"+url.PathEscape(roomID)+"/history?"+q.Encode(), nil, claims.Subject, claims.Tenant)
 	if err != nil {
@@ -502,21 +556,7 @@ func (s *Service) assistRecent(ctx context.Context, claims auth.Claims, roomID, 
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&page); err != nil {
 		return nil, fmt.Errorf("decode room history: %w", err)
 	}
-	var lines []assist.Line
-	for _, row := range page.Messages {
-		for _, e := range roomlog.DecodeRow(row) {
-			if strings.TrimSpace(e.Text) == "" {
-				continue // a message that carried only files
-			}
-			lines = append(lines, assist.Line{Speaker: e.Speaker, Text: e.Text})
-		}
-	}
-	// The history answers newest first.
-	slices.Reverse(lines)
-	if len(lines) > assist.RecentMessages {
-		lines = lines[len(lines)-assist.RecentMessages:]
-	}
-	return lines, nil
+	return page.Messages, nil
 }
 
 // assistArtifact reads a deliverable of the room as its member: its

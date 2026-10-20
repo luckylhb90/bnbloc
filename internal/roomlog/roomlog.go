@@ -50,6 +50,9 @@ type Entry struct {
 	Provider string
 	Session  string
 	Role     string
+	// SourceSeq is the room sequence of the request an agent entry answers
+	// (its payload's sourceSeq; 0 when unknown).
+	SourceSeq int64
 }
 
 // Kind is the speaker category of an Entry.

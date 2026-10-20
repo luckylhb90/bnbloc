@@ -139,7 +139,7 @@ export function formFromVersion(d: ContentVersionDetail): ContentForm {
       lead: c.team?.lead && c.team.lead !== "lead" ? c.team.lead : "",
       members: (c.team?.members ?? []).map((m) => ({ role: m.role, expert: m.expert, defaultAgent: m.defaultAgent, description: m.description ?? "" })),
     },
-    ...(c.assist ? { assist: { output: c.assist.output, fields: (c.assist.fields ?? []).map((f) => ({ ...f, ...(f.item ? { item: f.item.map((y) => ({ ...y })) } : {}) })), context: [...(c.assist.context ?? [])] } } : {}),
+    ...(c.assist ? { assist: { output: c.assist.output, fields: (c.assist.fields ?? []).map((f) => ({ ...f, ...(f.item ? { item: f.item.map((y) => ({ ...y })) } : {}) })), context: [...(c.assist.context ?? [])], ...(c.assist.gate ? { gate: { ...c.assist.gate } } : {}) } } : {}),
   };
 }
 
@@ -197,6 +197,7 @@ export function formPayload(f: ContentForm): Record<string, unknown> {
     const fields = (a.fields ?? []).map(assistFieldPayload).filter((x) => x.name);
     if (a.output === "json" && fields.length > 0) out.fields = fields;
     if ((a.context ?? []).length > 0) out.context = a.context;
+    if (a.gate?.question.trim()) out.gate = { question: a.gate.question.trim(), threshold: a.gate.threshold };
   }
   if (f.kind === "expert") out.instructions = f.instructions.trim();
   if (f.kind === "expert" || f.kind === "room") {

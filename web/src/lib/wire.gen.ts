@@ -857,9 +857,14 @@ export const AssistContextAttachments = "attachments";
 export const AssistContextLibrary = "library";
 // AssistContextClock: the current time in the member's timezone.
 export const AssistContextClock = "clock";
+// AssistContextCapabilities: what the member could use and does not
+// here — the components listed to them, the agents they can reach, an
+// agent of their own on this device, other members in the room
+// (docs/prd/2026-10-20-never-a-dead-end.md §2.2).
+export const AssistContextCapabilities = "capabilities";
 
 // AssistContexts are the contexts an assist task may declare.
-export const AssistContexts: readonly string[] = ["room", "artifact", "attachments", "library", "clock"];
+export const AssistContexts: readonly string[] = ["room", "artifact", "attachments", "library", "clock", "capabilities"];
 
 // Bounds of an assist request.
 export const MaxAssistText = 8000;
@@ -885,11 +890,35 @@ export interface AssistTask {
 }
 
 // AssistSpec is an assist component's task (its component.json output,
-// fields and context), on its Library view.
+// fields, context and gate), on its Library view.
 export interface AssistSpec {
   output: AssistOutput;
   fields?: AssistField[];
   context?: AssistContext[];
+  gate?: AssistGate;
+}
+
+// AssistGate is an assist's gate (docs/prd/2026-10-20-never-a-dead-end.md
+// §2.1): one yes/no question the decision model answers about the context
+// the assist reads. A gated run goes on only when the probability of yes
+// is at least Threshold (above 0, at most 1).
+export interface AssistGate {
+  question: string;
+  threshold: number;
+}
+
+// Why a gated run did not run its assist (AssistSkipped.Reason).
+// AssistSkipBelow: the gate's answer was below its threshold, or the
+// decision model declined the question.
+export const AssistSkipBelow = "below";
+// AssistSkipNoGate: no decision model runs for the caller.
+export const AssistSkipNoGate = "no-gate";
+
+// AssistSkipped answers a gated run that stopped at its gate: no chat
+// model was called.
+export interface AssistSkipped {
+  skipped: boolean;
+  reason: AssistSkipReason;
 }
 
 // A JSON task's field shapes (AssistField.Type).
@@ -931,6 +960,16 @@ export interface AssistRequest {
   // Timezone is the member's IANA timezone (the clock context; UTC when
   // absent or unknown).
   timezone?: string;
+  // ReplySeq names an agent reply in the channel (its room sequence):
+  // the room context then holds that turn, its request and the reply.
+  replySeq?: number;
+  // HasOwnAgent is the client's word that the member has an agent of
+  // their own on this device (the capabilities context).
+  hasOwnAgent?: boolean;
+  // Gated asks the task's gate first (AssistGate): below it, or with no
+  // decision model for the caller, the answer is AssistSkipped; a task
+  // without a gate refuses it.
+  gated?: boolean;
 }
 
 // AssistUsage is a call's token counts and latency.
@@ -3539,6 +3578,10 @@ export const NotificationContentReview = "content_review";
 // room's members or to named people of the organization (app.notify):
 // its title is the app's, and it links to the app.
 export const NotificationAppNotice = "app_notice";
+// NotificationRoomReport tells an organization's admins what a member
+// could not get done in a room (POST /v1/rooms/{roomId}/report): the
+// member's reviewed text, linked to the reply it is about.
+export const NotificationRoomReport = "room_report";
 
 // AdminAlertRequest is the body of POST /v1/platform/alerts. Recipients
 // default to every configured platform super-admin.
@@ -3576,7 +3619,29 @@ export interface NotificationPrefs {
   contentShared: boolean;
   contentReview: boolean;
   appNotices: boolean;
+  roomReports: boolean;
   quietRooms: string[];
+}
+
+// RoomReportRequest is POST /v1/rooms/{roomId}/report: a member's note to
+// the organization's admins of what the room could not do
+// (docs/prd/2026-10-20-never-a-dead-end.md §2.2, the "report" fix), the
+// text the member reviewed, and the reply it is about (its room sequence
+// and channel; 0 links the room).
+export interface RoomReportRequest {
+  text: string;
+  seq?: number;
+  channelId?: string;
+}
+
+// MaxRoomReportText bounds a room report's text.
+export const MaxRoomReportText = 1000;
+
+// RoomReportReply says whether the report was queued for an admin (false:
+// no notifier, push subscription or desktop reaches one, or every admin
+// turned room reports off).
+export interface RoomReportReply {
+  queued: boolean;
 }
 
 // NotificationTestResult answers a test send (POST
@@ -5573,8 +5638,10 @@ export type AppExportFormat = "json" | "csv";
 export const AppExportFormatValues: readonly AppExportFormat[] = ["json", "csv"];
 export type AssistOutput = "text" | "json";
 export const AssistOutputValues: readonly AssistOutput[] = ["text", "json"];
-export type AssistContext = "room" | "artifact" | "attachments" | "library" | "clock";
-export const AssistContextValues: readonly AssistContext[] = ["room", "artifact", "attachments", "library", "clock"];
+export type AssistContext = "room" | "artifact" | "attachments" | "library" | "clock" | "capabilities";
+export const AssistContextValues: readonly AssistContext[] = ["room", "artifact", "attachments", "library", "clock", "capabilities"];
+export type AssistSkipReason = "below" | "no-gate";
+export const AssistSkipReasonValues: readonly AssistSkipReason[] = ["below", "no-gate"];
 export type AssistFieldType = "text" | "list" | "items";
 export const AssistFieldTypeValues: readonly AssistFieldType[] = ["text", "list", "items"];
 export type AttachmentContent = "png" | "jpeg" | "gif" | "webp" | "pdf" | "zip" | "ole" | "text" | "isomedia" | "webm" | "mp3" | "wav" | "ogg";

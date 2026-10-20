@@ -189,6 +189,15 @@ func (m memberComponents) visibility(rec extpipe.Record) extpipe.Visibility {
 	return extpipe.MemberVisibility(m.viewer, extpipe.GateForRecord(rec), m.installed[componentKey(rec.Kind, rec.Name)])
 }
 
+// listed reports whether the member catalog (GET /v1/components) lists rec
+// (a kind the catalog shows, visible to the member), with its visibility:
+// the one rule of what the catalog lists, which an assist's capabilities
+// read too.
+func (m memberComponents) listed(rec extpipe.Record) (extpipe.Visibility, bool) {
+	vis := m.visibility(rec)
+	return vis, componentKindVisibleInMemberCatalog(componentKindForName(rec)) && vis.Visible
+}
+
 // coreVisible reports whether a registered/configured core is usable by the
 // member: an installed core passes the rollout + tenant gate; a core with no
 // install record is visible when the operator configured it (BNBLOC_CORES /

@@ -1665,6 +1665,15 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return createSchemaTable(ctx, db, "content_version_covers")
 		},
 	},
+	{
+		// The switch for room reports (a member's note to the admins of
+		// what a room could not do, docs/prd/2026-10-20-never-a-dead-end.md),
+		// on for every member who saved prefs before. Additive.
+		id: "2026_10_notification_prefs_room_reports",
+		run: func(ctx context.Context, db sqlConn) error {
+			return addColumnIfMissing(ctx, db, "notification_prefs", "room_reports", "TINYINT(1) NOT NULL DEFAULT 1 AFTER app_notices")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

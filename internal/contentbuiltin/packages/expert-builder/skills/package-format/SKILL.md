@@ -85,7 +85,7 @@ drafts/<name>/
 
 ```
 drafts/<name>/
-  component.json      + "output", "fields" (json only), "context" (optional)
+  component.json      + "output", "fields" (json only), "context", "gate" (optional)
   INSTRUCTIONS.md     required: the task's system prompt
   README.md           optional
 ```
@@ -104,7 +104,14 @@ drafts/<name>/
   `"room"` (its name, expert, skills and recent messages), `"artifact"`
   (a deliverable's title, type, file and recipe prompt), `"attachments"`
   (names and types), `"library"` (the experts and skill packs the person
-  can use) and `"clock"` (the current time in their timezone).
+  can use), `"clock"` (the current time in their timezone) and
+  `"capabilities"` (the components listed to them, installed or not, the
+  agents they can reach, and whether the room has other members).
+- `gate` (optional): `{ "question", "threshold" }`, one yes/no question
+  for the decision model about the same context, and the lowest
+  probability of yes (above 0) at which the task runs. A caller that runs the
+  task on its own (after a turn) asks the gate first; below it nothing
+  runs.
 - The model gets the person's text and that context fenced as data, so
   `INSTRUCTIONS.md` says what to produce from them, in which language, and
   to return only the result.
@@ -214,6 +221,7 @@ add scripts only when the person asks for them.
 | assist | fields | 12 entries |
 | assist | fields[].name | 40 characters |
 | assist | fields[].description | 300 characters |
+| assist | gate.question | 500 characters |
 | assist | files in the package | 3 files |
 | assist | package size | 64 KiB |
 | room package | description (the room's) | 500 characters |

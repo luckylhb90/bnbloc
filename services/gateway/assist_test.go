@@ -77,6 +77,7 @@ func assistGW(t *testing.T) (*appGW, *assistModelFake, *recordedAudit) {
 	sink := &recordedAudit{}
 	e.gw.ExtAudit = sink
 	rt := &realtimehttp.Service{Hub: e.hub, Blobs: e.blobs, Attachments: e.b.Attachments, Chat: e.b.Chat, Membership: membership.NewRoomClient(e.roomURL)}
+	e.rt = rt
 	rtSrv := httptest.NewServer(svcauth.Middleware(appGWKey, rt.Handler()))
 	t.Cleanup(rtSrv.Close)
 	e.gw.Backends.Realtime = rtSrv.URL
@@ -416,5 +417,27 @@ func TestAssistLibraryAndClock(t *testing.T) {
 	ps := reply.Fields["prompts"].([]any)
 	if len(ps) != 1 || ps[0].(map[string]any)["body"] != "Sum up {{project}}." || ps[0].(map[string]any)["extra"] != nil || len(reply.Fields["tags"].([]any)) != 2 {
 		t.Fatalf("prompts = %+v", reply.Fields)
+	}
+}
+
+// The room's recent messages are its latest, oldest first (the history
+// answers a page in ascending order: docs/bugs/2026-10-20-assist-recent-messages-oldest.md).
+func TestAssistRecentMessagesAreTheLatest(t *testing.T) {
+	e, fake, _ := assistGW(t)
+	for i := int64(1); i <= 14; i++ {
+		e.say(i, "maya", fmt.Sprintf("message %d", i))
+	}
+	fake.reply = "ok"
+	if r := e.call(http.MethodPost, "/v1/assist/enhance-prompt", wire.AssistRequest{Text: "x", RoomID: e.roomID}, e.as("maya")); r.status != http.StatusOK {
+		t.Fatalf("run = %d %s", r.status, r.body)
+	}
+	user := fake.last()[1]["content"]
+	start, end := strings.Index(user, "<recent_messages>\n"), strings.Index(user, "</recent_messages>")
+	var want strings.Builder
+	for i := 5; i <= 14; i++ {
+		fmt.Fprintf(&want, "[maya] message %d\n", i)
+	}
+	if start < 0 || user[start+len("<recent_messages>\n"):end] != want.String() {
+		t.Fatalf("recent messages:\n%s", user)
 	}
 }

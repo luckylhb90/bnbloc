@@ -47,11 +47,8 @@ func (s *Service) handleComponents(w http.ResponseWriter, r *http.Request, calle
 	onlyKind := strings.TrimSpace(r.URL.Query().Get("kind"))
 	out := make([]wire.MemberComponent, 0, len(view.list))
 	for _, rec := range view.list {
-		if !componentKindVisibleInMemberCatalog(componentKindForName(rec)) || (onlyKind != "" && rec.Kind != onlyKind) || (library && !isMCP(rec)) {
-			continue
-		}
-		vis := view.visibility(rec)
-		if !vis.Visible {
+		vis, listed := view.listed(rec)
+		if !listed || (onlyKind != "" && rec.Kind != onlyKind) || (library && !isMCP(rec)) {
 			continue
 		}
 		cfg, err := extpipe.DecodeConfig(rec)

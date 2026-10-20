@@ -21,13 +21,19 @@ type decisionFake struct {
 	mu     sync.Mutex
 	auths  []string
 	bodies []string
+	// probability is every predicate's answer (0: 0.8).
+	probability float64
 }
 
 func (f *decisionFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	raw, _ := io.ReadAll(r.Body)
 	f.mu.Lock()
 	f.auths, f.bodies = append(f.auths, r.Header.Get("Authorization")), append(f.bodies, string(raw))
+	p := f.probability
 	f.mu.Unlock()
+	if p == 0 {
+		p = 0.8
+	}
 	if r.URL.Path != "/v1/decisions" {
 		http.NotFound(w, r)
 		return
@@ -42,7 +48,7 @@ func (f *decisionFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_ = json.Unmarshal(raw, &body)
 	answers := []any{}
 	for _, q := range body.Questions {
-		answers = append(answers, map[string]any{"type": "predicate", "name": q.Name, "probability": 0.8})
+		answers = append(answers, map[string]any{"type": "predicate", "name": q.Name, "probability": p})
 	}
 	_ = json.NewEncoder(w).Encode(map[string]any{"model": "upstream-model", "answers": answers, "usage": map[string]any{"input_tokens": 12, "output_tokens": 3}})
 }
@@ -53,6 +59,13 @@ func decisionGW(t *testing.T, fake *decisionFake, auth string) *appGW {
 	t.Helper()
 	e, _, sink := assistGW(t)
 	defer func() { sink.take() }()
+	configureDecisions(t, e, fake, auth)
+	return e
+}
+
+// configureDecisions sets fake as the platform's decision provider.
+func configureDecisions(t *testing.T, e *appGW, fake *decisionFake, auth string) {
+	t.Helper()
 	srv := httptest.NewServer(fake)
 	t.Cleanup(srv.Close)
 	r := e.call(http.MethodPut, "/v1/platform/decisions", wire.MediaProviderUpdate{
@@ -60,7 +73,6 @@ func decisionGW(t *testing.T, fake *decisionFake, auth string) *appGW {
 	if r.status != http.StatusOK {
 		t.Fatalf("configure = %d %s", r.status, r.body)
 	}
-	return e
 }
 
 func ask(name, question string) wire.DecisionRequest {
