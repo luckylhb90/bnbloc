@@ -8,7 +8,7 @@ import { ConfirmDialog } from "@/ui/Dialog";
 import { Segment } from "@/ui/Segment";
 import { AdoptionBar, ArtifactFacts, ChipGroup, FactBlock, KindIcon, MCPFacts, PreviewerFacts, RolloutBadge, SettingsFacts, TrustBlock, memberMeta } from "@/views/componentFacts";
 import { ComponentSettingsDialog } from "@/views/settings/ComponentSettingsDialog";
-import { componentKindLabel } from "@/lib/componentKinds";
+import { componentKindLabel, holdsCredential } from "@/lib/componentKinds";
 import { exactTime } from "@/lib/format";
 
 const ROLLOUT_SEGMENTS = [
@@ -127,11 +127,13 @@ function AdminComponentCard({
             onChange={(rollout) => onSetRollout?.(component, rollout)}
           />
         </div>
-        {component.kind === "notifier" && (
+        {holdsCredential(component.kind) && (
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" disabled={busy} onClick={() => onSendTest?.(component)}>
-              Send test notification
-            </Button>
+            {component.kind === "notifier" && (
+              <Button variant="outline" size="sm" disabled={busy} onClick={() => onSendTest?.(component)}>
+                Send test notification
+              </Button>
+            )}
             <Button variant="ghost" size="sm" disabled={busy} onClick={() => onRotateSecret?.(component)}>
               Rotate secret
             </Button>

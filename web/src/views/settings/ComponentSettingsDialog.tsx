@@ -237,6 +237,7 @@ function ScopeSection({
           missing={view.missing.map((s) => s.key)}
           declaration={[...view.fields, ...view.missing]}
           reachesMembers={view.reachesMembers}
+          asks={view.asks}
           onSave={async (update) => onSaved(await componentSettingsApi.save(owner, target, update))}
           savedText={`${view.name} settings saved`}
         />

@@ -29,13 +29,17 @@ export interface ComponentKindMeta {
   readonly contract?: string;
   // The runtimes a package of the kind may use (absent: any).
   readonly runtimes?: readonly ComponentRuntime[];
+  // An endpoint component beside the gateway: it holds a credential the
+  // gateway shows once at install and a super admin rotates, and asks for
+  // its settings with it.
+  readonly credential?: boolean;
 }
 
 export const COMPONENT_KINDS: Readonly<Record<ComponentKind, ComponentKindMeta>> = {
   core: { label: "Core", noun: "core", packageKind: "bnbloc.core.package/v1" },
   plugin: { label: "Plugin", noun: "plugin", packageKind: "bnbloc.plugin.package/v1", contract: "bnbloc.plugin.contract/v1", runtimes: ["sidecar"] },
-  "auth-provider": { label: "Auth provider", noun: "auth-provider", packageKind: "bnbloc.auth-provider.package/v1", contract: "bnbloc.auth-provider.contract/v1", runtimes: ["endpoint"] },
-  notifier: { label: "Notifier", noun: "notifier", packageKind: "bnbloc.notifier.package/v1", contract: "bnbloc.notifier.contract/v1", runtimes: ["endpoint"] },
+  "auth-provider": { label: "Auth provider", noun: "auth-provider", packageKind: "bnbloc.auth-provider.package/v1", contract: "bnbloc.auth-provider.contract/v1", runtimes: ["endpoint"], credential: true },
+  notifier: { label: "Notifier", noun: "notifier", packageKind: "bnbloc.notifier.package/v1", contract: "bnbloc.notifier.contract/v1", runtimes: ["endpoint"], credential: true },
   sandbox: { label: "Sandbox", noun: "sandbox", packageKind: "bnbloc.sandbox.package/v1", contract: "bnbloc.sandbox.contract/v1", runtimes: ["sidecar", "endpoint"] },
   previewer: { label: "Previewer", noun: "previewer", packageKind: "bnbloc.previewer.package/v1", contract: "bnbloc.previewer.contract/v1", runtimes: ["bundle"] },
   mcp: { label: "MCP tool", noun: "MCP", packageKind: "bnbloc.mcp.package/v1", contract: "bnbloc.mcp.contract/v1", runtimes: ["stdio", "endpoint"] },
@@ -54,4 +58,10 @@ export function componentKindOfPackage(packageKind: unknown): ComponentKind | un
 export function componentKindLabel(kind: string): string {
   const short = (kind in COMPONENT_KINDS ? kind : componentKindOfPackage(kind)) as ComponentKind | undefined;
   return short ? COMPONENT_KINDS[short].label : kind;
+}
+
+// holdsCredential reports a kind whose components hold a credential (an
+// endpoint component beside the gateway: a notifier, an auth provider).
+export function holdsCredential(kind: string): boolean {
+  return kind in COMPONENT_KINDS && COMPONENT_KINDS[kind as ComponentKind].credential === true;
 }

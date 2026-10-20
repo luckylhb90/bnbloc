@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, type MemberComponent } from "@/lib/api";
-import { needsSetupText, ofScope } from "@/lib/componentSettings";
+import { needsSetupText } from "@/lib/componentSettings";
+import { componentSettingsApi } from "@/lib/componentSettingsApi";
+import type { OrgSettingsComponent } from "@/lib/wire.gen";
 import { Button } from "@/ui/Button";
 import { Badge, Card } from "@/ui/Card";
 import { ErrorBox } from "@/ui/ErrorBox";
@@ -8,22 +9,23 @@ import { ComponentSettingsDialog } from "@/views/settings/ComponentSettingsDialo
 import { errorText } from "@/lib/errors";
 
 // Org-admin: the components published to this organization that take
-// organization settings (docs/prd/2026-10-19-component-settings.md), each
-// with what it still needs; Settings opens the same dialog as the
-// component's card on the Components page. The values hold for every member
-// of this organization; they are stored sealed on the server, a secret is
-// never shown back, and a component that runs on members' computers (a
-// plugin, a stdio MCP tool) gets them there.
+// organization settings (docs/prd/2026-10-19-component-settings.md), of
+// any kind (an endpoint component beside the gateway, which asks for its
+// values, is in no member's catalog), each with what it still needs;
+// Settings opens the same dialog as the component's card on the Components
+// page. The values hold for every member of this organization; they are
+// stored sealed on the server, a secret is never shown back, and a
+// component that runs on members' computers (a plugin, a stdio MCP tool)
+// gets them there.
 export function ComponentSettingsTab() {
-  const [components, setComponents] = useState<readonly MemberComponent[] | null>(null);
+  const [components, setComponents] = useState<readonly OrgSettingsComponent[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [open, setOpen] = useState<MemberComponent | null>(null);
+  const [open, setOpen] = useState<OrgSettingsComponent | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
     try {
-      const reply = await api.components();
-      setComponents((reply.components ?? []).filter((c) => ofScope(c.settings, "org").length > 0));
+      setComponents((await componentSettingsApi.orgComponents()).components);
     } catch (e) {
       setError(errorText(e, "failed to load components"));
       setComponents([]);
@@ -47,7 +49,7 @@ export function ComponentSettingsTab() {
         <p className="text-sm text-[var(--color-fg-subtle)]">No component published to this organization takes organization settings.</p>
       )}
       {(components ?? []).map((c) => {
-        const setup = needsSetupText(c.settingsMissing ?? [], c.settings ?? []);
+        const setup = needsSetupText(c.settingsMissing, c.settings);
         return (
           <Card key={`${c.kind}/${c.name}`} className="flex flex-wrap items-center gap-3 px-4 py-3">
             <div className="min-w-0 flex-1">

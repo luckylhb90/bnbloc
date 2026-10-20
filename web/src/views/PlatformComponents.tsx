@@ -50,7 +50,7 @@ export function PlatformComponents() {
       live = false;
     };
   }, []);
-  // A notifier's signing secret, shown once after install or rotation.
+  // An endpoint component's credential, shown once after install or rotation.
   const [revealed, setRevealed] = useState<{ readonly name: string; readonly secret: string } | null>(null);
 
   const load = useCallback(async () => {
@@ -271,8 +271,8 @@ function summarizeComponents(components: readonly PlatformComponent[]) {
   };
 }
 
-// SecretReveal shows a notifier's signing secret once (after install or
-// rotation) with a copy button; it is never retrievable again.
+// SecretReveal shows an endpoint component's credential once (after install
+// or rotation) with a copy button; it is never retrievable again.
 function SecretReveal({ name, secret, onDismiss }: { readonly name: string; readonly secret: string; readonly onDismiss: () => void }) {
   const copy = useCopy();
   return (
@@ -281,7 +281,7 @@ function SecretReveal({ name, secret, onDismiss }: { readonly name: string; read
         Signing secret for {name} — copy it now, it is not shown again
       </span>
       <code className="break-all font-mono text-xs">{secret}</code>
-      <p className="text-xs text-[var(--color-fg-subtle)]">Configure it on the notifier endpoint so it can verify deliveries.</p>
+      <p className="text-xs text-[var(--color-fg-subtle)]">Configure it on the component's endpoint: it signs the component's calls to the gateway (its settings, a notifier's replies) and a notifier's deliveries.</p>
       <div className="flex gap-2">
         <Button
           size="sm"

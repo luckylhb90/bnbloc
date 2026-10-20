@@ -230,8 +230,9 @@ export const api = {
     }),
   uninstallPlatformComponent: (component: ComponentRef) =>
     req<void>(componentPath("/v1/platform/components", component), { method: "DELETE", as: "none" }),
-  // Notifier components: a new signing secret (shown once) and a test send
-  // to the calling super-admin through the notifier's default delivery.
+  // Endpoint components (a notifier, an auth provider): a new credential
+  // (shown once); a notifier's test send to the calling super-admin through
+  // its default delivery.
   rotateComponentSecret: (component: ComponentRef) =>
     req<{ secret: string }>(componentPath("/v1/platform/components", component, "/secret/rotate"), { method: "POST" }),
   testComponent: (component: ComponentRef) =>

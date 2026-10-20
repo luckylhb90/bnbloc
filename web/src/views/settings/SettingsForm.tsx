@@ -38,6 +38,7 @@ export function SettingsForm({
   missing = [],
   declaration,
   reachesMembers = false,
+  asks = false,
   onSave,
   savedText,
   children,
@@ -53,6 +54,8 @@ export function SettingsForm({
   readonly declaration?: readonly ComponentSetting[];
   // The component runs on members' computers: these values go there.
   readonly reachesMembers?: boolean;
+  // An endpoint component beside the gateway reads these values itself.
+  readonly asks?: boolean;
   readonly onSave?: (update: ComponentSettingsUpdate) => Promise<void>;
   readonly savedText?: string;
   readonly children?: ReactNode;
@@ -103,6 +106,9 @@ export function SettingsForm({
       {children}
       {fields.length > 0 && reachesMembers && (
         <p className="text-xs text-[var(--color-fg-subtle)]">These values are sent to the computers where this component runs.</p>
+      )}
+      {fields.length > 0 && asks && (
+        <p className="text-xs text-[var(--color-fg-subtle)]">The component reads these values from the gateway itself: a change reaches it the next time it asks, without a reinstall.</p>
       )}
       {fields.length > 0 && (
         <div className="flex flex-col gap-3">
