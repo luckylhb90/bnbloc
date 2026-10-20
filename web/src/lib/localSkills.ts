@@ -66,6 +66,21 @@ export interface SkillRow {
   readonly changed?: boolean;
 }
 
+/** A folder where another tool keeps skills, found by the provider: its
+ *  path under the home, how many skills it holds and one's name. */
+export interface SkillFolderCandidate {
+  readonly path: string;
+  readonly skills: number;
+  readonly sample: string;
+}
+
+/** The candidates a provider offers, and the setting of its own (a member
+ *  lines setting it declares) a ticked one is saved into. */
+export interface SkillCandidates {
+  readonly setting: string;
+  readonly folders: readonly SkillFolderCandidate[];
+}
+
 export interface SkillsState {
   readonly contract: string;
   readonly settings: SkillsSettings;
@@ -75,6 +90,8 @@ export interface SkillsState {
   readonly suggested: readonly string[];
   readonly skills: readonly SkillRow[];
   readonly notes: readonly string[];
+  // Optional: a provider may offer none.
+  readonly candidates?: SkillCandidates;
 }
 
 /** An installed plugin that provides skills (the shell's `skills_providers`). */

@@ -24,6 +24,7 @@ import { Card } from "@/ui/Card";
 import { Dialog } from "@/ui/Dialog";
 import { ErrorBox } from "@/ui/ErrorBox";
 import { useToast } from "@/ui/Toast";
+import { SkillFolderCandidates } from "@/views/skills/SkillFolderCandidates";
 import { SkillPublishDialog } from "@/views/skills/SkillPublishDialog";
 
 // SkillsDialog is a skills component's panel, opened from its card on the
@@ -190,6 +191,14 @@ function ProviderCard({ provider, reload }: { readonly provider: SkillsProvider;
           </div>
         ))}
       </div>
+
+      <SkillFolderCandidates
+        plugin={provider.plugin}
+        candidates={state.candidates}
+        using={[...s.sources, ...state.agentDirs]}
+        onAddSource={(path) => void save(withSource(s, path))}
+        onSaved={() => void reload()}
+      />
 
       {state.skills.length > 0 && (
         <div className="flex flex-col divide-y divide-[var(--color-border)] border-t border-[var(--color-border)]">

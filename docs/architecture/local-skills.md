@@ -90,6 +90,24 @@ changes".
   seconds, so the next turn sees it.
 - **Borrowed runs** get only what is ticked "for others borrowing my agents".
 
+## Folders other tools keep skills in
+
+The provider's state may offer `candidates`: `{setting, folders: [{path,
+skills, sample}]}`, folders under the home where another tool keeps skills
+(local skills looks among the home's hidden folders, `~/.config` and
+`~/Library/Application Support`, a few levels deep, bounded by its policy;
+names and counts only, never a file's content, and none already a source or
+an agent folder), and `setting`, the provider's own member `lines` setting
+they go into (local skills: `extraSkillDirs`). The panel lists them; the
+member ticks folders and "Add ticked" saves them into that setting through
+the member's settings store (the same rules as a typed value; the plugin
+restarts with it). "Suggest folders with AI" runs the `suggest-skill-dirs`
+assist on the folders in use and the candidates, which ticks the ones worth
+adding and says why; without an assist model the list is ticked by hand. A
+setting the provider names that is not one of its member lines settings
+offers no ticking. "Add to Folders" adds one as a source instead (an agent
+folder only places linked skills; a source's own skills are listed).
+
 ## Publishing a skill
 
 "Add to my library" (or "Publish changes") opens a publish step: the skill is

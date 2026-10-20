@@ -84,8 +84,12 @@ task declares and relays the reply. Nothing else calls a model.
   `fill-settings` (json: `values`, items of `key` and `value`, and `notes`;
   no context) maps a pasted setup note onto the fields of the one settings
   form ("Fill from a note"), the declaration and the note in the text, a
-  secret only into a secret field and never shown back. Each stays within a
-  token budget (`assists_test.go`).
+  secret only into a secret field and never shown back. `suggest-skill-dirs`
+  (json: `add`, items of `path` and `why`, and `notes`; no context)
+  proposes, from the folders a skills provider found where other tools keep
+  skills (paths under the home, counts, one skill name each, never a file's
+  content), which to add to the member's extra skill folders; only listed
+  paths are kept. Each stays within a token budget (`assists_test.go`).
 
 ## One run
 

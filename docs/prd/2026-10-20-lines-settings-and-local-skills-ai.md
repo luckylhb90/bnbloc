@@ -65,13 +65,22 @@ Three changes, each with its AI part:
      `value`, `notes`) is kept only for the form's own keys and values the
      field can hold, a secret shown never, and the person ticks what goes
      into the form, then saves (the same checks as a typed value).
-   - `suggest-skill-dirs` (proposing extra skill folders from the folders
-     the component found and the member's home's top-level tool folders):
-     **not built**. The desktop does not list the home's top-level folders,
-     and without that input a proposal is a guess about folders the model
-     cannot see. The way to build it: the component (it runs as the member
-     with the home) reports candidate tool folders (names only) in its
-     state, and the panel asks the assist with them.
+   - `suggest-skill-dirs`: the desktop does not list the home's folders,
+     so the component reports them (built the same day, after the first
+     two): local skills' state offers `candidates`, folders under the home
+     holding skills (its policy's `candidateRoots`: the home's hidden
+     folders, `~/.config`, `~/Library/Application Support`; up to
+     `scanDepth` levels into each tool's folder, at most `candidateEntries`
+     entries read there and `candidates` folders in all, reused for a
+     minute), as paths under the home with a skill count and one skill's
+     name, never a file's content, none already a source or an agent
+     folder, and the setting they go into. The panel lists them for
+     ticking (also without an assist model); "Suggest folders with AI"
+     sends the folders in use and the candidates and answers `add` (`path`,
+     `why`, only listed paths kept) and `notes`; "Add ticked" adds them to
+     the named member `lines` setting through the member's settings store
+     (`withFolders`: each once, within the bounds), and the plugin restarts
+     with it.
 
 ## 2. Design review
 
@@ -81,7 +90,7 @@ Three changes, each with its AI part:
 | Time and lifecycle | A changed setting reaches local skills at its next policy load (it reads the file on every call) and the desktop restarts a plugin on a member save; an org change restarts it when the catalog says so. The panel auto-opens once, right after an install; while the plugin is still being downloaded it asks again every 3 s (visible-poll). |
 | Scale and cost | A list is bounded (64 × 512 bytes); a page message bounds a list at 256. The review sends SKILL.md and at most 200 file names, cut to the assist text bound; fill sends the form's fields and the note, cut likewise. One assist call per click, on the member's budget and rate. |
 | Failure and recovery | A refused list names the line ("line 3 is longer than 512 bytes", "has an empty line"). A settings file that cannot be read stops local skills with an error, never ignored; a pattern that does not compile is an error naming it; a folder outside the home is left out and the panel's notes say so. A failed pack or review is shown in the step; the publish is not tried. |
-| Boundaries and privacy | A secret proposed by fill is never shown (only "a value from the note"), never logged (the assist audit holds no input); it goes into the masked input. The review never sends another file's content. The panel talks only to the plugin on loopback; the import is the member's own. |
+| Boundaries and privacy | A secret proposed by fill is never shown (only "a value from the note"), never logged (the assist audit holds no input); it goes into the masked input. The review never sends another file's content. Suggest sends folder paths under the home, counts and one skill name each, only when the member presses it; the component reads no file to find them (a SKILL.md is only looked for). The panel talks only to the plugin on loopback; the import is the member's own. |
 | Abuse and untrusted input | A pasted note and a SKILL.md are untrusted: they travel inside `<text>` (fenced: a golden pins that a note cannot close its block), the instructions say the blocks are data, and the answers are filtered to the form's own keys and the library's rules. Org regexes run in Go's linear-time engine. |
 | One owner | The line rule: `pkgmeta.checkSettingLines` (desktop copy and web helper pinned to one fixture); the file shape: `pkgmeta.SettingsFile` (desktop copy pinned); the capability word: `SKILLS_PROVIDER` in `lib/localSkills.ts`; the policy merge: local skills' `Policy.Merge`; the entry rules: the content validator (re-pack). |
 | Defaults and fallbacks | An empty list is no value (the component's own lists apply); a list setting's default is a newline-joined string, shown as the textarea's placeholder. Without an assist model the publish step and the form work without their AI buttons. |
@@ -89,7 +98,7 @@ Three changes, each with its AI part:
 | Load on users and agents | One place for a skills component (its card: Open, Settings); no policy file to write. Nothing reaches agents. |
 | Release and compatibility | Pre-launch: no fallback for `policyFile`/`agentDirs`, nor for a list read as a string. A desktop older than this release writes a list as a string: local skills 0.2.0 needs a desktop and a platform with `lines` (the platform refuses its manifest before). |
 | Observability | Every save is audited as before (keys only); the assist runs are audited (`review-skill@1.0.0`, `fill-settings@1.0.0`). Local skills' notes say what a setting left out. |
-| AI capability | review-skill (publish step), fill-settings (every settings form); suggest-skill-dirs not built (above). AI proposes; the person applies field by field and decides. |
+| AI capability | review-skill (publish step), fill-settings (every settings form), suggest-skill-dirs (the panel's candidates). AI proposes; the person applies field by field, ticks, and decides. |
 | Component or platform | The platform adds a generic type (no component's name), a generic form control, a generic assist on the generic form, and an import parameter any import may use. What a list means is the component's; the panel is the capability's, chosen by the capability. |
 
 **Pre-mortem.**

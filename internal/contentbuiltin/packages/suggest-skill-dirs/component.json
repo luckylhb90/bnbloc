@@ -1,0 +1,23 @@
+{
+  "kind": "bnbloc.assist.package/v1",
+  "name": "suggest-skill-dirs",
+  "version": "1.0.0",
+  "displayName": "Suggest skill folders",
+  "description": "From the folders where other tools on a member's computer keep skills (paths, counts, one skill name each), proposes which to add to their agents' skill folders, and why.",
+  "category": "authoring",
+  "tags": ["assist", "skills"],
+  "icon": "sparkle",
+  "output": "json",
+  "fields": [
+    {
+      "name": "add",
+      "description": "One object per folder worth adding",
+      "type": "items",
+      "item": [
+        { "name": "path", "description": "The folder's path, exactly as listed" },
+        { "name": "why", "description": "One short sentence: the tool it belongs to and why it is worth adding" }
+      ]
+    },
+    { "name": "notes", "description": "Why the others are left out, in one or two sentences" }
+  ]
+}

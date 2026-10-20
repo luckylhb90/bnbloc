@@ -292,3 +292,26 @@ func TestFillSettingsTask(t *testing.T) {
 		}
 	}
 }
+
+// suggest-skill-dirs proposes, from the candidates a skills component found,
+// which to add to the member's extra skill folders, each with why.
+func TestSuggestSkillDirsTask(t *testing.T) {
+	m := assistTask(t, "suggest-skill-dirs")
+	if len(m.Fields) != 2 || m.Fields[0].Name != "add" || m.Fields[0].Type != wire.AssistFieldItems || m.Fields[1].Name != "notes" {
+		t.Fatalf("suggest-skill-dirs fields = %+v", m.Fields)
+	}
+	var item []string
+	for _, f := range m.Fields[0].Item {
+		item = append(item, f.Name)
+	}
+	if !slices.Equal(item, []string{"path", "why"}) {
+		t.Fatalf("a proposal is %v", item)
+	}
+	p, _ := Get(IDPrefix + "suggest-skill-dirs")
+	flat := strings.Join(strings.Fields(p.Validated.Instructions), " ")
+	for _, want := range []string{"only paths exactly as listed", "Never invent a folder", "SKILL.md"} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("suggest-skill-dirs does not say %q", want)
+		}
+	}
+}
