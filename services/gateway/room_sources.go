@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/assist"
 	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/notify"
@@ -508,9 +509,10 @@ func (s *Service) heldGrant(ctx context.Context, tenantID, roomID, source string
 //   - members the admins were not told of: told, naming the room and the
 //     person (the grant holds: a private room's members are invited);
 //   - the grantee's AI tasks created or changed since the admin consented:
-//     kept as the grant's drift with an AI explanation against the purpose
-//     (explain-source-use, on the grantee's AI budget) and told (the
-//     grant holds; the console shows the change until acknowledged).
+//     kept as the grant's drift at once (the grant holds; the console
+//     shows the change until acknowledged), then explained against the
+//     purpose (explain-source-use, on the grantee's AI budget) and told
+//     past the answer (tellDriftLater).
 //
 // Every change is audited and told through notifyOrgAdmins. A task list
 // that cannot be read leaves the drift for the next watch.
@@ -537,18 +539,11 @@ func (s *Service) watchGrant(ctx context.Context, tenantID string, g store.RoomS
 	}
 	w.Members = memberIDs(sr.members)
 	var changed []wire.RoomSourceDrift
-	if tasks, err := s.sourceTasks(ctx, tenantID, g.RoomID, g.Grantee); err != nil {
+	tasks, err := s.sourceTasks(ctx, tenantID, g.RoomID, g.Grantee)
+	if err != nil {
 		slog.Warn("bnbloc gateway: read a reading room's tasks failed", "event", "bnbloc.room_source.tasks_failed", "room", g.RoomID, "error", err)
 	} else {
 		w.Drift, changed = taskDrift(w, tasks, s.nowTime().UnixMilli())
-		if len(changed) > 0 {
-			summary, mismatch := s.explainDrift(ctx, tenantID, g, tasks, changed)
-			for i := range w.Drift {
-				if isChanged(changed, w.Drift[i].ScheduleID) {
-					w.Drift[i].Summary, w.Drift[i].Mismatch = summary, mismatch
-				}
-			}
-		}
 	}
 	if len(joined) == 0 && len(changed) == 0 && slices.Equal(w.Members, g.Watch.Members) && slices.Equal(w.Drift, g.Watch.Drift) {
 		return g, nil
@@ -563,15 +558,49 @@ func (s *Service) watchGrant(ctx context.Context, tenantID string, g store.RoomS
 				name, sourceWords(g.Source), g.Grantee, g.Purpose, m),
 			DedupKey: fmt.Sprintf("room-source-member:%s:%s:%s:%d", g.RoomID, g.Source, m, g.DecidedAtMs)})
 	}
-	for _, c := range w.Drift {
-		if !isChanged(changed, c.ScheduleID) {
-			continue
-		}
-		title, text := driftNotice(g, c)
-		s.tellSourceAdmins(ctx, tenantID, g, ch, notify.Event{Actor: g.Grantee, Title: title, Text: text,
-			DedupKey: fmt.Sprintf("room-source-task:%s:%s:%s:%x", g.RoomID, g.Source, c.ScheduleID, sha256.Sum256([]byte(c.After)))})
+	if len(changed) > 0 {
+		s.tellDriftLater(ctx, tenantID, g, tasks, changed, ch)
 	}
 	return g, nil
+}
+
+// tellDriftLater explains the tasks a watch found changed and tells the
+// admins, past the answer (goDetached, bounded by the assist's own call
+// limit): the change itself is kept already, so a save never waits on the
+// model. The explanation is kept on the drift it was made for; one that
+// cannot be made (assists off, a failure, logged) leaves the notice
+// saying so.
+func (s *Service) tellDriftLater(ctx context.Context, tenantID string, g store.RoomSourceGrant, tasks []wire.RoomSchedule, changed []wire.RoomSourceDrift, ch sourceChange) {
+	s.goDetached(ctx, tenantID, assist.Timeout+30*time.Second, func(ctx context.Context) {
+		summary, mismatch := s.explainDrift(ctx, tenantID, g, tasks, changed)
+		if summary != "" || mismatch != "" {
+			s.keepDriftExplanation(ctx, g, changed, summary, mismatch)
+		}
+		for _, c := range changed {
+			c.Summary, c.Mismatch = summary, mismatch
+			title, text := driftNotice(g, c)
+			s.tellSourceAdmins(ctx, tenantID, g, ch, notify.Event{Actor: g.Grantee, Title: title, Text: text,
+				DedupKey: fmt.Sprintf("room-source-task:%s:%s:%s:%x", g.RoomID, g.Source, c.ScheduleID, sha256.Sum256([]byte(c.After)))})
+		}
+	})
+}
+
+// keepDriftExplanation writes an explanation onto the drift it was made
+// for (the same task at the same words), while the grant is still the
+// same grantee's; a failure is logged (the notice still says it).
+func (s *Service) keepDriftExplanation(ctx context.Context, g store.RoomSourceGrant, changed []wire.RoomSourceDrift, summary, mismatch string) {
+	cur, err := s.RoomSources.GetRoomSourceGrant(ctx, g.RoomID, g.Source)
+	if err != nil || cur.Scope == "" || cur.Grantee != g.Grantee {
+		return
+	}
+	for i, d := range cur.Watch.Drift {
+		if slices.ContainsFunc(changed, func(c wire.RoomSourceDrift) bool { return c.ScheduleID == d.ScheduleID && c.After == d.After }) {
+			cur.Watch.Drift[i].Summary, cur.Watch.Drift[i].Mismatch = summary, mismatch
+		}
+	}
+	if err := s.RoomSources.SetRoomSourceWatch(ctx, g.RoomID, g.Source, g.Grantee, cur.Watch); err != nil {
+		slog.Warn("bnbloc gateway: keep a changed task's explanation failed", "event", "bnbloc.room_source.explain_keep_failed", "room", g.RoomID, "error", err)
+	}
 }
 
 // driftNotice is the admins' notice of a task changed since they
@@ -588,7 +617,7 @@ func driftNotice(g store.RoomSourceGrant, c wire.RoomSourceDrift) (title, text s
 	case c.Summary != "":
 		text += "AI: " + c.Summary
 	default:
-		text += "No AI explanation could be made: read the task against the purpose (" + oneLine(g.Purpose) + ")."
+		text += "The AI explanation is unavailable: read the task against the purpose (" + oneLine(g.Purpose) + ")."
 	}
 	return fmt.Sprintf("%s %s a task that reads the organization's %s", g.Grantee, verb, sourceWords(g.Source)), text
 }
@@ -620,11 +649,6 @@ func taskDrift(w store.RoomSourceWatch, tasks []wire.RoomSchedule, atMs int64) (
 		drift, changed = append(drift, d), append(changed, d)
 	}
 	return drift, changed
-}
-
-// isChanged reports whether scheduleID is one of changed.
-func isChanged(changed []wire.RoomSourceDrift, scheduleID string) bool {
-	return slices.ContainsFunc(changed, func(d wire.RoomSourceDrift) bool { return d.ScheduleID == scheduleID })
 }
 
 // explainDrift asks explain-source-use (the built-in, for the grantee:

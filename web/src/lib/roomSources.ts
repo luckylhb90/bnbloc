@@ -84,7 +84,7 @@ export function driftView(d: RoomSourceDrift): DriftView {
     change: d.before ? "changed" : "added",
     before: d.before,
     after: d.after,
-    explanation: mismatch || d.summary?.trim() || "No AI explanation could be made: read the task against the purpose.",
+    explanation: mismatch || d.summary?.trim() || "No AI explanation (still being made, or unavailable): read the task against the purpose.",
     beyond: mismatch !== "",
   };
 }

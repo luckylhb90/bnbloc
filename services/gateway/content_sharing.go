@@ -75,14 +75,12 @@ func (s *Service) notifyContent(ctx context.Context, tenantID string, ev notify.
 	if s.Alerts == nil || len(ev.Recipients) == 0 {
 		return
 	}
-	go func() {
-		ctx, cancel := context.WithTimeout(tenant.NewContext(context.WithoutCancel(ctx), tenantID), 10*time.Second)
-		defer cancel()
+	s.goDetached(ctx, tenantID, 10*time.Second, func(ctx context.Context) {
 		if _, err := s.Alerts.Emit(ctx, ev); err != nil {
 			slog.Warn("bnbloc gateway: content notification enqueue failed",
 				"event", "bnbloc.notify.enqueue_failed", "type", ev.Type, "error", err)
 		}
-	}()
+	})
 }
 
 // appLink is a deep link into the web app ("#/library", "#/org").

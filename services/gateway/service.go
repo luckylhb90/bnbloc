@@ -120,6 +120,8 @@ type Service struct {
 	ExtAudit         store.ExtensionAuditStore
 	ExtPipe          *extpipe.Pipeline
 	extPipeOnce      sync.Once
+	// detached counts the work running past its request (goDetached).
+	detached         sync.WaitGroup
 	AllowExtUnsigned bool
 	// SecretBox seals component settings and the assist model's key
 	// (BNBLOC_SECRET_STORE_KEY); nil turns both off (component_settings.go,

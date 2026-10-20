@@ -25,6 +25,17 @@ type toolModel struct {
 	turns []any
 	seen  [][]map[string]any
 	tools []string
+	// hold, when set (holdUntil), keeps every answer until it is closed.
+	hold chan struct{}
+}
+
+// holdUntil keeps the model's answers until the returned release is called.
+func (m *toolModel) holdUntil() (release func()) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	hold := make(chan struct{})
+	m.hold = hold
+	return func() { close(hold) }
 }
 
 func (m *toolModel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -37,6 +48,12 @@ func (m *toolModel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		} `json:"tools"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&body)
+	m.mu.Lock()
+	hold := m.hold
+	m.mu.Unlock()
+	if hold != nil {
+		<-hold
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.seen = append(m.seen, body.Messages)

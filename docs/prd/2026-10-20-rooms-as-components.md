@@ -445,11 +445,16 @@ to its words. The consent's one owner (`room_sources.go`) now keeps:
     on every invitation would stop a review room each time a colleague
     joins it;
   - a grantee's AI task new or changed since the consent: kept as the
-    grant's drift (before, after) with `explain-source-use` run on it
-    (the built-in, never a same-named one a member saved; on the
-    grantee's model, budget and rate: its input carries each changed
-    task's `before`) and told with the words before and after and the
-    explanation, the mismatch first. It notifies, never blocks; the
+    grant's drift (before, after) at once, then, past the answer
+    (`tellDriftLater` through `goDetached`, the gateway's one way to work
+    after a response, bounded by the assist's call limit, so a save never
+    waits on the model), explained by `explain-source-use` (the
+    built-in, never a same-named one a member saved; on the grantee's
+    model, budget and rate: its input carries each changed task's
+    `before`; the explanation is kept on the drift it was made for) and
+    told with the words before and after and the explanation, the
+    mismatch first, or that the explanation is unavailable when it could
+    not be made. It notifies, never blocks; the
     console marks the ask "changed since granted" and shows the diff
     until an admin acknowledges
     (`POST /v1/tenant/room-sources/{roomId}/{source}/ack`, audited) or

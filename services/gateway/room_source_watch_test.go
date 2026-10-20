@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/wire"
@@ -200,9 +201,10 @@ func TestReadRecordsWatchesTheGrantFirst(t *testing.T) {
 }
 
 // The grantee's AI tasks are consented as they are at the grant. A task
-// changed or added since is told to the admins with explain-source-use's
-// explanation of the change against the purpose (the words before and
-// after are its input), and the console shows it until an admin
+// changed or added since is kept at once (the save never waits on the
+// model), then told to the admins past the answer with explain-source-
+// use's explanation of the change against the purpose (the words before
+// and after are its input); the console shows it until an admin
 // acknowledges; another member's task (it reads nothing) is not watched.
 func TestRoomSourceTaskChangedSinceGrant(t *testing.T) {
 	g := newSourcesGW(t)
@@ -214,10 +216,31 @@ func TestRoomSourceTaskChangedSinceGrant(t *testing.T) {
 		t.Fatalf("the granted ask = %+v", d)
 	}
 
+	// The save answers with the change kept while the model has not
+	// answered yet: the explanation and the notice come past the answer.
 	g.model.seen, g.model.turns = nil, []any{map[string]any{"content": `{"summary":"Ranks each member by failures.","uses":["Ranks members"],"mismatch":"It ranks people, which the purpose does not say."}`}}
-	if r := g.call(http.MethodPatch, "/v1/rooms/"+g.roomID+"/schedules/"+review, map[string]string{"text": "Rank every member by how often their conversations failed."}, g.as("maya")); r.status != http.StatusOK {
-		t.Fatalf("change the task = %d %s", r.status, r.body)
+	release := g.model.holdUntil()
+	saved := make(chan resp, 1)
+	go func() {
+		saved <- g.call(http.MethodPatch, "/v1/rooms/"+g.roomID+"/schedules/"+review, map[string]string{"text": "Rank every member by how often their conversations failed."}, g.as("maya"))
+	}()
+	select {
+	case r := <-saved:
+		if r.status != http.StatusOK {
+			t.Fatalf("change the task = %d %s", r.status, r.body)
+		}
+	case <-time.After(10 * time.Second):
+		release()
+		t.Fatal("the save waited on the AI explanation")
 	}
+	if d := g.detail(); d.Grant.Changed != 1 || len(d.Drift) != 1 || d.Drift[0].After != "Rank every member by how often their conversations failed." || d.Drift[0].Mismatch != "" {
+		t.Fatalf("the console before the explanation = %+v", d)
+	}
+	if n := len(g.notices("changed a task")); n != 0 {
+		t.Fatalf("%d notices before the explanation", n)
+	}
+	release()
+	g.gw.waitDetached()
 	if len(g.model.seen) != 1 {
 		t.Fatalf("the explanation ran %d times", len(g.model.seen))
 	}
@@ -239,6 +262,7 @@ func TestRoomSourceTaskChangedSinceGrant(t *testing.T) {
 	}
 	// Watched again (a read), the change is not told, nor explained, twice.
 	g.read("maya", `{"source":"runs"}`)
+	g.gw.waitDetached()
 	explained := 0
 	for _, call := range g.model.seen {
 		if strings.Contains(fmt.Sprint(call), "decide whether a room may read records") {
@@ -250,6 +274,7 @@ func TestRoomSourceTaskChangedSinceGrant(t *testing.T) {
 	}
 	// Another member's task reads nothing: not watched.
 	g.task("jack", "Post a joke.")
+	g.gw.waitDetached()
 	if len(g.notices("jack added")) != 0 {
 		t.Fatal("a task that reads nothing was told")
 	}
@@ -268,14 +293,16 @@ func TestRoomSourceTaskChangedSinceGrant(t *testing.T) {
 		t.Fatalf("audit = %v", got)
 	}
 
-	// A new task of the grantee is told too; AI off, the notice says so.
+	// A new task of the grantee is told too; AI off, the notice still goes
+	// out, saying the explanation is unavailable.
 	off := true
 	if _, err := g.b.Tenant.SetTenantPolicy(g.ctx(), g.tenant, store.TenantPolicyUpdate{AssistDisabled: &off}); err != nil {
 		t.Fatal(err)
 	}
 	g.task("maya", "Email the failures to the whole company.")
+	g.gw.waitDetached()
 	added := g.notices("maya added a task that reads")
-	if len(added) != 1 || !strings.Contains(added[0].Text, "No AI explanation") {
+	if len(added) != 1 || !strings.Contains(added[0].Text, "The AI explanation is unavailable") {
 		t.Fatalf("the admins' notice of a new task = %+v", added)
 	}
 	if d := g.detail(); d.Grant.Changed != 1 || d.Drift[0].Before != "" {
