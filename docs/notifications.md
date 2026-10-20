@@ -30,6 +30,7 @@ deliver them.
 | `content_shared` | An author shares an expert, skill pack or prompt pack with a member, or moves their copy to a newer version (`docs/prd/2026-10-12-experts-and-teams.md`, step 4); also a member who joins a room with a standing room share and gets a copy then (realtime, "Gap closure" 2). One version notifies a member once. No room; `url` opens the Library. | Each recipient whose copy was created or updated. | The author. |
 | `content_review` | An author asks to publish a content component to the organization, or saves a new version of one the organization uses (the request opens by itself; the admins are notified only when no request was pending); an org admin approves or declines it. No room; `url` opens the Organization console (request) or the Library (decision). | The organization's org admins (request); the author (decision). | The author (request); the deciding admin (decision). |
 | `app_notice` | An interactive app's page calls `app.notify` (`docs/prd/2026-10-15-app-identity-schedules-notify-ai.md` §5). The title is the app's title, then the title the app gave; `url` opens the app in its room unless the app gave a link on this deployment. At most 30 an hour per app and 10 per sender; the same notice within 10 minutes is one. | The room's members (`to: "room"`), the logins the app's owners name that belong to the organization, or a group chat connected to the room (`to: "group:<name>"`, owners only; below). | The member who sent it (never notified). |
+| `room_report` | A member sends their organization's admins a note on what an agent could not do in a room (`POST /v1/rooms/{roomId}/report`, the find-a-way card's "Tell your admins", `docs/prd/2026-10-20-never-a-dead-end.md`): the text is the member's, reviewed before sending (at most 1000 characters); `url` opens the room at the reply it is about. The same note about the same reply is sent once. The member learns whether it was queued for anyone. | The organization's org admins. | The member who reports (never notified). |
 
 Rules applied before anything is queued (`admin_alert` and `budget_warning`
 are operational and skip the first three: they reach exactly their
@@ -207,6 +208,7 @@ own settings; `PUT` replaces the whole object):
   "contentShared": true,
   "contentReview": true,
   "appNotices": true,
+  "roomReports": true,
   "quietRooms": ["room-a"]
 }
 ```
@@ -214,8 +216,9 @@ own settings; `PUT` replaces the whole object):
 One switch per type a member can turn off: `mentions`, `agentFinished`,
 `agentFailed`, `borrowRequests` (`borrow_request`), `contentShared`
 (`content_shared`), `contentReview` (`content_review`, the requests an
-org admin reviews and the decisions on the member's own requests) and
-`appNotices` (`app_notice`).
+org admin reviews and the decisions on the member's own requests),
+`appNotices` (`app_notice`) and `roomReports` (`room_report`, the notes
+members send their org admins).
 A member who never saved preferences has everything on and no quiet rooms
 (the stored columns default on, so prefs saved before a switch existed
 keep it on).

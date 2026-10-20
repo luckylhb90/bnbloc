@@ -1,7 +1,60 @@
 # Never a dead end: when an agent can't, propose what would help (2026-10-20)
 
-Status: proposed. Owner: the assist seam (a gate on an assist, a
-`capabilities` context), one built-in assist, the reply's card in the room.
+Status: slice 1 built, slice 2 proposed. Owner: the assist seam (a gate
+on an assist, a `capabilities` context), one built-in assist, the reply's
+card in the room.
+
+Status (2026-10-20): built (slice 1, §5.1). The reference is
+`docs/architecture/ai-assist.md` ("The gate", the capabilities context,
+"Find a way"). Decided while building:
+- **The gate** is `gate: {question, threshold}` on the assist kind (a
+  one-line question of at most 500 characters; a threshold above 0 and at
+  most 1), checked by `contentpkg`. A run with `gated: true` resolves the
+  task's context, asks the question with the run's user message (the
+  fenced blocks) as the decision input through the gateway's one decision
+  call (`callDecision`, which `runDecision` now uses too), and answers
+  `{skipped: true, reason: "below" | "no-gate"}` without a chat model; a
+  declined question counts as below. A gated run of a gateless task is a
+  400. The gate's call is audited as a decision of the task
+  (`find-a-way@1.0.0`); the run spends the assist route's rate and budget.
+- **The turn.** The request names the reply (`replySeq`, its room
+  sequence); the room context then holds that reply and the request its
+  payload's `sourceSeq` names (`roomlog.Entry.SourceSeq`), each cut to
+  4000 characters, in a `<turn>` block. Building it found the room's
+  recent messages were the page's oldest, newest first
+  (docs/bugs/2026-10-20-assist-recent-messages-oldest.md); fixed.
+- **Capabilities** list the executable components the member catalog
+  lists (`memberComponents.listed`, now the one rule `GET /v1/components`
+  and this context share), the organization's platform agents
+  (`core/provider`), the room's agents by handle (realtime's roster,
+  `roomRoster`, which a schedule run's `list_agents` now reads too) and
+  how many other people the room has; at most 40 components and 20 agents,
+  a list past its bound saying how many it left out. `hasOwnAgent` is the
+  client's word: an agent of the member's own (not a platform one) among
+  the room's agents.
+- **`find-a-way`** (1.0.0): gate "Does the reply leave what the member
+  asked for undone, or say the agent cannot do it?" at 0.7; `fixes` is an
+  `items` field of `{action, target, why}`: the existing field shapes
+  hold it, no extension. A web test holds the package's action and cause
+  lists to `deadEnd.ts`'s.
+- **The card** runs gated when the member's own turn (not a dispatched
+  one) reaches `replied` live in the channel they look at, once per reply
+  (a session memo; a gate's "skipped" is remembered too, so the menu's
+  entry then runs it ungated). The menu entry is an icon on the reply's
+  action row. Install confirms on the card, then the member catalog's
+  install, then the component's settings when it needs any (there is no
+  separate install dialog: the Components page installs from its card).
+  Own agent picks the member's own agent and puts the request in the
+  composer, or opens the Agents page (the desktop download in a browser,
+  the local agents in the desktop app).
+- **Report** had no path for a member to reach the admins: it is
+  `POST /v1/rooms/{roomId}/report` (a member who may post; at most 1000
+  characters; the same note about the same reply once) through the one
+  notification emitter as a new type, `room_report`, to the room
+  organization's org admins, who can turn it off (`roomReports`, a new
+  preferences column, on by default). The member sees on the fix whether
+  it was queued for anyone.
+- Not built in this slice: counting dismissals per package (§4.1).
 
 When an agent's reply leaves the member's request undone ("I can't reach
 that system", "I don't have the file", "I can't see your app"), the room

@@ -1390,7 +1390,9 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `AllowsTenant` outside extpipe (`TestVisibilityOwned`). In the gateway a
   component route's `{name}` resolves only through `requestComponent` (the
   409 ambiguity rule, the "name required" check) and a tenant scope
-  validates only through `setTenantsRequest.scope`.
+  validates only through `setTenantsRequest.scope`. What the member
+  catalog lists (`GET /v1/components`, and the components an assist's
+  `capabilities` context names) is `memberComponents.listed`.
 - **The shared audit trail has one writer: `internal/audit.Record`** (best
   effort, a failed write logged as `bnbloc.audit.append_failed`); outcomes
   come only from `wire.AuditOutcome*` (`TestAuditThroughOneWriter`).

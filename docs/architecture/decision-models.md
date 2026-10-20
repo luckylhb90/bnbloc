@@ -18,8 +18,11 @@ without content.
   `FromSystemOne` / `ToSystemOne` convert the SystemOne format to and
   from the list format (`systemone.go`), so both routes are one call.
 - `services/gateway/decisions.go`: the routes, admission, rate, audit.
-  `runDecision` is the one owner of a call (the member route and an app's
-  `~app/ai/decide`).
+  `runDecision` is the one owner of a route's call (the member route and an
+  app's `~app/ai/decide`: the decision rate, the request's validation);
+  `callDecision` the one call of a provider (the caller's provider, the
+  call, its audit row), which an assist's gate uses in-process
+  (`services/gateway/assist_gate.go`, `docs/architecture/ai-assist.md`).
 - `wire/decisions.go`: the shapes; `web/src/lib/decisions.ts` the web's
   routes.
 

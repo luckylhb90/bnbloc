@@ -52,8 +52,10 @@ task declares and relays the reply. Nothing else calls a model.
   sends it); `component.json` names its `output` (`text` or `json`), for
   JSON the `fields` its reply holds (`{name, description, type, item}`:
   `type` is `text`, `list` — strings — or `items`, a list of objects whose
-  text fields `item` names), and the `context` it may receive (`room`,
-  `artifact`, `attachments`, `library`, `clock`). Nothing
+  text fields `item` names), the `context` it may receive (`room`,
+  `artifact`, `attachments`, `library`, `clock`, `capabilities`) and an
+  optional `gate` (`{question, threshold}`: one line of at most 500
+  characters, a probability above 0 and at most 1; below). Nothing
   else: no `requires`, no other files. An assist is no content use
   (`KindSpec.Use`): a room or member never turns one on, and it never
   reaches an agent's workspace.
@@ -89,7 +91,14 @@ task declares and relays the reply. Nothing else calls a model.
   proposes, from the folders a skills provider found where other tools keep
   skills (paths under the home, counts, one skill name each, never a file's
   content), which to add to the member's extra skill folders; only listed
-  paths are kept. Each stays within a token budget (`assists_test.go`).
+  paths are kept.
+  `find-a-way` (json: `cause`, `summary`, `fixes` as `items` of
+  `{action, target, why}`; room, capabilities; gated, threshold 0.7)
+  says what stopped an agent's reply and proposes up to three fixes of the
+  web's closed list (`web/src/lib/deadEnd.ts`, which a web test holds to
+  the package's field descriptions;
+  `docs/prd/2026-10-20-never-a-dead-end.md`). Each stays within a token
+  budget (`assists_test.go`).
 
 ## One run
 
@@ -97,8 +106,10 @@ task declares and relays the reply. Nothing else calls a model.
 `wire.MaxAssistText` characters), and the ids of what it refers to —
 `roomId`, `channelId` (the composer's channel), `expertId` (the expert
 picked for the message), `artifactId`, `attachmentIds` (at most
-`wire.MaxAssistAttachments`). It spends the cost budget and the member's
-assist rate (20 a minute per replica share).
+`wire.MaxAssistAttachments`), `replySeq` (an agent reply in the
+channel: the room context then holds that turn), `hasOwnAgent` (the
+client's word for the capabilities context) and `gated`. It spends the
+cost budget and the member's assist rate (20 a minute per replica share).
 
 - **Context** is resolved only for what the task declares, as the member
   reads it: the room (the room service answers its name to members only;
@@ -109,15 +120,27 @@ assist rate (20 a minute per replica share).
   current version through the recipe owner `deliverableRecipe`), and
   attachments of it (names and types), the library (`assist.LibraryOf`:
   the experts and skill packs the member may use, one per name, the
-  nearest, their own first, at most 40 each, cut to a menu) and the clock
+  nearest, their own first, at most 40 each, cut to a menu), the clock
   (now in the request's `timezone`, `schedule.LoadZone`'s rule, UTC when
-  unknown). Anything the member cannot read is
-  a 404; a deliverable or attachments without `roomId` a 400; neither text
-  nor context a 400.
+  unknown) and the capabilities (`services/gateway/assist_capabilities.go`):
+  the executable components the member catalog lists to the member
+  (`memberComponents.listed`, the rule `GET /v1/components` lists by:
+  name, kind, description, installed or not; at most 40), the
+  organization's platform agents (shareagent's `GET /v1/platform-agents`,
+  `core/provider`), and with a room its agents (realtime's roster,
+  `roomRoster`, by handle) and how many other people it has (the room
+  service's members, agent hosts left out), plus `hasOwnAgent`; a list
+  past its bound says how many it left out. The room's recent messages
+  are the channel's latest 10, oldest first; `replySeq` adds the turn:
+  that reply's row and the request its payload's `sourceSeq` names
+  (`assistTurn`, both through `roomlog.DecodeRow`; a sequence that is not
+  an agent's reply is a 404), each cut to 4000 characters. Anything the
+  member cannot read is a 404; a deliverable or attachments without
+  `roomId` a 400; neither text nor context a 400.
 - **The prompt** (`assist.Messages`): the instructions as the system
   message, then one user message introducing the blocks as data, with
-  `<room>`, `<recent_messages>`, `<artifact>`, `<attachments>`,
-  `<library>`, `<clock>` and the member's `<text>`; the block tags inside untrusted text are neutralized,
+  `<room>`, `<recent_messages>`, `<turn>`, `<artifact>`, `<attachments>`,
+  `<library>`, `<clock>`, `<capabilities>` and the member's `<text>`; the block tags inside untrusted text are neutralized,
   so it cannot close its block or open another. Goldens pin the layout
   (`internal/assist/testdata/golden`).
 - **A text task** answers Server-Sent Events: `delta` `{text}` per piece,
@@ -130,6 +153,40 @@ assist rate (20 a minute per replica share).
   taken for a one-field item, at most `wire.MaxAssistItems`), from the
   reply's object (a fenced block tolerated); a reply that is not that
   object is a 502. The content validator still owns what a form saves.
+- **The gate** (`services/gateway/assist_gate.go`): a run with `gated`
+  of a task that declares a `gate` first asks the decision model its
+  question, with the run's user message (the blocks above, fenced and
+  introduced as data, cut to `wire.MaxDecisionInputText`) as the input,
+  through the gateway's one decision call (`callDecision`: the caller's
+  provider, the call, its audit row). Below the threshold, or a declined
+  question, it answers `wire.AssistSkipped` `{skipped: true, reason:
+  "below"}`; with no decision model for the caller `{reason: "no-gate"}`;
+  in both no chat model runs. A decision failure is the decision route's
+  answer (its status, or 502). A gated run of a task without a gate is a
+  400. The platform names no question: the gate is the task's.
 - **Audit**: every run is an audit row of kind `assist` (`task@version`,
   the component, the model, the token counts and the latency, the failure
   class), never the text; a model change is one too.
+
+## Find a way (a room's card)
+
+`docs/prd/2026-10-20-never-a-dead-end.md`. `web/src/lib/deadEnd.ts` owns
+the closed action list (`install`, `ask-agent`, `attach`, `own-agent`,
+`rephrase`, `report`), reads a `find-a-way` reply against what the member
+can act on (an install target must be listed and not installed, an agent
+one of the room's other than the one that replied; anything else is
+dropped, at most three fixes), the fallback (attach, ask another agent,
+rephrase) and the once-per-reply memo. `views/room/useDeadEnd.ts` runs it:
+gated when a turn the member asked for themselves reaches `replied` live
+in the channel they look at (never one an agent dispatched), ungated from
+an agent reply's "Didn't work? Find a way"; without an assist model the
+menu shows the fallback. The card (`views/room/DeadEndCard.tsx`) is the
+member's local state, never posted; each fix runs an existing flow on a
+click: `install` the member catalog's install after a confirmation (and
+the component's settings when it needs any), `ask-agent` the request
+resent to that agent in the room, `attach` the composer's file picker
+(`composerFilePicks`), `own-agent` their own agent picked with the request
+in the composer (or the Agents page: the desktop app and its local
+agents), `rephrase` the request through `enhance-prompt` into the
+composer, `report` a note the member reviews, sent to the organization's
+admins (`POST /v1/rooms/{roomId}/report`, notification `room_report`).

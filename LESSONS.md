@@ -400,6 +400,18 @@ AGENTS.md already says to run it before pushing.
 Evidence: commit 82584bdf (after fe416c71).
 Seen 1× (2026-10-18).
 
+### Give a list's test more rows than the reader keeps
+
+An assist's room context kept "the last 10 messages" of a 30-row history
+page, reversed on a comment's word that the history answers newest first.
+It answers oldest first, so the assist read the page's oldest messages,
+backwards. The only test stored one message, where every order and every
+cut is right.
+
+Evidence: docs/bugs/2026-10-20-assist-recent-messages-oldest.md (design
+review lens 9 now asks).
+Seen 1× (2026-10-20).
+
 ## Done right
 
 ### Replay a member's long task across a release, not just a smoke reply

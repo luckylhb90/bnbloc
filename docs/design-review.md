@@ -173,12 +173,16 @@ dropped without a word; an agent's decks under `out/` never published
 - When the external side dies (a browser tab crashes, a daemon exits), does
   the person see that, in words, or a frozen picture? Read its own crash
   reports before guessing at causes.
+- Does a reader rely on an order (newest first, ascending) the source
+  states, or one a comment remembers? Our own services count.
 
 *Test:* a conformance check against the real component; a probe in a
-throwaway environment; read the spec of the version actually negotiated.
+throwaway environment; read the spec of the version actually negotiated;
+more rows than the reader keeps, so a wrong order or cut shows.
 *Seen:* a newer protocol version requiring fields we did not send (tools
 silently dropped); a CLI reporting errors as normal text; a gateway
-reporting zero token usage, so the client never compacted.
+reporting zero token usage, so the client never compacted; an assist
+reading a history page as newest first, so it kept the oldest messages.
 
 ### 10. Load on users and agents
 
