@@ -8,12 +8,10 @@ import (
 	"net/http"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/ids"
 	"github.com/luckylhb90/bnbloc/internal/membership"
-	"github.com/luckylhb90/bnbloc/internal/notify"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/schedule"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -114,38 +112,6 @@ func gatewayRunsUnavailable(kind string) string {
 		return "notice schedules"
 	}
 	return "AI schedules"
-}
-
-// checkNoticeBody validates a notice schedule's text: what the model is asked
-// to write the body from (compose), else the body itself, which may be empty,
-// is at most what a notice carries and names only what a notice knows.
-func checkNoticeBody(text string, compose bool) (int, error) {
-	if compose {
-		if err := validScheduleText(text); err != nil {
-			if len(text) > maxChatTextBytes {
-				return http.StatusRequestEntityTooLarge, err
-			}
-			return http.StatusBadRequest, err
-		}
-		return 0, nil
-	}
-	if !utf8.ValidString(text) || utf8.RuneCountInString(text) > notify.MaxAlertTextRunes {
-		return http.StatusRequestEntityTooLarge, fmt.Errorf("a notice's text is at most %d characters", notify.MaxAlertTextRunes)
-	}
-	if err := schedule.CheckNoticeText(text); err != nil {
-		return http.StatusBadRequest, fmt.Errorf("the text: %w", err)
-	}
-	return 0, nil
-}
-
-func validScheduleText(text string) error {
-	if strings.TrimSpace(text) == "" {
-		return errors.New("text is required")
-	}
-	if len(text) > maxChatTextBytes {
-		return errors.New("text too long")
-	}
-	return nil
 }
 
 // planNextRun computes the next run of an enabled schedule from now; a
@@ -262,25 +228,18 @@ func writeScheduleSpecErr(w http.ResponseWriter, status int, err error) {
 }
 
 func (s *Service) checkScheduleSpec(ctx context.Context, sc *wire.RoomSchedule, now time.Time) (int, error) {
-	// A notice's text is its body, which may be empty; every other schedule
-	// needs its text (the message, or the task).
-	if strings.TrimSpace(sc.Recipient.Kind) != wire.ScheduleRecipientNotice {
-		if err := validScheduleText(sc.Text); err != nil {
-			if len(sc.Text) > maxChatTextBytes {
-				return http.StatusRequestEntityTooLarge, err
-			}
-			return http.StatusBadRequest, err
-		}
-	}
 	rcpt, err := schedule.NormalizeRecipient(sc.Recipient)
 	if err != nil {
 		return http.StatusBadRequest, err
 	}
 	sc.Recipient = rcpt
-	if rcpt.Kind == wire.ScheduleRecipientNotice {
-		if status, err := checkNoticeBody(sc.Text, rcpt.Compose); err != nil {
-			return status, err
+	// A notice's text is its body, which may be empty; every other schedule
+	// needs its text (the message, or the task).
+	if tooLarge, err := schedule.CheckText(rcpt, sc.Text); err != nil {
+		if tooLarge {
+			return http.StatusRequestEntityTooLarge, err
 		}
+		return http.StatusBadRequest, err
 	}
 	if schedule.RunsAtGateway(rcpt.Kind) && s.AIRuns == nil {
 		return http.StatusServiceUnavailable, errors.New(gatewayRunsUnavailable(rcpt.Kind) + " are not available on this deployment")

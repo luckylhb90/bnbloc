@@ -113,6 +113,31 @@ func CheckNoticeText(s string) error {
 	return err
 }
 
+// CheckText validates a schedule's text for its recipient: a notice's body
+// (CheckNoticeText's names, at most notify.MaxAlertTextRunes, possibly
+// empty) unless the model composes it, else the message or task, which is
+// required and at most wire.MaxChatTextBytes. tooLarge tells a refusal for
+// size apart. Every place a schedule's text is checked (realtime's routes,
+// a room package's validator) asks this.
+func CheckText(r wire.ScheduleRecipient, text string) (tooLarge bool, err error) {
+	if strings.TrimSpace(r.Kind) == wire.ScheduleRecipientNotice && !r.Compose {
+		if !utf8.ValidString(text) || utf8.RuneCountInString(text) > notify.MaxAlertTextRunes {
+			return true, fmt.Errorf("a notice's text is at most %d characters", notify.MaxAlertTextRunes)
+		}
+		if err := CheckNoticeText(text); err != nil {
+			return false, fmt.Errorf("the text: %w", err)
+		}
+		return false, nil
+	}
+	if strings.TrimSpace(text) == "" {
+		return false, errors.New("text is required")
+	}
+	if len(text) > wire.MaxChatTextBytes {
+		return true, errors.New("text too long")
+	}
+	return false, nil
+}
+
 // ExpandNotice is s with each name replaced by its value for a run at slot, in
 // the schedule's zone, in room. s passed CheckNoticeText when it was stored; a
 // name that no longer exists is left as it was written.
