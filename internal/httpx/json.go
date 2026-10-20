@@ -12,11 +12,13 @@ import (
 
 // ErrorBody is the one error response body of every bnbloc HTTP surface
 // (the gateway and every backend): {"error": "<message>"}, plus a
-// machine-readable code where a route defines one (dispatch refusals).
-// Clients read only this shape (the web's errorDetail).
+// machine-readable code where a route defines one (dispatch refusals), and
+// the request field a refusal is about where a route names one (a component
+// setting's key). Clients read only this shape (the web's errorBody).
 type ErrorBody struct {
 	Error string `json:"error"`
 	Code  string `json:"code,omitempty"`
+	Field string `json:"field,omitempty"`
 }
 
 // ErrorText is the message of a failed response's body: the one error

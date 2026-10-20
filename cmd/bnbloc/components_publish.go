@@ -19,7 +19,8 @@ import (
 //	    --binary darwin-arm64=dist/bnbloc-local-skills-darwin-arm64 --rollout optin
 //
 // A file the sidecar needs beside its executable (sidecar.files) is a
-// --binary <platform>/<name>=<path>.
+// --binary <platform>/<name>=<path>; the bundle of a settingsPage is
+// --settings-page <dir or tar> (settings_page.go).
 func componentsPublishPackage(args []string) error {
 	fs := flag.NewFlagSet("components publish-package", flag.ContinueOnError)
 	gw := addGatewayFlags(fs)
@@ -27,6 +28,7 @@ func componentsPublishPackage(args []string) error {
 	sign := addSigningFlags(fs, "rollout set atomically with the publish: auto | optin | off (default: gateway default, auto)")
 	var binaries multiFlag
 	fs.Var(&binaries, "binary", "platform binary as <goos-goarch>=<path>, or <goos-goarch>/<file>=<path> for a declared sidecar file (repeatable)")
+	settingsPage := addSettingsPageFlag(fs)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -37,6 +39,11 @@ func componentsPublishPackage(args []string) error {
 	if err := validRolloutFlag(*sign.rollout); err != nil {
 		return err
 	}
+	pagePath, cleanup, err := settingsPageInput(pkg, *settingsPage)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
 	priv, err := sign.key()
 	if err != nil {
 		return err
@@ -47,6 +54,9 @@ func componentsPublishPackage(args []string) error {
 		return err
 	}
 	pkg.Artifacts = artifacts
+	if err := pinSettingsPage(c, &pkg, pagePath); err != nil {
+		return err
+	}
 	body, err := json.Marshal(pkg)
 	if err != nil {
 		return err

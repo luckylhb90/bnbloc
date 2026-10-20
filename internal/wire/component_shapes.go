@@ -57,6 +57,18 @@ type ComponentSettingDeliver struct {
 	Bearer bool   `json:"bearer,omitempty"`
 }
 
+// ComponentSettingsPage is part of a component package (core/pkgmeta): the
+// component's own settings page (docs/prd/2026-10-19-component-settings.md
+// §2.2a), an HTML file (Entry) of a static bundle the platform shows in a
+// sandboxed frame where the one settings form would be. The bundle is an
+// archive in the previewer bundle format, pinned here (a gateway artifact's
+// url and sha256) rather than in the package's artifacts, which are a
+// plugin's or a stdio tool's per-platform binaries (an http tool has none).
+type ComponentSettingsPage struct {
+	Entry  string            `json:"entry"`
+	Bundle ComponentArtifact `json:"bundle"`
+}
+
 // The types of a setting (ComponentSetting.Type). A secret is write-only:
 // never shown back, only "set". A path is a path on the member's own
 // machine (member scope only).

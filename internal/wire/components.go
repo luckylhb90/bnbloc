@@ -44,6 +44,7 @@ type PlatformComponent struct {
 	Permissions   ComponentPermissions         `json:"permissions"`
 	Hooks         []string                     `json:"hooks,omitempty"`
 	Settings      []ComponentSetting           `json:"settings,omitempty"`
+	SettingsPage  *ComponentSettingsPage       `json:"settingsPage,omitempty"`
 	Artifacts     map[string]ComponentArtifact `json:"artifacts,omitempty"`
 	Endpoint      *ComponentEndpoint           `json:"endpoint,omitempty"`
 	Sidecar       *ComponentSidecar            `json:"sidecar,omitempty"`
@@ -107,10 +108,12 @@ type MemberComponent struct {
 	// organization (values never come here), and SettingsMissing the
 	// required ones of those scopes that are not set: while any is, the
 	// component needs setup and does not run. Member-scope settings live on
-	// the member's desktop.
+	// the member's desktop. SettingsPage is the component's own settings
+	// page, shown instead of the one form.
 	Settings        []ComponentSetting           `json:"settings,omitempty"`
 	SettingsSet     []string                     `json:"settingsSet,omitempty"`
 	SettingsMissing []string                     `json:"settingsMissing,omitempty"`
+	SettingsPage    *ComponentSettingsPage       `json:"settingsPage,omitempty"`
 	Artifacts       map[string]ComponentArtifact `json:"artifacts,omitempty"`
 	Endpoint        *ComponentEndpoint           `json:"endpoint,omitempty"`
 	Sidecar         *ComponentSidecar            `json:"sidecar,omitempty"`

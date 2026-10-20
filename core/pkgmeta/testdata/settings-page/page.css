@@ -1,0 +1,4 @@
+body { font: 14px system-ui, sans-serif; margin: 12px; }
+html[data-theme="dark"] body { background: #111; color: #eee; }
+label { display: block; margin: 8px 0; }
+input[aria-invalid="true"] { outline: 2px solid #d33; }

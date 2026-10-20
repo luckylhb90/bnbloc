@@ -320,6 +320,16 @@ func CheckSettingValue(s Setting, v string) error {
 	return nil
 }
 
+// SettingRefusal is why a save of settings was refused: the setting it is
+// about (Key) and the reason, worded with the setting's label (Error). A
+// form or a component's settings page shows it at that field.
+type SettingRefusal struct {
+	Key    string
+	Reason string
+}
+
+func (e *SettingRefusal) Error() string { return e.Reason }
+
 // MergeSettings applies an update to the stored values of one scope of a
 // declaration: a key absent from update is left as it is, an empty value
 // clears it (an empty secret keeps the stored one), a key in clear is
@@ -328,7 +338,8 @@ func CheckSettingValue(s Setting, v string) error {
 // setting of the scope set in the end (a default counts). Values of keys
 // the declaration no longer has in this scope are dropped. It returns the
 // values to store and the keys whose stored value changed (for the audit:
-// names, never values).
+// names, never values); a refusal is a *SettingRefusal naming the first
+// setting refused.
 func MergeSettings(decl []Setting, scope string, current, update map[string]string, clear []string) (map[string]string, []string, error) {
 	inScope := map[string]Setting{}
 	for _, s := range decl {
@@ -339,7 +350,7 @@ func MergeSettings(decl []Setting, scope string, current, update map[string]stri
 	named := append(slices.Sorted(maps.Keys(update)), clear...)
 	for _, k := range named {
 		if _, ok := inScope[k]; !ok {
-			return nil, nil, fmt.Errorf("%q is not a %s setting of this component", k, scope)
+			return nil, nil, &SettingRefusal{Key: k, Reason: fmt.Sprintf("%q is not a %s setting of this component", k, scope)}
 		}
 	}
 	next := map[string]string{}
@@ -356,7 +367,7 @@ func MergeSettings(decl []Setting, scope string, current, update map[string]stri
 			v = strings.TrimSpace(current[s.Key])
 		case v != "":
 			if err := CheckSettingValue(s, v); err != nil {
-				return nil, nil, fmt.Errorf("%s %w", s.Label, err)
+				return nil, nil, &SettingRefusal{Key: s.Key, Reason: s.Label + " " + err.Error()}
 			}
 		}
 		if v != "" {
@@ -364,7 +375,7 @@ func MergeSettings(decl []Setting, scope string, current, update map[string]stri
 		}
 	}
 	if unset := UnsetSettings(decl, next, scope); len(unset) > 0 {
-		return nil, nil, fmt.Errorf("%s is required", inScope[unset[0]].Label)
+		return nil, nil, &SettingRefusal{Key: unset[0], Reason: inScope[unset[0]].Label + " is required"}
 	}
 	var changed []string
 	for k := range current {

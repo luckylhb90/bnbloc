@@ -164,6 +164,7 @@ func (s *Service) routes() []route {
 		// Artifacts, previewers, sites and public shares.
 		member("GET /v1/artifacts/{key...}", s.handleArtifactDownload),
 		open("GET /v1/previewers/{name}/{version}/{ticket}/{path...}", "a previewer ticket in the path", s.handlePreviewerFile),
+		open("GET /v1/settings-pages/{kind}/{name}/{version}/{ticket}/{path...}", "a settings page ticket in the path", s.handleSettingsPageFile),
 		member("POST /v1/rooms/{roomId}/artifacts/{artifactId}/versions/{version}/site-ticket", s.handleSiteTicket),
 		member("GET /v1/rooms/{roomId}/artifacts/{artifactId}/versions/{version}/files/{path...}", s.handleSiteFileRead),
 		member("GET /v1/rooms/{roomId}/artifacts/{artifactId}/versions/{version}/cover", s.handleSiteCover),

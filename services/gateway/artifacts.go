@@ -207,7 +207,8 @@ func streamBlob(w http.ResponseWriter, body io.Reader, size int64) {
 // super-admin may fetch any staged key (they upload them). Everyone else may
 // fetch only keys referenced by something already published to them:
 //   - the artifacts of a component that passes their rollout + tenant gate
-//     (the same gate /v1/components and /v1/cores/{name}/artifact apply);
+//     (the same gate /v1/components and /v1/cores/{name}/artifact apply),
+//     and the settings page bundle of one listed to them;
 //   - the files of a published desktop release (/v1/app/releases) and the
 //     current desktop update (/v1/app/update), which every member may read;
 //   - the bundle of a content component version visible to them, used by a
@@ -226,12 +227,21 @@ func (s *Service) artifactEntitled(ctx context.Context, actor contentActor, key 
 		return false, err
 	}
 	for _, rec := range view.records {
-		if !componentKindVisibleInMemberCatalog(componentKindForName(rec)) || !view.visibility(rec).Installed {
+		vis := view.visibility(rec)
+		if !componentKindVisibleInMemberCatalog(componentKindForName(rec)) || !vis.Visible {
 			continue
 		}
 		cfg, err := extpipe.DecodeConfig(rec)
 		if err != nil {
 			return false, err
+		}
+		// A settings page is listed with the component, before the member
+		// installs it (an organization admin sets an opt-in tool up first).
+		if page := cfg.SettingsPage; page != nil && artifactKeyIs(page.Bundle.URL, key) {
+			return true, nil
+		}
+		if !vis.Installed {
+			continue
 		}
 		for _, art := range cfg.Artifacts {
 			if artifactKeyIs(art.URL, key) {
@@ -319,16 +329,16 @@ func (s *Service) probeUploadedArtifacts(ctx context.Context, pkg pkgmeta.Packag
 	if err != nil {
 		return err
 	}
-	for platform, artifact := range pkg.Artifacts {
+	for at, artifact := range pkg.Pins() {
 		key, err := pkgmeta.GatewayArtifactKey(artifact.URL, publicArtifactBaseURL)
 		if err != nil {
-			return fmt.Errorf("artifacts.%s.url: %w", platform, err)
+			return fmt.Errorf("%s.url: %w", at, err)
 		}
 		if err := s.probeUploadedArtifact(ctx, key, artifact.SHA256); err != nil {
-			return fmt.Errorf("artifacts.%s.url: %w", platform, err)
+			return fmt.Errorf("%s.url: %w", at, err)
 		}
 	}
-	return nil
+	return s.probeSettingsPage(ctx, pkg)
 }
 
 func (s *Service) probeUploadedArtifact(ctx context.Context, key, wantSHA string) error {

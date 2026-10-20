@@ -122,33 +122,54 @@ func previewerPublishInputs(packageFile, bundleFile, dir string) (pkgmeta.Packag
 	if pkg.Kind != pkgmeta.KindPreviewerPackageV1 {
 		return pkgmeta.Package{}, "", noop, fmt.Errorf("%s: kind must be %s", packageFile, pkgmeta.KindPreviewerPackageV1)
 	}
-	var raw []byte
-	path := expandHome(bundleFile)
-	cleanup := noop
+	src := bundleFile
 	if dir != "" {
-		if raw, err = tarbundle.Pack(expandHome(dir), tarbundle.PreviewerLimits); err != nil {
-			return pkgmeta.Package{}, "", noop, err
+		src = dir
+	}
+	path, cleanup, err := frameBundleInput(src, pkg.Previewer.Entry)
+	if err != nil {
+		return pkgmeta.Package{}, "", noop, err
+	}
+	return pkg, path, cleanup, nil
+}
+
+// frameBundleInput reads a frame bundle (a previewer's, a component's
+// settings page) before any upload: src is a built directory, packed into a
+// temporary archive, or an archive. The archive must be within the bundle
+// limits and hold entry. cleanup removes a temporary archive.
+func frameBundleInput(src, entry string) (string, func(), error) {
+	noop := func() {}
+	path := expandHome(src)
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", noop, err
+	}
+	var raw []byte
+	cleanup := noop
+	if info.IsDir() {
+		if raw, err = tarbundle.Pack(path, tarbundle.PreviewerLimits); err != nil {
+			return "", noop, err
 		}
-		tmp, err := os.MkdirTemp("", "bnbloc-previewer-")
+		tmp, err := os.MkdirTemp("", "bnbloc-bundle-")
 		if err != nil {
-			return pkgmeta.Package{}, "", noop, err
+			return "", noop, err
 		}
 		cleanup = func() { _ = os.RemoveAll(tmp) }
 		path = filepath.Join(tmp, "bundle.tar")
 		if err := os.WriteFile(path, raw, 0o644); err != nil {
 			cleanup()
-			return pkgmeta.Package{}, "", noop, err
+			return "", noop, err
 		}
 	} else if raw, err = os.ReadFile(path); err != nil {
-		return pkgmeta.Package{}, "", noop, err
+		return "", noop, err
 	}
 	b, err := tarbundle.Parse(raw, "", tarbundle.PreviewerLimits)
 	if err == nil {
-		err = b.RequireEntry(pkg.Previewer.Entry)
+		err = b.RequireEntry(entry)
 	}
 	if err != nil {
 		cleanup()
-		return pkgmeta.Package{}, "", noop, err
+		return "", noop, err
 	}
-	return pkg, path, cleanup, nil
+	return path, cleanup, nil
 }

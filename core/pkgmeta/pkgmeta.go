@@ -58,6 +58,9 @@ type Package struct {
 	// and how its value reaches the component. Plugins and MCP tools only
 	// (the field-to-kinds table).
 	Settings []Setting `json:"settings,omitempty"`
+	// SettingsPage is the component's own page for its settings, shown
+	// instead of the one form (settings_page.go). Only beside Settings.
+	SettingsPage *SettingsPage `json:"settingsPage,omitempty"`
 
 	// Sandbox-only payload: the guest profile of the one machine the desktop
 	// prepares (prewarms) on a member's computer. The image is the
@@ -186,7 +189,10 @@ func validatePackage(pkg Package) error {
 	if err := validate(pkg); err != nil {
 		return err
 	}
-	return validateSettings(pkg)
+	if err := validateSettings(pkg); err != nil {
+		return err
+	}
+	return validateSettingsPage(pkg)
 }
 
 func validatePackageShell(pkg Package) error {

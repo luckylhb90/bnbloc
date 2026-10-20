@@ -8,7 +8,7 @@ import (
 )
 
 func validateArtifactContract(ctx context.Context, pkg pkgmeta.Package, artifactBaseURL string, artifactProbe func(context.Context, pkgmeta.Package, string) error) error {
-	if len(pkg.Artifacts) == 0 {
+	if len(pkg.Pins()) == 0 {
 		return nil
 	}
 	if err := pkgmeta.ValidateCompleteArtifacts(pkg); err != nil {

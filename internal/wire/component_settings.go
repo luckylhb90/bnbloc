@@ -36,6 +36,21 @@ type ComponentSettingsView struct {
 	Missing        []ComponentSetting      `json:"missing"`
 	UpdatedBy      string                  `json:"updatedBy,omitempty"`
 	UpdatedAtMs    int64                   `json:"updatedAtMs,omitempty"`
+	// Page is the component's own settings page for this scope, when it
+	// declares one: it is shown instead of the one form.
+	Page *ComponentSettingsPageFrame `json:"page,omitempty"`
+}
+
+// ComponentSettingsPageFrame is where a component's own settings page
+// (ComponentSettingsPage) loads for one scope: the browser's frame base on
+// the gateway (a ticket for the caller, this scope and this version
+// included; the host appends Entry), and the bundle's pin, by which the
+// desktop shell serves the same files itself.
+type ComponentSettingsPageFrame struct {
+	Entry            string `json:"entry"`
+	BundleSHA256     string `json:"bundleSha256"`
+	FrameURL         string `json:"frameUrl"`
+	FrameExpiresAtMs int64  `json:"frameExpiresAtMs"`
 }
 
 // ComponentSettingsUpdate is a PUT of a scope's values: a key absent is

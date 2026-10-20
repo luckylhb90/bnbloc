@@ -27,8 +27,10 @@ type PackageConfig struct {
 	Hooks        []string                    `json:"hooks,omitempty"`
 	Permissions  pkgmeta.Permissions         `json:"permissions"`
 	Description  string                      `json:"description,omitempty"`
-	// Settings is the component's settings declaration (plugins, MCP tools).
-	Settings []pkgmeta.Setting `json:"settings,omitempty"`
+	// Settings is the component's settings declaration (plugins, MCP tools),
+	// SettingsPage its own page for them.
+	Settings     []pkgmeta.Setting     `json:"settings,omitempty"`
+	SettingsPage *pkgmeta.SettingsPage `json:"settingsPage,omitempty"`
 	// Guest is a sandbox's machine profile (the image the desktop prewarms).
 	Guest *pkgmeta.Guest `json:"guest,omitempty"`
 	// Previewer is a previewer's match/entry/rank/capabilities/toolbar.
@@ -52,6 +54,7 @@ func ConfigFromPackage(pkg pkgmeta.Package) PackageConfig {
 		Permissions:  pkg.Permissions,
 		Description:  pkg.Description,
 		Settings:     append([]pkgmeta.Setting(nil), pkg.Settings...),
+		SettingsPage: pkg.SettingsPage,
 		Guest:        pkg.Guest,
 		Previewer:    pkg.Previewer,
 		MCP:          pkg.MCP,
@@ -96,6 +99,7 @@ func (c PackageConfig) Package(kind string, rec Record) pkgmeta.Package {
 		Contract:     c.Contract,
 		Hooks:        c.Hooks,
 		Settings:     c.Settings,
+		SettingsPage: c.SettingsPage,
 		Guest:        c.Guest,
 		Previewer:    c.Previewer,
 		MCP:          c.MCP,

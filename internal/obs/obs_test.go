@@ -41,16 +41,17 @@ func TestMiddlewareLogsTagsWithoutSecrets(t *testing.T) {
 // of the path does.
 func TestRedactPathHidesCapabilityTokens(t *testing.T) {
 	for path, want := range map[string]string{
-		"/v1/invites/CODE-SECRET/redeem":                        "/v1/invites/[REDACTED]/redeem",
-		"/relay/stream/KEY-SECRET":                              "/relay/stream/[REDACTED]",
-		"/v1/sites/TICKET-SECRET/~app/c/votes":                  "/v1/sites/[REDACTED]/~app/c/votes",
-		"/v1/sites/TICKET-SECRET":                               "/v1/sites/[REDACTED]",
-		"/v1/public/shares/SHARE-SECRET/site/~app/events":       "/v1/public/shares/[REDACTED]/site/~app/events",
-		"/v1/public/shares/SHARE-SECRET/visitor":                "/v1/public/shares/[REDACTED]/visitor",
-		"/v1/previewers/sprites/1.0.0/TICKET-SECRET/index.html": "/v1/previewers/sprites/1.0.0/[REDACTED]/index.html",
-		"/s/SHARESECRET00000000000":                             "/s/[REDACTED]",
-		"/v1/rooms/room-1/s/x":                                  "/v1/rooms/room-1/s/x",
-		"/v1/rooms/room-1/apps/art_1/c/votes":                   "/v1/rooms/room-1/apps/art_1/c/votes",
+		"/v1/invites/CODE-SECRET/redeem":                           "/v1/invites/[REDACTED]/redeem",
+		"/relay/stream/KEY-SECRET":                                 "/relay/stream/[REDACTED]",
+		"/v1/sites/TICKET-SECRET/~app/c/votes":                     "/v1/sites/[REDACTED]/~app/c/votes",
+		"/v1/sites/TICKET-SECRET":                                  "/v1/sites/[REDACTED]",
+		"/v1/public/shares/SHARE-SECRET/site/~app/events":          "/v1/public/shares/[REDACTED]/site/~app/events",
+		"/v1/public/shares/SHARE-SECRET/visitor":                   "/v1/public/shares/[REDACTED]/visitor",
+		"/v1/previewers/sprites/1.0.0/TICKET-SECRET/index.html":    "/v1/previewers/sprites/1.0.0/[REDACTED]/index.html",
+		"/v1/settings-pages/mcp/notes/1.0.0/TICKET-SECRET/page.js": "/v1/settings-pages/mcp/notes/1.0.0/[REDACTED]/page.js",
+		"/s/SHARESECRET00000000000":                                "/s/[REDACTED]",
+		"/v1/rooms/room-1/s/x":                                     "/v1/rooms/room-1/s/x",
+		"/v1/rooms/room-1/apps/art_1/c/votes":                      "/v1/rooms/room-1/apps/art_1/c/votes",
 	} {
 		if got := redactPath(path); got != want || strings.Contains(got, "SECRET") {
 			t.Errorf("redactPath(%q) = %q, want %q", path, got, want)

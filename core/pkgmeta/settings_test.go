@@ -2,6 +2,7 @@ package pkgmeta
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"slices"
@@ -132,6 +133,7 @@ type settingFixture struct {
 		Next     map[string]string `json:"next"`
 		Changed  []string          `json:"changed"`
 		Error    string            `json:"error"`
+		Refused  string            `json:"refused"`
 	} `json:"merges"`
 	Effective []struct {
 		Settings  []Setting         `json:"settings"`
@@ -159,8 +161,9 @@ func TestSettingValueRules(t *testing.T) {
 	for i, c := range f.Merges {
 		next, changed, err := MergeSettings(c.Settings, c.Scope, c.Current, c.Update, c.Clear)
 		if c.Error != "" {
-			if err == nil || !strings.Contains(err.Error(), c.Error) {
-				t.Errorf("merge %d: err = %v, want %q", i, err, c.Error)
+			var refusal *SettingRefusal
+			if !errors.As(err, &refusal) || !strings.Contains(err.Error(), c.Error) || refusal.Key != c.Refused {
+				t.Errorf("merge %d: err = %#v, want %q about %q", i, err, c.Error, c.Refused)
 			}
 			continue
 		}

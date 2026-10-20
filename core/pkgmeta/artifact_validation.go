@@ -80,15 +80,24 @@ func validateAbsoluteHTTPURL(raw string) error {
 
 func validateArtifactMap(artifacts map[string]Artifact) error {
 	for platform, artifact := range artifacts {
-		if isUploadPlaceholder(artifact) {
-			continue
+		if err := validateArtifact("artifacts."+platform, artifact); err != nil {
+			return err
 		}
-		if strings.TrimSpace(artifact.URL) == "" || strings.TrimSpace(artifact.SHA256) == "" {
-			return fmt.Errorf("artifacts.%s requires url and sha256 strings; use {url:\"\", sha256:\"\"} or omit that artifact entry before upload", platform)
-		}
-		if !digest.Valid(artifact.SHA256) {
-			return fmt.Errorf("artifacts.%s.sha256 must be 64 lowercase hex characters", platform)
-		}
+	}
+	return nil
+}
+
+// validateArtifact is the rule for one pinned artifact at its place in the
+// package (Pins): an upload placeholder, or a url and a sha256.
+func validateArtifact(at string, artifact Artifact) error {
+	if isUploadPlaceholder(artifact) {
+		return nil
+	}
+	if strings.TrimSpace(artifact.URL) == "" || strings.TrimSpace(artifact.SHA256) == "" {
+		return fmt.Errorf("%s requires url and sha256 strings; use {url:\"\", sha256:\"\"} or omit that artifact entry before upload", at)
+	}
+	if !digest.Valid(artifact.SHA256) {
+		return fmt.Errorf("%s.sha256 must be 64 lowercase hex characters", at)
 	}
 	return nil
 }
@@ -106,16 +115,16 @@ func ValidateGatewayArtifactURLs(pkg Package, artifactBaseURL string) error {
 	if err != nil {
 		return err
 	}
-	for platform, artifact := range pkg.Artifacts {
+	for at, artifact := range pkg.Pins() {
 		if isUploadPlaceholder(artifact) {
 			continue
 		}
 		key, err := GatewayArtifactKey(artifact.URL, base)
 		if err != nil {
-			return fmt.Errorf("artifacts.%s.url: %w", platform, err)
+			return fmt.Errorf("%s.url: %w", at, err)
 		}
 		if key != digest.Key(artifact.SHA256) {
-			return fmt.Errorf("artifacts.%s.url key must match sha256", platform)
+			return fmt.Errorf("%s.url key must match sha256", at)
 		}
 	}
 	return nil
@@ -154,14 +163,14 @@ func (r Runtime) CarriesArtifacts() bool {
 }
 
 // ValidateCompleteArtifacts refuses a publish whose downloadable artifacts
-// are still upload placeholders.
+// (a runtime's, a settings page's bundle) are still upload placeholders.
 func ValidateCompleteArtifacts(pkg Package) error {
-	if !pkg.Runtime.CarriesArtifacts() {
-		return nil
-	}
-	for platform, artifact := range pkg.Artifacts {
+	for at, artifact := range pkg.Pins() {
+		if at != SettingsPageBundle && !pkg.Runtime.CarriesArtifacts() {
+			continue
+		}
 		if isUploadPlaceholder(artifact) {
-			return fmt.Errorf("artifacts.%s must be uploaded before publish", platform)
+			return fmt.Errorf("%s must be uploaded before publish", at)
 		}
 	}
 	return nil

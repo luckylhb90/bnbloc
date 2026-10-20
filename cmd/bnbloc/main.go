@@ -80,9 +80,10 @@ Components:
   bnbloc cores publish-sidecar --name <n> --binary <goos-goarch>=<path>... [--local-url <url>]
         [--version v] [--publisher p] [--listen-env VAR] [--supervised-env VAR] [--manifest f]
         [--rollout auto|optin|off] [--seckey f | --unsigned]
-  bnbloc cores publish-mcp --package <mcp.json> [--binary <goos-goarch>=<path>...]
+  bnbloc cores publish-mcp --package <mcp.json> [--binary <goos-goarch>=<path>...] [--settings-page <dir|tar>]
         [--rollout auto|optin|off] [--seckey f | --unsigned]
         an MCP tool: a stdio server's binaries are uploaded and pinned; an endpoint takes none
+        (both: a settingsPage's bundle, --settings-page, is uploaded and pinned too)
   bnbloc cores install --url <daemonURL> --name <name> [--publisher p] [--rollout r] [--seckey f | --unsigned]
   bnbloc cores install --manifest <file> --name <name> [--rollout r] [--seckey f | --unsigned]
   bnbloc cores install --package <file> [--signature <file>] [--rollout r]   any pre-built package
@@ -90,9 +91,10 @@ Components:
   bnbloc cores list
   bnbloc cores uninstall <name>
   bnbloc cores enable <name> (--tenant <id>... | --all-tenants)
-  bnbloc components publish-package --package <file> --binary <goos-goarch>=<path>...
+  bnbloc components publish-package --package <file> --binary <goos-goarch>=<path>... [--settings-page <dir|tar>]
         [--rollout auto|optin|off] [--seckey f | --unsigned]
-        a package file without artifacts (a plugin, a notifier sidecar): its binaries are uploaded and pinned
+        a package file without artifacts (a plugin, a notifier sidecar): its binaries are uploaded and pinned,
+        and a settingsPage's bundle (--settings-page) too
   bnbloc components rotate-secret <name>  new notifier signing secret (printed once)
   bnbloc components test <name>           send a test notification through a notifier to you
   bnbloc content export <id> [--version v] [--publisher p] [--out f]

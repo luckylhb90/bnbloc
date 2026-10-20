@@ -1237,6 +1237,21 @@ export interface ComponentSettingsView {
   missing: ComponentSetting[];
   updatedBy?: string;
   updatedAtMs?: number;
+  // Page is the component's own settings page for this scope, when it
+  // declares one: it is shown instead of the one form.
+  page?: ComponentSettingsPageFrame;
+}
+
+// ComponentSettingsPageFrame is where a component's own settings page
+// (ComponentSettingsPage) loads for one scope: the browser's frame base on
+// the gateway (a ticket for the caller, this scope and this version
+// included; the host appends Entry), and the bundle's pin, by which the
+// desktop shell serves the same files itself.
+export interface ComponentSettingsPageFrame {
+  entry: string;
+  bundleSha256: string;
+  frameUrl: string;
+  frameExpiresAtMs: number;
 }
 
 // ComponentSettingsUpdate is a PUT of a scope's values: a key absent is
@@ -1309,6 +1324,18 @@ export interface ComponentSettingDeliver {
   env?: string;
   header?: string;
   bearer?: boolean;
+}
+
+// ComponentSettingsPage is part of a component package (core/pkgmeta): the
+// component's own settings page (docs/prd/2026-10-19-component-settings.md
+// §2.2a), an HTML file (Entry) of a static bundle the platform shows in a
+// sandboxed frame where the one settings form would be. The bundle is an
+// archive in the previewer bundle format, pinned here (a gateway artifact's
+// url and sha256) rather than in the package's artifacts, which are a
+// plugin's or a stdio tool's per-platform binaries (an http tool has none).
+export interface ComponentSettingsPage {
+  entry: string;
+  bundle: ComponentArtifact;
 }
 
 // The types of a setting (ComponentSetting.Type). A secret is write-only:
@@ -1495,6 +1522,7 @@ export interface PlatformComponent {
   permissions: ComponentPermissions;
   hooks?: string[];
   settings?: ComponentSetting[];
+  settingsPage?: ComponentSettingsPage;
   artifacts?: Record<string, ComponentArtifact>;
   endpoint?: ComponentEndpoint;
   sidecar?: ComponentSidecar;
@@ -1557,10 +1585,12 @@ export interface MemberComponent {
   // organization (values never come here), and SettingsMissing the
   // required ones of those scopes that are not set: while any is, the
   // component needs setup and does not run. Member-scope settings live on
-  // the member's desktop.
+  // the member's desktop. SettingsPage is the component's own settings
+  // page, shown instead of the one form.
   settings?: ComponentSetting[];
   settingsSet?: string[];
   settingsMissing?: string[];
+  settingsPage?: ComponentSettingsPage;
   artifacts?: Record<string, ComponentArtifact>;
   endpoint?: ComponentEndpoint;
   sidecar?: ComponentSidecar;

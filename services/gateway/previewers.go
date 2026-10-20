@@ -24,7 +24,8 @@ import (
 // Previewer components (bnbloc.previewer.package/v1) in the gateway: the
 // install-time bundle probe, the member-catalog block, and the browser frame
 // route that serves bundle files to a sandboxed opaque-origin iframe. See
-// docs/architecture/previewer-components.md.
+// docs/architecture/previewer-components.md. A component's own settings
+// page is a frame bundle too, served by the same code (settings_pages.go).
 
 // previewerFrameTTL bounds a frame ticket: the catalog mints a fresh one on
 // every read, and the web host re-reads the catalog before it expires.
@@ -42,11 +43,19 @@ func (s *Service) probePreviewerBundle(ctx context.Context, _ extpipe.Record, cf
 	if !ok {
 		return fmt.Errorf("previewer requires artifact %q", pkgmeta.PreviewerBundleArtifact)
 	}
-	b, err := s.fetchPreviewerBundle(ctx, art)
+	return s.probeFrameBundle(ctx, "artifacts."+pkgmeta.PreviewerBundleArtifact, art, cfg.Previewer.Entry)
+}
+
+// probeFrameBundle proves a frame bundle (a previewer's, a settings page's)
+// installable: in the artifact store, matching its sha256, a valid archive
+// within the bundle limits, holding its entry document. at names its place
+// in the package.
+func (s *Service) probeFrameBundle(ctx context.Context, at string, art pkgmeta.Artifact, entry string) error {
+	b, err := s.fetchFrameBundle(ctx, art)
 	if err != nil {
-		return fmt.Errorf("artifacts.%s: %w", pkgmeta.PreviewerBundleArtifact, err)
+		return fmt.Errorf("%s: %w", at, err)
 	}
-	return b.RequireEntry(cfg.Previewer.Entry)
+	return b.RequireEntry(entry)
 }
 
 // previewerCatalog builds an installed previewer's catalog block, minting a
@@ -108,10 +117,19 @@ func (s *Service) handlePreviewerFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	art, _ := previewerruntime.Bundle(cfg)
-	b, err := s.fetchPreviewerBundle(r.Context(), art)
+	s.serveFrameFile(w, r, previewerFrameBase(name, version), art, file, claims.ExpiresAtUnix)
+}
+
+// serveFrameFile serves one file of a frame bundle (a previewer's, or a
+// component's settings page: the same archive rules and policy) to its
+// sandboxed frame, out of the verified archive art pins, under frameCSP with
+// base, the bundle's frame route, named in it. The caller has checked the
+// frame's ticket, which expires at expiresAtUnix.
+func (s *Service) serveFrameFile(w http.ResponseWriter, r *http.Request, base string, art pkgmeta.Artifact, file string, expiresAtUnix int64) {
+	b, err := s.fetchFrameBundle(r.Context(), art)
 	if err != nil {
-		obs.ServerError(w, "load previewer bundle failed", err)
-		httpx.Error(w, "load previewer bundle failed", http.StatusBadGateway)
+		obs.ServerError(w, "load frame bundle failed", err)
+		httpx.Error(w, "load frame bundle failed", http.StatusBadGateway)
 		return
 	}
 	data, ok := b.File(file)
@@ -121,7 +139,7 @@ func (s *Service) handlePreviewerFile(w http.ResponseWriter, r *http.Request) {
 	}
 	h := w.Header()
 	h.Set("Content-Type", tarbundle.ContentType(file))
-	h.Set("Content-Security-Policy", previewerCSP(s.publicOrigin(r)+previewerFrameBase(name, version)))
+	h.Set("Content-Security-Policy", frameCSP(s.publicOrigin(r)+base))
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Referrer-Policy", "no-referrer")
 	// Module scripts and fonts load in CORS mode from the frame's opaque
@@ -131,20 +149,21 @@ func (s *Service) handlePreviewerFile(w http.ResponseWriter, r *http.Request) {
 	// A version's files are pinned by the bundle's sha, and the URL carries
 	// the ticket: the browser may keep them until the ticket expires, so
 	// reopening a file of the same type within the hour downloads nothing.
-	if left := claims.ExpiresAtUnix - s.nowTime().Unix(); left > 0 {
+	if left := expiresAtUnix - s.nowTime().Unix(); left > 0 {
 		h.Set("Cache-Control", fmt.Sprintf("private, max-age=%d, immutable", left))
 	} else {
 		h.Set("Cache-Control", "private, no-cache")
 	}
-	httpx.WriteStatic(w, r, "previewer:"+art.SHA256+"/"+file, data)
+	httpx.WriteStatic(w, r, "frame:"+art.SHA256+"/"+file, data)
 }
 
-// previewerCSP is the policy of every served bundle file: scripts, styles
+// frameCSP is the policy of every served frame bundle file: scripts, styles
 // and fonts only from the bundle itself, images/media only from blob:/data:
-// (the file bytes the host transfers), no network at all, and framing only by
-// the app. bundleBase names the bundle path explicitly besides 'self'
-// because engines differ on what 'self' means in an opaque-origin document.
-func previewerCSP(bundleBase string) string {
+// (the file bytes a previewer's host transfers), no network at all, and
+// framing only by the app. bundleBase names the bundle path explicitly
+// besides 'self' because engines differ on what 'self' means in an
+// opaque-origin document.
+func frameCSP(bundleBase string) string {
 	return "default-src 'none'; script-src 'self' " + bundleBase +
 		"; style-src 'self' " + bundleBase + " 'unsafe-inline'; img-src blob: data:; media-src blob: data:; font-src 'self' " +
 		bundleBase + " data:; connect-src 'none'; frame-ancestors 'self'"
@@ -168,9 +187,9 @@ func (s *Service) visiblePreviewer(ctx context.Context, claims auth.Claims, name
 	return cfg, true, nil
 }
 
-// fetchPreviewerBundle returns the verified, parsed bundle pinned by art,
+// fetchFrameBundle returns the verified, parsed frame bundle pinned by art,
 // from the cache or the artifact store (via realtime).
-func (s *Service) fetchPreviewerBundle(ctx context.Context, art pkgmeta.Artifact) (*tarbundle.Bundle, error) {
+func (s *Service) fetchFrameBundle(ctx context.Context, art pkgmeta.Artifact) (*tarbundle.Bundle, error) {
 	previewers, _ := s.bundleCaches()
 	return previewers.LoadPinned(art.SHA256, tarbundle.PreviewerLimits, func() ([]byte, error) {
 		key, ok := pkgmeta.ArtifactKeyOf(art.URL)

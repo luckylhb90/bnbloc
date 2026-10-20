@@ -23,6 +23,7 @@ func coresPublishMCP(args []string) error {
 	sign := addSigningFlags(fs, "rollout set atomically with the publish: auto | optin | off (default: gateway default, auto)")
 	var binaries multiFlag
 	fs.Var(&binaries, "binary", "stdio server binary as <goos-goarch>=<path> (repeatable)")
+	settingsPage := addSettingsPageFlag(fs)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -33,6 +34,11 @@ func coresPublishMCP(args []string) error {
 	if err != nil {
 		return err
 	}
+	pagePath, cleanup, err := settingsPageInput(pkg, *settingsPage)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
 	priv, err := sign.key()
 	if err != nil {
 		return err
@@ -43,6 +49,9 @@ func coresPublishMCP(args []string) error {
 		if pins, err = uploadArtifacts(c, binaries); err != nil {
 			return err
 		}
+	}
+	if err := pinSettingsPage(c, &pkg, pagePath); err != nil {
+		return err
 	}
 	if pkg, err = pkgmeta.AssembleMCP(pkg, pins); err != nil {
 		return err

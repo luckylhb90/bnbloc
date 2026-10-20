@@ -69,6 +69,11 @@ const (
 	// reading the files of the one previewer bundle named in ID
 	// ("<name>@<version>") for its subject and tenant.
 	KindPreviewerFrame = "previewer-frame"
+	// KindSettingsPageFrame is the same ticket for a component's own
+	// settings page: it authorizes only reading the files of the page bundle
+	// of the component, version and scope named in ID
+	// ("<scope>:<kind>/<name>@<version>") for its subject and tenant.
+	KindSettingsPageFrame = "settings-page-frame"
 	// KindSiteFrame is a short-lived ticket in a site snapshot's frame URL
 	// (/v1/sites/<ticket>/…): it authorizes only reading the files of the
 	// one artifact version named in ID ("<roomId>/<artifactId>/<version>")

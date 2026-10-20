@@ -22,7 +22,7 @@ var roomPathRe = regexp.MustCompile(`/v1/rooms/([^/]+)`)
 // redemption code, the relay stream session key, and the capability tokens
 // of the frame and link routes (a member's site ticket, which an
 // interactive app's data calls carry too; a public share token; a
-// previewer ticket). They are redacted before a path is logged so request
+// previewer's or a settings page's frame ticket). They are redacted before a path is logged so request
 // logs never leak them (SEC-9).
 var secretPathRes = []*regexp.Regexp{
 	regexp.MustCompile(`(/v1/invites/)[^/]+(/redeem)`),
@@ -31,6 +31,7 @@ var secretPathRes = []*regexp.Regexp{
 	regexp.MustCompile(`(/v1/public/shares/)[^/]+()`),
 	regexp.MustCompile(`^(` + regexp.QuoteMeta(sharelink.Prefix) + `)[^/]+()`),
 	regexp.MustCompile(`(/v1/previewers/[^/]+/[^/]+/)[^/]+()`),
+	regexp.MustCompile(`(/v1/settings-pages/[^/]+/[^/]+/[^/]+/)[^/]+()`),
 }
 
 // redactPath replaces secret path segments with [REDACTED] for logging. It does

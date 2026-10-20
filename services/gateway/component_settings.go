@@ -51,7 +51,7 @@ func (s *Service) settingsRecord(w http.ResponseWriter, r *http.Request, claims 
 	if !ok {
 		return extpipe.Record{}, extpipe.PackageConfig{}, false
 	}
-	if scope == pkgmeta.SettingScopeOrg && !extpipe.MemberVisibility(viewerOf(claims), extpipe.GateForRecord(rec), 0).Visible {
+	if scope == pkgmeta.SettingScopeOrg && !orgSees(claims, rec) {
 		httpx.Error(w, "component not found", http.StatusNotFound)
 		return extpipe.Record{}, extpipe.PackageConfig{}, false
 	}
@@ -62,6 +62,13 @@ func (s *Service) settingsRecord(w http.ResponseWriter, r *http.Request, claims 
 		return extpipe.Record{}, extpipe.PackageConfig{}, false
 	}
 	return rec, cfg, true
+}
+
+// orgSees reports whether the caller's organization may see a component
+// (listed to its members, before any opts in): whose organization settings
+// its admins set, and whose settings page they may open.
+func orgSees(claims auth.Claims, rec extpipe.Record) bool {
+	return extpipe.MemberVisibility(viewerOf(claims), extpipe.GateForRecord(rec), 0).Visible
 }
 
 // settingsTenant is the organization a scope's record belongs to.
@@ -82,6 +89,7 @@ func (s *Service) settingsView(ctx context.Context, scope string, claims auth.Cl
 		Kind: rec.Kind, Name: rec.Name, Version: rec.Version, Description: cfg.Description, Scope: scope,
 		Available: st.Available(), ReachesMembers: reachesMembers(rec, cfg),
 		Fields: []wire.ComponentSettingField{}, Missing: []wire.ComponentSetting{},
+		Page: s.settingsPageFrame(claims, scope, rec, cfg),
 	}
 	var stored componentsettings.Record
 	if view.Available && len(pkgmeta.SettingsOfScope(cfg.Settings, scope)) > 0 {
@@ -161,7 +169,14 @@ func (s *Service) handlePutComponentSettings(scope string) sessionHandler {
 			return next, err
 		})
 		if invalid != nil {
-			httpx.Error(w, invalid.Error(), http.StatusBadRequest)
+			// The refused setting's key goes with the reason: a form or a
+			// component's settings page shows it at that field.
+			body := httpx.ErrorBody{Error: invalid.Error()}
+			var refusal *pkgmeta.SettingRefusal
+			if errors.As(invalid, &refusal) {
+				body.Field = refusal.Key
+			}
+			httpx.WriteJSON(w, http.StatusBadRequest, body)
 			return
 		}
 		if err != nil {
@@ -232,7 +247,7 @@ func (s *Service) handleResolvedComponentSettings(w http.ResponseWriter, r *http
 // failure is logged and reads as every required one missing (fail closed:
 // the component does not run on a guess).
 func (s *Service) catalogSettings(ctx context.Context, claims auth.Claims, rec extpipe.Record, cfg extpipe.PackageConfig, out *wire.MemberComponent) {
-	out.Settings = cfg.Settings
+	out.Settings, out.SettingsPage = cfg.Settings, cfg.SettingsPage
 	scopes := []string{pkgmeta.SettingScopePlatform, pkgmeta.SettingScopeOrg}
 	if len(pkgmeta.SettingsOfScope(cfg.Settings, scopes...)) == 0 {
 		return

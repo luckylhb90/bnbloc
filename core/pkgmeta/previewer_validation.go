@@ -6,7 +6,6 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/internal/filematch"
 )
 
@@ -78,7 +77,7 @@ func validatePreviewerPackage(pkg Package) error {
 }
 
 func validatePreviewer(p Previewer) error {
-	if !core.ValidBundlePath(p.Entry) || !strings.HasSuffix(p.Entry, ".html") {
+	if !ValidBundleEntry(p.Entry) {
 		return fmt.Errorf("previewer.entry must be a relative .html path inside the bundle")
 	}
 	if err := validatePreviewerMatch(p.Match); err != nil {

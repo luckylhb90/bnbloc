@@ -81,22 +81,31 @@
     {
       "settings": [{"key": "apiKey", "label": "API key", "type": "secret", "scope": "org", "required": true}],
       "scope": "org", "current": {}, "update": {"apiKey": ""},
-      "error": "API key is required"
+      "error": "API key is required", "refused": "apiKey"
     },
     {
       "settings": [{"key": "apiKey", "label": "API key", "type": "secret", "scope": "org"}],
       "scope": "org", "current": {}, "update": {"other": "x"},
-      "error": "\"other\" is not a org setting"
+      "error": "\"other\" is not a org setting", "refused": "other"
     },
     {
       "settings": [{"key": "chrome", "label": "Chrome", "type": "path", "scope": "member"}],
       "scope": "org", "current": {}, "update": {"chrome": "/x"},
-      "error": "\"chrome\" is not a org setting"
+      "error": "\"chrome\" is not a org setting", "refused": "chrome"
     },
     {
       "settings": [{"key": "port", "label": "Port", "type": "number", "scope": "platform"}],
       "scope": "platform", "current": {}, "update": {"port": "eighty"},
-      "error": "Port must be a number"
+      "error": "Port must be a number", "refused": "port"
+    },
+    {
+      "_comment": "the first setting refused, in declaration order, is the one named",
+      "settings": [
+        {"key": "host", "label": "Host", "type": "url", "scope": "org", "required": true},
+        {"key": "port", "label": "Port", "type": "number", "scope": "org"}
+      ],
+      "scope": "org", "current": {}, "update": {"port": "eighty", "host": "nowhere"},
+      "error": "Host must be an http(s) URL", "refused": "host"
     }
   ],
   "effective": [
