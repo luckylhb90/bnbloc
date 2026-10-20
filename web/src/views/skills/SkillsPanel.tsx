@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { contentApi } from "@/lib/contentComponentsApi";
 import { formatBytes } from "@/lib/format";
 import { desktop } from "@/lib/desktop";
 import { errorText } from "@/lib/errors";
+import { useVisiblePoll } from "@/lib/useVisiblePoll";
 import {
   publishLabel,
   reachCounts,
@@ -21,64 +21,67 @@ import {
 } from "@/lib/localSkills";
 import { Button } from "@/ui/Button";
 import { Card } from "@/ui/Card";
+import { Dialog } from "@/ui/Dialog";
 import { ErrorBox } from "@/ui/ErrorBox";
 import { useToast } from "@/ui/Toast";
+import { SkillPublishDialog } from "@/views/skills/SkillPublishDialog";
 
-// LocalSkills (Settings → Skills) lets the member choose which skill folders on
-// this computer reach their agents' sandbox and their library. Nothing is shared
-// until it is turned on here, and the sandbox only ever sees read-only copies of
-// the skills ticked. The work is done by a skills component the member installed
-// (any plugin serving bnbloc.skills.provider/v1; the member may use their own),
-// so with none installed the section only says so. Desktop shell only.
-export function LocalSkills() {
+// SkillsDialog is a skills component's panel, opened from its card on the
+// Components page (and once by itself right after it is added): the member
+// chooses which skill folders on this computer reach their agents' sandbox
+// and which to add to their library. Nothing is shared until it is turned on
+// here, and the sandbox only ever sees read-only copies of the skills
+// ticked. The work is done by the component (any plugin with the
+// skills-provider capability, serving bnbloc.skills.provider/v1; the member
+// may use their own), so this names none. Desktop shell only.
+export function SkillsDialog({ plugin, onClose }: { readonly plugin: string | null; readonly onClose: () => void }) {
+  if (!plugin) return null;
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      title={`${plugin}: your skills`}
+      description="Choose which skills on this computer your agents can use inside the sandbox, and which to add to your library. Nothing is shared until you turn it on."
+      size="lg"
+    >
+      <SkillsPanel plugin={plugin} />
+    </Dialog>
+  );
+}
+
+// SkillsPanel finds the provider on this computer and renders it; while the
+// desktop is still downloading or starting it (right after it is added), it
+// asks again every few seconds.
+function SkillsPanel({ plugin }: { readonly plugin: string }) {
   const inShell = desktop.available();
-  const [providers, setProviders] = useState<SkillsProvider[] | null>(null);
+  const [provider, setProvider] = useState<SkillsProvider | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
-      setProviders(await desktop.skillsProviders());
+      setProvider((await desktop.skillsProviders()).find((p) => p.plugin === plugin) ?? null);
       setError(null);
     } catch (e) {
       setError(errorText(e, "Could not list the skills components"));
-      setProviders([]);
     }
-  }, []);
+  }, [plugin]);
   useEffect(() => {
     if (inShell) void load();
   }, [inShell, load]);
+  useVisiblePoll(() => void load(), 3000, inShell && !provider?.running);
 
-  if (!inShell) return null;
-  return (
-    <section className="flex flex-col gap-3">
-      <div>
-        <h2 className="text-sm font-semibold">Skills</h2>
-        <p className="mt-0.5 text-sm text-[var(--color-fg-muted)]">
-          Choose which skills on this computer your agents can use inside the sandbox, and which to add to your library. Nothing is shared until you turn it on.
-        </p>
-      </div>
-      {error && <ErrorBox>{error}</ErrorBox>}
-      {providers && providers.length === 0 && !error && (
-        <p className="text-sm text-[var(--color-fg-subtle)]">
-          No skills component is installed for you. Install one from{" "}
-          <a className="underline" href="#/components">
-            Components
-          </a>
-          , or use your own.
-        </p>
-      )}
-      {(providers ?? []).map((p) => (
-        <ProviderCard key={p.plugin} provider={p} reload={load} />
-      ))}
-    </section>
-  );
+  if (!inShell) return <p className="text-sm text-[var(--color-fg-subtle)]">Your skills are on your computer: open this in the bnbloc desktop app.</p>;
+  if (error) return <ErrorBox>{error}</ErrorBox>;
+  if (provider === undefined) return <p className="text-sm text-[var(--color-fg-subtle)]">Looking for {plugin} on this computer…</p>;
+  if (provider === null) return <p className="text-sm text-[var(--color-fg-subtle)]">{plugin} is not on this computer yet: the desktop app is setting it up.</p>;
+  return <ProviderCard provider={provider} reload={load} />;
 }
 
 function ProviderCard({ provider, reload }: { readonly provider: SkillsProvider; readonly reload: () => Promise<void> }) {
   const toast = useToast();
   const [state, setState] = useState<SkillsState | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
+  const [publishing, setPublishing] = useState<SkillRow | null>(null);
   // Edits wait for the previous save: a toggle sent while another is in flight
   // would be built from stale settings.
   const saving = useRef(false);
@@ -118,25 +121,6 @@ function ProviderCard({ provider, reload }: { readonly provider: SkillsProvider;
       if (path) await save(withSource(state.settings, path));
     } catch (e) {
       toast.error(errorText(e, "Could not open the folder picker"));
-    }
-  };
-
-  const publish = async (row: SkillRow) => {
-    if (!state || busy) return;
-    setBusy(row.name);
-    try {
-      const packed = await desktop.packSkill(provider.plugin, row.name);
-      const published = row.choice.published;
-      const file = new File([packed.archive as BlobPart], `${row.name}.tar`, { type: "application/x-tar" });
-      const d = await contentApi.importArchive(file, { kind: "skill", name: row.name, existingId: published?.componentId });
-      await save(
-        withPublished(state.settings, row.name, { hash: packed.hash, componentId: d.component.id, version: d.component.latestVersion }),
-        published ? `Published version ${d.component.latestVersion} of ${row.name}` : `${row.name} is in your library`,
-      );
-    } catch (e) {
-      toast.error(errorText(e, `Could not publish ${row.name}`));
-    } finally {
-      setBusy(null);
     }
   };
 
@@ -210,10 +194,10 @@ function ProviderCard({ provider, reload }: { readonly provider: SkillsProvider;
       {state.skills.length > 0 && (
         <div className="flex flex-col divide-y divide-[var(--color-border)] border-t border-[var(--color-border)]">
           {state.skills.map((row) => (
-            <SkillRowView key={`${row.source}/${row.name}`} row={row} on={s.enabled} busy={busy === row.name} onChoice={(patch) => void save(withChoice(s, row.name, patch))}
+            <SkillRowView key={`${row.source}/${row.name}`} row={row} on={s.enabled} onChoice={(patch) => void save(withChoice(s, row.name, patch))}
               onAllow={(file, hash) => void save(withAllowed(s, row.name, { file, hash }), `${file} allowed for your sandbox`)}
               onDisallow={(file) => void save(withoutAllowed(s, row.name, file))}
-              onPublish={() => void publish(row)} />
+              onPublish={() => setPublishing(row)} />
           ))}
         </div>
       )}
@@ -227,6 +211,12 @@ function ProviderCard({ provider, reload }: { readonly provider: SkillsProvider;
       <Button size="sm" variant="ghost" className="self-start" onClick={() => void reload().then(refresh)}>
         Rescan
       </Button>
+      <SkillPublishDialog
+        plugin={provider.plugin}
+        row={publishing}
+        onClose={() => setPublishing(null)}
+        onPublished={(row, published, done) => void save(withPublished(s, row.name, published), done)}
+      />
     </Card>
   );
 }
@@ -244,7 +234,6 @@ function Title({ provider }: { readonly provider: SkillsProvider }) {
 function SkillRowView({
   row,
   on,
-  busy,
   onChoice,
   onAllow,
   onDisallow,
@@ -252,7 +241,6 @@ function SkillRowView({
 }: {
   readonly row: SkillRow;
   readonly on: boolean;
-  readonly busy: boolean;
   readonly onChoice: (patch: { vm?: boolean; borrowers?: boolean }) => void;
   readonly onAllow: (file: string, hash: string) => void;
   readonly onDisallow: (file: string) => void;
@@ -272,8 +260,8 @@ function SkillRowView({
           )}
         </span>
         {usable && (
-          <Button size="sm" variant={row.changed ? "primary" : "ghost"} disabled={busy || !!row.publishProblem || (!!row.choice.published && !row.changed)} onClick={onPublish}>
-            {busy ? "Publishing…" : publishLabel(row)}
+          <Button size="sm" variant={row.changed ? "primary" : "ghost"} disabled={!!row.publishProblem || (!!row.choice.published && !row.changed)} onClick={onPublish}>
+            {publishLabel(row)}
           </Button>
         )}
       </div>

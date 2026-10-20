@@ -305,9 +305,10 @@ export const desktop = {
     });
   },
 
-  // Local skills (Settings → Skills): the installed plugins that provide
-  // skills and each one's `bnbloc.skills.provider/v1` API, called through the
-  // shell on loopback. Nothing here reaches the gateway.
+  // Local skills (the skills panel a provider's card opens): the installed
+  // plugins that provide skills and each one's `bnbloc.skills.provider/v1`
+  // API, called through the shell on loopback. Nothing here reaches the
+  // gateway.
   async skillsProviders(): Promise<SkillsProvider[]> {
     const t = tauri();
     if (!t) return [];

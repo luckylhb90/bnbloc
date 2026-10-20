@@ -67,14 +67,21 @@ export const contentApi = {
       body: JSON.stringify({ form: formPayload(form), baseVersion }),
     }).then(noteSaved),
   // Import a skill directory, a plugin or a package as a new component, or
-  // (existingId) as a new version of one of the caller's.
-  importArchive: (file: File, opts: { kind: ContentKind; name?: string; existingId?: string }) => {
+  // (existingId) as a new version of one of the caller's; a display name,
+  // description and tags given replace what the import reads from the files.
+  importArchive: (
+    file: File,
+    opts: { kind: ContentKind; name?: string; existingId?: string; displayName?: string; description?: string; tags?: readonly string[] },
+  ) => {
     const q = new URLSearchParams();
     if (opts.existingId) q.set("id", opts.existingId);
     else {
       q.set("kind", opts.kind);
       if (opts.name?.trim()) q.set("name", opts.name.trim());
     }
+    if (opts.displayName?.trim()) q.set("displayName", opts.displayName.trim());
+    if (opts.description?.trim()) q.set("description", opts.description.trim());
+    for (const t of opts.tags ?? []) q.append("tag", t);
     return postArchive<ContentComponentDetail>(`/v1/content-components/import?${q}`, file).then(noteSaved);
   },
   // A package archive (a tar the web packed from drafted deliverables): a

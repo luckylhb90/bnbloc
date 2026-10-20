@@ -13,7 +13,7 @@ component that speaks the same two contracts. Design record and review:
 [`../prd/2026-10-16-local-skills.md`](../prd/2026-10-16-local-skills.md).
 
 ```
- Settings → Skills (web, desktop only)
+ the skills panel (web, desktop only: Components → the component's card → Open)
         │  skills_providers / _state / _settings / _pack   (Tauri invoke)
         ▼
  desktop (Rust, internal_ext/skills_provider.rs)
@@ -37,30 +37,43 @@ member's computer (`~/.agents/skills/<name>`, and each agent folder that links
 to it), so a script path an agent knows resolves in the VM. The bridge forces
 read-only and validates every entry.
 
-**`bnbloc.skills.provider/v1`** — what Settings → Skills renders, over loopback
-with the launch's bearer:
+**`bnbloc.skills.provider/v1`** — what the skills panel renders, over loopback
+with the launch's bearer. The panel opens from the card of any installed
+component with the `skills-provider` capability on the Components page
+("Open"; the web names no component), and once by itself right after one is
+added when it needs no setup first (one place: there is no separate Settings
+entry). The calls:
 
 | Call | Does |
 |---|---|
-| `GET /v1/state` | the member's settings as saved, the folders and their skills (name, description, size, scripts, `eligible`/`reason`, hash, the member's choice, `changed` since it was published), folders worth adding, notes on what the last publish left out |
+| `GET /v1/state` | the member's settings as saved, the folders and their skills (name, description, size, scripts, `eligible`/`reason`, hash, the member's choice, `changed` since it was published), folders worth adding, notes on what the last publish and the settings left out |
 | `PUT /v1/settings` | replaces the settings whole (unknown fields refused, bounded), brings the copies and descriptor up to date, answers the state |
 | `POST /v1/pack?name=` | one skill as a tar (`X-Skill-Hash`), only if eligible, only the files the policy lets through |
 
 The web adds nothing of its own: a skill is published to the library by packing
 it through the provider and importing the archive as a skill pack
-(`contentApi.importArchive`), and the publish is recorded in the settings
+(`contentApi.importArchive`, with the entry the member set: Publishing a skill
+below), and the publish is recorded in the settings
 (`published`: hash, component, version), so a later edit shows as "Publish
 changes".
 
 ## What the component decides
 
-- **Settings** (`<data dir>/local-skills.json`, owner-only): `enabled`, `sources`
-  (folders of skill folders; `~/.agents/skills` is only ever *suggested*),
-  `agentDirs` added to the policy's, per-skill `{vm, borrowers, published}`, and
-  an optional `policyFile`. Borrowers are only ever skills also ticked for the
-  member's own sandbox.
-- **Policy** (`localskills/policy.default.json` in the component, data, merged with the
-  member's own file): which agent folders exist, which files a skill never
+- **Choices** (`<data dir>/local-skills.json`, owner-only, what the panel
+  edits): `enabled`, `sources` (folders of skill folders; `~/.agents/skills`
+  is only ever *suggested*) and per-skill `{vm, borrowers, published}`.
+  Borrowers are only ever skills also ticked for the member's own sandbox.
+- **Settings** (component settings declared in its `package.json`, set from
+  the card's Settings like any component's, read from
+  `BNBLOC_COMPONENT_SETTINGS_FILE`): the member's `extraSkillDirs` (extra
+  agent skill folders under their home) and `excludes` (name patterns never
+  copied), the organization's `secretNames` and `secretPatterns` (more
+  credential rules) and `maxSkills`. Each list is a `lines` setting, added
+  after the shipped policy's (one merge, `Policy.Merge`): a setting can add a
+  rule, never remove one. A folder outside the home is left out and the panel
+  says so; a pattern that does not compile is an error naming it.
+- **Policy** (`localskills/policy.default.json` in the component, data, with
+  the settings merged onto it): which agent folders exist, which files a skill never
   carries (credentials, `.git`, …), size and count limits, how deep a source is
   searched. A skill that holds a credential file, a link out of its folder or
   exceeds a limit (5000 files, 256 MiB; the library's own bundle limit of 512
@@ -76,6 +89,20 @@ changes".
   while its skill is ticked; an edit to the source reaches the mirror within ten
   seconds, so the next turn sees it.
 - **Borrowed runs** get only what is ticked "for others borrowing my agents".
+
+## Publishing a skill
+
+"Add to my library" (or "Publish changes") opens a publish step: the skill is
+packed by its provider, the member sees its files and sets the library entry
+(name, display name, description, tags; the import route takes them beside
+the archive, `?displayName=`, `?description=`, `?tag=`, and the content
+validator holds them to its rules). "Review with AI" runs the `review-skill`
+assist on the folder's name, its file list and SKILL.md (never another
+file's content): what to fix first (a secret or a personal path left in, a
+description that does not say when to use it, a step a colleague cannot
+follow) and a proposed entry, applied field by field. Nothing is published
+until the member presses Publish; without an assist model the step works the
+same without the button.
 
 ## Launch inputs (the package names the env vars)
 

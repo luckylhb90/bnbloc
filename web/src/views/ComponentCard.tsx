@@ -36,6 +36,8 @@ type MemberCardProps = {
   // onSettings opens its settings; setup names what it still needs ("").
   readonly onSettings?: (component: MemberComponent) => void;
   readonly setup?: string;
+  // onOpen opens what the component shows its member (a skills panel).
+  readonly onOpen?: (component: MemberComponent) => void;
 };
 
 export function ComponentCard(props: AdminCardProps | MemberCardProps) {
@@ -59,6 +61,7 @@ export function ComponentCard(props: AdminCardProps | MemberCardProps) {
       onRemove={props.onRemove}
       onSettings={props.onSettings}
       setup={props.setup ?? ""}
+      onOpen={props.onOpen}
     />
   );
 }
@@ -170,6 +173,7 @@ function MemberComponentCard({
   onRemove,
   onSettings,
   setup,
+  onOpen,
 }: {
   readonly component: MemberComponent;
   readonly busy: boolean;
@@ -177,6 +181,7 @@ function MemberComponentCard({
   readonly onRemove?: (component: MemberComponent) => void;
   readonly onSettings?: (component: MemberComponent) => void;
   readonly setup: string;
+  readonly onOpen?: (component: MemberComponent) => void;
 }) {
   return (
     <Card className="animate-in flex flex-wrap items-start gap-3.5 p-4">
@@ -199,6 +204,11 @@ function MemberComponentCard({
         )}
       </div>
       <div className="ml-auto flex shrink-0 items-center gap-2">
+        {component.installed && onOpen && !busy && (
+          <Button size="sm" variant={setup ? "outline" : "primary"} onClick={() => onOpen(component)}>
+            Open
+          </Button>
+        )}
         {component.installed && onSettings && !busy && (
           <Button size="sm" variant={setup ? "primary" : "outline"} onClick={() => onSettings(component)}>
             {setup ? "Set up" : "Settings"}

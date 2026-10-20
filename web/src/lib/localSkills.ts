@@ -1,9 +1,21 @@
-// Local skills (Settings → Skills): the member's own skill folders, chosen for
-// their agents' sandbox and their library. The host renders any component that
-// serves `bnbloc.skills.provider/v1`; these are the contract's shapes and the
-// pure edits the view makes to a provider's settings
-// (docs/prd/2026-10-16-local-skills.md). The member's settings are echoed in
-// the provider's state and sent back whole.
+// Local skills: the member's own skill folders, chosen for their agents'
+// sandbox and their library, in the skills panel a component's card opens on
+// the Components page. The host renders any component with the
+// `skills-provider` capability (it serves `bnbloc.skills.provider/v1`);
+// these are the contract's shapes and the pure edits the view makes to a
+// provider's settings (docs/prd/2026-10-16-local-skills.md). The member's
+// settings are echoed in the provider's state and sent back whole; what the
+// component reads beyond them (extra folders, excludes, secret rules) are
+// its declared component settings, set from the same card.
+
+/** The plugin capability of a component that provides skills
+ *  (pkgmeta.PluginCapabilitySkillsProvider). */
+export const SKILLS_PROVIDER = "skills-provider";
+
+/** providesSkills: the component serves the skills provider contract. */
+export function providesSkills(c: { readonly capabilities?: readonly string[] }): boolean {
+  return (c.capabilities ?? []).includes(SKILLS_PROVIDER);
+}
 
 export interface PublishedSkill {
   readonly hash: string;
@@ -26,9 +38,7 @@ export interface SkillChoice {
 export interface SkillsSettings {
   readonly enabled: boolean;
   readonly sources: readonly string[];
-  readonly agentDirs: readonly string[];
   readonly skills: Readonly<Record<string, SkillChoice>>;
-  readonly policyFile?: string;
 }
 
 export interface SkillSource {

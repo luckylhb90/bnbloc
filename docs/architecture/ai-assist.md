@@ -74,7 +74,14 @@ task declares and relays the reply. Nothing else calls a model.
   description, expert, skill packs and first message, naming only what the
   library lists; `draft-schedule` (json; clock) turns plain words into a
   recurrence (`wire.ScheduleRecurrence`'s fields plus `text` and a local
-  `at`). Each stays within a token budget (`assists_test.go`).
+  `at`). `review-skill` (json: `findings`, `name`, `displayName`,
+  `description`, `tags`; no context) reviews a local skill in its publish
+  step from the folder's name, file list and SKILL.md the web sends;
+  `fill-settings` (json: `values`, items of `key` and `value`, and `notes`;
+  no context) maps a pasted setup note onto the fields of the one settings
+  form ("Fill from a note"), the declaration and the note in the text, a
+  secret only into a secret field and never shown back. Each stays within a
+  token budget (`assists_test.go`).
 
 ## One run
 

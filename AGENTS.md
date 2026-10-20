@@ -776,8 +776,9 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `notification.v1` in `core/pkgmeta/package_validation.go`). An unknown hook fails validation
   before anything persists. A plugin may instead (or also) declare a
   capability that gives it another job and the launch inputs for it:
-  `skills-provider` (a bearer the desktop keeps, Settings → Skills renders its
-  `bnbloc.skills.provider/v1` API) and `sandbox-mounts` (a descriptor file and a
+  `skills-provider` (a bearer the desktop keeps; the skills panel its card
+  opens on the Components page renders its `bnbloc.skills.provider/v1` API,
+  chosen by the capability, never by a component's name) and `sandbox-mounts` (a descriptor file and a
   mirror folder, `docs/architecture/sandbox-mounts.md`); the package names the
   env vars and a plugin with only those subscribes to no hook
   (`docs/architecture/local-skills.md`). Which kinds may carry which payload field is
@@ -837,13 +838,18 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   and one form** (`docs/prd/2026-10-19-component-settings.md`). The
   manifest's `settings` (plugins and MCP tools) is validated only by
   `core/pkgmeta/settings.go`: keys, types (`text`, `secret`, `url`,
-  `number`, `boolean`, `choice`, `path`), scopes (`platform`, `org`,
+  `number`, `boolean`, `choice`, `path`, `lines`), scopes (`platform`, `org`,
   `member`), defaults, and the env a value is delivered as
   (`ValidSettingEnv`: no variable that changes how a process runs, and
   under `BNBLOC_` only the component's own `OwnEnvPrefix`). A value is
   checked by `CheckSettingValue`, a save by `MergeSettings`, "needs setup"
   is `UnsetSettings` (a default counts), what a component gets is
-  `EffectiveSettings`/`SettingsEnv`; the desktop's copy
+  `EffectiveSettings`/`SettingsEnv`/`SettingsFile` (a `lines` value is
+  stored, sent and delivered in env as its lines joined by "\n", within
+  `wire.MaxComponentSettingLines`/`MaxComponentSettingLineBytes`, and is a
+  JSON array of strings in the settings file and on a settings page; the
+  web's form helper `parseLines`/`linesProblem` is pinned to the same
+  fixture); the desktop's copy
   (`internal_ext/component_settings.rs`) is pinned to the same cases
   (`core/pkgmeta/testdata/setting_values.json`). Platform and organization
   values live only in `internal/componentsettings` (sealed per record under

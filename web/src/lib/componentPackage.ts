@@ -1,5 +1,6 @@
 import type { ComponentMCP, ComponentPackageEnvelope, ComponentPreviewer, ComponentSidecarFile } from "./apiTypes";
 import { COMPONENT_KINDS, componentKindOfPackage } from "./componentKinds.ts";
+import { SKILLS_PROVIDER } from "./localSkills.ts";
 
 type ParseResult =
   | { readonly ok: true; readonly value: ComponentPackageEnvelope }
@@ -91,12 +92,12 @@ function packageShapeError(
   }
   if (meta?.runtimes && !meta.runtimes.includes(runtime)) return `${meta.noun} package runtime must be ${meta.runtimes.join(" or ")}`;
   if (short === "plugin") {
-    const jobs = (capabilities ?? []).filter((c) => c === "skills-provider" || c === "sandbox-mounts");
+    const jobs = (capabilities ?? []).filter((c) => c === SKILLS_PROVIDER || c === "sandbox-mounts");
     if ((!hooks || hooks.length === 0) && jobs.length === 0) return "plugin package requires at least one hook (or a capability that gives it another job)";
     const mounts = (capabilities ?? []).includes("sandbox-mounts");
     if (mounts && !(sidecar?.mountsEnv && sidecar?.mountRootEnv)) return "a sandbox-mounts plugin requires sidecar.mountsEnv and sidecar.mountRootEnv";
     if (!mounts && (sidecar?.mountsEnv || sidecar?.mountRootEnv)) return "sidecar.mountsEnv and sidecar.mountRootEnv need the sandbox-mounts capability";
-    if ((capabilities ?? []).includes("skills-provider") && !sidecar?.tokenEnv) return "a skills-provider plugin requires sidecar.tokenEnv (its bearer)";
+    if ((capabilities ?? []).includes(SKILLS_PROVIDER) && !sidecar?.tokenEnv) return "a skills-provider plugin requires sidecar.tokenEnv (its bearer)";
   }
   if (short === "sandbox" && runtime === "sidecar" && !sidecar?.tokenEnv) return "sandbox sidecar requires sidecar.tokenEnv";
   if (short === "previewer" && !("previewer" in record)) return "previewer package requires previewer";

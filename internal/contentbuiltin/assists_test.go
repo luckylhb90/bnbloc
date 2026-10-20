@@ -223,6 +223,26 @@ func TestDraftScheduleTask(t *testing.T) {
 	}
 }
 
+// review-skill reviews a local skill before it is published: what to fix,
+// and the library entry's name, display name, description and tags.
+func TestReviewSkillTask(t *testing.T) {
+	m := assistTask(t, "review-skill")
+	got := []string{}
+	for _, f := range m.Fields {
+		got = append(got, f.Name+":"+f.Type)
+	}
+	if strings.Join(got, ",") != "findings:list,name:,displayName:,description:,tags:list" {
+		t.Fatalf("review-skill fields = %v", got)
+	}
+	p, _ := Get(IDPrefix + "review-skill")
+	flat := strings.Join(strings.Fields(p.Validated.Instructions), " ")
+	for _, want := range []string{"never repeat it", "personal path", "at most 32 characters", "lower-case", "SKILL.md"} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("review-skill does not say %q", want)
+		}
+	}
+}
+
 // fill-settings maps a note onto a declaration: a value per listed key,
 // every setting type explained, a secret only into a secret.
 func TestFillSettingsTask(t *testing.T) {

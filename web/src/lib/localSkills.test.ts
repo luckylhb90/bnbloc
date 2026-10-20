@@ -1,5 +1,6 @@
 import { formatBytes } from "./format.ts";
 import {
+  providesSkills,
   publishLabel,
   reachCounts,
   skillLine,
@@ -19,7 +20,7 @@ function eq<T>(got: T, want: T, msg: string): void {
   if (JSON.stringify(got) !== JSON.stringify(want)) throw new Error(`${msg}: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
 }
 
-const empty: SkillsSettings = { enabled: false, sources: [], agentDirs: [], skills: {} };
+const empty: SkillsSettings = { enabled: false, sources: [], skills: {} };
 
 eq(withEnabled(empty, true).enabled, true, "turned on");
 eq(withSource(empty, " ~/.agents/skills ").sources, ["~/.agents/skills"], "a source is added trimmed");
@@ -72,3 +73,7 @@ try {
   threw = true;
 }
 eq(threw, true, "an unframed answer is an error");
+
+eq(providesSkills({ capabilities: ["sandbox-mounts", "skills-provider"] }), true, "a skills provider, whatever its name");
+eq(providesSkills({ capabilities: ["sandbox-mounts"] }), false, "not one");
+eq(providesSkills({}), false, "no capabilities");

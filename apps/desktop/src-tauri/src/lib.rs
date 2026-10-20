@@ -201,7 +201,8 @@ fn component_settings_save(
     state.save_component_settings(&kind, &name, values, clear)
 }
 
-/// Installed plugins that provide skills (Settings → Skills), with their state.
+/// Installed plugins that provide skills (the skills panel their card opens),
+/// with their state.
 #[tauri::command]
 fn skills_providers(
     state: State<'_, internal_ext::Adapter>,

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -245,6 +246,31 @@ func TestContentImport(t *testing.T) {
 	}
 	if code, _ := g.do("maya", http.MethodPost, "/v1/content-components/import?kind=bogus", "application/zip", zipArchive(t, map[string]string{"SKILL.md": skill})); code != http.StatusBadRequest {
 		t.Fatalf("unknown kind = %d", code)
+	}
+}
+
+// The member's reviewed entry (a local skill's publish step) replaces what
+// the import read from the files; the content validator still checks it.
+func TestContentImportEntry(t *testing.T) {
+	g := newContentGateway(t)
+	skill := "---\nname: lint-rules\ndescription: Lints\n---\nRun the linter.\n"
+	q := url.Values{"kind": {"skill"}, "name": {"house-lint"}, "displayName": {"House lint"}, "description": {"Use when a change needs the house lint rules."}, "tag": {"lint", " review "}}
+	code, raw := g.do("maya", http.MethodPost, "/v1/content-components/import?"+q.Encode(), "application/zip", zipArchive(t, map[string]string{"lint-rules/SKILL.md": skill}))
+	if code != http.StatusCreated {
+		t.Fatalf("import = %d %s", code, raw)
+	}
+	d := decodeDetail(t, raw)
+	if c := d.Component; c.Name != "house-lint" || c.DisplayName != "House lint" || c.Description != "Use when a change needs the house lint rules." || strings.Join(c.Tags, ",") != "lint,review" {
+		t.Fatalf("imported = %+v", c)
+	}
+	q = url.Values{"id": {d.Component.ID}, "description": {"Use when linting a change."}}
+	code, raw = g.do("maya", http.MethodPost, "/v1/content-components/import?"+q.Encode(), "application/zip", zipArchive(t, map[string]string{"SKILL.md": skill}))
+	if code != http.StatusCreated || decodeDetail(t, raw).Component.Description != "Use when linting a change." {
+		t.Fatalf("a new version's entry = %d %s", code, raw)
+	}
+	q = url.Values{"kind": {"skill"}, "tag": {"Not A Tag!"}}
+	if code, raw := g.do("maya", http.MethodPost, "/v1/content-components/import?"+q.Encode(), "application/zip", zipArchive(t, map[string]string{"lint-rules/SKILL.md": skill})); code != http.StatusBadRequest {
+		t.Fatalf("a bad tag = %d %s", code, raw)
 	}
 }
 

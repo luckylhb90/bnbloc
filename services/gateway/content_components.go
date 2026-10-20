@@ -490,7 +490,8 @@ func contentOptions() contentpkg.Options { return contentpkg.Options{} }
 
 // handleImportContent imports an archive of an existing format as a new
 // component (?kind=expert|skill&name=) or, with ?id=, as a new version of
-// the caller's component.
+// the caller's component; ?displayName=, ?description= and ?tag= set its
+// entry (withImportMeta).
 func (s *Service) handleImportContent(w http.ResponseWriter, r *http.Request, caller auth.Claims) {
 	actor, ok := s.contentCaller(w, r, caller, grantHonored)
 	if !ok {
@@ -518,6 +519,9 @@ func (s *Service) handleImportContent(w http.ResponseWriter, r *http.Request, ca
 			return
 		}
 		pkg, bundle, err := contentpkg.Import(raw, c.Kind, c.Name, version, opts)
+		if err == nil {
+			pkg, bundle, err = withImportMeta(pkg, bundle, q, opts)
+		}
 		if err != nil {
 			httpx.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -532,6 +536,9 @@ func (s *Service) handleImportContent(w http.ResponseWriter, r *http.Request, ca
 	}
 	version := firstNonEmpty(strings.TrimSpace(q.Get("version")), "1.0.0")
 	pkg, bundle, err := contentpkg.Import(raw, kind, strings.TrimSpace(q.Get("name")), version, opts)
+	if err == nil {
+		pkg, bundle, err = withImportMeta(pkg, bundle, q, opts)
+	}
 	if err != nil {
 		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return

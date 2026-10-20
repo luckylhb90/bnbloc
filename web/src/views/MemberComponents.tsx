@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type MemberComponent } from "@/lib/api";
 import { desktop } from "@/lib/desktop";
 import { needsSetupText, type DesktopComponentSettings } from "@/lib/componentSettings";
+import { providesSkills } from "@/lib/localSkills";
 import { ComponentSettingsDialog } from "@/views/settings/ComponentSettingsDialog";
+import { SkillsDialog } from "@/views/skills/SkillsPanel";
 import { EmptyCard } from "@/ui/Card";
 import { PageHeader } from "@/ui/Page";
 import { useToast } from "@/ui/Toast";
@@ -13,7 +15,10 @@ import { errorText } from "@/lib/errors";
 // MemberComponents is where a member adds components and sets them up: a
 // component's settings open from its card ("Set up" while it needs any),
 // and right after it is added when it needs setup, so nobody has to look
-// for them elsewhere (docs/prd/2026-10-19-component-settings.md §2.2).
+// for them elsewhere (docs/prd/2026-10-19-component-settings.md §2.2). A
+// component that provides skills (the skills-provider capability) opens its
+// skills panel from its card ("Open", in the desktop app), and once by
+// itself right after it is added when nothing needs setting first.
 export function MemberComponents() {
   const toast = useToast();
   const [components, setComponents] = useState<readonly MemberComponent[] | null>(null);
@@ -23,6 +28,7 @@ export function MemberComponents() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [settingsOf, setSettingsOf] = useState<MemberComponent | null>(null);
+  const [skillsOf, setSkillsOf] = useState<string | null>(null);
 
   const load = useCallback(async (): Promise<{ list: readonly MemberComponent[]; local: readonly DesktopComponentSettings[] }> => {
     setError(null);
@@ -62,9 +68,10 @@ export function MemberComponents() {
       await api.installComponent(component);
       toast.success(`${component.name} installed`);
       const loaded = await load();
-      // Set it up now when it needs anything.
+      // Set it up now when it needs anything, else open what it shows.
       const added = loaded.list.find((c) => c.kind === component.kind && c.name === component.name);
       if (added && setupOf(added, loaded.local)) setSettingsOf(added);
+      else if (added && opensSkills(added)) setSkillsOf(added.name);
     } catch (caught: unknown) {
       setError(errorText(caught, `failed to install ${component.name}`));
     } finally {
@@ -105,6 +112,7 @@ export function MemberComponents() {
                 onRemove={(selected) => void remove(selected)}
                 onSettings={hasSettings(component) ? setSettingsOf : undefined}
                 setup={setupOf(component)}
+                onOpen={opensSkills(component) ? (c) => setSkillsOf(c.name) : undefined}
               />
             ))}
           </ComponentSection>
@@ -128,6 +136,7 @@ export function MemberComponents() {
           void load();
         }}
       />
+      <SkillsDialog plugin={skillsOf} onClose={() => setSkillsOf(null)} />
     </>
   );
 }
@@ -136,6 +145,12 @@ export function MemberComponents() {
 // setting, or an MCP tool its member signs in to.
 function hasSettings(component: MemberComponent): boolean {
   return (component.settings ?? []).length > 0 || component.mcp?.http?.auth?.scheme === "oauth";
+}
+
+// opensSkills: an installed plugin that provides skills, in the desktop app
+// (its panel talks to it on this computer).
+function opensSkills(component: MemberComponent): boolean {
+  return component.installed && component.kind === "plugin" && providesSkills(component) && desktop.available();
 }
 
 function splitComponents(components: readonly MemberComponent[]) {

@@ -10,7 +10,6 @@ import { Button } from "@/ui/Button";
 import { ErrorBox } from "@/ui/ErrorBox";
 import { useToast } from "@/ui/Toast";
 import { NotifierDelivery } from "@/views/settings/NotifierDelivery";
-import { LocalSkills } from "@/views/settings/LocalSkills";
 import { BrowserPush } from "@/views/settings/BrowserPush";
 import { SignedInDevices } from "@/views/settings/SignedInDevices";
 import { MyBudget } from "@/views/settings/MyBudget";
@@ -137,7 +136,6 @@ export function Settings() {
           )}
         </section>
         <AgentSandbox />
-        <LocalSkills />
         <MyBudget />
         <SignedInDevices />
       </div>

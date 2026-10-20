@@ -1,5 +1,15 @@
 # Local skills: a member's own skills in the sandbox, and in their library (2026-10-16)
 
+> **Update 2026-10-20.** The panel moved: it opens from the component's card
+> on the Components page ("Open", for any component with the
+> `skills-provider` capability), and once by itself right after it is added;
+> Settings → Skills is gone. The member's `agentDirs` and `policyFile` are
+> replaced by the component's declared settings (`extraSkillDirs`,
+> `excludes`, the organization's `secretNames`, `secretPatterns` and
+> `maxSkills`), and publishing a skill goes through a publish step with an AI
+> review (docs/prd/2026-10-20-lines-settings-and-local-skills-ai.md). The
+> text below is the original design.
+
 Status: implemented (2026-10-16) except the end-to-end check on a real sandboxed
 run (milestone F); revised the same day to make it an installable component
 behind two small contracts. Since 2026-10-18 the component is its own repository, `luckylhb90/bnbloc-local-skills` (`docs/prd/2026-10-18-components-in-own-repos.md`). How it is built: `docs/architecture/local-skills.md`. Builds on `docs/prd/2026-10-09-agent-vm-sandbox.md`
