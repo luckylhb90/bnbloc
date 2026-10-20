@@ -2,7 +2,10 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"sort"
+	"strconv"
+	"strings"
 
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 )
@@ -17,6 +20,30 @@ import (
 type AgentRunCursor struct {
 	CreatedAtMs int64
 	JobID       string
+}
+
+// String is the cursor as a client holds it, "<createdAtMs>:<jobId>"
+// (opaque to it); "" for the zero cursor.
+func (c AgentRunCursor) String() string {
+	if c.CreatedAtMs <= 0 {
+		return ""
+	}
+	return strconv.FormatInt(c.CreatedAtMs, 10) + ":" + c.JobID
+}
+
+// CursorOf is the cursor of the page after j.
+func CursorOf(j AgentJob) AgentRunCursor {
+	return AgentRunCursor{CreatedAtMs: j.CreatedAtMs, JobID: j.JobID}
+}
+
+// ParseAgentRunCursor reads a cursor a client held (AgentRunCursor.String).
+func ParseAgentRunCursor(s string) (AgentRunCursor, bool) {
+	at, id, ok := strings.Cut(s, ":")
+	n, err := strconv.ParseInt(at, 10, 64)
+	if !ok || err != nil || n <= 0 || id == "" {
+		return AgentRunCursor{}, false
+	}
+	return AgentRunCursor{CreatedAtMs: n, JobID: id}, true
 }
 
 // MaxAgentRunsPage bounds one run listing page.
@@ -144,6 +171,23 @@ func (s *MemoryBridgeJobs) GetAgentRun(ctx context.Context, jobID string) (Agent
 		return AgentJob{}, ErrAgentJobNotFound
 	}
 	return j, nil
+}
+
+// RunDiag decodes one object-valued key of a run's diagnostics (the run
+// summary the bridge reports beside its status: wire.RunDiagReply,
+// wire.RunDiagUsage) into T; false when absent or malformed. The one
+// reader of those keys (the run records, a room source's records).
+func RunDiag[T any](j AgentJob, key string) (T, bool) {
+	var out T
+	var diag map[string]json.RawMessage
+	if len(j.DiagnosticsJSON) == 0 || json.Unmarshal(j.DiagnosticsJSON, &diag) != nil {
+		return out, false
+	}
+	raw, ok := diag[key]
+	if !ok || len(raw) == 0 || raw[0] != '{' || json.Unmarshal(raw, &out) != nil {
+		return out, false
+	}
+	return out, true
 }
 
 // AgentRuns returns the bridge-job store's run-record read side (nil when the

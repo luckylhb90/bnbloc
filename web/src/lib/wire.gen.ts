@@ -1120,6 +1120,10 @@ export const AuditKindSchedule = "schedule";
 // AuditKindAssist: an AI assist ran (name = task@version; the model,
 // tokens and latency, never the text) or the assist model was set.
 export const AuditKindAssist = "assist";
+// AuditKindSource: a room's consented source (name = the reading
+// room): an admin's grant or withdrawal, a schedule's read through
+// read_records (the source, the range and the count, never a record).
+export const AuditKindSource = "source";
 
 // AuditLogEntry is one normalized audit record. ID is unique across sources
 // ("<source>:<row id>"). Name is the record's subject (component name, member
@@ -3107,6 +3111,9 @@ export const MaxArtifactStateBytes = 16384;
 export const MaxDisplayNameRunes = 40;
 // MaxContentTagRunes bounds one content component tag, in characters.
 export const MaxContentTagRunes = 32;
+// MaxRoomSourcePurpose bounds a room package's stated purpose for a
+// source it asks for (sources[].purpose), in characters.
+export const MaxRoomSourcePurpose = 500;
 // Media bounds (docs/prd/2026-10-16-voice-and-image-generation.md):
 // what one media model call may carry. The gateway enforces them; the
 // web reads them here to say why before it sends.
@@ -3637,9 +3644,10 @@ export interface RoomReportRequest {
 // MaxRoomReportText bounds a room report's text.
 export const MaxRoomReportText = 1000;
 
-// RoomReportReply says whether the report was queued for an admin (false:
-// no notifier, push subscription or desktop reaches one, or every admin
-// turned room reports off).
+// RoomReportReply says whether a note to the organization's admins (a room
+// report, or a room's ask for a source's consent) was queued for one
+// (false: no notifier, push subscription or desktop reaches one, or every
+// admin turned room reports off).
 export interface RoomReportReply {
   queued: boolean;
 }
@@ -4241,13 +4249,6 @@ export interface TenantRetentionView {
 
 // ---- wire/room_components.go ----
 
-// RoomSourceRuns is the organization's agent conversations: request
-// and reply text, the agent, the outcome, the room and the time.
-export const RoomSourceRuns = "runs";
-
-// RoomSources are the sources a room package may declare: the one list.
-export const RoomSources: readonly string[] = ["runs"];
-
 // RoomPackageSchedule is a scheduled task of a room package: an AI task
 // or a notice to the room's members (Recipient kind "ai" or "notice"),
 // its text and when it recurs. Channel is a channel name of the package
@@ -4268,7 +4269,7 @@ export interface RoomSpec {
   channels: string[];
   schedules: RoomPackageSchedule[];
   apps: string[];
-  sources: RoomSource[];
+  sources: RoomSourceAsk[];
 }
 
 // RoomDraftPart is a component a room uses, as a draft captured it: its
@@ -4316,8 +4317,8 @@ export interface RoomInstallRequest {
 // From ("name@version"), its channels, the ids of its schedules (all
 // paused), the room expert, the packs turned on and the apps copied in
 // (labels), what was left out and why (Skipped), and what the room asks
-// for that nobody granted: its sources (none is read until the
-// organization's admin consents) and its MCP tools. Welcome and
+// for that nobody granted yet: its sources (each waits for the
+// organization admin's consent, room_sources.go) and its MCP tools. Welcome and
 // QuickPrompts are the package's, for the room's first visit.
 export interface RoomInstallReply {
   roomId: string;
@@ -4330,10 +4331,106 @@ export interface RoomInstallReply {
   enabled: string[];
   apps: string[];
   skipped: string[];
-  sources: RoomSource[];
+  sources: RoomSourceAsk[];
   tools: string[];
   welcome?: string;
   quickPrompts?: ContentQuickPrompt[];
+}
+
+// ---- wire/room_sources.go ----
+
+// RoomSourceRuns is the organization's agent conversations: request
+// and reply text, the agent, the outcome, the room and the time.
+export const RoomSourceRuns = "runs";
+
+// RoomSources are the sources a room package may ask for: the one list.
+export const RoomSources: readonly string[] = ["runs"];
+
+// RoomSourceAsk is a source a room package asks for (its manifest's
+// sources[]): the source and the purpose its tasks read it for, in the
+// author's words, shown to the admin who decides.
+export interface RoomSourceAsk {
+  name: RoomSource;
+  purpose: string;
+}
+
+// What a grant covers: the rooms whose records the reading room may read.
+// RoomSourceScopeAll: every room of the organization.
+export const RoomSourceScopeAll = "all";
+// RoomSourceScopeOptedIn: only the rooms whose owner opted in.
+export const RoomSourceScopeOptedIn = "opted-in";
+// RoomSourceScopeNonePrivate: every room but the private ones (invite
+// only, store.VisibilityPrivate).
+export const RoomSourceScopeNonePrivate = "none-private";
+
+// RoomSourceScopes are the scopes an admin may grant.
+export const RoomSourceScopes: readonly string[] = ["all", "opted-in", "none-private"];
+
+// RoomSourceGrant is one room's ask for a source and the organization
+// admin's answer, on the console (GET /v1/tenant/room-sources). From is
+// the package it was installed from ("name@version") and Schedules that
+// version's scheduled tasks (what would read: the grant dialog's AI
+// summary reads them with the purpose). Scope "" is waiting for the
+// admin (never granted, or withdrawn).
+export interface RoomSourceGrant {
+  roomId: string;
+  roomName: string;
+  source: RoomSource;
+  purpose: string;
+  componentId: string;
+  from: string;
+  schedules: RoomPackageSchedule[];
+  askedBy: string;
+  askedAtMs: number;
+  scope?: RoomSourceScope;
+  decidedBy?: string;
+  decidedAtMs?: number;
+}
+
+// RoomSourceGrantsReply is GET /v1/tenant/room-sources: every ask of the
+// organization's rooms, newest first.
+export interface RoomSourceGrantsReply {
+  grants: RoomSourceGrant[];
+}
+
+// RoomSourceDecision is PUT /v1/tenant/room-sources/{roomId}/{source}:
+// the scope the admin grants (DELETE withdraws).
+export interface RoomSourceDecision {
+  scope: RoomSourceScope;
+}
+
+// RoomSourceAskState is a source the room asks to read and where it
+// stands (Scope "" = waiting for the organization admin).
+export interface RoomSourceAskState {
+  source: RoomSource;
+  purpose: string;
+  scope?: RoomSourceScope;
+}
+
+// RoomReviewer is a room that reads this room's records under a grant:
+// its name always (members are told which room does), its id only when
+// the caller is a member of it (they may open it).
+export interface RoomReviewer {
+  source: RoomSource;
+  roomName: string;
+  roomId?: string;
+}
+
+// RoomSourcesInfo is GET /v1/rooms/{roomId}/sources for a member: what the
+// room asks to read and where each ask stands, which rooms read its own
+// records (transparency), and the sources its owner opted it in to (for
+// grants of scope opted-in).
+export interface RoomSourcesInfo {
+  asks: RoomSourceAskState[];
+  reviewedBy: RoomReviewer[];
+  optedIn: RoomSource[];
+}
+
+// RoomSourceOptIn is PUT /v1/rooms/{roomId}/sources/{source}/opt-in: the
+// room's owner opts its records in to (or out of) grants of scope
+// opted-in.
+export interface RoomSourceOptIn {
+  optedIn: boolean;
 }
 
 // ---- wire/rooms.go ----
@@ -5668,6 +5765,8 @@ export type MediaVideoStatus = "rendering" | "done" | "failed";
 export const MediaVideoStatusValues: readonly MediaVideoStatus[] = ["rendering", "done", "failed"];
 export type RoomSource = "runs";
 export const RoomSourceValues: readonly RoomSource[] = ["runs"];
+export type RoomSourceScope = "all" | "opted-in" | "none-private";
+export const RoomSourceScopeValues: readonly RoomSourceScope[] = ["all", "opted-in", "none-private"];
 export type ScheduleRecipientKind = "room" | "agent" | "ai" | "notice";
 export const ScheduleRecipientKindValues: readonly ScheduleRecipientKind[] = ["room", "agent", "ai", "notice"];
 export type RecurrenceKind = "once" | "daily" | "weekly" | "cron";

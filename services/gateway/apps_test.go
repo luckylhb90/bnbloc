@@ -149,7 +149,8 @@ func newAppGW(t *testing.T) *appGW {
 		}
 	}
 	e.jobs = store.NewMemoryBridgeJobs()
-	e.gw.ContentJobs = e.jobs
+	e.gw.ContentJobs, e.gw.AgentRuns = e.jobs, e.jobs
+	e.gw.RoomSources, e.gw.RoomInfo = b.RoomSources, b.Room.GetRoom
 	e.srv = httptest.NewServer(e.gw.Handler())
 	t.Cleanup(e.srv.Close)
 

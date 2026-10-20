@@ -1061,3 +1061,40 @@ CREATE TABLE IF NOT EXISTS app_keys (
   created_at_ms   BIGINT NOT NULL,
   KEY idx_app_keys_room (tenant_id, room_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- A room's asks to read a kind of organization record (a room source,
+-- docs/prd/2026-10-20-rooms-as-components.md §2.3): recorded when a room
+-- package asking for it is installed (the package, its version and its
+-- stated purpose), answered by the organization's admin with a scope
+-- ('' = waiting: never granted, or withdrawn). alias_key keys the opaque
+-- per-ask alias a reader who may not see names reads a person as.
+-- Deleted with the room.
+CREATE TABLE IF NOT EXISTS room_source_grants (
+  tenant_id          VARCHAR(64) NOT NULL,
+  room_id            VARCHAR(64) NOT NULL,
+  source_name        VARCHAR(32) NOT NULL,
+  component_id       VARCHAR(64) NOT NULL,
+  component_name     VARCHAR(128) NOT NULL,
+  component_version  VARCHAR(64) NOT NULL,
+  purpose            VARCHAR(500) NOT NULL,
+  alias_key          VARCHAR(64) NOT NULL,
+  scope              VARCHAR(16) NOT NULL DEFAULT '',
+  asked_by           VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  asked_at_ms        BIGINT NOT NULL,
+  decided_by         VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '',
+  decided_at_ms      BIGINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (tenant_id, room_id, source_name),
+  KEY idx_room_source_grants_asked (tenant_id, asked_at_ms)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Rooms whose owner opted their own records in to a source's grants of
+-- scope opted-in. Deleted with the room.
+CREATE TABLE IF NOT EXISTS room_source_opt_ins (
+  tenant_id    VARCHAR(64) NOT NULL,
+  room_id      VARCHAR(64) NOT NULL,
+  source_name  VARCHAR(32) NOT NULL,
+  opted_by     VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  opted_at_ms  BIGINT NOT NULL,
+  PRIMARY KEY (tenant_id, room_id, source_name),
+  KEY idx_room_source_opt_ins_source (tenant_id, source_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -90,6 +90,7 @@ func Limits() []Limit {
 		{room, "schedules", maxRoomSchedules, UnitItems},
 		{room, "schedules[].text", wire.MaxChatTextBytes, UnitBytes},
 		{room, "apps", maxRoomApps, UnitItems},
+		{room, "sources[].purpose", wire.MaxRoomSourcePurpose, UnitChars},
 		{room, ReadmeFile, maxInstructions, UnitBytes},
 		{room, "files in the package", RoomLimits.MaxFiles, UnitFiles},
 		{room, "package size", RoomLimits.MaxBytes, UnitBytes},

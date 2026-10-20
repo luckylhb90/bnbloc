@@ -73,6 +73,9 @@ var roomOwnedTables = []roomOwnedTable{
 	byTenantRoom("notification_reply_tokens"),
 	byTenantRoom("content_drafts"),
 	byTenantRoom("content_room_shares"),
+	// A room's asks for sources and its owner's opt-ins (room_sources.go).
+	byTenantRoom("room_source_grants"),
+	byTenantRoom("room_source_opt_ins"),
 	// Room-scoped enables and the room expert (scope_id is the room id).
 	{table: "content_component_uses", args: roomOnlyArgs,
 		where: `scope_kind IN ('` + string(ContentUseRoom) + `', '` + string(ContentUseRoomExpert) + `') AND scope_id = ?`},

@@ -26,6 +26,9 @@ const (
 	MaxDisplayNameRunes = 40
 	// MaxContentTagRunes bounds one content component tag, in characters.
 	MaxContentTagRunes = 32
+	// MaxRoomSourcePurpose bounds a room package's stated purpose for a
+	// source it asks for (sources[].purpose), in characters.
+	MaxRoomSourcePurpose = 500
 	// Media bounds (docs/prd/2026-10-16-voice-and-image-generation.md):
 	// what one media model call may carry. The gateway enforces them; the
 	// web reads them here to say why before it sends.

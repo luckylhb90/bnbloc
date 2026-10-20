@@ -41,7 +41,7 @@ type Form struct {
 	Channels  []string                   `json:"channels,omitempty"`
 	Schedules []wire.RoomPackageSchedule `json:"schedules,omitempty"`
 	Apps      []string                   `json:"apps,omitempty"`
-	Sources   []string                   `json:"sources,omitempty"`
+	Sources   []wire.RoomSourceAsk       `json:"sources,omitempty"`
 }
 
 // FormSkill is one skill written in the form: its SKILL.md is generated

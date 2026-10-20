@@ -86,6 +86,10 @@ func sqlJobStatuses(set []AgentJobStatus) string {
 // claimed, renewed, swept, or overwritten again.
 func (s AgentJobStatus) Terminal() bool { return slices.Contains(terminalJobStatuses, s) }
 
+// TerminalJobStatuses are the final statuses (a run query for finished
+// runs names them).
+func TerminalJobStatuses() []AgentJobStatus { return slices.Clone(terminalJobStatuses) }
+
 // Live reports a leased phase (claimed, running or reflowing).
 func (s AgentJobStatus) Live() bool { return slices.Contains(liveJobStatuses, s) }
 

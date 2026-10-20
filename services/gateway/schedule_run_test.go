@@ -78,10 +78,16 @@ func scheduleGW(t *testing.T) (*appGW, *toolModel, *store.MemoryNotifications) {
 	return e, model, outbox
 }
 
-// runAI calls the internal route as realtime would.
+// runAI calls the internal route as realtime would, for jack's schedule.
 func (e *appGW) runAI(task string, dry bool) wire.ScheduleRunReply {
 	e.t.Helper()
-	sc := wire.RoomSchedule{ScheduleID: "sch_1", TenantID: e.tenant, RoomID: e.roomID, CreatedBy: "jack", Text: task,
+	return e.runAIAs("jack", task, dry)
+}
+
+// runAIAs runs owner's AI schedule of the room.
+func (e *appGW) runAIAs(owner, task string, dry bool) wire.ScheduleRunReply {
+	e.t.Helper()
+	sc := wire.RoomSchedule{ScheduleID: "sch_1", TenantID: e.tenant, RoomID: e.roomID, CreatedBy: owner, Text: task,
 		Recipient: wire.ScheduleRecipient{Kind: wire.ScheduleRecipientAI}, Timezone: "UTC"}
 	body, _ := json.Marshal(wire.ScheduleRunRequest{Schedule: sc, SlotMs: time.Date(2026, 10, 15, 9, 0, 0, 0, time.UTC).UnixMilli(), DryRun: dry})
 	req, _ := svcauth.Key(appGWKey).NewRequest(context.Background(), http.MethodPost, e.srv.URL+"/internal/v1/schedule-runs", bytes.NewReader(body), svcauth.ServiceSubject("realtime"), e.tenant)

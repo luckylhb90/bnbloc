@@ -70,6 +70,7 @@ type scheduleRun struct {
 	actions []wire.ScheduleAction
 	notices int
 	posts   int
+	reads   int
 	seq     int64
 	origin  string
 	// dedup, when set, is every notice of this run's dedup key (a notice
@@ -86,6 +87,8 @@ type scheduleAction struct {
 }
 
 // scheduleActions is the registry. Adding a capability is adding an entry.
+// read_records (schedule_records.go) joins it for a room that asks to read
+// a source.
 func scheduleActions() []scheduleAction {
 	return []scheduleAction{
 		{tool: assist.Tool{Name: "app_data", Description: "Read the room's interactive apps' data. action list: the apps, or with artifactId their collections; " +
@@ -161,6 +164,9 @@ func (s *Service) runSchedule(ctx context.Context, sc wire.RoomSchedule, slot ti
 		return fail("AI is not available: the organization has no AI model, or turned AI off")
 	}
 	actions := scheduleActions()
+	if s.asksForSources(ctx, claims, sc.RoomID) {
+		actions = append(actions, readRecordsAction())
+	}
 	if groups := s.roomGroupNames(ctx, claims, sc.RoomID); len(groups) > 0 {
 		for i := range actions {
 			if actions[i].tool.Name == "notify" {
@@ -517,6 +523,22 @@ func (r *scheduleRun) listAgents(ctx context.Context, _ json.RawMessage) (string
 	}
 	out, _ := json.Marshal(map[string]any{"agents": names})
 	return string(out), nil
+}
+
+// asksForSources reports whether the room asks to read a source (its
+// schedules are offered read_records, which answers within the grant at
+// each call); a failed read offers nothing.
+func (s *Service) asksForSources(ctx context.Context, claims auth.Claims, roomID string) bool {
+	if s.RoomSources == nil {
+		return false
+	}
+	tctx := tenant.NewContext(ctx, claims.Tenant)
+	for _, src := range wire.RoomSources {
+		if _, err := s.RoomSources.GetRoomSourceGrant(tctx, roomID, src); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // roomGroupNames are the group chats connected to the room, as "group:<name>"

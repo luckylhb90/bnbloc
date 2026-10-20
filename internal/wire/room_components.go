@@ -5,21 +5,6 @@ package wire
 // manifest checked by contentpkg) and installed as a new room the
 // installer owns.
 
-// Room sources: the kinds of organization records a room package's
-// scheduled tasks may ask to read (§2.3). A package declares them and the
-// Library shows them; nothing grants or reads one yet (the consent and the
-// read come with slice 2).
-//
-//wire:union RoomSource
-const (
-	// RoomSourceRuns is the organization's agent conversations: request
-	// and reply text, the agent, the outcome, the room and the time.
-	RoomSourceRuns = "runs"
-)
-
-// RoomSources are the sources a room package may declare: the one list.
-var RoomSources = []string{RoomSourceRuns}
-
 // RoomPackageSchedule is a scheduled task of a room package: an AI task
 // or a notice to the room's members (Recipient kind "ai" or "notice"),
 // its text and when it recurs. Channel is a channel name of the package
@@ -40,7 +25,7 @@ type RoomSpec struct {
 	Channels  []string              `json:"channels"`
 	Schedules []RoomPackageSchedule `json:"schedules"`
 	Apps      []string              `json:"apps"`
-	Sources   []string              `json:"sources" tstype:"RoomSource"`
+	Sources   []RoomSourceAsk       `json:"sources"`
 }
 
 // RoomDraftPart is a component a room uses, as a draft captured it: its
@@ -88,8 +73,8 @@ type RoomInstallRequest struct {
 // From ("name@version"), its channels, the ids of its schedules (all
 // paused), the room expert, the packs turned on and the apps copied in
 // (labels), what was left out and why (Skipped), and what the room asks
-// for that nobody granted: its sources (none is read until the
-// organization's admin consents) and its MCP tools. Welcome and
+// for that nobody granted yet: its sources (each waits for the
+// organization admin's consent, room_sources.go) and its MCP tools. Welcome and
 // QuickPrompts are the package's, for the room's first visit.
 type RoomInstallReply struct {
 	RoomID       string               `json:"roomId"`
@@ -102,7 +87,7 @@ type RoomInstallReply struct {
 	Enabled      []string             `json:"enabled"`
 	Apps         []string             `json:"apps"`
 	Skipped      []string             `json:"skipped"`
-	Sources      []string             `json:"sources" tstype:"RoomSource"`
+	Sources      []RoomSourceAsk      `json:"sources"`
 	Tools        []string             `json:"tools"`
 	Welcome      string               `json:"welcome,omitempty"`
 	QuickPrompts []ContentQuickPrompt `json:"quickPrompts,omitempty"`

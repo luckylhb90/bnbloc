@@ -96,27 +96,13 @@ func parseRunQuery(r *http.Request) (store.AgentRunQuery, error) {
 		}
 	}
 	if s := v.Get("before"); s != "" {
-		c, ok := parseRunCursor(s)
+		c, ok := store.ParseAgentRunCursor(s)
 		if !ok {
 			return q, errors.New("invalid before cursor")
 		}
 		q.Before = c
 	}
 	return q, nil
-}
-
-// The page cursor is "<createdAtMs>:<jobId>" — opaque to clients.
-func runCursor(j store.AgentJob) string {
-	return strconv.FormatInt(j.CreatedAtMs, 10) + ":" + j.JobID
-}
-
-func parseRunCursor(s string) (store.AgentRunCursor, bool) {
-	at, id, ok := strings.Cut(s, ":")
-	n, err := strconv.ParseInt(at, 10, 64)
-	if !ok || err != nil || n <= 0 || id == "" {
-		return store.AgentRunCursor{}, false
-	}
-	return store.AgentRunCursor{CreatedAtMs: n, JobID: id}, true
 }
 
 // handleRoomRuns lists a room's runs (room members).
@@ -178,7 +164,7 @@ func (s *Service) writeRuns(w http.ResponseWriter, r *http.Request, scope string
 		out.Runs = append(out.Runs, v.record(j, false))
 	}
 	if n := len(jobs); n > 0 && n == q.PageSize() {
-		out.NextBefore = runCursor(jobs[n-1])
+		out.NextBefore = store.CursorOf(jobs[n-1]).String()
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
@@ -358,14 +344,14 @@ func (v *runViewer) record(j store.AgentJob, detail bool) wire.AgentRun {
 	// retry keeps the last attempt's error while it waits.
 	run.Error, _ = diag["error"].(string)
 	run.Warning, _ = diag["warning"].(string)
-	if rep := diagObject[wire.AgentRunReply](diag, wire.RunDiagReply); rep != nil {
+	if rep, ok := store.RunDiag[wire.AgentRunReply](j, wire.RunDiagReply); ok {
 		rep.RoomSeq = 0 // resolved by the detail route only
 		rep.Text = wire.RunPreview(rep.Text)
-		run.Reply = rep
+		run.Reply = &rep
 		run.Phases.FirstReplyAtMs = rep.AtMs
 	}
-	if u := diagObject[wire.AgentRunUsage](diag, wire.RunDiagUsage); u != nil && (u.Model != "" || u.InputTokens != nil || u.OutputTokens != nil || u.CostUsd != nil) {
-		run.Usage = u
+	if u, ok := store.RunDiag[wire.AgentRunUsage](j, wire.RunDiagUsage); ok && (u.Model != "" || u.InputTokens != nil || u.OutputTokens != nil || u.CostUsd != nil) {
+		run.Usage = &u
 	}
 	if !v.canRead(j.RoomID) {
 		run.Redacted = true
@@ -379,22 +365,4 @@ func (v *runViewer) record(j store.AgentJob, detail bool) wire.AgentRun {
 		run.Diagnostics = diag
 	}
 	return run
-}
-
-// diagObject decodes one object-valued diagnostics key into T (nil when
-// absent or malformed).
-func diagObject[T any](diag map[string]any, key string) *T {
-	raw, ok := diag[key].(map[string]any)
-	if !ok {
-		return nil
-	}
-	b, err := json.Marshal(raw)
-	if err != nil {
-		return nil
-	}
-	var out T
-	if json.Unmarshal(b, &out) != nil {
-		return nil
-	}
-	return &out
 }

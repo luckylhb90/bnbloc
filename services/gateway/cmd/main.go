@@ -132,6 +132,11 @@ type tenantWiring struct {
 	OrgAdmins   func(tenantID string) ([]string, error)
 	// TenantSettings reads an organization's settings (publish approval).
 	TenantSettings func(ctx context.Context, tenantID string) (store.Tenant, error)
+	// RoomSources, RoomInfo and AgentRuns back the rooms' consented
+	// sources (room_sources.go, read_records).
+	RoomSources store.RoomSourceStore
+	RoomInfo    func(ctx context.Context, roomID string) (store.Room, error)
+	AgentRuns   store.AgentRunReader
 	// Health pings the control-plane store for the readiness probe; nil when no
 	// DB is configured (dev/in-memory), which reads as always-ready.
 	Health func() error
@@ -231,7 +236,8 @@ func resolveTenantWiring() tenantWiring {
 		return out, nil
 	}
 	return tenantWiring{Resolve: res.Resolve, RoomMembers: roomMembers, OrgAdmins: orgAdmins, TenantSettings: tenants.GetTenant, Suspended: suspended, MemberRole: memberRole, Settings: backends.Settings, ExtAudit: backends.ExtAudit, ComponentInstalls: backends.ComponentInstalls, NotifierReplies: backends.ReplyTokens, SSOHandoffs: backends.SSOHandoffs, RefreshTokens: backends.RefreshTokens, Profiles: backends.Profiles, MemberCount: memberCount, Health: backends.HealthCheck(),
-		APITokens: backends.APITokens,
+		APITokens:   backends.APITokens,
+		RoomSources: backends.RoomSources, RoomInfo: backends.Room.GetRoom, AgentRuns: backends.AgentRuns(),
 		// Built-in content (the Expert builder) overlays the stored components.
 		ContentComponents: contentbuiltin.Overlay(backends.ContentComponents),
 		ContentJobs:       contentJobs(backends.BridgeJobs),
@@ -321,6 +327,9 @@ func main() {
 		RoomMembers:       tw.RoomMembers,
 		OrgAdmins:         tw.OrgAdmins,
 		TenantSettings:    tw.TenantSettings,
+		RoomSources:       tw.RoomSources,
+		RoomInfo:          tw.RoomInfo,
+		AgentRuns:         tw.AgentRuns,
 		AllowedOrigins:    config.List("BNBLOC_ALLOWED_ORIGINS"),
 		TrustedProxies:    resolveTrustedProxies(),
 		PublicURL:         config.FromEnvRaw(notify.PublicURLEnv),

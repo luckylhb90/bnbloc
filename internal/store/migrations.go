@@ -1674,6 +1674,18 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return addColumnIfMissing(ctx, db, "notification_prefs", "room_reports", "TINYINT(1) NOT NULL DEFAULT 1 AFTER app_notices")
 		},
 	},
+	{
+		// Rooms' asks to read organization records, their grants and the
+		// rooms' opt-ins (docs/prd/2026-10-20-rooms-as-components.md §2.3).
+		// Additive: new tables.
+		id: "2026_10_room_sources",
+		run: func(ctx context.Context, db sqlConn) error {
+			if err := createSchemaTable(ctx, db, "room_source_grants"); err != nil {
+				return err
+			}
+			return createSchemaTable(ctx, db, "room_source_opt_ins")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

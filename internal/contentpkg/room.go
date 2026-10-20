@@ -22,8 +22,9 @@ import (
 // disabled on install), the room expert and the skill and prompt packs it
 // turns on (requires), the MCP tools it needs (requires.mcp), its apps
 // (works by "name@range", copied in like "Use this app") and the sources
-// its tasks ask to read (wire.RoomSources: declared and shown, granted by
-// nothing yet). README.md is optional. A room package is no content use:
+// its tasks ask to read, each with its purpose (wire.RoomSourceAsk: the
+// install records the ask for the new room, the organization's admin
+// grants it). README.md is optional. A room package is no content use:
 // nothing in it reaches an agent until it is installed as a room.
 
 // Bounds of a room package.
@@ -212,17 +213,25 @@ func checkRoomApps(apps []string) error {
 	return nil
 }
 
-// checkRoomSources: sources of the one list (wire.RoomSources), each once.
-func checkRoomSources(sources []string) error {
+// checkRoomSources: sources of the one list (wire.RoomSources), each once
+// and with its purpose (the admin consents to it), within
+// wire.MaxRoomSourcePurpose characters.
+func checkRoomSources(sources []wire.RoomSourceAsk) error {
 	seen := map[string]bool{}
 	for _, s := range sources {
-		if !slices.Contains(wire.RoomSources, s) {
-			return fmt.Errorf("source %q: one of %s", s, strings.Join(wire.RoomSources, ", "))
+		if !slices.Contains(wire.RoomSources, s.Name) {
+			return fmt.Errorf("source %q: one of %s", s.Name, strings.Join(wire.RoomSources, ", "))
 		}
-		if seen[s] {
-			return fmt.Errorf("source %q is named twice", s)
+		if seen[s.Name] {
+			return fmt.Errorf("source %q is named twice", s.Name)
 		}
-		seen[s] = true
+		seen[s.Name] = true
+		if strings.TrimSpace(s.Purpose) == "" {
+			return fmt.Errorf("source %q: say its purpose (what the room's tasks read it for); the organization's admin consents to it", s.Name)
+		}
+		if err := checkText("source "+s.Name+" purpose", s.Purpose, wire.MaxRoomSourcePurpose, false); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -241,7 +250,9 @@ func roomFromForm(f Form, m *Manifest, files map[string][]byte) error {
 	}
 	m.Schedules = f.Schedules
 	m.Apps = f.Apps
-	m.Sources = f.Sources
+	for _, src := range f.Sources {
+		m.Sources = append(m.Sources, wire.RoomSourceAsk{Name: src.Name, Purpose: strings.TrimSpace(src.Purpose)})
+	}
 	return nil
 }
 
@@ -262,7 +273,7 @@ func (m Manifest) RoomSpec() *wire.RoomSpec {
 		out.Apps = []string{}
 	}
 	if out.Sources == nil {
-		out.Sources = []string{}
+		out.Sources = []wire.RoomSourceAsk{}
 	}
 	return out
 }

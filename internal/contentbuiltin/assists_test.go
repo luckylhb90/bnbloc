@@ -348,3 +348,25 @@ func TestFindAWayTask(t *testing.T) {
 		}
 	}
 }
+
+// explain-source-use answers the room sources' grant dialog
+// (docs/prd/2026-10-20-rooms-as-components.md §2.3): a summary, the uses
+// and a mismatch with the stated purpose, from <text> alone (the ask the
+// console shows), judging only what the tasks say.
+func TestExplainSourceUseTask(t *testing.T) {
+	m := assistTask(t, "explain-source-use")
+	got := []string{}
+	for _, f := range m.Fields {
+		got = append(got, f.Name+":"+f.Type)
+	}
+	if strings.Join(got, ",") != "summary:,uses:list,mismatch:" {
+		t.Fatalf("explain-source-use fields = %v", got)
+	}
+	p, _ := Get(IDPrefix + "explain-source-use")
+	flat := strings.Join(strings.Fields(p.Validated.Instructions), " ")
+	for _, want := range []string{"<text>", "`purpose`", "`scheduledTasks`", "read_records", "an empty string when every task fits", "singles out people", "never guess"} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("explain-source-use does not say %q", want)
+		}
+	}
+}

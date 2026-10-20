@@ -2,7 +2,6 @@ package activity
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -174,12 +173,8 @@ func (s *Service) agentCost(ctx context.Context, a wire.PlanAgent) (*wire.AgentC
 	out := &wire.AgentCostSample{}
 	total := 0.0
 	for _, j := range runs {
-		var diag map[string]any
-		if len(j.DiagnosticsJSON) == 0 || json.Unmarshal(j.DiagnosticsJSON, &diag) != nil {
-			continue
-		}
-		u := diagObject[wire.AgentRunUsage](diag, wire.RunDiagUsage)
-		if u == nil || u.CostUsd == nil {
+		u, ok := store.RunDiag[wire.AgentRunUsage](j, wire.RunDiagUsage)
+		if !ok || u.CostUsd == nil {
 			continue
 		}
 		total += *u.CostUsd

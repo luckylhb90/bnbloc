@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -25,6 +26,9 @@ import (
 // (an admin may turn it off in their notification settings).
 //
 //	POST /v1/rooms/{roomId}/report   a member's note to the admins
+//
+// notifyOrgAdmins is the one path a note to an organization's admins takes
+// (a room report, a room's ask for a source's consent: room_sources.go).
 
 // handleRoomReport answers POST /v1/rooms/{roomId}/report: a member who
 // may post in the room queues the note to the room organization's admins
@@ -46,34 +50,41 @@ func (s *Service) handleRoomReport(w http.ResponseWriter, r *http.Request, claim
 		httpx.Error(w, "only the room's members who may post in it report it", http.StatusForbidden)
 		return
 	}
-	var admins []string
-	if s.OrgAdmins != nil {
-		var err error
-		if admins, err = s.OrgAdmins(rc.Tenant); err != nil {
-			obs.ServerError(w, "read the organization's admins failed", err)
-			httpx.Error(w, "read the organization's admins failed", http.StatusInternalServerError)
-			return
-		}
-	}
-	queued := false
-	if s.Alerts != nil && len(admins) > 0 {
-		sum := sha256.Sum256([]byte(text))
-		var err error
-		queued, err = s.Alerts.Emit(tenant.NewContext(r.Context(), rc.Tenant), notify.Event{
-			Type: wire.NotificationRoomReport, RoomID: roomID, Recipients: admins, Actor: claims.Subject,
-			Title: claims.Subject + " reports what an agent could not do", Text: text,
-			Seq: req.Seq, ChannelID: strings.TrimSpace(req.ChannelID),
-			DedupKey: "room-report:" + roomID + ":" + claims.Subject + ":" + strconv.FormatInt(req.Seq, 10) + ":" + hex.EncodeToString(sum[:8]),
-		})
-		if err != nil {
-			obs.ServerError(w, "queue the report failed", err)
-			httpx.Error(w, "queue the report failed", http.StatusInternalServerError)
-			return
-		}
+	sum := sha256.Sum256([]byte(text))
+	admins, queued, err := s.notifyOrgAdmins(r.Context(), rc.Tenant, notify.Event{
+		RoomID: roomID, Actor: claims.Subject,
+		Title: claims.Subject + " reports what an agent could not do", Text: text,
+		Seq: req.Seq, ChannelID: strings.TrimSpace(req.ChannelID),
+		DedupKey: "room-report:" + roomID + ":" + claims.Subject + ":" + strconv.FormatInt(req.Seq, 10) + ":" + hex.EncodeToString(sum[:8]),
+	})
+	if err != nil {
+		obs.ServerError(w, "queue the report failed", err)
+		httpx.Error(w, "queue the report failed", http.StatusInternalServerError)
+		return
 	}
 	s.audit(r.Context(), rc.Tenant, store.ExtAuditRecord{
 		Kind: wire.AuditKindAssist, Name: "room-report", Action: "report", Actor: claims.Subject,
-		Outcome: wire.AuditOutcomeAllow, Detail: fmt.Sprintf("room %s, %d admins, queued %t", roomID, len(admins), queued),
+		Outcome: wire.AuditOutcomeAllow, Detail: fmt.Sprintf("room %s, %d admins, queued %t", roomID, admins, queued),
 	})
 	httpx.WriteJSON(w, http.StatusOK, wire.RoomReportReply{Queued: queued})
+}
+
+// notifyOrgAdmins queues ev to the organization's admins through the one
+// emitter, as a room report (wire.NotificationRoomReport: an admin may turn
+// it off), and says how many admins it was for and whether it was queued
+// for anyone (no emitter, no admin, or every admin filtered out: false).
+func (s *Service) notifyOrgAdmins(ctx context.Context, tenantID string, ev notify.Event) (admins int, queued bool, err error) {
+	if s.OrgAdmins == nil {
+		return 0, false, nil
+	}
+	list, err := s.OrgAdmins(tenantID)
+	if err != nil {
+		return 0, false, fmt.Errorf("read the organization's admins: %w", err)
+	}
+	if s.Alerts == nil || len(list) == 0 {
+		return len(list), false, nil
+	}
+	ev.Type, ev.Recipients = wire.NotificationRoomReport, list
+	queued, err = s.Alerts.Emit(tenant.NewContext(ctx, tenantID), ev)
+	return len(list), queued, err
 }

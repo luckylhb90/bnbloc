@@ -130,11 +130,14 @@ func TestRoomComponentDraft(t *testing.T) {
 	}
 }
 
+// reviewAsk is the runs source a review package asks for.
+var reviewAsk = wire.RoomSourceAsk{Name: wire.RoomSourceRuns, Purpose: "Judge whether the week's conversations reached their goal."}
+
 // roomForm is the content form a member saves from a draft (every part
 // ticked) as a room package, with the runs source asked for.
 func roomForm(d wire.RoomComponentDraft, name string) contentpkg.Form {
 	f := contentpkg.Form{Kind: "room", Name: name, DisplayName: "Weekly review", Description: "Reviews the week.",
-		Welcome: "Turn the daily summary on.", Channels: d.Channels, Schedules: d.Schedules, Sources: []string{wire.RoomSourceRuns}}
+		Welcome: "Turn the daily summary on.", Channels: d.Channels, Schedules: d.Schedules, Sources: []wire.RoomSourceAsk{reviewAsk}}
 	if d.Expert != nil {
 		f.Requires.Expert = d.Expert.Ref
 	}
@@ -180,14 +183,15 @@ func (e *appGW) saveRoomPackage(subject string, f contentpkg.Form) wire.ContentC
 // A room package saved from a draft installs as a room its installer owns:
 // the description, channels, the room expert and the packs they may use
 // turned on, the app copied in, the schedules created paused and theirs,
-// the sources only reported; the install counts as a use. What is not
-// theirs to use is reported, never granted.
+// the sources recorded as the room's asks, waiting for the organization
+// admin's consent; the install counts as a use. What is not theirs to use
+// is reported, never granted.
 func TestCreateRoomFromComponent(t *testing.T) {
 	e := galleryGW(t)
 	e.reviewRoom()
 	d, _ := e.draft("maya", e.roomID)
 	pkg := e.saveRoomPackage("maya", roomForm(d, "weekly-review"))
-	if pkg.Kind != "room" || pkg.Room == nil || !slices.Equal(pkg.Room.Sources, []string{wire.RoomSourceRuns}) || pkg.Requires.Expert != "reviewer@^1" || len(pkg.Room.Schedules) != 2 {
+	if pkg.Kind != "room" || pkg.Room == nil || !slices.Equal(pkg.Room.Sources, []wire.RoomSourceAsk{reviewAsk}) || pkg.Requires.Expert != "reviewer@^1" || len(pkg.Room.Schedules) != 2 {
 		t.Fatalf("the package's view = %+v", pkg)
 	}
 
@@ -197,7 +201,7 @@ func TestCreateRoomFromComponent(t *testing.T) {
 		t.Fatalf("create-room = %d %s", r.status, r.body)
 	}
 	if got.RoomID != "jacks-review" || got.From != "weekly-review@1.0.0" || !slices.Equal(got.Channels, []string{"reports"}) || got.Expert != "Reviewer" ||
-		!slices.Equal(got.Sources, []string{wire.RoomSourceRuns}) || got.Welcome != "Turn the daily summary on." || len(got.Apps) != 1 || len(got.Schedules) != 2 {
+		!slices.Equal(got.Sources, []wire.RoomSourceAsk{reviewAsk}) || got.Welcome != "Turn the daily summary on." || len(got.Apps) != 1 || len(got.Schedules) != 2 {
 		t.Fatalf("reply = %+v", got)
 	}
 	if !slices.Equal(got.Skipped, []string{"skill pack charts@^1 (not one you can use)"}) {
@@ -251,6 +255,10 @@ func TestCreateRoomFromComponent(t *testing.T) {
 	}
 	if installs, _ := e.b.ContentComponents.ListContentUses(e.ctx(), store.ContentUseRoomInstall, "jacks-review"); len(installs) != 1 || installs[0].ComponentID != pkg.ID {
 		t.Fatalf("install uses = %+v", installs)
+	}
+	ask, err := e.b.RoomSources.GetRoomSourceGrant(e.ctx(), "jacks-review", wire.RoomSourceRuns)
+	if err != nil || ask.Scope != "" || ask.Purpose != reviewAsk.Purpose || ask.ComponentID != pkg.ID || ask.ComponentVersion != "1.0.0" || ask.AskedBy != "jack" || len(ask.AliasKey) != 32 {
+		t.Fatalf("the room's ask = %+v, %v (waiting, the package's purpose)", ask, err)
 	}
 
 	// The id is taken now; a work is not a room package; someone else's

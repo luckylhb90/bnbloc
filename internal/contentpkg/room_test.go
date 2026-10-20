@@ -15,6 +15,11 @@ func aiTask() map[string]any {
 		"recurrence": map[string]any{"kind": wire.RecurDaily, "time": "09:00"}, "timezone": "UTC"}
 }
 
+// runsAsk asks for the runs source with a purpose.
+func runsAsk() map[string]any {
+	return map[string]any{"name": wire.RoomSourceRuns, "purpose": "Judge whether conversations reached their goal."}
+}
+
 // roomBundle is a room package with a channel, an AI task, a room expert,
 // a prompt pack, an app and a source; extra manifest fields are set or
 // removed (nil), and files added or removed ("").
@@ -25,7 +30,7 @@ func roomBundle(t *testing.T, extra map[string]any, files map[string]string) []b
 		"quickPrompts": []map[string]any{{"title": "Plan", "prompt": "Plan the week."}, {"ref": "review-prompts/recap"}},
 		"channels":     []string{"reports"}, "schedules": []map[string]any{aiTask()},
 		"requires": map[string]any{"expert": "reviewer@^1", "skills": []string{"charts@^2"}, "prompts": []string{"review-prompts@^1"}},
-		"apps":     []string{"triage-board@^1"}, "sources": []string{wire.RoomSourceRuns}}
+		"apps":     []string{"triage-board@^1"}, "sources": []map[string]any{runsAsk()}}
 	for k, v := range extra {
 		if v == nil {
 			delete(m, k)
@@ -55,7 +60,7 @@ func TestRoomPackageValidation(t *testing.T) {
 	}
 	spec := p.Manifest.RoomSpec()
 	if spec == nil || spec.Channels[0] != "reports" || spec.Schedules[0].Recipient.Kind != wire.ScheduleRecipientAI ||
-		spec.Apps[0] != "triage-board@^1" || spec.Sources[0] != wire.RoomSourceRuns || p.Manifest.Requires.Expert != "reviewer@^1" {
+		spec.Apps[0] != "triage-board@^1" || spec.Sources[0] != (wire.RoomSourceAsk{Name: wire.RoomSourceRuns, Purpose: "Judge whether conversations reached their goal."}) || p.Manifest.Requires.Expert != "reviewer@^1" {
 		t.Fatalf("room spec = %+v (requires %+v)", spec, p.Manifest.Requires)
 	}
 	notice := map[string]any{"text": "Week {week}: the review is due.", "recurrence": map[string]any{"kind": wire.RecurWeekly, "time": "08:30", "days": []int{1}},
@@ -104,8 +109,11 @@ func TestRoomPackageValidation(t *testing.T) {
 		{"a channel twice", map[string]any{"channels": []string{"reports", "Reports"}}, nil, "twice"},
 		{"a padded channel", map[string]any{"channels": []string{" reports"}}, nil, "surrounding spaces"},
 		{"too many channels", map[string]any{"channels": names("c", maxRoomChannels+1), "schedules": nil}, nil, "at most"},
-		{"an unknown source", map[string]any{"sources": []string{"mail"}}, nil, "source \"mail\""},
-		{"a source twice", map[string]any{"sources": []string{wire.RoomSourceRuns, wire.RoomSourceRuns}}, nil, "twice"},
+		{"an unknown source", map[string]any{"sources": []map[string]any{{"name": "mail", "purpose": "x"}}}, nil, "source \"mail\""},
+		{"a source twice", map[string]any{"sources": []map[string]any{runsAsk(), runsAsk()}}, nil, "twice"},
+		{"a source without its purpose", map[string]any{"sources": []map[string]any{{"name": wire.RoomSourceRuns, "purpose": " "}}}, nil, "say its purpose"},
+		{"a purpose past its bound", map[string]any{"sources": []map[string]any{{"name": wire.RoomSourceRuns, "purpose": strings.Repeat("p", wire.MaxRoomSourcePurpose+1)}}}, nil, "longer than"},
+		{"a source as a bare name", map[string]any{"sources": []string{wire.RoomSourceRuns}}, nil, "sources"},
 		{"a bad app reference", map[string]any{"apps": []string{"Triage Board"}}, nil, "apps"},
 		{"an app twice", map[string]any{"apps": []string{"board@^1", "board@^2"}}, nil, "twice"},
 		{"a bad expert reference", map[string]any{"requires": map[string]any{"expert": "reviewer@nope"}}, nil, "requires.expert"},
@@ -137,7 +145,7 @@ func names(prefix string, n int) []string {
 func TestRoomFieldsOnlyInRoomPackages(t *testing.T) {
 	for _, extra := range []map[string]any{
 		{"channels": []string{"reports"}},
-		{"sources": []string{wire.RoomSourceRuns}},
+		{"sources": []map[string]any{runsAsk()}},
 		{"apps": []string{"board@^1"}},
 		{"schedules": []map[string]any{aiTask()}},
 		{"requires": map[string]any{"expert": "reviewer@^1"}},
@@ -155,7 +163,7 @@ func TestRoomFieldsOnlyInRoomPackages(t *testing.T) {
 // The form lays a room package out as its manifest alone.
 func TestRoomPackageFromForm(t *testing.T) {
 	f := Form{Kind: "room", Name: "weekly-review", Description: "Reviews the week.", Welcome: " Hello ",
-		Requires: Requires{Expert: "reviewer@^1"}, Channels: []string{" reports "}, Sources: []string{wire.RoomSourceRuns},
+		Requires: Requires{Expert: "reviewer@^1"}, Channels: []string{" reports "}, Sources: []wire.RoomSourceAsk{{Name: wire.RoomSourceRuns, Purpose: " Review outcomes. "}},
 		Schedules: []wire.RoomPackageSchedule{{Text: "Go.", Recipient: wire.ScheduleRecipient{Kind: wire.ScheduleRecipientAI},
 			Recurrence: wire.ScheduleRecurrence{Kind: wire.RecurDaily, Time: "09:00"}, Timezone: "UTC", Channel: "reports"}}}
 	p, _, err := Build(f, "1.0.0", Options{}, nil)
@@ -165,7 +173,7 @@ func TestRoomPackageFromForm(t *testing.T) {
 	if got := p.Bundle.Paths(); len(got) != 1 || got[0] != ManifestFile {
 		t.Fatalf("files = %v", got)
 	}
-	if m := p.Manifest; m.Welcome != "Hello" || m.Channels[0] != "reports" || m.Requires.Expert != "reviewer@^1" || len(m.Schedules) != 1 {
+	if m := p.Manifest; m.Welcome != "Hello" || m.Channels[0] != "reports" || m.Requires.Expert != "reviewer@^1" || len(m.Schedules) != 1 || m.Sources[0].Purpose != "Review outcomes." {
 		t.Fatalf("manifest = %+v", m)
 	}
 	f.Instructions = "Be a reviewer."

@@ -136,6 +136,16 @@ type Service struct {
 	// routes 503.
 	ContentComponents store.ContentComponentStore
 	ContentJobs       ContentJobs
+	// RoomSources holds rooms' asks to read organization records and the
+	// organization admins' grants (room_sources.go, the one consent
+	// owner); RoomInfo reads a room of the ctx tenant (a grant's scope
+	// needs its visibility, its records its name); AgentRuns is the run
+	// records' read side a granted read_records answers from. nil
+	// RoomSources or RoomInfo answers the source routes 503 and offers no
+	// read_records.
+	RoomSources store.RoomSourceStore
+	RoomInfo    func(ctx context.Context, roomID string) (store.Room, error)
+	AgentRuns   store.AgentRunReader
 	// NotifierReplies resolves the reply tokens of delivered notifications
 	// for POST /v1/notifier/replies (N1); uninstalling a notifier deletes
 	// its tokens. nil answers the route 503.

@@ -40,7 +40,8 @@ import (
 // expert and the packs (putContentUse, setRoomExpert) and the apps
 // (copyApp, "Use this app"'s copy). A failure after the room exists
 // deletes it, so a half-made room never lingers. The sources a package
-// asks for are reported, never granted (slice 2 adds the consent).
+// asks for are recorded as the new room's asks, waiting for the
+// organization admin's consent (room_sources.go).
 
 // handleRoomComponentDraft answers what "Save as component" captures of a
 // room: its owner's or an admin's (the room editors').
@@ -305,9 +306,8 @@ func (s *Service) handleCreateRoomFromComponent(w http.ResponseWriter, r *http.R
 func (s *Service) installRoom(ctx context.Context, claims auth.Claims, c store.ContentComponent, v store.ContentComponentVersion, m contentpkg.Manifest, in wire.RoomInstallRequest) (reply wire.RoomInstallReply, err error) {
 	roomID := firstNonEmpty(in.RoomID, ids.New("room-"))
 	reply = wire.RoomInstallReply{RoomID: roomID, Name: firstNonEmpty(in.Name, m.DisplayName, c.Name), ComponentID: c.ID, From: c.Name + "@" + v.Version,
-		Channels: []string{}, Schedules: []string{}, Enabled: []string{}, Apps: []string{}, Skipped: []string{}, Sources: []string{}, Tools: []string{},
+		Channels: []string{}, Schedules: []string{}, Enabled: []string{}, Apps: []string{}, Skipped: []string{}, Sources: []wire.RoomSourceAsk{}, Tools: []string{},
 		Welcome: m.Welcome}
-	reply.Sources = append(reply.Sources, m.Sources...)
 	for _, q := range m.QuickPrompts {
 		reply.QuickPrompts = append(reply.QuickPrompts, wire.ContentQuickPrompt{Title: q.Title, Prompt: q.Prompt, Ref: q.Ref})
 	}
@@ -354,6 +354,9 @@ func (s *Service) installRoom(ctx context.Context, claims auth.Claims, c store.C
 		return reply, err
 	}
 	if err := s.installTools(ctx, claims, m.Requires.MCP, &reply); err != nil {
+		return reply, err
+	}
+	if err := s.askRoomSources(ctx, claims, roomID, c, v.Version, m.Sources, &reply); err != nil {
 		return reply, err
 	}
 	if err := s.ContentComponents.PutContentUse(ctx, store.ContentUse{TenantID: claims.Tenant, ScopeKind: store.ContentUseRoomInstall, ScopeID: roomID,

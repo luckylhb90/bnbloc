@@ -56,6 +56,7 @@ type dependency struct {
 var (
 	needContent = dependency{"content components", func(s *Service) bool { return s.ContentComponents != nil }}
 	needOrgSync = dependency{"organization sync", func(s *Service) bool { return s.OrgSync != nil }}
+	needSources = dependency{"room sources", func(s *Service) bool { return s.RoomSources != nil && s.RoomInfo != nil }}
 )
 
 // route is one gateway-served route. A session route runs session after
@@ -238,6 +239,12 @@ func (s *Service) routes() []route {
 		// A member's note to the admins of what a room could not do
 		// (room_report.go): it notifies people, so it spends the budget.
 		gated("POST /v1/rooms/{roomId}/report", drive, s.handleRoomReport).spends(costBudget),
+		// A room's sources (room_sources.go): what it asks to read and who
+		// reviews it (any member), its owner's opt-in, and asking the
+		// organization's admins to decide (it notifies people).
+		member("GET /v1/rooms/{roomId}/sources", s.handleRoomSources).with(needSources),
+		gated("PUT /v1/rooms/{roomId}/sources/{source}/opt-in", drive, s.handleRoomSourceOptIn).with(needSources),
+		gated("POST /v1/rooms/{roomId}/sources/{source}/ask-admin", drive, s.handleRoomSourceAskAdmin).spends(costBudget).with(needSources),
 		member("GET /v1/rooms/{roomId}/artifacts/{artifactId}/recipe", s.handleDeliverableRecipe).with(needContent),
 		// Media model calls (media.go): speech to text, image and video
 		// generation through admin-configured providers. They feed message
@@ -281,6 +288,9 @@ func (s *Service) routes() []route {
 		gated("POST /v1/tenant/content-components/{id}/unpublish", org, s.handleOrgContentStatus(store.ContentStatusRetired)).with(needContent),
 		gated("POST /v1/tenant/content-components/{id}/restore", org, s.handleOrgContentStatus(store.ContentStatusActive)).with(needContent),
 		gated("DELETE /v1/tenant/content-components/{id}", org, s.handleRemoveOrgContent).with(needContent),
+		gated("GET /v1/tenant/room-sources", org, s.handleListRoomSources).with(needSources),
+		gated("PUT /v1/tenant/room-sources/{roomId}/{source}", org, s.handleDecideRoomSource(false)).with(needSources),
+		gated("DELETE /v1/tenant/room-sources/{roomId}/{source}", org, s.handleDecideRoomSource(true)).with(needSources),
 
 		// Platform administration (super admins).
 		gated("GET /v1/platform/update-config", platform, s.handlePlatformUpdateConfig),

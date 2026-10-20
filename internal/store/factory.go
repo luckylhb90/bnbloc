@@ -222,6 +222,9 @@ type Backends struct {
 	// RoomGroups holds the group chats connected to rooms and their
 	// connect codes.
 	RoomGroups RoomGroupStore
+	// RoomSources holds rooms' asks to read organization records, their
+	// grants and the rooms' opt-ins (room_sources.go).
+	RoomSources RoomSourceStore
 }
 
 // NewBackends builds the store set. If dsn is empty, everything is in-memory.
@@ -274,11 +277,12 @@ func NewBackends(dsn string) (*Backends, error) {
 			ContentComponents: NewMemoryContentComponents(),
 			AppDocs:           appDocs,
 			RoomGroups:        NewMemoryRoomGroups(),
+			RoomSources:       NewMemoryRoomSources(),
 		}
 		// DeleteRoom clears every memory store holding room-owned rows, as
 		// the MySQL DeleteRoom clears roomOwnedTables.
 		for _, s := range []any{b.Activity, b.Grant, b.Chat, b.BridgeJobs, b.Artifacts, b.Attachments, b.AgentPrefs,
-			b.MessageTasks, b.QuotaRequests, b.ReplyTokens, b.RoomImports, b.Schedules, b.OrgSync, b.ContentComponents, b.AppDocs, b.RoomGroups} {
+			b.MessageTasks, b.QuotaRequests, b.ReplyTokens, b.RoomImports, b.Schedules, b.OrgSync, b.ContentComponents, b.AppDocs, b.RoomGroups, b.RoomSources} {
 			rooms.cascadeDeleteTo(s.(roomRowsOwner))
 		}
 		return b, nil
@@ -324,6 +328,7 @@ func newMySQLBackends(db *sql.DB) *Backends {
 		ContentComponents: NewMySQLContentComponents(db),
 		AppDocs:           NewMySQLAppDocs(db),
 		RoomGroups:        NewMySQLRoomGroups(db),
+		RoomSources:       NewMySQLRoomSources(db),
 	}
 }
 

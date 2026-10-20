@@ -40,6 +40,10 @@ const (
 	// AuditKindAssist: an AI assist ran (name = task@version; the model,
 	// tokens and latency, never the text) or the assist model was set.
 	AuditKindAssist = "assist"
+	// AuditKindSource: a room's consented source (name = the reading
+	// room): an admin's grant or withdrawal, a schedule's read through
+	// read_records (the source, the range and the count, never a record).
+	AuditKindSource = "source"
 )
 
 // AuditLogEntry is one normalized audit record. ID is unique across sources

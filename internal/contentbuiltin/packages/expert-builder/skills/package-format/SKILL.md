@@ -230,6 +230,7 @@ add scripts only when the person asks for them.
 | room package | schedules | 20 entries |
 | room package | schedules[].text | 16 KiB |
 | room package | apps | 10 entries |
+| room package | sources[].purpose | 500 characters |
 | room package | README.md | 64 KiB |
 | room package | files in the package | 2 files |
 | room package | package size | 1 MiB |

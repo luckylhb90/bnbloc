@@ -1,7 +1,7 @@
 {
   "kind": "bnbloc.expert.package/v1",
   "name": "expert-builder",
-  "version": "1.3.3",
+  "version": "1.3.4",
   "displayName": "Expert builder",
   "description": "Creates and improves experts, skill packs, prompt packs and AI assists with you in a short conversation: it asks a few questions, drafts the package where you can read it, lets you try it, and saves it to your Library when you say so.",
   "category": "authoring",

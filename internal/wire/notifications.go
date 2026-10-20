@@ -101,9 +101,10 @@ type RoomReportRequest struct {
 // MaxRoomReportText bounds a room report's text.
 const MaxRoomReportText = 1000
 
-// RoomReportReply says whether the report was queued for an admin (false:
-// no notifier, push subscription or desktop reaches one, or every admin
-// turned room reports off).
+// RoomReportReply says whether a note to the organization's admins (a room
+// report, or a room's ask for a source's consent) was queued for one
+// (false: no notifier, push subscription or desktop reaches one, or every
+// admin turned room reports off).
 type RoomReportReply struct {
 	Queued bool `json:"queued"`
 }
