@@ -12,6 +12,7 @@ import type {
   AssistModelUpdate,
   AssistOrgModel,
   AssistRequest,
+  AssistSkipped,
   AssistStatus,
   AssistTask,
   AssistUsage,
@@ -156,6 +157,15 @@ export async function runTextAssist(
 /** runJSONAssist runs a JSON task: its declared fields. */
 export function runJSONAssist(task: string, body: AssistRequest, signal?: AbortSignal): Promise<AssistJSONReply> {
   return req<AssistJSONReply>(`/v1/assist/${enc(task)}`, { method: "POST", body: withTimezone(body), signal });
+}
+
+/** runGatedJSONAssist runs a JSON task behind its gate (one the client runs
+ *  on its own, docs/prd/2026-10-20-never-a-dead-end.md §2.1): null when
+ *  the gate stopped it (below its threshold, or no decision model), so no
+ *  chat model ran. */
+export async function runGatedJSONAssist(task: string, body: AssistRequest, signal?: AbortSignal): Promise<AssistJSONReply | null> {
+  const reply = await req<AssistJSONReply | AssistSkipped>(`/v1/assist/${enc(task)}`, { method: "POST", body: withTimezone({ ...body, gated: true }), signal });
+  return "skipped" in reply && reply.skipped ? null : (reply as AssistJSONReply);
 }
 
 /** isAbort reports a run the member stopped. */

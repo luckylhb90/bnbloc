@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { useInjectedAgent, useInjectedAttachments, useInjectedDraft, useInjectedReferences } from "@/views/composer/useInjectedDraft";
+import { useInjectedAgent, useInjectedAttachments, useInjectedDraft, useInjectedFilePick, useInjectedReferences } from "@/views/composer/useInjectedDraft";
 import {
   PaperPlaneRightIcon,
   HashIcon,
@@ -126,6 +126,9 @@ export function Composer({
   // chat, land in the room's main composer only (never the people chat's).
   useInjectedDraft(roomId, main ? channelId : null, setText, taRef);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // A find-a-way card's "Attach a file" opens the picker here.
+  const openFilePicker = useCallback(() => fileInputRef.current?.click(), []);
+  useInjectedFilePick(roomId, main ? channelId : null, openFilePicker);
   // The agent selection, restored from and saved to the room's prefs: the
   // picked recipient (another member's agent to borrow, a platform agent;
   // null = my own selected target), people-only (drives no agent), and the

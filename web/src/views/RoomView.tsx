@@ -30,6 +30,8 @@ import { shareComposerRef } from "@/lib/team";
 import { RoomDialogs } from "@/views/room/RoomDialogs";
 import { ActivityRail } from "@/views/room/ActivityRail";
 import { useRoomMessageActions } from "@/views/room/useRoomMessageActions";
+import { useDeadEnd } from "@/views/room/useDeadEnd";
+import { DeadEndProvider } from "@/views/room/DeadEndCard";
 import { QuotaRequestDialog } from "@/views/team/QuotaRequestDialog";
 import { usePendingQuotaCount } from "@/views/team/QuotaRequestsPanel";
 import { borrowKey } from "@/lib/roomAgents";
@@ -196,6 +198,7 @@ export function RoomView({
   activityRef.current = activity;
   const { clearFilesBadge } = activity;
   dispatch.current = (e) => {
+    deadEnd.observe(e);
     if (team.applyEvent(e)) return;
     if (activity.applyEvent(e)) return;
     if (e.kind === "agent_roster") {
@@ -241,6 +244,9 @@ export function RoomView({
     onQuotaExhausted,
     onPlatformOffline: data.platform.refresh,
   });
+  // Never a dead end: a card under a reply that left the member's own
+  // request undone, theirs alone (the find-a-way assist).
+  const deadEnd = useDeadEnd({ roomId, channelId, subject, feed, roomAgents, send });
   // A queued platform job shows how many of its host's jobs are ahead.
   const platformInRoom = data.platform.inRoom;
   const queueAhead = useCallback((job: AgentJob) => jobQueueAhead(job, platformInRoom), [platformInRoom]);
@@ -574,6 +580,7 @@ export function RoomView({
                 <MessageExtrasProvider value={team.extras}>
                 <JobProgressProvider value={activity.jobProgress}>
                 <JobLiveProvider value={liveRoom}>
+                <DeadEndProvider value={deadEnd.room}>
                 <MessageFeed
                   loaded={!!room}
                   roomId={roomId}
@@ -602,6 +609,7 @@ export function RoomView({
                   onViewAllDeliverables={viewAllDeliverables}
                   agentReady={roomAgents.some((a) => !a.platform) || data.platform.choices.some((c) => c.inRoom && c.online)}
                 />
+                </DeadEndProvider>
                 </JobLiveProvider>
                 </JobProgressProvider>
                 </MessageExtrasProvider>

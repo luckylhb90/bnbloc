@@ -131,6 +131,10 @@ export const composerRefs = handoff<readonly Referenceable[]>();
 // main composer (a "Make similar" draft's references), attached as if the
 // member had uploaded them.
 export const composerAttachments = handoff<readonly ChatAttachment[]>();
+// composerFilePicks carries "open the attach picker" to a room's main
+// composer (a find-a-way fix: the file a turn needed). It is taken at once,
+// within the member's click, so the browser lets the picker open.
+export const composerFilePicks = handoff<true>();
 
 export function queueComposerRef(roomId: string, ref: Referenceable): void {
   composerRefs.queue(roomId, [...(composerRefs.peek(roomId) ?? []), ref]);

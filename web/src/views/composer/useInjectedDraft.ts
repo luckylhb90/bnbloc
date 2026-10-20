@@ -1,5 +1,5 @@
 import { useEffect, type Dispatch, type RefObject, type SetStateAction } from "react";
-import { composerAgentPicks, composerAttachments, composerDrafts, composerRefs, mergeDraft } from "@/lib/team";
+import { composerAgentPicks, composerAttachments, composerDrafts, composerFilePicks, composerRefs, mergeDraft } from "@/lib/team";
 import type { ChatAttachment } from "@/lib/wire.gen";
 import { samePlatformAgent } from "@/lib/platformAgents";
 import type { Referenceable, RoomAgent } from "@/views/composer/types";
@@ -85,6 +85,18 @@ export function useInjectedAttachments(
       if (id === roomId) apply();
     });
   }, [roomId, channelId, addStored]);
+}
+
+// useInjectedFilePick opens the attach picker when another view asks (a
+// find-a-way card's "Attach a file"): only while the composer is open, so a
+// request made elsewhere never waits to open a picker later.
+export function useInjectedFilePick(roomId: string, channelId: string | null | undefined, open: () => void): void {
+  useEffect(() => {
+    if (!channelId) return;
+    return composerFilePicks.subscribe((id) => {
+      if (id === roomId && composerFilePicks.take(roomId)) open();
+    });
+  }, [roomId, channelId, open]);
 }
 
 // useInjectedAgent selects the agent another view asked for (the welcome

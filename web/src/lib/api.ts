@@ -21,6 +21,8 @@ import {
   type PublishApproval,
   type RoomDetail,
   type RoomMembersReply,
+  type RoomReportReply,
+  type RoomReportRequest,
   type RoomPreview,
   type RoomsReply,
   type UnreadReply,
@@ -375,6 +377,10 @@ export const api = {
     }),
   unmarkTask: (roomId: string, seq: number) =>
     req<void>(roomPath(roomId, "tasks", seq), { method: "DELETE", as: "none" }),
+  // A note to the organization's admins of what the room could not do
+  // (docs/prd/2026-10-20-never-a-dead-end.md, the "report" fix).
+  reportRoom: (roomId: string, body: RoomReportRequest) =>
+    req<RoomReportReply>(roomPath(roomId, "report"), { method: "POST", body: JSON.stringify(body) }),
   // Global search (F7) across the caller's rooms (resolved server-side).
   search: (q: string, opts: { before?: number; limit?: number } = {}) => {
     const p = new URLSearchParams({ q });

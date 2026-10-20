@@ -4,9 +4,10 @@ import type { MessageTask, TaskStatus } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import type { FeedItem } from "@/views/room/types";
 import { useDisplayName } from "@/lib/useDisplayName";
+import { FindAWayButton } from "@/views/room/DeadEndCard";
 
-// Team actions on a feed row — "Save as prompt" (prompt packs) and "Mark as
-// task" (F6)
+// Team actions on a feed row — "Save as prompt" (prompt packs), "Mark as
+// task" (F6) and an agent reply's "Find a way" (DeadEndCard.tsx)
 // — plus the task badge. They reach the memoized Message rows through context
 // so the row props (and the existing copy / edit / delete actions) stay as
 // they are; only these small components re-render when tasks change.
@@ -68,6 +69,7 @@ export function MessageExtraActions({ item, floating }: { item: FeedItem; floati
       >
         <ListChecksIcon size={12} weight={task ? "bold" : "regular"} />
       </button>
+      <FindAWayButton item={item} />
     </span>
   );
 }

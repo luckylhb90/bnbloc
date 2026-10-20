@@ -28,6 +28,7 @@ import { MessageExtraActions, TaskBadge } from "@/views/room/messageExtras";
 import { dispatchLine, type DispatchAttribution } from "@/lib/dispatch";
 import { ExpertTag } from "@/views/room/ExpertTag";
 import { FileRefTag } from "@/views/room/FileRefTag";
+import { DeadEndCard } from "@/views/room/DeadEndCard";
 import { isSubmitEnter } from "@/lib/keys";
 import { copyText } from "@/lib/clipboard";
 
@@ -432,6 +433,7 @@ export const Message = memo(function Message({
         {isAgent && item.metrics ? <TurnMetricsFooter metrics={item.metrics} /> : null}
         <MessageAttachments roomId={roomId} attachments={item.attachments} className="mt-2" />
         <FileRefTag roomId={roomId} fileRef={item.fileRef} className="mt-1" />
+        {isAgent && <DeadEndCard item={item} />}
       </div>
     </div>
   );
