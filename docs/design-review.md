@@ -243,13 +243,27 @@ version identity; problems found only by a user.
 - Does the platform name the feature anywhere (a type, a weight, a file's
   wording, a panel, a route)? Then it is not a contract, it is the feature.
 - Would an organization that wants its own version have to fork the platform?
+- **Capabilities, not use cases.** The platform ships the base capability (a
+  kind, a consented data source, a tool, a route); a use case built on it (a
+  review room, a report, a workflow, an app) is never written into the
+  platform or its built-in content: no fixed categories, columns, formats,
+  steps or prompts the member did not choose. Members build use cases
+  themselves with AI. Where an example helps, it is a **sample**: made only
+  with the public capabilities, kept in its own repository, published to the
+  Library like any member's content, and copied and changed by whoever uses
+  it.
 
 *Test:* grep the platform for the feature's nouns; the only hits should be
 the contract's. The PRD names the component, the contracts it uses, and what
-the platform adds for it.
+the platform adds for it. For a use case, the PRD says which capabilities it
+needs and that it ships as a sample, if at all.
 *Seen:* a room-memory feature (note types, ranking, file wording, a panel)
 built into the gateway, the room service, the bridge and the web app when the
-owner wanted an installable component.
+owner wanted an installable component. Interactive apps first designed with
+manifests, participant modes and a lifecycle the apps can own (2026-10-12).
+An outcome-review room planned as built-in content with a fixed cause list,
+table columns, digest and task flow, when the platform only had to provide
+the room kind, the consented `runs` source and `read_records` (2026-10-20).
 
 ### 13. AI capability
 
