@@ -214,7 +214,7 @@ impl KindRuntime for Plugin {
     }
 
     /// A plugin whose required settings are not all set (needs setup) is
-    /// not launched: the member enters theirs in Settings → Components
+    /// not launched: the member enters theirs on the Components page
     /// (which restarts it); a platform or organization one waits for the
     /// catalog to say it is set (a new spec restarts it).
     fn blocker(&self, adapter: &Adapter, spec: &SidecarSpec) -> Option<String> {

@@ -823,7 +823,7 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   exit); `POST /v1/chat` forwards to the gateway chat route with the
   desktop's session (per-plugin rate limit, namespaced `clientMsgId`).
   A plugin's member-scope settings (component settings, below) are entered
-  in Settings → Components via Tauri commands, stored 0600 in the signed-in
+  on the Components page via Tauri commands, stored 0600 in the signed-in
   member's own directory (`member_dir`: `<app config>/members/<hash of
   gateway origin, subject and tenant>/`, `internal_ext/member_dir.rs`; never
   a shared dir) and NEVER sent to the gateway; at launch the desktop merges

@@ -12,7 +12,7 @@
 //! Binaries of tools that left the catalog (uninstalled, rollout off, opt-in
 //! dropped) or were replaced by a new pin are deleted.
 //!
-//! A tool's member-scope settings are entered in Settings → Components and
+//! A tool's member-scope settings are entered on the Components page and
 //! kept in the member store (component_settings.rs, one 0600 JSON object
 //! per component in the member's own directory, which the bridge reads for
 //! its owner's own drives); they never leave this
@@ -20,7 +20,7 @@
 //! values reach the bridge with each job, never through here.
 //!
 //! An http tool declaring `auth.scheme = "oauth"` takes a sign-in instead:
-//! the member signs in from Settings → Components (mcp_oauth.rs runs the
+//! the member signs in from the Components page (mcp_oauth.rs runs the
 //! MCP authorization flow in their browser), the tokens are stored 0600 in
 //! `<member>/mcp-sign-ins/<tool>.json` (`BNBLOC_MCP_SIGN_INS_DIR` for the
 //! bridge) and refreshed here on every catalog refresh shortly before they
@@ -113,7 +113,7 @@ pub(super) struct McpState {
     pub(super) sign_ins: mcp_oauth::SignIns,
 }
 
-/// An oauth tool's sign-in as Settings → Components shows it.
+/// An oauth tool's sign-in as the Components page shows it.
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpSignInView {

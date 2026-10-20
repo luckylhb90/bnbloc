@@ -749,7 +749,7 @@ tool by name and can never inline a command.
   settings"): the package's `settings`, each of scope `platform` (the super
   admin, Platform console → Components → Settings), `org` (an organization
   admin, Organization → Component settings) or `member` (each member on
-  their desktop, Settings → Components). A stdio tool gets each value's
+  their desktop, the Components page). A stdio tool gets each value's
   `deliver.env` and every value in the file named by
   `BNBLOC_COMPONENT_SETTINGS_FILE` (written 0600 by the bridge for the
   session); an http tool gets them as request headers (the auth block's
@@ -766,7 +766,7 @@ tool by name and can never inline a command.
   and, when content requires it, shows missing with the settings it lacks.
   - `oauth` (`mcp.http.auth: {scheme: "oauth", clientId?, scopes?}`,
     endpoint tools only, no setting carries its credential): each member
-    signs in on their desktop (Settings → Components). The desktop
+    signs in on their desktop (the Components page). The desktop
     (`internal_ext/mcp_oauth.rs`) runs the MCP authorization flow against
     the tool's own server: protected resource metadata (the 401
     `WWW-Authenticate resource_metadata`, else the well-known URIs; its

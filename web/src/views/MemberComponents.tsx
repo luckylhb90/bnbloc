@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type MemberComponent } from "@/lib/api";
+import { desktop } from "@/lib/desktop";
+import { needsSetupText, type DesktopComponentSettings } from "@/lib/componentSettings";
+import { ComponentSettingsDialog } from "@/views/settings/ComponentSettingsDialog";
 import { EmptyCard } from "@/ui/Card";
 import { PageHeader } from "@/ui/Page";
 import { useToast } from "@/ui/Toast";
@@ -7,22 +10,44 @@ import { ComponentCard } from "@/views/ComponentCard";
 import { ErrorBox } from "@/ui/ErrorBox";
 import { errorText } from "@/lib/errors";
 
+// MemberComponents is where a member adds components and sets them up: a
+// component's settings open from its card ("Set up" while it needs any),
+// and right after it is added when it needs setup, so nobody has to look
+// for them elsewhere (docs/prd/2026-10-19-component-settings.md §2.2).
 export function MemberComponents() {
   const toast = useToast();
   const [components, setComponents] = useState<readonly MemberComponent[] | null>(null);
+  // This computer's view of each component's settings (the member's own
+  // live here), in the desktop app only.
+  const [local, setLocal] = useState<readonly DesktopComponentSettings[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [settingsOf, setSettingsOf] = useState<MemberComponent | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (): Promise<{ list: readonly MemberComponent[]; local: readonly DesktopComponentSettings[] }> => {
     setError(null);
+    let list: readonly MemberComponent[] = [];
+    let mine: readonly DesktopComponentSettings[] = [];
     try {
-      const res = await api.components();
-      setComponents(res.components ?? []);
+      const [res, items] = await Promise.all([api.components(), desktop.available() ? desktop.componentSettings().catch(() => null) : Promise.resolve(null)]);
+      list = res.components ?? [];
+      mine = items ?? [];
     } catch (caught: unknown) {
       setError(errorText(caught, "failed to load components"));
-      setComponents([]);
     }
+    setComponents(list);
+    setLocal(mine);
+    return { list, local: mine };
   }, []);
+
+  const setupOf = useCallback(
+    (component: MemberComponent, mine: readonly DesktopComponentSettings[] = local) => {
+      const here = mine.find((i) => i.kind === component.kind && i.name === component.name);
+      const missing = [...new Set([...(component.settingsMissing ?? []), ...(here?.missing ?? [])])];
+      return needsSetupText(missing, component.settings ?? []);
+    },
+    [local],
+  );
 
   useEffect(() => {
     void load();
@@ -36,7 +61,10 @@ export function MemberComponents() {
     try {
       await api.installComponent(component);
       toast.success(`${component.name} installed`);
-      await load();
+      const loaded = await load();
+      // Set it up now when it needs anything.
+      const added = loaded.list.find((c) => c.kind === component.kind && c.name === component.name);
+      if (added && setupOf(added, loaded.local)) setSettingsOf(added);
     } catch (caught: unknown) {
       setError(errorText(caught, `failed to install ${component.name}`));
     } finally {
@@ -75,6 +103,8 @@ export function MemberComponents() {
                 component={component}
                 busy={busy === component.name}
                 onRemove={(selected) => void remove(selected)}
+                onSettings={hasSettings(component) ? setSettingsOf : undefined}
+                setup={setupOf(component)}
               />
             ))}
           </ComponentSection>
@@ -91,8 +121,21 @@ export function MemberComponents() {
           </ComponentSection>
         </div>
       </div>
+      <ComponentSettingsDialog
+        target={settingsOf}
+        onClose={() => {
+          setSettingsOf(null);
+          void load();
+        }}
+      />
     </>
   );
+}
+
+// hasSettings reports a component with anything to set: a declared
+// setting, or an MCP tool its member signs in to.
+function hasSettings(component: MemberComponent): boolean {
+  return (component.settings ?? []).length > 0 || component.mcp?.http?.auth?.scheme === "oauth";
 }
 
 function splitComponents(components: readonly MemberComponent[]) {

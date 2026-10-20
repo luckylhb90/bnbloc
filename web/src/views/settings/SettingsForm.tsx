@@ -23,7 +23,7 @@ import { errorText } from "@/lib/errors";
 // SettingsForm is the one form for a component's settings
 // (docs/prd/2026-10-19-component-settings.md), wherever their scope is set:
 // the platform console (platform scope), Organization → Component settings
-// (org scope) and Settings → Components (member scope, on the desktop).
+// (org scope) and the Components page (member scope, on the desktop).
 // `fields` are the settings this form edits; `others` are settings of other
 // scopes, shown read-only as set or not (never a value). A secret is
 // write-only: left empty it keeps the stored one, and a stored optional

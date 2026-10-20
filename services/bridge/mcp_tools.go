@@ -38,7 +38,7 @@ import (
 //
 // Member settings (docs/prd/2026-10-19-component-settings.md) are read from
 // the member's own desktop store (ComponentSettingsDir/mcp@<tool>.json,
-// written 0600 by Settings → Components) and only for drives the member
+// written 0600 by the Components page) and only for drives the member
 // asked for themselves: a borrowed or platform drive never lends the agent
 // owner's values or accounts. A tool whose required settings are not all
 // set needs setup and is not attached. What cannot be attached is reported
@@ -210,7 +210,7 @@ func (b *Bridge) mcpSettings(t wire.ContentMCPTool, own bool) (map[string]string
 	case memberUnset && !own:
 		return nil, "member settings are not lent to someone else's drive"
 	case memberUnset:
-		return nil, "needs setup: set " + strings.Join(labels, ", ") + " in Settings → Components"
+		return nil, "needs setup: set " + strings.Join(labels, ", ") + " on the Components page"
 	}
 	return nil, "needs setup: an admin has not set " + strings.Join(labels, ", ")
 }
@@ -310,7 +310,7 @@ func (b *Bridge) mcpOAuthToken(t wire.ContentMCPTool, own bool) (string, string)
 	if !own {
 		return "", "member sign-ins are not lent to someone else's drive"
 	}
-	signIn := "sign in to " + t.Name + " in Settings → Components"
+	signIn := "sign in to " + t.Name + " on the Components page"
 	dir := strings.TrimSpace(b.cfg.MCPSignInsDir)
 	if dir == "" {
 		return "", signIn
@@ -330,7 +330,7 @@ func (b *Bridge) mcpOAuthToken(t wire.ContentMCPTool, own bool) (string, string)
 		return "", signIn
 	}
 	if f.ExpiresAtMs > 0 && time.Now().Add(mcpOAuthExpirySlack).UnixMilli() >= f.ExpiresAtMs {
-		return "", "its sign-in expired: sign in to " + t.Name + " again in Settings → Components"
+		return "", "its sign-in expired: sign in to " + t.Name + " again on the Components page"
 	}
 	return strings.TrimSpace(f.AccessToken), ""
 }

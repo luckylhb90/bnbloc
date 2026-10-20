@@ -3,7 +3,7 @@
 // require by name. The member catalog (GET /v1/components?kind=mcp) lists
 // the ones visible to the member with their settings declaration and which
 // platform and organization settings are set; a member's own settings live
-// on their desktop (Settings → Components, never sent to the server). Pure
+// on their desktop (the Components page, never sent to the server). Pure
 // helpers; the calls are in mcpToolsApi.ts and lib/desktop.ts.
 import type { MemberComponent } from "./apiTypes.ts";
 import type { ContentComponent } from "./contentComponents.ts";
@@ -15,7 +15,7 @@ export function signsIn(tool: MemberComponent): boolean {
   return tool.mcp?.http?.auth.scheme === "oauth";
 }
 
-// signInLine is Settings → Components' status of an OAuth tool on this
+// signInLine is the Components page' status of an OAuth tool on this
 // computer.
 export function signInLine(t: Pick<DesktopComponentSettings, "signIn">): string {
   const s = t.signIn;
@@ -37,19 +37,19 @@ export interface CredentialStatus {
 // report; undefined in a browser).
 export function credentialStatus(tool: MemberComponent, local?: DesktopComponentSettings): CredentialStatus {
   if (signsIn(tool)) {
-    if (!local) return { state: "elsewhere", text: "Your own sign-in: sign in from the desktop app (Settings → Components)" };
-    if (!local.signIn?.valid) return { state: "missing", text: "Needs setup: sign in from Settings → Components" };
+    if (!local) return { state: "elsewhere", text: "Your own sign-in: sign in from the desktop app (the Components page)" };
+    if (!local.signIn?.valid) return { state: "missing", text: "Needs setup: sign in from the Components page" };
   }
   const settings = tool.settings ?? [];
   const admin = tool.settingsMissing ?? [];
   if (admin.length > 0) return { state: "missing", text: `Needs setup: an admin has not set ${settingLabels(admin, settings).join(", ")}` };
   const own = ofScope(settings, "member").filter((s) => s.required && !s.default);
   if (!local) {
-    if (own.length > 0) return { state: "elsewhere", text: "Your own settings: set them in the desktop app (Settings → Components)" };
+    if (own.length > 0) return { state: "elsewhere", text: "Your own settings: set them in the desktop app (the Components page)" };
     return { state: "ready", text: "Ready" };
   }
   const mine = local.missing.filter((k) => own.some((s) => s.key === k));
-  if (mine.length > 0) return { state: "missing", text: `Needs setup: set ${settingLabels(mine, settings).join(", ")} in Settings → Components` };
+  if (mine.length > 0) return { state: "missing", text: `Needs setup: set ${settingLabels(mine, settings).join(", ")} on the Components page` };
   return { state: "ready", text: signsIn(tool) ? "Signed in on this computer" : "Ready" };
 }
 

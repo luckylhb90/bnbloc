@@ -176,7 +176,7 @@ async fn internal_adapter_login(
     state.login(&name).await
 }
 
-/// Installed components with settings (Settings → Components): every MCP
+/// Installed components with settings (the Components page): every MCP
 /// tool (its binary's state, its sign-in) and every plugin that declares
 /// settings. Secret values, and platform or organization values, are never
 /// returned.

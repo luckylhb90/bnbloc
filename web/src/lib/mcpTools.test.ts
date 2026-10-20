@@ -40,7 +40,7 @@ test("an OAuth tool is signed in to, not configured", () => {
   equal(credentialStatus(oauth).state, "elsewhere");
   const signedIn = { ...local([]), auth: "oauth", signIn: { server: "auth.example.com", signedInAtMs: 1, expiresAtMs: 0, valid: true } };
   equal(credentialStatus(oauth, signedIn).text, "Signed in on this computer");
-  equal(credentialStatus(oauth, { ...local([]), auth: "oauth" }).text, "Needs setup: sign in from Settings → Components");
+  equal(credentialStatus(oauth, { ...local([]), auth: "oauth" }).text, "Needs setup: sign in from the Components page");
   equal(signInLine(signedIn), "Signed in with auth.example.com.");
   equal(signInLine({ signIn: { ...signedIn.signIn, valid: false } }), "Your sign-in with auth.example.com expired. Sign in again.");
   equal(signInLine({}), "Not signed in. Sign in to use it in your runs.");
@@ -54,7 +54,7 @@ test("settings: none, an admin's and the member's own", () => {
   // In a browser the member's own settings live on their desktop.
   equal(credentialStatus(member).state, "elsewhere");
   equal(credentialStatus(member, local([])).state, "ready");
-  equal(credentialStatus(member, local(["salt"])).text, "Needs setup: set Salt in Settings → Components");
+  equal(credentialStatus(member, local(["salt"])).text, "Needs setup: set Salt on the Components page");
 });
 
 test("which experts and skill packs use a tool", () => {

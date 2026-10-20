@@ -2,7 +2,7 @@
 //! (docs/prd/2026-10-12-experts-and-teams.md, "Runtime gap closure" item 7).
 //!
 //! An endpoint MCP component may declare `mcp.http.auth.scheme = "oauth"`.
-//! The member then signs in from Settings → Components and this module runs the
+//! The member then signs in from the Components page and this module runs the
 //! MCP authorization flow (specification 2026-07-28) against the tool's own
 //! server; nothing about the authorization server is declared or baked in:
 //!

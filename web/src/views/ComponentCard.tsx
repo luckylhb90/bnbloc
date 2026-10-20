@@ -7,8 +7,7 @@ import { Badge, Card } from "@/ui/Card";
 import { ConfirmDialog } from "@/ui/Dialog";
 import { Segment } from "@/ui/Segment";
 import { AdoptionBar, ArtifactFacts, ChipGroup, FactBlock, KindIcon, MCPFacts, PreviewerFacts, RolloutBadge, SettingsFacts, TrustBlock, memberMeta } from "@/views/componentFacts";
-import { PlatformComponentSettings } from "@/views/PlatformComponentSettings";
-import { ofScope } from "@/lib/componentSettings";
+import { ComponentSettingsDialog } from "@/views/settings/ComponentSettingsDialog";
 import { componentKindLabel } from "@/lib/componentKinds";
 import { exactTime } from "@/lib/format";
 
@@ -34,6 +33,9 @@ type MemberCardProps = {
   readonly busy?: boolean;
   readonly onInstall?: (component: MemberComponent) => void;
   readonly onRemove?: (component: MemberComponent) => void;
+  // onSettings opens its settings; setup names what it still needs ("").
+  readonly onSettings?: (component: MemberComponent) => void;
+  readonly setup?: string;
 };
 
 export function ComponentCard(props: AdminCardProps | MemberCardProps) {
@@ -55,6 +57,8 @@ export function ComponentCard(props: AdminCardProps | MemberCardProps) {
       busy={Boolean(props.busy)}
       onInstall={props.onInstall}
       onRemove={props.onRemove}
+      onSettings={props.onSettings}
+      setup={props.setup ?? ""}
     />
   );
 }
@@ -133,7 +137,7 @@ function AdminComponentCard({
             </Button>
           </div>
         )}
-        {ofScope(component.settings, "platform").length > 0 && (
+        {(component.settings ?? []).length > 0 && (
           <Button variant="outline" size="sm" disabled={busy} onClick={() => setSettingsOpen(true)}>
             Settings
           </Button>
@@ -143,7 +147,7 @@ function AdminComponentCard({
           {busy ? "Working…" : "Uninstall"}
         </Button>
       </div>
-      {settingsOpen && <PlatformComponentSettings component={component} onClose={() => setSettingsOpen(false)} />}
+      <ComponentSettingsDialog target={settingsOpen ? component : null} onClose={() => setSettingsOpen(false)} />
       <ConfirmDialog
         open={confirming}
         onClose={() => setConfirming(false)}
@@ -162,11 +166,15 @@ function MemberComponentCard({
   busy,
   onInstall,
   onRemove,
+  onSettings,
+  setup,
 }: {
   readonly component: MemberComponent;
   readonly busy: boolean;
   readonly onInstall?: (component: MemberComponent) => void;
   readonly onRemove?: (component: MemberComponent) => void;
+  readonly onSettings?: (component: MemberComponent) => void;
+  readonly setup: string;
 }) {
   return (
     <Card className="animate-in flex flex-wrap items-start gap-3.5 p-4">
@@ -177,16 +185,23 @@ function MemberComponentCard({
           <Badge tone="neutral" className="tabular">v{component.version}</Badge>
           {component.managed && <Badge tone="accent">Auto-installed</Badge>}
           {!component.managed && component.installed && <Badge tone="neutral">You installed this</Badge>}
+          {component.installed && setup && <Badge tone="warning">Needs setup</Badge>}
         </div>
         <p className="mt-1 text-sm leading-relaxed text-[var(--color-fg-muted)]">
           {component.description || "No description provided."}
         </p>
         <p className="mt-1.5 text-xs text-[var(--color-fg-subtle)]">{memberMeta(component)}</p>
+        {component.installed && setup && <p className="mt-1 text-xs text-[var(--color-warning)]">{setup}</p>}
         {component.hooks && component.hooks.length > 0 && (
           <ChipGroup label="Hooks" values={component.hooks} compact />
         )}
       </div>
       <div className="ml-auto flex shrink-0 items-center gap-2">
+        {component.installed && onSettings && !busy && (
+          <Button size="sm" variant={setup ? "primary" : "outline"} onClick={() => onSettings(component)}>
+            {setup ? "Set up" : "Settings"}
+          </Button>
+        )}
         {memberAction(component, busy, onInstall, onRemove)}
       </div>
     </Card>

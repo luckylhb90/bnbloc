@@ -267,7 +267,7 @@ connection per desktop, not one per member on the server.
 - `settings` are the plugin's component settings
   (docs/prd/2026-10-19-component-settings.md; `core/pkgmeta/settings.go`):
   member-scope ones are the form the member fills in on their desktop
-  (Settings → Components); a `secret` is never shown back. Deployment data
+  (the Components page); a `secret` is never shown back. Deployment data
   the plugin needs (e.g. its service's API origin) is a platform-scope
   setting the super admin sets (Platform console → Components → Settings),
   or an organization one an org admin sets, never baked into `sidecar.args`
@@ -360,7 +360,7 @@ member may answer (`mention`: `to: "room"`; `agent_finished`/`agent_failed`:
 | `<settings[].deliver.env>` | as declared | A setting's value, when it has one. |
 
 The desktop does not start a plugin whose required settings are not all set,
-in any scope (its status and Settings → Components say which; its
+in any scope (its status and the Components page say which; its
 notifications fall back to the server notifiers). Saving the member's
 values restarts the sidecar, and so does a change of the platform or
 organization values (the catalog says which are set); an uninstalled

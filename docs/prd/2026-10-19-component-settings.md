@@ -118,7 +118,11 @@ setting key instead of an env name.
     scope);
   - Organization → Components → Settings (org scope; today's connectors
     tab);
-  - Settings → Components (member scope; today's plugin and tool pages).
+  - the Components page, where the component is added: its card's Settings
+    (Set up while it needs any) opens one dialog with every scope the viewer
+    may set, and it opens by itself right after adding a component that
+    needs setup (revised 2026-10-20: settings beside the component, not in
+    a separate settings page).
 
   A component's settings show only where its scope is set; a member sees
   an organization setting as "set by your organization", never its value.
@@ -316,7 +320,7 @@ organization or a member (decided 2026-10-20):
    - *Forms.* The one form (`web/src/views/settings/SettingsForm.tsx`, the
      widened `LocalSettingsCard`) renders every type and each field's
      scope; Platform console → Components → Settings, Organization →
-     Component settings (was Tool connectors), Settings → Components
+     Component settings (was Tool connectors), the Components page
      (merging Tools and Personal bot); a member sees organization and
      platform settings as set or not, never a value.
    - *Not in slice 1.* An upgrade that adds a required setting is not held

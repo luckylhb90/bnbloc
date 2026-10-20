@@ -100,7 +100,7 @@ pub struct SettingField {
     pub value: Option<String>,
 }
 
-/// One installed component with settings as Settings → Components renders
+/// One installed component with settings as the Components page renders
 /// it: every installed MCP tool (its binary's state, its sign-in) and every
 /// installed plugin that declares settings.
 #[derive(Clone, Debug, serde::Serialize)]
@@ -394,7 +394,7 @@ fn labels(decl: &[Setting], keys: &[String]) -> String {
 pub(super) fn needs_setup(name: &str, decl: &[Setting], keys: &[String]) -> Option<String> {
     (!keys.is_empty()).then(|| {
         format!(
-            "{name} needs setup: {} (Settings → Components)",
+            "{name} needs setup: {} (the Components page)",
             labels(decl, keys)
         )
     })
@@ -568,7 +568,7 @@ impl Adapter {
         Ok(())
     }
 
-    /// Every installed component with settings, as Settings → Components
+    /// Every installed component with settings, as the Components page
     /// renders it. Secret values are never returned.
     pub fn component_settings(&self) -> Result<Vec<ComponentSettingsView>, String> {
         let dir = self.component_settings_dir()?;
@@ -865,7 +865,7 @@ mod tests {
                 &["orgKey".to_string(), "appKey".to_string()]
             )
             .as_deref(),
-            Some("bot needs setup: ORGKEY, APPKEY (Settings → Components)")
+            Some("bot needs setup: ORGKEY, APPKEY (the Components page)")
         );
         assert_eq!(needs_setup("bot", &decl(), &[]), None);
     }

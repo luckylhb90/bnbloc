@@ -1,22 +1,23 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api, type MemberComponent } from "@/lib/api";
-import { ofScope, type ComponentSettingsView } from "@/lib/componentSettings";
-import { componentSettingsApi } from "@/lib/componentSettingsApi";
-import { relativeTime } from "@/lib/format";
+import { needsSetupText, ofScope } from "@/lib/componentSettings";
+import { Button } from "@/ui/Button";
+import { Badge, Card } from "@/ui/Card";
 import { ErrorBox } from "@/ui/ErrorBox";
-import { SettingsForm } from "@/views/settings/SettingsForm";
+import { ComponentSettingsDialog } from "@/views/settings/ComponentSettingsDialog";
 import { errorText } from "@/lib/errors";
 
-// Org-admin: the organization's settings of the components published to it
-// (docs/prd/2026-10-19-component-settings.md), one form per component with
-// any organization-scope setting. The values hold for every member of this
-// organization; they are stored sealed on the server, a secret is never
-// shown back, and a component that runs on members' computers (a plugin, a
-// stdio MCP tool) gets them there. A member's own settings are set on their
-// desktop instead; the platform's in the platform console.
+// Org-admin: the components published to this organization that take
+// organization settings (docs/prd/2026-10-19-component-settings.md), each
+// with what it still needs; Settings opens the same dialog as the
+// component's card on the Components page. The values hold for every member
+// of this organization; they are stored sealed on the server, a secret is
+// never shown back, and a component that runs on members' computers (a
+// plugin, a stdio MCP tool) gets them there.
 export function ComponentSettingsTab() {
   const [components, setComponents] = useState<readonly MemberComponent[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [open, setOpen] = useState<MemberComponent | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -45,53 +46,31 @@ export function ComponentSettingsTab() {
       {components && components.length === 0 && !error && (
         <p className="text-sm text-[var(--color-fg-subtle)]">No component published to this organization takes organization settings.</p>
       )}
-      {(components ?? []).map((c) => (
-        <OrgComponentSettings key={`${c.kind}/${c.name}`} component={c} />
-      ))}
+      {(components ?? []).map((c) => {
+        const setup = needsSetupText(c.settingsMissing ?? [], c.settings ?? []);
+        return (
+          <Card key={`${c.kind}/${c.name}`} className="flex flex-wrap items-center gap-3 px-4 py-3">
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm font-medium">{c.name}</span>
+                <Badge tone="neutral" className="tabular">v{c.version}</Badge>
+                {setup && <Badge tone="warning">Needs setup</Badge>}
+              </div>
+              <p className="mt-0.5 text-xs text-[var(--color-fg-subtle)]">{setup || c.description || "Set up."}</p>
+            </div>
+            <Button size="sm" variant={setup ? "primary" : "outline"} onClick={() => setOpen(c)}>
+              {setup ? "Set up" : "Settings"}
+            </Button>
+          </Card>
+        );
+      })}
+      <ComponentSettingsDialog
+        target={open}
+        onClose={() => {
+          setOpen(null);
+          void load();
+        }}
+      />
     </section>
-  );
-}
-
-// OrgComponentSettings is one component's organization settings.
-function OrgComponentSettings({ component }: { readonly component: MemberComponent }) {
-  const ref = useMemo(() => ({ name: component.name, kind: component.kind }), [component.name, component.kind]);
-  const [view, setView] = useState<ComponentSettingsView | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let live = true;
-    componentSettingsApi
-      .get("org", ref)
-      .then((v) => live && setView(v))
-      .catch((e: unknown) => live && setError(errorText(e, `failed to load ${component.name}'s settings`)));
-    return () => {
-      live = false;
-    };
-  }, [ref, component.name]);
-
-  if (error) return <ErrorBox>{error}</ErrorBox>;
-  if (!view) return null;
-  if (!view.available) {
-    return (
-      <p className="text-sm text-[var(--color-fg-subtle)]">
-        {view.name}: organization settings are off on this deployment: the gateway has no secret store key (BNBLOC_SECRET_STORE_KEY). Ask your platform operator.
-      </p>
-    );
-  }
-  const updated = view.updatedBy || view.updatedAtMs ? `Saved${view.updatedBy ? ` by ${view.updatedBy}` : ""}${view.updatedAtMs ? ` ${relativeTime(view.updatedAtMs)}` : ""}.` : "Not saved yet.";
-  return (
-    <SettingsForm
-      title={view.name}
-      version={view.version}
-      status={updated}
-      fields={view.fields}
-      missing={view.missing.map((s) => s.key)}
-      declaration={[...view.fields, ...view.missing]}
-      reachesMembers={view.reachesMembers}
-      onSave={async (update) => setView(await componentSettingsApi.save("org", ref, update))}
-      savedText={`${view.name} settings saved`}
-    >
-      {view.description && <p className="text-xs text-[var(--color-fg-subtle)]">{view.description}</p>}
-    </SettingsForm>
   );
 }

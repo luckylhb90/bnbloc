@@ -172,7 +172,7 @@ func TestMCPToolsMissingDoNotFailTheTurn(t *testing.T) {
 		t.Fatalf("profiles = %+v", ps)
 	}
 	missing := strings.Join(toStrings(runningDiagnostics(g)["contentMissing"]), "; ")
-	for _, want := range []string{"MCP tool ghost", "codeword (not downloaded on this computer yet)", "salted (needs setup: set Salt in Settings → Components)", "search (the agent accepts no http MCP server)"} {
+	for _, want := range []string{"MCP tool ghost", "codeword (not downloaded on this computer yet)", "salted (needs setup: set Salt on the Components page)", "search (the agent accepts no http MCP server)"} {
 		if !strings.Contains(missing, want) {
 			t.Fatalf("missing %q in %q", want, missing)
 		}
@@ -376,7 +376,7 @@ func TestMCPOAuthSignIn(t *testing.T) {
 	refs := []wire.ContentRef{{ComponentID: "cc_reviewer", Owner: "maya", Name: "reviewer"}}
 
 	_, missing, _ := b.resolveMCP([]wire.ContentMCPTool{driveTool()}, refs, "maya", "home", true)
-	if len(missing) != 1 || !strings.Contains(missing[0], "sign in to drive in Settings → Components") {
+	if len(missing) != 1 || !strings.Contains(missing[0], "sign in to drive on the Components page") {
 		t.Fatalf("not signed in: missing = %v", missing)
 	}
 	f.setSignIn(t, "drive", "old-token", time.Now().Add(10*time.Second).UnixMilli())
