@@ -290,6 +290,11 @@ bnbloc components rotate-secret corp-notify   # new secret, printed once
 bnbloc components test corp-notify            # test notification to you, with the notifier's answer
 ```
 
+An auth provider holds the same kind of credential (it signs its ask for
+its settings, [architecture/endpoint-components.md](./architecture/endpoint-components.md)):
+its install prints it once, and `bnbloc components rotate-secret corp-sso
+--kind auth-provider` replaces it.
+
 A previewer package (`bnbloc.previewer.package/v1`, see
 [architecture/previewer-components.md](./architecture/previewer-components.md))
 pins one bundle archive; `previewers publish` checks the package and archive,

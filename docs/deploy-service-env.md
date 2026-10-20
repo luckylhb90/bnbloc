@@ -48,7 +48,7 @@ embedded SPA. Stateless apart from the shared database — scale horizontally.
 | `BNBLOC_MYSQL_DSN` | yes | Tenant registry, platform settings, components. |
 | `BNBLOC_INTERNAL_KEY` | yes | Signs `X-Bnbloc-User`. Same value as all backends. |
 | `BNBLOC_SESSION_SIGNING_KEY` | yes | Signs session JWTs. All replicas share it. |
-| `BNBLOC_SECRET_STORE_KEY` | for component settings | 32 random bytes (base64 or hex) sealing components' platform and organization settings at rest. All replicas share it, and the room service (app data). Unset = those settings cannot be stored; malformed = refuses to start. |
+| `BNBLOC_SECRET_STORE_KEY` | for component settings | 32 random bytes (base64 or hex) sealing components' platform and organization settings and endpoint components' credentials (notifiers, auth providers) at rest. All replicas share it, and realtime (notifier deliveries) and the room service (app data). Unset = those settings cannot be stored and no notifier or auth provider installs; malformed = refuses to start. |
 | `BNBLOC_OIDC_ISSUER_URL` + `BNBLOC_OIDC_CLIENT_ID` | no | OIDC relying party. Unset in production = direct login disabled; sign in via an installed auth-provider (SSO). |
 | `BNBLOC_SUPER_ADMINS` | yes | Comma-separated verified subject ids/emails (cross-tenant admins). |
 | `BNBLOC_PUBLIC_URL` | recommended | Public origin; every link and artifact URL the gateway hands out (content notifications, published package artifacts, previewer CSP). Unset = each request's own origin. |
@@ -116,6 +116,7 @@ history. Kubernetes runs it as a StatefulSet behind the headless
 | `BNBLOC_SEARCH_OPENSEARCH_URL` | optional | OpenSearch base URL for message search; unset = MySQL FULLTEXT. Probed at startup: in production an unreachable cluster, refused credentials or an index that is neither ready nor creatable stops the replica. Helm: `realtime.search.opensearch.url`. |
 | `BNBLOC_SEARCH_OPENSEARCH_USERNAME` / `_PASSWORD` | optional | HTTP basic credentials, both or neither; the password is a secret (Helm: `passwordSecretRef`). |
 | `BNBLOC_SEARCH_OPENSEARCH_INDEX_PREFIX` | optional | Index `<prefix>-room-messages-v<N>`; default `bnbloc`. |
+| `BNBLOC_SECRET_STORE_KEY` | with notifiers | The gateway's value: opens each notifier's signing secret (sealed at rest) to sign deliveries. Unset = no notifier whose secret is sealed is delivered to; malformed = refuses to start. |
 
 Realtime also runs the notification outbox worker (signed delivery to the
 installed notifier components, see [notifications.md](./notifications.md)); it

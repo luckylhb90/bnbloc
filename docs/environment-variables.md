@@ -63,7 +63,7 @@ sync-layer HMAC. The value must be identical across every service.
 | `BNBLOC_TENANT_AUTOPROVISION` | on | `false` locks tenant membership to pre-provisioned tenants instead of auto-provisioning at login. |
 | `BNBLOC_DESKTOP_DOWNLOAD_URL` | — | Fallback desktop download link served when the deployment has no curated release history. |
 | `BNBLOC_EXT_ALLOW_UNSIGNED` | unset | Dev-only: accept unsigned component packages (see Components below). |
-| `BNBLOC_SECRET_STORE_KEY` | — (component settings off) | 32 random bytes, base64 or hex (`openssl rand -base64 32`), sealing component settings at rest (AES-256-GCM, `internal/sealbox`): the platform and organization values admins enter for the settings components declare (`/v1/platform/components/{name}/settings`, `/v1/tenant/components/{name}/settings`). Every gateway replica shares it, and the room service reads the same value for interactive apps' data (see Artifact files (room)). Unset = those settings cannot be stored (a save answers 409; a component that requires one needs setup); a malformed value refuses to start. Losing or changing it makes stored values unreadable: admins enter them again. Secret. |
+| `BNBLOC_SECRET_STORE_KEY` | — (component settings off) | 32 random bytes, base64 or hex (`openssl rand -base64 32`), sealing component settings at rest (AES-256-GCM, `internal/sealbox`): the platform and organization values admins enter for the settings components declare (`/v1/platform/components/{name}/settings`, `/v1/tenant/components/{name}/settings`). It also seals endpoint components' credentials (a notifier's signing secret, an auth provider's; `internal/componentcred`), which realtime opens to sign notifier deliveries. Every gateway replica shares it, realtime reads the same value (see Member notifications), and the room service reads it for interactive apps' data (see Artifact files (room)). Unset = those settings cannot be stored (a save answers 409; a component that requires one needs setup) and a notifier or auth provider cannot be installed (409); a malformed value refuses to start. Losing or changing it makes stored values unreadable: admins enter them again and rotate every endpoint component's credential. Secret. |
 
 ## Internal wiring
 
@@ -157,7 +157,8 @@ writes and reads them over the signed internal route).
 
 Notifications are delivered to installed notifier components (super-admin
 installs, rollout and tenant scope like every component; each component's
-signing secret lives in platform settings). A member's own delivery (a
+signing secret lives in platform settings, sealed with
+`BNBLOC_SECRET_STORE_KEY`). A member's own delivery (a
 personal bot) is a desktop plugin whose settings stay on the member's
 machine; the server stores no member notifier settings. Contract:
 [notifications.md](./notifications.md).
@@ -168,6 +169,7 @@ machine; the server stores no member notifier settings. Contract:
 | `BNBLOC_WEB_PUSH_VAPID_PUBLIC_KEY` | realtime | — (channel off) | Browser push notifications: the VAPID public key (base64url P-256 point), generate the pair with `bnbloc keys gen-vapid`. Served to browsers by `GET /v1/push/vapid-public-key`. Neither key set = the channel is off (the route answers 404, the web hides the toggle); one without the other or a mismatched pair is fatal at startup. Not required in production. |
 | `BNBLOC_WEB_PUSH_VAPID_PRIVATE_KEY` | realtime | — | The matching VAPID private key (base64url P-256 scalar). Secret. Rotating the pair invalidates every browser subscription (members turn the toggle on again). |
 | `BNBLOC_WEB_PUSH_VAPID_SUBJECT` | realtime | an https `BNBLOC_PUBLIC_URL` | VAPID contact, `mailto:<address>` or `https://<origin>`, sent to push services. Required when the keys are set and `BNBLOC_PUBLIC_URL` is not https. |
+| `BNBLOC_SECRET_STORE_KEY` | realtime | — | The gateway's value: realtime opens each notifier's signing secret with it to sign deliveries. Unset = a notifier whose secret is sealed (installed or rotated since secrets are sealed) is not delivered to (the outbox retries, logged); a secret stored in clear before then still works. Malformed refuses to start. Secret. |
 
 ## Message search (realtime)
 

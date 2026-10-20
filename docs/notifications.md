@@ -164,17 +164,28 @@ answer 200 `{name, contract: "bnbloc.notifier.contract/v1"}`) before the
 record is saved; realtime activates it on its next reconcile (at most 30 s,
 no restart).
 
-**Signing secret.** The first install generates the notifier's signing
-secret server-side and returns it **once** (the install response's `secret`;
-the web shows it with a copy button, the CLI prints it). Configure it on the
-notifier. It is stored in platform settings, never in the package and never
-in any list response.
+**Signing secret.** The notifier's signing secret is its component
+credential (every endpoint component beside the gateway holds one:
+[architecture/endpoint-components.md](./architecture/endpoint-components.md)).
+The first install generates it server-side and returns it **once** (the
+install response's `secret`; the web shows it with a copy button, the CLI
+prints it). Configure it on the notifier. It is stored in platform settings
+sealed with `BNBLOC_SECRET_STORE_KEY` (the gateway creates and verifies it,
+realtime opens it to sign deliveries, so both need the key; without it on
+the gateway a notifier install is refused), never in the package and never
+in any list response. A secret stored before credentials were sealed (in
+clear) keeps working until the first rotation replaces it.
 
 - `POST /v1/platform/components/{name}/secret/rotate?kind=notifier`
   (super-admin) replaces it and returns the new one once
   (`bnbloc components rotate-secret <name>`; "Rotate secret" in the web).
   The receiver accepts a comma list of secrets: add the new one beside the
   old, then remove the old.
+- The same secret signs the notifier's own calls to the gateway: its replies
+  (below) and its ask for its settings (`GET /v1/component-settings`): a
+  notifier's settings (its messenger's API origin and keys, its tenant
+  allowlist) are declared in its package and set in Platform → Components →
+  Settings, and the notifier reads them itself.
 - `POST /v1/platform/components/{name}/test?kind=notifier` (super-admin)
   sends one signed `test` notification to the caller through the notifier's
   default delivery and answers `{delivered, status, error, eventId, results}`

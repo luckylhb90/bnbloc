@@ -23,6 +23,13 @@ extend it" references.
   and desktop serving, the sandboxed frame protocol and SDK, and how to build,
   sign and publish one.
 
+## Endpoint components
+
+- [Endpoint components](endpoint-components.md) — a notifier or an auth
+  provider beside the gateway: its one credential (created at install,
+  sealed, rotated), the signed calls it makes, and how it asks for its
+  settings (`GET /v1/component-settings`).
+
 ## Rooms and Agents
 
 - [Room agent roster and remote deployment](room-agent-roster.md) — how members

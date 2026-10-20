@@ -1,9 +1,11 @@
 # Components describe their own settings (2026-10-19)
 
 Status: slice 1 built (2026-10-20, §5); slice 2's own settings page built
-(2026-10-20, §2.2a, §5), moving local skills to its page not yet; slices 3–5
-proposed. Owner: the component contract (`core/pkgmeta`), the settings store
-(`internal/componentsettings`), the one settings form.
+(2026-10-20, §2.2a, §5), moving local skills to its page not yet; slice 3
+built (2026-10-20, §2.3, §5: endpoint components ask, in a staged
+migration); slices 4–5 proposed. Owner: the component contract
+(`core/pkgmeta`), the settings store (`internal/componentsettings`), the
+one settings form.
 
 A component that needs a setting (a URL, a key, a model, a path, a switch)
 declares it in its own manifest. The platform stores the values, shows one
@@ -183,7 +185,7 @@ would be (decided 2026-10-19).
 |---|---|
 | A process on a machine (stdio MCP tool, plugin, desktop sidecar, manifest core) | `deliver.env` as its environment; every value also in a JSON settings file named by `BNBLOC_COMPONENT_SETTINGS_FILE` (0600, rewritten on change) |
 | An MCP tool over HTTP | `deliver.header` (`{"header": "X-Api-Key"}` or bearer) |
-| An endpoint component beside the gateway (notifier, auth provider) | it asks: `GET /v1/component-settings` with its install identity, answered its platform and organization values (per tenant); a change notifies it to ask again |
+| An endpoint component beside the gateway (notifier, auth provider) | it asks: `GET /v1/component-settings` signed with its component credential, answered its platform and organization values (per tenant) and a version; it asks again every minute and applies a changed version (decided 2026-10-20: pull, no push; `docs/architecture/endpoint-components.md`) |
 | A built-in adapter (media, decision, assist) | §2.4 |
 
 A stdio tool's values, secrets included, are visible to the agent CLI
@@ -256,6 +258,18 @@ organization or a member (decided 2026-10-20):
 6. **A secret leaks through the assist.** The note goes to the assist
    model like any assist input; the answer fills the form only; the run's
    audit row holds no input.
+7. **A wrong console value takes sign-in down** (slice 3: an auth provider
+   reads its settings). A changed answer is applied by building a new
+   provider beside the running one and swapping only when it builds; a
+   failed build keeps the old one and logs why. During the staged
+   migration the environment is still the fallback for every value not
+   set in the console.
+8. **Sealing breaks deliveries** (slice 3: the notifier's secret is now
+   sealed and realtime must open it). A secret stored in clear before is
+   still read without the key, so the release itself changes nothing; a
+   rotation seals it, so realtime gets the key first (the deploy surfaces
+   pass it, the operator steps say so, and realtime logs at start when it
+   is missing).
 
 ## 5. Build order (slices of §2)
 
@@ -395,6 +409,71 @@ organization or a member (decided 2026-10-20):
 3. **Endpoint components ask.** `GET /v1/component-settings`; the notifier
    and the auth provider move their deployment environment into
    `settings`.
+
+   **Built 2026-10-20** (the platform's commits beside this record; the
+   components' own change in their repository;
+   `docs/architecture/endpoint-components.md`):
+   - *Declaration.* `settings` on notifier and auth-provider packages too
+     (the field-to-kinds table), scope `platform` or `org` only and no
+     `deliver` (`pkgmeta.AsksForSettings`, `validateSettings`); no
+     `settingsPage` (the one form).
+   - *Credential.* One per installed endpoint component
+     (`internal/componentcred`, replacing the notifier-only secret store):
+     created at install and answered once, rotated by a super admin
+     (`POST /v1/platform/components/{name}/secret/rotate?kind=…`, the CLI's
+     `--kind`, "Rotate secret" on every endpoint component's card), deleted
+     at uninstall; an upgrade of an auth provider installed before gets its
+     first one (shown once). Now **sealed at rest**
+     (`component.credential/<kind>/<name>`, `BNBLOC_SECRET_STORE_KEY`):
+     the gateway creates and verifies, realtime opens a notifier's to sign
+     deliveries, so realtime now loads the key too (compose, the
+     production overlay, Helm, the all-in-one image). Without the key on
+     the gateway a notifier or auth-provider install is refused (409). A
+     notifier secret stored in clear before (`notify.secret/<name>`) is
+     still read, with or without the key, until its first rotation or
+     uninstall removes it, so a deployed notifier keeps delivering across
+     the release (`TestLegacyNotifierSecretKeepsWorking`).
+   - *Signed calls.* `verifyComponentCall` is the one check
+     (`TestComponentCallSingleOwner`): the notifier's reply routes (the
+     body signed, the header its name, still behind the reply store) and
+     the ask (`X-Bnbloc-Component: <kind>/<name>`, the signature over
+     `GET /v1/component-settings`), 5-minute window both ways.
+   - *The ask.* `GET /v1/component-settings` answers
+     `wire.EndpointComponentSettings`: the stored platform values (secrets
+     included, no defaults filled in: the component applies its own, so a
+     value it still reads from its environment is not overridden), the
+     organization values of the organizations the install serves that
+     stored any, the required ones not set per scope, and `version`, a
+     hash of the rest (`componentsettings.Store.Endpoint`). Not logged, not
+     audited; 409 without the key.
+   - *Forms.* An endpoint component's platform settings are on its card in
+     the platform console like any component's, saying the component reads
+     them itself (`ComponentSettingsView.asks`); Organization → Component
+     settings lists components of every kind with organization settings
+     (`GET /v1/tenant/component-settings`), since an endpoint component is
+     in no member's catalog.
+   - *Staged migration (the components).* Sign-in depends on the auth
+     provider, so its move is in stages. Its deployment environment keeps
+     only what it needs before it can ask: its listen address, its public
+     URL, the gateway's address, its credential (and the notifier's signing
+     secret, which is the notifier's credential), and the secret-manager
+     reference that loads them. Every other value is declared in
+     `settings`; during the migration a value set in the console wins and
+     the old environment variable is the fallback (the component logs at
+     start which source each setting came from, keys only), and a changed
+     answer rebuilds the provider in place, keeping the old one when the
+     new values do not work. Once the deployment runs on console settings,
+     the fallback is deleted in a later change.
+   - *Not built.* A push to ask again (the minute's poll is the delay);
+     member values of an endpoint component (none by design); `check`
+     (slice 5). Before a component drops its environment fallback, two
+     bootstrap loops need the platform: an auth provider is not healthy
+     until it has settings, but its install probe requires health (and the
+     credential it asks with comes only from the install), and the
+     gateway activates an installed auth provider at boot with one probe,
+     not retried until the record changes. The install probe must accept a
+     provider that answers discover but waits for its settings, and the
+     activation must retry until it is healthy.
 4. **Model providers.** `docs/prd/2026-10-20-model-provider-components.md`.
 5. **The rest.** The sandbox's and core connection's desktop fields as
    their components' settings; Fill with AI and Check.

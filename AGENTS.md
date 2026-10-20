@@ -871,6 +871,20 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   per-member settings (personal delivery: the bullet above). There is no
   tenant webhook — do not add a second delivery seam beside it
   (`docs/notifications.md`).
+- **An endpoint component holds one credential and asks for its
+  settings.** A notifier or an auth provider runs beside the gateway, so
+  nothing is delivered to it: its credential (`internal/componentcred`, the
+  one owner: created at install, shown once, rotated, deleted; sealed at
+  rest with `BNBLOC_SECRET_STORE_KEY`, so realtime, which signs notifier
+  deliveries with it, loads the key too) signs its calls to the gateway,
+  and `verifyComponentCall` (services/gateway/component_credential.go) is
+  the one check of every such route (`TestComponentCallSingleOwner`). It
+  reads its platform and organization values with `GET
+  /v1/component-settings` (`componentsettings.Store.Endpoint`; no defaults
+  filled in, a `version` to poll on). Its declaration has no `deliver` and
+  no member scope (`pkgmeta.AsksForSettings`). Never hand an endpoint
+  component its values another way, and never add a second signature check
+  (`docs/architecture/endpoint-components.md`).
 - **Rollout policy gates every member surface.** An installed record's
   rollout (`extpipe.Record.Rollout`: auto ≡ default/empty, optin, off) is a
   read-time filter applied consistently in `/v1/cores`, `GET /v1/components`,
