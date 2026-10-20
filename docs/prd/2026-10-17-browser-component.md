@@ -453,8 +453,12 @@ support agents; the agent could not see the app and invented screens.
   run's pictured steps in order, 1.5 s each (the last 3 s), captioned with
   the replay's step line, at most 480 px wide for phone runs and 800 for
   others, at most 8 MB (shrink, then drop every other step, first and last
-  kept). Never a sign-in (§2.8a). The replay names the GIF; it cannot link
-  it (the runner frame allows no downloads).
+  kept). Never a sign-in (§2.8a). Captions are drawn in the system's own
+  fonts, picked from a short ordered list per OS (CJK first, then
+  Vietnamese and Latin coverage): each character from the first font that
+  has it, lines wrapped by width, between CJK characters too; a built-in
+  7×13 ASCII font only on a machine with none of them. The replay names the
+  GIF; it cannot link it (the runner frame allows no downloads).
 - **AI.** The agent writes the guide's text; the GIF carries the run's own
   step lines. No new model client.
 
