@@ -92,6 +92,12 @@ task declares and relays the reply. Nothing else calls a model.
   skills (paths under the home, counts, one skill name each, never a file's
   content), which to add to the member's extra skill folders; only listed
   paths are kept.
+  `explain-source-use` (json: `summary`, `uses` as a list, `mismatch`; no
+  context) explains to an organization admin what a room's scheduled tasks
+  would do with organization records it asks to read, from the ask's
+  purpose and the package's tasks the console sends as `<text>`
+  (`web/src/lib/roomSources.ts`), and flags a task beyond the stated
+  purpose (`docs/prd/2026-10-20-rooms-as-components.md` §2.3).
   `find-a-way` (json: `cause`, `summary`, `fixes` as `items` of
   `{action, target, why}`; room, capabilities; gated, threshold 0.7)
   says what stopped an agent's reply and proposes up to three fixes of the

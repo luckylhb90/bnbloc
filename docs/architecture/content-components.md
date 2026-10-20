@@ -250,19 +250,48 @@ skew, and a later release drops it).
   `recipient`, `recurrence`, `timezone`), `requires.expert` (the room
   expert, one `name@range`), `requires.skills`/`prompts` (packs turned on
   in the room), `requires.mcp` (as for any content), `apps` (works by
-  `name@range`) and `sources` (`wire.RoomSources`, the one list; today
-  `runs`). A schedule is an AI task or a notice to the room's members
+  `name@range`) and `sources` (`wire.RoomSourceAsk`: a name of the one
+  list `wire.RoomSources`, today `runs`, and its purpose). A schedule is an AI task or a notice to the room's members
   (`to: "room"`): one that posts as a person or drives an agent would act
   as whoever installs it, and a notice names no people or group. It
   recurs (no `once`), its text passes `schedule.CheckText` (realtime's own
   rule), its recurrence `schedule.Validate`, and its channel is one of the
   package's. No other kind carries these fields (`errRoomFields`). A room
   package is no content use (`KindSpec.Use` false) and runs nothing.
-- **Sources are declared, never granted.** A package lists the records its
-  scheduled tasks ask to read; the Library, the install dialog and the new
-  room's first-visit card show each as "asks to read …, needs your
-  organization admin's consent". Nothing reads one yet (slice 2 adds the
-  consent and `read_records`).
+- **Sources are asked for with a purpose; the organization admin grants
+  them per room.** A package lists the records its scheduled tasks ask to
+  read as `sources: [{name, purpose}]` (`wire.RoomSourceAsk`; the name from
+  the one list `wire.RoomSources`, today `runs`; the purpose required,
+  within `wire.MaxRoomSourcePurpose`). Installing it records an ask of the
+  new room (`room_source_grants`: the package, its version, the purpose and
+  a random alias key), waiting. The consent's one owner is
+  `services/gateway/room_sources.go`: the organization admin grants it
+  (`PUT /v1/tenant/room-sources/{roomId}/{source}`, a scope of
+  `wire.RoomSourceScopes`: `all`, `none-private` (every room whose
+  visibility is shared), `opted-in` (rooms whose owner opted in,
+  `room_source_opt_ins`)) or withdraws it (`DELETE`, back to waiting), both
+  audited (`wire.AuditKindSource`); `sourceCover.covers` is the one rule of
+  which rooms' records a grant reaches (never the reading room itself).
+  A room's members read its asks, the rooms that review it and its
+  opt-ins at `GET /v1/rooms/{roomId}/sources` (the header's note,
+  `RoomSourcesIndicator`); its owner opts it in at
+  `PUT …/sources/{source}/opt-in` (room settings); its owner or an admin
+  asks the admins at `POST …/sources/{source}/ask-admin` (the admins' one
+  notification path, `notifyOrgAdmins`, as a room report, once a day). The
+  console is Organization → Room sources (`RoomSourcesTab`,
+  `RoomSourceDialog`: the purpose, the package's scheduled tasks and the
+  built-in `explain-source-use` assist's explanation, which flags a task
+  beyond the purpose). A schedule of the room reads a granted source only
+  through the schedule-run tool `read_records`
+  (`services/gateway/schedule_records.go`; offered to a room that asks for
+  a source): within the grant at the moment of the call, for a schedule
+  whose owner is the room's owner or an admin, finished runs only (the
+  request cut to 1500 bytes, the reply the run record's preview, the
+  agent, the outcome and its failure sentence, the room and the time),
+  people named only for an organization admin's schedule and otherwise
+  the ask's stable aliases (`sourceAlias`), at most 25 records and 18 KiB
+  a page (`next` continues), 4 reads a run, a range of at most 31 days,
+  each read audited (the range and the count, never a record).
 - **Save as component.** `GET /v1/rooms/{roomId}/component-draft` (the
   room's owner or an admin, `roomEditorClaims`;
   `services/gateway/room_components.go`) reads the room through the
@@ -300,7 +329,7 @@ skew, and a later release drops it).
   (scope `room-install`, the room). The reply (`wire.RoomInstallReply`)
   is kept by the web for the room's first visit (`RoomStartCard`: the
   welcome, the quick prompts as composer drafts, the paused schedules,
-  what was left out, the sources asked for).
+  what was left out, the sources waiting for the admin's consent).
 - **Where they appear.** The Library's Rooms tab (`RoomsTab`: view, new
   version, share, publish, delete, "Create a room"), and Plaza's "New
   room" → "From a room component…".

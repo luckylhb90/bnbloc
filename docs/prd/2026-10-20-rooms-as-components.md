@@ -1,7 +1,8 @@
 # Rooms as components, and a room that reviews outcomes (2026-10-20)
 
 Status: slice 1 built (the room kind, save and install, templates folded
-in; §5, §6); slices 2 and 3 proposed. Owner: the content component
+in; §5, §6); slice 2 built (the `runs` source: consent, transparency,
+`read_records`; §7); slice 3 proposed. Owner: the content component
 contract (a new kind), the schedule runs' sources, the room's own
 content.
 
@@ -71,8 +72,8 @@ platform.
 
 ### 2.3 Reading other rooms: a consented source
 
-- A room package may ask for a **source**: a kind of organization record
-  its scheduled tasks may read. The first is `runs`: agent conversations
+- A room package may ask for a **source**, with its **purpose**: a kind
+  of organization record its scheduled tasks may read. The first is `runs`: agent conversations
   of the organization (request and reply text, the agent, the outcome
   status, the room and time).
 - Consent is the organization admin's, per installed room: what it reads
@@ -121,6 +122,7 @@ person, a schedule runs only once the owner turns it on.
 1. The room kind: save a room as a component, install it as a room;
    templates folded in. **Built** (§6; commits 435ed025, 74124c84).
 2. The `runs` source with consent, transparency and `read_records`.
+   **Built** (§7; commits f8cc0fbc, 06ef1194).
 3. The outcome review room as built-in content; the digest and fixes as
    tasks.
 
@@ -183,3 +185,134 @@ packages". What the slice decided, against the code:
   Cost: one assist call per "Fill with AI"; install does a bounded number
   of backend calls (20 channels, 20 schedules, 10 apps, 32 requirements).
 
+## 7. Slice 2 as built
+
+The reference is docs/architecture/content-components.md, "Room
+packages" ("Sources are asked for with a purpose"). What the slice
+decided, against the code:
+
+- **An ask carries its purpose.** A package's `sources` are
+  `[{name, purpose}]` (`wire.RoomSourceAsk`; the purpose required, at most
+  `wire.MaxRoomSourcePurpose` characters, a row of `contentpkg.Limits()`),
+  replacing slice 1's list of names; the save dialog asks for the purpose
+  when a source is ticked. Installing records the ask for the new room
+  (`room_source_grants`: the package's id, name and version, the purpose,
+  who installed it and a random alias key), waiting; the install reply
+  and the first-visit card say it waits for the admin.
+- **The consent's one owner is `services/gateway/room_sources.go`.** The
+  organization admin grants an ask a scope or withdraws it (Organization
+  → Room sources; `PUT`/`DELETE /v1/tenant/room-sources/{roomId}/{source}`,
+  `manage_org`), audited as `wire.AuditKindSource`. A withdrawal empties
+  the scope: the ask stays (the admin can grant it again; its alias key is
+  stable for the ask's life) and the next read refuses. Scopes:
+  - `all`: every room of the organization;
+  - `none-private`: every room whose visibility is shared. "Private" here
+    is the room's own notion (`store.VisibilityPrivate`, invite only); a
+    room of unknown visibility counts as private;
+  - `opted-in`: rooms whose owner opted in (room settings → Organization
+    reviews; `PUT /v1/rooms/{roomId}/sources/{source}/opt-in`, the owner
+    only, audited). The opt-in is the room's, per source, for every
+    `opted-in` grant of the organization: the header tells its members
+    which rooms read it.
+  `sourceCover.covers` is the one rule; the reading room's own records are
+  never covered (its members read them already).
+- **Transparency.** `GET /v1/rooms/{roomId}/sources` (any member, a
+  visitor too) answers the room's asks and where each stands, the rooms
+  whose grants cover it, and its opt-ins. The room header shows a note
+  beside the platform agents' one: "Outcomes reviewed" opens "This
+  organization reviews conversation outcomes in <room name>", linked when
+  the member is a member of the reviewing room (only its name otherwise);
+  a reading room shows "Waiting for your organization admin" (or that it
+  reads), its purpose, and "Ask admin" for its owner or admins.
+- **Ask admin** goes through the admins' one notification path,
+  `notifyOrgAdmins` (extracted from the room report, `wire.NotificationRoomReport`:
+  an admin can turn it off), linking to the console, at most once a day
+  per room and source; a granted ask answers 409.
+- **`read_records(source, since, until, next)`** is a schedule-run tool
+  (`services/gateway/schedule_records.go`), never an agent tool. It is
+  offered to a room that asks for a source (so a run whose ask waits can
+  say so in its summary) and answers only:
+  - within the grant at the moment of the call (no grant, waiting or
+    withdrawn: refused);
+  - for a schedule whose owner is the room's owner or an admin now (the
+    grant is the room's; a member's own schedule in it reads nothing);
+  - finished runs (the terminal statuses) in `[since, until)`: RFC 3339
+    times or dates in the schedule's timezone, by default the 24 hours
+    before the slot, never past the slot, at most 31 days;
+  - per record: the run id, time, room name and id, requester, agent
+    (`owner/provider`), whether it was borrowed or dispatched by another
+    agent, the status and, for a failure, its member-facing sentence
+    (`AgentJobFailureReason.Text`), the request cut to 1500 bytes and the
+    reply as the run record keeps it (`wire.RunPreview`, 280 characters:
+    the run row holds only that preview, and reading the room's messages
+    would be a second read path; not added);
+  - people (the requester and the agent's owner) by name only when the
+    schedule's owner is an organization admin (`readerSeesNames`, PRD
+    §3), else as `member-<hmac>` of the ask's alias key: stable across
+    reads of one grant, different across grants;
+  - at most 25 records and 18 KiB a page (`next` continues without
+    repeats), scanning at most 5 store pages a call, 4 calls a run
+    (beside the run's 8 model steps); the page is fenced as data;
+  - each call audited (the schedule, the source, the range, the count,
+    the scope and whether names were shown; never a record), refusals
+    as `deny`.
+- **AI.** The grant dialog runs the built-in assist `explain-source-use`
+  (json: `summary`, `uses`, `mismatch`; through the assist route, the
+  admin's budget; no new model client) over the purpose and the package
+  version's scheduled tasks the console lists, and flags a task beyond
+  the purpose. The admin decides.
+- **One owner each, collapsed while building.** A run's reply and usage
+  summary in its diagnostics is read only by `store.RunDiag` (activity's
+  run records and its team plan's cost sample used private copies); a
+  run page's cursor is `store.AgentRunCursor.String` /
+  `ParseAgentRunCursor` (activity's and read_records'); the terminal
+  statuses a query names are `store.TerminalJobStatuses()`.
+  `TestRoomSourceConsentSingleOwner` keeps grants, scopes and the
+  gateway's run reads in their owners.
+- **Release safety.** The migration `2026_10_room_sources` only adds two
+  tables (both deleted with their room, `roomOwnedTables`); the previous
+  release's gateway never reads them. A room package saved by slice 1
+  with `"sources": ["runs"]` no longer validates (pre-launch: no
+  compatibility); its author saves a new version with a purpose.
+
+**Not in this slice.**
+
+- The find-a-way card's cause and the member's choice
+  (docs/prd/2026-10-20-never-a-dead-end.md §5.2) are not persisted: the
+  card's result lives in the member's session (a memo in the web), and a
+  "report" is a notification not linked to its run. Adding persistence was
+  out of scope here; `read_records` carries the run's outcome and failure
+  sentence only. Slice 3 decides whether the review needs the card's
+  cause (it can judge the cause from the request and reply itself).
+- The AI explanation reads the package version's scheduled tasks, not the
+  room's current ones: a task edited in the room after the grant is not
+  re-explained. The grant is the room's, so the console shows which
+  component and version it came from; comparing the room's schedules with
+  the package's is a later step.
+
+**Design review (slice 2).**
+
+| Lens | Answer |
+|---|---|
+| Actors | The installer asks (recorded at install); the org admin grants, withdraws and sees names; the room's owner opts it in; the reading room's owner or admins ask the admin and own the schedules that read; a member's own schedule in the reading room reads nothing; members (visitors too) of covered rooms see who reviews them; a non-member of a room reads nothing of its sources. |
+| Time and lifecycle | A withdrawal holds at the next read (the grant is read at each call); a deleted room loses its asks and opt-ins; an alias is stable for an ask's life, a re-install is a new ask. |
+| Scale and cost | Bounded per call and per run (records, bytes, store pages, reads); the run's model steps stay 8; the console lists at most 500 asks. |
+| Failure | A store failure answers the model "could not be read" and is not audited as a read; the ask route reports whether an admin was notified. |
+| Boundaries and privacy | Only finished runs of covered rooms, never the reading room's own, never the people chat (no agent runs there); names only for an org admin's schedule; the audit never holds a record. |
+| Abuse | Records are fenced as data; the ask to admins is deduplicated per day and spends the cost budget; the explanation flags tasks beyond the purpose. |
+| One owner | The consent (`room_sources.go`, archtest), the admins' notification (`notifyOrgAdmins`), the run diagnostics (`store.RunDiag`), the cursor. |
+| Defaults | A new ask waits; the dialog proposes `opted-in`, the narrowest scope; an unknown visibility is private. |
+| Load on agents | None: `read_records` is a schedule-run tool. |
+| Load on users | One note in the header; one dialog for the admin; one switch for an owner. |
+| Release | Additive tables; no data kept from slice 1 (pre-launch). |
+| Observability | Every grant, withdrawal, opt-in and read is in the organization's audit log ("Room sources"). |
+| AI capability | `explain-source-use` summarizes and flags; the admin decides. |
+| Component or platform | The platform keeps only the consent, the read and the audit; the review itself stays content (slice 3). |
+
+**Pre-mortem (slice 2).** 1. A member builds a reading room and reads
+everyone's conversations: the admin must grant it, the members of covered
+rooms see it, every read is audited, names stay hidden unless the schedule
+is an admin's. 2. A package states a harmless purpose and its tasks do
+more: the AI explanation flags it, the admin sees every task. 3. The
+review leaks a private room: `none-private` and `opted-in` exist, and the
+dialog proposes the narrowest.

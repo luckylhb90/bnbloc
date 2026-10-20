@@ -1542,8 +1542,9 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   templates are gone. Its schedules are AI tasks and notices to the room
   only (never one that posts as a person or drives an agent), checked by
   the schedule rules' owners (`schedule.CheckText`, `schedule.Validate`);
-  its `sources` come from the one list `wire.RoomSources` and are declared
-  and shown, never granted. A room's draft is only
+  its `sources` are asks with a purpose (`wire.RoomSourceAsk`, a name of
+  the one list `wire.RoomSources`), recorded for the room at install and
+  granted only by the organization admin (below). A room's draft is only
   `GET /v1/rooms/{roomId}/component-draft` (its owner or an admin) and is
   saved through the content form like every kind; a room is made from one
   only by `POST /v1/content-components/{id}/create-room`
@@ -1554,6 +1555,26 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   one copy of an app, shared with "Use this app"), and deletes the room
   when a step fails once it exists. A `name@range` reference resolves for
   a member only through `contentuse.Resolve`.
+- **A room reads organization records only through its consent:
+  `services/gateway/room_sources.go`** (docs/prd/2026-10-20-rooms-as-components.md
+  §2.3, §7). An installed room package's asks (`room_source_grants`) wait
+  until the organization admin grants a scope (`wire.RoomSourceScopes`) or
+  withdraws it, audited (`wire.AuditKindSource`); `sourceCover.covers` is
+  the one rule of which rooms a grant reaches (never the reading room; a
+  room of unknown visibility is private; `opted-in` reads the owner's
+  opt-ins, `room_source_opt_ins`). A schedule reads only through the
+  schedule-run tool `read_records` (`schedule_records.go`, never an agent
+  tool), within the grant at each call, for a schedule of the room's owner
+  or an admin, bounded and audited (range and count, never a record);
+  names reach only an organization admin's schedule (`readerSeesNames`),
+  everyone else reads the ask's aliases (`sourceAlias`). Members of a
+  covered room see which room reviews them (`GET /v1/rooms/{id}/sources`).
+  A note to an organization's admins goes through `notifyOrgAdmins`
+  (room reports and source asks alike). A run's reply and usage summary
+  in its diagnostics is read only by `store.RunDiag`, a run page's cursor
+  only by `store.AgentRunCursor`/`ParseAgentRunCursor`.
+  `TestRoomSourceConsentSingleOwner` keeps grants, scopes and the
+  gateway's run reads in their owners.
 - **Content requests on behalf of a job** (room tools `save_component`,
   `get_component`, …) use the `?job=&room=` grant and act as the job's human
   requester under the dispatch authority rules. Never save content as the

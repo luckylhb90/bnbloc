@@ -176,4 +176,7 @@ buttons are the manual part, and the fallback with the model off.
    and the manual entry, with the six actions.
 2. The outcome review room (`docs/prd/2026-10-20-rooms-as-components.md`)
    reads the cards' causes and what the member did with them as part of
-   the `runs` source.
+   the `runs` source. Not yet: the `runs` source (that PRD's §7) carries
+   each run's outcome and failure sentence, but the card's cause and the
+   member's choice are not persisted anywhere (the card's result is a
+   session memo in the web), so they are not in its records.
