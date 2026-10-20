@@ -193,6 +193,9 @@ type Bridge struct {
 	defaultCore string               // first configured core (used when none named)
 	http        *http.Client
 	stream      *http.Client
+	// download fetches room files: no total limit, only a stall
+	// (download.go).
+	download *http.Client
 	// summarizer condenses conversation older than the verbatim window (L1). The
 	// default is deterministic and model-free; a configurable LLM-backed
 	// summarizer can replace it later behind the same interface.
@@ -459,6 +462,7 @@ func New(cfg Config) *Bridge {
 		defaultCore: defaultCore,
 		http:        &http.Client{Timeout: 20 * time.Second},
 		stream:      &http.Client{},
+		download:    newDownloadClient(),
 		rooms:       map[string]context.CancelFunc{},
 		sessions:    map[sessionKey]*roomSession{},
 		workspaces:  newAgentWorkspaces(cfg.StateDir),
@@ -2746,7 +2750,7 @@ func (b *Bridge) gatewayGET(ctx context.Context, path string) ([]byte, error) {
 // Content-Disposition headers), so the bridge can write it with a real
 // extension and name it in the prompt without a separate metadata call.
 func (b *Bridge) gatewayGETAttachment(ctx context.Context, path string) (data []byte, contentType, filename string, err error) {
-	raw, header, err := b.send(ctx, b.http, http.MethodGet, b.cfg.GatewayBaseURL+path, b.gatewayAuth(ctx), nil, nil)
+	raw, header, err := b.send(ctx, b.download, http.MethodGet, b.cfg.GatewayBaseURL+path, b.gatewayAuth(ctx), nil, nil)
 	if err != nil {
 		return nil, "", "", err
 	}
