@@ -1,10 +1,13 @@
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { BroadcastIcon, DotsThreeIcon, PushPinIcon, PushPinSlashIcon, SquaresFourIcon, XIcon, XSquareIcon } from "@phosphor-icons/react";
+import { api } from "@/lib/api";
 import { fileCategory, versionFacts } from "@/lib/artifactFiles";
+import { pickFileByName } from "@/lib/artifactFrame";
 import { cn } from "@/lib/cn";
 import type { JobLive } from "@/lib/jobLive";
 import { DELIVERABLES_TAB, type WorkbenchTab } from "@/lib/workbenchTabs";
 import { Menu, MenuItem } from "@/ui/Menu";
+import { useToast } from "@/ui/Toast";
 import { fileInfoFor, useArtifactDetail, versionMeta } from "./artifactData";
 import { ArtifactTabView } from "./ArtifactTabView";
 import { attachmentFacts, attachmentFileInfo } from "@/views/artifact/fileInfo";
@@ -106,6 +109,23 @@ export function PreviewWorkbench({
   const [dragKey, setDragKey] = useState<string | null>(null);
   const [dropKey, setDropKey] = useState<string | null>(null);
   const tabRefs = useRef(new Map<string, HTMLButtonElement>());
+  const toast = useToast();
+  // A live page's relative link names a room file: the newest of that name
+  // opens in its own tab (where it can be downloaded), else the room says
+  // it has none.
+  const openFileByName = useCallback(
+    (name: string) => {
+      void api
+        .artifacts(roomId, { q: name, limit: 50 })
+        .then((list) => {
+          const file = pickFileByName(list.artifacts ?? [], name);
+          if (file) workbench.openArtifact(file.artifactId);
+          else toast.error(`This room has no file named ${name}`);
+        })
+        .catch(() => toast.error(`Could not open ${name}`));
+    },
+    [roomId, workbench, toast],
+  );
 
   const focusTab = (key: string) => {
     dispatch({ type: "activate", key });
@@ -297,6 +317,7 @@ export function PreviewWorkbench({
             }
             fullscreen={fullscreen}
             onToggleFullscreen={onToggleFullscreen}
+            onOpenFile={openFileByName}
           />
         ) : null}
       </div>

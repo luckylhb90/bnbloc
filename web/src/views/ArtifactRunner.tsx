@@ -27,7 +27,9 @@ import {
 //   - the ONLY channel out is postMessage, validated by origin ("null" for
 //     sandboxed frames), source frame and message shape (lib/artifactFrame)
 // Anything the artifact wants beyond its own box must go through the state
-// channel, which the host routes to the room — never to the member's session.
+// channel, which the host routes to the room — never to the member's session
+// — or name a room file to open (a relative link: onOpenFile), which the
+// host shows in its own tab.
 //
 // Collaboration protocol (both directions, room-scoped and transient):
 //   guest  -> host : { type: "artifact-state", state: <json value> }   (actor intent)
@@ -36,6 +38,9 @@ import {
 // onState; incoming remote state (onRemote) is delivered as-is. The guest is
 // expected to merge/appliance state idempotently; the protocol carries no
 // ordering guarantees beyond the room stream's own sequence.
+// The least time between two room files an artifact opens.
+const OPEN_FILE_INTERVAL_MS = 1000;
+
 function runnerUrl(): string {
   const internals = window.__TAURI_INTERNALS__ as { convertFileSrc?: ConvertFileSrc } | undefined;
   return artifactRunnerUrl({
@@ -56,6 +61,7 @@ export function ArtifactRunner({
   reloadToken = 0,
   onState,
   remoteState,
+  onOpenFile,
 }: {
   // Owning room; present only where the host can authorize the join snapshot.
   roomId?: string;
@@ -81,6 +87,9 @@ export function ArtifactRunner({
   onState?: (state: unknown) => void;
   // Latest remote state received from the room, delivered to the guest.
   remoteState?: { state: unknown; actor: string; nonce: number };
+  // Opens the room file a relative link in the artifact names (at most one
+  // a second); absent where there is no room to open it in.
+  onOpenFile?: (name: string) => void;
 }) {
   const [running, setRunning] = useState(autoRun);
   // Guest readiness + join snapshot: the bootstrap script pings on load (all
@@ -101,6 +110,9 @@ export function ArtifactRunner({
   const handedOffRef = useRef(false);
   const actorRef = useRef(actor);
   actorRef.current = actor;
+  const openFileRef = useRef(onOpenFile);
+  openFileRef.current = onOpenFile;
+  const lastOpenRef = useRef(0);
 
   // A version change remounts the guest: readiness resets (the new document
   // re-pings) and the snapshot refetches in case the board advanced.
@@ -172,6 +184,14 @@ export function ArtifactRunner({
           lastSentRef.current = msg.key;
           onState?.(msg.state);
           return;
+        case "open-file": {
+          // A page cannot flood the workbench with tabs.
+          const now = Date.now();
+          if (now - lastOpenRef.current < OPEN_FILE_INTERVAL_MS) return;
+          lastOpenRef.current = now;
+          openFileRef.current?.(msg.name);
+          return;
+        }
       }
     };
     window.addEventListener("message", onMessage);

@@ -15,7 +15,7 @@ const WIDTHS = [
   { value: "375", label: "Phone 375" },
 ] as const;
 
-export default function AppRenderer({ roomId, actor, artifactId, version, content, toolbar, onLocalState, remoteState }: ArtifactViewerProps) {
+export default function AppRenderer({ roomId, actor, artifactId, version, content, toolbar, onLocalState, remoteState, onOpenFile }: ArtifactViewerProps) {
   const [reload, setReload] = useState(0);
   const [width, setWidth] = useState<string>("fill");
   useViewerToolbar(
@@ -42,6 +42,7 @@ export default function AppRenderer({ roomId, actor, artifactId, version, conten
         reloadToken={reload}
         onState={onLocalState}
         remoteState={remoteState}
+        onOpenFile={onOpenFile}
       />
     </DeviceFrame>
   );

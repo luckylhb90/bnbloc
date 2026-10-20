@@ -457,8 +457,11 @@ support agents; the agent could not see the app and invented screens.
   fonts, picked from a short ordered list per OS (CJK first, then
   Vietnamese and Latin coverage): each character from the first font that
   has it, lines wrapped by width, between CJK characters too; a built-in
-  7×13 ASCII font only on a machine with none of them. The replay names the
-  GIF; it cannot link it (the runner frame allows no downloads).
+  7×13 ASCII font only on a machine with none of them. The replay links the
+  GIF: a relative link in a live page asks the host (the frame protocol's
+  `artifact-open-file`, by base name) to open the room's newest file of
+  that name in its own tab, where the member downloads it; the frame still
+  allows no downloads.
 - **AI.** The agent writes the guide's text; the GIF carries the run's own
   step lines. No new model client.
 

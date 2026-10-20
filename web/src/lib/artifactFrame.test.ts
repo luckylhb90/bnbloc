@@ -4,6 +4,9 @@ import {
   composeArtifactDocument,
   contentKey,
   loadMessage,
+  MAX_OPEN_FILE_NAME,
+  openFileName,
+  pickFileByName,
   readGuestMessage,
 } from "./artifactFrame.ts";
 import { MaxArtifactStateBytes } from "./wire.gen.ts";
@@ -97,9 +100,42 @@ function testLoadMessageAndContentKey(): void {
   assert(contentKey("abc") !== contentKey("abd"), "content change changes the key");
 }
 
+// A relative link becomes a request to open a room file by its base name;
+// the host takes only a plain name from the sandboxed frame.
+function testOpenFileRequests(): void {
+  const frame = {};
+  const msg = (name: unknown) => readGuestMessage({ origin: "null", source: frame, data: { type: "artifact-open-file", name } }, frame);
+  const ok = msg("run-1.gif");
+  assert(ok?.kind === "open-file" && ok.name === "run-1.gif", "a plain name is an open-file request");
+  for (const bad of ["", "  ", ".", "..", "a/b.gif", "a\\b.gif", "x\u0000.gif", 7, null, "x".repeat(MAX_OPEN_FILE_NAME + 1)]) {
+    assert(msg(bad) === null, `refused name ${JSON.stringify(bad)}`);
+  }
+  assert(openFileName(" guide.gif ") === "guide.gif", "a name is trimmed");
+  assert(readGuestMessage({ origin: "https://evil.example", source: frame, data: { type: "artifact-open-file", name: "a.gif" } }, frame) === null, "only the sandboxed frame asks");
+  const doc = composeArtifactDocument("<a href=\"browser-runs/run-1.gif\">GIF</a>");
+  assert(doc.includes("artifact-open-file") && doc.includes('closest("a[href]")'), "the bootstrap turns relative links into requests");
+  assert(doc.indexOf("artifact-open-file") < doc.indexOf("browser-runs/run-1.gif"), "the bootstrap runs before the content");
+}
+
+// Names repeat across runs and channels: the newest file of the name wins,
+// matched case-insensitively, by file name or else title.
+function testPickFileByName(): void {
+  const files = [
+    { artifactId: "a", fileName: "run.gif", title: "Run", updatedAtMs: 1 },
+    { artifactId: "b", fileName: "RUN.gif", title: "Run", updatedAtMs: 3 },
+    { artifactId: "c", fileName: "other.gif", title: "Other", updatedAtMs: 9 },
+    { artifactId: "d", title: "notes.md", updatedAtMs: 2 },
+  ];
+  assert(pickFileByName(files, "run.gif")?.artifactId === "b", "the newest of the name");
+  assert(pickFileByName(files, "notes.md")?.artifactId === "d", "a title stands in for a missing file name");
+  assert(pickFileByName(files, "missing.gif") === null, "no file of the name");
+}
+
 testRunnerUrlUsesTheShellSchemeOrTheBundle();
 testComposedDocumentAppliesThePolicyBeforeTheContent();
 testGuestMessagesMustComeFromTheSandboxedFrame();
 testStateIntentsAreBoundedJson();
 testLoadMessageAndContentKey();
 console.log("artifactFrame tests passed");
+testOpenFileRequests();
+testPickFileByName();

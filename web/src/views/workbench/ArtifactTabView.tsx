@@ -122,6 +122,7 @@ export function ArtifactTabView({
   onOpenWindow,
   fullscreen,
   onToggleFullscreen,
+  onOpenFile,
 }: {
   readonly roomId: string;
   readonly actor?: string;
@@ -140,6 +141,8 @@ export function ArtifactTabView({
   readonly onOpenWindow?: (() => void) | null;
   readonly fullscreen?: boolean;
   readonly onToggleFullscreen?: () => void;
+  // Opens a room file by name in the workbench (a live page's link).
+  readonly onOpenFile?: (name: string) => void;
 }) {
   const toast = useToast();
   const copy = useCopy();
@@ -530,6 +533,7 @@ export function ArtifactTabView({
             onSelection={setSelection}
             reveal={reveal}
             onPublish={latest && artifactId && meta?.storage === "blob" ? publishEdit : undefined}
+            onOpenFile={onOpenFile}
           />
         )}
         {mode === "view" && canAsk && selection?.rect && (

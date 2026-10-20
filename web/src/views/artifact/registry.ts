@@ -98,6 +98,10 @@ export interface ArtifactViewerProps {
    *  cover; absent where none is kept (a share page, an attachment). A
    *  viewer sends at most one. */
   readonly onCover?: (png: ArrayBuffer, source: "builtin" | "previewer") => void;
+  /** Opens the room file of this name in the host's own tab (a live page's
+   *  relative link); absent where there is no room tab to open (a share
+   *  page, a pop-out, a cover job). */
+  readonly onOpenFile?: (name: string) => void;
 }
 
 /** What a viewer reports as selected: the frame protocol's Selection

@@ -26,6 +26,12 @@
 //   host   -> guest: { type: "artifact-hello", actor }
 //   guest  -> host : { type: "artifact-state", state }        actor intent
 //   host   -> guest: { type: "artifact-state", state, actor, broadcast }
+//   guest  -> host : { type: "artifact-open-file", name }      a room file
+// The last is a click on a relative link (the bootstrap turns it into the
+// message): the host opens the room's file of that name in its own tab,
+// where the member may download it. The frame itself never downloads or
+// navigates (no allow-downloads, no allow-top-navigation): a page an agent
+// wrote cannot put a file on the member's computer.
 
 import { schemeUrl, type ConvertFileSrc } from "./schemeUrl.ts";
 import { MaxArtifactStateBytes } from "./wire.gen.ts";
@@ -77,6 +83,15 @@ export function composeArtifactDocument(src: string): string {
 <body>
 <script>
 window.addEventListener("load", () => parent.postMessage({ type: "artifact-ready" }, "*"));
+document.addEventListener("click", (e) => {
+  const a = e.target instanceof Element ? e.target.closest("a[href]") : null;
+  const href = a ? a.getAttribute("href") || "" : "";
+  if (!href || href.startsWith("#") || href.startsWith("//") || /^[a-z][a-z0-9+.-]*:/i.test(href)) return;
+  e.preventDefault();
+  let name = href.split(/[?#]/)[0].split("/").pop() || "";
+  try { name = decodeURIComponent(name); } catch {}
+  if (name) parent.postMessage({ type: "artifact-open-file", name }, "*");
+});
 </script>
 ${src}
 </body>
@@ -86,7 +101,33 @@ ${src}
 export type GuestMessage =
   | { kind: "runner-ready" }
   | { kind: "ready" }
-  | { kind: "state"; state: unknown; key: string };
+  | { kind: "state"; state: unknown; key: string }
+  | { kind: "open-file"; name: string };
+
+/** The longest file name an artifact may ask the host to open. */
+export const MAX_OPEN_FILE_NAME = 255;
+
+/** A room file name a guest names: a base name (no path, no control
+ *  characters, not "." or ".."), within MAX_OPEN_FILE_NAME; null otherwise. */
+export function openFileName(name: unknown): string | null {
+  if (typeof name !== "string") return null;
+  const n = name.trim();
+  if (!n || n === "." || n === ".." || n.length > MAX_OPEN_FILE_NAME || /[\\/\u0000-\u001f\u007f]/.test(n)) return null;
+  return n;
+}
+
+/** The room file a guest's link names: the most recently updated file of
+ *  that name (case-insensitive), or null. Names repeat across channels and
+ *  runs; the newest is the one a page just written beside it means. */
+export function pickFileByName<T extends { fileName?: string; title: string; updatedAtMs: number }>(files: readonly T[], name: string): T | null {
+  const want = name.toLowerCase();
+  let best: T | null = null;
+  for (const f of files) {
+    if ((f.fileName || f.title).toLowerCase() !== want) continue;
+    if (!best || f.updatedAtMs > best.updatedAtMs) best = f;
+  }
+  return best;
+}
 
 /** Validates one inbound message event against the frame it must come from.
  *  Returns null for anything that is not a well-formed message from that
@@ -98,7 +139,7 @@ export function readGuestMessage(
 ): GuestMessage | null {
   if (ev.origin !== "null") return null;
   if (!frameWindow || ev.source !== frameWindow) return null;
-  const data = ev.data as { type?: unknown; state?: unknown } | null;
+  const data = ev.data as { type?: unknown; state?: unknown; name?: unknown } | null;
   if (!data || typeof data !== "object") return null;
   switch (data.type) {
     case "artifact-runner-ready":
@@ -115,6 +156,10 @@ export function readGuestMessage(
       // The room service refuses a state over MaxArtifactStateBytes (bytes).
       if (typeof key !== "string" || new TextEncoder().encode(key).length > MaxArtifactStateBytes) return null;
       return { kind: "state", state: data.state, key };
+    }
+    case "artifact-open-file": {
+      const name = openFileName(data.name);
+      return name ? { kind: "open-file", name } : null;
     }
     default:
       return null;

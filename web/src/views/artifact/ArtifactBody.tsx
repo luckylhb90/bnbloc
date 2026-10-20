@@ -145,6 +145,7 @@ export function ArtifactBody({
   reveal,
   onPublish,
   onCover,
+  onOpenFile,
 }: {
   readonly roomId: string;
   readonly actor?: string;
@@ -167,6 +168,7 @@ export function ArtifactBody({
   // Where a cover the viewer draws goes (default: the room version's
   // thumbnail).
   readonly onCover?: ArtifactViewerProps["onCover"];
+  readonly onOpenFile?: ArtifactViewerProps["onOpenFile"];
 }) {
   const instanceKey = `${viewer?.id ?? ""}:${artifactId}:${file.version}`;
   const onToolbarRef = useStableRef(onToolbar);
@@ -221,6 +223,7 @@ export function ArtifactBody({
     reveal,
     onPublish,
     onCover: onCover ?? roomCover,
+    onOpenFile,
   };
   return (
     <ViewerBoundary resetKey={instanceKey}>
