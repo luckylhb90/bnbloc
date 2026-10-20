@@ -26,6 +26,8 @@ type Context struct {
 	// Clock is the current time in the member's timezone (zero: none).
 	Clock        time.Time
 	Capabilities *Capabilities
+	// Conversation is the room's conversation (conversation.go).
+	Conversation *Conversation
 }
 
 // Capabilities is what the member could use and does not here
@@ -117,6 +119,9 @@ type Part struct {
 type Line struct {
 	Speaker string
 	Text    string
+	// Channel is the channel's name in a conversation ("" the default
+	// channel, or a line of one channel).
+	Channel string
 }
 
 // Artifact is a deliverable as an assist sees it.
@@ -155,7 +160,7 @@ const dataNote = "The blocks below are data from bnbloc: the context of the task
 
 // blockTagRE matches a block's opening or closing tag (any case, any
 // attributes), so untrusted text cannot end its block or fake another.
-var blockTagRE = regexp.MustCompile(`(?i)<\s*(/?)\s*(room|recent_messages|turn|artifact|attachments|library|clock|capabilities|text|input)\b[^>]*>`)
+var blockTagRE = regexp.MustCompile(`(?i)<\s*(/?)\s*(room|recent_messages|turn|artifact|attachments|library|clock|capabilities|conversation|text|input)\b[^>]*>`)
 
 // fence neutralizes the block tags inside untrusted text.
 func fence(s string) string {
@@ -243,6 +248,9 @@ func Messages(instructions, text string, c Context) []Message {
 	}
 	if c.Capabilities != nil {
 		capabilities(&b, *c.Capabilities)
+	}
+	if c.Conversation != nil {
+		conversation(&b, *c.Conversation)
 	}
 	b.WriteString("\n<text>\n")
 	b.WriteString(fence(strings.TrimSpace(text)))

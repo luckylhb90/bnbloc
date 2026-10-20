@@ -34,14 +34,20 @@ const (
 	// agent of their own on this device, other members in the room
 	// (docs/prd/2026-10-20-never-a-dead-end.md §2.2).
 	AssistContextCapabilities = "capabilities"
+	// AssistContextConversation: the room's conversation, its channels'
+	// latest messages the member reads, never the people chat
+	// (docs/prd/2026-10-20-complete-room-capture.md §2.1).
+	AssistContextConversation = "conversation"
 )
 
 // AssistContexts are the contexts an assist task may declare.
-var AssistContexts = []string{AssistContextRoom, AssistContextArtifact, AssistContextAttachments, AssistContextLibrary, AssistContextClock, AssistContextCapabilities}
+var AssistContexts = []string{AssistContextRoom, AssistContextArtifact, AssistContextAttachments, AssistContextLibrary, AssistContextClock, AssistContextCapabilities, AssistContextConversation}
 
-// Bounds of an assist request.
+// Bounds of an assist request. The text holds a room package's every text
+// and its instructions for describe-room's check
+// (docs/prd/2026-10-20-complete-room-capture.md §2.1).
 const (
-	MaxAssistText        = 8000
+	MaxAssistText        = 16000
 	MaxAssistAttachments = 20
 )
 

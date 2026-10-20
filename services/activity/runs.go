@@ -353,6 +353,9 @@ func (v *runViewer) record(j store.AgentJob, detail bool) wire.AgentRun {
 	if u, ok := store.RunDiag[wire.AgentRunUsage](j, wire.RunDiagUsage); ok && (u.Model != "" || u.InputTokens != nil || u.OutputTokens != nil || u.CostUsd != nil) {
 		run.Usage = &u
 	}
+	if tools, ok := store.RunDiag[wire.AgentRunTools](j, wire.RunDiagTools); ok && len(tools.MCP) > 0 {
+		run.Tools = tools.MCP
+	}
 	if !v.canRead(j.RoomID) {
 		run.Redacted = true
 		run.Request.Text = ""

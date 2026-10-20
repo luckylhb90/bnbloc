@@ -42,7 +42,10 @@ import (
 // (copyApp, "Use this app"'s copy). A failure after the room exists
 // deletes it, so a half-made room never lingers. The sources a package
 // asks for are recorded as the new room's asks, waiting for the
-// organization admin's consent (room_sources.go).
+// organization admin's consent (room_sources.go). What a package carries
+// beyond the setup (the room's instructions, the apps made in it, its
+// files, the tools its runs had) is captured, saved and installed by
+// room_capture.go.
 
 // handleRoomComponentDraft answers what "Save as component" captures of a
 // room: its owner's or an admin's (the room editors'). save_component's
@@ -82,7 +85,8 @@ func (s *Service) roomDraft(ctx context.Context, claims auth.Claims, roomID stri
 	title := firstNonEmpty(room.Name, roomID)
 	d := wire.RoomComponentDraft{RoomID: roomID, Name: firstNonEmpty(contentpkg.NameFrom(title), "room"), DisplayName: title,
 		Description: room.Description, Welcome: room.Welcome, QuickPrompts: room.QuickPrompts, Channels: []string{}, Schedules: []wire.RoomPackageSchedule{},
-		Skills: []wire.RoomDraftPart{}, Prompts: []wire.RoomDraftPart{}, Apps: []wire.RoomDraftPart{}, Sources: []wire.RoomSourceAsk{}, Left: []string{}}
+		Skills: []wire.RoomDraftPart{}, Prompts: []wire.RoomDraftPart{}, Apps: []wire.RoomDraftPart{}, MadeApps: []wire.RoomDraftDeliverable{},
+		Files: []wire.RoomDraftDeliverable{}, Tools: []wire.RoomDraftTool{}, Sources: []wire.RoomSourceAsk{}, Left: []string{}}
 	if d.QuickPrompts == nil {
 		d.QuickPrompts = []wire.RoomQuickPrompt{}
 	}
@@ -113,11 +117,15 @@ func (s *Service) roomDraft(ctx context.Context, claims auth.Claims, roomID stri
 		if err := s.draftContent(ctx, claims, roomID, &d); err != nil {
 			return d, err
 		}
-		if err := s.draftApps(ctx, claims, roomID, &d); err != nil {
+		if err := s.draftDeliverables(ctx, claims, roomID, &d); err != nil {
+			return d, err
+		}
+		if err := s.draftTools(ctx, claims, roomID, &d); err != nil {
 			return d, err
 		}
 	}
-	d.Left = append(d.Left, "members and their agents: a room package names no people, whoever installs it invites them")
+	d.Left = append(d.Left, "members and their agents: a room package names no people, whoever installs it invites them",
+		"the data of its apps: an app is copied with a fresh, empty data space")
 	return d, nil
 }
 
@@ -221,46 +229,6 @@ func (s *Service) draftContent(ctx context.Context, claims auth.Claims, roomID s
 	return nil
 }
 
-// draftApps captures the room's apps copied in from works ("Use this app",
-// counted as the work's app-copy use); an app made in the room is said in
-// Left.
-func (s *Service) draftApps(ctx context.Context, claims auth.Claims, roomID string, d *wire.RoomComponentDraft) error {
-	var apps wire.ArtifactList
-	if err := s.roomBackendDo(ctx, backendHTTP, http.MethodGet, "/v1/rooms/"+url.PathEscape(roomID)+"/artifacts?app=1&limit=200", "", nil,
-		claims.Subject, claims.Tenant, &apps); err != nil {
-		return err
-	}
-	seen := map[string]bool{}
-	for _, a := range apps.Artifacts {
-		uses, err := s.ContentComponents.ListContentUses(ctx, store.ContentUseAppCopy, a.ArtifactID)
-		if err != nil {
-			return err
-		}
-		var part *wire.RoomDraftPart
-		for _, u := range uses {
-			c, err := s.ContentComponents.GetContentComponent(ctx, u.ComponentID)
-			if errors.Is(err, store.ErrContentNotFound) {
-				continue
-			}
-			if err != nil {
-				return err
-			}
-			if c.Kind == contentpkg.KindWork && extpipe.MemberVisibility(viewerOf(claims), extpipe.GateForContent(c), 0).Visible {
-				version := firstNonEmpty(u.PinnedVersion, c.LatestVersion)
-				part = &wire.RoomDraftPart{ID: c.ID, Name: c.Name, DisplayName: c.DisplayName, Version: version, Ref: contentpkg.MajorRef(c.Name, version)}
-			}
-		}
-		switch {
-		case part == nil:
-			d.Left = append(d.Left, fmt.Sprintf("app %q (made here, not from a work you can see: publish it as a work to include it)", a.Title))
-		case !seen[part.Name]:
-			seen[part.Name] = true
-			d.Apps = append(d.Apps, *part)
-		}
-	}
-	return nil
-}
-
 // plural is "1 schedule" or "n schedules".
 func plural(n int, word string) string {
 	if n == 1 {
@@ -304,15 +272,15 @@ func (s *Service) handleCreateRoomFromComponent(w http.ResponseWriter, r *http.R
 		contentStoreErr(w, "load content version failed", err)
 		return
 	}
-	m, err := contentuse.Manifest(v)
+	pkg, err := s.contentPackage(ctx, v)
 	if err != nil {
-		obs.ServerError(w, "decode content manifest failed", err)
-		httpx.Error(w, "decode content manifest failed", http.StatusInternalServerError)
+		obs.ServerError(w, "load content bundle failed", err)
+		httpx.Error(w, "load content bundle failed", http.StatusBadGateway)
 		return
 	}
 	ctx, cancel := context.WithTimeout(ctx, appCopyTimeout)
 	defer cancel()
-	reply, err := s.installRoom(ctx, claims, c, v, m, in)
+	reply, err := s.installRoom(ctx, claims, c, v, pkg, in)
 	if err != nil {
 		s.writeRoomBackendErr(w, "create the room failed", err)
 		return
@@ -320,13 +288,16 @@ func (s *Service) handleCreateRoomFromComponent(w http.ResponseWriter, r *http.R
 	httpx.WriteJSON(w, http.StatusCreated, reply)
 }
 
-// installRoom makes a room of the package m (c at v) owned by the member in
-// claims; anything after the room exists that fails deletes it, with the
-// app copies counted for it.
-func (s *Service) installRoom(ctx context.Context, claims auth.Claims, c store.ContentComponent, v store.ContentComponentVersion, m contentpkg.Manifest, in wire.RoomInstallRequest) (reply wire.RoomInstallReply, err error) {
+// installRoom makes a room of the package pkg (c at v) owned by the member
+// in claims; anything after the room exists that fails deletes it (its
+// deliverables go with it), with the app copies counted for it and the
+// expert made from its instructions.
+func (s *Service) installRoom(ctx context.Context, claims auth.Claims, c store.ContentComponent, v store.ContentComponentVersion, pkg *contentpkg.Package, in wire.RoomInstallRequest) (reply wire.RoomInstallReply, err error) {
+	m := pkg.Manifest
 	roomID := firstNonEmpty(in.RoomID, ids.New("room-"))
 	reply = wire.RoomInstallReply{RoomID: roomID, Name: firstNonEmpty(in.Name, m.DisplayName, c.Name), ComponentID: c.ID, From: c.Name + "@" + v.Version,
-		Channels: []string{}, Schedules: []string{}, Enabled: []string{}, Apps: []string{}, Skipped: []string{}, Sources: []wire.RoomSourceAsk{}, Tools: []string{}}
+		Channels: []string{}, Schedules: []string{}, Enabled: []string{}, Apps: []string{}, MadeApps: []string{}, Files: []string{}, Skipped: []string{},
+		Sources: []wire.RoomSourceAsk{}, Tools: []string{}, ToolsToAdd: []string{}}
 	prompts, err := s.roomQuickPrompts(ctx, claims, m, &reply)
 	if err != nil {
 		return reply, err
@@ -336,7 +307,8 @@ func (s *Service) installRoom(ctx context.Context, claims auth.Claims, c store.C
 	if err := s.roomBackendCall(ctx, http.MethodPost, "/v1/rooms", claims.Subject, claims.Tenant, create); err != nil {
 		return reply, err
 	}
-	var copies []store.ContentUse // app copies counted for this room
+	var copies []store.ContentUse            // app copies counted for this room
+	var instructions *store.ContentComponent // the expert made from the instructions
 	defer func() {
 		if err == nil {
 			return
@@ -348,6 +320,11 @@ func (s *Service) installRoom(ctx context.Context, claims auth.Claims, c store.C
 		for _, u := range copies {
 			if derr := s.ContentComponents.DeleteContentUse(bg, u.ScopeKind, u.ScopeID, u.ComponentID); derr != nil {
 				log.Printf("gateway: room package %s: uncount app copy %s failed: %v", c.Name, u.ScopeID, derr)
+			}
+		}
+		if instructions != nil {
+			if derr := s.ContentComponents.DeleteContentComponent(bg, instructions.ID); derr != nil {
+				log.Printf("gateway: room package %s: delete the instructions' expert %s failed: %v", c.Name, instructions.ID, derr)
 			}
 		}
 	}()
@@ -371,7 +348,16 @@ func (s *Service) installRoom(ctx context.Context, claims auth.Claims, c store.C
 	if err := s.installContent(ctx, claims, roomID, m, &reply); err != nil {
 		return reply, err
 	}
+	if instructions, err = s.installInstructions(ctx, claims, roomID, pkg, &reply); err != nil {
+		return reply, err
+	}
 	if copies, err = s.installApps(ctx, claims, roomID, m.Apps, &reply); err != nil {
+		return reply, err
+	}
+	if err := s.installMadeApps(ctx, claims, roomID, pkg, &reply); err != nil {
+		return reply, err
+	}
+	if err := s.installFiles(ctx, claims, roomID, pkg, &reply); err != nil {
 		return reply, err
 	}
 	if err := s.installTools(ctx, claims, m.Requires.MCP, &reply); err != nil {
@@ -519,9 +505,11 @@ func (s *Service) installApps(ctx context.Context, claims auth.Claims, roomID st
 	return copies, nil
 }
 
-// installTools reports the MCP tools the package needs (requires.mcp: its
-// expert and packs bring them to agents); one the installer may not use is
-// reported too.
+// installTools reports the MCP tools the package needs (requires.mcp: the
+// tools the source room's runs had). A run's session gets a tool its
+// content requires or its requester added, so one the installer can add
+// and has not is in ToolsToAdd (the install dialog offers Add, the member
+// catalog's install); one they may not use is reported as left out.
 func (s *Service) installTools(ctx context.Context, claims auth.Claims, tools []contentpkg.MCPRequirement, reply *wire.RoomInstallReply) error {
 	if len(tools) == 0 {
 		return nil
@@ -532,8 +520,12 @@ func (s *Service) installTools(ctx context.Context, claims auth.Claims, tools []
 	}
 	for _, t := range tools {
 		reply.Tools = append(reply.Tools, t.Name)
-		if c, ok := cands[t.Name]; !ok || !c.Visibility.Visible || c.Config.MCP == nil {
+		c, ok := cands[t.Name]
+		switch {
+		case !ok || !c.Visibility.Visible || c.Config.MCP == nil:
 			reply.Skipped = append(reply.Skipped, fmt.Sprintf("MCP tool %s (not available to you)", t.Name))
+		case !c.Visibility.Installed:
+			reply.ToolsToAdd = append(reply.ToolsToAdd, t.Name)
 		}
 	}
 	return nil

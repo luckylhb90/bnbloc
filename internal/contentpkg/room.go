@@ -24,8 +24,10 @@ import (
 // (works by "name@range", copied in like "Use this app") and the sources
 // its tasks ask to read, each with its purpose (wire.RoomSourceAsk: the
 // install records the ask for the new room, the organization's admin
-// grants it). README.md is optional. A room package is no content use:
-// nothing in it reaches an agent until it is installed as a room.
+// grants it). README.md is optional. Beside the manifest a package may
+// carry the room's instructions, apps made in it and room files
+// (room_carry.go). A room package is no content use: nothing in it
+// reaches an agent until it is installed as a room.
 
 // Bounds of a room package.
 const (
@@ -35,18 +37,26 @@ const (
 	maxRoomChannels    = 20
 	maxRoomChannelName = 80
 	maxRoomSchedules   = 20
-	maxRoomApps        = 10
+	// MaxRoomApps bounds a package's apps: works and apps made in the room
+	// together (a save's include is held to it before it reads a site).
+	MaxRoomApps = 10
 )
 
-// RoomLimits is a room package's bundle profile: component.json and
-// README.md.
-var RoomLimits = tarbundle.Limits{MaxBytes: 1 << 20, MaxFiles: 2}
+// RoomLimits is a room package's bundle profile: component.json,
+// README.md and INSTRUCTIONS.md (within maxRoomText), and the apps' sites
+// and the files it carries (within wire.MaxRoomCarryBytes and a site
+// snapshot's file count, plus wire.MaxRoomFiles).
+var RoomLimits = tarbundle.Limits{MaxBytes: wire.MaxRoomCarryBytes + maxRoomText, MaxFiles: tarbundle.SiteLimits.MaxFiles + wire.MaxRoomFiles + 3}
+
+// maxRoomText is the room a package's manifest, README.md and
+// INSTRUCTIONS.md take beyond what it carries.
+const maxRoomText = 1 << 20
 
 // defaultChannel is the channel every room has; a package names only the
 // others (a schedule in it names no channel).
 const defaultChannel = "general"
 
-var errRoomFields = errors.New("channels, schedules, apps, sources and a room expert belong to a room package")
+var errRoomFields = errors.New("channels, schedules, apps, files, sources and a room expert belong to a room package")
 
 // CheckRoomDescription checks a room's description (a room's own, the room
 // service's, and a room package's, which becomes it): within the room's
@@ -56,13 +66,14 @@ func CheckRoomDescription(description string) error {
 }
 
 func init() {
-	register(KindSpec{Kind: KindRoom, Short: "room", Limits: RoomLimits,
+	register(KindSpec{Kind: KindRoom, Short: "room", Limits: RoomLimits, Snapshot: true,
 		validate: validateRoom, fromForm: roomFromForm})
 }
 
 // validateRoom: the room's description within a room's bound, a welcome
 // and quick prompts (an expert's rules), channels, schedules, apps and
-// sources, no scripts, and nothing but component.json and README.md.
+// sources, no scripts permission, and beside component.json and README.md
+// only what it carries (checkRoomCarry).
 func validateRoom(p *Package) error {
 	m := p.Manifest
 	switch {
@@ -73,10 +84,8 @@ func validateRoom(p *Package) error {
 	case m.declares(PermScripts):
 		return errors.New("a room package ships no scripts")
 	}
-	for _, f := range p.Bundle.Paths() {
-		if f != ManifestFile && f != ReadmeFile {
-			return fmt.Errorf("%s: a room package holds only %s and %s", f, ManifestFile, ReadmeFile)
-		}
+	if err := checkRoomCarry(p); err != nil {
+		return err
 	}
 	if _, ok := p.Bundle.File(ReadmeFile); ok {
 		if _, err := readText(p.Bundle, ReadmeFile, maxInstructions); err != nil {
@@ -193,11 +202,9 @@ func checkRoomSchedule(s wire.RoomPackageSchedule, channels map[string]bool) err
 	return nil
 }
 
-// checkRoomApps: works by "name@range", each named once.
+// checkRoomApps: works by "name@range", each named once (their count, with
+// the apps made in the room, is checkRoomCarry's).
 func checkRoomApps(apps []string) error {
-	if len(apps) > maxRoomApps {
-		return fmt.Errorf("at most %d apps", maxRoomApps)
-	}
 	seen := map[string]bool{}
 	for _, a := range apps {
 		if err := checkReference("apps", a); err != nil {
@@ -236,9 +243,9 @@ func CheckRoomSources(sources []wire.RoomSourceAsk) error {
 	return nil
 }
 
-func roomFromForm(f Form, m *Manifest, files map[string][]byte) error {
-	if strings.TrimSpace(f.Instructions) != "" || len(f.Skills) > 0 || f.Team != nil {
-		return errors.New("instructions, skills and a team belong to experts and skill packs")
+func roomFromForm(f Form, base *Package, m *Manifest, files map[string][]byte) error {
+	if len(f.Skills) > 0 || f.Team != nil {
+		return errors.New("skills and a team belong to experts and skill packs")
 	}
 	if len(f.Prompts) > 0 {
 		return errors.New("prompts belong to prompt packs")
@@ -253,7 +260,7 @@ func roomFromForm(f Form, m *Manifest, files map[string][]byte) error {
 	for _, src := range f.Sources {
 		m.Sources = append(m.Sources, wire.RoomSourceAsk{Name: src.Name, Purpose: strings.TrimSpace(src.Purpose)})
 	}
-	return nil
+	return layoutRoomCarry(f, base, m, files)
 }
 
 // RoomSpec is a room manifest's setup as the API shows it (nil for any
@@ -262,7 +269,13 @@ func (m Manifest) RoomSpec() *wire.RoomSpec {
 	if m.Kind != KindRoom {
 		return nil
 	}
-	out := &wire.RoomSpec{Channels: m.Channels, Schedules: m.Schedules, Apps: m.Apps, Sources: m.Sources}
+	out := &wire.RoomSpec{Channels: m.Channels, Schedules: m.Schedules, Apps: m.Apps, AppSnapshots: m.AppSnapshots, Files: m.Files, Sources: m.Sources}
+	if out.AppSnapshots == nil {
+		out.AppSnapshots = []wire.RoomAppSnapshot{}
+	}
+	if out.Files == nil {
+		out.Files = []wire.RoomPackageFile{}
+	}
 	if out.Channels == nil {
 		out.Channels = []string{}
 	}

@@ -423,6 +423,22 @@ func (c *jobContent) fitMCPToTarget(profile bool, transports []string) {
 	c.mcp.servers = kept
 }
 
+// withTools adds the MCP tools attached to the turn's session to a
+// job-status diagnostics map (wire.RunDiagTools, by name: the run record
+// says which tools a room's runs had, never their settings), once they are
+// fitted to the target. The map is returned for chaining.
+func (c *jobContent) withTools(diag map[string]any) map[string]any {
+	if c == nil || len(c.mcp.servers) == 0 {
+		return diag
+	}
+	names := make([]string, 0, len(c.mcp.servers))
+	for _, s := range c.mcp.servers {
+		names = append(names, s.Name)
+	}
+	diag[wire.RunDiagTools] = wire.AgentRunTools{MCP: names}
+	return diag
+}
+
 // relayedMCP names the content's room-credential servers still attached.
 func (c *jobContent) relayedMCP() []string {
 	if c == nil {

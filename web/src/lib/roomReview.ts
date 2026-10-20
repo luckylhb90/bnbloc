@@ -7,7 +7,7 @@
 // out) and "Ignore". Saving stays the member's decision. The helpers are
 // pure: the input, the reply read, which findings still hold, a fix.
 
-import { describeRoomInput, partKey, type RoomSaveForm } from "./roomComponents.ts";
+import { describeRoomInput, isOn, partKey, type RoomSaveForm } from "./roomComponents.ts";
 
 /** The kinds a finding may be, in the order describe-room's item
  *  description names them (a test holds them together). */
@@ -34,14 +34,13 @@ export interface RoomFinding {
   readonly why: string;
 }
 
-const isOn = (f: RoomSaveForm, key: string) => !f.off.includes(key);
-
 /** roomPackageTexts is every text the saved package would carry, by key:
- *  displayName, description, welcome, quickPrompt:<n>, schedule:<n> (a
- *  kept one, n its index in the form), channel:<name> (a kept one) and
- *  source:<name> (its purpose). */
+ *  displayName, description, welcome, instructions (when there are any),
+ *  quickPrompt:<n>, schedule:<n> (a kept one, n its index in the form),
+ *  channel:<name> (a kept one) and source:<name> (its purpose). */
 export function roomPackageTexts(f: RoomSaveForm): Record<string, string> {
   const out: Record<string, string> = { displayName: f.displayName, description: f.description, welcome: f.welcome };
+  if (f.instructions.trim()) out.instructions = f.instructions;
   f.quickPrompts.forEach((q, i) => {
     out[`quickPrompt:${i}`] = [q.title, q.prompt].filter(Boolean).join(": ");
   });
@@ -102,7 +101,7 @@ export function openFindings(findings: readonly RoomFinding[], f: RoomSaveForm, 
 }
 
 /** A field the save dialog edits in place. */
-export type EditableField = "displayName" | "description" | "welcome" | `source:${string}`;
+export type EditableField = "displayName" | "description" | "welcome" | "instructions" | `source:${string}`;
 
 /** A finding's fix: the field to edit (the dialog focuses it), or the form
  *  without the part (a schedule or channel left out, a quick prompt
@@ -142,6 +141,8 @@ export function findingWhere(f: RoomSaveForm, x: RoomFinding): string {
       return "Description";
     case "welcome":
       return "Welcome";
+    case "instructions":
+      return "Instructions";
     case "schedule":
       return `Scheduled task ${Number(id) + 1}`;
     case "channel":

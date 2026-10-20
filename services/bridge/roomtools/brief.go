@@ -50,8 +50,8 @@ var briefs = map[string]brief{
 	"save_component": {
 		Text: "Save a drafted package (dir), a file as a gallery work (file or artifactId) or this room (kind room) to the Library of the person who asked you, only after they confirm. With id: the next version.",
 		Params: map[string]string{
-			"dir": "Workspace-relative, holds component.json.", "id": "cc_…; omit to create.", "file": "A workspace file.",
-			"artifactId": "A deliverable (artf_…).", "name": "A new work's or room's name.",
+			"dir": "Workspace-relative, holds component.json.", "id": "cc_…; omit to create.",
+			"name": "A new work's or room's name.", "include": "Apps made here and room files, by artifact id.",
 		},
 	},
 	"get_component": {

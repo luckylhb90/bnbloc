@@ -255,7 +255,7 @@ func checkVariables(at string, pr Prompt) error {
 	return nil
 }
 
-func promptPackFromForm(f Form, m *Manifest, _ map[string][]byte) error {
+func promptPackFromForm(f Form, _ *Package, m *Manifest, _ map[string][]byte) error {
 	if strings.TrimSpace(f.Instructions) != "" || len(f.QuickPrompts) > 0 || f.Welcome != "" || len(f.Skills) > 0 {
 		return errors.New("a prompt pack holds prompts only (instructions, quick prompts, a welcome and skills belong to experts and skill packs)")
 	}

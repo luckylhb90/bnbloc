@@ -36,12 +36,18 @@ type Form struct {
 	Context []string           `json:"context,omitempty"`
 	Gate    *wire.AssistGate   `json:"gate,omitempty"`
 
-	// A room package's setup (room.go); its welcome and quick prompts are
-	// the fields above, its room expert and packs Requires.
-	Channels  []string                   `json:"channels,omitempty"`
-	Schedules []wire.RoomPackageSchedule `json:"schedules,omitempty"`
-	Apps      []string                   `json:"apps,omitempty"`
-	Sources   []wire.RoomSourceAsk       `json:"sources,omitempty"`
+	// A room package's setup (room.go); its welcome, quick prompts and
+	// instructions are the fields above, its room expert and packs
+	// Requires. AppSnapshots and Files are the ones the edited version
+	// carries that the form keeps; Captured what the save took from the
+	// room.
+	Channels     []string                   `json:"channels,omitempty"`
+	Schedules    []wire.RoomPackageSchedule `json:"schedules,omitempty"`
+	Apps         []string                   `json:"apps,omitempty"`
+	AppSnapshots []wire.RoomAppSnapshot     `json:"appSnapshots,omitempty"`
+	Files        []wire.RoomPackageFile     `json:"files,omitempty"`
+	Sources      []wire.RoomSourceAsk       `json:"sources,omitempty"`
+	Captured     *RoomCapture               `json:"-"`
 }
 
 // FormSkill is one skill written in the form: its SKILL.md is generated
@@ -67,7 +73,7 @@ func Build(f Form, version string, opts Options, base *Package) (*Package, []byt
 	if spec.Kind != KindAssist && (f.Output != "" || len(f.Fields) > 0 || len(f.Context) > 0 || f.Gate != nil) {
 		return nil, nil, errAssistFields
 	}
-	if spec.Kind != KindRoom && len(f.Channels)+len(f.Schedules)+len(f.Apps)+len(f.Sources) > 0 {
+	if spec.Kind != KindRoom && (len(f.Channels)+len(f.Schedules)+len(f.Apps)+len(f.AppSnapshots)+len(f.Files)+len(f.Sources) > 0 || f.Captured != nil) {
 		return nil, nil, errRoomFields
 	}
 	m := Manifest{
@@ -96,7 +102,7 @@ func Build(f Form, version string, opts Options, base *Package) (*Package, []byt
 			files[ReadmeFile] = data
 		}
 	}
-	if err := spec.fromForm(f, &m, files); err != nil {
+	if err := spec.fromForm(f, base, &m, files); err != nil {
 		return nil, nil, err
 	}
 	return Pack(m, files, opts)
@@ -151,7 +157,7 @@ func yamlScalar(s string) string {
 	return s
 }
 
-func expertFromForm(f Form, m *Manifest, files map[string][]byte) error {
+func expertFromForm(f Form, _ *Package, m *Manifest, files map[string][]byte) error {
 	if len(f.Prompts) > 0 {
 		return fmt.Errorf("prompts belong to prompt packs")
 	}
@@ -165,7 +171,7 @@ func expertFromForm(f Form, m *Manifest, files map[string][]byte) error {
 	return nil
 }
 
-func skillPackFromForm(f Form, m *Manifest, files map[string][]byte) error {
+func skillPackFromForm(f Form, _ *Package, m *Manifest, files map[string][]byte) error {
 	if strings.TrimSpace(f.Instructions) != "" || len(f.QuickPrompts) > 0 || f.Welcome != "" || f.Team != nil {
 		return fmt.Errorf("instructions, quick prompts, a welcome and a team belong to experts")
 	}

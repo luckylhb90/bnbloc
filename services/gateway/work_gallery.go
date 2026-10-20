@@ -635,8 +635,17 @@ func (s *Service) galleryRoom(ctx context.Context, w http.ResponseWriter, claims
 // room service's own artifact routes and checks. It answers the artifact
 // id and version.
 func (s *Service) copySite(ctx context.Context, claims auth.Claims, roomID, title, fileName, from string, snapshot []byte) (string, int, error) {
+	return s.createRoomArtifact(ctx, claims, roomID, store.ArtifactKindSite, title, fileName, tarbundle.SiteMIME, from, snapshot)
+}
+
+// createRoomArtifact is the gateway's one creation of a room deliverable
+// from bytes: an artifact of kind in roomID as the member in claims, its
+// first version data of contentType ("from <from>"), through the room
+// service's own artifact routes and checks (a site's copy, a room
+// package's file). It answers the artifact id and version.
+func (s *Service) createRoomArtifact(ctx context.Context, claims auth.Claims, roomID, kind, title, fileName, contentType, from string, data []byte) (string, int, error) {
 	base := "/v1/rooms/" + url.PathEscape(roomID) + "/artifacts"
-	create, _ := json.Marshal(map[string]any{"kind": store.ArtifactKindSite, "title": title, "fileName": fileName})
+	create, _ := json.Marshal(map[string]any{"kind": kind, "title": title, "fileName": fileName})
 	var created wire.ArtifactReply
 	if err := s.roomBackendDo(ctx, backendHTTP, http.MethodPost, base, "application/json", create, claims.Subject, claims.Tenant, &created); err != nil {
 		return "", 0, err
@@ -650,12 +659,12 @@ func (s *Service) copySite(ctx context.Context, claims auth.Claims, roomID, titl
 	}
 	h := textproto.MIMEHeader{}
 	h.Set("Content-Disposition", mime.FormatMediaType("form-data", map[string]string{"name": "file", "filename": fileName}))
-	h.Set("Content-Type", tarbundle.SiteMIME)
+	h.Set("Content-Type", contentType)
 	part, err := mw.CreatePart(h)
 	if err != nil {
 		return "", 0, err
 	}
-	if _, err := part.Write(snapshot); err != nil {
+	if _, err := part.Write(data); err != nil {
 		return "", 0, err
 	}
 	if err := mw.Close(); err != nil {

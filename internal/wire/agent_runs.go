@@ -25,7 +25,15 @@ const (
 const (
 	RunDiagReply = "reply" // AgentRunReply (without RoomSeq)
 	RunDiagUsage = "usage" // AgentRunUsage
+	RunDiagTools = "tools" // AgentRunTools
 )
+
+// AgentRunTools is the run summary's tools (RunDiagTools): the MCP tool
+// components attached to the turn's session, by name. The record keeps what
+// the session had, never which tool calls the agent made.
+type AgentRunTools struct {
+	MCP []string `json:"mcp"`
+}
 
 // RunPreviewRunes bounds every text preview a run record carries.
 const RunPreviewRunes = 280
@@ -132,6 +140,10 @@ type AgentRun struct {
 	// RoomExpert is the room's expert the turn wore under the chat's own,
 	// recorded when the turn resolved it; absent when the room had none.
 	RoomExpert *AgentRunExpert `json:"roomExpert,omitempty"`
+	// Tools are the MCP tool components the turn's session had
+	// (AgentRunTools), by name; absent when none or reported by an older
+	// bridge.
+	Tools []string `json:"tools,omitempty"`
 	// Redacted marks a run whose request/reply text and diagnostics are
 	// withheld because the viewer is not a member of the run's room.
 	Redacted bool `json:"redacted,omitempty"`

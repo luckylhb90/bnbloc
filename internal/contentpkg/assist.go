@@ -184,7 +184,7 @@ func checkAssistFieldShape(f wire.AssistField) error {
 	return nil
 }
 
-func assistFromForm(f Form, m *Manifest, files map[string][]byte) error {
+func assistFromForm(f Form, _ *Package, m *Manifest, files map[string][]byte) error {
 	if len(f.QuickPrompts) > 0 || f.Welcome != "" || len(f.Skills) > 0 || f.Team != nil {
 		return errors.New("quick prompts, a welcome, skills and a team belong to experts and skill packs")
 	}

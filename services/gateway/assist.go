@@ -196,7 +196,7 @@ func (s *Service) handleAssist(w http.ResponseWriter, r *http.Request, claims au
 		writeAssistContextErr(w, err)
 		return
 	}
-	if strings.TrimSpace(req.Text) == "" && actx.Room == nil && actx.Artifact == nil && len(actx.Attachments) == 0 {
+	if strings.TrimSpace(req.Text) == "" && actx.Room == nil && actx.Conversation == nil && actx.Artifact == nil && len(actx.Attachments) == 0 {
 		httpx.Error(w, "nothing to work from: type something first", http.StatusBadRequest)
 		return
 	}
@@ -412,6 +412,7 @@ func (s *Service) assistContext(ctx context.Context, claims auth.Claims, declare
 	}
 	needsRoom := (wants(wire.AssistContextRoom) && roomID != "") ||
 		(wants(wire.AssistContextCapabilities) && roomID != "") ||
+		(wants(wire.AssistContextConversation) && roomID != "") ||
 		(wants(wire.AssistContextArtifact) && req.ArtifactID != "") ||
 		(wants(wire.AssistContextAttachments) && len(req.AttachmentIDs) > 0)
 	if !needsRoom {
@@ -442,6 +443,11 @@ func (s *Service) assistContext(ctx context.Context, claims auth.Claims, declare
 			return out, err
 		}
 	}
+	if wants(wire.AssistContextConversation) {
+		if out.Conversation, err = s.assistConversation(ctx, rc, roomID); err != nil {
+			return out, err
+		}
+	}
 	if wants(wire.AssistContextArtifact) && req.ArtifactID != "" {
 		art, err := s.assistArtifact(ctx, rc, roomID, strings.TrimSpace(req.ArtifactID))
 		if err != nil {
@@ -469,21 +475,11 @@ func (s *Service) assistContext(ctx context.Context, claims auth.Claims, declare
 // default one when ""), and the Library its expert (the one picked for the
 // message, else the room's) and skill packs (the room's and the member's).
 func (s *Service) assistRoom(ctx context.Context, claims auth.Claims, roomID, channelID, expertID string) (*assist.Room, error) {
-	var detail struct {
-		Name    string `json:"name"`
-		Preview bool   `json:"preview"`
-	}
-	err := s.roomBackendDo(ctx, backendHTTP, http.MethodGet, "/v1/rooms/"+url.PathEscape(roomID), "", nil, claims.Subject, claims.Tenant, &detail)
-	var rbe *roomBackendError
-	switch {
-	case errors.As(err, &rbe) && rbe.Status < http.StatusInternalServerError:
-		return nil, errAssistNotFound
-	case err != nil:
+	name, err := s.assistRoomName(ctx, claims, roomID)
+	if err != nil {
 		return nil, err
-	case detail.Preview:
-		return nil, errAssistNotFound
 	}
-	room := &assist.Room{Name: detail.Name}
+	room := &assist.Room{Name: name}
 	if room.Recent, err = s.assistRecent(ctx, claims, roomID, channelID); err != nil {
 		return nil, err
 	}
@@ -532,6 +528,27 @@ func (s *Service) assistRoom(ctx context.Context, claims auth.Claims, roomID, ch
 		room.Skills = append(room.Skills, assist.Part{Name: firstNonEmpty(c.DisplayName, c.Name), Description: c.Description})
 	}
 	return room, nil
+}
+
+// assistRoomName reads a room's name as its member: the room service
+// answers it to members only (errAssistNotFound for anyone else, and for a
+// preview).
+func (s *Service) assistRoomName(ctx context.Context, claims auth.Claims, roomID string) (string, error) {
+	var detail struct {
+		Name    string `json:"name"`
+		Preview bool   `json:"preview"`
+	}
+	err := s.roomBackendDo(ctx, backendHTTP, http.MethodGet, "/v1/rooms/"+url.PathEscape(roomID), "", nil, claims.Subject, claims.Tenant, &detail)
+	var rbe *roomBackendError
+	switch {
+	case errors.As(err, &rbe) && rbe.Status < http.StatusInternalServerError:
+		return "", errAssistNotFound
+	case err != nil:
+		return "", err
+	case detail.Preview:
+		return "", errAssistNotFound
+	}
+	return detail.Name, nil
 }
 
 // assistRecent reads a room channel's latest messages as its member

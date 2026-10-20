@@ -211,9 +211,14 @@ export function formPayload(f: ContentForm): Record<string, unknown> {
   }
   if (f.kind === "room") {
     const room = f.room;
+    // A room's instructions (INSTRUCTIONS.md) become its expert where it
+    // is installed.
+    if (f.instructions.trim()) out.instructions = f.instructions.trim();
     if (room?.channels.length) out.channels = room.channels;
     if (room?.schedules.length) out.schedules = room.schedules;
     if (room?.apps.length) out.apps = room.apps;
+    if (room?.appSnapshots.length) out.appSnapshots = room.appSnapshots;
+    if (room?.files.length) out.files = room.files;
     if (room?.sources.length) out.sources = room.sources;
   }
   if (f.kind === "expert") {

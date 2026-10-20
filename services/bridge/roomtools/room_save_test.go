@@ -17,7 +17,49 @@ var roomDraftJSON, _ = json.Marshal(wire.RoomComponentDraft{RoomID: "room-1", Na
 	Channels: []string{"reports"}, Schedules: []wire.RoomPackageSchedule{{Channel: "reports", Text: "Summarize.", Recipient: wire.ScheduleRecipient{Kind: "ai"},
 		Recurrence: wire.ScheduleRecurrence{Kind: wire.RecurDaily, Time: "09:00"}, Timezone: "UTC"}},
 	Expert: &wire.RoomDraftPart{Ref: "reviewer@^1"}, Skills: []wire.RoomDraftPart{{Ref: "charts@^1"}}, Prompts: []wire.RoomDraftPart{{Ref: "recaps@^2"}},
-	Apps: []wire.RoomDraftPart{{Ref: "lunch-poll@^1"}}, Sources: []wire.RoomSourceAsk{{Name: "runs", Purpose: "Judge outcomes."}}})
+	Apps: []wire.RoomDraftPart{{Ref: "lunch-poll@^1"}}, Sources: []wire.RoomSourceAsk{{Name: "runs", Purpose: "Judge outcomes."}},
+	Tools: []wire.RoomDraftTool{{Name: "browser", Permission: "mcp.stdio"}, {Name: "search", Permission: "mcp.http:tools.example.com"}}})
+
+// What the agent and the person agreed rides the save: the instructions
+// (which replace the room's expert in the package, said in the note) and
+// the apps made here and room files to carry, by id, as the save's include
+// of this room; the tools its runs had are required with their
+// permissions. Neither belongs to another kind's save.
+func TestSaveComponentRoomCarries(t *testing.T) {
+	gw := &recordingGateway{reply: func(method, p string) ([]byte, error) {
+		if method == "GET" {
+			return roomDraftJSON, nil
+		}
+		return []byte(`{"component":{"id":"cc_9","kind":"room","name":"weekly-review","latestVersion":"1.0.0","mine":true}}`), nil
+	}}
+	res := saveComponent(context.Background(), contentEnv(nil, gw, true), json.RawMessage(
+		`{"kind":"room","instructions":" Review the week in three bullets. ","include":{"apps":["art_board"],"files":["art_faq","art_tpl"]}}`))
+	if res.Err != "" {
+		t.Fatal(res.Err)
+	}
+	body := gw.calls[1].Body.(map[string]any)
+	f := body["form"].(contentpkg.Form)
+	if f.Instructions != "Review the week in three bullets." || f.Requires.Expert != "" ||
+		len(f.Requires.MCP) != 2 || f.Requires.MCP[1].Name != "search" || strings.Join(f.Requires.Permissions, ",") != "mcp.stdio,mcp.http:tools.example.com" {
+		t.Fatalf("form = %+v", f)
+	}
+	if inc, _ := body["include"].(wire.RoomInclude); inc.RoomID != "room-1" || strings.Join(inc.Apps, ",") != "art_board" || strings.Join(inc.Files, ",") != "art_faq,art_tpl" {
+		t.Fatalf("include = %+v", body["include"])
+	}
+	if note := res.Value.(map[string]any)["note"].(string); !strings.Contains(note, "reviewer@^1) is left out") {
+		t.Fatalf("note = %s", note)
+	}
+	gw.calls = nil
+	if res := saveComponent(context.Background(), contentEnv(nil, gw, true), json.RawMessage(`{"kind":"room"}`)); res.Err != "" {
+		t.Fatal(res.Err)
+	}
+	if body := gw.calls[1].Body.(map[string]any); body["include"] != nil || body["form"].(contentpkg.Form).Requires.Expert != "reviewer@^1" {
+		t.Fatalf("a plain save = %+v", body)
+	}
+	if res := saveComponent(context.Background(), contentEnv(nil, gw, true), json.RawMessage(`{"artifactId":"art_x","instructions":"x"}`)); !strings.Contains(res.Err, "are a room's") {
+		t.Fatalf("instructions on a work = %q", res.Err)
+	}
+}
 
 // save_component's room kind captures this room through component-draft
 // (the dialog's capture) under the job's grant and saves the content form

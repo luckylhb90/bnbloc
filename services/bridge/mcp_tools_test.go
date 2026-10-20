@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -144,6 +145,17 @@ func TestMCPToolsReachTheSession(t *testing.T) {
 	if d := runningDiagnostics(g); d["contentMissing"] != nil {
 		t.Fatalf("diagnostics = %+v", d)
 	}
+	// The run record keeps which tools the session had, by name, from the
+	// running report to the outcome (a room's capture reads them).
+	g.mu.Lock()
+	for _, st := range g.statuses {
+		d, _ := st["diagnostics"].(map[string]any)
+		tools, _ := d[wire.RunDiagTools].(map[string]any)
+		if got := fmt.Sprint(tools["mcp"]); got != "[codeword search]" {
+			t.Errorf("%v report's tools = %s", st["status"], got)
+		}
+	}
+	g.mu.Unlock()
 	// Secrets never reach the job's persisted status.
 	g.mu.Lock()
 	raw, _ = json.Marshal(g.statuses)

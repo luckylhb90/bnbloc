@@ -199,7 +199,7 @@ func validateEnvelope(m Manifest, opts Options) error {
 	if m.Kind != KindAssist && (m.Output != "" || len(m.Fields) > 0 || len(m.Context) > 0 || m.Gate != nil) {
 		return errAssistFields
 	}
-	if m.Kind != KindRoom && (m.Requires.Expert != "" || len(m.Channels)+len(m.Schedules)+len(m.Apps)+len(m.Sources) > 0) {
+	if m.Kind != KindRoom && (m.Requires.Expert != "" || len(m.Channels)+len(m.Schedules)+len(m.Apps)+len(m.AppSnapshots)+len(m.Files)+len(m.Sources) > 0) {
 		return errRoomFields
 	}
 	r := m.Requires
@@ -285,17 +285,23 @@ func checkMCPReference(m Manifest, t MCPRequirement, opts Options) error {
 			return fmt.Errorf("requires.mcp %s: %q is not one of its settings (%s)", t.Name, key, strings.Join(info.Settings, ", "))
 		}
 	}
-	switch info.Transport {
-	case "stdio":
-		if !m.declares(PermMCPStdio) {
-			return fmt.Errorf("requires.mcp %s: a stdio MCP tool needs the %q permission", t.Name, PermMCPStdio)
-		}
-	case "http":
-		if want := PermMCPHTTPPrefix + info.Host; !m.declares(want) {
-			return fmt.Errorf("requires.mcp %s: an http MCP tool needs the %q permission", t.Name, want)
-		}
+	if want := MCPPermission(info); want != "" && !m.declares(want) {
+		return fmt.Errorf("requires.mcp %s: a %s MCP tool needs the %q permission", t.Name, info.Transport, want)
 	}
 	return nil
+}
+
+// MCPPermission is the permission content requiring a tool declares: the
+// one its transport needs (mcp.stdio, or mcp.http:<host>); "" for an
+// unknown transport.
+func MCPPermission(info MCPToolInfo) string {
+	switch info.Transport {
+	case "stdio":
+		return PermMCPStdio
+	case "http":
+		return PermMCPHTTPPrefix + info.Host
+	}
+	return ""
 }
 
 func checkReference(field, s string) error {

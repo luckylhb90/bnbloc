@@ -129,10 +129,15 @@ type Manifest struct {
 	// tasks, its apps (works by "name@range") and the sources it asks for,
 	// each with its purpose (wire.RoomSourceAsk). Its welcome and quick prompts are the expert's
 	// fields; its room expert, skill and prompt packs are its requires.
-	Channels  []string                   `json:"channels,omitempty"`
-	Schedules []wire.RoomPackageSchedule `json:"schedules,omitempty"`
-	Apps      []string                   `json:"apps,omitempty"`
-	Sources   []wire.RoomSourceAsk       `json:"sources,omitempty"`
+	// AppSnapshots and Files are the apps made in the room and the room
+	// files it carries (their bytes under apps/ and files/); INSTRUCTIONS.md
+	// holds the room's instructions.
+	Channels     []string                   `json:"channels,omitempty"`
+	Schedules    []wire.RoomPackageSchedule `json:"schedules,omitempty"`
+	Apps         []string                   `json:"apps,omitempty"`
+	AppSnapshots []wire.RoomAppSnapshot     `json:"appSnapshots,omitempty"`
+	Files        []wire.RoomPackageFile     `json:"files,omitempty"`
+	Sources      []wire.RoomSourceAsk       `json:"sources,omitempty"`
 }
 
 // Requires lists what a package needs at use time: skill and prompt packs
@@ -194,16 +199,19 @@ type KindSpec struct {
 	// content use of member scope): skill packs (all their agents) and
 	// prompt packs (their composer). Experts are picked per message.
 	MemberUse bool
-	// Snapshot reports a kind whose bundle is a deliverable's snapshot
-	// (works): nothing in it runs on a member's machine (a site's code
-	// runs only in the sandboxed site frame), so a script file in it is no
-	// executable content (no scripts permission, no sandbox forced), and a
-	// listing never opens its bundle (up to a site's size).
+	// Snapshot reports a kind whose bundle holds deliverables' snapshots
+	// (works, and room packages carrying a room's apps and files): nothing
+	// in it runs on a member's machine (a site's code runs only in the
+	// sandboxed site frame), so a script file in it is no executable
+	// content (no scripts permission, no sandbox forced), and a listing
+	// never opens its bundle (up to a site's size).
 	Snapshot bool
 	// validate checks the kind's own manifest fields and files.
 	validate func(p *Package) error
-	// fromForm lays out the kind's files from a form save.
-	fromForm func(f Form, m *Manifest, files map[string][]byte) error
+	// fromForm lays out the kind's files from a form save; base is the
+	// version the form edits (nil for a new component), whose files a form
+	// may keep.
+	fromForm func(f Form, base *Package, m *Manifest, files map[string][]byte) error
 	// fromImport generates the kind's manifest fields and files from an
 	// imported foreign format (files of the upload; m carries the kind and
 	// version, and the name when one was given).

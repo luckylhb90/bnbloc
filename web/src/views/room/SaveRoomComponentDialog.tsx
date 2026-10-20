@@ -3,10 +3,12 @@ import { DESCRIBE_ROOM, runJSONAssist, useAssistTask } from "@/lib/assist";
 import { contentLabel, type ContentComponent } from "@/lib/contentComponents";
 import { contentApi } from "@/lib/contentComponentsApi";
 import { errorText } from "@/lib/errors";
+import { applyDependencies, roomDependencies, type RoomDependency } from "@/lib/roomCapture";
 import {
   partKey,
   roomContentForm,
   roomDraftPatch,
+  roomInclude,
   roomSaveFromComponent,
   roomSaveFromDraft,
   roomSaveProblem,
@@ -26,6 +28,7 @@ import { Field, Input, Textarea } from "@/ui/Input";
 import { Select } from "@/ui/Select";
 import { useToast } from "@/ui/Toast";
 import { AssistButton } from "@/views/AssistButton";
+import { RoomCaptureSections } from "@/views/room/RoomCaptureSections";
 
 /** What the dialog saves: a room (its draft, as a new component or a new
  *  version of one of the member's), or a room component (its next
@@ -40,9 +43,12 @@ const check = "flex items-start gap-2 rounded-[var(--radius)] px-2 py-1 text-sm 
 // the server captured it (GET …/component-draft), or a room component of
 // the member's for its next version. The member edits the name and the
 // text, unticks parts, declares the sources its tasks ask for, and saves
-// through the content form (contentApi.create / newVersion). "Fill with
-// AI" (the describe-room assist) drafts the name, description, category,
-// tags and welcome; nothing is saved until they press Save. The same
+// through the content form (contentApi.create / newVersion; the room's
+// apps and files it ticks ride the save's include). "Fill with AI" (the
+// describe-room assist, reading the room's conversation) drafts the name,
+// description, category, tags, welcome and the room's instructions, says
+// what the room depends on and ticks what it says the package should
+// carry (RoomCaptureSections); nothing is saved until they press Save. The same
 // assist checks the package's text before it leaves the room (on Save,
 // when the text changed since the last check; lib/roomReview.ts): what
 // should not leave (a secret, an internal link, a person's name, private
@@ -61,6 +67,7 @@ export function SaveRoomComponentDialog({ target, onClose, onSaved }: { readonly
   const [findings, setFindings] = useState<readonly RoomFinding[]>([]);
   const [ignored, setIgnored] = useState<readonly string[]>([]);
   const [reviewed, setReviewed] = useState("");
+  const [deps, setDeps] = useState<readonly RoomDependency[]>([]);
   const roomId = target && "roomId" in target ? target.roomId : "";
   const component = target && "component" in target ? target.component : null;
 
@@ -72,8 +79,20 @@ export function SaveRoomComponentDialog({ target, onClose, onSaved }: { readonly
     setFindings([]);
     setIgnored([]);
     setReviewed("");
-    if (!roomId) return;
+    setDeps([]);
     let live = true;
+    if (component) {
+      // The version's instructions are its file: read them in.
+      void contentApi
+        .version(component.id, component.latestVersion)
+        .then((v) => live && v.instructions && setForm((f) => (f && !f.instructions ? { ...f, instructions: v.instructions ?? "" } : f)))
+        .catch((e) => live && setFailure(errorText(e, "Could not read the component's instructions")));
+    }
+    if (!roomId) {
+      return () => {
+        live = false;
+      };
+    }
     void Promise.all([
       roomComponentsApi.draft(roomId),
       contentApi
@@ -103,6 +122,7 @@ export function SaveRoomComponentDialog({ target, onClose, onSaved }: { readonly
   const review = async (f: RoomSaveForm) => {
     const r = await runJSONAssist(describe?.name ?? "", { text: roomReviewInput(f), ...(roomId ? { roomId } : {}) });
     setFindings(roomFindings(r.fields ?? {}, f));
+    setDeps(roomDependencies(r.fields ?? {}));
     return r.fields ?? {};
   };
 
@@ -112,7 +132,7 @@ export function SaveRoomComponentDialog({ target, onClose, onSaved }: { readonly
     setFailure("");
     try {
       const fields = await review(form);
-      const next = { ...form, ...roomDraftPatch(fields, form) };
+      const next = applyDependencies({ ...form, ...roomDraftPatch(fields, form) }, roomDependencies(fields));
       setForm(next);
       setReviewed(reviewKey(next));
     } catch (e) {
@@ -156,7 +176,8 @@ export function SaveRoomComponentDialog({ target, onClose, onSaved }: { readonly
     }
     try {
       const f = roomContentForm(next ? { ...form, name: next.name } : form);
-      const d = next ? await contentApi.newVersion(next.id, f, next.latestVersion) : await contentApi.create(f);
+      const include = roomInclude(form, roomId);
+      const d = next ? await contentApi.newVersion(next.id, f, next.latestVersion, include) : await contentApi.create(f, include);
       toast.success(`${contentLabel(d.component)} v${d.component.latestVersion} is in your Library (Rooms)`);
       onSaved?.();
       onClose();
@@ -173,7 +194,7 @@ export function SaveRoomComponentDialog({ target, onClose, onSaved }: { readonly
       onClose={onClose}
       size="lg"
       title={component ? `New version of ${contentLabel(component)}` : "Save room as component"}
-      description="A room component holds the room's setup: its description, channels, scheduled tasks, expert, packs and apps. Whoever installs it gets a room of their own with the tasks paused; nobody's people, conversations or data come along."
+      description="A room component holds the room's setup and way of working: its description, instructions, channels, scheduled tasks, expert, packs, apps, the files you tick and the tools it needs. Whoever installs it gets a room of their own with the tasks paused; nobody's people, conversations or app data come along."
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
@@ -191,7 +212,9 @@ export function SaveRoomComponentDialog({ target, onClose, onSaved }: { readonly
         <div className="flex flex-col gap-4">
           {describe && (
             <div className="flex items-center justify-between gap-3 rounded-[var(--radius-lg)] bg-[var(--color-surface-2)] px-3 py-2">
-              <p className="text-xs text-[var(--color-fg-muted)]">Draft the name, description, category, tags and welcome from the room and its setup, then edit them.</p>
+              <p className="text-xs text-[var(--color-fg-muted)]">
+                Read the room and its conversation: draft the listing and the room&apos;s instructions, and say what its way of working depends on. Then edit them.
+              </p>
               <AssistButton variant="text" label="Fill with AI" state={filling ? "waiting" : "idle"} onRun={() => void fill()} disabled={busy} />
             </div>
           )}
@@ -229,6 +252,12 @@ export function SaveRoomComponentDialog({ target, onClose, onSaved }: { readonly
           <Field label="Welcome" hint="What a new room made from it shows first.">
             <Textarea id="room-save-welcome" value={form.welcome} onChange={(e) => set({ welcome: e.target.value })} rows={2} />
           </Field>
+          <RoomCaptureSections
+            form={form}
+            deps={deps}
+            onToggle={(key, on) => setForm((f) => (f ? toggleRoomPart(f, key, on) : f))}
+            onInstructions={(instructions) => set({ instructions })}
+          />
           <RoomParts form={form} onToggle={(key, on) => setForm((f) => (f ? toggleRoomPart(f, key, on) : f))} />
           <SourcesField
             sources={form.sources}

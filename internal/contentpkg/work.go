@@ -538,6 +538,6 @@ func safeReferenceName(name string) string {
 
 // workFromForm: a work is published from a deliverable, never written in a
 // form (nor imported from another format).
-func workFromForm(Form, *Manifest, map[string][]byte) error {
+func workFromForm(Form, *Package, *Manifest, map[string][]byte) error {
 	return errors.New("a work is published from a deliverable (Publish to gallery), not written in a form")
 }

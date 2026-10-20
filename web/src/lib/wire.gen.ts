@@ -334,6 +334,14 @@ export const RunScopeTenant = "tenant";
 // and their runs simply have no reply preview or usage.
 export const RunDiagReply = "reply";
 export const RunDiagUsage = "usage";
+export const RunDiagTools = "tools";
+
+// AgentRunTools is the run summary's tools (RunDiagTools): the MCP tool
+// components attached to the turn's session, by name. The record keeps what
+// the session had, never which tool calls the agent made.
+export interface AgentRunTools {
+  mcp: string[];
+}
 
 // RunPreviewRunes bounds every text preview a run record carries.
 export const RunPreviewRunes = 280;
@@ -430,6 +438,10 @@ export interface AgentRun {
   // RoomExpert is the room's expert the turn wore under the chat's own,
   // recorded when the turn resolved it; absent when the room had none.
   roomExpert?: AgentRunExpert;
+  // Tools are the MCP tool components the turn's session had
+  // (AgentRunTools), by name; absent when none or reported by an older
+  // bridge.
+  tools?: string[];
   // Redacted marks a run whose request/reply text and diagnostics are
   // withheld because the viewer is not a member of the run's room.
   redacted?: boolean;
@@ -862,12 +874,18 @@ export const AssistContextClock = "clock";
 // agent of their own on this device, other members in the room
 // (docs/prd/2026-10-20-never-a-dead-end.md §2.2).
 export const AssistContextCapabilities = "capabilities";
+// AssistContextConversation: the room's conversation, its channels'
+// latest messages the member reads, never the people chat
+// (docs/prd/2026-10-20-complete-room-capture.md §2.1).
+export const AssistContextConversation = "conversation";
 
 // AssistContexts are the contexts an assist task may declare.
-export const AssistContexts: readonly string[] = ["room", "artifact", "attachments", "library", "clock", "capabilities"];
+export const AssistContexts: readonly string[] = ["room", "artifact", "attachments", "library", "clock", "capabilities", "conversation"];
 
-// Bounds of an assist request.
-export const MaxAssistText = 8000;
+// Bounds of an assist request. The text holds a room package's every text
+// and its instructions for describe-room's check
+// (docs/prd/2026-10-20-complete-room-capture.md §2.1).
+export const MaxAssistText = 16000;
 export const MaxAssistAttachments = 20;
 
 // AssistStatus is GET /v1/assist: whether assists are available to the
@@ -4297,13 +4315,43 @@ export interface RoomPackageSchedule {
   timezone: string;
 }
 
+// Bounds of what a room package carries beyond its setup
+// (docs/prd/2026-10-20-complete-room-capture.md §2.2): contentpkg's room
+// checks hold a package to them, and the save dialog shows a capture's
+// size against them.
+// MaxRoomCarryBytes bounds the apps' sites and the files a room
+// package carries, together: one site snapshot's cap
+// (tarbundle.SiteLimits; a test holds them equal).
+export const MaxRoomCarryBytes = 67108864;
+// MaxRoomFiles bounds the files a room package carries.
+export const MaxRoomFiles = 20;
+
+// RoomAppSnapshot is an app made in a room that its package carries: its
+// title and the package folder holding its site ("apps/<name>"), copied
+// into the new room as a new site, without its data.
+export interface RoomAppSnapshot {
+  title: string;
+  dir: string;
+}
+
+// RoomPackageFile is a room file its package carries: its name in the new
+// room, the package path holding it ("files/<name>") and its size.
+export interface RoomPackageFile {
+  name: string;
+  path: string;
+  sizeBytes: number;
+}
+
 // RoomSpec is a room package's setup on its Library view (the room
 // expert, skill packs and prompt packs are its requires). Apps are works
-// by "name@range".
+// by "name@range"; AppSnapshots the apps made in the room it carries;
+// Files the room files it carries.
 export interface RoomSpec {
   channels: string[];
   schedules: RoomPackageSchedule[];
   apps: string[];
+  appSnapshots: RoomAppSnapshot[];
+  files: RoomPackageFile[];
   sources: RoomSourceAsk[];
 }
 
@@ -4318,13 +4366,35 @@ export interface RoomDraftPart {
   ref: string;
 }
 
+// RoomDraftDeliverable is a deliverable of the room a draft offers to
+// carry: an app made in the room (a site: its current version as a site
+// snapshot) or a room file (its current version), with its size.
+export interface RoomDraftDeliverable {
+  artifactId: string;
+  title: string;
+  fileName?: string;
+  mimeType?: string;
+  sizeBytes: number;
+}
+
+// RoomDraftTool is an MCP tool component the room's runs had (the run
+// records' tools): its name and the permission a package requiring it
+// declares (mcp.stdio, or mcp.http:<host>).
+export interface RoomDraftTool {
+  name: string;
+  permission: string;
+}
+
 // RoomComponentDraft answers GET /v1/rooms/{roomId}/component-draft: what
 // "Save as component" captures of a room for its owner or an admin, to be
 // reviewed and saved as a room package through the content form. Name is
 // a package name proposed from the room's. Sources are the room's own asks
 // (each with its purpose, granted or not: a package asks again for the
-// room installed from it). Left says, a line each, what of the room a
-// package does not hold.
+// room installed from it). MadeApps and Files are what the room made that
+// a package can carry, for the saver to tick (a save names the ticked ones
+// in its include); Tools are the MCP tools its recent runs had, which a
+// package requires. Left says, a line each, what of the room a package
+// does not hold.
 export interface RoomComponentDraft {
   roomId: string;
   name: string;
@@ -4338,8 +4408,22 @@ export interface RoomComponentDraft {
   skills: RoomDraftPart[];
   prompts: RoomDraftPart[];
   apps: RoomDraftPart[];
+  madeApps: RoomDraftDeliverable[];
+  files: RoomDraftDeliverable[];
+  tools: RoomDraftTool[];
   sources: RoomSourceAsk[];
   left: string[];
+}
+
+// RoomInclude is what a room package's content save takes from the room it
+// captures (the save request's "include"): the room, and by artifact id the
+// apps made in it and the room files to carry, each read as the saver reads
+// it (the room's owner or an admin). The bytes never pass through the
+// client.
+export interface RoomInclude {
+  roomId: string;
+  apps?: string[];
+  files?: string[];
 }
 
 // RoomInstallRequest is POST /v1/content-components/{id}/create-room: the
@@ -4356,10 +4440,14 @@ export interface RoomInstallRequest {
 // RoomInstallReply is what installing a room package set up: the new room,
 // From ("name@version"), its channels, the ids of its schedules (all
 // paused), the room expert, the packs turned on and the apps copied in
+// (labels), the expert made from the package's instructions (Instructions,
+// its label), the apps made in the source room and the files copied in
 // (labels), what was left out and why (Skipped), and what the room asks
-// for that nobody granted yet: its sources (each waits for the
-// organization admin's consent, room_sources.go) and its MCP tools. The
-// package's welcome and quick prompts are the new room's own (RoomDetail).
+// for that nobody granted yet: its sources (each waits for the organization
+// admin's consent, room_sources.go) and its MCP tools, of which ToolsToAdd
+// are listed to the installer but not added yet (the install dialog offers
+// Add). The package's welcome and quick prompts are the new room's own
+// (RoomDetail).
 export interface RoomInstallReply {
   roomId: string;
   name: string;
@@ -4370,9 +4458,13 @@ export interface RoomInstallReply {
   expert?: string;
   enabled: string[];
   apps: string[];
+  instructions?: string;
+  madeApps: string[];
+  files: string[];
   skipped: string[];
   sources: RoomSourceAsk[];
   tools: string[];
+  toolsToAdd: string[];
 }
 
 // ---- wire/room_sources.go ----
@@ -5840,8 +5932,8 @@ export type AppExportFormat = "json" | "csv";
 export const AppExportFormatValues: readonly AppExportFormat[] = ["json", "csv"];
 export type AssistOutput = "text" | "json";
 export const AssistOutputValues: readonly AssistOutput[] = ["text", "json"];
-export type AssistContext = "room" | "artifact" | "attachments" | "library" | "clock" | "capabilities";
-export const AssistContextValues: readonly AssistContext[] = ["room", "artifact", "attachments", "library", "clock", "capabilities"];
+export type AssistContext = "room" | "artifact" | "attachments" | "library" | "clock" | "capabilities" | "conversation";
+export const AssistContextValues: readonly AssistContext[] = ["room", "artifact", "attachments", "library", "clock", "capabilities", "conversation"];
 export type AssistSkipReason = "below" | "no-gate";
 export const AssistSkipReasonValues: readonly AssistSkipReason[] = ["below", "no-gate"];
 export type AssistFieldType = "text" | "list" | "items";

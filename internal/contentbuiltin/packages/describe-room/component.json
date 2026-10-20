@@ -1,9 +1,9 @@
 {
   "kind": "bnbloc.assist.package/v1",
   "name": "describe-room",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "displayName": "Describe a room component",
-  "description": "Drafts a room component's Library entry (its name, description, category, tags and welcome) from the room and the setup being saved, and flags what in the package's text should not leave the room: secrets, internal links, people's names, private data.",
+  "description": "Reads a room being saved as a component: says what its way of working depends on, drafts its instructions from the conversation and its Library entry (name, description, category, tags, welcome), and flags what in the package's text should not leave the room: secrets, internal links, people's names, private data.",
   "category": "authoring",
   "tags": ["assist", "rooms"],
   "icon": "sparkle",
@@ -14,6 +14,18 @@
     { "name": "category", "description": "One lower-case word for its kind of work" },
     { "name": "tags", "description": "Three to five tags", "type": "list" },
     { "name": "welcome", "description": "What a new room made from it says first" },
+    { "name": "instructions", "description": "The room's instructions as the conversation established them, plain text or Markdown" },
+    {
+      "name": "dependsOn",
+      "description": "What the room's way of working relies on, one item each",
+      "type": "items",
+      "item": [
+        { "name": "what", "description": "Its name, as <text> or the conversation gives it" },
+        { "name": "kind", "description": "instructions, app, file, tool, schedule, agent, data or other" },
+        { "name": "included", "description": "yes when the package should carry it, no when it cannot or should not" },
+        { "name": "why", "description": "One short sentence: what it gives the room, or why it stays out" }
+      ]
+    },
     {
       "name": "findings",
       "description": "Text of the package that should not leave the room, one item each; none when nothing should not",
@@ -25,5 +37,5 @@
       ]
     }
   ],
-  "context": ["room"]
+  "context": ["conversation"]
 }

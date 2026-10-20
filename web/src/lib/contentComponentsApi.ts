@@ -10,6 +10,7 @@ import {
   type ContentUsesReply,
   type ContentVersionDetail,
 } from "./contentComponents.ts";
+import type { RoomInclude } from "./wire.gen.ts";
 
 const enc = encodeURIComponent;
 
@@ -59,12 +60,14 @@ export const contentApi = {
   get: (id: string, roomId?: string) => req<ContentComponentDetail>(`/v1/content-components/${enc(id)}${roomQuery(roomId)}`),
   version: (id: string, version: string, roomId?: string) =>
     req<ContentVersionDetail>(`/v1/content-components/${enc(id)}/versions/${enc(version)}${roomQuery(roomId)}`),
-  create: (form: ContentForm) =>
-    req<ContentComponentDetail>("/v1/content-components", { method: "POST", body: JSON.stringify({ form: formPayload(form) }) }),
-  newVersion: (id: string, form: ContentForm, baseVersion: string) =>
+  // A room component's save may include apps made in its room and room
+  // files (include: the gateway reads them from the room).
+  create: (form: ContentForm, include?: RoomInclude | null) =>
+    req<ContentComponentDetail>("/v1/content-components", { method: "POST", body: JSON.stringify({ form: formPayload(form), ...(include ? { include } : {}) }) }),
+  newVersion: (id: string, form: ContentForm, baseVersion: string, include?: RoomInclude | null) =>
     req<ContentComponentDetail>(`/v1/content-components/${enc(id)}/versions`, {
       method: "POST",
-      body: JSON.stringify({ form: formPayload(form), baseVersion }),
+      body: JSON.stringify({ form: formPayload(form), baseVersion, ...(include ? { include } : {}) }),
     }).then(noteSaved),
   // Import a skill directory, a plugin or a package as a new component, or
   // (existingId) as a new version of one of the caller's; a display name,

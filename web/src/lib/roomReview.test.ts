@@ -23,6 +23,9 @@ const draft: RoomComponentDraft = {
   skills: [],
   prompts: [],
   apps: [],
+  madeApps: [],
+  files: [],
+  tools: [],
   sources: [],
   left: [],
 };
@@ -94,6 +97,16 @@ const base: RoomSaveForm = {
   assert("form" in prompt && prompt.form.quickPrompts.length === 0, "a quick prompt is removed");
   eq(findingWhere(base, found[1]), "Scheduled task 1", "where a finding is");
   eq(findingWhere(base, { field: "quickPrompt:0", quote: "", kind: null, why: "" }), 'Quick prompt "Numbers"', "a quick prompt by its title");
+}
+
+// The room's instructions are a text the package carries: checked, and a
+// finding in them is fixed by editing them.
+{
+  const withInstructions = { ...base, instructions: "Ask maya@example.com when unsure." };
+  eq(roomPackageTexts(withInstructions).instructions, "Ask maya@example.com when unsure.", "the instructions are checked");
+  assert(!("instructions" in roomPackageTexts(base)), "no instructions, no text");
+  const [x] = roomFindings({ findings: [{ field: "instructions", quote: "maya@example.com", why: "private-data: an email." }] }, withInstructions);
+  eq([x.kind, fixFinding(withInstructions, x), findingWhere(withInstructions, x)], ["private-data", { edit: "instructions" }, "Instructions"], "a finding in them");
 }
 
 // The kinds are describe-room's, in its order.

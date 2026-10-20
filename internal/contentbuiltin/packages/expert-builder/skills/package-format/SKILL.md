@@ -106,7 +106,9 @@ drafts/<name>/
   (names and types), `"library"` (the experts and skill packs the person
   can use), `"clock"` (the current time in their timezone) and
   `"capabilities"` (the components listed to them, installed or not, the
-  agents they can reach, and whether the room has other members).
+  agents they can reach, and whether the room has other members) and
+  `"conversation"` (the room's latest messages across its channels,
+  bounded).
 - `gate` (optional): `{ "question", "threshold" }`, one yes/no question
   for the decision model about the same context, and the lowest
   probability of yes (above 0) at which the task runs. A caller that runs the
@@ -229,9 +231,13 @@ add scripts only when the person asks for them.
 | room package | channels[] | 80 characters |
 | room package | schedules | 20 entries |
 | room package | schedules[].text | 16 KiB |
-| room package | apps | 10 entries |
+| room package | apps and appSnapshots together | 10 entries |
+| room package | files | 20 entries |
+| room package | files[].name | 255 characters |
+| room package | apps/ and files/ together | 64 MiB |
 | room package | sources[].purpose | 500 characters |
+| room package | INSTRUCTIONS.md | 64 KiB |
 | room package | README.md | 64 KiB |
-| room package | files in the package | 2 files |
-| room package | package size | 1 MiB |
+| room package | files in the package | 2023 files |
+| room package | package size | 65 MiB |
 <!-- limits:end -->

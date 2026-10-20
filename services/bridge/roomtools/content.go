@@ -73,23 +73,29 @@ func saveComponentTool() Tool {
 		Description: "Save to the Library of the person who asked you, after they confirmed: a package drafted in a workspace directory (dir), " +
 			"a file as a gallery work (file or artifactId; its current version and recipe, never its data), " +
 			"or this room as a room component (kind \"room\": what \"Save as component\" captures of it, its welcome, quick prompts, expert, packs, channels, " +
-			"AI tasks and notices, apps from works and the sources it asks for (room_setup's ask_source), never its members or messages; " +
+			"AI tasks and notices, apps from works, the MCP tools its runs had and the sources it asks for (room_setup's ask_source), never its members or messages; " +
+			"with the person's agreement also its instructions, which replace its expert, and the apps made here and room files to carry (include, by artifact id); " +
 			"only the room's owner or admins save it). " +
 			"Validated first; an error says what to fix. " +
 			"Without id it creates (refused if they have one of that kind and name); with id (cc_...) it saves the next version. " +
 			"Write a work's or a room's listing yourself: name, displayName, description, category (and a room's tags).",
 		InputSchema: objectSchema(map[string]any{
-			"dir":         map[string]any{"type": "string", "description": "Workspace-relative directory holding component.json, e.g. drafts/contract-reviewer."},
-			"file":        map[string]any{"type": "string", "description": "A workspace file (published first if needed)."},
-			"artifactId":  map[string]any{"type": "string", "description": "Or any deliverable's id (artf_...)."},
-			"kind":        map[string]any{"type": "string", "enum": []string{"room"}, "description": "room: save this room as a room component."},
-			"id":          map[string]any{"type": "string", "description": "The component to save a new version of; omit to create."},
-			"name":        map[string]any{"type": "string", "description": "A new work's or room component's name (lower-case, hyphens)."},
-			"category":    map[string]any{"type": "string", "description": "A work's: " + strings.Join(wire.WorkCategories, ", ") + "; a room's: one lower-case word."},
-			"displayName": map[string]any{"type": "string", "description": "A work's or a room's title."},
-			"description": map[string]any{"type": "string", "description": "A work's gallery description, or a room's (it becomes the installed room's, at most 500 characters)."},
-			"tags":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "A room's tags."},
-			"request":     map[string]any{"type": "string", "description": "A work's \"how it was made\": a request that would make a similar one."},
+			"dir":          map[string]any{"type": "string", "description": "Workspace-relative directory holding component.json, e.g. drafts/contract-reviewer."},
+			"file":         map[string]any{"type": "string", "description": "A workspace file (published first if needed)."},
+			"artifactId":   map[string]any{"type": "string", "description": "Or any deliverable's id (artf_...)."},
+			"kind":         map[string]any{"type": "string", "enum": []string{"room"}, "description": "room: save this room as a room component."},
+			"id":           map[string]any{"type": "string", "description": "The component to save a new version of; omit to create."},
+			"name":         map[string]any{"type": "string", "description": "A new work's or room component's name (lower-case, hyphens)."},
+			"category":     map[string]any{"type": "string", "description": "A work's: " + strings.Join(wire.WorkCategories, ", ") + "; a room's: one lower-case word."},
+			"displayName":  map[string]any{"type": "string", "description": "A work's or a room's title."},
+			"description":  map[string]any{"type": "string", "description": "A work's gallery description, or a room's (it becomes the installed room's, at most 500 characters)."},
+			"tags":         map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "A room's tags."},
+			"request":      map[string]any{"type": "string", "description": "A work's \"how it was made\": a request that would make a similar one."},
+			"instructions": map[string]any{"type": "string", "description": "A room's instructions as you and the person agreed them: the agent's role here, the steps and formats that worked, their corrections."},
+			"include": map[string]any{"type": "object", "description": "A room's apps made here and room files to carry, by artifact id.", "properties": map[string]any{
+				"apps":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+				"files": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			}},
 		}),
 		Call: saveComponent,
 	}
@@ -252,9 +258,9 @@ func saveComponent(ctx context.Context, env *Env, args json.RawMessage) Result {
 	}
 	id := strings.TrimSpace(in.ID)
 	var (
-		p, what string
-		body    any
-		files   int
+		p, what, roomNote string
+		body              any
+		files             int
 	)
 	art, file := strings.TrimSpace(in.ArtifactID), strings.TrimSpace(in.File)
 	if n := countSet(in.Dir != "", art != "", file != "", in.Kind != ""); n > 1 {
@@ -284,10 +290,12 @@ func saveComponent(ctx context.Context, env *Env, args json.RawMessage) Result {
 			return toolError("request is a work's: a room component carries no recipe")
 		}
 		var err error
-		if p, body, err = roomSave(ctx, env, grant, id, in); err != nil {
+		if p, body, roomNote, err = roomSave(ctx, env, grant, id, in); err != nil {
 			return refusal("capturing this room", err)
 		}
 		what = "this room"
+	case strings.TrimSpace(in.Instructions) != "" || in.Include != nil:
+		return toolError("instructions and include are a room's: pass kind \"room\" to save this room")
 	case in.Kind != "":
 		return toolError("kind is \"room\" (this room); a drafted package's component.json names its own kind")
 	case art != "":
@@ -349,8 +357,8 @@ func saveComponent(ctx context.Context, env *Env, args json.RawMessage) Result {
 	}
 	if c.Kind == contentKindRoom {
 		out["note"] = fmt.Sprintf("Saved this room as the room component %s version %s to the Library of the person who asked you: only they see it. "+
-			"Anyone it is shared with installs it as a new room of theirs, without this room's members or messages. "+
-			"publish_component offers to share it with their organization (they publish it with a click).", c.Name, c.LatestVersion)
+			"Anyone it is shared with installs it as a new room of theirs, without this room's members, messages or app data. "+
+			"publish_component offers to share it with their organization (they publish it with a click).", c.Name, c.LatestVersion) + roomNote
 	}
 	if v := d.OrgProposed; v != "" {
 		// Their organization uses it: the new version reaches it only by

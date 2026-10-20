@@ -19,6 +19,12 @@ const (
 	assistMaxTk     = 700
 )
 
+// assistBudgets are the tasks given more than assistMaxTk, each with why:
+// describe-room runs once per save, not per keystroke, and does three
+// jobs in one call (what the room depends on and its instructions, the
+// listing, the check of the package's text).
+var assistBudgets = map[string]int{"describe-room": 900}
+
 func TestBuiltinAssistsStayWithinBudget(t *testing.T) {
 	n := 0
 	for _, p := range builtins {
@@ -26,8 +32,12 @@ func TestBuiltinAssistsStayWithinBudget(t *testing.T) {
 			continue
 		}
 		n++
-		if tk := len(p.Validated.Instructions) / 4; tk > assistMaxTk {
-			t.Errorf("%s: INSTRUCTIONS.md is about %d tokens, the budget is %d (every call sends it)", p.Component.Name, tk, assistMaxTk)
+		budget := assistMaxTk
+		if b, ok := assistBudgets[p.Component.Name]; ok {
+			budget = b
+		}
+		if tk := len(p.Validated.Instructions) / 4; tk > budget {
+			t.Errorf("%s: INSTRUCTIONS.md is about %d tokens, the budget is %d (every call sends it)", p.Component.Name, tk, budget)
 		}
 	}
 	if n < 2 {
@@ -177,36 +187,44 @@ func TestLibraryDraftTasksFillTheForm(t *testing.T) {
 	}
 }
 
-// describe-room fills the room component's save dialog: its fields but
-// findings are the content form's (contentpkg.Form), read from the room
-// and the setup being saved, and it describes the setup, never the room's
-// people. Its findings are items of field, quote and why: what in the
-// package's text should not leave the room, of the kinds the save
-// dialog's closed list reads (web/src/lib/roomComponents.ts, held to the
-// item's description by a web test).
+// describe-room reads a room being saved (its conversation, and the setup
+// as <text>) and fills the room component's save dialog: its fields but
+// dependsOn and findings are the content form's (contentpkg.Form), the
+// instructions among them; the listing describes the setup, never the
+// room's people. dependsOn is items of what, kind, included and why, of
+// the kinds the dialog's checklist reads (web/src/lib/roomCapture.ts, held
+// to the item's description by a web test); findings are items of field,
+// quote and why, of the kinds web/src/lib/roomReview.ts reads.
 func TestDescribeRoomFillsTheSaveDialog(t *testing.T) {
-	m := assistTask(t, "describe-room", wire.AssistContextRoom)
+	m := assistTask(t, "describe-room", wire.AssistContextConversation)
 	form := m
-	form.Fields = slices.DeleteFunc(slices.Clone(m.Fields), func(f wire.AssistField) bool { return f.Name == "findings" })
+	form.Fields = slices.DeleteFunc(slices.Clone(m.Fields), func(f wire.AssistField) bool { return f.Name == "findings" || f.Name == "dependsOn" })
 	fieldsFill(t, "describe-room", form, jsonKeys(contentpkg.Form{}), nil)
 	got := []string{}
 	for _, f := range m.Fields {
 		got = append(got, f.Name+":"+f.Type)
 	}
-	if strings.Join(got, ",") != "displayName:,description:,category:,tags:list,welcome:,findings:items" {
+	if strings.Join(got, ",") != "displayName:,description:,category:,tags:list,welcome:,instructions:,dependsOn:items,findings:items" {
 		t.Fatalf("describe-room fields = %v", got)
 	}
-	var item []string
-	for _, it := range m.Fields[5].Item {
-		item = append(item, it.Name)
+	items := func(f wire.AssistField) string {
+		var out []string
+		for _, it := range f.Item {
+			out = append(out, it.Name)
+		}
+		return strings.Join(out, ",")
 	}
-	if strings.Join(item, ",") != "field,quote,why" || !strings.Contains(m.Fields[5].Item[2].Description, "secret, internal-link, personal-name or private-data") {
-		t.Fatalf("a finding = %+v", m.Fields[5].Item)
+	if dep := m.Fields[6]; items(dep) != "what,kind,included,why" || dep.Item[1].Description != "instructions, app, file, tool, schedule, agent, data or other" {
+		t.Fatalf("a dependency = %+v", dep.Item)
+	}
+	if f := m.Fields[7]; items(f) != "field,quote,why" || !strings.Contains(f.Item[2].Description, "secret, internal-link, personal-name or private-data") {
+		t.Fatalf("a finding = %+v", f.Item)
 	}
 	p, _ := Get(IDPrefix + "describe-room")
 	flat := strings.Join(strings.Fields(p.Validated.Instructions), " ")
-	for _, want := range []string{"<room>", "<recent_messages>", "<text>", "at most 32 characters", "never a conversation of the room or the people in it",
-		"`package`", "`quickPrompt:<n>`", "`schedule:<n>`", "`channel:<n>`", "`secret`", "`internal-link`", "`personal-name`", "`private-data`", "never guess"} {
+	for _, want := range []string{"<conversation>", "<text>", "at most 32 characters", "never a conversation of the room or the people in it",
+		"`madeApps`", "`files`", "`tools`", "`included`", "`yes`", "`no`", "no names of people",
+		"`package`", "`instructions`", "`quickPrompt:<n>`", "`schedule:<n>`", "`channel:<n>`", "`secret`", "`internal-link`", "`personal-name`", "`private-data`", "never guess"} {
 		if !strings.Contains(flat, want) {
 			t.Errorf("describe-room does not say %q", want)
 		}

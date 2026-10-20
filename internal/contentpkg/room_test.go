@@ -121,7 +121,8 @@ func TestRoomPackageValidation(t *testing.T) {
 		{"a description past a room's", map[string]any{"description": strings.Repeat("d", maxRoomDescription+1)}, nil, "room's description"},
 		{"scripts", map[string]any{"requires": map[string]any{"permissions": []string{PermScripts}}}, nil, "no scripts"},
 		{"skills", map[string]any{"skills": []string{"x"}}, nil, "skills"},
-		{"an extra file", nil, map[string]string{"INSTRUCTIONS.md": "x"}, "holds only"},
+		{"an extra file", nil, map[string]string{"notes.txt": "x"}, "a room package holds"},
+		{"instructions beside an expert", nil, map[string]string{InstructionsFile: "Review the week."}, "not both"},
 	}
 	for _, c := range bad {
 		_, err := Validate(roomBundle(t, c.extra, c.files), "", Options{})
@@ -178,7 +179,7 @@ func TestRoomPackageFromForm(t *testing.T) {
 	}
 	f.Instructions = "Be a reviewer."
 	if _, _, err := Build(f, "1.0.0", Options{}, nil); err == nil {
-		t.Error("a room form with instructions saved")
+		t.Error("a room form with instructions and a room expert saved")
 	}
 }
 

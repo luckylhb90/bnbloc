@@ -86,7 +86,7 @@ func runsFixture(t *testing.T) *Service {
 	post("/v1/bridge/jobs/j-borrow/status", `{"bridgeId":"b-alice","status":"running"}`)
 	post("/v1/bridge/jobs/j-borrow/status", `{"bridgeId":"b-alice","status":"replied","diagnostics":{"sessionId":"s1",
 		"reply":{"messageId":"m-reply","text":"done","atMs":5000,"count":2},
-		"usage":{"model":"m-large","inputTokens":120,"outputTokens":30,"costUsd":0.4}}}`)
+		"usage":{"model":"m-large","inputTokens":120,"outputTokens":30,"costUsd":0.4},"tools":{"mcp":["browser","media"]}}}`)
 	post("/v1/bridge/jobs/j-failed/status", `{"bridgeId":"b-alice","status":"failed","failureReason":"borrow_not_authorized","diagnostics":{"error":"core exploded"}}`)
 	return svc
 }
@@ -140,6 +140,9 @@ func TestRoomRunsRecordPhasesReplyAndUsage(t *testing.T) {
 	}
 	if b.Usage == nil || *b.Usage.InputTokens != 120 || *b.Usage.OutputTokens != 30 || *b.Usage.CostUsd != 0.4 {
 		t.Fatalf("usage = %+v", b.Usage)
+	}
+	if strings.Join(b.Tools, ",") != "browser,media" || out.Runs[0].Tools != nil {
+		t.Fatalf("tools = %v / %v (the session's MCP tools, none for a failed run without a report)", b.Tools, out.Runs[0].Tools)
 	}
 	if b.Diagnostics != nil {
 		t.Fatal("list rows must not carry raw diagnostics")

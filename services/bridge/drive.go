@@ -341,13 +341,13 @@ func (b *Bridge) driveTurn(ctx context.Context, d *drive) (driveResult, error) {
 	if len(d.content.missing) > 0 {
 		running["contentMissing"] = d.content.missing
 	}
-	if err := b.reportJobStatus(ctx, d.job.JobID, store.AgentJobRunning, "", running); err != nil {
+	if err := b.reportJobStatus(ctx, d.job.JobID, store.AgentJobRunning, "", d.content.withTools(running)); err != nil {
 		slog.Debug("bnbloc bridge job running status failed", "event", "bnbloc.bridge.job_status_failed", "job", d.job.JobID, "error", err)
 	}
 	return b.driveClaim(ctx, d, func(rs *roomSession) {
 		// Publish the bound session so a cancel arriving mid-turn can interrupt it.
 		d.run.bind(d.core, rs)
-		diag := d.agent()
+		diag := d.content.withTools(d.agent())
 		diag["workspaceId"], diag["sessionId"] = rs.workspaceID, rs.sessionID
 		b.reportJobStatus(ctx, d.job.JobID, store.AgentJobReflowing, "", diag)
 	})
@@ -374,7 +374,7 @@ func (b *Bridge) settle(ctx context.Context, d *drive, res driveResult, err erro
 		return
 	}
 	b.publishTurn(ctx, d)
-	diag := d.agent()
+	diag := d.content.withTools(d.agent())
 	if res.sessionID != "" {
 		diag["workspaceId"], diag["sessionId"] = res.workspaceID, res.sessionID
 	}

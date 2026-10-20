@@ -1,5 +1,6 @@
 import { ShieldWarningIcon } from "@phosphor-icons/react";
 import type { ContentComponent } from "@/lib/contentComponents";
+import { formatBytes } from "@/lib/format";
 import { scheduleLine } from "@/lib/roomComponents";
 import { sourceAsk } from "@/lib/roomSources";
 
@@ -7,7 +8,7 @@ const heading = "mb-1 text-xs font-medium uppercase tracking-wide text-[var(--co
 
 // RoomSetup shows what a room component sets up in a new room: its
 // channels, its scheduled tasks (created paused), the room expert, the
-// packs and apps it turns on, the MCP tools they need, and the sources it
+// packs, apps and files it turns on or copies in, the MCP tools they need, and the sources it
 // asks to read with their purpose (a room made from it waits for its
 // organization admin's consent).
 export function RoomSetup({ component }: { readonly component: Pick<ContentComponent, "room" | "requires"> }) {
@@ -20,7 +21,8 @@ export function RoomSetup({ component }: { readonly component: Pick<ContentCompo
     ["Scheduled tasks (created paused)", room.schedules.map(scheduleLine)],
     ["Room expert", req.expert ? [req.expert] : []],
     ["Packs turned on", packs],
-    ["Apps copied in", room.apps],
+    ["Apps copied in", [...room.apps, ...room.appSnapshots.map((a) => a.title)]],
+    ["Files copied in", room.files.map((f) => `${f.name} (${formatBytes(f.sizeBytes)})`)],
     ["MCP tools needed", (req.mcp ?? []).map((t) => t.name)],
   ];
   return (

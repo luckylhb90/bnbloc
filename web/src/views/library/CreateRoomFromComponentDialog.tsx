@@ -15,6 +15,7 @@ import { Segment } from "@/ui/Segment";
 import { Select } from "@/ui/Select";
 import { useToast } from "@/ui/Toast";
 import { RoomSetup } from "@/views/library/RoomSetup";
+import { RoomToolsToAdd } from "@/views/library/RoomToolsToAdd";
 
 // CreateRoomFromComponentDialog is "Create a room from this" (room
 // components PRD §2.1): a room component (the one given, or one picked
@@ -88,7 +89,7 @@ export function CreateRoomFromComponentDialog({
       const reply = await roomComponentsApi.createRoom(chosen.id, { roomId: id, name: id, visibility: vis });
       await reauth().catch(() => {});
       toast.success(`Room “${id}” created from ${contentLabel(chosen)}`);
-      if (reply.skipped.length > 0) setMade(reply);
+      if (reply.skipped.length > 0 || reply.toolsToAdd.length > 0) setMade(reply);
       else onCreated(id);
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) setErr("A room with this id already exists");
@@ -123,13 +124,19 @@ export function CreateRoomFromComponentDialog({
       }
     >
       {made ? (
-        <div role="status" className="flex flex-col gap-1 text-sm">
-          <p>Room “{made.roomId}” is made. Left out:</p>
-          <ul className="list-disc pl-5 text-[var(--color-fg-muted)]">
-            {made.skipped.map((s) => (
-              <li key={s}>{s}</li>
-            ))}
-          </ul>
+        <div role="status" className="flex flex-col gap-2 text-sm">
+          <p>Room “{made.roomId}” is made.{made.instructions ? ` Its instructions are your expert ${made.instructions}: edit them in your Library.` : ""}</p>
+          {made.skipped.length > 0 && (
+            <>
+              <p>Left out:</p>
+              <ul className="list-disc pl-5 text-[var(--color-fg-muted)]">
+                {made.skipped.map((s) => (
+                  <li key={s}>{s}</li>
+                ))}
+              </ul>
+            </>
+          )}
+          <RoomToolsToAdd tools={made.toolsToAdd} />
         </div>
       ) : (
       <div className="flex flex-col gap-4">

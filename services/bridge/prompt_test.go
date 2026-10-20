@@ -112,7 +112,9 @@ func TestPromptBudgets(t *testing.T) {
 		// whole setup (description, welcome and quick prompts, expert and
 		// packs, channels, sources) and save_component saves this room
 		// (docs/prd/2026-10-20-room-setup-by-conversation.md); briefs cut.
-		{"session prefix (guidance + tools/list)", guidance + toolsList, 3060},
+		// +30 on 2026-10-20: save_component's room instructions and include
+		// (docs/prd/2026-10-20-complete-room-capture.md); two notes cut.
+		{"session prefix (guidance + tools/list)", guidance + toolsList, 3090},
 	} {
 		got := tokens(c.text)
 		t.Logf("%-48s %5d tokens (budget %d)", c.name, got, c.budget)

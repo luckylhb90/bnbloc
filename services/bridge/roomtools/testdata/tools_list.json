@@ -135,7 +135,6 @@
         "additionalProperties": false,
         "properties": {
           "artifactId": {
-            "description": "A deliverable (artf_…).",
             "type": "string"
           },
           "category": {
@@ -152,11 +151,31 @@
             "type": "string"
           },
           "file": {
-            "description": "A workspace file.",
             "type": "string"
           },
           "id": {
             "description": "cc_…; omit to create.",
+            "type": "string"
+          },
+          "include": {
+            "description": "Apps made here and room files, by artifact id.",
+            "properties": {
+              "apps": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "files": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          },
+          "instructions": {
             "type": "string"
           },
           "kind": {

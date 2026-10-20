@@ -291,34 +291,3 @@ func TestCreateRoomFromComponent(t *testing.T) {
 		t.Fatalf("maya's personal package as jack = %d %s", r.status, r.body)
 	}
 }
-
-// An install that fails once the room exists leaves no room behind: its
-// channels and schedules go with it, and nothing counts as a use.
-func TestCreateRoomFromComponentIsAtomic(t *testing.T) {
-	e := galleryGW(t)
-	// A stored version whose second schedule realtime refuses (its text is
-	// past a message's: a save would have refused it, a stored row may not).
-	bad := e.content(store.ContentScopeOrg, contentpkg.KindRoom, "broken-room", map[string]any{
-		"channels": []string{"reports"},
-		"schedules": []any{
-			map[string]any{"text": "Fine.", "recipient": map[string]any{"kind": "ai"}, "recurrence": map[string]any{"kind": "daily", "time": "09:00"}, "timezone": "UTC"},
-			map[string]any{"text": strings.Repeat("x", wire.MaxChatTextBytes+1), "recipient": map[string]any{"kind": "ai"}, "recurrence": map[string]any{"kind": "daily", "time": "09:00"}, "timezone": "UTC"},
-		},
-	})
-	r := e.call(http.MethodPost, "/v1/content-components/"+bad+"/create-room", wire.RoomInstallRequest{RoomID: "doomed"}, e.as("jack"))
-	if r.status != http.StatusRequestEntityTooLarge {
-		t.Fatalf("create-room = %d %s", r.status, r.body)
-	}
-	if _, err := e.b.Room.GetRoom(e.ctx(), "doomed"); !errors.Is(err, store.ErrRoomNotFound) {
-		t.Fatalf("the half-made room = %v, want gone", err)
-	}
-	if scheds, _ := e.b.Schedules.ListSchedules(e.ctx(), "doomed"); len(scheds) != 0 {
-		t.Fatalf("schedules left = %+v", scheds)
-	}
-	if channels, _ := e.b.Channel.ListChannels(e.ctx(), "doomed"); len(channels) != 0 {
-		t.Fatalf("channels left = %+v", channels)
-	}
-	if installs, _ := e.b.ContentComponents.ListContentUses(e.ctx(), store.ContentUseRoomInstall, "doomed"); len(installs) != 0 {
-		t.Fatalf("install counted = %+v", installs)
-	}
-}

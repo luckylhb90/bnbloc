@@ -19,6 +19,7 @@ const CONTEXT_LABELS: Readonly<Record<AssistContext, string>> = {
   library: "The member's library (the experts and skill packs they can use)",
   clock: "The current time in the member's timezone",
   capabilities: "What the member could use (components, agents they can reach, other people in the room)",
+  conversation: "The room's conversation (its channels' latest messages, bounded)",
 };
 
 const FIELD_TYPES: readonly { readonly value: AssistFieldType; readonly label: string }[] = [

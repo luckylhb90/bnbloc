@@ -401,6 +401,9 @@ type contentSaveRequest struct {
 	Form        contentpkg.Form `json:"form"`
 	Version     string          `json:"version,omitempty"`
 	BaseVersion string          `json:"baseVersion,omitempty"`
+	// Include is what a room package's save takes from its room
+	// (room_capture.go: roomIncluded).
+	Include *wire.RoomInclude `json:"include,omitempty"`
 }
 
 // isArchiveBody reports a request carrying a package archive (tar, tar.gz
@@ -459,6 +462,9 @@ func (s *Service) handleCreateContent(w http.ResponseWriter, r *http.Request, ca
 		}
 		if err := json.Unmarshal(raw, &req); err != nil {
 			httpx.Error(w, "invalid json body", http.StatusBadRequest)
+			return
+		}
+		if !s.roomIncluded(w, r.Context(), actor, req.Include, &req.Form) {
 			return
 		}
 		version := firstNonEmpty(strings.TrimSpace(req.Version), "1.0.0")
@@ -564,13 +570,35 @@ func (s *Service) storeBundle(ctx context.Context, pkg *contentpkg.Package, bund
 }
 
 func (s *Service) createContent(w http.ResponseWriter, r *http.Request, actor contentActor, pkg *contentpkg.Package, bundle []byte) {
-	ctx := r.Context()
-	claims := actor.Claims
-	key, err := s.storeBundle(ctx, pkg, bundle)
-	if err != nil {
+	c, err := s.newContent(r.Context(), actor, pkg, bundle)
+	switch {
+	case errors.Is(err, errContentBundle):
 		obs.ServerError(w, "store content bundle failed", err)
 		httpx.Error(w, "store content bundle failed", http.StatusBadGateway)
 		return
+	case errors.Is(err, store.ErrContentExists):
+		httpx.Error(w, fmt.Sprintf("you already have a %s named %q: save a new version of it instead", shortKind(pkg.Manifest.Kind), pkg.Manifest.Name), http.StatusConflict)
+		return
+	case err != nil:
+		obs.ServerError(w, "save content component failed", err)
+		httpx.Error(w, "save content component failed", http.StatusInternalServerError)
+		return
+	}
+	s.writeContentDetail(w, r, actor.Claims, c, http.StatusCreated)
+}
+
+// errContentBundle: a new component's bundle could not be stored.
+var errContentBundle = errors.New("store content bundle")
+
+// newContent is the one creation of a content component: pkg (bundle) as
+// a new personal component of the acting member, its bundle stored, the
+// save audited and announced. store.ErrContentExists when they have one of
+// that kind and name; errContentBundle when the bundle is not stored.
+func (s *Service) newContent(ctx context.Context, actor contentActor, pkg *contentpkg.Package, bundle []byte) (store.ContentComponent, error) {
+	claims := actor.Claims
+	key, err := s.storeBundle(ctx, pkg, bundle)
+	if err != nil {
+		return store.ContentComponent{}, fmt.Errorf("%w: %w", errContentBundle, err)
 	}
 	now := s.nowTime().UnixMilli()
 	m := pkg.Manifest
@@ -581,23 +609,15 @@ func (s *Service) createContent(w http.ResponseWriter, r *http.Request, actor co
 	}
 	v, err := contentVersionRow(pkg, key, len(bundle), claims.Subject, now)
 	if err != nil {
-		obs.ServerError(w, "encode content manifest failed", err)
-		httpx.Error(w, "encode content manifest failed", http.StatusInternalServerError)
-		return
+		return c, fmt.Errorf("encode content manifest: %w", err)
 	}
-	switch err := s.ContentComponents.CreateContentComponent(ctx, c, v); {
-	case errors.Is(err, store.ErrContentExists):
-		httpx.Error(w, fmt.Sprintf("you already have a %s named %q: save a new version of it instead", shortKind(m.Kind), m.Name), http.StatusConflict)
-		return
-	case err != nil:
-		obs.ServerError(w, "save content component failed", err)
-		httpx.Error(w, "save content component failed", http.StatusInternalServerError)
-		return
+	if err := s.ContentComponents.CreateContentComponent(ctx, c, v); err != nil {
+		return c, err
 	}
 	c.LatestVersion = v.Version
 	s.auditJobSave(ctx, actor, c, v.Version)
 	s.contentSaved(ctx, actor, c, v.Version, wire.ContentSavedSaved, true)
-	s.writeContentDetail(w, r, claims, c, http.StatusCreated)
+	return c, nil
 }
 
 func contentVersionRow(pkg *contentpkg.Package, key string, size int, actor string, now int64) (store.ContentComponentVersion, error) {
@@ -692,6 +712,9 @@ func (s *Service) handleNewContentVersion(w http.ResponseWriter, r *http.Request
 			}
 		}
 		req.Form.Kind, req.Form.Name = c.Kind, c.Name
+		if !s.roomIncluded(w, ctx, actor, req.Include, &req.Form) {
+			return
+		}
 		if pkg, bundle, err = contentpkg.Build(req.Form, version, opts, base); err != nil {
 			httpx.Error(w, err.Error(), http.StatusBadRequest)
 			return
