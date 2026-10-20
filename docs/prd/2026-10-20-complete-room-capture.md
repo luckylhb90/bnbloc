@@ -3,7 +3,10 @@
 Status: slice 1 built (§6: the room-saving assist's "depends on" and
 instructions over the room's conversation; `INSTRUCTIONS.md`, apps made in
 the room and ticked files in the package; the tools its runs had as
-`requires.mcp`). Owner: the room package capture
+`requires.mcp`). Slice 2: agent schedules built (§7: a request to an
+agent travels without its agent and waits for the installer's pick; an
+agent sets one up through `room_setup`); "Try as a newcomer" not yet.
+Owner: the room package capture
 (`services/gateway/room_components.go` and `room_capture.go`,
 `component-draft`), the room package kind (`internal/contentpkg/room.go`
 and `room_carry.go`), the room-saving assist (`describe-room`).
@@ -106,7 +109,8 @@ the member decides what goes into the package.
 
 1. The assist's "depends on" and instructions; `INSTRUCTIONS.md`, apps and
    files in the package; tools as `requires.mcp`. **Built** (§6).
-2. Agent schedules picked at install; "Try as a newcomer".
+2. Agent schedules picked at install (**built**, §7); "Try as a newcomer"
+   (not yet).
 3. QA acceptance: one member sets a room up by talking and publishes it;
    another installs it and sends the same request.
 
@@ -245,3 +249,90 @@ file's version history, an app's data and its share links never travel.
 | Observability | The install's audit row as before (it names the package and the room); the run records show the tools a session had. |
 | AI capability | The whole capture: dependencies, instructions, listing, findings; the member decides every tick. |
 | Component or platform | Platform capabilities only: a context, package parts and their install; no use case is named. |
+
+## 7. Slice 2 as built: agent schedules
+
+"Try as a newcomer" (§2.3) is not built yet. What the agent schedules
+decided, against the code:
+
+- **The state is the schedule's own data, no new field.** A request to
+  an agent (recipient kind `agent`) that names no owner, provider or core
+  waits for an agent: `schedule.WaitsForAgent` (`internal/schedule`) is
+  the one rule of that state, and `NormalizeRecipient` accepts it (half a
+  target is still refused). The web shows it with `waitsForAgent`
+  (`web/src/lib/schedules.ts`): status "Waiting for an agent", recipient
+  "an agent you pick", never a borrow. No migration: the recipient is
+  JSON (`recipient_json`), and an empty owner was never stored before.
+- **One place decides a schedule may be enabled or run.** realtime's
+  `runnable` refuses a waiting schedule: `planNextRun` (create or patch
+  with `enabled: true`, 400, and a patch that takes an enabled
+  schedule's agent away), run now (409) and `postScheduled` (the one post
+  of the scheduler's and run now's, also behind the scale-out route, where
+  it pauses the schedule like an empty message; it cannot be reached
+  while enabling is refused, and stops a post to nobody as its creator).
+- **The package rule.** `contentpkg.RoomScheduleMisfit` (the one rule of
+  which schedules a package holds) now admits kind `agent`; posting as a
+  person (kind `room` or none) stays refused ("words they never wrote");
+  a notice to people or a group and a one-time run as before.
+  `contentpkg.PackageRecipient` is a fitting recipient as a package holds
+  it (`{kind: "agent"}` and nothing more); the validator refuses a
+  request that names any part of an agent. Capture (`draftSchedules`)
+  keeps the text, recurrence, timezone and channel, strips the agent
+  and says so in `left` ("the agent of N scheduled requests (whoever
+  installs it picks one of their agents)").
+- **Install** creates it paused through realtime's route like every
+  package schedule (`installSchedules`, `PackageRecipient` again so a
+  package can never install a named agent) and lists it in the reply's
+  `waitingForAgent` (its text in a line). The install dialog says "Pick
+  an agent for: <text>". In the room, `AgentPicksCard` (above the feed,
+  only the member's own waiting schedules, `agentToPick`; one schedule
+  list read per room open and per Schedules dialog close) lists the same
+  with "Pick an agent", which opens the Schedules dialog on that
+  schedule's editor (`editId`). Its picker is the one the dialog uses for
+  any request to an agent (`agentRows`: the member's own targets and the
+  room's agents), with "Choose an agent…" until one is chosen; saving
+  sets the target (realtime's PATCH, the creator only); Resume turns it
+  on. Pick and enable stay two steps, as the PRD says (the installer
+  enables it), so a pick never starts runs by itself.
+- **`room_setup` add_schedule takes `agent`** (a handle from
+  `list_room_agents`, resolved by `resolveHandle` against the roster);
+  `task` is then the request posted to that agent as the person each
+  time. The door (`agentChangeAllowed` → `agentScheduleTarget`) admits a
+  request only to one of the room's agents online now (realtime's roster
+  through `roomRoster`, the one read: the agents the dialog offers the
+  person) and never one without a target; another member's agent is a
+  borrow, authorized at drive time as for the dialog's. The brief's text
+  is unchanged; the new parameter is paid by three shorter parameter
+  notes (`task`, `send`, `name`), so the session prefix stays at its
+  3090-token budget. `get` names each request's agent, or "none yet".
+
+**Not in this slice.** "Try as a newcomer". A schedule waiting for an
+agent is the installer's only (its creator): nobody else picks for them.
+
+**Design review (slice 2).**
+
+| Lens | Answer |
+|---|---|
+| Actors | The saver's request loses its agent; the installer creates, picks for and turns on their own schedule; a member's agent schedules for the member, never as another; another member's agent runs a request only under its owner's borrow authorization. |
+| Time and lifecycle | Installed paused and waiting; picking keeps it paused; Resume plans its next run. A waiting schedule never plans a run, so the scheduler never claims it. Its agent going offline later is the existing drive-time path. |
+| Scale and cost | One schedule list read per room open (and per dialog close) for the card; a waiting schedule costs nothing until enabled; one roster read per agent-made request. |
+| Failure and recovery | Enabling or running a waiting schedule is refused with what to do ("pick one of your agents for it, then turn it on"); a roster read that fails refuses the agent's request (502, logged), the person can still use the dialog. |
+| Boundaries and privacy | A package carries no person or agent of the saver's; the installer's pick names only agents the dialog offers them. |
+| Abuse and untrusted input | The door checks the target against the roster server-side (an agent cannot name an arbitrary owner); the text stays the schedule rule's (bounds, fenced when `get` reads it back). |
+| One owner | `WaitsForAgent` (the state), `runnable` (enable and run), `RoomScheduleMisfit` and `PackageRecipient` (what a package holds), `roomRoster` (the room's agents), `agentRows` (the picker). |
+| Defaults and fallbacks | Waiting until the installer picks; nothing guesses an agent for them. |
+| External contracts | Additive: `RoomInstallReply.waitingForAgent`; an agent recipient may be empty; the door admits kind `agent`. |
+| Load on users and agents | One "pick an agent" per request, from the install dialog's list or the room's card; the tool brief unchanged in length. |
+| Release and compatibility | Pre-launch; no migration. An older realtime replica refuses an empty agent recipient, so an install there fails cleanly and deletes the room. |
+| Observability | The agent's request is audited as `add-schedule` like the others; a refused one as denied. |
+| AI capability | An agent sets a request to an agent up by talking (`room_setup`); the installer decides the agent. |
+| Component or platform | Platform: what a package's schedule may carry and its install; no use case is named. |
+
+**Pre-mortem (slice 2).** (1) An installer never notices the waiting
+schedule: the install dialog lists it, the room shows the card until it
+has an agent, the Schedules dialog marks it. (2) A pick starts runs
+before the installer means to: picking keeps it paused. (3) An agent
+schedules a request to someone's agent it may not drive: the door admits
+only the room's agents, and the borrow is checked at drive time as for
+the person's own. (4) A waiting schedule posts as its creator to nobody:
+`runnable` refuses it on every path that enables or posts.

@@ -142,7 +142,9 @@ decided, against the code:
   (description, welcome, quick prompts), `use`/`unuse` (an expert, skill
   or prompt pack from the requester's Library by name, `roomlog.ReadLibrary`;
   an expert becomes the room's expert), `add_channel`, `add_schedule` /
-  `remove_schedule` (the old create/delete, an AI task or a notice only),
+  `remove_schedule` (the old create/delete, an AI task or a notice only;
+  since docs/prd/2026-10-20-complete-room-capture.md slice 2 also a
+  request to one of the room's agents, `agent`),
   `ask_source` (a source and its purpose). Its brief: "This room's setup
   (description, welcome, quick prompts, expert, packs, channels,
   schedules, sources), changed as the person who asked you. Propose each

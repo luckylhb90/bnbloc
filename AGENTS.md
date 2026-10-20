@@ -769,7 +769,8 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   routes people already use: `room_setup` reads and changes the room's setup
   through the agent door (`services/gateway/agent_door.go`: the room's
   description only, its welcome and quick prompts, channels, schedules (an AI
-  task or a notice only) and group names) and the gateway's grant-honoring
+  task, a notice, or a request to one of the room's agents online now,
+  `agentScheduleTarget`) and group names) and the gateway's grant-honoring
   routes (content uses, sources), the person's role in the room deciding,
   each change audited (`room-setup`) and shown in the room as a line naming
   who asked. Sharing beyond its author is never an agent's act:
@@ -1546,9 +1547,13 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
 - **A room's setup is a content kind, `bnbloc.room.package/v1`**
   (`contentpkg/room.go`; docs/prd/2026-10-20-rooms-as-components.md,
   docs/architecture/content-components.md "Room packages"); room
-  templates are gone. Its schedules are AI tasks and notices to the room
-  only (never one that posts as a person or drives an agent), checked by
-  the schedule rules' owners (`schedule.CheckText`, `schedule.Validate`);
+  templates are gone. Its schedules are AI tasks, notices to the room and
+  requests to an agent without the agent (never one that posts as a
+  person; `contentpkg.RoomScheduleMisfit` and `PackageRecipient`), checked
+  by the schedule rules' owners (`schedule.CheckText`, `schedule.Validate`);
+  a request installs waiting for the installer's agent, and a schedule
+  waiting for one (`schedule.WaitsForAgent`) is never enabled or run
+  (realtime's `runnable`, the one place);
   its `sources` are asks with a purpose (`wire.RoomSourceAsk`, a name of
   the one list `wire.RoomSources`), recorded for the room at install and
   granted only by the organization admin (below). A room's draft is only

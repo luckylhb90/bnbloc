@@ -253,9 +253,12 @@ skew, and a later release drops it).
   expert, one `name@range`), `requires.skills`/`prompts` (packs turned on
   in the room), `requires.mcp` (as for any content), `apps` (works by
   `name@range`) and `sources` (`wire.RoomSourceAsk`: a name of the one
-  list `wire.RoomSources`, today `runs`, and its purpose). A schedule is an AI task or a notice to the room's members
-  (`to: "room"`): one that posts as a person or drives an agent would act
-  as whoever installs it, and a notice names no people or group. It
+  list `wire.RoomSources`, today `runs`, and its purpose). A schedule is an AI task, a notice to the room's members
+  (`to: "room"`) or a request to an agent without the agent (recipient
+  `{kind: "agent"}` and nothing more: a package names no people or their
+  agents; `contentpkg.PackageRecipient`); one that posts as a person would
+  post as whoever installs it, words they never wrote, and a notice names
+  no people or group (the one rule, `contentpkg.RoomScheduleMisfit`). It
   recurs (no `once`), its text passes `schedule.CheckText` (realtime's own
   rule), its recurrence `schedule.Validate`, and its channel is one of the
   package's. No other kind carries these fields (`errRoomFields`). A room
@@ -347,7 +350,8 @@ skew, and a later release drops it).
   through activity's room route as the editor, each with the permission
   a package declares for it, `contentpkg.MCPPermission`). Everything
   else is said in `left` (members and agents, other schedules, a notice's
-  link, another member's private pack, an app's data, a tool the editor
+  link, the agent taken out of a request to an agent, another member's
+  private pack, an app's data, a tool the editor
   may not use, run records that could not be read). The web's save
   dialog (`SaveRoomComponentDialog`, `RoomCaptureSections`, room header,
   owner/admin) shows the setup, the apps made here and the tools ticked
@@ -404,7 +408,17 @@ skew, and a later release drops it).
   (`RoomStartCard`; docs/prd/2026-10-20-room-setup-by-conversation.md).
   The install dialog says what was left out (`skipped`) before the room
   opens; the paused schedules and the waiting sources are the room's own
-  state (its Schedules, the note under its name).
+  state (its Schedules, the note under its name). A request to an agent
+  is created paused with no agent: it waits for one
+  (`schedule.WaitsForAgent`, the one rule of that state), and realtime's
+  `runnable` (the one place a schedule is enabled or run: `planNextRun`,
+  run now, `postScheduled`) refuses to turn it on or run it. The reply's
+  `waitingForAgent` lists them ("Pick an agent for: <text>" in the install
+  dialog); in the room the installer sees the same list
+  (`AgentPicksCard`, their own waiting schedules, above the feed), whose
+  "Pick an agent" opens that schedule's editor in the Schedules dialog
+  (the agent picker it uses for any request to an agent: their agents and
+  the room's); saving it sets the agent, and Resume turns it on.
 - **Where they appear.** The Library's Rooms tab (`RoomsTab`: view, new
   version, share, publish, delete, "Create a room"), and Plaza's "New
   room" → "From a room component…".

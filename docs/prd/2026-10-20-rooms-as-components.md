@@ -204,7 +204,10 @@ packages". What the slice decided, against the code:
   with a line saying so; a notice's link (it points into the saved room)
   is dropped, said too. The text and recurrence are checked by the
   schedule rules' owners (`schedule.CheckText`, extracted from realtime's
-  route so both ask one function; `schedule.Validate`).
+  route so both ask one function; `schedule.Validate`). (Since
+  docs/prd/2026-10-20-complete-room-capture.md slice 2 a request to an
+  agent is held too, without its agent, and waits for the installer's
+  pick.)
 - **Apps** are captured only when they came from a work: the copy's
   `app-copy` use names the work. An app made in the room is left out with
   "publish it as a work to include it". Install copies each through
