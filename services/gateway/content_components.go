@@ -19,6 +19,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/contentbuiltin"
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
+	"github.com/luckylhb90/bnbloc/internal/contentshare"
 	"github.com/luckylhb90/bnbloc/internal/contentuse"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
@@ -1029,6 +1030,10 @@ func (s *Service) handlePutContentUse(w http.ResponseWriter, r *http.Request, ca
 	if !ok {
 		return
 	}
+	// An agent turning one on in the room (room_setup) is audited.
+	room, what := "", "component"
+	w, audited := s.grantedSetup(w, r, actor, "use", &room, &what)
+	defer audited()
 	claims := actor.Claims
 	ctx := r.Context()
 	raw, ok := readBody(w, r, 64<<10)
@@ -1039,6 +1044,9 @@ func (s *Service) handlePutContentUse(w http.ResponseWriter, r *http.Request, ca
 	if err := json.Unmarshal(raw, &req); err != nil {
 		httpx.Error(w, "invalid json body", http.StatusBadRequest)
 		return
+	}
+	if req.Scope != wire.ContentUseMember {
+		room, what = strings.TrimSpace(req.RoomID), "component "+strings.TrimSpace(req.ComponentID)
 	}
 	claims, scope, scopeID, ok := s.contentUseScope(w, claims, req.Scope, req.RoomID)
 	if !ok {
@@ -1051,6 +1059,10 @@ func (s *Service) handlePutContentUse(w http.ResponseWriter, r *http.Request, ca
 	if err != nil {
 		contentStoreErr(w, "load content component failed", err)
 		return
+	}
+	what = contentshare.Label(c)
+	if scope == store.ContentUseRoomExpert {
+		what += " as the room's expert"
 	}
 	spec, _ := contentpkg.Lookup(c.Kind)
 	if !spec.Use {
@@ -1125,6 +1137,13 @@ func (s *Service) handleDeleteContentUse(w http.ResponseWriter, r *http.Request,
 	}
 	claims := actor.Claims
 	q := r.URL.Query()
+	// An agent turning one off in the room (room_setup) is audited.
+	room, what := "", "component "+strings.TrimSpace(q.Get("componentId"))
+	if q.Get("scope") != wire.ContentUseMember {
+		room = strings.TrimSpace(q.Get("roomId"))
+	}
+	w, audited := s.grantedSetup(w, r, actor, "unuse", &room, &what)
+	defer audited()
 	claims, scope, scopeID, ok := s.contentUseScope(w, claims, q.Get("scope"), q.Get("roomId"))
 	if !ok {
 		return

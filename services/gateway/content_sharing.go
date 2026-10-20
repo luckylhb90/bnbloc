@@ -382,10 +382,17 @@ func (s *Service) handleUpdateContentCopy(w http.ResponseWriter, r *http.Request
 // errPlatformPublish answers a member asking for platform scope.
 const errPlatformPublish = "publishing to every organization is a platform admin action: they export it as a package, sign it and install it (bnbloc content promote). Ask a platform admin; to reach your organization, publish it with scope org"
 
+// errAgentPublish refuses a publication through a job's grant: sharing
+// beyond its author is the member's own click (publish_component proposes
+// it to them in the room, docs/prd/2026-10-20-room-setup-by-conversation.md
+// §2.3), so text an agent read can never publish for them.
+const errAgentPublish = "publishing to the organization is the member's own click: publish_component asks them in the room"
+
 // handlePublishContent changes who can use the caller's component: org
 // opens a publish request, personal takes it out of the organization,
 // platform is a super admin's action. The room tools' publish_component
-// calls it with a job grant, acting as the job's requester.
+// calls it with a job grant, acting as the job's requester, to withdraw
+// only (errAgentPublish).
 func (s *Service) handlePublishContent(w http.ResponseWriter, r *http.Request, caller auth.Claims) {
 	actor, ok := s.contentCaller(w, r, caller, grantHonored)
 	if !ok {
@@ -413,6 +420,10 @@ func (s *Service) handlePublishContent(w http.ResponseWriter, r *http.Request, c
 	}
 	switch in.Scope {
 	case wire.ContentScopeOrg:
+		if actor.Job != nil {
+			httpx.Error(w, errAgentPublish, http.StatusForbidden)
+			return
+		}
 		s.requestOrgPublication(w, r, actor, c, strings.TrimSpace(in.Version), note)
 	case wire.ContentScopePersonal:
 		s.withdrawOrgPublication(w, r, claims, c)
@@ -494,8 +505,8 @@ type orgPublishResult struct {
 }
 
 // publishToOrg is the ONE way a member's publish reaches the organization:
-// the publish route, the room tools' publish_component and a new version's
-// resubmission all call it, for every content kind. The organization's
+// the publish route (a member's click, a publish_component card's too) and
+// a new version's resubmission call it, for every content kind. The organization's
 // settings decide through contentshare.NeedsApproval: by default it opens
 // a request an org admin approves (openPublishRequest, notifying the
 // admins when notifyAdmins); where the organization requires no approval

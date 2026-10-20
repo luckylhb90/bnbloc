@@ -544,8 +544,14 @@ func (s *Service) handleProxy(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// An agent's act for the person who asked it (?job=) runs as that person.
-	if claims, ok = s.agentDoor(w, r, p, claims); !ok {
+	claims, doorDone, ok := s.agentDoor(w, r, p, claims)
+	if !ok {
 		return
+	}
+	if doorDone != nil {
+		sw := &statusWriter{ResponseWriter: w}
+		defer func() { doorDone(sw.status) }()
+		w = sw
 	}
 	r.Header.Del(actingTenantHeader)
 	if p.isRoomDispatch(r.Method) {

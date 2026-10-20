@@ -25,16 +25,35 @@ type RoomsReply struct {
 
 // RoomDetail is GET /v1/rooms/{id} for a member (and the answer to a create
 // or a PATCH). The caller's role is not part of it: it comes from the member
-// list (RoomMembersReply), the one source a role change updates.
+// list (RoomMembersReply), the one source a role change updates. Welcome
+// and QuickPrompts are what an empty room shows every member
+// (docs/prd/2026-10-20-room-setup-by-conversation.md §2.1).
 type RoomDetail struct {
-	RoomID      string `json:"roomId"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Visibility  string `json:"visibility" tstype:"RoomVisibility"`
-	SyncMode    string `json:"syncMode" tstype:"RoomSyncMode"`
-	CreatedBy   string `json:"createdBy"`
-	CreatedAtMs int64  `json:"createdAtMs"`
-	MemberCount int    `json:"memberCount"`
+	RoomID       string            `json:"roomId"`
+	Name         string            `json:"name"`
+	Description  string            `json:"description"`
+	Visibility   string            `json:"visibility" tstype:"RoomVisibility"`
+	SyncMode     string            `json:"syncMode" tstype:"RoomSyncMode"`
+	CreatedBy    string            `json:"createdBy"`
+	CreatedAtMs  int64             `json:"createdAtMs"`
+	MemberCount  int               `json:"memberCount"`
+	Welcome      string            `json:"welcome"`
+	QuickPrompts []RoomQuickPrompt `json:"quickPrompts"`
+}
+
+// RoomQuickPrompt is one quick prompt of a room: a title and the text a
+// click puts into the message box (nothing is sent).
+type RoomQuickPrompt struct {
+	Title  string `json:"title"`
+	Prompt string `json:"prompt"`
+}
+
+// RoomWelcomeRequest is PATCH /v1/rooms/{id}/welcome (the room's owner or
+// an admin): a nil field is left as it is. The bounds are a room
+// package's (contentpkg.CheckRoomStart).
+type RoomWelcomeRequest struct {
+	Welcome      *string            `json:"welcome,omitempty"`
+	QuickPrompts *[]RoomQuickPrompt `json:"quickPrompts,omitempty"`
 }
 
 // RoomPreview is GET /v1/rooms/{id} for a non-member of a shared room: just

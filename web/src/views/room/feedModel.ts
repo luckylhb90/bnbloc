@@ -7,6 +7,7 @@ import type { RoomAgent } from "../composer/types.ts";
 import { type FeedItem, type OutgoingMessage, isSelf, nextFeedId } from "./types.ts";
 import type { ChatExpert } from "../../lib/contentComponents.ts";
 import type { FileRef } from "../../lib/wire.gen.ts";
+import { proposalShownTo } from "../../lib/publishProposal.ts";
 
 // feedItemFromEvent converts a chat/agent event (live or from history) into a
 // feed row, or null for an event with no visible content. `live` marks rows
@@ -14,6 +15,8 @@ import type { FileRef } from "../../lib/wire.gen.ts";
 export function feedItemFromEvent(e: RoomEvent, subject: string | null, live: boolean): FeedItem | null {
   const text = e.text ?? "";
   if (!text && (!e.attachments || e.attachments.length === 0)) return null;
+  // A publish card is only for the person the agent asked for.
+  if (e.proposal && !proposalShownTo(e.proposal, subject)) return null;
   const author = e.author || "agent";
   const self = isSelf(author, subject);
   return {
@@ -37,6 +40,7 @@ export function feedItemFromEvent(e: RoomEvent, subject: string | null, live: bo
     fileRef: e.fileRef,
     notice: e.notice,
     noticeDetail: e.noticeDetail,
+    proposal: e.proposal,
     jobId: e.jobId,
     sourceSeq: e.sourceSeq,
     peopleOnly: e.kind === "chat_message" && e.toAgent === false ? true : undefined,

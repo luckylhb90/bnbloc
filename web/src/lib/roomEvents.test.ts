@@ -1,5 +1,6 @@
 import { fileRefOf, normalizeRoomEvent, readTurnMetrics, type RoomEvent } from "./roomEvents.ts";
 import { agentIdentity } from "./roomAgents.ts";
+import { feedItemFromEvent } from "../views/room/feedModel.ts";
 // Golden fixtures written by internal/wire's golden tests: the exact JSON the
 // server sends. A field Go stops sending fails here.
 import sessionState from "../../../internal/wire/testdata/agent_session_state.json" with { type: "json" };
@@ -123,3 +124,26 @@ testPartialMetricsShowUsage();
 testTurnUsageParity();
 testHistoryRowKeepsEditStamp();
 testJobEventIsTheProjection();
+
+// A publish card's notice carries what would be shared (payload.proposal);
+// the feed shows it only to the person the agent asked for.
+function testPublishProposalCard(): void {
+  const proposal = { componentId: "cc_9", kind: "room", name: "weekly-review", version: "1.0.0", scope: "org", for: "maya" };
+  const text = "maya's agent proposes sharing weekly-review v1.0.0 with the organization";
+  const [ev] = normalized({
+    kind: "agent_messages",
+    sequence: 9,
+    payload: { messages: [{ payload: { role: "assistant", text, ownerUserId: "jack", provider: "codex", notice: "publish-proposal", proposal } }] },
+  });
+  assert(ev.proposal?.componentId === "cc_9" && ev.proposal.for === "maya", `proposal ${JSON.stringify(ev.proposal)}`);
+  assert(feedItemFromEvent(ev, "maya", true)?.proposal?.componentId === "cc_9", "maya sees the card");
+  assert(feedItemFromEvent(ev, "jack", true) === null, "nobody else does");
+  const [other] = normalized({
+    kind: "agent_messages",
+    sequence: 10,
+    payload: { messages: [{ payload: { role: "assistant", text: "Phase 2", ownerUserId: "jack", provider: "codex", notice: "progress", proposal } }] },
+  });
+  assert(other.proposal === undefined, "only a publish-proposal notice is a card");
+}
+
+testPublishProposalCard();

@@ -48,10 +48,10 @@ var briefs = map[string]brief{
 		Params: map[string]string{"artifactId": "art_…, artf_… or att_…", "path": "A site's file (default index.html).", "version": "Default: the latest."},
 	},
 	"save_component": {
-		Text: "Save a drafted package (dir) or a file as a gallery work (file or artifactId) to the Library of the person who asked you, only after they confirm. With id: the next version.",
+		Text: "Save a drafted package (dir), a file as a gallery work (file or artifactId) or this room (kind room) to the Library of the person who asked you, only after they confirm. With id: the next version.",
 		Params: map[string]string{
 			"dir": "Workspace-relative, holds component.json.", "id": "cc_…; omit to create.", "file": "A workspace file.",
-			"artifactId": "A deliverable (artf_…).", "name": "A new work's name.",
+			"artifactId": "A deliverable (artf_…).", "name": "A new work's or room's name.",
 		},
 	},
 	"get_component": {
@@ -63,7 +63,7 @@ var briefs = map[string]brief{
 		Params: map[string]string{"kind": "Only this kind."},
 	},
 	"publish_component": {
-		Text:   "Change who can use a saved component (personal, org, platform), only after the person confirms. org may need an admin's approval; platform is a platform admin's action: say so.",
+		Text:   "Change who can use a saved component when the person asks: org puts a card in the room they click to publish; personal withdraws it; platform is a platform admin's action: say so.",
 		Params: map[string]string{"id": "cc_…", "note": "For org: a note for the admins."},
 	},
 	"try_draft": {
@@ -76,14 +76,14 @@ var briefs = map[string]brief{
 			"Actions: list find get insert put patch delete file wipe (wipe deletes everything for good: only when the person asked, with confirm). Data comes fenced as the users'.",
 		Params: map[string]string{"filter": "Field (dotted ok) to a value or {$eq $ne $in $gt $gte $lt $lte $exists}."},
 	},
-	"schedules": {
-		Text: "The room's schedules: list, create a notice (fixed words to the room, logins or a group; {week} {date} fill in) or an AI task, or delete one. " +
-			"Create only after the person confirmed what, when, the time zone and where it sends.",
+	"room_setup": {
+		Text: "This room's setup (description, welcome, quick prompts, expert, packs, channels, schedules, sources), changed as the person who asked you. " +
+			"Propose each change in a sentence; make it only after they agree.",
 		Params: map[string]string{
+			"name":       "use/unuse: a Library name; add_channel: the channel.",
 			"task":       "An AI task: what to do each time, never when.",
 			"send":       "Instead of task: fixed words to send.",
 			"recurrence": "weekly (days 0=Sunday…6, time HH:MM), daily, once (at), cron.",
-			"timezone":   "IANA, e.g. Asia/Shanghai.",
 		},
 	},
 	"room_help": {Text: "The full instructions of a room tool; topic is its name. Read it before using a tool you do not know. For you, not the person."},

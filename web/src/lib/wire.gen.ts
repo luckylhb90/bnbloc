@@ -1114,9 +1114,11 @@ export const AuditKindContent = "content";
 // AuditKindApp: an interactive app's data read out (name = the app):
 // an owner's export, or an agent's read through its job's grant.
 export const AuditKindApp = "app";
-// AuditKindSchedule: a schedule an agent created or deleted for the person
-// who asked it (name = the room; the detail says which, never its text).
-export const AuditKindSchedule = "schedule";
+// AuditKindRoomSetup: a room's setup an agent changed for the person
+// who asked it, through the room tool room_setup (name = the room; the
+// detail says what: the description, the welcome, a channel, an expert
+// or a pack, a schedule; never its text).
+export const AuditKindRoomSetup = "room-setup";
 // AuditKindAssist: an AI assist ran (name = task@version; the model,
 // tokens and latency, never the text) or the assist model was set.
 export const AuditKindAssist = "assist";
@@ -2221,8 +2223,8 @@ export interface ContentUsesChanged {
 }
 
 // EventContentSaved is a transient room event: the room tools saved a
-// content component (save_component) or asked to publish one
-// (publish_component) for the job's requester, in the job's room. The
+// content component (save_component) for the job's requester, in the
+// job's room, or the save of a new version sent it to the organization. The
 // workshop shows the save from it ("Saved expert …" with "Open in Library"
 // and "Try it now") instead of re-listing the Library after every agent
 // reply. Payload: ContentSaved; clients act only on their own (Owner).
@@ -2251,6 +2253,25 @@ export interface ContentSaved {
   created?: boolean;
   // Owner is the member it was saved for (the job's requester).
   owner: string;
+}
+
+// PublishProposal is what an agent proposes to share for the person who
+// asked it (publish_component, docs/prd/2026-10-20-room-setup-by-conversation.md
+// §2.3): a notice row of kind NoticePublishProposal carries it as
+// payload.proposal. Clients show it, as a card with a Publish button, only
+// to For (the job's requester); the share happens when they click it (the
+// publish route, as them), never from the tool call.
+export interface PublishProposal {
+  componentId: string;
+  kind: ContentKind;
+  name: string;
+  displayName?: string;
+  version: string;
+  // Scope is who it would be shared with (ContentScopeOrg).
+  scope: string;
+  // Note is the agent's note for the organization's admins.
+  note?: string;
+  for: string;
 }
 
 // ---- wire/content_prompts.go ----
@@ -3036,6 +3057,14 @@ export const NoticeContextReset = "context-reset";
 // change: it never reached the agent (and why), or the agent left it
 // as it was (the bridge, once per job, under FileEditNoticeSessionID).
 export const NoticeFileEdit = "file-edit";
+// NoticeRoomSetup is a change an agent made to the room's setup for
+// the person who asked it ("maya's agent set the welcome"; room_setup,
+// a line each, under the job's progress session).
+export const NoticeRoomSetup = "room-setup";
+// NoticePublishProposal asks the person who asked the agent to share a
+// component (publish_component): payload.proposal is a PublishProposal,
+// shown to them only.
+export const NoticePublishProposal = "publish-proposal";
 
 // ---- wire/job_progress.go ----
 
@@ -4286,19 +4315,24 @@ export interface RoomDraftPart {
 // RoomComponentDraft answers GET /v1/rooms/{roomId}/component-draft: what
 // "Save as component" captures of a room for its owner or an admin, to be
 // reviewed and saved as a room package through the content form. Name is
-// a package name proposed from the room's. Left says, a line each, what
-// of the room a package does not hold.
+// a package name proposed from the room's. Sources are the room's own asks
+// (each with its purpose, granted or not: a package asks again for the
+// room installed from it). Left says, a line each, what of the room a
+// package does not hold.
 export interface RoomComponentDraft {
   roomId: string;
   name: string;
   displayName: string;
   description: string;
+  welcome: string;
+  quickPrompts: RoomQuickPrompt[];
   channels: string[];
   schedules: RoomPackageSchedule[];
   expert?: RoomDraftPart;
   skills: RoomDraftPart[];
   prompts: RoomDraftPart[];
   apps: RoomDraftPart[];
+  sources: RoomSourceAsk[];
   left: string[];
 }
 
@@ -4318,8 +4352,8 @@ export interface RoomInstallRequest {
 // paused), the room expert, the packs turned on and the apps copied in
 // (labels), what was left out and why (Skipped), and what the room asks
 // for that nobody granted yet: its sources (each waits for the
-// organization admin's consent, room_sources.go) and its MCP tools. Welcome and
-// QuickPrompts are the package's, for the room's first visit.
+// organization admin's consent, room_sources.go) and its MCP tools. The
+// package's welcome and quick prompts are the new room's own (RoomDetail).
 export interface RoomInstallReply {
   roomId: string;
   name: string;
@@ -4333,8 +4367,6 @@ export interface RoomInstallReply {
   skipped: string[];
   sources: RoomSourceAsk[];
   tools: string[];
-  welcome?: string;
-  quickPrompts?: ContentQuickPrompt[];
 }
 
 // ---- wire/room_sources.go ----
@@ -4503,7 +4535,9 @@ export interface RoomsReply {
 
 // RoomDetail is GET /v1/rooms/{id} for a member (and the answer to a create
 // or a PATCH). The caller's role is not part of it: it comes from the member
-// list (RoomMembersReply), the one source a role change updates.
+// list (RoomMembersReply), the one source a role change updates. Welcome
+// and QuickPrompts are what an empty room shows every member
+// (docs/prd/2026-10-20-room-setup-by-conversation.md §2.1).
 export interface RoomDetail {
   roomId: string;
   name: string;
@@ -4513,6 +4547,23 @@ export interface RoomDetail {
   createdBy: string;
   createdAtMs: number;
   memberCount: number;
+  welcome: string;
+  quickPrompts: RoomQuickPrompt[];
+}
+
+// RoomQuickPrompt is one quick prompt of a room: a title and the text a
+// click puts into the message box (nothing is sent).
+export interface RoomQuickPrompt {
+  title: string;
+  prompt: string;
+}
+
+// RoomWelcomeRequest is PATCH /v1/rooms/{id}/welcome (the room's owner or
+// an admin): a nil field is left as it is. The bounds are a room
+// package's (contentpkg.CheckRoomStart).
+export interface RoomWelcomeRequest {
+  welcome?: string;
+  quickPrompts?: RoomQuickPrompt[];
 }
 
 // RoomPreview is GET /v1/rooms/{id} for a non-member of a shared room: just

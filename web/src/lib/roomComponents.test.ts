@@ -1,19 +1,15 @@
 import { formPayload, type ContentComponent } from "./contentComponents.ts";
 import {
-  clearRoomStart,
   describeRoomInput,
   partKey,
-  rememberRoomStart,
   roomContentForm,
   roomDraftPatch,
   roomSaveFromComponent,
   roomSaveFromDraft,
   roomSaveProblem,
   roomSetupSummary,
-  takeRoomStart,
   toggleRoomPart,
   type RoomComponentDraft,
-  type RoomInstallReply,
   type RoomPackageSchedule,
 } from "./roomComponents.ts";
 
@@ -33,21 +29,27 @@ const draft: RoomComponentDraft = {
   name: "weekly-review",
   displayName: "Weekly review",
   description: "Reviews the week.",
+  welcome: "Turn the summary on.",
+  quickPrompts: [{ title: "Recap", prompt: "Recap the week" }],
   channels: ["reports", "notes"],
   schedules: [aiTask, notice],
   expert: { id: "cc_e", name: "reviewer", displayName: "Reviewer", version: "1.2.0", ref: "reviewer@^1" },
   skills: [{ id: "cc_s", name: "charts", version: "2.0.0", ref: "charts@^2" }],
   prompts: [{ id: "cc_p", name: "review-prompts", displayName: "Review prompts", version: "1.0.0", ref: "review-prompts@^1" }],
   apps: [{ id: "cc_a", name: "lunch-poll", version: "1.0.0", ref: "lunch-poll@^1" }],
+  sources: [],
   left: ["members and their agents"],
 };
 
 // A draft starts with everything ticked; its form names every part by its
-// reference, and the save payload carries the room's fields.
+// reference, and the save payload carries the room's fields: its welcome,
+// quick prompts and its own asks for sources too.
 {
   const f = roomSaveFromDraft(draft);
   eq(roomSaveProblem(f), null, "a fresh draft saves");
   const form = roomContentForm(f);
+  eq([form.welcome, form.quickPrompts], ["Turn the summary on.", [{ title: "Recap", prompt: "Recap the week" }]], "the room's welcome and quick prompts");
+  eq(roomSaveFromDraft({ ...draft, sources: [{ name: "runs", purpose: "Judge outcomes." }] }).sources, [{ name: "runs", purpose: "Judge outcomes." }], "the room's asks");
   eq(form.requires, { expert: "reviewer@^1", skills: ["charts@^2"], prompts: ["review-prompts@^1"], mcp: [], permissions: [] }, "requires");
   eq(form.room, { channels: ["reports", "notes"], schedules: [aiTask, notice], apps: ["lunch-poll@^1"], sources: [] }, "room setup");
   const asked = roomContentForm({ ...f, sources: [{ name: "runs", purpose: " Judge outcomes. " }] });
@@ -122,16 +124,4 @@ eq(
     "a reply fills the fields: the name follows an untouched display name, the description a room's bound",
   );
   eq(roomDraftPatch({ displayName: "Release review", category: "two words" }, { ...f, name: "my-own" }), { displayName: "Release review" }, "a changed name is kept; a bad category dropped");
-}
-
-// The install reply waits for the room's first visit, once.
-{
-  const store = new Map<string, string>();
-  const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v), removeItem: (k: string) => void store.delete(k) };
-  const reply = { roomId: "r9", name: "r9", componentId: "cc_1", from: "weekly-review@1.0.0", channels: [], schedules: ["sch_1"], enabled: [], apps: [], skipped: [], sources: [{ name: "runs", purpose: "Judge outcomes." }], tools: [] } as RoomInstallReply;
-  rememberRoomStart(reply, storage);
-  eq(takeRoomStart("r9", storage)?.from, "weekly-review@1.0.0", "kept for the room");
-  eq(takeRoomStart("other", storage), undefined, "not another room's");
-  clearRoomStart("r9", storage);
-  eq(takeRoomStart("r9", storage), undefined, "dismissed");
 }

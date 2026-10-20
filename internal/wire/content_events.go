@@ -14,8 +14,8 @@ type ContentUsesChanged struct {
 }
 
 // EventContentSaved is a transient room event: the room tools saved a
-// content component (save_component) or asked to publish one
-// (publish_component) for the job's requester, in the job's room. The
+// content component (save_component) for the job's requester, in the
+// job's room, or the save of a new version sent it to the organization. The
 // workshop shows the save from it ("Saved expert …" with "Open in Library"
 // and "Try it now") instead of re-listing the Library after every agent
 // reply. Payload: ContentSaved; clients act only on their own (Owner).
@@ -48,4 +48,23 @@ type ContentSaved struct {
 	Created bool `json:"created,omitempty"`
 	// Owner is the member it was saved for (the job's requester).
 	Owner string `json:"owner"`
+}
+
+// PublishProposal is what an agent proposes to share for the person who
+// asked it (publish_component, docs/prd/2026-10-20-room-setup-by-conversation.md
+// §2.3): a notice row of kind NoticePublishProposal carries it as
+// payload.proposal. Clients show it, as a card with a Publish button, only
+// to For (the job's requester); the share happens when they click it (the
+// publish route, as them), never from the tool call.
+type PublishProposal struct {
+	ComponentID string `json:"componentId"`
+	Kind        string `json:"kind" tstype:"ContentKind"`
+	Name        string `json:"name"`
+	DisplayName string `json:"displayName,omitempty"`
+	Version     string `json:"version"`
+	// Scope is who it would be shared with (ContentScopeOrg).
+	Scope string `json:"scope"`
+	// Note is the agent's note for the organization's admins.
+	Note string `json:"note,omitempty"`
+	For  string `json:"for"`
 }

@@ -3,12 +3,14 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/tenant"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // MySQLRoom implements RoomStore over database/sql. Schema matches deploy/schema.sql.
@@ -44,11 +46,28 @@ func (s *MySQLRoom) CreateRoom(ctx context.Context, r Room) error {
 func insertRoom(ctx context.Context, q interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }, tid string, r Room) error {
-	_, err := q.ExecContext(ctx,
-		`INSERT INTO rooms (tenant_id, room_id, name, description, visibility, sync_mode, created_by, created_at_ms)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		tid, r.RoomID, r.Name, r.Description, string(r.Visibility), string(r.SyncMode), r.CreatedBy, r.CreatedAtMs)
+	prompts, err := quickPromptsJSON(r.QuickPrompts)
+	if err != nil {
+		return err
+	}
+	_, err = q.ExecContext(ctx,
+		`INSERT INTO rooms (tenant_id, room_id, name, description, visibility, sync_mode, created_by, created_at_ms, welcome, quick_prompts_json)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		tid, r.RoomID, r.Name, r.Description, string(r.Visibility), string(r.SyncMode), r.CreatedBy, r.CreatedAtMs, r.Welcome, prompts)
 	return dupAs(err, ErrRoomExists)
+}
+
+// quickPromptsJSON is a room's quick prompts as rooms.quick_prompts_json
+// holds them: NULL for none.
+func quickPromptsJSON(list []wire.RoomQuickPrompt) (sql.NullString, error) {
+	if len(list) == 0 {
+		return sql.NullString{}, nil
+	}
+	raw, err := json.Marshal(list)
+	if err != nil {
+		return sql.NullString{}, err
+	}
+	return sql.NullString{String: string(raw), Valid: true}, nil
 }
 
 // CreateRoomWithOwner atomically inserts a room and its owner membership in a
@@ -148,16 +167,26 @@ func (s *MySQLRoom) GetRoom(ctx context.Context, roomID string) (Room, error) {
 	}
 	var r Room
 	var visibility, syncMode string
+	var welcome, prompts sql.NullString
 	err = s.DB.QueryRowContext(ctx,
-		`SELECT tenant_id, room_id, name, description, visibility, sync_mode, created_by, created_at_ms
+		`SELECT tenant_id, room_id, name, description, visibility, sync_mode, created_by, created_at_ms, welcome, quick_prompts_json
 		 FROM rooms WHERE tenant_id = ? AND room_id = ? AND `+sqlNotDeleted,
-		tid, roomID).Scan(&r.TenantID, &r.RoomID, &r.Name, &r.Description, &visibility, &syncMode, &r.CreatedBy, &r.CreatedAtMs)
+		tid, roomID).Scan(&r.TenantID, &r.RoomID, &r.Name, &r.Description, &visibility, &syncMode, &r.CreatedBy, &r.CreatedAtMs, &welcome, &prompts)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Room{}, ErrRoomNotFound
 	}
+	if err != nil {
+		return Room{}, err
+	}
 	r.Visibility = NormalizeVisibility(visibility)
 	r.SyncMode = NormalizeSyncMode(syncMode)
-	return r, err
+	r.Welcome = welcome.String
+	if prompts.Valid && prompts.String != "" {
+		if err := json.Unmarshal([]byte(prompts.String), &r.QuickPrompts); err != nil {
+			return Room{}, fmt.Errorf("decode room %s quick prompts: %w", roomID, err)
+		}
+	}
+	return r, nil
 }
 
 // AddMember inserts or updates a membership. It is always a human
@@ -502,6 +531,18 @@ func (s *MySQLRoom) UpdateRoom(ctx context.Context, roomID string, patch RoomPat
 	if patch.SyncMode != nil {
 		sets = append(sets, "sync_mode = ?")
 		args = append(args, string(*patch.SyncMode))
+	}
+	if patch.Welcome != nil {
+		sets = append(sets, "welcome = ?")
+		args = append(args, *patch.Welcome)
+	}
+	if patch.QuickPrompts != nil {
+		prompts, err := quickPromptsJSON(*patch.QuickPrompts)
+		if err != nil {
+			return err
+		}
+		sets = append(sets, "quick_prompts_json = ?")
+		args = append(args, prompts)
 	}
 	if len(sets) == 0 {
 		// Nothing to write: still a miss when the room is not live here.

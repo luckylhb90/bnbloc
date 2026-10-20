@@ -505,10 +505,11 @@ func TestContentPlatformPromote(t *testing.T) {
 	}
 }
 
-// publish_component (room tools) publishes as the job's requester through
-// the job grant: the request is the requester's, and the audit names the
-// agent that asked.
-func TestContentPublishAsJobRequester(t *testing.T) {
+// A job's grant never publishes to the organization: sharing beyond its
+// author is the member's own click (publish_component puts a card in the
+// room instead). The grant still withdraws, as the requester; the
+// member's own publish goes through.
+func TestContentPublishRefusedToAJob(t *testing.T) {
 	g := newSharingGateway(t)
 	src := g.create("maya", expertForm("Be strict."))
 	ctx := tenant.NewContext(context.Background(), "home")
@@ -521,14 +522,26 @@ func TestContentPublishAsJobRequester(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, raw := g.json("jack", http.MethodPost, "/v1/content-components/"+src.ID+"/publish?job=job-1&room=room-1", wire.ContentPublishInput{Scope: "org"})
-	if code != http.StatusCreated || !strings.Contains(string(raw), `"requestedBy":"maya"`) {
+	if code != http.StatusForbidden || !strings.Contains(string(raw), "the member's own click") {
 		t.Fatalf("granted publish = %d %s", code, raw)
+	}
+	if reqs, _ := g.svc.ContentComponents.ListContentRequests(ctx, store.ContentRequestQuery{ComponentID: src.ID}); len(reqs) != 0 {
+		t.Fatalf("a job opened a publish request: %+v", reqs)
+	}
+	if recs, _ := g.audit.AuditLog(context.Background(), store.AuditLogQuery{AllTenants: true, Kinds: []string{wire.AuditKindContent}}); len(recs) != 0 {
+		t.Fatalf("audit = %+v", recs)
 	}
 	if code, _ := g.json("jack", http.MethodPost, "/v1/content-components/"+src.ID+"/publish", wire.ContentPublishInput{Scope: "org"}); code != http.StatusNotFound {
 		t.Fatalf("publish without the grant = %d", code)
 	}
-	recs, _ := g.audit.AuditLog(context.Background(), store.AuditLogQuery{AllTenants: true, Kinds: []string{wire.AuditKindContent}})
-	if len(recs) != 1 || recs[0].Actor != "maya" || !strings.Contains(recs[0].Detail, "through agent jack/opencode, job job-1") {
-		t.Fatalf("audit = %+v", recs)
+	// maya's own click publishes; the grant withdraws as her.
+	if code, raw := g.json("maya", http.MethodPost, "/v1/content-components/"+src.ID+"/publish", wire.ContentPublishInput{Scope: "org"}); code != http.StatusCreated || !strings.Contains(string(raw), `"requestedBy":"maya"`) {
+		t.Fatalf("maya's publish = %d %s", code, raw)
+	}
+	if code, raw := g.json("jack", http.MethodPost, "/v1/content-components/"+src.ID+"/publish?job=job-1&room=room-1", wire.ContentPublishInput{Scope: "personal"}); code != http.StatusOK {
+		t.Fatalf("granted withdraw = %d %s", code, raw)
+	}
+	if reqs, _ := g.svc.ContentComponents.ListContentRequests(ctx, store.ContentRequestQuery{ComponentID: src.ID, Status: store.ContentRequestPending}); len(reqs) != 0 {
+		t.Fatalf("the withdrawn request is pending: %+v", reqs)
 	}
 }

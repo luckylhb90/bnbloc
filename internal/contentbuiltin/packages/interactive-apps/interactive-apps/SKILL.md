@@ -82,7 +82,7 @@ recipe.
   notifications, to "room", logins or a connected group chat
   ("group:<name>"); `app.groups()` lists them as `[{name}]` (owners):
   offer them, never hardcode one. A page cannot run on a timer: a reminder or
-  report at a time is a schedule (the schedules room tool).
+  report at a time is a schedule (the room tool room_setup, add_schedule).
 - `app.subscribe(fn)` calls `fn` with `{appId, collection, id, version}`
   on every change and returns a function that stops it. No content
   (re-read what changed), no replay (read on load too). `version` 0:

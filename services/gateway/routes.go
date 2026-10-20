@@ -243,6 +243,7 @@ func (s *Service) routes() []route {
 		// reviews it (any member), its owner's opt-in, and asking the
 		// organization's admins to decide (it notifies people).
 		member("GET /v1/rooms/{roomId}/sources", s.handleRoomSources).with(needSources),
+		gated("POST /v1/rooms/{roomId}/sources/{source}", drive, s.handleRoomSourceAsk).spends(costBudget).with(needSources),
 		gated("PUT /v1/rooms/{roomId}/sources/{source}/opt-in", drive, s.handleRoomSourceOptIn).with(needSources),
 		gated("POST /v1/rooms/{roomId}/sources/{source}/ask-admin", drive, s.handleRoomSourceAskAdmin).spends(costBudget).with(needSources),
 		member("GET /v1/rooms/{roomId}/artifacts/{artifactId}/recipe", s.handleDeliverableRecipe).with(needContent),

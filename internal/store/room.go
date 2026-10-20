@@ -3,11 +3,13 @@ package store
 import (
 	"context"
 	"errors"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
 
 	"github.com/luckylhb90/bnbloc/internal/tenant"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // Room domain errors.
@@ -93,16 +95,20 @@ func NormalizeSyncMode(v string) SyncMode {
 	}
 }
 
-// Room is a collaboration scope. RoomID == workspaceId.
+// Room is a collaboration scope. RoomID == workspaceId. Welcome and
+// QuickPrompts are what the empty room shows its members; GetRoom reads
+// them, the listings do not.
 type Room struct {
-	TenantID    string
-	RoomID      string
-	Name        string
-	Description string
-	Visibility  Visibility
-	SyncMode    SyncMode
-	CreatedBy   string
-	CreatedAtMs int64
+	TenantID     string
+	RoomID       string
+	Name         string
+	Description  string
+	Visibility   Visibility
+	SyncMode     SyncMode
+	CreatedBy    string
+	CreatedAtMs  int64
+	Welcome      string
+	QuickPrompts []wire.RoomQuickPrompt
 }
 
 // RoomWithCount augments a Room with its current member count for plaza rows.
@@ -113,10 +119,12 @@ type RoomWithCount struct {
 
 // RoomPatch is a partial update to a room. Nil fields are left unchanged.
 type RoomPatch struct {
-	Name        *string
-	Description *string
-	Visibility  *Visibility
-	SyncMode    *SyncMode
+	Name         *string
+	Description  *string
+	Visibility   *Visibility
+	SyncMode     *SyncMode
+	Welcome      *string
+	QuickPrompts *[]wire.RoomQuickPrompt
 }
 
 // RoomMembershipDetail is a rich per-user room row for list differentiation.
@@ -317,6 +325,7 @@ func (s *MemoryRoom) CreateRoom(ctx context.Context, r Room) error {
 		r.SyncMode = SyncModeGit
 	}
 	r.TenantID = tid
+	r.QuickPrompts = slices.Clone(r.QuickPrompts)
 	s.rooms[tkey(tid, r.RoomID)] = r
 	return nil
 }
@@ -392,6 +401,7 @@ func (s *MemoryRoom) createRoomWithOwnerLocked(tid string, r Room, owner Members
 		r.SyncMode = SyncModeGit
 	}
 	r.TenantID = tid
+	r.QuickPrompts = slices.Clone(r.QuickPrompts)
 	rk := tkey(tid, r.RoomID)
 	s.rooms[rk] = r
 	owner.TenantID = tid
@@ -454,7 +464,9 @@ func (s *MemoryRoom) GetRoom(ctx context.Context, roomID string) (Room, error) {
 	if !ok {
 		return Room{}, ErrRoomNotFound
 	}
-	return s.rooms[rk], nil
+	r := s.rooms[rk]
+	r.QuickPrompts = slices.Clone(r.QuickPrompts)
+	return r, nil
 }
 
 // AddMember inserts or updates a human membership of a live room of the ctx
@@ -790,6 +802,12 @@ func (s *MemoryRoom) UpdateRoom(ctx context.Context, roomID string, patch RoomPa
 	}
 	if patch.SyncMode != nil {
 		r.SyncMode = *patch.SyncMode
+	}
+	if patch.Welcome != nil {
+		r.Welcome = *patch.Welcome
+	}
+	if patch.QuickPrompts != nil {
+		r.QuickPrompts = slices.Clone(*patch.QuickPrompts)
 	}
 	s.rooms[rk] = r
 	return nil

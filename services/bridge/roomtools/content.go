@@ -71,17 +71,24 @@ func saveComponentTool() Tool {
 		Name:  "save_component",
 		Title: "Save a drafted component",
 		Description: "Save to the Library of the person who asked you, after they confirmed: a package drafted in a workspace directory (dir), " +
-			"or a file as a gallery work (file or artifactId; its current version and recipe, never its data). Validated first; an error says what to fix. " +
-			"Without id it creates (refused if they have one of that kind and name); with id (cc_...) it saves the next version.",
+			"a file as a gallery work (file or artifactId; its current version and recipe, never its data), " +
+			"or this room as a room component (kind \"room\": what \"Save as component\" captures of it, its welcome, quick prompts, expert, packs, channels, " +
+			"AI tasks and notices, apps from works and the sources it asks for (room_setup's ask_source), never its members or messages; " +
+			"only the room's owner or admins save it). " +
+			"Validated first; an error says what to fix. " +
+			"Without id it creates (refused if they have one of that kind and name); with id (cc_...) it saves the next version. " +
+			"Write a work's or a room's listing yourself: name, displayName, description, category (and a room's tags).",
 		InputSchema: objectSchema(map[string]any{
 			"dir":         map[string]any{"type": "string", "description": "Workspace-relative directory holding component.json, e.g. drafts/contract-reviewer."},
 			"file":        map[string]any{"type": "string", "description": "A workspace file (published first if needed)."},
 			"artifactId":  map[string]any{"type": "string", "description": "Or any deliverable's id (artf_...)."},
+			"kind":        map[string]any{"type": "string", "enum": []string{"room"}, "description": "room: save this room as a room component."},
 			"id":          map[string]any{"type": "string", "description": "The component to save a new version of; omit to create."},
-			"name":        map[string]any{"type": "string", "description": "A new work's name (lower-case, hyphens)."},
-			"category":    map[string]any{"type": "string", "enum": wire.WorkCategories},
-			"displayName": map[string]any{"type": "string", "description": "A work's title."},
-			"description": map[string]any{"type": "string", "description": "A work's gallery description."},
+			"name":        map[string]any{"type": "string", "description": "A new work's or room component's name (lower-case, hyphens)."},
+			"category":    map[string]any{"type": "string", "description": "A work's: " + strings.Join(wire.WorkCategories, ", ") + "; a room's: one lower-case word."},
+			"displayName": map[string]any{"type": "string", "description": "A work's or a room's title."},
+			"description": map[string]any{"type": "string", "description": "A work's gallery description, or a room's (it becomes the installed room's, at most 500 characters)."},
+			"tags":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "A room's tags."},
 			"request":     map[string]any{"type": "string", "description": "A work's \"how it was made\": a request that would make a similar one."},
 		}),
 		Call: saveComponent,
@@ -92,10 +99,11 @@ func publishComponentTool() Tool {
 	return Tool{
 		Name:  "publish_component",
 		Title: "Publish a saved component",
-		Description: "Change who can use a component saved in the Library of the person who asked you, only after they confirm. " +
-			"\"org\" publishes its latest version to their organization: unless it publishes without approval, as an admin's request " +
-			"(members keep the approved version until then). \"personal\" withdraws a pending " +
-			"request and takes it out of the organization. \"platform\" (every organization) is a platform admin's action: say so instead.",
+		Description: "Change who can use a component saved in the Library of the person who asked you, when they ask for it. " +
+			"\"org\" never shares it by itself: it puts a card in the room, shown only to them, naming the component, its latest version and their " +
+			"organization; it is shared when they click Publish there (as an admin's request unless their organization publishes without approval; " +
+			"members keep the approved version until then). \"personal\" withdraws a pending " +
+			"request and takes it out of the organization at once. \"platform\" (every organization) is a platform admin's action: say so instead.",
 		InputSchema: objectSchema(map[string]any{
 			"id":    map[string]any{"type": "string", "description": "The component id (cc_...)."},
 			"scope": map[string]any{"type": "string", "enum": []string{ScopePersonal, ScopeOrg, ScopePlatform}, "description": "Who may use it."},
@@ -241,17 +249,7 @@ type componentDetail struct {
 }
 
 func saveComponent(ctx context.Context, env *Env, args json.RawMessage) Result {
-	var in struct {
-		Dir         string `json:"dir"`
-		File        string `json:"file"`
-		ArtifactID  string `json:"artifactId"`
-		ID          string `json:"id"`
-		Name        string `json:"name"`
-		Category    string `json:"category"`
-		DisplayName string `json:"displayName"`
-		Description string `json:"description"`
-		Request     string `json:"request"`
-	}
+	var in saveArgs
 	if err := decodeArgs(args, &in); err != nil {
 		return toolError("invalid arguments: %v", err)
 	}
@@ -266,8 +264,11 @@ func saveComponent(ctx context.Context, env *Env, args json.RawMessage) Result {
 		files   int
 	)
 	art, file := strings.TrimSpace(in.ArtifactID), strings.TrimSpace(in.File)
-	if n := countSet(in.Dir != "", art != "", file != ""); n > 1 {
-		return toolError("give one of dir (a drafted package), file or artifactId (saved as a work)")
+	if n := countSet(in.Dir != "", art != "", file != "", in.Kind != ""); n > 1 {
+		return toolError("give one of dir (a drafted package), file or artifactId (saved as a work) and kind \"room\" (this room)")
+	}
+	if in.Kind == "" && len(in.Tags) > 0 {
+		return toolError("tags are a room's: pass kind \"room\" to save this room")
 	}
 	if file != "" {
 		// A workspace file: its deliverable, published now when it is not
@@ -285,6 +286,17 @@ func saveComponent(ctx context.Context, env *Env, args json.RawMessage) Result {
 		}
 	}
 	switch {
+	case in.Kind == contentKindRoom:
+		if in.Request != "" {
+			return toolError("request is a work's: a room component carries no recipe")
+		}
+		var err error
+		if p, body, err = roomSave(ctx, env, grant, id, in); err != nil {
+			return refusal("capturing this room", err)
+		}
+		what = "this room"
+	case in.Kind != "":
+		return toolError("kind is \"room\" (this room); a drafted package's component.json names its own kind")
 	case art != "":
 		// A deliverable's current version as a work (the gateway snapshots
 		// its files as the job's requester; its data never comes along).
@@ -296,7 +308,7 @@ func saveComponent(ctx context.Context, env *Env, args json.RawMessage) Result {
 		}
 		what = "the deliverable " + art
 	case in.Name != "" || in.Category != "" || in.DisplayName != "" || in.Description != "" || in.Request != "":
-		return toolError("name, category, displayName, description and request are a work's: pass file or artifactId to save one")
+		return toolError("name, category, displayName, description and request are a work's (pass file or artifactId) or a room's (pass kind \"room\")")
 	default:
 		dir, err := cleanDir(in.Dir)
 		if err != nil {
@@ -333,14 +345,19 @@ func saveComponent(ctx context.Context, env *Env, args json.RawMessage) Result {
 		out["files"] = files
 	}
 	if c.Kind == "assist" {
-		out["note"] = fmt.Sprintf("Saved the assist %s version %s to the Library of the person who asked you. It runs on the deployment's assist model behind the sparkle button of its task (one named like a built-in assist replaces that one for them), not in an agent's composer; publish_component shares it with their organization.", c.Name, c.LatestVersion)
+		out["note"] = fmt.Sprintf("Saved the assist %s version %s to the Library of the person who asked you. It runs on the deployment's assist model behind the sparkle button of its task (one named like a built-in assist replaces that one for them), not in an agent's composer; publish_component offers to share it with their organization (they publish it with a click).", c.Name, c.LatestVersion)
 	}
 	if c.Kind == "work" {
-		out["note"] = fmt.Sprintf("Saved the work %s version %s to the Library of the person who asked you: a snapshot of the deliverable, without its data. publish_component shares it with their organization's gallery.", c.Name, c.LatestVersion)
+		out["note"] = fmt.Sprintf("Saved the work %s version %s to the Library of the person who asked you: a snapshot of the deliverable, without its data. publish_component offers to share it with their organization's gallery (they publish it with a click).", c.Name, c.LatestVersion)
 		if c.Recipe != nil {
 			out["recipe"] = recipeSummary(c.Recipe)
 			out["note"] = out["note"].(string) + " It carries its recipe (the request, its expert, packs and reference files), which others start from with Make similar: say so. To change its title, description or \"how it was made\" request, save it again with id and displayName, description or request."
 		}
+	}
+	if c.Kind == contentKindRoom {
+		out["note"] = fmt.Sprintf("Saved this room as the room component %s version %s to the Library of the person who asked you: only they see it. "+
+			"Anyone it is shared with installs it as a new room of theirs, without this room's members or messages. "+
+			"publish_component offers to share it with their organization (they publish it with a click).", c.Name, c.LatestVersion)
 	}
 	if rs := d.Resubmitted; rs != nil {
 		keep := ""
@@ -365,7 +382,7 @@ func publishComponent(ctx context.Context, env *Env, args json.RawMessage) Resul
 	if err := decodeArgs(args, &in); err != nil {
 		return toolError("invalid arguments: %v", err)
 	}
-	_, grant, refused := jobGrant(env, "publish_component")
+	job, grant, refused := jobGrant(env, "publish_component")
 	if refused != nil {
 		return *refused
 	}
@@ -374,7 +391,9 @@ func publishComponent(ctx context.Context, env *Env, args json.RawMessage) Resul
 		return toolError("id is required")
 	}
 	switch in.Scope {
-	case ScopePersonal, ScopeOrg:
+	case ScopeOrg:
+		return proposePublish(ctx, env, job, grant, id, strings.TrimSpace(in.Note))
+	case ScopePersonal:
 	case ScopePlatform:
 		return toolError("publishing to every organization is a platform admin's action, not one you or the person who asked can take: " +
 			"tell them a platform admin promotes it (exports it as a signed package and installs it). To share it with their organization, " +
@@ -406,6 +425,37 @@ func publishComponent(ctx context.Context, env *Env, args json.RawMessage) Resul
 			"approvedVersion": reply.Request.ApprovedVersion}
 	}
 	return Result{Value: out}
+}
+
+// proposePublish offers the requester to share their component id with
+// their organization: a card in the room (a notice row carrying a
+// wire.PublishProposal) that only they are shown, whose Publish button
+// calls the publish route as them. Sharing beyond its author is their own
+// click, never the tool's (the gateway refuses a job's publish to the
+// organization), so text an agent read cannot share their work.
+func proposePublish(ctx context.Context, env *Env, job Job, grant url.Values, id, note string) Result {
+	raw, err := env.Gateway.Do(ctx, http.MethodGet, "/v1/content-components/"+url.PathEscape(id)+"?"+grant.Encode(), nil)
+	if err != nil {
+		return refusal("reading "+id, err)
+	}
+	var d componentDetail
+	if err := json.Unmarshal(raw, &d); err != nil {
+		return toolError("unreadable component: %v", err)
+	}
+	c := d.Component
+	if !c.Mine || c.SharedBy != "" {
+		return toolError("%s is not a component of the person who asked you: only its author shares it", c.Name)
+	}
+	label := firstNonEmptyString(c.DisplayName, c.Name)
+	p := wire.PublishProposal{ComponentID: c.ID, Kind: c.Kind, Name: c.Name, DisplayName: c.DisplayName, Version: c.LatestVersion,
+		Scope: ScopeOrg, Note: note, For: job.RequesterUserID}
+	text := fmt.Sprintf("%s's agent proposes sharing %s v%s with the organization", job.RequesterUserID, label, c.LatestVersion)
+	if err := postNotice(ctx, env, job, wire.NoticePublishProposal, text, false, map[string]any{"proposal": p}); err != nil {
+		return refusal("putting the publish card in the room", err)
+	}
+	return Result{Value: map[string]any{"id": c.ID, "proposed": ScopeOrg, "version": c.LatestVersion,
+		"note": fmt.Sprintf("Nothing is shared yet: a card in the room, shown only to %s, asks them to publish %s version %s to their organization. "+
+			"It is shared when they click Publish (their organization may then need an admin's approval). Tell them.", job.RequesterUserID, label, c.LatestVersion)}}
 }
 
 func getComponent(ctx context.Context, env *Env, args json.RawMessage) Result {

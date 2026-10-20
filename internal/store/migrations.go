@@ -1699,6 +1699,18 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return addColumnIfMissing(ctx, db, "room_source_grants", "watch_json", "MEDIUMTEXT NULL AFTER grantee")
 		},
 	},
+	{
+		// A room's own welcome and quick prompts
+		// (docs/prd/2026-10-20-room-setup-by-conversation.md §2.1).
+		// Additive: nullable columns the previous release never reads.
+		id: "2026_10_room_welcome",
+		run: func(ctx context.Context, db sqlConn) error {
+			if err := addColumnIfMissing(ctx, db, "rooms", "welcome", "TEXT NULL AFTER deleted_at_ms"); err != nil {
+				return err
+			}
+			return addColumnIfMissing(ctx, db, "rooms", "quick_prompts_json", "MEDIUMTEXT NULL AFTER welcome")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

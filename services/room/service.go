@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/appdata"
+	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
@@ -156,6 +157,7 @@ func (s *Service) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/rooms", s.handlePlaza)
 	mux.HandleFunc("GET /v1/rooms/{roomId}", s.handleGetRoom)
 	mux.HandleFunc("PATCH /v1/rooms/{roomId}", s.handlePatchRoom)
+	mux.HandleFunc("PATCH /v1/rooms/{roomId}/welcome", s.handlePatchWelcome)
 	mux.HandleFunc("DELETE /v1/rooms/{roomId}", s.handleDeleteRoom)
 	mux.HandleFunc("POST /v1/rooms/{roomId}/join", s.handleJoinRoom)
 	mux.HandleFunc("POST /v1/rooms/{roomId}/leave", s.handleLeaveRoom)
@@ -207,13 +209,23 @@ func (s *Service) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		RoomID      string `json:"roomId"`
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		Visibility  string `json:"visibility"`
-		SyncMode    string `json:"syncMode"`
+		RoomID       string                 `json:"roomId"`
+		Name         string                 `json:"name"`
+		Description  string                 `json:"description"`
+		Visibility   string                 `json:"visibility"`
+		SyncMode     string                 `json:"syncMode"`
+		Welcome      string                 `json:"welcome"`
+		QuickPrompts []wire.RoomQuickPrompt `json:"quickPrompts"`
 	}
-	if !httpx.DecodeJSON(w, r, maxJSONBodyBytes, &body) {
+	if !httpx.DecodeJSON(w, r, maxStartBodyBytes, &body) {
+		return
+	}
+	welcome, prompts, err := cleanStart(body.Welcome, body.QuickPrompts)
+	if err == nil {
+		err = contentpkg.CheckRoomDescription(body.Description)
+	}
+	if err != nil {
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	roomID, err := roomctx.Normalize(body.RoomID)
@@ -228,12 +240,14 @@ func (s *Service) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	room := store.Room{
-		RoomID:      roomID,
-		Name:        body.Name,
-		Description: body.Description,
-		Visibility:  store.NormalizeVisibility(body.Visibility),
-		SyncMode:    store.NormalizeSyncMode(body.SyncMode),
-		CreatedAtMs: s.Now(),
+		RoomID:       roomID,
+		Name:         body.Name,
+		Description:  body.Description,
+		Visibility:   store.NormalizeVisibility(body.Visibility),
+		SyncMode:     store.NormalizeSyncMode(body.SyncMode),
+		CreatedAtMs:  s.Now(),
+		Welcome:      welcome,
+		QuickPrompts: prompts,
 	}
 	if _, err := s.createRoom(r.Context(), room, caller, ""); err != nil {
 		// An existing id (any tenant, including a deleted room) is a conflict,
@@ -307,10 +321,14 @@ func (s *Service) roomDetail(ctx context.Context, rm store.Room) (wire.RoomDetai
 
 // roomDetailOf is the one member-facing projection of a room.
 func roomDetailOf(rm store.Room, memberCount int) wire.RoomDetail {
+	prompts := rm.QuickPrompts
+	if prompts == nil {
+		prompts = []wire.RoomQuickPrompt{}
+	}
 	return wire.RoomDetail{
 		RoomID: rm.RoomID, Name: rm.Name, Description: rm.Description,
 		Visibility: string(rm.Visibility), SyncMode: string(rm.SyncMode), CreatedBy: rm.CreatedBy,
-		CreatedAtMs: rm.CreatedAtMs, MemberCount: memberCount,
+		CreatedAtMs: rm.CreatedAtMs, MemberCount: memberCount, Welcome: rm.Welcome, QuickPrompts: prompts,
 	}
 }
 
@@ -790,6 +808,12 @@ func (s *Service) handlePatchRoom(w http.ResponseWriter, r *http.Request) {
 	}
 	if !httpx.DecodeJSON(w, r, maxJSONBodyBytes, &body) {
 		return
+	}
+	if body.Description != nil {
+		if err := contentpkg.CheckRoomDescription(*body.Description); err != nil {
+			httpx.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 	}
 	patch := store.RoomPatch{Name: body.Name, Description: body.Description}
 	if body.Visibility != nil {

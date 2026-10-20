@@ -136,7 +136,11 @@ func TestSaveComponentRefusals(t *testing.T) {
 		{"empty", contentEnv(ws, ok, true), `{"dir":"drafts/none"}`, "no files under drafts/none"},
 		{"no manifest", contentEnv(ws, ok, true), `{"dir":"drafts/y"}`, "has no component.json"},
 		{"no files seam", contentEnv(nil, ok, true), `{"dir":"drafts/x"}`, "Save as expert"},
-		{"unknown arg", contentEnv(ws, ok, true), `{"dir":"drafts/x","kind":"expert"}`, "invalid arguments"},
+		{"unknown arg", contentEnv(ws, ok, true), `{"dir":"drafts/x","color":"red"}`, "invalid arguments"},
+		{"room and a dir", contentEnv(ws, ok, true), `{"dir":"drafts/x","kind":"room"}`, "give one of"},
+		{"another kind", contentEnv(ws, ok, true), `{"kind":"expert"}`, "kind is \"room\""},
+		{"room fields on a package", contentEnv(ws, ok, true), `{"dir":"drafts/x","tags":["a"]}`, "tags are a room's"},
+		{"a recipe on a room", contentEnv(ws, ok, true), `{"kind":"room","request":"x"}`, "carries no recipe"},
 		{"two sources", contentEnv(ws, ok, true), `{"dir":"drafts/x","file":"notes.md"}`, "give one of"},
 		{"no such file", contentEnv(ws, ok, true), `{"file":"out/missing.pptx"}`, "cannot be a deliverable"},
 		{"work fields on a package", contentEnv(ws, ok, true), `{"dir":"drafts/x","request":"make a deck"}`, "are a work's"},
@@ -155,41 +159,69 @@ func TestSaveComponentRefusals(t *testing.T) {
 	}
 }
 
-// publish_component posts the scope to the publish route under the job's
-// grant and reports the request; platform scope is refused locally with
-// what a platform admin does.
+// publish_component never shares by itself: "org" reads the component
+// under the job's grant and puts a card for the requester in the room (a
+// publish-proposal notice naming what would be shared and with whom), with
+// no call to the publish route; "personal" withdraws through the route;
+// "platform" is refused locally; another author's component is refused.
 func TestPublishComponentScopes(t *testing.T) {
-	gw := &recordingGateway{reply: func(string, string) ([]byte, error) {
-		return []byte(`{"scope":"personal","note":"Waiting for an organization admin's approval.","request":{"id":"cpr_1","version":"1.2.0","status":"pending"}}`), nil
+	mine := `{"component":{"id":"cc_1","kind":"room","name":"weekly-review","displayName":"Weekly review","latestVersion":"1.2.0","mine":true}}`
+	gw := &recordingGateway{reply: func(method, p string) ([]byte, error) {
+		switch {
+		case method == "GET":
+			return []byte(mine), nil
+		case strings.Contains(p, "/publish"):
+			return []byte(`{"scope":"personal","note":"Taken out of your organization."}`), nil
+		}
+		return []byte(`{}`), nil
 	}}
 	res := publishComponent(context.Background(), contentEnv(nil, gw, true), json.RawMessage(`{"id":"cc_1","scope":"org","note":"for reviews"}`))
 	if res.Err != "" {
 		t.Fatal(res.Err)
 	}
 	out := res.Value.(map[string]any)
-	if out["request"].(map[string]any)["status"] != "pending" || !strings.Contains(out["note"].(string), "approval") {
+	if out["proposed"] != "org" || !strings.Contains(out["note"].(string), "Nothing is shared yet") || !strings.Contains(out["note"].(string), "click Publish") {
 		t.Fatalf("org publish = %+v", out)
 	}
-	if len(gw.calls) != 1 || gw.calls[0].Method != "POST" || !strings.HasPrefix(gw.calls[0].Path, "/v1/content-components/cc_1/publish?") {
+	if len(gw.calls) != 2 || gw.calls[0].Method != "GET" || gw.calls[1].Path != "/v1/rooms/room-1/agent-activity/messages" {
 		t.Fatalf("calls = %+v", gw.calls)
 	}
 	if u, _ := url.Parse(gw.calls[0].Path); u.Query().Get("job") != "job-1" {
-		t.Fatalf("publish without the job grant: %s", gw.calls[0].Path)
+		t.Fatalf("read without the job grant: %s", gw.calls[0].Path)
 	}
-	if body, _ := gw.calls[0].Body.(map[string]any); body["scope"] != "org" || body["note"] != "for reviews" {
-		t.Fatalf("body = %+v", gw.calls[0].Body)
+	batch := gw.calls[1].Body.(wire.ReportMessagesInput)
+	payload := batch.Messages[0].Payload.(map[string]any)
+	p, _ := payload["proposal"].(wire.PublishProposal)
+	if payload["notice"] != wire.NoticePublishProposal || p.ComponentID != "cc_1" || p.Version != "1.2.0" || p.Scope != "org" || p.For != "maya" || p.Note != "for reviews" ||
+		!strings.Contains(payload["text"].(string), "maya's agent proposes sharing Weekly review v1.2.0") {
+		t.Fatalf("card = %+v", payload)
 	}
+
+	res = publishComponent(context.Background(), contentEnv(nil, gw, true), json.RawMessage(`{"id":"cc_1","scope":"personal"}`))
+	last := gw.calls[len(gw.calls)-1]
+	if res.Err != "" || last.Method != "POST" || !strings.HasPrefix(last.Path, "/v1/content-components/cc_1/publish?") {
+		t.Fatalf("withdraw = %+v, calls %+v", res, gw.calls)
+	}
+	if body, _ := last.Body.(map[string]any); body["scope"] != "personal" {
+		t.Fatalf("body = %+v", last.Body)
+	}
+	for _, c := range gw.calls[:2] {
+		if strings.Contains(c.Path, "/publish") {
+			t.Fatalf("org reached the publish route: %+v", c)
+		}
+	}
+	n := len(gw.calls)
 	res = publishComponent(context.Background(), contentEnv(nil, gw, true), json.RawMessage(`{"id":"cc_1","scope":"platform"}`))
-	if !strings.Contains(res.Err, "platform admin") || len(gw.calls) != 1 {
+	if !strings.Contains(res.Err, "platform admin") || len(gw.calls) != n {
 		t.Fatalf("platform publish = %q (calls %d)", res.Err, len(gw.calls))
 	}
-	// The gateway's refusal is passed through.
-	refused := &recordingGateway{reply: func(string, string) ([]byte, error) {
-		return nil, &StatusError{Status: 409, Body: []byte("version 1.2.0 is already published to your organization\n")}
+	// Another author's component is not the requester's to share.
+	theirs := &recordingGateway{reply: func(string, string) ([]byte, error) {
+		return []byte(`{"component":{"id":"cc_2","kind":"expert","name":"reviewer","latestVersion":"1.0.0","mine":false}}`), nil
 	}}
-	res = publishComponent(context.Background(), contentEnv(nil, refused, true), json.RawMessage(`{"id":"cc_1","scope":"org"}`))
-	if !strings.Contains(res.Err, "already published") {
-		t.Fatalf("refusal = %q", res.Err)
+	res = publishComponent(context.Background(), contentEnv(nil, theirs, true), json.RawMessage(`{"id":"cc_2","scope":"org"}`))
+	if !strings.Contains(res.Err, "only its author shares it") || len(theirs.calls) != 1 {
+		t.Fatalf("another author's = %q, calls %+v", res.Err, theirs.calls)
 	}
 }
 

@@ -220,6 +220,8 @@ CREATE TABLE IF NOT EXISTS rooms (
   created_by     VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   created_at_ms  BIGINT NOT NULL,
   deleted_at_ms  BIGINT NULL,
+  welcome        TEXT NULL,
+  quick_prompts_json MEDIUMTEXT NULL,
   PRIMARY KEY (room_id),
   KEY idx_rooms_active_created (tenant_id, deleted_at_ms, created_at_ms)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

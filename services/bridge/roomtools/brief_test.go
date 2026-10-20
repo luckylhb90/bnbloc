@@ -65,10 +65,11 @@ func TestBriefKeepsTheSchemaShape(t *testing.T) {
 func TestBriefsKeepTheirConstraintsAndStayShort(t *testing.T) {
 	for name, want := range map[string][]string{
 		"save_component":    {"only after they confirm"},
-		"publish_component": {"only after the person confirms", "platform"},
+		"publish_component": {"when the person asks", "they click to publish", "platform"},
 		"app_data":          {"wipe", "only when the person asked", "confirm"},
 		"ask_agent":         {"under their authority"},
 		"try_draft":         {"not saved"},
+		"room_setup":        {"as the person who asked you", "only after they agree"},
 	} {
 		for _, s := range want {
 			if !strings.Contains(briefs[name].Text, s) {
@@ -95,7 +96,7 @@ func TestRoomHelp(t *testing.T) {
 	}
 	text := r.Value.(map[string]any)["instructions"].(string)
 	full, _ := reg.Lookup("save_component")
-	for _, want := range []string{full.Description, "Parameters:", "- dir (string): Workspace-relative directory holding component.json", "- category (string) one of"} {
+	for _, want := range []string{full.Description, "Parameters:", "- dir (string): Workspace-relative directory holding component.json", "- kind (string) one of [\"room\"]"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the manual lacks %q:\n%s", want, text)
 		}

@@ -20,6 +20,7 @@ import (
 
 	"github.com/luckylhb90/bnbloc/internal/assist"
 	"github.com/luckylhb90/bnbloc/internal/auth"
+	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/notify"
 	"github.com/luckylhb90/bnbloc/internal/obs"
@@ -57,11 +58,14 @@ import (
 //	DELETE /v1/tenant/room-sources/{roomId}/{source}        withdraw
 //	POST   /v1/tenant/room-sources/{roomId}/{source}/ack    acknowledge the tasks changed since the grant
 //	GET    /v1/rooms/{roomId}/sources                       a member: the room's asks, who reviews it, its opt-ins
+//	POST   /v1/rooms/{roomId}/sources/{source}              the room's owner or an admin asks for one in the room itself
 //	PUT    /v1/rooms/{roomId}/sources/{source}/opt-in       the room's owner opts its records in or out
 //	POST   /v1/rooms/{roomId}/sources/{source}/ask-admin    the room's owner or an admin asks the admins to decide
 //
-// Grants, withdrawals, pauses, acknowledgments and opt-ins are audited
-// (wire.AuditKindSource).
+// Asks, grants, withdrawals, pauses, acknowledgments and opt-ins are
+// audited (wire.AuditKindSource). The room's sources and its own ask honor
+// a job's grant (?job=&room=): the room tool room_setup reads and asks as
+// the person who asked the agent.
 
 // sourceWatcher is the audit's actor of a change the watch finds rather
 // than one a person's request made (a read's or the console's check).
@@ -131,27 +135,45 @@ func sourceAlias(g store.RoomSourceGrant, person string) string {
 }
 
 // askRoomSources records the sources a room package asks for as asks of
-// the room just installed from it, waiting for the organization's admin
-// (each with a fresh alias key). A deployment without the consent store
-// keeps none: the reply says the source cannot be granted here.
+// the room just installed from it (askRoomSource). A deployment without
+// the consent store keeps none: the reply says the source cannot be
+// granted here.
 func (s *Service) askRoomSources(ctx context.Context, claims auth.Claims, roomID string, c store.ContentComponent, version string, asks []wire.RoomSourceAsk, reply *wire.RoomInstallReply) error {
 	for _, a := range asks {
 		if s.RoomSources == nil {
 			reply.Skipped = append(reply.Skipped, fmt.Sprintf("source %s (this deployment keeps no consent for it)", a.Name))
 			continue
 		}
-		key := make([]byte, 16)
-		if _, err := rand.Read(key); err != nil {
-			return err
-		}
-		if err := s.RoomSources.AskRoomSource(tenant.NewContext(ctx, claims.Tenant), store.RoomSourceGrant{RoomID: roomID, Source: a.Name,
-			ComponentID: c.ID, ComponentName: c.Name, ComponentVersion: version, Purpose: a.Purpose, AliasKey: hex.EncodeToString(key),
-			AskedBy: claims.Subject, AskedAtMs: s.nowTime().UnixMilli()}); err != nil {
+		g := store.RoomSourceGrant{RoomID: roomID, Source: a.Name, ComponentID: c.ID, ComponentName: c.Name, ComponentVersion: version, Purpose: a.Purpose}
+		if err := s.askRoomSource(ctx, claims, g); err != nil {
 			return fmt.Errorf("record the ask for %s: %w", a.Name, err)
 		}
 		reply.Sources = append(reply.Sources, a)
 	}
 	return nil
+}
+
+// askRoomSource records g (a room, a source, its purpose and the package it
+// came from, none for an ask made in the room) as the room's ask by claims'
+// member, waiting for the organization's admin, with a fresh alias key: the
+// one writer of an ask (a package's install, the room's own ask).
+func (s *Service) askRoomSource(ctx context.Context, claims auth.Claims, g store.RoomSourceGrant) error {
+	key := make([]byte, 16)
+	if _, err := rand.Read(key); err != nil {
+		return err
+	}
+	g.AliasKey, g.AskedBy, g.AskedAtMs = hex.EncodeToString(key), claims.Subject, s.nowTime().UnixMilli()
+	return s.RoomSources.AskRoomSource(tenant.NewContext(ctx, claims.Tenant), g)
+}
+
+// grantFrom is where an ask came from as the console shows it: the package
+// version its room was installed from, or "" for an ask made in the room
+// itself.
+func grantFrom(g store.RoomSourceGrant) string {
+	if g.ComponentName == "" {
+		return ""
+	}
+	return g.ComponentName + "@" + g.ComponentVersion
 }
 
 // roomName is a room's name as the consent shows it (its id when it cannot
@@ -164,10 +186,11 @@ func (s *Service) roomName(ctx context.Context, roomID string) string {
 	return firstNonEmpty(room.Name, roomID)
 }
 
-// grantView is an ask as the console lists it.
+// grantView is an ask as the console lists it (From is "" for an ask made
+// in the room itself, grantFrom).
 func (s *Service) grantView(ctx context.Context, g store.RoomSourceGrant) wire.RoomSourceGrant {
 	return wire.RoomSourceGrant{RoomID: g.RoomID, RoomName: s.roomName(ctx, g.RoomID), Source: g.Source, Purpose: g.Purpose,
-		ComponentID: g.ComponentID, From: g.ComponentName + "@" + g.ComponentVersion, AskedBy: g.AskedBy, AskedAtMs: g.AskedAtMs,
+		ComponentID: g.ComponentID, From: grantFrom(g), AskedBy: g.AskedBy, AskedAtMs: g.AskedAtMs,
 		Scope: g.Scope, Grantee: g.Grantee, DecidedBy: g.DecidedBy, DecidedAtMs: g.DecidedAtMs, Changed: len(g.Watch.Drift)}
 }
 
@@ -711,7 +734,13 @@ func sourceParam(w http.ResponseWriter, r *http.Request) (string, bool) {
 
 // handleRoomSources answers GET /v1/rooms/{roomId}/sources for any member
 // (a visitor included: transparency is everyone's).
-func (s *Service) handleRoomSources(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
+func (s *Service) handleRoomSources(w http.ResponseWriter, r *http.Request, caller auth.Claims) {
+	// room_setup's get reads them as the job's requester.
+	actor, ok := s.contentCaller(w, r, caller, grantHonored)
+	if !ok {
+		return
+	}
+	claims := actor.Claims
 	roomID := r.PathValue("roomId")
 	rc, ok := s.roomClaims(claims, roomID)
 	if _, member := s.roomMember(claims.Subject, roomID); !ok || !member {
@@ -735,17 +764,33 @@ func (s *Service) writeRoomSources(w http.ResponseWriter, r *http.Request, ctx c
 	httpx.WriteJSON(w, http.StatusOK, info)
 }
 
-func (s *Service) roomSourcesInfo(ctx context.Context, caller, roomID string) (wire.RoomSourcesInfo, error) {
-	info := wire.RoomSourcesInfo{Asks: []wire.RoomSourceAskState{}, ReviewedBy: []wire.RoomReviewer{}, OptedIn: []string{}}
-	optIns := map[string]map[string]bool{}
+// roomAsks are the asks roomID holds (ctx in its tenant), one per source it
+// asks for, in wire.RoomSources' order, whatever each's decision.
+func (s *Service) roomAsks(ctx context.Context, roomID string) ([]store.RoomSourceGrant, error) {
+	var out []store.RoomSourceGrant
 	for _, src := range wire.RoomSources {
 		g, err := s.RoomSources.GetRoomSourceGrant(ctx, roomID, src)
 		switch {
 		case err == nil:
-			info.Asks = append(info.Asks, wire.RoomSourceAskState{Source: src, Purpose: g.Purpose, Scope: g.Scope, Grantee: g.Grantee})
+			out = append(out, g)
 		case !errors.Is(err, store.ErrRoomSourceNotFound):
-			return info, err
+			return nil, err
 		}
+	}
+	return out, nil
+}
+
+func (s *Service) roomSourcesInfo(ctx context.Context, caller, roomID string) (wire.RoomSourcesInfo, error) {
+	info := wire.RoomSourcesInfo{Asks: []wire.RoomSourceAskState{}, ReviewedBy: []wire.RoomReviewer{}, OptedIn: []string{}}
+	asks, err := s.roomAsks(ctx, roomID)
+	if err != nil {
+		return info, err
+	}
+	for _, g := range asks {
+		info.Asks = append(info.Asks, wire.RoomSourceAskState{Source: g.Source, Purpose: g.Purpose, Scope: g.Scope, Grantee: g.Grantee})
+	}
+	optIns := map[string]map[string]bool{}
+	for _, src := range wire.RoomSources {
 		if optIns[src], err = s.sourceOptIns(ctx, src); err != nil {
 			return info, err
 		}
@@ -808,6 +853,58 @@ func (s *Service) handleRoomSourceOptIn(w http.ResponseWriter, r *http.Request, 
 	s.writeRoomSources(w, r, ctx, claims.Subject, roomID)
 }
 
+// handleRoomSourceAsk answers POST /v1/rooms/{roomId}/sources/{source}
+// ({purpose}): the room's owner or an admin, or an agent for them through
+// its job's grant (room_setup's ask_source), records the room's own ask
+// for a source, waiting for the organization's admin like a package's
+// (askRoomSource; contentpkg.CheckRoomSources checks the purpose). An ask
+// the room already holds answers 409. Audited; the answer is the room's
+// sources.
+func (s *Service) handleRoomSourceAsk(w http.ResponseWriter, r *http.Request, caller auth.Claims) {
+	actor, ok := s.contentCaller(w, r, caller, grantHonored)
+	if !ok {
+		return
+	}
+	roomID := r.PathValue("roomId")
+	source, ok := sourceParam(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		Purpose string `json:"purpose"`
+	}
+	if !httpx.DecodeJSON(w, r, 4<<10, &in) {
+		return
+	}
+	ask := wire.RoomSourceAsk{Name: source, Purpose: strings.TrimSpace(in.Purpose)}
+	if err := contentpkg.CheckRoomSources([]wire.RoomSourceAsk{ask}); err != nil {
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	rc, ok := s.roomEditorClaims(actor.Claims, roomID)
+	if !ok {
+		httpx.Error(w, "only the room's owner or admins ask for its sources", http.StatusForbidden)
+		return
+	}
+	ctx := tenant.NewContext(r.Context(), rc.Tenant)
+	switch err := s.askRoomSource(ctx, rc, store.RoomSourceGrant{RoomID: roomID, Source: source, Purpose: ask.Purpose}); {
+	case errors.Is(err, store.ErrRoomSourceAsked):
+		httpx.Error(w, "the room already asks for "+source+": its organization's admin decides", http.StatusConflict)
+		return
+	case err != nil:
+		obs.ServerError(w, "record the ask failed", err)
+		httpx.Error(w, "record the ask failed", http.StatusInternalServerError)
+		return
+	}
+	detail := source + " asked for by " + rc.Subject + " in room " + roomID
+	if j := actor.Job; j != nil {
+		detail += " (through agent " + jobAgent(*j) + ", job " + j.JobID + ")"
+	}
+	s.audit(ctx, rc.Tenant, store.ExtAuditRecord{Kind: wire.AuditKindSource, Name: roomID, Action: "ask", Actor: rc.Subject,
+		Outcome: wire.AuditOutcomeAllow, Detail: detail})
+	s.writeRoomSources(w, r, ctx, rc.Subject, roomID)
+}
+
 // handleRoomSourceAskAdmin answers POST
 // /v1/rooms/{roomId}/sources/{source}/ask-admin: the room's owner or an
 // admin asks the organization's admins to decide a waiting ask, through
@@ -834,9 +931,13 @@ func (s *Service) handleRoomSourceAskAdmin(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	day := s.nowTime().UTC().Format(time.DateOnly)
+	from := ""
+	if f := grantFrom(g); f != "" {
+		from = "From " + f + ". "
+	}
 	_, queued, err := s.notifyOrgAdmins(r.Context(), rc.Tenant, notify.Event{RoomID: roomID, Actor: claims.Subject,
 		Title: claims.Subject + " asks you to let a room read the organization's " + sourceWords(source),
-		Text:  "Purpose: " + g.Purpose + "\nFrom " + g.ComponentName + "@" + g.ComponentVersion + ". Decide in Organization → Room sources.",
+		Text:  "Purpose: " + g.Purpose + "\n" + from + "Decide in Organization → Room sources.",
 		URL:   sourceChange{origin: s.publicOrigin(r)}.consoleURL(), DedupKey: "room-source-ask:" + roomID + ":" + source + ":" + day})
 	if err != nil {
 		obs.ServerError(w, "ask the admins failed", err)

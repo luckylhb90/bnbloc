@@ -11,6 +11,7 @@ import { useCopy } from "@/ui/useCopy";
 import { displayNameOf } from "@/lib/useDisplayName";
 import { EmailInput } from "@/views/UserName";
 import { RoomContentSection } from "@/views/room/RoomContentSection";
+import { RoomWelcomeSection } from "@/views/room/RoomWelcomeSection";
 import { RoomOptInSection } from "@/views/room/RoomOptInSection";
 import { errorText } from "@/lib/errors";
 
@@ -28,8 +29,9 @@ const syncGuidance: Record<string, string> = {
 };
 
 // RoomSettings is offered to members who may invite (owner, admin): they
-// manage members and the room's content; only the owner edits, transfers or
-// deletes the room itself (the room service refuses anyone else).
+// manage members, the room's welcome and quick prompts and its content;
+// only the owner edits, transfers or deletes the room itself (the room
+// service refuses anyone else).
 export function RoomSettings({
   room,
   me,
@@ -182,6 +184,8 @@ export function RoomSettings({
         </p>
         </>
         )}
+
+        <RoomWelcomeSection room={room} canEdit={canInvite(me)} onChanged={onChanged} />
 
         <RoomContentSection roomId={room.roomId} canEdit={canInvite(me)} />
 

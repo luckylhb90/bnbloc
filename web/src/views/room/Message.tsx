@@ -1,6 +1,7 @@
 import { memo, useEffect, useState } from "react";
 import {
   FlagIcon,
+  GearSixIcon,
   HourglassIcon,
   RobotIcon,
   CopyIcon,
@@ -29,6 +30,8 @@ import { dispatchLine, type DispatchAttribution } from "@/lib/dispatch";
 import { ExpertTag } from "@/views/room/ExpertTag";
 import { FileRefTag } from "@/views/room/FileRefTag";
 import { DeadEndCard } from "@/views/room/DeadEndCard";
+import { PublishProposalCard } from "@/views/room/PublishProposalCard";
+import { NoticeRoomSetup } from "@/lib/wire.gen";
 import { isSubmitEnter } from "@/lib/keys";
 import { copyText } from "@/lib/clipboard";
 
@@ -195,10 +198,25 @@ export const Message = memo(function Message({
 
   // An agent's notice line (a team lead's progress, a member that has not
   // finished): one compact line under the agent's name, not a reply.
+  if (isAgent && item.proposal) {
+    return (
+      <div id={`msg-${item.id}`} data-notice={item.notice}>
+        <PublishProposalCard proposal={item.proposal} />
+      </div>
+    );
+  }
   if (isAgent && item.notice) {
+    const icon =
+      item.notice === "member-timeout" ? (
+        <HourglassIcon size={12} className="shrink-0" />
+      ) : item.notice === NoticeRoomSetup ? (
+        <GearSixIcon size={12} className="shrink-0" />
+      ) : (
+        <FlagIcon size={12} className="shrink-0" />
+      );
     const line = (
       <div className="flex min-w-0 items-center gap-1.5">
-        {item.notice === "member-timeout" ? <HourglassIcon size={12} className="shrink-0" /> : <FlagIcon size={12} className="shrink-0" />}
+        {icon}
         {/* By display name like every other agent row: never the raw
             owner id (privacy mode, web M15). */}
         <ActorLabel actor={item.agentLabel || "Agent"} className="shrink-0" />

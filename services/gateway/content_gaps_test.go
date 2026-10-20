@@ -285,9 +285,9 @@ func (rr *recordingRealtime) kinds(kind string) []wire.Event {
 	return out
 }
 
-// A save or publish by the room tools tells the job's room (content_saved),
-// so the workshop needs no re-list after every reply; a member's own save
-// in the Library publishes nothing ("Gap closure" 9).
+// A save by the room tools tells the job's room (content_saved), so the
+// workshop needs no re-list after every reply (a job never publishes); a
+// member's own save in the Library publishes nothing ("Gap closure" 9).
 func TestGrantedSaveAndPublishEmitContentSaved(t *testing.T) {
 	g := newSharingGateway(t)
 	rr := &recordingRealtime{}
@@ -310,24 +310,19 @@ func TestGrantedSaveAndPublishEmitContentSaved(t *testing.T) {
 		t.Fatalf("granted save = %d %s", code, raw)
 	}
 	saved := decodeDetail(t, raw).Component
-	code, raw = g.json("jack", http.MethodPost, "/v1/content-components/"+saved.ID+"/publish?job=job-1&room=room-1", wire.ContentPublishInput{Scope: "org"})
-	if code != http.StatusCreated {
+	// A job never publishes to the organization (the member's own click).
+	if code, raw = g.json("jack", http.MethodPost, "/v1/content-components/"+saved.ID+"/publish?job=job-1&room=room-1", wire.ContentPublishInput{Scope: "org"}); code != http.StatusForbidden {
 		t.Fatalf("granted publish = %d %s", code, raw)
 	}
 	got := rr.kinds(wire.EventContentSaved)
-	if len(got) != 2 {
+	if len(got) != 1 {
 		t.Fatalf("content_saved events = %+v", got)
 	}
-	var first, second wire.ContentSaved
+	var first wire.ContentSaved
 	b, _ := json.Marshal(got[0].Payload)
 	_ = json.Unmarshal(b, &first)
-	b, _ = json.Marshal(got[1].Payload)
-	_ = json.Unmarshal(b, &second)
 	if got[0].RoomID != "room-1" || first.ComponentID != saved.ID || first.Owner != "maya" || first.Action != wire.ContentSavedSaved || !first.Created ||
 		first.Kind != "expert" || first.Version != "1.0.0" || first.Name != "drafted" {
 		t.Fatalf("saved event = %+v %+v", got[0], first)
-	}
-	if second.Action != wire.ContentSavedSubmitted || second.Version != "1.0.0" || second.Created {
-		t.Fatalf("submitted event = %+v", second)
 	}
 }

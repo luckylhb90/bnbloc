@@ -57,6 +57,7 @@ import { JobLiveProvider, JobProgressProvider } from "@/views/room/JobProgressSt
 import { waitingFor, type JobLive } from "@/lib/jobLive";
 import { SaveRoomComponentDialog } from "@/views/room/SaveRoomComponentDialog";
 import { RoomStartCard } from "@/views/room/RoomStartCard";
+import { roomStartOf } from "@/lib/roomWelcome";
 import { SchedulesDialog } from "@/views/room/SchedulesDialog";
 import { GroupChatsDialog } from "@/views/room/GroupChatsDialog";
 import { RunsDialog } from "@/views/room/RunsDialog";
@@ -126,6 +127,7 @@ export function RoomView({
   );
   const data = useRoomData({ roomId, subject, reauth, onGone: () => leaveGoneRoom("missing") });
   const { room, setRoom, roomAgents, joinedGen } = data;
+  const roomStart = roomStartOf(room && !("preview" in room) ? room : null);
   const handoff = useDesktopHandoff(roomId, subject, data.setRoster);
   // Owner/admin act on the room as a whole: export its handoff package, and
   // add the suggested members of an imported room.
@@ -548,7 +550,8 @@ export function RoomView({
       {/* The empty-room card already carries the same guidance. */}
       {!(handoff.show && feed.length === 0 && activity.working.size === 0) && <DesktopConnectBanner subject={subject} hasPlatformAgent={platformInRoom.length > 0} />}
       <HandoffBanner roomId={roomId} canInvite={canManageRoom} members={data.members} />
-      <RoomStartCard roomId={roomId} />
+      {/* An empty room shows its welcome and quick prompts to every member. */}
+      {roomStart && feed.length === 0 && activity.working.size === 0 && <RoomStartCard roomId={roomId} start={roomStart} />}
 
       {/* Channel rail + feed + composer share one row; the rail scopes all
           three to the selected channel. */}

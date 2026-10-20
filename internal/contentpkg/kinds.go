@@ -46,15 +46,7 @@ func validateExpert(p *Package) error {
 		return fmt.Errorf("%s is empty", InstructionsFile)
 	}
 	p.Instructions = text
-	if len(m.QuickPrompts) > maxQuickPrompts {
-		return fmt.Errorf("at most %d quick prompts", maxQuickPrompts)
-	}
-	for i, q := range m.QuickPrompts {
-		if err := checkQuickPrompt(m, i, q); err != nil {
-			return err
-		}
-	}
-	if err := checkText("welcome", m.Welcome, maxWelcome, false); err != nil {
+	if err := checkStart(m); err != nil {
 		return err
 	}
 	slugs := map[string]bool{}
@@ -84,6 +76,33 @@ func validateExpert(p *Package) error {
 		p.Skills = append(p.Skills, s)
 	}
 	return nil
+}
+
+// checkStart: a welcome and quick prompts (an expert's, a room package's
+// and, through CheckRoomStart, a room's own): the one rule of their bounds.
+func checkStart(m Manifest) error {
+	if len(m.QuickPrompts) > maxQuickPrompts {
+		return fmt.Errorf("at most %d quick prompts", maxQuickPrompts)
+	}
+	for i, q := range m.QuickPrompts {
+		if err := checkQuickPrompt(m, i, q); err != nil {
+			return err
+		}
+	}
+	return checkText("welcome", m.Welcome, maxWelcome, false)
+}
+
+// CheckRoomStart checks a room's own welcome and quick prompts (the room
+// service's, docs/prd/2026-10-20-room-setup-by-conversation.md §2.1) by a
+// room package's rules: the same bounds, each quick prompt a title and its
+// text (a room requires no prompt pack a reference could point into).
+func CheckRoomStart(welcome string, quickPrompts []QuickPrompt) error {
+	for i, q := range quickPrompts {
+		if q.Ref != "" {
+			return fmt.Errorf("quick prompt %d: a room's quick prompt is a title and its text", i+1)
+		}
+	}
+	return checkStart(Manifest{Welcome: welcome, QuickPrompts: quickPrompts})
 }
 
 // checkQuickPrompt: a quick prompt is a title and its text, or a reference

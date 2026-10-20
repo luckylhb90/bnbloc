@@ -25,6 +25,7 @@ import {
   type RoomReportRequest,
   type RoomPreview,
   type RoomsReply,
+  type RoomWelcomeRequest,
   type UnreadReply,
 } from "./wire.gen.ts";
 import { authedFetch, errorBody } from "./session.ts";
@@ -415,6 +416,13 @@ export const api = {
     },
   ) =>
     req<RoomDetail>(roomPath(id), {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+  // The room's welcome and quick prompts (its owner or admins; an absent
+  // field is left as it is).
+  updateRoomWelcome: (id: string, body: RoomWelcomeRequest) =>
+    req<RoomDetail>(`${roomPath(id)}/welcome`, {
       method: "PATCH",
       body: JSON.stringify(body),
     }),

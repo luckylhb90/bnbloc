@@ -138,7 +138,7 @@ export function RoomSourceDialog({ grant, onClose, onDecided }: { readonly grant
     >
       <div className="flex flex-col gap-4 text-sm">
         <p className="text-[var(--color-fg-muted)]">
-          Installed from {grant.from} by <UserName id={grant.askedBy} />.
+          {grant.from ? <>Installed from {grant.from} by <UserName id={grant.askedBy} />.</> : <>Asked in the room by <UserName id={grant.askedBy} />.</>}
         </p>
         {!detail ? (
           !failure && <p className="text-xs text-[var(--color-fg-subtle)]" role="status">Reading the room…</p>

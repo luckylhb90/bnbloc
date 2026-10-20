@@ -161,11 +161,15 @@ func TestPublishAppFromSite(t *testing.T) {
 }
 
 // The agent publishes an app with the room tools' save_component: kind app
-// and the site's artifact id, as the job's requester.
+// and the site's artifact id, as the job's requester. publish_component
+// shares nothing: it puts a card for her in the room, and her click on it
+// (the publish route, as her) shares it.
 func TestAgentPublishesAppThroughRoomTools(t *testing.T) {
 	e := galleryGW(t)
 	site := e.pollSite()
 	e.runJob("job-1", e.roomID)
+	activity := newRecorder(t)
+	e.gw.Backends.Activity = activity.srv.URL
 	r := e.roomToolAs(e.roomID, "job-1", "save_component", map[string]any{"artifactId": site, "name": "lunch-poll", "category": wire.WorkCategoryLife})
 	if r.Err != "" {
 		t.Fatalf("save_component = %+v", r)
@@ -183,6 +187,21 @@ func TestAgentPublishesAppThroughRoomTools(t *testing.T) {
 	}
 	if r := e.roomToolAs(e.roomID, "job-1", "publish_component", map[string]any{"id": comps[0].ID, "scope": "org"}); r.Err != "" {
 		t.Fatalf("publish_component = %+v", r)
+	}
+	card, _ := activity.last()
+	if card.path != "/v1/rooms/"+e.roomID+"/agent-activity/messages" || !strings.Contains(card.body, `"notice":"publish-proposal"`) ||
+		!strings.Contains(card.body, `"componentId":"`+comps[0].ID+`"`) || !strings.Contains(card.body, `"for":"maya"`) {
+		t.Fatalf("the card = %+v", card)
+	}
+	if org := e.libraryApp("jack", "lunch-poll"); org != nil {
+		t.Fatalf("shared before maya clicked: %+v", org)
+	}
+	if reqs, _ := e.b.ContentComponents.ListContentRequests(e.ctx(), store.ContentRequestQuery{ComponentID: comps[0].ID}); len(reqs) != 0 {
+		t.Fatalf("a request before maya clicked: %+v", reqs)
+	}
+	// Her click on the card: the publish route, as her.
+	if r := e.call(http.MethodPost, "/v1/content-components/"+comps[0].ID+"/publish", wire.ContentPublishInput{Scope: "org"}, e.as("maya")); r.status != http.StatusCreated {
+		t.Fatalf("maya's publish = %d %s", r.status, r.body)
 	}
 }
 

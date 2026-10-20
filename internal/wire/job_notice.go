@@ -70,6 +70,14 @@ const (
 	// change: it never reached the agent (and why), or the agent left it
 	// as it was (the bridge, once per job, under FileEditNoticeSessionID).
 	NoticeFileEdit = "file-edit"
+	// NoticeRoomSetup is a change an agent made to the room's setup for
+	// the person who asked it ("maya's agent set the welcome"; room_setup,
+	// a line each, under the job's progress session).
+	NoticeRoomSetup = "room-setup"
+	// NoticePublishProposal asks the person who asked the agent to share a
+	// component (publish_component): payload.proposal is a PublishProposal,
+	// shown to them only.
+	NoticePublishProposal = "publish-proposal"
 )
 
 // AttachmentNoticeSessionID is the activity session of a job's

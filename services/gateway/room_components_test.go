@@ -89,6 +89,14 @@ func (e *appGW) draft(subject, room string) (wire.RoomComponentDraft, resp) {
 func TestRoomComponentDraft(t *testing.T) {
 	e := galleryGW(t)
 	e.reviewRoom()
+	text := "Ask about last week."
+	welcome := wire.RoomWelcomeRequest{Welcome: &text, QuickPrompts: &[]wire.RoomQuickPrompt{{Title: "Recap", Prompt: "Recap the week"}}}
+	if r := e.call(http.MethodPatch, "/v1/rooms/"+e.roomID+"/welcome", welcome, e.as("maya")); r.status != http.StatusOK {
+		t.Fatalf("welcome = %d %s", r.status, r.body)
+	}
+	if r := e.call(http.MethodPost, "/v1/rooms/"+e.roomID+"/sources/runs", map[string]string{"purpose": reviewAsk.Purpose}, e.as("maya")); r.status != http.StatusOK {
+		t.Fatalf("ask = %d %s", r.status, r.body)
+	}
 	for _, who := range []string{"jack", "olaf"} {
 		if _, r := e.draft(who, e.roomID); r.status != http.StatusForbidden {
 			t.Fatalf("draft as %s = %d %s", who, r.status, r.body)
@@ -97,6 +105,10 @@ func TestRoomComponentDraft(t *testing.T) {
 	d, r := e.draft("maya", e.roomID)
 	if r.status != http.StatusOK {
 		t.Fatalf("draft = %d %s", r.status, r.body)
+	}
+	if d.Welcome != "Ask about last week." || !slices.Equal(d.QuickPrompts, []wire.RoomQuickPrompt{{Title: "Recap", Prompt: "Recap the week"}}) ||
+		!slices.Equal(d.Sources, []wire.RoomSourceAsk{reviewAsk}) {
+		t.Fatalf("draft start and sources = %q %+v %+v", d.Welcome, d.QuickPrompts, d.Sources)
 	}
 	if d.Name != "r" || d.DisplayName != "r" || !slices.Equal(d.Channels, []string{"reports"}) {
 		t.Fatalf("draft = %+v", d)
@@ -137,7 +149,8 @@ var reviewAsk = wire.RoomSourceAsk{Name: wire.RoomSourceRuns, Purpose: "Judge wh
 // ticked) as a room package, with the runs source asked for.
 func roomForm(d wire.RoomComponentDraft, name string) contentpkg.Form {
 	f := contentpkg.Form{Kind: "room", Name: name, DisplayName: "Weekly review", Description: "Reviews the week.",
-		Welcome: "Turn the daily summary on.", Channels: d.Channels, Schedules: d.Schedules, Sources: []wire.RoomSourceAsk{reviewAsk}}
+		Welcome: "Turn the daily summary on.", Channels: d.Channels, Schedules: d.Schedules, Sources: []wire.RoomSourceAsk{reviewAsk},
+		QuickPrompts: []contentpkg.QuickPrompt{{Title: "Weekly recap", Ref: "review-prompts/recap"}, {Title: "Misses", Prompt: "What failed this week?"}}}
 	if d.Expert != nil {
 		f.Requires.Expert = d.Expert.Ref
 	}
@@ -201,14 +214,15 @@ func TestCreateRoomFromComponent(t *testing.T) {
 		t.Fatalf("create-room = %d %s", r.status, r.body)
 	}
 	if got.RoomID != "jacks-review" || got.From != "weekly-review@1.0.0" || !slices.Equal(got.Channels, []string{"reports"}) || got.Expert != "Reviewer" ||
-		!slices.Equal(got.Sources, []wire.RoomSourceAsk{reviewAsk}) || got.Welcome != "Turn the daily summary on." || len(got.Apps) != 1 || len(got.Schedules) != 2 {
+		!slices.Equal(got.Sources, []wire.RoomSourceAsk{reviewAsk}) || len(got.Apps) != 1 || len(got.Schedules) != 2 {
 		t.Fatalf("reply = %+v", got)
 	}
 	if !slices.Equal(got.Skipped, []string{"skill pack charts@^1 (not one you can use)"}) {
 		t.Fatalf("skipped = %v", got.Skipped)
 	}
 	room, err := e.b.Room.GetRoom(e.ctx(), "jacks-review")
-	if err != nil || room.Name != "Jack's review" || room.Description != "Reviews the week." {
+	if err != nil || room.Name != "Jack's review" || room.Description != "Reviews the week." || room.Welcome != "Turn the daily summary on." ||
+		!slices.Equal(room.QuickPrompts, []wire.RoomQuickPrompt{{Title: "Weekly recap", Prompt: "Recap"}, {Title: "Misses", Prompt: "What failed this week?"}}) {
 		t.Fatalf("the room = %+v, %v", room, err)
 	}
 	if role, ok, _ := e.b.Room.MemberRole(e.ctx(), "jacks-review", "jack"); !ok || role != store.RoleOwner {

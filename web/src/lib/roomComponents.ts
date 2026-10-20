@@ -2,17 +2,16 @@
 // room's setup saved as a content component and installed as a new room.
 // The shapes are internal/wire/room_components.go's (wire.gen.ts); the
 // helpers here are pure (the save dialog's state and its form, the AI
-// draft onto it, the setup's summary, a new room's first-visit card), so
-// they are unit-tested. The requests are lib/roomComponentsApi.ts.
+// draft onto it, the setup's summary), so they are unit-tested. The
+// requests are lib/roomComponentsApi.ts.
 
 import { cleanTags, splitList, tagProblem, type ContentComponent, type ContentForm, type ContentMCPRequirement, type ContentQuickPrompt } from "./contentComponents.ts";
 import { sourcesProblem } from "./roomSources.ts";
 import { describeRecurrence, recipientLabel } from "./schedules.ts";
-import { StorageKey, keyFor } from "./storageKeys.ts";
 import { workNameFrom } from "./workGallery.ts";
 
 export type { RoomComponentDraft, RoomInstallReply, RoomInstallRequest, RoomPackageSchedule, RoomSpec } from "./wire.gen.ts";
-import type { ContentRequires, RoomComponentDraft, RoomDraftPart, RoomInstallReply, RoomPackageSchedule, RoomSourceAsk, RoomSpec } from "./wire.gen.ts";
+import type { ContentRequires, RoomComponentDraft, RoomDraftPart, RoomPackageSchedule, RoomSourceAsk, RoomSpec } from "./wire.gen.ts";
 
 // MAX_ROOM_DESCRIPTION is a room's description bound (rooms.description):
 // a room component's description becomes the new room's.
@@ -44,7 +43,8 @@ export interface RoomSaveForm {
   apps: readonly RoomPart[];
   sources: readonly RoomSourceAsk[];
   off: readonly string[];
-  // Kept as they are from a component's version (the dialog edits none).
+  // Kept as they are, the room's or a component version's (the dialog
+  // edits none: the room's settings edit a room's quick prompts).
   quickPrompts: readonly ContentQuickPrompt[];
   mcp: readonly ContentMCPRequirement[];
   permissions: readonly string[];
@@ -61,7 +61,8 @@ const draftPart = (p: RoomDraftPart): RoomPart => ({ ref: p.ref, label: p.displa
 const refPart = (ref: string): RoomPart => ({ ref, label: ref });
 
 /** roomSaveFromDraft is the dialog's first state for a room's draft:
- *  everything the room holds, ticked. */
+ *  everything the room holds, ticked (its welcome, quick prompts and its
+ *  own asks for sources too). */
 export function roomSaveFromDraft(d: RoomComponentDraft): RoomSaveForm {
   return {
     name: d.name,
@@ -69,16 +70,16 @@ export function roomSaveFromDraft(d: RoomComponentDraft): RoomSaveForm {
     description: d.description.slice(0, MAX_ROOM_DESCRIPTION),
     category: "",
     tags: "",
-    welcome: "",
+    welcome: d.welcome,
     channels: d.channels,
     schedules: d.schedules,
     expert: d.expert ? draftPart(d.expert) : null,
     skills: d.skills.map(draftPart),
     prompts: d.prompts.map(draftPart),
     apps: d.apps.map(draftPart),
-    sources: [],
+    sources: d.sources,
     off: [],
-    quickPrompts: [],
+    quickPrompts: d.quickPrompts.map((q) => ({ title: q.title, prompt: q.prompt })),
     mcp: [],
     permissions: [],
   };
@@ -229,33 +230,4 @@ export function roomDraftPatch(fields: Readonly<Record<string, unknown>>, f: Roo
   const welcome = str(fields.welcome);
   if (welcome) patch.welcome = welcome;
   return patch;
-}
-
-// A new room's install reply, kept for its first visits (the reply is the
-// only place what was left out is said).
-const startKey = (roomId: string) => keyFor(StorageKey.roomStart, roomId);
-
-export function rememberRoomStart(reply: RoomInstallReply, storage: Pick<Storage, "setItem"> = localStorage): void {
-  try {
-    storage.setItem(startKey(reply.roomId), JSON.stringify(reply));
-  } catch {
-    // Best-effort: storage full or unavailable just skips the card.
-  }
-}
-
-export function takeRoomStart(roomId: string, storage: Pick<Storage, "getItem"> = localStorage): RoomInstallReply | undefined {
-  try {
-    const raw = storage.getItem(startKey(roomId));
-    return raw ? (JSON.parse(raw) as RoomInstallReply) : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-export function clearRoomStart(roomId: string, storage: Pick<Storage, "removeItem"> = localStorage): void {
-  try {
-    storage.removeItem(startKey(roomId));
-  } catch {
-    // ignore
-  }
 }

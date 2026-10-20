@@ -48,10 +48,11 @@ func TestCreateRoomRejectsInvalidID(t *testing.T) {
 	}
 }
 
-// BE-17: control bodies are size-capped.
+// BE-17: control bodies are size-capped (a create carries a welcome and
+// quick prompts: maxStartBodyBytes).
 func TestCreateRoomRejectsOversizedBody(t *testing.T) {
 	srv, _ := newTestServer(t)
-	resp := do(t, http.MethodPost, srv.URL+"/v1/rooms", "alice", map[string]string{"roomId": "r", "description": strings.Repeat("x", maxJSONBodyBytes)})
+	resp := do(t, http.MethodPost, srv.URL+"/v1/rooms", "alice", map[string]string{"roomId": "r", "description": strings.Repeat("x", maxStartBodyBytes)})
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusRequestEntityTooLarge {
 		t.Fatalf("oversized create = %d, want 413", resp.StatusCode)

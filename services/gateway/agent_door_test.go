@@ -157,7 +157,7 @@ func TestAgentDoorSchedulesAsTheRequester(t *testing.T) {
 	}
 
 	// Creating and deleting are audited with the agent and the requester, never the text.
-	recs, err := audit.AuditLog(context.Background(), store.AuditLogQuery{AllTenants: true, Kinds: []string{wire.AuditKindSchedule}, Limit: 20})
+	recs, err := audit.AuditLog(context.Background(), store.AuditLogQuery{AllTenants: true, Kinds: []string{wire.AuditKindRoomSetup}, Limit: 20})
 	if err != nil || len(recs) != 3 {
 		t.Fatalf("audit = %+v, %v", recs, err)
 	}

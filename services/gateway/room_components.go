@@ -20,6 +20,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/ids"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
+	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
@@ -44,9 +45,11 @@ import (
 // organization admin's consent (room_sources.go).
 
 // handleRoomComponentDraft answers what "Save as component" captures of a
-// room: its owner's or an admin's (the room editors').
+// room: its owner's or an admin's (the room editors'). save_component's
+// room kind reads it through a job's grant, as the job's requester: the
+// same capture as the dialog's.
 func (s *Service) handleRoomComponentDraft(w http.ResponseWriter, r *http.Request, caller auth.Claims) {
-	actor, ok := s.contentCaller(w, r, caller, grantRefused)
+	actor, ok := s.contentCaller(w, r, caller, grantHonored)
 	if !ok {
 		return
 	}
@@ -65,24 +68,27 @@ func (s *Service) handleRoomComponentDraft(w http.ResponseWriter, r *http.Reques
 }
 
 // roomDraft captures roomID's setup as claims (the room's editor, in its
-// organization) read it: its name and description, its channels, its AI
-// tasks and notices, the room expert and room packs and the apps copied in
-// from works, each a part the editor may see (another member's private
-// component could not be installed by anyone else). What a package does
-// not hold is said in Left.
+// organization) read it: its name, description, welcome and quick prompts,
+// its channels, its AI tasks and notices, the room expert and room packs,
+// the apps copied in from works, each a part the editor may see (another
+// member's private component could not be installed by anyone else), and
+// the sources it asks for. What a package does not hold is said in Left.
 func (s *Service) roomDraft(ctx context.Context, claims auth.Claims, roomID string) (wire.RoomComponentDraft, error) {
-	var room struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
-	}
+	var room wire.RoomDetail
 	path := "/v1/rooms/" + url.PathEscape(roomID)
 	if err := s.roomBackendDo(ctx, backendHTTP, http.MethodGet, path, "", nil, claims.Subject, claims.Tenant, &room); err != nil {
 		return wire.RoomComponentDraft{}, err
 	}
 	title := firstNonEmpty(room.Name, roomID)
 	d := wire.RoomComponentDraft{RoomID: roomID, Name: firstNonEmpty(contentpkg.NameFrom(title), "room"), DisplayName: title,
-		Description: room.Description, Channels: []string{}, Schedules: []wire.RoomPackageSchedule{},
-		Skills: []wire.RoomDraftPart{}, Prompts: []wire.RoomDraftPart{}, Apps: []wire.RoomDraftPart{}, Left: []string{}}
+		Description: room.Description, Welcome: room.Welcome, QuickPrompts: room.QuickPrompts, Channels: []string{}, Schedules: []wire.RoomPackageSchedule{},
+		Skills: []wire.RoomDraftPart{}, Prompts: []wire.RoomDraftPart{}, Apps: []wire.RoomDraftPart{}, Sources: []wire.RoomSourceAsk{}, Left: []string{}}
+	if d.QuickPrompts == nil {
+		d.QuickPrompts = []wire.RoomQuickPrompt{}
+	}
+	if err := s.draftSources(ctx, claims, roomID, &d); err != nil {
+		return d, err
+	}
 	var channels struct {
 		Channels []struct {
 			ChannelID string `json:"channelId"`
@@ -156,6 +162,20 @@ func (s *Service) draftSchedules(ctx context.Context, claims auth.Claims, roomID
 		d.Left = append(d.Left, "the link of "+plural(links, "scheduled notice")+" (a link points into this room)")
 	}
 	return nil
+}
+
+// draftSources captures the sources the room asks for, each with its
+// purpose, granted or not: the package asks again for the room installed
+// from it (a deployment without the consent store has none).
+func (s *Service) draftSources(ctx context.Context, claims auth.Claims, roomID string, d *wire.RoomComponentDraft) error {
+	if s.RoomSources == nil {
+		return nil
+	}
+	asks, err := s.roomAsks(tenant.NewContext(ctx, claims.Tenant), roomID)
+	for _, g := range asks {
+		d.Sources = append(d.Sources, wire.RoomSourceAsk{Name: g.Source, Purpose: g.Purpose})
+	}
+	return err
 }
 
 // draftContent captures the room expert and the room's skill and prompt
@@ -306,12 +326,13 @@ func (s *Service) handleCreateRoomFromComponent(w http.ResponseWriter, r *http.R
 func (s *Service) installRoom(ctx context.Context, claims auth.Claims, c store.ContentComponent, v store.ContentComponentVersion, m contentpkg.Manifest, in wire.RoomInstallRequest) (reply wire.RoomInstallReply, err error) {
 	roomID := firstNonEmpty(in.RoomID, ids.New("room-"))
 	reply = wire.RoomInstallReply{RoomID: roomID, Name: firstNonEmpty(in.Name, m.DisplayName, c.Name), ComponentID: c.ID, From: c.Name + "@" + v.Version,
-		Channels: []string{}, Schedules: []string{}, Enabled: []string{}, Apps: []string{}, Skipped: []string{}, Sources: []wire.RoomSourceAsk{}, Tools: []string{},
-		Welcome: m.Welcome}
-	for _, q := range m.QuickPrompts {
-		reply.QuickPrompts = append(reply.QuickPrompts, wire.ContentQuickPrompt{Title: q.Title, Prompt: q.Prompt, Ref: q.Ref})
+		Channels: []string{}, Schedules: []string{}, Enabled: []string{}, Apps: []string{}, Skipped: []string{}, Sources: []wire.RoomSourceAsk{}, Tools: []string{}}
+	prompts, err := s.roomQuickPrompts(ctx, claims, m, &reply)
+	if err != nil {
+		return reply, err
 	}
-	create, _ := json.Marshal(map[string]any{"roomId": roomID, "name": reply.Name, "description": m.Description, "visibility": in.Visibility})
+	create, _ := json.Marshal(map[string]any{"roomId": roomID, "name": reply.Name, "description": m.Description, "visibility": in.Visibility,
+		"welcome": m.Welcome, "quickPrompts": prompts})
 	if err := s.roomBackendCall(ctx, http.MethodPost, "/v1/rooms", claims.Subject, claims.Tenant, create); err != nil {
 		return reply, err
 	}
@@ -366,6 +387,31 @@ func (s *Service) installRoom(ctx context.Context, claims auth.Claims, c store.C
 	s.auditContent(ctx, "use", claims.Subject, claims.Tenant, c, v.Version,
 		contentshare.Label(c)+" v"+v.Version+" installed by "+claims.Subject+" as room "+roomID)
 	return reply, nil
+}
+
+// roomQuickPrompts are the package's quick prompts as the new room keeps
+// them: a title and its text. One that names a prompt of a pack the package
+// requires takes that prompt's text, resolved for the installer
+// (contentuse.ResolvePromptRef); one whose pack they may not use is
+// reported.
+func (s *Service) roomQuickPrompts(ctx context.Context, claims auth.Claims, m contentpkg.Manifest, reply *wire.RoomInstallReply) ([]wire.RoomQuickPrompt, error) {
+	out := []wire.RoomQuickPrompt{}
+	for _, q := range m.QuickPrompts {
+		if q.Ref == "" {
+			out = append(out, wire.RoomQuickPrompt{Title: q.Title, Prompt: q.Prompt})
+			continue
+		}
+		ref, err := contentuse.ResolvePromptRef(ctx, s.ContentComponents, viewerOf(claims), "", m.Requires.Prompts, q.Ref)
+		if err != nil {
+			return nil, err
+		}
+		if ref == nil {
+			reply.Skipped = append(reply.Skipped, fmt.Sprintf("quick prompt %q (its prompt pack is not one you can use)", firstNonEmpty(q.Title, q.Ref)))
+			continue
+		}
+		out = append(out, wire.RoomQuickPrompt{Title: firstNonEmpty(q.Title, ref.Prompt.Title), Prompt: ref.Prompt.Body})
+	}
+	return out, nil
 }
 
 // installSchedules creates the package's schedules in the room, disabled,

@@ -5,7 +5,7 @@ import { contentLabel, type ContentComponent } from "@/lib/contentComponents";
 import { contentApi } from "@/lib/contentComponentsApi";
 import { errorText } from "@/lib/errors";
 import { isSubmitEnter } from "@/lib/keys";
-import { rememberRoomStart, roomSetupSummary } from "@/lib/roomComponents";
+import { roomSetupSummary, type RoomInstallReply } from "@/lib/roomComponents";
 import { roomComponentsApi } from "@/lib/roomComponentsApi";
 import { roomIdProblem } from "@/lib/roomId";
 import { Button } from "@/ui/Button";
@@ -20,8 +20,9 @@ import { RoomSetup } from "@/views/library/RoomSetup";
 // components PRD §2.1): a room component (the one given, or one picked
 // from the member's Library) becomes a new room the member owns, with its
 // channels, expert, packs and apps, and its scheduled tasks paused. What
-// it asks to read is shown, never granted. The install reply is kept for
-// the room's first visit (RoomStartCard).
+// it asks to read is shown, never granted. The new room keeps the
+// component's welcome and quick prompts; what the install left out is said
+// here, once, before the room opens (it is no room state).
 export function CreateRoomFromComponentDialog({
   open,
   component,
@@ -41,12 +42,15 @@ export function CreateRoomFromComponentDialog({
   const [vis, setVis] = useState<"private" | "shared">("private");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  // A made room whose install left something out, said before it opens.
+  const [made, setMade] = useState<RoomInstallReply | null>(null);
 
   useEffect(() => {
     if (!open) return;
     setRoomId("");
     setVis("private");
     setErr("");
+    setMade(null);
     setPickedId(component?.id ?? "");
     if (component) return;
     let live = true;
@@ -82,10 +86,10 @@ export function CreateRoomFromComponentDialog({
     try {
       const id = roomId.trim();
       const reply = await roomComponentsApi.createRoom(chosen.id, { roomId: id, name: id, visibility: vis });
-      rememberRoomStart(reply);
       await reauth().catch(() => {});
       toast.success(`Room “${id}” created from ${contentLabel(chosen)}`);
-      onCreated(id);
+      if (reply.skipped.length > 0) setMade(reply);
+      else onCreated(id);
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) setErr("A room with this id already exists");
       else setErr(errorText(e, "Could not create the room"));
@@ -102,16 +106,32 @@ export function CreateRoomFromComponentDialog({
       title="New room from a room component"
       description="You own the new room. Its channels, expert, packs and apps are set up, and its scheduled tasks are created paused: turn them on when you are ready."
       footer={
-        <>
-          <Button variant="ghost" onClick={onClose}>
-            Cancel
+        made ? (
+          <Button variant="primary" onClick={() => onCreated(made.roomId)}>
+            Open the room
           </Button>
-          <Button variant="primary" onClick={() => void submit()} disabled={busy || !chosen}>
-            {busy ? "Creating…" : "Create room"}
-          </Button>
-        </>
+        ) : (
+          <>
+            <Button variant="ghost" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button variant="primary" onClick={() => void submit()} disabled={busy || !chosen}>
+              {busy ? "Creating…" : "Create room"}
+            </Button>
+          </>
+        )
       }
     >
+      {made ? (
+        <div role="status" className="flex flex-col gap-1 text-sm">
+          <p>Room “{made.roomId}” is made. Left out:</p>
+          <ul className="list-disc pl-5 text-[var(--color-fg-muted)]">
+            {made.skipped.map((s) => (
+              <li key={s}>{s}</li>
+            ))}
+          </ul>
+        </div>
+      ) : (
       <div className="flex flex-col gap-4">
         {!component && (
           <Field label="Room component">
@@ -161,6 +181,7 @@ export function CreateRoomFromComponentDialog({
           />
         </Field>
       </div>
+      )}
     </Dialog>
   );
 }

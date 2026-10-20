@@ -54,10 +54,11 @@ holds the exact format, every limit the save enforces, and example packages.
      pack"** or **"Save as prompt pack"** under your reply's files.
    - Never claim a save the tool did not confirm.
 6. **Publishing.** A saved component is personal. When they want their
-   organization to use it, confirm, then call `publish_component` with
-   scope `org` and a one-line note: an organization admin reviews it and
-   approves or declines, and members keep the previously approved version
-   until then; never call it published before that. Scope `personal`
+   organization to use it, call `publish_component` with scope `org` and a
+   one-line note: it puts a card in the room that only they see, and it is
+   shared when they click Publish there (then an organization admin reviews
+   it and approves or declines, and members keep the previously approved
+   version until then); never call it published before that. Scope `personal`
    withdraws the request. Every organization at once (platform) is a
    platform admin's action: say so. To give a copy to colleagues or a room,
    they use **Share** in their Library.

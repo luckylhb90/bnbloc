@@ -3,6 +3,7 @@ import type { AgentOptions } from "@/views/composer/types";
 import type { DispatchAttribution } from "@/lib/dispatch";
 import type { ChatExpert, ExpertMarker } from "@/lib/contentComponents";
 import type { FileRef } from "@/lib/wire.gen";
+import type { PublishProposal } from "@/lib/publishProposal";
 import { sameUser } from "../../lib/format.ts";
 
 // The routing of one chat send, exactly as it went (or will go) on the wire.
@@ -82,6 +83,9 @@ export interface FeedItem {
   // A notice's detail (payload.detail): the agent's own error output,
   // rendered fenced under the notice line, never as Markdown.
   noticeDetail?: string;
+  // A publish-proposal notice's card (payload.proposal): only the person
+  // the agent asked for is shown it (feedItemFromEvent drops it for others).
+  proposal?: PublishProposal;
   // An agent row's job and the room sequence of that job's request
   // (payload.jobId / payload.sourceSeq): delegated work nests under the
   // request that started it (feedTurns.ts).

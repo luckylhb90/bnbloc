@@ -48,6 +48,13 @@ const defaultChannel = "general"
 
 var errRoomFields = errors.New("channels, schedules, apps, sources and a room expert belong to a room package")
 
+// CheckRoomDescription checks a room's description (a room's own, the room
+// service's, and a room package's, which becomes it): within the room's
+// bound.
+func CheckRoomDescription(description string) error {
+	return checkText("description", description, maxRoomDescription, false)
+}
+
 func init() {
 	register(KindSpec{Kind: KindRoom, Short: "room", Limits: RoomLimits,
 		validate: validateRoom, fromForm: roomFromForm})
@@ -76,19 +83,11 @@ func validateRoom(p *Package) error {
 			return err
 		}
 	}
-	if err := checkText("description", m.Description, maxRoomDescription, false); err != nil {
+	if err := CheckRoomDescription(m.Description); err != nil {
 		return fmt.Errorf("%w (it becomes the room's description)", err)
 	}
-	if err := checkText("welcome", m.Welcome, maxWelcome, false); err != nil {
+	if err := checkStart(m); err != nil {
 		return err
-	}
-	if len(m.QuickPrompts) > maxQuickPrompts {
-		return fmt.Errorf("at most %d quick prompts", maxQuickPrompts)
-	}
-	for i, q := range m.QuickPrompts {
-		if err := checkQuickPrompt(m, i, q); err != nil {
-			return err
-		}
 	}
 	channels, err := checkRoomChannels(m.Channels)
 	if err != nil {
@@ -105,7 +104,7 @@ func validateRoom(p *Package) error {
 	if err := checkRoomApps(m.Apps); err != nil {
 		return err
 	}
-	return checkRoomSources(m.Sources)
+	return CheckRoomSources(m.Sources)
 }
 
 // checkRoomChannels: names as they are shown (trimmed, one line, bounded),
@@ -213,10 +212,11 @@ func checkRoomApps(apps []string) error {
 	return nil
 }
 
-// checkRoomSources: sources of the one list (wire.RoomSources), each once
+// CheckRoomSources: sources of the one list (wire.RoomSources), each once
 // and with its purpose (the admin consents to it), within
-// wire.MaxRoomSourcePurpose characters.
-func checkRoomSources(sources []wire.RoomSourceAsk) error {
+// wire.MaxRoomSourcePurpose characters. A package's asks, and an ask made
+// in a room itself (the gateway's room_sources.go), are checked by it.
+func CheckRoomSources(sources []wire.RoomSourceAsk) error {
 	seen := map[string]bool{}
 	for _, s := range sources {
 		if !slices.Contains(wire.RoomSources, s.Name) {

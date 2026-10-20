@@ -162,8 +162,9 @@ func (n *jobNotes) nextLine(jobID string, counted bool) (int64, bool) {
 func ProgressSessionID(jobID string) string { return wire.JobNoticeSessionID(jobID) + "-progress" }
 
 // postNotice posts one notice line for the bound job in its channel,
-// attributed to the session's agent.
-func postNotice(ctx context.Context, env *Env, job Job, kind, text string, counted bool) error {
+// attributed to the session's agent; extra holds its kind's own fields
+// (wire.JobNotice.Extra).
+func postNotice(ctx context.Context, env *Env, job Job, kind, text string, counted bool, extra map[string]any) error {
 	seq, ok := env.Session.notes.nextLine(job.JobID, counted)
 	if !ok {
 		return errProgressLimit
@@ -172,6 +173,7 @@ func postNotice(ctx context.Context, env *Env, job Job, kind, text string, count
 	body := wire.JobNotice{
 		RoomID: scope.RoomID, ChannelID: job.ChannelID, JobID: job.JobID, SourceSeq: job.MessageSeq,
 		Kind: kind, Text: text, OwnerUserID: scope.Owner, Provider: scope.Provider,
+		Extra:   extra,
 		Session: ProgressSessionID(job.JobID), Seq: seq,
 		MessageID: kind + "-" + job.JobID + "-" + strconv.FormatInt(seq, 10),
 		AtUnixMs:  time.Now().UnixMilli(),
@@ -219,7 +221,7 @@ func postProgressTool() Tool {
 			if job.JobID == "" {
 				return toolError("post_progress works only while you are answering a request in the room")
 			}
-			if err := postNotice(ctx, env, job, NoticeProgress, text, true); err != nil {
+			if err := postNotice(ctx, env, job, NoticeProgress, text, true, nil); err != nil {
 				if err == errProgressLimit {
 					return toolError("at most %d progress lines per request", maxProgressLines)
 				}
@@ -282,7 +284,7 @@ func noteOutcome(ctx context.Context, env *Env, job Job, label string, run wire.
 		}
 		return "failed member tasks so far: " + strconv.Itoa(n) + " (the team stops at " + strconv.Itoa(wire.MaxTeamFailures) + ")"
 	case !settled(run.Status) && waited > 0:
-		_ = postNotice(ctx, env, job, NoticeTimeout, label+" has not finished after "+humanDuration(waited)+"; the lead goes on and checks it later.", false)
+		_ = postNotice(ctx, env, job, NoticeTimeout, label+" has not finished after "+humanDuration(waited)+"; the lead goes on and checks it later.", false, nil)
 		return "still running: a notice told the room; check it later with room_status"
 	}
 	return ""

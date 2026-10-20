@@ -42,20 +42,25 @@ type RoomDraftPart struct {
 // RoomComponentDraft answers GET /v1/rooms/{roomId}/component-draft: what
 // "Save as component" captures of a room for its owner or an admin, to be
 // reviewed and saved as a room package through the content form. Name is
-// a package name proposed from the room's. Left says, a line each, what
-// of the room a package does not hold.
+// a package name proposed from the room's. Sources are the room's own asks
+// (each with its purpose, granted or not: a package asks again for the
+// room installed from it). Left says, a line each, what of the room a
+// package does not hold.
 type RoomComponentDraft struct {
-	RoomID      string                `json:"roomId"`
-	Name        string                `json:"name"`
-	DisplayName string                `json:"displayName"`
-	Description string                `json:"description"`
-	Channels    []string              `json:"channels"`
-	Schedules   []RoomPackageSchedule `json:"schedules"`
-	Expert      *RoomDraftPart        `json:"expert,omitempty"`
-	Skills      []RoomDraftPart       `json:"skills"`
-	Prompts     []RoomDraftPart       `json:"prompts"`
-	Apps        []RoomDraftPart       `json:"apps"`
-	Left        []string              `json:"left"`
+	RoomID       string                `json:"roomId"`
+	Name         string                `json:"name"`
+	DisplayName  string                `json:"displayName"`
+	Description  string                `json:"description"`
+	Welcome      string                `json:"welcome"`
+	QuickPrompts []RoomQuickPrompt     `json:"quickPrompts"`
+	Channels     []string              `json:"channels"`
+	Schedules    []RoomPackageSchedule `json:"schedules"`
+	Expert       *RoomDraftPart        `json:"expert,omitempty"`
+	Skills       []RoomDraftPart       `json:"skills"`
+	Prompts      []RoomDraftPart       `json:"prompts"`
+	Apps         []RoomDraftPart       `json:"apps"`
+	Sources      []RoomSourceAsk       `json:"sources"`
+	Left         []string              `json:"left"`
 }
 
 // RoomInstallRequest is POST /v1/content-components/{id}/create-room: the
@@ -74,21 +79,19 @@ type RoomInstallRequest struct {
 // paused), the room expert, the packs turned on and the apps copied in
 // (labels), what was left out and why (Skipped), and what the room asks
 // for that nobody granted yet: its sources (each waits for the
-// organization admin's consent, room_sources.go) and its MCP tools. Welcome and
-// QuickPrompts are the package's, for the room's first visit.
+// organization admin's consent, room_sources.go) and its MCP tools. The
+// package's welcome and quick prompts are the new room's own (RoomDetail).
 type RoomInstallReply struct {
-	RoomID       string               `json:"roomId"`
-	Name         string               `json:"name"`
-	ComponentID  string               `json:"componentId"`
-	From         string               `json:"from"`
-	Channels     []string             `json:"channels"`
-	Schedules    []string             `json:"schedules"`
-	Expert       string               `json:"expert,omitempty"`
-	Enabled      []string             `json:"enabled"`
-	Apps         []string             `json:"apps"`
-	Skipped      []string             `json:"skipped"`
-	Sources      []RoomSourceAsk      `json:"sources"`
-	Tools        []string             `json:"tools"`
-	Welcome      string               `json:"welcome,omitempty"`
-	QuickPrompts []ContentQuickPrompt `json:"quickPrompts,omitempty"`
+	RoomID      string          `json:"roomId"`
+	Name        string          `json:"name"`
+	ComponentID string          `json:"componentId"`
+	From        string          `json:"from"`
+	Channels    []string        `json:"channels"`
+	Schedules   []string        `json:"schedules"`
+	Expert      string          `json:"expert,omitempty"`
+	Enabled     []string        `json:"enabled"`
+	Apps        []string        `json:"apps"`
+	Skipped     []string        `json:"skipped"`
+	Sources     []RoomSourceAsk `json:"sources"`
+	Tools       []string        `json:"tools"`
 }

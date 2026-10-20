@@ -130,7 +130,7 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Save a drafted package (dir) or a file as a gallery work (file or artifactId) to the Library of the person who asked you, only after they confirm. With id: the next version.",
+      "description": "Save a drafted package (dir), a file as a gallery work (file or artifactId) or this room (kind room) to the Library of the person who asked you, only after they confirm. With id: the next version.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -139,17 +139,6 @@
             "type": "string"
           },
           "category": {
-            "enum": [
-              "office",
-              "data",
-              "productivity",
-              "content",
-              "learning",
-              "engineering",
-              "finance",
-              "life",
-              "other"
-            ],
             "type": "string"
           },
           "description": {
@@ -170,12 +159,24 @@
             "description": "cc_…; omit to create.",
             "type": "string"
           },
+          "kind": {
+            "enum": [
+              "room"
+            ],
+            "type": "string"
+          },
           "name": {
-            "description": "A new work's name.",
+            "description": "A new work's or room's name.",
             "type": "string"
           },
           "request": {
             "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           }
         },
         "type": "object"
@@ -239,7 +240,7 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Change who can use a saved component (personal, org, platform), only after the person confirms. org may need an admin's approval; platform is a platform admin's action: say so.",
+      "description": "Change who can use a saved component when the person asks: org puts a card in the room they click to publish; personal withdraws it; platform is a platform admin's action: say so.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -409,20 +410,62 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "The room's schedules: list, create a notice (fixed words to the room, logins or a group; {week} {date} fill in) or an AI task, or delete one. Create only after the person confirmed what, when, the time zone and where it sends.",
+      "description": "This room's setup (description, welcome, quick prompts, expert, packs, channels, schedules, sources), changed as the person who asked you. Propose each change in a sentence; make it only after they agree.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "action": {
             "enum": [
-              "list",
-              "create",
-              "delete"
+              "get",
+              "set",
+              "use",
+              "unuse",
+              "add_channel",
+              "add_schedule",
+              "remove_schedule",
+              "ask_source"
             ],
+            "type": "string"
+          },
+          "description": {
             "type": "string"
           },
           "id": {
             "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "expert",
+              "skill",
+              "prompt"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "description": "use/unuse: a Library name; add_channel: the channel.",
+            "type": "string"
+          },
+          "purpose": {
+            "type": "string"
+          },
+          "quickPrompts": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "prompt": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "title",
+                "prompt"
+              ],
+              "type": "object"
+            },
+            "type": "array"
           },
           "recurrence": {
             "additionalProperties": false,
@@ -481,12 +524,20 @@
             ],
             "type": "object"
           },
+          "source": {
+            "enum": [
+              "runs"
+            ],
+            "type": "string"
+          },
           "task": {
             "description": "An AI task: what to do each time, never when.",
             "type": "string"
           },
           "timezone": {
-            "description": "IANA, e.g. Asia/Shanghai.",
+            "type": "string"
+          },
+          "welcome": {
             "type": "string"
           }
         },
@@ -495,8 +546,8 @@
         ],
         "type": "object"
       },
-      "name": "schedules",
-      "title": "The room's schedules"
+      "name": "room_setup",
+      "title": "The room's setup"
     },
     {
       "annotations": {
