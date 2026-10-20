@@ -356,8 +356,10 @@ func TestParsePackage_rejectsInvalidPluginHost(t *testing.T) {
 	}
 }
 
+// Settings are for plugins, MCP tools and the endpoint components that ask
+// for them; a core declares none.
 func TestParsePackage_rejectsSettingsOnOtherKinds(t *testing.T) {
-	body := validAuthProviderPackageBody(t, func(b map[string]any) {
+	body := validManifestPackageBody(t, func(b map[string]any) {
 		b["settings"] = []map[string]any{{"key": "a", "label": "A", "type": "text", "scope": "org"}}
 	})
 	if _, err := ParsePackage(body); err == nil || !strings.Contains(err.Error(), "must not declare settings") {

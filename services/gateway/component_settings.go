@@ -87,7 +87,7 @@ func (s *Service) settingsView(ctx context.Context, scope string, claims auth.Cl
 	tenantID := settingsTenant(scope, claims)
 	view := wire.ComponentSettingsView{
 		Kind: rec.Kind, Name: rec.Name, Version: rec.Version, Description: cfg.Description, Scope: scope,
-		Available: st.Available(), ReachesMembers: reachesMembers(rec, cfg),
+		Available: st.Available(), ReachesMembers: reachesMembers(rec, cfg), Asks: asksForSettings(rec),
 		Fields: []wire.ComponentSettingField{}, Missing: []wire.ComponentSetting{},
 		Page: s.settingsPageFrame(claims, scope, rec, cfg),
 	}

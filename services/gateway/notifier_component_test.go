@@ -122,7 +122,7 @@ func TestNotifierComponentLifecycle(t *testing.T) {
 		t.Fatalf("uninstall = %v %v", resp, err)
 	}
 	resp.Body.Close()
-	if _, ok, _ := (&notify.SecretStore{Settings: svc.PlatformSettings}).Get(t.Context(), "corp"); ok {
+	if _, ok, _ := svc.componentCredentials().Get(t.Context(), "notifier", "corp"); ok {
 		t.Fatal("uninstall kept the signing secret")
 	}
 }
@@ -146,9 +146,17 @@ func TestNotifierRoutesRejectOtherKinds(t *testing.T) {
 	if raw, status := postComponent(t, srv.URL, token, body, signPackage(key.private, body)); status != http.StatusOK {
 		t.Fatalf("install auth-provider = %d %s", status, raw)
 	}
-	for _, path := range []string{"/secret/rotate", "/test"} {
-		if raw, status := platformPost(t, srv.URL+"/v1/platform/components/sso-x"+path, token); status != http.StatusBadRequest {
-			t.Fatalf("%s on an auth-provider = %d %s, want 400", path, status, raw)
-		}
+	// A test send is a notifier's; a credential is every endpoint
+	// component's (an auth provider's rotates), never another kind's.
+	if raw, status := platformPost(t, srv.URL+"/v1/platform/components/sso-x/test", token); status != http.StatusBadRequest {
+		t.Fatalf("/test on an auth-provider = %d %s, want 400", status, raw)
+	}
+	if raw, status := platformPost(t, srv.URL+"/v1/platform/components/sso-x/secret/rotate", token); status != http.StatusOK {
+		t.Fatalf("/secret/rotate on an auth-provider = %d %s, want 200", status, raw)
+	}
+	_, unsignedSrv, unsignedToken, _ := signedPackageGatewayConfigured(t, false, true, true)
+	installPreviewer(t, unsignedSrv, unsignedToken, "viewer-x", "1.0.0")
+	if raw, status := platformPost(t, unsignedSrv.URL+"/v1/platform/components/viewer-x/secret/rotate", unsignedToken); status != http.StatusBadRequest {
+		t.Fatalf("/secret/rotate on a previewer = %d %s, want 400", status, raw)
 	}
 }

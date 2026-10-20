@@ -220,6 +220,7 @@ func signedPackageGatewayConfigured(t *testing.T, trustKey bool, artifacts bool,
 	svc := newGateway(t, "")
 	svc.PlatformSettings = settings
 	svc.AllowExtUnsigned = allowUnsigned
+	svc.SecretBox = testSecretBox(t)
 	svc.TenantResolver = func(auth.Identity, string) (string, string, error) { return "home", string(rbac.RoleSuperAdmin), nil }
 	if artifacts {
 		blobs, err := blobstore.NewDiskStore(t.TempDir())

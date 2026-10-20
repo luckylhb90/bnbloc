@@ -30,6 +30,7 @@ const orgView: ComponentSettingsView = {
   scope: "org",
   available: true,
   reachesMembers: true,
+  asks: false,
   fields: [
     { key: "apiKey", label: "API key", type: "secret", scope: "org", required: true, set: true, value: "s3cr3t" },
     { key: "pageSize", label: "Page size", type: "number", scope: "org", set: true, value: "50" },

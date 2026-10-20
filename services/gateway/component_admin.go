@@ -6,11 +6,13 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/luckylhb90/bnbloc/core/pkgmeta"
 	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
+	"github.com/luckylhb90/bnbloc/internal/sealbox"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
@@ -49,6 +51,13 @@ func (s *Service) handleInstallComponent(w http.ResponseWriter, r *http.Request,
 		s.installPlatformContent(w, r, claims, req)
 		return
 	}
+	// An endpoint component beside the gateway gets its credential at
+	// install, sealed with the secret store key: without the key it could
+	// neither be called nor ask, so it is refused before anything is stored.
+	if pkgmeta.AsksForSettings(shell.Kind) && !s.componentCredentials().Available() {
+		httpx.Error(w, "an endpoint component's credential is sealed with "+sealbox.KeyEnv+"; set it on the gateway and realtime first", http.StatusConflict)
+		return
+	}
 	rec, err := s.corePipeline().Install(r.Context(), extpipe.InstallRequest{
 		Body:            []byte(req.Package),
 		Signature:       []byte(req.Signature),
@@ -77,10 +86,10 @@ func (s *Service) handleInstallComponent(w http.ResponseWriter, r *http.Request,
 		httpx.Error(w, "save component failed", http.StatusInternalServerError)
 		return
 	}
-	secret, err := s.afterNotifierInstall(r.Context(), rec, claims.Subject)
+	secret, err := s.afterEndpointInstall(r.Context(), rec, claims.Subject)
 	if err != nil {
 		obs.ServerError(w, "install component failed", err)
-		httpx.Error(w, errNotifierSecret.Error(), http.StatusInternalServerError)
+		httpx.Error(w, errComponentCredential.Error(), http.StatusInternalServerError)
 		return
 	}
 	s.componentsChanged(r.Context(), "", "")
@@ -101,7 +110,7 @@ func (s *Service) handleUninstallComponent(w http.ResponseWriter, r *http.Reques
 		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	s.afterNotifierUninstall(r.Context(), rec)
+	s.afterEndpointUninstall(r.Context(), rec)
 	s.afterSettingsUninstall(r.Context(), rec)
 	s.componentsChanged(r.Context(), "", "")
 	w.WriteHeader(http.StatusNoContent)

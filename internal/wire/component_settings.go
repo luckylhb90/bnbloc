@@ -31,11 +31,15 @@ type ComponentSettingsView struct {
 	Available bool `json:"available"`
 	// ReachesMembers: the component runs on members' computers (a plugin,
 	// a stdio MCP tool), so these values are sent to them.
-	ReachesMembers bool                    `json:"reachesMembers"`
-	Fields         []ComponentSettingField `json:"fields"`
-	Missing        []ComponentSetting      `json:"missing"`
-	UpdatedBy      string                  `json:"updatedBy,omitempty"`
-	UpdatedAtMs    int64                   `json:"updatedAtMs,omitempty"`
+	ReachesMembers bool `json:"reachesMembers"`
+	// Asks: an endpoint component beside the gateway (a notifier, an auth
+	// provider) that reads these values itself (GET /v1/component-settings);
+	// a change reaches it on its next ask.
+	Asks        bool                    `json:"asks"`
+	Fields      []ComponentSettingField `json:"fields"`
+	Missing     []ComponentSetting      `json:"missing"`
+	UpdatedBy   string                  `json:"updatedBy,omitempty"`
+	UpdatedAtMs int64                   `json:"updatedAtMs,omitempty"`
 	// Page is the component's own settings page for this scope, when it
 	// declares one: it is shown instead of the one form.
 	Page *ComponentSettingsPageFrame `json:"page,omitempty"`
@@ -70,4 +74,53 @@ type ComponentSettingsUpdate struct {
 type ComponentSettingsResolved struct {
 	Values  map[string]string `json:"values"`
 	Missing []string          `json:"missing"`
+}
+
+// ComponentSettingsPath is where an endpoint component beside the gateway
+// (a notifier, an auth provider) asks for its settings: a GET signed with
+// its component credential, X-Bnbloc-Component "<kind>/<name>" and
+// X-Bnbloc-Signature over "GET /v1/component-settings"
+// (docs/architecture/endpoint-components.md).
+const ComponentSettingsPath = "/v1/component-settings"
+
+// EndpointComponentSettings answers GET /v1/component-settings: the stored
+// platform values of the calling component (secrets included; a setting
+// with no stored value is absent and the component applies its own
+// default), each organization's values for the organizations the install
+// serves that have stored any, the required settings not set per scope,
+// and Version, a hash of the rest: the component applies an answer only
+// when it changed.
+type EndpointComponentSettings struct {
+	Kind     string                       `json:"kind"`
+	Name     string                       `json:"name"`
+	Version  string                       `json:"version"`
+	Platform map[string]string            `json:"platform"`
+	Orgs     map[string]map[string]string `json:"orgs"`
+	Missing  EndpointSettingsMissing      `json:"missing"`
+}
+
+// EndpointSettingsMissing are the required settings without a value: the
+// platform's, and each listed organization's own.
+type EndpointSettingsMissing struct {
+	Platform []string            `json:"platform"`
+	Orgs     map[string][]string `json:"orgs"`
+}
+
+// OrgSettingsComponent is one component whose organization settings the
+// caller's organization sets (GET /v1/tenant/component-settings), of any
+// kind: a member's catalog lists only what runs for members, while an
+// endpoint component beside the gateway takes organization settings too.
+type OrgSettingsComponent struct {
+	Kind            string                 `json:"kind"`
+	Name            string                 `json:"name"`
+	Version         string                 `json:"version"`
+	Description     string                 `json:"description,omitempty"`
+	Settings        []ComponentSetting     `json:"settings"`
+	SettingsPage    *ComponentSettingsPage `json:"settingsPage,omitempty"`
+	SettingsMissing []string               `json:"settingsMissing"`
+}
+
+// OrgSettingsComponentsReply answers GET /v1/tenant/component-settings.
+type OrgSettingsComponentsReply struct {
+	Components []OrgSettingsComponent `json:"components"`
 }

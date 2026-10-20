@@ -32,13 +32,11 @@ import (
 // {ref, sender}.
 var errReplyFormAmbiguous = errors.New("send either replyToken or ref with sender")
 
-// verifyNotifierCall authenticates a notifier's signed call (N1 scheme): the
-// component named in X-Bnbloc-Component must be an installed notifier with a
-// stored signing secret, and X-Bnbloc-Signature must verify over the raw
-// body (constant time, 5-minute window). It answers the refusal itself and
-// returns ok=false then.
+// verifyNotifierCall authenticates a notifier's signed call (N1 scheme):
+// X-Bnbloc-Component names the notifier, and its signature covers the raw
+// body (verifyComponentCall). It answers the refusal itself and returns
+// ok=false then.
 func (s *Service) verifyNotifierCall(w http.ResponseWriter, r *http.Request) (extpipe.Record, []byte, bool) {
-	ctx := r.Context()
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxNotifierReplyBodyBytes))
 	if err != nil {
 		httpx.Error(w, "body too large or unreadable", http.StatusRequestEntityTooLarge)
@@ -49,36 +47,8 @@ func (s *Service) verifyNotifierCall(w http.ResponseWriter, r *http.Request) (ex
 		httpx.Error(w, "notifier replies are not available", http.StatusServiceUnavailable)
 		return extpipe.Record{}, nil, false
 	}
-	name := strings.TrimSpace(r.Header.Get(wire.NotifierComponentHeader))
-	if name == "" {
-		httpx.Error(w, wire.NotifierComponentHeader+" required", http.StatusUnauthorized)
-		return extpipe.Record{}, nil, false
-	}
-	rec, found, err := s.findComponentRecord(ctx, extreg.KindNotifier, name)
-	switch {
-	case err != nil:
-		obs.ServerError(w, "load components failed", err)
-		httpx.Error(w, "load components failed", http.StatusInternalServerError)
-		return extpipe.Record{}, nil, false
-	case !found:
-		httpx.Error(w, "notifier not installed", http.StatusForbidden)
-		return extpipe.Record{}, nil, false
-	}
-	secret, ok, err := s.notifierSecrets().Get(ctx, rec.Name)
-	switch {
-	case err != nil:
-		obs.ServerError(w, "read notifier secret failed", err)
-		httpx.Error(w, "read notifier secret failed", http.StatusInternalServerError)
-		return extpipe.Record{}, nil, false
-	case !ok:
-		httpx.Error(w, "notifier has no signing secret", http.StatusUnauthorized)
-		return extpipe.Record{}, nil, false
-	}
-	if err := notify.Verify(r.Header.Get(wire.NotificationSignatureHeader), secret, body, s.nowTime(), notify.SignatureTolerance); err != nil {
-		httpx.Error(w, "invalid signature", http.StatusUnauthorized)
-		return extpipe.Record{}, nil, false
-	}
-	return rec, body, true
+	rec, ok := s.verifyComponentCall(w, r, extreg.KindNotifier, strings.TrimSpace(r.Header.Get(wire.ComponentHeader)), body)
+	return rec, body, ok
 }
 
 // resolveNotifierReply resolves the token a reply answers through notifier:

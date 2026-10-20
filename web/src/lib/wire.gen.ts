@@ -1233,6 +1233,10 @@ export interface ComponentSettingsView {
   // ReachesMembers: the component runs on members' computers (a plugin,
   // a stdio MCP tool), so these values are sent to them.
   reachesMembers: boolean;
+  // Asks: an endpoint component beside the gateway (a notifier, an auth
+  // provider) that reads these values itself (GET /v1/component-settings);
+  // a change reaches it on its next ask.
+  asks: boolean;
   fields: ComponentSettingField[];
   missing: ComponentSetting[];
   updatedBy?: string;
@@ -1271,6 +1275,55 @@ export interface ComponentSettingsUpdate {
 export interface ComponentSettingsResolved {
   values: Record<string, string>;
   missing: string[];
+}
+
+// ComponentSettingsPath is where an endpoint component beside the gateway
+// (a notifier, an auth provider) asks for its settings: a GET signed with
+// its component credential, X-Bnbloc-Component "<kind>/<name>" and
+// X-Bnbloc-Signature over "GET /v1/component-settings"
+// (docs/architecture/endpoint-components.md).
+export const ComponentSettingsPath = "/v1/component-settings";
+
+// EndpointComponentSettings answers GET /v1/component-settings: the stored
+// platform values of the calling component (secrets included; a setting
+// with no stored value is absent and the component applies its own
+// default), each organization's values for the organizations the install
+// serves that have stored any, the required settings not set per scope,
+// and Version, a hash of the rest: the component applies an answer only
+// when it changed.
+export interface EndpointComponentSettings {
+  kind: string;
+  name: string;
+  version: string;
+  platform: Record<string, string>;
+  orgs: Record<string, Record<string, string>>;
+  missing: EndpointSettingsMissing;
+}
+
+// EndpointSettingsMissing are the required settings without a value: the
+// platform's, and each listed organization's own.
+export interface EndpointSettingsMissing {
+  platform: string[];
+  orgs: Record<string, string[]>;
+}
+
+// OrgSettingsComponent is one component whose organization settings the
+// caller's organization sets (GET /v1/tenant/component-settings), of any
+// kind: a member's catalog lists only what runs for members, while an
+// endpoint component beside the gateway takes organization settings too.
+export interface OrgSettingsComponent {
+  kind: string;
+  name: string;
+  version: string;
+  description?: string;
+  settings: ComponentSetting[];
+  settingsPage?: ComponentSettingsPage;
+  settingsMissing: string[];
+}
+
+// OrgSettingsComponentsReply answers GET /v1/tenant/component-settings.
+export interface OrgSettingsComponentsReply {
+  components: OrgSettingsComponent[];
 }
 
 // ---- wire/component_shapes.go ----
@@ -3554,9 +3607,11 @@ export interface NotificationReplyRecipient {
 // notification back into bnbloc.
 // NotifierRepliesPath is the gateway route a notifier posts replies to.
 export const NotifierRepliesPath = "/v1/notifier/replies";
-// NotifierComponentHeader names the notifier component that signed a
-// reply (X-Bnbloc-Signature uses that component's signing secret).
-export const NotifierComponentHeader = "X-Bnbloc-Component";
+// ComponentHeader names the endpoint component that signed a call to
+// the gateway (X-Bnbloc-Signature uses that component's credential): a
+// notifier's reply routes take its name, GET /v1/component-settings
+// "<kind>/<name>".
+export const ComponentHeader = "X-Bnbloc-Component";
 
 // NotifierReplyRequest is the signed body of POST /v1/notifier/replies.
 // IdempotencyKey is the receiving system's id of the reply message: a retry

@@ -47,6 +47,9 @@ services:
       # only caller).
       BNBLOC_GATEWAY_BASE_URL: "http://gateway:8080"
       BNBLOC_MYSQL_DSN: "bnbloc:bnbloc-pass@tcp(mysql:3306)/bnbloc?parseTime=true"
+      # Opens the notifiers' signing secrets, sealed at rest with the
+      # gateway's key (one key per deployment).
+      BNBLOC_SECRET_STORE_KEY: "${BNBLOC_SECRET_STORE_KEY:-}"
       # Blob storage for attachments + sidecar-core artifacts. Set
       # BNBLOC_ATTACHMENTS_S3_BUCKET to use S3; otherwise the disk dir below is
       # used. BNBLOC_ATTACHMENTS_S3_KEY_PREFIX is the object-key directory prefix

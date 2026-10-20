@@ -19,7 +19,7 @@ func (f *replyFixture) registerRef(t *testing.T, name, secret string, req wire.N
 	t.Helper()
 	body, _ := json.Marshal(req)
 	r, _ := http.NewRequest(http.MethodPost, f.srv.URL+wire.NotifierReplyRefsPath, bytes.NewReader(body))
-	r.Header.Set(wire.NotifierComponentHeader, name)
+	r.Header.Set(wire.ComponentHeader, name)
 	r.Header.Set(wire.NotificationSignatureHeader, notify.Sign(secret, time.Now(), body))
 	resp, err := http.DefaultClient.Do(r)
 	if err != nil {
@@ -131,7 +131,7 @@ func TestNotifierReplyRefRejections(t *testing.T) {
 	defer func() { f.svc.Now = time.Now }()
 	body, _ := json.Marshal(wire.NotifierReplyRequest{Ref: "r1", Sender: "+11", Text: "late", IdempotencyKey: "k9"})
 	r, _ := http.NewRequest(http.MethodPost, f.srv.URL+wire.NotifierRepliesPath, bytes.NewReader(body))
-	r.Header.Set(wire.NotifierComponentHeader, "corp")
+	r.Header.Set(wire.ComponentHeader, "corp")
 	r.Header.Set(wire.NotificationSignatureHeader, notify.Sign(f.secret, f.svc.Now(), body))
 	resp, err := http.DefaultClient.Do(r)
 	if err != nil || resp.StatusCode != http.StatusGone {

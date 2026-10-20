@@ -17,6 +17,8 @@ package componentsettings
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,6 +27,7 @@ import (
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
 	"github.com/luckylhb90/bnbloc/internal/sealbox"
 	"github.com/luckylhb90/bnbloc/internal/store"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 const keyPrefix = "component.settings/"
@@ -167,6 +170,85 @@ func (s *Store) Resolved(ctx context.Context, tenantID, kind, name string, decl 
 		return nil, nil, err
 	}
 	return values, pkgmeta.UnsetSettings(decl, values, scopes...), nil
+}
+
+// orgTenants lists the organizations holding an organization record of a
+// component.
+func (s *Store) orgTenants(ctx context.Context, kind, name string) ([]string, error) {
+	rows, err := s.Settings.ListPlatformSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	prefix, suffix := keyPrefix+pkgmeta.SettingScopeOrg+"/", "/"+kind+"/"+name
+	var tenants []string
+	for _, row := range rows {
+		rest, ok := strings.CutPrefix(row.Key, prefix)
+		if !ok {
+			continue
+		}
+		if tenant, ok := strings.CutSuffix(rest, suffix); ok && tenant != "" && !strings.Contains(tenant, "/") {
+			tenants = append(tenants, tenant)
+		}
+	}
+	return tenants, nil
+}
+
+// Endpoint is what an endpoint component beside the gateway is answered
+// when it asks for its settings (GET /v1/component-settings): its stored
+// platform values, the stored organization values of every organization
+// serves admits (the install's tenant scope), the required settings of
+// each not set, and a version that changes with any of them. Secrets are
+// included: the component needs them. With the store off it answers
+// ErrOff.
+func (s *Store) Endpoint(ctx context.Context, kind, name string, decl []pkgmeta.Setting, serves func(tenantID string) bool) (wire.EndpointComponentSettings, error) {
+	if !s.Available() {
+		return wire.EndpointComponentSettings{}, ErrOff
+	}
+	out := wire.EndpointComponentSettings{
+		Kind: kind, Name: name, Orgs: map[string]map[string]string{},
+		Missing: wire.EndpointSettingsMissing{Orgs: map[string][]string{}},
+	}
+	var err error
+	if out.Platform, err = s.Values(ctx, "", kind, name, decl, pkgmeta.SettingScopePlatform); err != nil {
+		return wire.EndpointComponentSettings{}, err
+	}
+	out.Missing.Platform = nonNil(pkgmeta.UnsetSettings(decl, out.Platform, pkgmeta.SettingScopePlatform))
+	if len(pkgmeta.SettingsOfScope(decl, pkgmeta.SettingScopeOrg)) > 0 {
+		tenants, err := s.orgTenants(ctx, kind, name)
+		if err != nil {
+			return wire.EndpointComponentSettings{}, err
+		}
+		for _, tenant := range tenants {
+			if !serves(tenant) {
+				continue
+			}
+			values, err := s.Values(ctx, tenant, kind, name, decl, pkgmeta.SettingScopeOrg)
+			if err != nil {
+				return wire.EndpointComponentSettings{}, err
+			}
+			out.Orgs[tenant] = values
+			out.Missing.Orgs[tenant] = nonNil(pkgmeta.UnsetSettings(decl, values, pkgmeta.SettingScopeOrg))
+		}
+	}
+	// encoding/json writes map keys sorted, so equal answers hash alike.
+	raw, err := json.Marshal(struct {
+		Platform map[string]string
+		Orgs     map[string]map[string]string
+		Missing  wire.EndpointSettingsMissing
+	}{out.Platform, out.Orgs, out.Missing})
+	if err != nil {
+		return wire.EndpointComponentSettings{}, err
+	}
+	sum := sha256.Sum256(raw)
+	out.Version = hex.EncodeToString(sum[:16])
+	return out, nil
+}
+
+func nonNil(keys []string) []string {
+	if keys == nil {
+		return []string{}
+	}
+	return keys
 }
 
 // DeleteComponent removes every scope's record of an uninstalled component,

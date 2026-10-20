@@ -57,9 +57,19 @@ func TestParsePackage_rejectsInvalidNotifier(t *testing.T) {
 		// Notifiers carry no member settings: personal delivery is a desktop
 		// plugin (its settings), never a server-side secret.
 		"member settings": {func(b map[string]any) { b["memberSettings"] = []map[string]any{{"key": "a", "label": "A"}} }, "unknown field"},
-		"settings": {func(b map[string]any) {
-			b["settings"] = []map[string]any{{"key": "a", "label": "A", "type": "text", "scope": "org"}}
-		}, "must not declare settings"},
+		// An endpoint component asks for its platform and organization
+		// values: nothing is delivered, nothing of a member's reaches it,
+		// and the one form renders its declaration.
+		"member setting": {func(b map[string]any) {
+			b["settings"] = []map[string]any{{"key": "a", "label": "A", "type": "text", "scope": "member"}}
+		}, "an endpoint component runs beside the gateway"},
+		"delivered setting": {func(b map[string]any) {
+			b["settings"] = []map[string]any{{"key": "a", "label": "A", "type": "text", "scope": "platform", "deliver": map[string]any{"env": "A"}}}
+		}, "an endpoint component asks for its values"},
+		"settings page": {func(b map[string]any) {
+			b["settings"] = []map[string]any{{"key": "a", "label": "A", "type": "text", "scope": "platform"}}
+			b["settingsPage"] = map[string]any{"entry": "index.html", "bundle": map[string]any{"url": "https://cdn.example.com/p.tar.gz", "sha256": strings.Repeat("a", 64)}}
+		}, "must not declare settingsPage"},
 		"unknown capability": {func(b map[string]any) { b["capabilities"] = []string{"broadcast"} }, `unknown notifier capability "broadcast"`},
 		"host permission": {func(b map[string]any) {
 			b["permissions"] = map[string]any{"network": []string{"notify.internal"}, "host": []string{"chat"}}

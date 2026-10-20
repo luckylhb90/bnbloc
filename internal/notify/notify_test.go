@@ -15,9 +15,11 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
+	"github.com/luckylhb90/bnbloc/internal/componentcred"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/extreg"
 	"github.com/luckylhb90/bnbloc/internal/membership"
+	"github.com/luckylhb90/bnbloc/internal/sealbox"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
@@ -47,9 +49,19 @@ type fixture struct {
 	audit    *store.MemoryExtensionAudit
 	dir      *Directory
 	pipe     *extpipe.Pipeline
-	secrets  *SecretStore
+	secrets  *componentcred.Store
 	emitter  *Emitter
 	clock    *clock
+}
+
+// testBox is a secret store key for the notifiers' sealed credentials.
+func testBox(t *testing.T) *sealbox.Box {
+	t.Helper()
+	box, err := sealbox.New([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return box
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -60,7 +72,7 @@ func newFixture(t *testing.T) *fixture {
 	}
 	f.dir = NewDirectory(f.settings)
 	f.pipe = &extpipe.Pipeline{Settings: f.settings, Audit: f.audit, AllowUnsigned: true, Installers: map[extreg.Kind]extpipe.KindInstaller{extreg.KindNotifier: f.dir.Installer()}}
-	f.secrets = &SecretStore{Settings: f.settings}
+	f.secrets = &componentcred.Store{Settings: f.settings, Box: testBox(t)}
 	f.emitter = &Emitter{
 		Prefs: f.mem, Outbox: f.mem, Notifiers: f.dir, Installs: f.installs, Now: f.clock.Now, PublicURL: "https://bnbloc.example.com/",
 		RoomName: func(context.Context, string) string { return "Design" },
@@ -98,7 +110,7 @@ func (f *fixture) install(t *testing.T, name, baseURL, rollout string) string {
 	if _, err := f.pipe.Install(context.Background(), extpipe.InstallRequest{Body: notifierPackage(t, name, baseURL), Actor: "root", Rollout: rollout}); err != nil {
 		t.Fatalf("install %s: %v", name, err)
 	}
-	secret, _, err := f.secrets.Ensure(context.Background(), name, "root")
+	secret, _, err := f.secrets.Ensure(context.Background(), string(extreg.KindNotifier), name, "root")
 	if err != nil {
 		t.Fatal(err)
 	}

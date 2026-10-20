@@ -150,14 +150,17 @@ func (e *appGW) connectGroup(notifier, name, address string) int {
 	if r.status != http.StatusCreated || json.Unmarshal(r.body, &code) != nil || !strings.HasPrefix(code.Code, wire.RoomGroupCodePrefix) {
 		e.t.Fatalf("connect code = %d %s", r.status, r.body)
 	}
-	secret, _, err := (&notify.SecretStore{Settings: e.gw.PlatformSettings}).Ensure(context.Background(), notifier, "root")
+	if e.gw.SecretBox == nil {
+		e.gw.SecretBox = testSecretBox(e.t)
+	}
+	secret, _, err := e.gw.componentCredentials().Ensure(context.Background(), "notifier", notifier, "root")
 	if err != nil {
 		e.t.Fatal(err)
 	}
 	// The code as a person types it in the chat: any case.
 	body, _ := json.Marshal(wire.NotifierGroupBindRequest{Code: strings.ToLower(code.Code), Address: address})
 	req, _ := http.NewRequest(http.MethodPost, e.srv.URL+"/v1/notifier/group-binds", bytes.NewReader(body))
-	req.Header.Set(wire.NotifierComponentHeader, notifier)
+	req.Header.Set(wire.ComponentHeader, notifier)
 	req.Header.Set(wire.NotificationSignatureHeader, notify.Sign(secret, time.Now(), body))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

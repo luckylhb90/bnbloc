@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
+	"github.com/luckylhb90/bnbloc/internal/componentcred"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/notify"
@@ -237,7 +238,8 @@ func newNotificationE2E(t *testing.T, ctx context.Context, mem *membership.Stati
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	t.Cleanup(receiver.Close)
-	e.ns = notify.NewService(notify.Stores{Prefs: e.notes, Outbox: e.notes, Settings: e.settings, Audit: store.NewMemoryExtensionAudit()}, mem, notify.Options{})
+	box := testCredentialBox(t)
+	e.ns = notify.NewService(notify.Stores{Prefs: e.notes, Outbox: e.notes, Settings: e.settings, Audit: store.NewMemoryExtensionAudit(), Box: box}, mem, notify.Options{})
 	e.f = newPluginFixture(t, e.settings)
 	pipe := NewComponentPipeline(e.settings, e.f.audit, e.f.dispatcher, e.f.installs, nil, e.ns.Notifiers.Installer())
 	pipe.AllowUnsigned = true
@@ -252,7 +254,7 @@ func newNotificationE2E(t *testing.T, ctx context.Context, mem *membership.Stati
 	if _, err := pipe.Install(ctx, extpipe.InstallRequest{Body: notificationPluginBody(t, "personal-bot"), Actor: "root"}); err != nil {
 		t.Fatalf("install plugin: %v", err)
 	}
-	if _, _, err := (&notify.SecretStore{Settings: e.settings}).Ensure(ctx, "corp", "root"); err != nil {
+	if _, _, err := (&componentcred.Store{Settings: e.settings, Box: box}).Ensure(ctx, "notifier", "corp", "root"); err != nil {
 		t.Fatal(err)
 	}
 	e.ns.Worker.Desktop = e.f.dispatcher

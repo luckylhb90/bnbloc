@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/audit"
+	"github.com/luckylhb90/bnbloc/internal/componentcred"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/extreg"
 	"github.com/luckylhb90/bnbloc/internal/obs"
@@ -42,7 +43,7 @@ const (
 type Worker struct {
 	Outbox    store.NotificationOutboxStore
 	Notifiers *Directory
-	Secrets   *SecretStore
+	Secrets   *componentcred.Store
 	// Replies mints each recipient's reply token for a notification that
 	// accepts replies (nil = notifications cannot be answered).
 	Replies *ReplyTokens
@@ -228,7 +229,7 @@ func (w *Worker) send(ctx context.Context, it store.NotificationOutboxItem) (sto
 	if !live {
 		return store.NotificationRetry, "notifier not active in this process (activation pending or failed)", nil
 	}
-	secret, ok, err := w.Secrets.Get(ctx, it.Notifier)
+	secret, ok, err := w.Secrets.Get(ctx, string(extreg.KindNotifier), it.Notifier)
 	if err != nil || !ok {
 		return store.NotificationRetry, "notifier signing secret unavailable", nil
 	}

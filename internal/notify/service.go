@@ -5,9 +5,11 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/luckylhb90/bnbloc/internal/componentcred"
 	"github.com/luckylhb90/bnbloc/internal/config"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
+	"github.com/luckylhb90/bnbloc/internal/sealbox"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
@@ -25,6 +27,10 @@ type Stores struct {
 	// Replies stores the reply tokens minted at delivery (N1); nil makes
 	// notifications unanswerable.
 	Replies store.NotificationReplyTokenStore
+	// Box opens the notifiers' credentials, sealed at rest
+	// (internal/componentcred; BNBLOC_SECRET_STORE_KEY). nil reads only a
+	// signing secret stored before credentials were sealed.
+	Box *sealbox.Box
 	// RoomName resolves a room's display name for payloads (optional).
 	RoomName func(ctx context.Context, roomID string) string
 
@@ -62,7 +68,7 @@ type Options struct {
 // mention candidates (a mention only counts for a room member).
 func NewService(st Stores, members membership.Reader, opts Options) *Service {
 	emitter := NewEmitter(st, opts.PublicURL)
-	secrets := &SecretStore{Settings: st.Settings}
+	secrets := &componentcred.Store{Settings: st.Settings, Box: st.Box}
 	worker := &Worker{Outbox: st.Outbox, Notifiers: emitter.Notifiers, Secrets: secrets, Audit: st.Audit}
 	if st.Replies != nil {
 		worker.Replies = &ReplyTokens{Store: st.Replies}

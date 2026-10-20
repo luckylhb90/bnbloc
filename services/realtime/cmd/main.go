@@ -17,6 +17,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/retention"
+	"github.com/luckylhb90/bnbloc/internal/sealbox"
 	"github.com/luckylhb90/bnbloc/internal/search"
 	"github.com/luckylhb90/bnbloc/internal/shard"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -110,11 +111,21 @@ func main() {
 	} else {
 		log.Printf("bnbloc-realtime: browser push notifications disabled (no %s/%s)", notify.WebPushPublicKeyEnv, notify.WebPushPrivateKeyEnv)
 	}
+	// The notifiers' credentials are sealed at rest (internal/componentcred):
+	// realtime opens them to sign deliveries with the gateway's key.
+	credentialBox, err := sealbox.FromEnv()
+	if err != nil {
+		log.Fatalf("bnbloc-realtime: %v", err)
+	}
+	if credentialBox == nil {
+		log.Printf("bnbloc-realtime: %s unset: notifiers whose signing secret is sealed (installed or rotated since credentials are sealed) cannot be delivered to", sealbox.KeyEnv)
+	}
 	svc.Notifications = notify.NewService(notify.Stores{
 		Prefs: backends.Notifications, Outbox: backends.Notifications,
 		Settings: backends.Settings, Installs: backends.ComponentInstalls, Audit: backends.ExtAudit,
 		WebPush: backends.WebPush,
 		Replies: backends.ReplyTokens,
+		Box:     credentialBox,
 		RoomName: func(ctx context.Context, roomID string) string {
 			if r, err := rooms.GetRoom(ctx, roomID); err == nil {
 				return r.Name

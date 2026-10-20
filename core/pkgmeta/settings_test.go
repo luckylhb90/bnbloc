@@ -81,6 +81,49 @@ func TestSettingsDeclarationRefusals(t *testing.T) {
 	}
 }
 
+// An endpoint component beside the gateway (a notifier, an auth provider)
+// declares platform and organization settings with no deliver: it asks
+// for them (GET /v1/component-settings).
+func TestEndpointComponentsAskForSettings(t *testing.T) {
+	decl := []map[string]any{
+		{"key": "metadataUrl", "label": "IdP metadata URL", "type": "url", "scope": "platform", "required": true},
+		{"key": "spKey", "label": "SP key", "type": "secret", "scope": "platform"},
+		{"key": "skipTls", "label": "Skip TLS verification", "type": "boolean", "scope": "platform", "default": "false"},
+		{"key": "tenantNote", "label": "Note", "type": "text", "scope": "org"},
+	}
+	bodies := map[string][]byte{
+		KindNotifierPackageV1:     notifierPackageBody(t, func(b map[string]any) { b["settings"] = decl }),
+		KindAuthProviderPackageV1: validAuthProviderPackageBody(t, func(b map[string]any) { b["settings"] = decl }),
+	}
+	for kind, body := range bodies {
+		if !AsksForSettings(kind) {
+			t.Errorf("%s: AsksForSettings = false", kind)
+		}
+		pkg, err := ParsePackage(body)
+		if err != nil || len(pkg.Settings) != len(decl) {
+			t.Fatalf("%s: settings = %+v, err = %v", kind, pkg.Settings, err)
+		}
+		for name, s := range map[string]map[string]any{
+			"member": {"key": "a", "label": "A", "type": "text", "scope": "member"},
+			"env":    {"key": "a", "label": "A", "type": "text", "scope": "platform", "deliver": map[string]any{"env": "A_VALUE"}},
+			"header": {"key": "a", "label": "A", "type": "text", "scope": "org", "deliver": map[string]any{"header": "X-A"}},
+		} {
+			raw := validAuthProviderPackageBody(t, func(b map[string]any) { b["kind"] = kind; b["settings"] = []map[string]any{s} })
+			if kind == KindNotifierPackageV1 {
+				raw = notifierPackageBody(t, func(b map[string]any) { b["settings"] = []map[string]any{s} })
+			}
+			if _, err := ParsePackage(raw); err == nil || !strings.Contains(err.Error(), "endpoint component") {
+				t.Errorf("%s with a %s setting: err = %v", kind, name, err)
+			}
+		}
+	}
+	for _, kind := range []string{KindPluginPackageV1, KindMCPPackageV1, KindCorePackageV1, KindPreviewerPackageV1, KindSandboxPackageV1} {
+		if AsksForSettings(kind) {
+			t.Errorf("%s asks for its settings", kind)
+		}
+	}
+}
+
 // A setting delivers an env var of its own: never one that changes how a
 // process runs, and under BNBLOC_ only in the component's own namespace.
 func TestSettingEnvRule(t *testing.T) {

@@ -185,6 +185,8 @@ func (s *Service) routes() []route {
 		open("POST /v1/notifier/replies", "the notifier component's signature", s.handleNotifierReply),
 		open("POST /v1/notifier/reply-refs", "the notifier component's signature", s.handleNotifierReplyRef),
 		open("POST /v1/notifier/group-binds", "the notifier component's signature", s.handleNotifierGroupBind),
+		// An endpoint component's signed ask for its own settings.
+		open("GET /v1/component-settings", "the endpoint component's signature", s.handleEndpointComponentSettings),
 
 		// Content components (content_components.go and siblings). A write
 		// drives agents' configuration and spends the cost budget; whether
@@ -250,6 +252,7 @@ func (s *Service) routes() []route {
 		gated("POST /v1/live", drive, s.handleLiveFrame),
 
 		// Organization administration (manage_org in the acting tenant).
+		gated("GET /v1/tenant/component-settings", org, s.handleOrgSettingsComponents),
 		gated("GET /v1/tenant/components/{name}/settings", org, s.handleComponentSettings(pkgmeta.SettingScopeOrg)),
 		gated("PUT /v1/tenant/components/{name}/settings", org, s.handlePutComponentSettings(pkgmeta.SettingScopeOrg)),
 		gated("GET /v1/tenant/assist-model", org, s.handleOrgAssistModel),

@@ -59,4 +59,11 @@ func TestNotifierSecretIsPrintedOnInstallAndRotate(t *testing.T) {
 	if err != nil || !strings.Contains(out, "whsec_second") || rotatePath != "/v1/platform/components/corp/secret/rotate?kind=notifier" {
 		t.Fatalf("rotate output = %q err=%v path=%s", out, err, rotatePath)
 	}
+	// An auth provider's credential rotates the same way, by its kind.
+	out, err = captureStdout(t, func() error {
+		return runComponents([]string{"rotate-secret", "corp", "--kind", "auth-provider", "--gateway", gw.URL, "--token", "admin"})
+	})
+	if err != nil || !strings.Contains(out, "whsec_second") || rotatePath != "/v1/platform/components/corp/secret/rotate?kind=auth-provider" {
+		t.Fatalf("auth provider rotate output = %q err=%v path=%s", out, err, rotatePath)
+	}
 }

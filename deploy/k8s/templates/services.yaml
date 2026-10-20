@@ -135,7 +135,7 @@ spec:
             - name: BNBLOC_CORES
               value: {{ join "," ($cfg.cores | default list) | quote }}
             {{- end }}
-            {{- if and (has $name (list "gateway" "room")) $.Values.secretStoreKey.secretRef.name }}
+            {{- if and (has $name (list "gateway" "room" "realtime")) $.Values.secretStoreKey.secretRef.name }}
             - name: BNBLOC_SECRET_STORE_KEY
               valueFrom:
                 secretKeyRef: { name: {{ $.Values.secretStoreKey.secretRef.name }}, key: {{ $.Values.secretStoreKey.secretRef.key }} }

@@ -95,7 +95,7 @@ Components:
         [--rollout auto|optin|off] [--seckey f | --unsigned]
         a package file without artifacts (a plugin, a notifier sidecar): its binaries are uploaded and pinned,
         and a settingsPage's bundle (--settings-page) too
-  bnbloc components rotate-secret <name>  new notifier signing secret (printed once)
+  bnbloc components rotate-secret <name> [--kind auth-provider]  new endpoint component credential (printed once)
   bnbloc components test <name>           send a test notification through a notifier to you
   bnbloc content export <id> [--version v] [--publisher p] [--out f]
         the signable package of an expert, skill pack or prompt pack version (sign it offline,

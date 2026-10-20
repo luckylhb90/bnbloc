@@ -120,10 +120,11 @@ func publishComponent(c *client, pkgBody []byte, signature, rollout string) erro
 	return nil
 }
 
-// printSigningSecret shows a notifier's signing secret, which is never
-// readable again (rotate to get a new one).
+// printSigningSecret shows an endpoint component's credential (a
+// notifier's signing secret, an auth provider's), which is never readable
+// again (rotate to get a new one).
 func printSigningSecret(name, secret string) {
-	fmt.Printf("signing secret for %s (shown once; configure it on the notifier endpoint):\n%s\n", name, secret)
+	fmt.Printf("signing secret for %s (shown once; configure it on the component's endpoint):\n%s\n", name, secret)
 }
 
 // validRolloutFlag accepts "" (gateway default) or a rollout policy.

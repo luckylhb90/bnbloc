@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/audit"
+	"github.com/luckylhb90/bnbloc/internal/componentcred"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/extreg"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
@@ -40,7 +41,7 @@ type Handlers struct {
 	Prefs     store.NotificationPrefsStore
 	Notifiers *Directory
 	Installs  store.ComponentInstallStore
-	Secrets   *SecretStore
+	Secrets   *componentcred.Store
 	PublicURL string
 	Audit     store.ExtensionAuditStore
 	Now       func() time.Time
@@ -211,7 +212,7 @@ func (h *Handlers) handleTestNotifier(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, "notifier is not active yet; try again shortly", http.StatusServiceUnavailable)
 		return
 	}
-	secret, found, err := h.Secrets.Get(r.Context(), rec.Name)
+	secret, found, err := h.Secrets.Get(r.Context(), string(extreg.KindNotifier), rec.Name)
 	if err != nil || !found {
 		obs.ServerError(w, "notifier signing secret unavailable", err)
 		httpx.Error(w, "notifier signing secret unavailable", http.StatusServiceUnavailable)

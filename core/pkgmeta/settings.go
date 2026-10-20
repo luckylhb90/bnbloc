@@ -151,17 +151,28 @@ func ValidSettingEnv(component, name string) error {
 	return nil
 }
 
+// AsksForSettings reports a package kind whose settings are not delivered
+// but asked for: an endpoint component beside the gateway (a notifier, an
+// auth provider) reads its platform and organization values itself with
+// GET /v1/component-settings, signed with its component credential.
+func AsksForSettings(packageKind string) bool {
+	return packageKind == KindNotifierPackageV1 || packageKind == KindAuthProviderPackageV1
+}
+
 // validateSettings checks a package's settings (validatePackage runs it
 // for every kind; the field-to-kinds table says which kinds may declare
 // any). A value is delivered as an env var only to a process the platform
 // starts (a plugin sidecar, a stdio MCP tool) and as a header only to an
-// http MCP tool.
+// http MCP tool; an endpoint component beside the gateway asks for its
+// values (AsksForSettings), so it declares no deliver and no member
+// setting (nothing of a member's reaches a service beside the gateway).
 func validateSettings(pkg Package) error {
 	if len(pkg.Settings) > wire.MaxComponentSettings {
 		return fmt.Errorf("settings: at most %d", wire.MaxComponentSettings)
 	}
 	process := pkg.Kind == KindPluginPackageV1 || (pkg.Kind == KindMCPPackageV1 && pkg.Runtime == RuntimeStdio)
 	httpTool := pkg.Kind == KindMCPPackageV1 && pkg.Runtime == RuntimeEndpoint
+	asks := AsksForSettings(pkg.Kind)
 	ownEnv := map[string]bool{}
 	if sc := pkg.Sidecar; sc != nil {
 		for _, name := range []string{sc.ListenEnv, sc.SupervisedEnv, sc.TokenEnv, sc.DataDirEnv, sc.MountsEnv, sc.MountRootEnv} {
@@ -197,6 +208,12 @@ func validateSettings(pkg Package) error {
 		}
 		if s.Type == SettingPath && s.Scope != SettingScopeMember {
 			return fmt.Errorf("%s: a path is on the member's own machine (scope %q only)", at, SettingScopeMember)
+		}
+		if asks && s.Scope == SettingScopeMember {
+			return fmt.Errorf("%s: an endpoint component runs beside the gateway; its settings are %q or %q", at, SettingScopePlatform, SettingScopeOrg)
+		}
+		if asks && s.Deliver != nil {
+			return fmt.Errorf("%s.deliver: an endpoint component asks for its values (GET /v1/component-settings); nothing is delivered", at)
 		}
 		if err := validateSettingOptions(s); err != nil {
 			return fmt.Errorf("%s: %w", at, err)

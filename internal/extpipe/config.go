@@ -27,7 +27,8 @@ type PackageConfig struct {
 	Hooks        []string                    `json:"hooks,omitempty"`
 	Permissions  pkgmeta.Permissions         `json:"permissions"`
 	Description  string                      `json:"description,omitempty"`
-	// Settings is the component's settings declaration (plugins, MCP tools),
+	// Settings is the component's settings declaration (plugins, MCP tools,
+	// notifiers and auth providers),
 	// SettingsPage its own page for them.
 	Settings     []pkgmeta.Setting     `json:"settings,omitempty"`
 	SettingsPage *pkgmeta.SettingsPage `json:"settingsPage,omitempty"`

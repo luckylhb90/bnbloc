@@ -86,6 +86,10 @@ services:
       BNBLOC_INTERNAL_KEY: "${BNBLOC_INTERNAL_KEY:-}"
       # Signed plugin packages only (realtime rehydrates plugin records too).
       BNBLOC_EXT_ALLOW_UNSIGNED: ""
+      # Opens the notifiers' signing secrets, sealed at rest with the
+      # gateway's key: without it no notifier whose secret is sealed is
+      # delivered to.
+      BNBLOC_SECRET_STORE_KEY: "${BNBLOC_SECRET_STORE_KEY:-}"
       # compose runs one realtime and one relay (single nodes: no
       # BNBLOC_REALTIME_PEERS/_SELF, BNBLOC_RELAY_PEERS/_SELF). More replicas
       # are a Kubernetes deployment (deploy/k8s StatefulSets).

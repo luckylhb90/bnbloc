@@ -13,10 +13,12 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
+	"github.com/luckylhb90/bnbloc/internal/componentcred"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/notify"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
+	"github.com/luckylhb90/bnbloc/internal/sealbox"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
@@ -27,6 +29,17 @@ import (
 // member is published, observed off the publish path, enqueued per notifier,
 // and delivered signed with the component's secret; the member notifier
 // routes are served by the same service.
+// testCredentialBox is the secret store key the notifiers' credentials
+// are sealed with (realtime opens them to sign deliveries).
+func testCredentialBox(t *testing.T) *sealbox.Box {
+	t.Helper()
+	box, err := sealbox.New([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return box
+}
+
 func TestChatMentionDeliversToNotifierComponent(t *testing.T) {
 	var mu sync.Mutex
 	var bodies [][]byte
@@ -54,8 +67,9 @@ func TestChatMentionDeliversToNotifierComponent(t *testing.T) {
 	mem.Add("room-1", "bob")
 	notes := store.NewMemoryNotifications()
 	settings := store.NewMemoryPlatformSettings()
+	box := testCredentialBox(t)
 	ns := notify.NewService(notify.Stores{
-		Prefs: notes, Outbox: notes, Settings: settings, Audit: store.NewMemoryExtensionAudit(),
+		Prefs: notes, Outbox: notes, Settings: settings, Audit: store.NewMemoryExtensionAudit(), Box: box,
 	}, mem, notify.Options{PublicURL: "https://bnbloc.example.com"})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -69,7 +83,7 @@ func TestChatMentionDeliversToNotifierComponent(t *testing.T) {
 	if _, err := pipe.Install(ctx, extpipe.InstallRequest{Body: pkg, Actor: "root"}); err != nil {
 		t.Fatalf("install notifier: %v", err)
 	}
-	secret, _, err := (&notify.SecretStore{Settings: settings}).Ensure(ctx, "corp", "root")
+	secret, _, err := (&componentcred.Store{Settings: settings, Box: box}).Ensure(ctx, "notifier", "corp", "root")
 	if err != nil {
 		t.Fatal(err)
 	}
