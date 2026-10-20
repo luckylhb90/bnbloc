@@ -16,11 +16,14 @@ const draft: RoomComponentDraft = {
   name: "release-review",
   displayName: "Release review",
   description: "Reviews releases with maya.",
+  welcome: "",
+  quickPrompts: [],
   channels: ["reports", "acme-ops"],
   schedules: [task("Post the release notes to https://wiki.acme.internal/notes.", "reports"), task("Ask jack for the numbers.", "acme-ops")],
   skills: [],
   prompts: [],
   apps: [],
+  sources: [],
   left: [],
 };
 const base: RoomSaveForm = {
