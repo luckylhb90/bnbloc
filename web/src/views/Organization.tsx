@@ -34,6 +34,7 @@ import { PublicLinksTab } from "@/views/org/PublicLinksTab";
 import { ComponentSettingsTab } from "@/views/org/ComponentSettingsTab";
 import { ContentReviewTab } from "@/views/org/ContentReviewTab";
 import { PlatformContentTab } from "@/views/org/PlatformContentTab";
+import { RoomSourcesTab } from "@/views/org/RoomSourcesTab";
 import { invalidateTenantPolicy } from "@/lib/tenantPolicy";
 import { UserWithEmail } from "@/views/UserName";
 import { can } from "@/lib/permissions";
@@ -51,6 +52,7 @@ type Tab =
   | "members"
   | "requests"
   | "content"
+  | "sources"
   | "quota"
   | "settings"
   | "links"
@@ -69,6 +71,7 @@ const TABS: { id: Tab; label: string; superOnly?: boolean }[] = [
   { id: "members", label: "Members" },
   { id: "requests", label: "Requests" },
   { id: "content", label: "Content" },
+  { id: "sources", label: "Room sources" },
   { id: "quota", label: "Quota" },
   { id: "settings", label: "Settings" },
   { id: "links", label: "Share links" },
@@ -170,6 +173,7 @@ export function Organization() {
       {tab === "links" && <PublicLinksTab key={activeTenant} />}
       {tab === "componentSettings" && <ComponentSettingsTab key={activeTenant} />}
       {tab === "content" && <ContentReviewTab key={activeTenant} />}
+      {tab === "sources" && <RoomSourcesTab key={activeTenant} />}
       {tab === "audit" && (
         <AuditLogTab key={isSuper ? "platform" : activeTenant} platform={isSuper} tenants={tenants} />
       )}

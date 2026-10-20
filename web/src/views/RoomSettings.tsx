@@ -11,6 +11,7 @@ import { useCopy } from "@/ui/useCopy";
 import { displayNameOf } from "@/lib/useDisplayName";
 import { EmailInput } from "@/views/UserName";
 import { RoomContentSection } from "@/views/room/RoomContentSection";
+import { RoomOptInSection } from "@/views/room/RoomOptInSection";
 import { errorText } from "@/lib/errors";
 
 const syncOptions: SegmentOption<"git" | "mutagen" | "none">[] = [
@@ -183,6 +184,8 @@ export function RoomSettings({
         )}
 
         <RoomContentSection roomId={room.roomId} canEdit={canInvite(me)} />
+
+        {owner && <RoomOptInSection roomId={room.roomId} />}
 
         {/* Invite */}
         <div className="rounded-[var(--radius)] border border-[var(--color-border)] p-4">

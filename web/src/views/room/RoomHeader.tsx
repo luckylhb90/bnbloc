@@ -24,6 +24,7 @@ import { OnlineStrip } from "@/views/room/RoomNav";
 import { RoomMuteButton } from "@/views/room/RoomMuteButton";
 import type { RailSurface } from "@/views/room/RoomLayout";
 import { PlatformAgentsIndicator } from "@/views/room/PlatformAgentsIndicator";
+import { RoomSourcesIndicator } from "@/views/room/RoomSourcesIndicator";
 import type { RoomPlatformAgent } from "@/lib/platformAgents";
 
 export function RoomHeader({
@@ -134,6 +135,7 @@ export function RoomHeader({
             {roomId}
           </p>
           <PlatformAgentsIndicator agents={platformAgents} />
+          <RoomSourcesIndicator roomId={roomId} me={me} />
         </div>
       </div>
       {roomStage !== "compact" && <OnlineStrip online={online} />}

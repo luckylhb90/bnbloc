@@ -12,14 +12,13 @@ import {
   roomSaveFromDraft,
   roomSaveProblem,
   scheduleLine,
-  sourceAsk,
   toggleRoomPart,
   type RoomPartKind,
   type RoomSaveForm,
-  type RoomSource,
 } from "@/lib/roomComponents";
+import { ROOM_SOURCE_LABELS, type RoomSourceAsk } from "@/lib/roomSources";
 import { roomComponentsApi } from "@/lib/roomComponentsApi";
-import { RoomSourceValues } from "@/lib/wire.gen";
+import { MaxRoomSourcePurpose, RoomSourceValues } from "@/lib/wire.gen";
 import { Button } from "@/ui/Button";
 import { Dialog } from "@/ui/Dialog";
 import { ErrorBox } from "@/ui/ErrorBox";
@@ -237,24 +236,41 @@ function RoomParts({ form, onToggle }: { readonly form: RoomSaveForm; readonly o
   );
 }
 
-/** SourcesField declares what the room's scheduled tasks ask to read; a
- *  declaration grants nothing (the organization admin's consent does,
- *  once it exists). */
-function SourcesField({ sources, onChange }: { readonly sources: readonly RoomSource[]; readonly onChange: (s: RoomSource[]) => void }) {
+/** SourcesField declares what the room's scheduled tasks ask to read, each
+ *  with its purpose; a declaration grants nothing: a room made from the
+ *  component waits for its organization admin's consent to that purpose. */
+function SourcesField({ sources, onChange }: { readonly sources: readonly RoomSourceAsk[]; readonly onChange: (s: RoomSourceAsk[]) => void }) {
   return (
     <section aria-label="Asks to read" className="flex flex-col gap-0.5">
       <span className={heading}>Asks to read</span>
-      {RoomSourceValues.map((s) => (
-        <label key={s} className={check}>
-          <input
-            type="checkbox"
-            className="mt-1"
-            checked={sources.includes(s)}
-            onChange={(e) => onChange(e.target.checked ? [...sources, s] : sources.filter((x) => x !== s))}
-          />
-          <span className="text-xs text-[var(--color-fg-muted)]">{sourceAsk(s)}</span>
-        </label>
-      ))}
+      {RoomSourceValues.map((name) => {
+        const ask = sources.find((s) => s.name === name);
+        return (
+          <div key={name} className="flex flex-col gap-1">
+            <label className={check}>
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={!!ask}
+                onChange={(e) => onChange(e.target.checked ? [...sources, { name, purpose: "" }] : sources.filter((x) => x.name !== name))}
+              />
+              <span className="text-xs text-[var(--color-fg-muted)]">
+                {ROOM_SOURCE_LABELS[name]} — a room made from it waits for its organization admin&apos;s consent
+              </span>
+            </label>
+            {ask && (
+              <Field label="Purpose" hint="What the room's scheduled tasks read it for. The admin decides on this purpose, and members of the rooms it covers are told.">
+                <Textarea
+                  value={ask.purpose}
+                  rows={2}
+                  maxLength={MaxRoomSourcePurpose}
+                  onChange={(e) => onChange(sources.map((x) => (x.name === name ? { ...x, purpose: e.target.value } : x)))}
+                />
+              </Field>
+            )}
+          </div>
+        );
+      })}
     </section>
   );
 }

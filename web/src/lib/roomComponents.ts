@@ -6,29 +6,19 @@
 // they are unit-tested. The requests are lib/roomComponentsApi.ts.
 
 import { cleanTags, splitList, tagProblem, type ContentComponent, type ContentForm, type ContentMCPRequirement, type ContentQuickPrompt } from "./contentComponents.ts";
+import { sourcesProblem } from "./roomSources.ts";
 import { describeRecurrence, recipientLabel } from "./schedules.ts";
 import { StorageKey, keyFor } from "./storageKeys.ts";
 import { workNameFrom } from "./workGallery.ts";
 
-export type { RoomComponentDraft, RoomInstallReply, RoomInstallRequest, RoomPackageSchedule, RoomSource, RoomSpec } from "./wire.gen.ts";
-import type { ContentRequires, RoomComponentDraft, RoomDraftPart, RoomInstallReply, RoomPackageSchedule, RoomSource, RoomSpec } from "./wire.gen.ts";
+export type { RoomComponentDraft, RoomInstallReply, RoomInstallRequest, RoomPackageSchedule, RoomSpec } from "./wire.gen.ts";
+import type { ContentRequires, RoomComponentDraft, RoomDraftPart, RoomInstallReply, RoomPackageSchedule, RoomSourceAsk, RoomSpec } from "./wire.gen.ts";
 
 // MAX_ROOM_DESCRIPTION is a room's description bound (rooms.description):
 // a room component's description becomes the new room's.
 const MAX_ROOM_DESCRIPTION = 500;
 const MAX_TAGS = 12;
 const CATEGORY = /^[a-z0-9][a-z0-9-]{0,39}$/;
-
-/** What a source a room component asks for reads, in words (wire.RoomSources). */
-export const ROOM_SOURCE_LABELS: Readonly<Record<RoomSource, string>> = {
-  runs: "the organization's agent conversations",
-};
-
-/** sourceAsk is how a declared source is shown: asked for, never granted
- *  (the organization admin's consent comes with a later release). */
-export function sourceAsk(source: RoomSource): string {
-  return `Asks to read ${ROOM_SOURCE_LABELS[source]} — needs your organization admin's consent (coming)`;
-}
 
 /** A part the save dialog lists: the reference a package names it by and
  *  its label. */
@@ -52,7 +42,7 @@ export interface RoomSaveForm {
   skills: readonly RoomPart[];
   prompts: readonly RoomPart[];
   apps: readonly RoomPart[];
-  sources: readonly RoomSource[];
+  sources: readonly RoomSourceAsk[];
   off: readonly string[];
   // Kept as they are from a component's version (the dialog edits none).
   quickPrompts: readonly ContentQuickPrompt[];
@@ -135,6 +125,8 @@ export function roomSaveProblem(f: RoomSaveForm): string | null {
   if (f.category.trim() && !CATEGORY.test(f.category.trim())) return "The category is one lower-case word (letters, digits and hyphens)";
   const tagIssue = tagProblem(splitList(f.tags));
   if (tagIssue) return tagIssue;
+  const sourceIssue = sourcesProblem(f.sources);
+  if (sourceIssue) return sourceIssue;
   for (const [i, s] of f.schedules.entries()) {
     if (isOn(f, partKey("schedule", i)) && s.channel && !isOn(f, partKey("channel", s.channel))) {
       return `A kept schedule runs in #${s.channel}: keep the channel too, or leave the schedule out`;
@@ -168,7 +160,7 @@ export function roomContentForm(f: RoomSaveForm): ContentForm {
       channels: f.channels.filter((c) => isOn(f, partKey("channel", c))),
       schedules: f.schedules.filter((_, i) => isOn(f, partKey("schedule", i))),
       apps: f.apps.filter((p) => isOn(f, partKey("app", p.ref))).map((p) => p.ref),
-      sources: [...f.sources],
+      sources: f.sources.map((s) => ({ name: s.name, purpose: s.purpose.trim() })),
     },
   };
 }

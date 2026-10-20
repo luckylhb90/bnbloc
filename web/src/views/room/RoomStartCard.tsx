@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { DoorOpenIcon, XIcon } from "@phosphor-icons/react";
-import { clearRoomStart, sourceAsk, takeRoomStart, type RoomInstallReply } from "@/lib/roomComponents";
+import { clearRoomStart, takeRoomStart, type RoomInstallReply } from "@/lib/roomComponents";
+import { ROOM_SOURCE_LABELS } from "@/lib/roomSources";
 import { composerDrafts } from "@/lib/team";
 import { Button } from "@/ui/Button";
 
@@ -8,8 +9,8 @@ import { Button } from "@/ui/Button";
 // first visits (the install reply, kept by CreateRoomFromComponentDialog):
 // the component's welcome and quick prompts (a chip puts its text into the
 // message box; nothing is sent), the scheduled tasks created paused, what
-// was left out and why, and the sources the room asks to read, which
-// nothing has granted.
+// was left out and why, and the sources the room asks to read, waiting for
+// the organization admin's consent (the header's sources note asks them).
 export function RoomStartCard({ roomId }: { readonly roomId: string }) {
   const [start, setStart] = useState<RoomInstallReply | undefined>(() => takeRoomStart(roomId));
   if (!start) return null;
@@ -50,8 +51,8 @@ export function RoomStartCard({ roomId }: { readonly roomId: string }) {
         </p>
       )}
       {start.sources.map((s) => (
-        <p key={s} className="text-xs text-[var(--color-fg-muted)]">
-          {sourceAsk(s)}
+        <p key={s.name} className="text-xs text-[var(--color-fg-muted)]">
+          Reading {ROOM_SOURCE_LABELS[s.name]} waits for your organization admin&apos;s consent — ask them from the note under the room&apos;s name.
         </p>
       ))}
       {start.skipped.length > 0 && (

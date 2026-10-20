@@ -1,13 +1,15 @@
 import { ShieldWarningIcon } from "@phosphor-icons/react";
 import type { ContentComponent } from "@/lib/contentComponents";
-import { scheduleLine, sourceAsk } from "@/lib/roomComponents";
+import { scheduleLine } from "@/lib/roomComponents";
+import { sourceAsk } from "@/lib/roomSources";
 
 const heading = "mb-1 text-xs font-medium uppercase tracking-wide text-[var(--color-fg-muted)]";
 
 // RoomSetup shows what a room component sets up in a new room: its
 // channels, its scheduled tasks (created paused), the room expert, the
 // packs and apps it turns on, the MCP tools they need, and the sources it
-// asks to read, which nothing grants yet.
+// asks to read with their purpose (a room made from it waits for its
+// organization admin's consent).
 export function RoomSetup({ component }: { readonly component: Pick<ContentComponent, "room" | "requires"> }) {
   const room = component.room;
   const req = component.requires;
@@ -38,7 +40,7 @@ export function RoomSetup({ component }: { readonly component: Pick<ContentCompo
           </div>
         ))}
       {room.sources.map((s) => (
-        <p key={s} className="flex items-start gap-1.5 text-xs text-[var(--color-fg-muted)]">
+        <p key={s.name} className="flex items-start gap-1.5 text-xs text-[var(--color-fg-muted)]">
           <ShieldWarningIcon size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
           {sourceAsk(s)}
         </p>

@@ -35,6 +35,7 @@ export const AUDIT_KIND_GROUPS: readonly { readonly id: string; readonly label: 
   { id: "api-token", label: "API tokens", kinds: "api-token" },
   { id: "admin-alert", label: "Alerts", kinds: "admin-alert" },
   { id: "retention", label: "Data retention", kinds: "retention" },
+  { id: "source", label: "Room sources", kinds: "source" },
 ];
 
 // addDay returns the YYYY-MM-DD after day (the "to" bound is exclusive on the

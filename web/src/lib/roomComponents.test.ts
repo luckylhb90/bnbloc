@@ -10,7 +10,6 @@ import {
   roomSaveFromDraft,
   roomSaveProblem,
   roomSetupSummary,
-  sourceAsk,
   takeRoomStart,
   toggleRoomPart,
   type RoomComponentDraft,
@@ -51,10 +50,11 @@ const draft: RoomComponentDraft = {
   const form = roomContentForm(f);
   eq(form.requires, { expert: "reviewer@^1", skills: ["charts@^2"], prompts: ["review-prompts@^1"], mcp: [], permissions: [] }, "requires");
   eq(form.room, { channels: ["reports", "notes"], schedules: [aiTask, notice], apps: ["lunch-poll@^1"], sources: [] }, "room setup");
-  const payload = formPayload({ ...form, welcome: " Hi ", room: { ...form.room!, sources: ["runs"] } });
+  const asked = roomContentForm({ ...f, sources: [{ name: "runs", purpose: " Judge outcomes. " }] });
+  const payload = formPayload({ ...asked, welcome: " Hi " });
   eq(
     [payload.kind, payload.welcome, payload.channels, payload.apps, payload.sources, (payload.requires as Record<string, unknown>).expert, "instructions" in payload],
-    ["room", "Hi", ["reports", "notes"], ["lunch-poll@^1"], ["runs"], "reviewer@^1", false],
+    ["room", "Hi", ["reports", "notes"], ["lunch-poll@^1"], [{ name: "runs", purpose: "Judge outcomes." }], "reviewer@^1", false],
     "the payload is a room package's: no instructions",
   );
 }
@@ -76,6 +76,9 @@ const draft: RoomComponentDraft = {
   assert(roomSaveProblem({ ...f, name: "Weekly Review" }) !== null, "a bad name is refused");
   assert(roomSaveProblem({ ...f, description: "d".repeat(501) }) !== null, "a description past a room's is refused");
   assert(roomSaveProblem({ ...f, category: "two words" }) !== null, "a category is one word");
+  assert((roomSaveProblem({ ...f, sources: [{ name: "runs", purpose: "  " }] }) ?? "").includes("organization admin"), "a source needs its purpose");
+  assert(roomSaveProblem({ ...f, sources: [{ name: "runs", purpose: "p".repeat(501) }] }) !== null, "a purpose past its bound is refused");
+  eq(roomSaveProblem({ ...f, sources: [{ name: "runs", purpose: "Judge outcomes." }] }), null, "a source with its purpose saves");
 }
 
 // A component's next version starts from its own setup.
@@ -89,24 +92,23 @@ const draft: RoomComponentDraft = {
     welcome: "Hello",
     quickPrompts: [{ title: "Plan", prompt: "Plan it." }],
     requires: { expert: "reviewer@^1", prompts: ["review-prompts@^1"], mcp: [{ name: "browser" }], permissions: ["mcp.stdio"] },
-    room: { channels: ["reports"], schedules: [aiTask], apps: [], sources: ["runs"] },
+    room: { channels: ["reports"], schedules: [aiTask], apps: [], sources: [{ name: "runs", purpose: "Judge outcomes." }] },
   } as unknown as ContentComponent;
   const form = roomContentForm(roomSaveFromComponent(c));
   eq(
     [form.tags, form.welcome, form.quickPrompts, form.requires, form.room?.sources],
-    [["reviews", "weekly"], "Hello", [{ title: "Plan", prompt: "Plan it." }], { expert: "reviewer@^1", skills: [], prompts: ["review-prompts@^1"], mcp: [{ name: "browser" }], permissions: ["mcp.stdio"] }, ["runs"]],
+    [["reviews", "weekly"], "Hello", [{ title: "Plan", prompt: "Plan it." }], { expert: "reviewer@^1", skills: [], prompts: ["review-prompts@^1"], mcp: [{ name: "browser" }], permissions: ["mcp.stdio"] }, [{ name: "runs", purpose: "Judge outcomes." }]],
     "a new version keeps what the dialog does not edit",
   );
 }
 
-// The summary and the sources' words.
+// The summary.
 eq(roomSetupSummary(undefined, {}), "An empty room", "nothing set up");
 eq(
   roomSetupSummary({ channels: ["a"], schedules: [aiTask, notice], apps: ["x@^1"], sources: [] }, { expert: "e@^1", skills: ["s@^1"], prompts: ["p@^1"] }),
   "1 channel · 2 scheduled tasks · an expert · 2 packs · 1 app",
   "summary",
 );
-assert(sourceAsk("runs").includes("agent conversations") && sourceAsk("runs").includes("consent"), "a source is asked for, never granted");
 
 // describe-room reads the setup and the member's values; its reply fills
 // the dialog within the rules.
@@ -126,7 +128,7 @@ assert(sourceAsk("runs").includes("agent conversations") && sourceAsk("runs").in
 {
   const store = new Map<string, string>();
   const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v), removeItem: (k: string) => void store.delete(k) };
-  const reply = { roomId: "r9", name: "r9", componentId: "cc_1", from: "weekly-review@1.0.0", channels: [], schedules: ["sch_1"], enabled: [], apps: [], skipped: [], sources: ["runs"], tools: [] } as RoomInstallReply;
+  const reply = { roomId: "r9", name: "r9", componentId: "cc_1", from: "weekly-review@1.0.0", channels: [], schedules: ["sch_1"], enabled: [], apps: [], skipped: [], sources: [{ name: "runs", purpose: "Judge outcomes." }], tools: [] } as RoomInstallReply;
   rememberRoomStart(reply, storage);
   eq(takeRoomStart("r9", storage)?.from, "weekly-review@1.0.0", "kept for the room");
   eq(takeRoomStart("other", storage), undefined, "not another room's");
