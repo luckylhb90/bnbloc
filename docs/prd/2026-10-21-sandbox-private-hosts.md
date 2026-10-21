@@ -1,0 +1,160 @@
+# Private hosts for a member's own sandboxed agents, asked for by the AI (2026-10-21)
+
+Status: proposed. Owner: the Sandbox Protocol (`sandbox/protocol`,
+`docs/architecture/sandbox-protocol.md`), the desktop's sandbox adapter
+(`apps/desktop/src-tauri/src/internal_ext/sandbox*.rs`), the bridge's
+sandbox runtime (`services/bridge/sandbox.go`), find-a-way
+(`docs/prd/2026-10-20-never-a-dead-end.md`), the tenant policy
+(`internal/wire/tenant_policy.go`).
+
+A member whose own agent runs in the VM sandbox can let it reach a named
+private host (the team's package registry, its CI) instead of the sandbox
+blocking every private address. The AI notices the block and proposes the
+host; the member allows it with one click; the organization's admins
+decide whether members may, and which hosts.
+
+## 1. Why
+
+- QA 2026-10-21: in a release room, maya's own Claude Code agent (desktop
+  sandbox mode `all`) installed a public tool but could not install the
+  team's release tools: the sandbox could not resolve
+  `npm.internal.example` and `ci.internal.example`. The agent stopped and
+  told her to fix DNS or use a machine with intranet access. On her own
+  computer both hosts work.
+- The owner asked for settings "so the AI asks the member whether to turn
+  something on, instead of everything being disabled".
+- The open item of `2026-10-09-agent-vm-sandbox.md` ("tenant-admin-managed
+  egress rules (allowlisted private hosts) as an explicit policy input")
+  is this.
+
+What blocks it today, checked against the code:
+- The desktop creates the one machine `bnbloc` with egress `public`
+  (`create_machine_request`): the public internet, never a private, LAN,
+  loopback or link-local address.
+- The reference implementation enforces egress per machine on the host and
+  does not offer `spaceEgress`; a per-room rule cannot be enforced there.
+- The machine is shared by the member's own drives **and** by borrowed and
+  platform drives (each in its own space). Opening a private host on it
+  would open it to a teammate's borrowed prompt.
+- `public` takes no rules (protocol and implementation both refuse them),
+  and `allowlist` drops the public internet.
+- Its DNS refuses an answer with a private address (rebind protection)
+  unless an address rule covers that address; a name rule alone is not
+  enough. That is the "cannot resolve" the agent saw.
+- Its egress policy is fixed when the VM boots: a change needs a restart
+  (0.8 s measured) or a recreate.
+
+## 2. What it is (the end state)
+
+### 2.1 Two machines: own and shared
+
+- The desktop runs two machines when the member has private hosts: `bnbloc`
+  (as today: borrowed, platform and, without private hosts, own drives)
+  and `bnbloc-own` (the member's own drives only, egress `public` plus
+  their private hosts). With no private hosts there is one machine, as
+  today.
+- The bridge picks the machine per drive: own drive → `bnbloc-own` when it
+  is ready, else `bnbloc`; borrowed and platform drives → `bnbloc`, always.
+  A borrower's prompt never runs where a private host is open. Both
+  machines share the same workspaces root; a session never moves between
+  machines (the session key carries the machine, as it carries the
+  execution kind today).
+
+### 2.2 The protocol: `public` with extra hosts
+
+- New capability `egressHosts`: mode `public` may carry `rules`, hosts
+  reachable **in addition** to the public internet, private addresses
+  included. Same rule shape as `allowlist` (an exact DNS name, a
+  `*.suffix` of at least two labels, an IP literal or CIDR; port 0 = any).
+- The implementation must admit a private DNS answer for a listed name
+  (and only for it) and allow connections to it; every other private
+  answer stays refused. Enforcement stays outside the guest.
+- Conformance step `egressHosts`: a listed private host resolves and
+  connects; an unlisted private host neither resolves nor connects; the
+  public internet still works; a listed name does not open the address of
+  an unlisted one.
+- The reference implementation (checked against microsandbox 0.7.7): its
+  DNS rebind check admits a private answer only when an **address** rule
+  allows that address (`policies_allow_rebind_address` reads `Cidr` and
+  `Group` rules, never `Domain`). So for a listed name the sidecar resolves
+  it on the host when it applies the policy and adds an address rule for
+  each private address it got, beside the name rule; rebind protection
+  stays on for everything else. The addresses are resolved again at every
+  machine start. A listed IP or CIDR is an address rule as it is.
+
+### 2.3 Noticing and asking: find-a-way proposes the host
+
+- find-a-way gets a seventh action, `allow-host`, its target a host name
+  (and port). The `capabilities` context tells it, for the reply's drive,
+  that the agent ran in the sandbox, that private hosts are blocked and
+  whether the member may allow one (the tenant policy, §2.4). It proposes
+  the action only when the reply names a host the agent could not reach.
+- The target is held to a DNS name or an IP literal, never a URL or a
+  path, and never `localhost`, the host's own addresses, link-local or
+  metadata addresses. A host outside the organization's list (when it has
+  one) is dropped.
+- The card says what it would do, in plain words: "Let your own agents
+  reach `npm.internal.example` (port 443) from the sandbox. It applies to
+  your own agents in every room, not to agents borrowed from you." Two
+  buttons: **Allow** and **Not now**. Only the member whose own agent made
+  the reply sees the action (the card is theirs already; a borrowed or
+  platform drive never gets it).
+- Allow: the desktop adds the host to the member's list, applies it to
+  `bnbloc-own` when no own turn runs there (a running turn is never
+  stopped; the card says "applies when your agent's current run ends"),
+  and the card then offers **Ask again** (the existing resend).
+- Nothing in the agent changes: it reports the failure as it does today.
+
+### 2.4 Settings and policy
+
+- Desktop Settings → Agent sandbox → **Private hosts**: the member's list
+  (host, port, added when, from which room), add and remove. A removal
+  applies like an addition.
+- Organization → Settings → **Sandbox private hosts** (tenant policy,
+  `manage_org`): `off` (members may not allow any), `listed` (only hosts on
+  the organization's list; default) or `any` (members choose), plus the
+  organization's list. With `listed`, a host on the list is still added by
+  the member (the AI still asks); the list only bounds what may be added.
+- `GET /v1/my/tenant-policy` carries both, so the desktop and the card read
+  one answer. A member's host the policy no longer allows is dropped from
+  the machine at the next apply, and the Settings row says why.
+
+## 3. Design review
+
+| Lens | Answer |
+|---|---|
+| Actors | The member decides for their own agents; admins bound it; a borrower and a platform drive never reach a private host (§2.1). An agent never adds a host: the member's click does. |
+| Time and lifecycle | A change applies when no own turn runs (never-stop-live-runs); the machine restart is 0.8 s; a host the policy drops is removed at the next apply. |
+| Scale and cost | A second VM only for members with private hosts; idle cost is memory (paused when idle is a follow-up). |
+| Failure and recovery | `bnbloc-own` not ready → own drives run on `bnbloc` as today (the host just stays blocked); the card says the change did not apply and why. An unreadable policy counts as `off`. |
+| Boundaries and privacy | The host list stays on the member's computer; the tenant policy is the only server state. Secrets keep their own host rules. |
+| Abuse and untrusted input | The host comes from an agent reply (untrusted): held to a name, never loopback, link-local or metadata, bounded by the organization's list, and opened only on a click that names it. |
+| One owner | The protocol owns the rule shape; the desktop owns the machines and the list; the bridge owns the choice of machine; find-a-way owns noticing. |
+| Defaults and fallbacks | Default policy `listed` with an empty list: nothing opens until an admin lists a host. No capability → no Private hosts section and no `allow-host` action. |
+| External contracts | `egressHosts` is a new optional capability with a conformance step; `public` without rules is unchanged. |
+| Load on users and agents | One card when a host is blocked; no new tool or rule for agents. |
+| Release and compatibility | Additive. Old sidecar: no capability, behaviour as today. Old desktop: never sends rules. |
+| Observability | The desktop logs every apply (hosts added or removed, the machine restarted or not); the bridge logs which machine a drive ran on. |
+| AI capability | Notices the block and proposes the exact host; the member decides. |
+| Component or platform | Platform: the protocol capability, the machine choice, the policy (only the platform can enforce a boundary). The sandbox itself stays a component. |
+
+**Pre-mortem.**
+1. *A teammate's borrowed prompt reaches the private host.* Borrowed and
+   platform drives never run on `bnbloc-own`; a bridge test holds every
+   drive kind to its machine.
+2. *The host still does not resolve after Allow.* The rebind check is what
+   blocked it; the reference adds address rules for the name's private
+   addresses (§2.2), the conformance step resolves a listed private name,
+   and a host whose address changes is resolved again at the next start.
+3. *A reply talks the member into opening something.* The card names the
+   host and the reach in plain words, the target cannot be loopback or
+   metadata, and the organization's list bounds it by default.
+
+## 4. Build order (slices of §2)
+
+1. Protocol `egressHosts` + conformance step; the reference
+   implementation's rule translation and rebind admission.
+2. Desktop: the member's list, `bnbloc-own`, apply when idle, Settings;
+   bridge: the machine per drive kind.
+3. Tenant policy and Organization settings; find-a-way's `allow-host`
+   action, the capabilities context and the card.
