@@ -23,6 +23,7 @@ const FILTERS = [
   { value: "plugin", label: "Plugins" },
   { value: "auth-provider", label: "Auth" },
   { value: "notifier", label: "Notifiers" },
+  { value: "share-target", label: "Share targets" },
   { value: "sandbox", label: "Sandboxes" },
   { value: "previewer", label: "Previewers" },
   { value: "mcp", label: "MCP tools" },
@@ -140,12 +141,12 @@ export function PlatformComponents() {
           <div className="min-w-0 flex-1">
             <h2 className="text-base font-semibold text-[var(--color-fg)]">Components Workbench</h2>
             <p className="mt-1 text-sm leading-relaxed text-[var(--color-fg-muted)]">
-              Publish signed core, plugin, auth-provider, notifier, sandbox, previewer and MCP tool packages, review trust and runtime facts, and choose who receives each component.
+              Publish signed core, plugin, auth-provider, notifier, share-target, sandbox, previewer and MCP tool packages, review trust and runtime facts, and choose who receives each component.
             </p>
           </div>
           <div className="hidden shrink-0 gap-6 pl-5 sm:flex">
             <HeadStat label="Components" value={counts.total} />
-            <HeadStat label="Cores / Plugins / Auth / Notifiers / Sandboxes / Previewers / MCP tools" value={`${counts.core} / ${counts.plugin} / ${counts["auth-provider"]} / ${counts.notifier} / ${counts.sandbox} / ${counts.previewer} / ${counts.mcp}`} />
+            <HeadStat label="Cores / Plugins / Auth / Notifiers / Share targets / Sandboxes / Previewers / MCP tools" value={`${counts.core} / ${counts.plugin} / ${counts["auth-provider"]} / ${counts.notifier} / ${counts["share-target"]} / ${counts.sandbox} / ${counts.previewer} / ${counts.mcp}`} />
             <HeadStat label="Auto-installed" value={counts.auto} />
             <HeadStat label="Members" value={counts.members > 0 ? counts.members : "—"} />
           </div>
@@ -263,6 +264,7 @@ function summarizeComponents(components: readonly PlatformComponent[]) {
     plugin: ofKind("plugin"),
     "auth-provider": ofKind("auth-provider"),
     notifier: ofKind("notifier"),
+    "share-target": ofKind("share-target"),
     sandbox: ofKind("sandbox"),
     previewer: ofKind("previewer"),
     mcp: ofKind("mcp"),

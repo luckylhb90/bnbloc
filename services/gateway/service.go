@@ -374,6 +374,23 @@ func (s *Service) withCORS(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		if shareTicketPath(r.URL.Path) {
+			// A share page has an opaque origin ("null": it is sandboxed), so
+			// its two calls are cross-origin. They carry no credentials (the
+			// ticket in the path is the capability): any origin may make
+			// them, never with cookies (share_target.go).
+			h := w.Header()
+			h.Set("Access-Control-Allow-Origin", "*")
+			h.Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			h.Set("Access-Control-Allow-Headers", "Content-Type")
+			h.Set("Access-Control-Max-Age", "600")
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			next.ServeHTTP(w, r)
+			return
+		}
 		origin := r.Header.Get("Origin")
 		if s.allowedOrigin(origin) {
 			h := w.Header()

@@ -9,6 +9,9 @@ const (
 	KindAuthProvider Kind = "auth-provider"
 	KindNotifier     Kind = "notifier"
 	KindWebhook      Kind = "webhook"
+	// KindShareTarget takes one shared item, as a card, to a conversation of
+	// another app: an endpoint component beside the gateway.
+	KindShareTarget Kind = "share-target"
 	// KindSandbox is a Sandbox Protocol v1 runtime (local microVM sidecar or
 	// remote endpoint).
 	KindSandbox Kind = "sandbox"
@@ -31,6 +34,7 @@ const (
 	KindContractAuthProviderV1 KindContract = "bnbloc.auth-provider.contract/v1"
 	KindContractNotifierV1     KindContract = "bnbloc.notifier.contract/v1"
 	KindContractWebhookV1      KindContract = "bnbloc.webhook.contract/v1"
+	KindContractShareTargetV1  KindContract = "bnbloc.share-target.contract/v1"
 	KindContractSandboxV1      KindContract = "bnbloc.sandbox.contract/v1"
 	KindContractPreviewerV1    KindContract = "bnbloc.previewer.contract/v1"
 	KindContractMCPV1          KindContract = "bnbloc.mcp.contract/v1"
@@ -104,6 +108,9 @@ func init() {
 	RegisterKind(KindDescriptor{Kind: KindAuthProvider, Contract: KindContractAuthProviderV1, Hosts: []Service{ServiceGateway}})
 	// Notifiers are driven by realtime's notification outbox worker.
 	RegisterKind(KindDescriptor{Kind: KindNotifier, Contract: KindContractNotifierV1, Hosts: []Service{ServiceRealtime}})
+	// Share targets: the gateway builds the card and calls the target on a
+	// member's send (docs/architecture/share-targets.md).
+	RegisterKind(KindDescriptor{Kind: KindShareTarget, Contract: KindContractShareTargetV1, Hosts: []Service{ServiceGateway}})
 	// Sandboxes: the gateway owns the install record and the member catalog;
 	// the desktop supervises local sidecars from that catalog, and the bridge
 	// will drive the Sandbox Protocol in the next phase. Nothing runs in the

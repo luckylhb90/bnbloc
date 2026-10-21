@@ -41,7 +41,7 @@ const keyPrefix = "component.credential/"
 const legacyNotifierPrefix = "notify.secret/"
 
 // kinds hold a credential: the endpoint components beside the gateway.
-var kinds = []extreg.Kind{extreg.KindNotifier, extreg.KindAuthProvider}
+var kinds = []extreg.Kind{extreg.KindNotifier, extreg.KindAuthProvider, extreg.KindShareTarget}
 
 // Holds reports whether a component kind has a credential.
 func Holds(kind string) bool { return slices.Contains(kinds, extreg.Kind(kind)) }

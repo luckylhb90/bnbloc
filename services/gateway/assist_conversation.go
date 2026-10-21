@@ -30,10 +30,11 @@ const maxConversationChannels = 12
 // their room sequence, newest first, into the budget of
 // assist.NewConversation.
 func (s *Service) assistConversation(ctx context.Context, claims auth.Claims, roomID string) (*assist.Conversation, error) {
-	name, err := s.assistRoomName(ctx, claims, roomID)
+	view, err := s.memberRoom(ctx, claims, roomID)
 	if err != nil {
 		return nil, err
 	}
+	name := view.Name
 	var listing struct {
 		Channels []struct {
 			ChannelID string `json:"channelId"`

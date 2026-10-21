@@ -155,10 +155,10 @@ func ValidSettingEnv(component, name string) error {
 
 // AsksForSettings reports a package kind whose settings are not delivered
 // but asked for: an endpoint component beside the gateway (a notifier, an
-// auth provider) reads its platform and organization values itself with
+// auth provider, a share target) reads its platform and organization values itself with
 // GET /v1/component-settings, signed with its component credential.
 func AsksForSettings(packageKind string) bool {
-	return packageKind == KindNotifierPackageV1 || packageKind == KindAuthProviderPackageV1
+	return packageKind == KindNotifierPackageV1 || packageKind == KindAuthProviderPackageV1 || packageKind == KindShareTargetPackageV1
 }
 
 // validateSettings checks a package's settings (validatePackage runs it

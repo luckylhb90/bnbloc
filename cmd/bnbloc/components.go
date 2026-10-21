@@ -41,13 +41,13 @@ func notifierComponentPath(name, suffix string) string {
 func componentsRotateSecret(args []string) error {
 	fs := flag.NewFlagSet("components rotate-secret", flag.ContinueOnError)
 	gw := addGatewayFlags(fs)
-	kind := fs.String("kind", "notifier", "the endpoint component's kind: notifier or auth-provider")
+	kind := fs.String("kind", "notifier", "the endpoint component's kind: notifier, auth-provider or share-target")
 	name, err := parseNamed(fs, args)
 	if err != nil {
 		return err
 	}
 	if name == "" {
-		return fmt.Errorf("usage: components rotate-secret <name> [--kind notifier|auth-provider]")
+		return fmt.Errorf("usage: components rotate-secret <name> [--kind notifier|auth-provider|share-target]")
 	}
 	c := gw.client()
 	var out struct {

@@ -46,6 +46,7 @@ import {
 import { AppDataLine } from "./AppDataLine";
 import { categoryIcons } from "./fileIcons";
 import { ShareDialog } from "./ShareDialog";
+import { ShareToTargetButton } from "@/views/ShareToTarget";
 import { CompareView } from "./CompareView";
 import { selectComparer, useComparerRegistry } from "@/views/artifact/compare/registry";
 import { FileAskPanel, useFileAsk, type FileComposerOptions } from "./FileAskPanel";
@@ -404,6 +405,7 @@ export function ArtifactTabView({
             <button type="button" className={ACTION} onClick={() => setSharingOpen(true)} title="Share" aria-label="Share a link" data-tour="share">
               <ShareNetworkIcon size={16} />
             </button>
+            <ShareToTargetButton item={{ kind: "deliverable", roomId, artifactId }} className={ACTION} />
             {onOpenWindow !== null && (
               <button type="button" className={ACTION} onClick={openWindow} title="Open in new window" aria-label="Open in new window">
                 <ArrowSquareOutIcon size={16} />

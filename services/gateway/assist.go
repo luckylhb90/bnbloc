@@ -485,11 +485,11 @@ func (s *Service) assistContext(ctx context.Context, claims auth.Claims, declare
 // default one when ""), and the Library its expert (the one picked for the
 // message, else the room's) and skill packs (the room's and the member's).
 func (s *Service) assistRoom(ctx context.Context, claims auth.Claims, roomID, channelID, expertID string) (*assist.Room, error) {
-	name, err := s.assistRoomName(ctx, claims, roomID)
+	view, err := s.memberRoom(ctx, claims, roomID)
 	if err != nil {
 		return nil, err
 	}
-	room := &assist.Room{Name: name}
+	room := &assist.Room{Name: view.Name}
 	if room.Recent, err = s.assistRecent(ctx, claims, roomID, channelID); err != nil {
 		return nil, err
 	}
@@ -540,25 +540,31 @@ func (s *Service) assistRoom(ctx context.Context, claims auth.Claims, roomID, ch
 	return room, nil
 }
 
-// assistRoomName reads a room's name as its member: the room service
-// answers it to members only (errAssistNotFound for anyone else, and for a
-// preview).
-func (s *Service) assistRoomName(ctx context.Context, claims auth.Claims, roomID string) (string, error) {
+// roomView is what a room's member reads of it: its name and description.
+type roomView struct {
+	Name        string
+	Description string
+}
+
+// memberRoom reads a room as its member: the room service answers it to
+// members only (errAssistNotFound for anyone else, and for a preview).
+func (s *Service) memberRoom(ctx context.Context, claims auth.Claims, roomID string) (roomView, error) {
 	var detail struct {
-		Name    string `json:"name"`
-		Preview bool   `json:"preview"`
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Preview     bool   `json:"preview"`
 	}
 	err := s.roomBackendDo(ctx, backendHTTP, http.MethodGet, "/v1/rooms/"+url.PathEscape(roomID), "", nil, claims.Subject, claims.Tenant, &detail)
 	var rbe *roomBackendError
 	switch {
 	case errors.As(err, &rbe) && rbe.Status < http.StatusInternalServerError:
-		return "", errAssistNotFound
+		return roomView{}, errAssistNotFound
 	case err != nil:
-		return "", err
+		return roomView{}, err
 	case detail.Preview:
-		return "", errAssistNotFound
+		return roomView{}, errAssistNotFound
 	}
-	return detail.Name, nil
+	return roomView{Name: detail.Name, Description: detail.Description}, nil
 }
 
 // assistRecent reads a room channel's latest messages as its member

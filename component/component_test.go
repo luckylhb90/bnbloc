@@ -48,7 +48,7 @@ func TestNoComponentCodeInThePlatform(t *testing.T) {
 	installable := map[string]bool{
 		"bnbloc.mcp.package/v1": true, "bnbloc.plugin.package/v1": true, "bnbloc.previewer.package/v1": true,
 		"bnbloc.core.package/v1": true, "bnbloc.sandbox.package/v1": true, "bnbloc.notifier.package/v1": true,
-		"bnbloc.auth-provider.package/v1": true,
+		"bnbloc.auth-provider.package/v1": true, "bnbloc.share-target.package/v1": true,
 	}
 	out, err := exec.Command("git", "-C", root, "ls-files", "*.json").Output()
 	if err != nil {

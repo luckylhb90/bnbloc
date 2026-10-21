@@ -155,6 +155,11 @@ func (s *Service) routes() []route {
 		// The member component surface: the rollout-filtered catalog and
 		// opt-in installs.
 		member("GET /v1/components", s.handleComponents),
+		member("GET /v1/my/share-targets", s.handleShareTargets),
+		member("POST /v1/my/share-targets/{name}/sessions", s.handleShareSession).spends(costBudget),
+		open("GET "+shareTargetsPrefix+"{name}/pages/{ticket}/", "a share ticket in the path", s.handleSharePage).spends(publicBudget),
+		open("GET "+shareTargetsPrefix+"{name}/pages/{ticket}/session", "a share ticket in the path", s.handleShareSessionInfo).spends(publicBudget),
+		open("POST "+shareTargetsPrefix+"{name}/pages/{ticket}/send", "a share ticket in the path", s.handleShareSend).spends(publicBudget),
 		member("POST /v1/components/{name}/install", s.handleComponentInstall),
 		member("DELETE /v1/components/{name}/install", s.handleComponentUninstall),
 		// The platform and organization values of a component the member's

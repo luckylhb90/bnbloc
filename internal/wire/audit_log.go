@@ -11,7 +11,7 @@ package wire
 const TruncatedHeader = "X-Bnbloc-Truncated"
 
 // Audit log entry kinds written by the platform itself. Component kinds
-// (core, plugin, notifier, auth-provider, webhook) are the extension kinds
+// (core, plugin, notifier, auth-provider, share-target, webhook) are the extension kinds
 // recorded by the component lifecycle and their deliveries.
 const (
 	AuditKindBorrow     = "borrow"      // a borrow decision (shared-agent audit)

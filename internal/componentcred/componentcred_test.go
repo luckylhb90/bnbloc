@@ -87,7 +87,8 @@ func TestCredentialLifecycle(t *testing.T) {
 func TestCredentialKindsAreTheAskingKinds(t *testing.T) {
 	for kind, pkgKind := range map[string]string{
 		"notifier": pkgmeta.KindNotifierPackageV1, "auth-provider": pkgmeta.KindAuthProviderPackageV1,
-		"plugin": pkgmeta.KindPluginPackageV1, "mcp": pkgmeta.KindMCPPackageV1, "core": pkgmeta.KindCorePackageV1,
+		"share-target": pkgmeta.KindShareTargetPackageV1,
+		"plugin":       pkgmeta.KindPluginPackageV1, "mcp": pkgmeta.KindMCPPackageV1, "core": pkgmeta.KindCorePackageV1,
 		"previewer": pkgmeta.KindPreviewerPackageV1, "sandbox": pkgmeta.KindSandboxPackageV1,
 	} {
 		if Holds(kind) != pkgmeta.AsksForSettings(pkgKind) {

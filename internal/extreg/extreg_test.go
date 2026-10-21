@@ -60,6 +60,12 @@ func TestPrivateCapabilityKindDescriptors_areGatewayAndRealtimeHosted(t *testing
 			wantHosts:    []Service{ServiceRealtime},
 		},
 		{
+			name:         "share target",
+			kind:         KindShareTarget,
+			wantContract: KindContractShareTargetV1,
+			wantHosts:    []Service{ServiceGateway},
+		},
+		{
 			name:              "webhook",
 			kind:              KindWebhook,
 			wantContract:      KindContractWebhookV1,

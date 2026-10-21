@@ -19,7 +19,7 @@ export function parseComponentPackage(raw: string): ParseResult {
 
 function parsePackageRecord(record: Readonly<Record<string, unknown>>): ParseResult {
   const kind = readPackageKind(record["kind"]);
-  if (!kind) return { ok: false, error: "package kind must be bnbloc.core.package/v1, bnbloc.plugin.package/v1, bnbloc.auth-provider.package/v1, bnbloc.notifier.package/v1, bnbloc.sandbox.package/v1, bnbloc.previewer.package/v1, or bnbloc.mcp.package/v1" };
+  if (!kind) return { ok: false, error: "package kind must be bnbloc.core.package/v1, bnbloc.plugin.package/v1, bnbloc.auth-provider.package/v1, bnbloc.notifier.package/v1, bnbloc.share-target.package/v1, bnbloc.sandbox.package/v1, bnbloc.previewer.package/v1, or bnbloc.mcp.package/v1" };
   const name = readRequiredString(record, "name");
   const version = readRequiredString(record, "version");
   const publisher = readRequiredString(record, "publisher");

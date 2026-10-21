@@ -15,6 +15,7 @@ func TestKindOnlyFieldsRefused(t *testing.T) {
 		KindPluginPackageV1:       validPluginPackageBody,
 		KindAuthProviderPackageV1: validAuthProviderPackageBody,
 		KindNotifierPackageV1:     notifierPackageBody,
+		KindShareTargetPackageV1:  shareTargetPackageBody,
 		KindSandboxPackageV1:      validSandboxSidecarBody,
 		KindMCPPackageV1:          mcpStdioBody,
 		KindPreviewerPackageV1: func(t *testing.T, mutate func(map[string]any)) []byte {
@@ -80,6 +81,7 @@ func TestGuardedEndpointRequiresNetwork(t *testing.T) {
 	for kind, body := range map[string][]byte{
 		KindAuthProviderPackageV1: validAuthProviderPackageBody(t, func(b map[string]any) { delete(b, "permissions") }),
 		KindNotifierPackageV1:     notifierPackageBody(t, func(b map[string]any) { b["permissions"] = map[string]any{"network": []string{"other.example.com"}} }),
+		KindShareTargetPackageV1:  shareTargetPackageBody(t, func(b map[string]any) { b["permissions"] = map[string]any{"network": []string{"other.example.com"}} }),
 		KindSandboxPackageV1:      validSandboxEndpointBody(t, func(b map[string]any) { delete(b, "permissions") }),
 		KindMCPPackageV1:          mcpEndpointBody(t, func(b map[string]any) { delete(b, "permissions") }),
 	} {

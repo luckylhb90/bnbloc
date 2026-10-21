@@ -23,6 +23,22 @@ func MessageURL(publicURL, roomID, channelID string, seq int64) string {
 	return u
 }
 
+// ArtifactURL is the web deep link to one room deliverable:
+// <origin>/#/room/<roomId>?artifact=<artifactId>[&v=<n>]. The web client
+// opens the room and the preview workbench on it; version <= 0 links to the
+// latest. "" when no public URL is set.
+func ArtifactURL(publicURL, roomID, artifactID string, version int) string {
+	u := RoomURL(publicURL, roomID)
+	if u == "" || roomID == "" || artifactID == "" {
+		return u
+	}
+	u += "?artifact=" + url.QueryEscape(artifactID)
+	if version > 0 {
+		u += "&v=" + strconv.Itoa(version)
+	}
+	return u
+}
+
 // urlHash returns the hash route of a deep link ("#/room/…"), or the room's
 // route when the link is empty (no public URL configured): a browser push
 // notification opens it relative to the web client's own origin.

@@ -1255,7 +1255,7 @@ export const AttachmentTypes: readonly AttachmentType[] = [{ mime: "image/png", 
 export const TruncatedHeader = "X-Bnbloc-Truncated";
 
 // Audit log entry kinds written by the platform itself. Component kinds
-// (core, plugin, notifier, auth-provider, webhook) are the extension kinds
+// (core, plugin, notifier, auth-provider, share-target, webhook) are the extension kinds
 // recorded by the component lifecycle and their deliveries.
 export const AuditKindBorrow = "borrow";
 export const AuditKindSession = "session";
@@ -5376,6 +5376,110 @@ export interface SearchUpdateStats {
   dropped: number;
 }
 
+// ---- wire/share_targets.go ----
+
+// Share item kinds: what a member may share.
+export const ShareItemRoom = "room";
+export const ShareItemMessage = "message";
+export const ShareItemDeliverable = "deliverable";
+
+// Share destination types: who a card goes to in the other app.
+export const ShareDestUser = "user";
+export const ShareDestGroup = "group";
+
+// MaxShareDest bounds the conversations of one share.
+export const MaxShareDest = 20;
+// MaxShareIDBytes bounds a delivery id, a destination id and an item id.
+export const MaxShareIDBytes = 128;
+// MaxShareHostTokenBytes bounds the other app's credential for the member.
+export const MaxShareHostTokenBytes = 8192;
+// MaxShareSummaryRunes bounds a card's summary.
+export const MaxShareSummaryRunes = 100;
+// MaxShareTitleRunes bounds a card's title.
+export const MaxShareTitleRunes = 100;
+
+// ShareTargetInfo is one share target a member may use
+// (GET /v1/my/share-targets).
+export interface ShareTargetInfo {
+  name: string;
+  version: string;
+}
+
+// ShareItem names the item a member shares. Kind picks the fields that
+// matter: a room needs RoomID; a message RoomID, ChannelID and Seq; a
+// deliverable RoomID, ArtifactID and optionally Version.
+export interface ShareItem {
+  kind: ShareItemKind;
+  roomId: string;
+  channelId?: string;
+  seq?: number;
+  artifactId?: string;
+  version?: number;
+}
+
+// ShareDest is one conversation of the other app: its id there and whether
+// it is a person or a group.
+export interface ShareDest {
+  id: string;
+  type: ShareDestType;
+}
+
+// ShareCard is a shared item as a neutral card: what the gateway built from
+// the item as the member (internal/sharecard) and the target formats for its
+// app. Kind is a ShareItem* value; Summary is plain text.
+export interface ShareCard {
+  kind: string;
+  title: string;
+  summary: string;
+  url: string;
+}
+
+// ShareSessionRequest starts a share (POST /v1/my/share-targets/{name}/sessions):
+// the item the member shares.
+export interface ShareSessionRequest {
+  item: ShareItem;
+}
+
+// ShareSession answers a started share: URL is the share page, with the
+// session's ticket in its path, which the web navigates to.
+export interface ShareSession {
+  url: string;
+}
+
+// ShareSessionInfo is what the share page reads of its session
+// (GET <page URL>session): the card, the address to send it to and the link
+// back to the shared item.
+export interface ShareSessionInfo {
+  card: ShareCard;
+  sendUrl: string;
+  backUrl: string;
+}
+
+// ShareSend is the share page's request to send the session's card
+// (POST <page URL>send): DeliveryID is the client half's idempotency key;
+// HostToken is the other app's credential for the member, used for this one
+// call and never stored or logged.
+export interface ShareSend {
+  deliveryId: string;
+  dest: ShareDest[];
+  hostToken: string;
+}
+
+// ShareResult answers a share the target accepted.
+export interface ShareResult {
+  status: string;
+}
+
+// ShareSignatureHeader carries a share's signature to the target: the
+// notifier's scheme ("t=<unix seconds>,v1=<hex>", notify.Sign) over the
+// request body with the component's credential.
+export const ShareSignatureHeader = "X-Bnbloc-Signature";
+
+// ShareTargetList answers GET /v1/my/share-targets.
+export interface ShareTargetList {
+  targets: ShareTargetInfo[];
+}
+
 // ---- wire/shares.go ----
 
 // Who may open a share link (ShareView.Access): a signed-in member of the
@@ -6438,6 +6542,10 @@ export type RecurrenceKind = "once" | "daily" | "weekly" | "cron" | "event";
 export const RecurrenceKindValues: readonly RecurrenceKind[] = ["once", "daily", "weekly", "cron", "event"];
 export type ScheduleRunStatus = "ok" | "error" | "skipped";
 export const ScheduleRunStatusValues: readonly ScheduleRunStatus[] = ["ok", "error", "skipped"];
+export type ShareItemKind = "room" | "message" | "deliverable";
+export const ShareItemKindValues: readonly ShareItemKind[] = ["room", "message", "deliverable"];
+export type ShareDestType = "user" | "group";
+export const ShareDestTypeValues: readonly ShareDestType[] = ["user", "group"];
 export type ShareAccess = "org" | "signed_in" | "anyone";
 export const ShareAccessValues: readonly ShareAccess[] = ["org", "signed_in", "anyone"];
 export type ShareRefusalCode = "share_sign_in_required" | "share_org_only";

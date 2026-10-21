@@ -57,6 +57,9 @@ type Claims struct {
 	// again is reuse and revokes the family. Empty on every other kind.
 	Family string `json:"fam,omitempty"`
 	ID     string `json:"jti,omitempty"`
+	// Data is the signed payload of a kind that carries one: a share
+	// ticket's card (KindShareTarget). Empty on every other kind.
+	Data string `json:"data,omitempty"`
 }
 
 // Token kinds (see Claims.Kind). KindRefresh mints sessions; KindSSORelay
@@ -103,6 +106,13 @@ const (
 	// but that link's routes, which re-resolve the link and re-check the
 	// member's organization membership.
 	KindShareTicket = "share-ticket"
+	// KindShareTarget is a share session's ticket (docs/architecture/share-targets.md):
+	// a member started sharing one item through the share target named in ID;
+	// Subject is the member, Tenant their organization and Data the card the
+	// member authorized. It rides in the share page's URL path (the page runs
+	// in the host app's client and cannot hold a session) and authorizes only
+	// that page's routes: reading the card and sending it, once per delivery.
+	KindShareTarget = "share-target"
 )
 
 // HasRoom reports whether the claims authorize the given room scope.

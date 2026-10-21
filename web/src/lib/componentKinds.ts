@@ -9,12 +9,13 @@ import type { ComponentRuntime } from "./wire.gen.ts";
 // package kind each one's file declares. The server keeps a component's kind
 // as a plain string (extreg.Kind); these are the kinds the web knows how to
 // present.
-export type ComponentKind = "core" | "plugin" | "auth-provider" | "notifier" | "sandbox" | "previewer" | "mcp";
+export type ComponentKind = "core" | "plugin" | "auth-provider" | "notifier" | "share-target" | "sandbox" | "previewer" | "mcp";
 export type ComponentPackageKind =
   | "bnbloc.core.package/v1"
   | "bnbloc.plugin.package/v1"
   | "bnbloc.auth-provider.package/v1"
   | "bnbloc.notifier.package/v1"
+  | "bnbloc.share-target.package/v1"
   | "bnbloc.sandbox.package/v1"
   | "bnbloc.previewer.package/v1"
   | "bnbloc.mcp.package/v1";
@@ -40,6 +41,7 @@ export const COMPONENT_KINDS: Readonly<Record<ComponentKind, ComponentKindMeta>>
   plugin: { label: "Plugin", noun: "plugin", packageKind: "bnbloc.plugin.package/v1", contract: "bnbloc.plugin.contract/v1", runtimes: ["sidecar"] },
   "auth-provider": { label: "Auth provider", noun: "auth-provider", packageKind: "bnbloc.auth-provider.package/v1", contract: "bnbloc.auth-provider.contract/v1", runtimes: ["endpoint"], credential: true },
   notifier: { label: "Notifier", noun: "notifier", packageKind: "bnbloc.notifier.package/v1", contract: "bnbloc.notifier.contract/v1", runtimes: ["endpoint"], credential: true },
+  "share-target": { label: "Share target", noun: "share-target", packageKind: "bnbloc.share-target.package/v1", contract: "bnbloc.share-target.contract/v1", runtimes: ["endpoint"], credential: true },
   sandbox: { label: "Sandbox", noun: "sandbox", packageKind: "bnbloc.sandbox.package/v1", contract: "bnbloc.sandbox.contract/v1", runtimes: ["sidecar", "endpoint"] },
   previewer: { label: "Previewer", noun: "previewer", packageKind: "bnbloc.previewer.package/v1", contract: "bnbloc.previewer.contract/v1", runtimes: ["bundle"] },
   mcp: { label: "MCP tool", noun: "MCP", packageKind: "bnbloc.mcp.package/v1", contract: "bnbloc.mcp.contract/v1", runtimes: ["stdio", "endpoint"] },

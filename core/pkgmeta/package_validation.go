@@ -21,6 +21,12 @@ const KindAuthProviderPackageV1 = "bnbloc.auth-provider.package/v1"
 // member notifications from realtime (docs/notifications.md).
 const KindNotifierPackageV1 = "bnbloc.notifier.package/v1"
 
+// KindShareTargetPackageV1 is the package-envelope kind for a share target:
+// an externally supervised endpoint (runtime "endpoint") that takes one
+// shared item, as a card, to a conversation of another app
+// (docs/architecture/share-targets.md).
+const KindShareTargetPackageV1 = "bnbloc.share-target.package/v1"
+
 // PluginContractV1 is the only typed plugin wire-contract version. The sidecar
 // receives a versioned delivery envelope ({event, version, tenantId, roomId,
 // payload}) at POST /events; the contract version pins that envelope shape so a
@@ -33,6 +39,12 @@ const AuthProviderContractV1 = "bnbloc.auth-provider.contract/v1"
 // answers {name, contract}, POST {baseUrl}/v1/notifications receives one
 // signed notification payload.
 const NotifierContractV1 = "bnbloc.notifier.contract/v1"
+
+// ShareTargetContractV1 pins the share-target wire contract: GET
+// {baseUrl}/discover answers {name, contract}, POST {baseUrl}/v1/share
+// receives one signed share, GET {baseUrl}/v1/share/frame answers the
+// client half's document.
+const ShareTargetContractV1 = "bnbloc.share-target.contract/v1"
 
 // NotifierCapabilityGroups: the notifier delivers a notification addressed
 // to a named group (NotificationPayload.Group) as well as to members; the
@@ -200,6 +212,10 @@ func validateEndpointPackage(pkg Package, label, contract string) error {
 	return requireGuardedEndpoint(pkg, label)
 }
 
+func validateShareTargetPackage(pkg Package) error {
+	return validateEndpointPackage(pkg, "share-target", ShareTargetContractV1)
+}
+
 func validatePluginCapabilities(caps []string) error {
 	for _, cap := range caps {
 		if !pluginCapabilities[cap] {
@@ -213,6 +229,7 @@ func init() {
 	RegisterKindValidator(KindPluginPackageV1, validatePluginPackage)
 	RegisterKindValidator(KindAuthProviderPackageV1, validateAuthProviderPackage)
 	RegisterKindValidator(KindNotifierPackageV1, validateNotifierPackage)
+	RegisterKindValidator(KindShareTargetPackageV1, validateShareTargetPackage)
 	extreg.RegisterKind(extreg.KindDescriptor{
 		Kind:  KindPlugin,
 		Hosts: []extreg.Service{extreg.ServiceRealtime},

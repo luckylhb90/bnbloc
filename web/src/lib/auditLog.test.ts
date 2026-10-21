@@ -30,7 +30,7 @@ test("filters map to query params; the inclusive to-day becomes an exclusive bou
   );
   equal(
     path,
-    "/v1/platform/audit-log?kind=core%2Cplugin%2Cnotifier%2Cauth-provider%2Cwebhook&actor=root&outcome=deny&from=2026-10-01&to=2026-11-01&tzOffsetMin=-480&cursor=abc&format=csv",
+    "/v1/platform/audit-log?kind=core%2Cplugin%2Cnotifier%2Cauth-provider%2Cshare-target%2Cwebhook&actor=root&outcome=deny&from=2026-10-01&to=2026-11-01&tzOffsetMin=-480&cursor=abc&format=csv",
   );
   equal(addDay("2026-12-31"), "2027-01-01");
 });

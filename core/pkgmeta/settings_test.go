@@ -96,6 +96,7 @@ func TestEndpointComponentsAskForSettings(t *testing.T) {
 	bodies := map[string][]byte{
 		KindNotifierPackageV1:     notifierPackageBody(t, func(b map[string]any) { b["settings"] = decl }),
 		KindAuthProviderPackageV1: validAuthProviderPackageBody(t, func(b map[string]any) { b["settings"] = decl }),
+		KindShareTargetPackageV1:  shareTargetPackageBody(t, func(b map[string]any) { b["settings"] = decl }),
 	}
 	for kind, body := range bodies {
 		if !AsksForSettings(kind) {
@@ -111,8 +112,11 @@ func TestEndpointComponentsAskForSettings(t *testing.T) {
 			"header": {"key": "a", "label": "A", "type": "text", "scope": "org", "deliver": map[string]any{"header": "X-A"}},
 		} {
 			raw := validAuthProviderPackageBody(t, func(b map[string]any) { b["kind"] = kind; b["settings"] = []map[string]any{s} })
-			if kind == KindNotifierPackageV1 {
+			switch kind {
+			case KindNotifierPackageV1:
 				raw = notifierPackageBody(t, func(b map[string]any) { b["settings"] = []map[string]any{s} })
+			case KindShareTargetPackageV1:
+				raw = shareTargetPackageBody(t, func(b map[string]any) { b["settings"] = []map[string]any{s} })
 			}
 			if _, err := ParsePackage(raw); err == nil || !strings.Contains(err.Error(), "endpoint component") {
 				t.Errorf("%s with a %s setting: err = %v", kind, name, err)

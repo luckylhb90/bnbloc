@@ -170,3 +170,21 @@ func TestObserverEmitsWithoutReplyAfterWait(t *testing.T) {
 		t.Fatalf("agent_failed = %+v ok=%v", failed, ok)
 	}
 }
+
+func TestArtifactURL(t *testing.T) {
+	cases := []struct {
+		pub, room, artifact string
+		version             int
+		want                string
+	}{
+		{"https://b.example/", "r1", "a 1", 3, "https://b.example/#/room/r1?artifact=a+1&v=3"},
+		{"https://b.example", "r1", "a1", 0, "https://b.example/#/room/r1?artifact=a1"},
+		{"https://b.example", "r1", "", 2, "https://b.example/#/room/r1"},
+		{"", "r1", "a1", 2, ""},
+	}
+	for _, c := range cases {
+		if got := ArtifactURL(c.pub, c.room, c.artifact, c.version); got != c.want {
+			t.Errorf("ArtifactURL(%q,%q,%q,%d) = %q, want %q", c.pub, c.room, c.artifact, c.version, got, c.want)
+		}
+	}
+}

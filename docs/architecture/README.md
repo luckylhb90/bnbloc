@@ -30,6 +30,13 @@ extend it" references.
   sealed, rotated), the signed calls it makes, and how it asks for its
   settings (`GET /v1/component-settings`).
 
+## Share targets
+
+- [Share targets](share-targets.md) — a member shares a room, a message or a
+  deliverable as a card into a conversation of another app through an
+  installed share-target component (`bnbloc.share-target.package/v1`): the
+  contract, who builds the card, what the gateway checks and audits.
+
 ## Rooms and Agents
 
 - [Room agent roster and remote deployment](room-agent-roster.md) — how members
