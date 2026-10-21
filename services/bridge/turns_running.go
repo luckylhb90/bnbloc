@@ -23,26 +23,32 @@ const TurnsFile = "turns.json"
 
 // RunningTurns is TurnsFile's content.
 type RunningTurns struct {
-	PID         int            `json:"pid"`
-	Running     map[string]int `json:"running"`
-	UpdatedAtMs int64          `json:"updatedAtMs"`
+	PID     int            `json:"pid"`
+	Running map[string]int `json:"running"`
+	// OwnMachine counts the running turns on the member's own sandbox
+	// machine (SandboxConfig.OwnMachine): the desktop recreates that machine
+	// for a private-host change only when none runs
+	// (docs/prd/2026-10-21-sandbox-private-hosts.md).
+	OwnMachine  int   `json:"ownMachine"`
+	UpdatedAtMs int64 `json:"updatedAtMs"`
 }
 
 // turnCounter counts the turns the bridge is driving, per core.
 type turnCounter struct {
-	mu      sync.Mutex
-	running map[string]int
+	mu         sync.Mutex
+	running    map[string]int
+	ownMachine int
 }
 
-// turnRunning records a turn of core as running until the returned done is
-// called (once).
-func (b *Bridge) turnRunning(core string) (done func()) {
-	b.turns.add(b.cfg.StateDir, core, 1)
+// turnRunning records a turn of core (on the own machine when ownMachine)
+// as running until the returned done is called (once).
+func (b *Bridge) turnRunning(core string, ownMachine bool) (done func()) {
+	b.turns.add(b.cfg.StateDir, core, ownMachine, 1)
 	var once sync.Once
-	return func() { once.Do(func() { b.turns.add(b.cfg.StateDir, core, -1) }) }
+	return func() { once.Do(func() { b.turns.add(b.cfg.StateDir, core, ownMachine, -1) }) }
 }
 
-func (c *turnCounter) add(stateDir, core string, delta int) {
+func (c *turnCounter) add(stateDir, core string, ownMachine bool, delta int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.running == nil {
@@ -52,10 +58,13 @@ func (c *turnCounter) add(stateDir, core string, delta int) {
 	if c.running[core] <= 0 {
 		delete(c.running, core)
 	}
+	if ownMachine {
+		c.ownMachine = max(0, c.ownMachine+delta)
+	}
 	if stateDir == "" {
 		return
 	}
-	snapshot := RunningTurns{PID: os.Getpid(), Running: map[string]int{}, UpdatedAtMs: time.Now().UnixMilli()}
+	snapshot := RunningTurns{PID: os.Getpid(), Running: map[string]int{}, OwnMachine: c.ownMachine, UpdatedAtMs: time.Now().UnixMilli()}
 	for k, v := range c.running {
 		snapshot.Running[k] = v
 	}

@@ -91,6 +91,15 @@ type SandboxConfig struct {
 	VMExec         string
 	Machine        string
 	WorkspacesRoot string
+	// OwnMachine is the member's own machine (BNBLOC_SANDBOX_OWN_MACHINE,
+	// "" = none): the shared machine's egress plus the private hosts the
+	// member allowed (docs/prd/2026-10-21-sandbox-private-hosts.md). Only a
+	// drive on its owner's own behalf runs there (sandboxDecision.ownerEnv),
+	// always while it is set: the desktop sets it once the machine runs and
+	// withdraws it when the machine is not wanted or keeps failing, so a
+	// session never moves between machines; the machine briefly missing
+	// (recreated for a change of hosts) is a retried sandbox_starting.
+	OwnMachine string
 	// MountsDir is where components write the mounts they contribute to a
 	// sandboxed turn (sandbox_mounts.go; "" = none are read), and
 	// MountGuestRoots the guest folders they may mount under.
@@ -235,6 +244,14 @@ func (s *sandboxRuntime) probe(ctx context.Context) (bool, string) {
 	return true, ""
 }
 
+// machineOf is the machine a sandboxed slot runs on.
+func (s *sandboxRuntime) machineOf(k driveKey) string {
+	if k.ownMachine && s.cfg.OwnMachine != "" {
+		return s.cfg.OwnMachine
+	}
+	return s.cfg.Machine
+}
+
 // sandboxSpaceName names the space (and the workspace directory) of one
 // seat of one (room, core, provider) (driveKey): readable, path- and
 // user-name-safe (the default guest user is "sp-<space>", so it stays well
@@ -242,7 +259,12 @@ func (s *sandboxRuntime) probe(ctx context.Context) (bool, string) {
 // key. The owner's own seat keeps the name the agent always had; another
 // requester's seat is a space of its own.
 func sandboxSpaceName(k driveKey) string {
-	sum := sha256.Sum256([]byte(k.seatAgentID()))
+	id := k.seatAgentID()
+	if k.ownMachine {
+		// A workspace of its own: both machines share the workspaces root.
+		id += "\x00own-machine"
+	}
+	sum := sha256.Sum256([]byte(id))
 	return slugPart(k.core, 8) + "-" + slugPart(k.provider, 8) + "-" + hex.EncodeToString(sum[:5])
 }
 
@@ -275,7 +297,7 @@ func slugPart(s string, max int) string {
 // a turn for someone else after the owner's converges back to the default.
 func (s *sandboxRuntime) prepare(ctx context.Context, k driveKey, owner string, env []string, ttl time.Duration, borrowed bool) (*corepkg.Execution, error) {
 	room, core, provider := k.room, k.core, k.provider
-	space := sandboxSpaceName(k)
+	space, machine := sandboxSpaceName(k), s.machineOf(k)
 	workdir := filepath.Join(s.cfg.WorkspacesRoot, space)
 	if err := os.MkdirAll(workdir, 0o700); err != nil {
 		return nil, fmt.Errorf("agent sandbox workspace: %w", err)
@@ -284,7 +306,7 @@ func (s *sandboxRuntime) prepare(ctx context.Context, k driveKey, owner string, 
 		// Not quiesced by this bridge since its last use (a bridge restart,
 		// a failed quiesce): a process left there could still write the
 		// workdir, so it is stopped first, or the drive does not run.
-		if err := s.quiesce(ctx, space); err != nil {
+		if err := s.quiesce(ctx, machine, space); err != nil {
 			s.invalidate()
 			return nil, fmt.Errorf("agent sandbox space: stop its processes: %w", err)
 		}
@@ -297,7 +319,7 @@ func (s *sandboxRuntime) prepare(ctx context.Context, k driveKey, owner string, 
 	// allows) is the guest's alone: the core's path mapping is the workspace.
 	space0 := len(mounts)
 	mounts = append(mounts, s.contributedMounts(workdir, borrowed)...)
-	if _, err := s.client.EnsureSpace(ctx, s.endpoint(), s.cfg.Machine, space, sandbox.SpaceRequest{
+	if _, err := s.client.EnsureSpace(ctx, s.endpoint(), machine, space, sandbox.SpaceRequest{
 		Workdir:      workdir,
 		Mounts:       mounts,
 		EnvAllowlist: coreprotocol.ForwardEnvAllowlist(env),
@@ -306,7 +328,7 @@ func (s *sandboxRuntime) prepare(ctx context.Context, k driveKey, owner string, 
 		s.invalidate()
 		return nil, fmt.Errorf("agent sandbox space: %w", err)
 	}
-	tok, err := s.client.MintExecToken(ctx, s.endpoint(), s.cfg.Machine, space, int64(ttl/time.Second))
+	tok, err := s.client.MintExecToken(ctx, s.endpoint(), machine, space, int64(ttl/time.Second))
 	if err != nil {
 		s.invalidate()
 		return nil, fmt.Errorf("agent sandbox exec token: %w", err)
@@ -315,7 +337,7 @@ func (s *sandboxRuntime) prepare(ctx context.Context, k driveKey, owner string, 
 		URL:         s.cfg.URL,
 		ExecToken:   tok.Token,
 		ExpiresAtMs: tok.ExpiresAtMs,
-		Machine:     s.cfg.Machine,
+		Machine:     machine,
 		Space:       space,
 		VMExec:      s.cfg.VMExec,
 		Workdir:     workdir,
@@ -333,7 +355,7 @@ func (s *sandboxRuntime) prepare(ctx context.Context, k driveKey, owner string, 
 // renewed is exec with a freshly minted token for its space (a running
 // turn's renewal; ttl as prepare's).
 func (s *sandboxRuntime) renewed(ctx context.Context, exec *corepkg.Execution, ttl time.Duration) (*corepkg.Execution, error) {
-	tok, err := s.client.MintExecToken(ctx, s.endpoint(), s.cfg.Machine, exec.Sandbox.Space, int64(ttl/time.Second))
+	tok, err := s.client.MintExecToken(ctx, s.endpoint(), exec.Sandbox.Machine, exec.Sandbox.Space, int64(ttl/time.Second))
 	if err != nil {
 		return nil, fmt.Errorf("agent sandbox exec token: %w", err)
 	}
@@ -515,8 +537,12 @@ func (b *Bridge) planSandbox(ctx context.Context, d *drive) (refuse string) {
 		env = s.cfg.Env
 	}
 	d.ownSandbox = dec.ownerEnv
+	// Only a drive on its owner's own behalf reaches the private hosts the
+	// owner allowed: a borrowed, platform or foreign-content drive never
+	// runs on the own machine.
+	d.ownMachine = dec.ownerEnv && s.cfg.OwnMachine != ""
 	owner := d.owner
-	key := driveKey{room: d.job.RoomID, core: d.core, provider: d.job.Provider, sandboxed: true, owner: d.seatOwner, requester: d.seatRequester()}
+	key := driveKey{room: d.job.RoomID, core: d.core, provider: d.job.Provider, sandboxed: true, ownMachine: d.ownMachine, owner: d.seatOwner, requester: d.seatRequester()}
 	d.prepareExec = func(ctx context.Context) (*corepkg.Execution, error) {
 		exec, err := s.prepare(ctx, key, owner, env, d.execTokenTTL(), d.borrowed)
 		if err != nil {

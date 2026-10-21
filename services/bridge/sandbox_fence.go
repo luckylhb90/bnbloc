@@ -246,7 +246,7 @@ func (rs *roomSession) fenceIntact() bool {
 func (b *Bridge) endSandboxedTurn(ctx context.Context, key driveKey, sx corepkg.SandboxExecution, rs *roomSession) {
 	qctx, cancel := context.WithTimeout(b.detached(ctx), quiesceTimeout)
 	defer cancel()
-	if err := b.sandbox.quiesce(qctx, sx.Space); err != nil {
+	if err := b.sandbox.quiesce(qctx, sx.Machine, sx.Space); err != nil {
 		// The next prepare quiesces before it re-ensures the space, or fails
 		// the drive; the reuse check below it catches anything written
 		// meanwhile.
@@ -271,8 +271,8 @@ func (b *Bridge) endSandboxedTurn(ctx context.Context, key driveKey, sx corepkg.
 // protocol kills its processes and revokes its exec tokens; its home and
 // guest-local disks stay for the next ensure). A space that does not exist
 // has no process.
-func (s *sandboxRuntime) quiesce(ctx context.Context, space string) error {
-	err := s.client.DeleteSpace(ctx, s.endpoint(), s.cfg.Machine, space, false)
+func (s *sandboxRuntime) quiesce(ctx context.Context, machine, space string) error {
+	err := s.client.DeleteSpace(ctx, s.endpoint(), machine, space, false)
 	if err != nil && sandbox.ErrorCodeOf(err) != sandbox.ErrorSpaceNotFound {
 		return err
 	}
@@ -301,7 +301,7 @@ func (s *sandboxRuntime) removeRoomWorkspace(ctx context.Context, k driveKey) er
 		return nil
 	}
 	space := sandboxSpaceName(k)
-	if err := s.client.DeleteSpace(ctx, s.endpoint(), s.cfg.Machine, space, true); err != nil && sandbox.ErrorCodeOf(err) != sandbox.ErrorSpaceNotFound {
+	if err := s.client.DeleteSpace(ctx, s.endpoint(), s.machineOf(k), space, true); err != nil && sandbox.ErrorCodeOf(err) != sandbox.ErrorSpaceNotFound {
 		return err
 	}
 	s.mu.Lock()

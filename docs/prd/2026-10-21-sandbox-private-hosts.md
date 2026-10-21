@@ -1,9 +1,12 @@
 # Private hosts for a member's own sandboxed agents, asked for by the AI (2026-10-21)
 
-Status: slice 1 built (2026-10-21): `egressHosts` in the protocol, the
-conformance step `egressHosts` (`SANDBOX_PRIVATE_HOST`), the reference
-implementation; the full suite passes against it with an internal host
-listed. Slices 2–3 proposed. Owner: the Sandbox Protocol (`sandbox/protocol`,
+Status: slices 1–2 built (2026-10-21). Slice 1: `egressHosts` in the
+protocol, the conformance step `egressHosts` (`SANDBOX_PRIVATE_HOST`), the
+reference implementation; the full suite passes against it with an
+internal host listed. Slice 2: the desktop's list (Settings → Agent sandbox
+→ Private hosts, `protocol.ValidPrivateHost`), `bnbloc-own` and its apply
+rule (`plan_own_machine`), the bridge's machine per drive
+(`BNBLOC_SANDBOX_OWN_MACHINE`, `driveKey.ownMachine`). Slice 3 proposed. Owner: the Sandbox Protocol (`sandbox/protocol`,
 `docs/architecture/sandbox-protocol.md`), the desktop's sandbox adapter
 (`apps/desktop/src-tauri/src/internal_ext/sandbox*.rs`), the bridge's
 sandbox runtime (`services/bridge/sandbox.go`), find-a-way
@@ -58,12 +61,24 @@ What blocks it today, checked against the code:
   and `bnbloc-own` (the member's own drives only, egress `public` plus
   their private hosts). With no private hosts there is one machine, as
   today.
-- The bridge picks the machine per drive: own drive → `bnbloc-own` when it
-  is ready, else `bnbloc`; borrowed and platform drives → `bnbloc`, always.
-  A borrower's prompt never runs where a private host is open. Both
-  machines share the same workspaces root; a session never moves between
-  machines (the session key carries the machine, as it carries the
-  execution kind today).
+- The bridge picks the machine per drive: own drive → `bnbloc-own` while
+  the desktop hands it over, else `bnbloc`; borrowed and platform drives →
+  `bnbloc`, always. A borrower's prompt never runs where a private host is
+  open. Both machines share the same workspaces root; a session never
+  moves between machines (the session key carries the machine, as it
+  carries the execution kind today).
+- The desktop hands `bnbloc-own` over (`BNBLOC_SANDBOX_OWN_MACHINE`) once
+  it runs with the member's hosts, and withdraws it when it is no longer
+  wanted (mode not `all`, no hosts) or could not be created; the handoff
+  changing restarts the bridge through the stabilized path, which waits
+  while turns run. While handed over, the machine briefly missing (a
+  recreate) is `sandbox_starting`, retried; an own drive never falls back
+  to `bnbloc` mid-session.
+- The own machine follows one rule (`plan_own_machine`): created beside a
+  ready shared machine (whose prewarm pulled the image), recreated when its
+  hosts differ, deleted when not wanted, and never recreated or deleted
+  while an own turn runs on it: the bridge counts those in `turns.json`
+  (`ownMachine`), and the watch (every 15 s) applies a waiting change.
 
 ### 2.2 The protocol: `public` with extra hosts
 
@@ -121,8 +136,12 @@ What blocks it today, checked against the code:
 ### 2.4 Settings and policy
 
 - Desktop Settings → Agent sandbox → **Private hosts**: the member's list
-  (host, port, added when, from which room), add and remove. A removal
-  applies like an addition.
+  (host, added when, from which room), add and remove, and "Apply again"
+  (re-resolves the names). A host opens on any port: the reference cannot
+  hold a name's port (§2.2), so the list does not pretend to. A removal
+  applies like an addition. Shown only when the runtime advertises
+  `egressHosts`; used only in mode `all` (in `borrowed` the member's own
+  runs are on the host, which reaches the hosts itself).
 - Organization → Settings → **Sandbox private hosts** (tenant policy,
   `manage_org`): `off` (members may not allow any), `listed` (only hosts on
   the organization's list; default) or `any` (members choose), plus the

@@ -28,6 +28,11 @@ pub(crate) fn is_loopback_host(host: &str) -> bool {
     host == LOOPBACK_IP || host == "localhost"
 }
 
+/// Whether `ip` is a loopback address (IPv4 127/8, IPv6 ::1).
+pub(crate) fn is_loopback_ip(ip: std::net::IpAddr) -> bool {
+    ip.is_loopback()
+}
+
 /// A validated loopback http URL with an explicit port.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct LoopbackHttp {

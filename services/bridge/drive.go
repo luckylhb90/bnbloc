@@ -60,8 +60,10 @@ type drive struct {
 	startGate   gate
 	unsandboxed string
 	// ownSandbox: the sandboxed drive runs on its owner's own behalf and
-	// gets the owner's forwarded environment (sandboxDecision.ownerEnv).
+	// gets the owner's forwarded environment (sandboxDecision.ownerEnv);
+	// ownMachine: it runs on the owner's own machine (driveKey.ownMachine).
 	ownSandbox bool
+	ownMachine bool
 
 	reservationID string // stage 5: the borrow's reservation ("" = none)
 	target        string // stage 6
@@ -94,7 +96,7 @@ func (d *drive) ref() jobRef {
 
 // key is the drive's slot: its session and drive lock.
 func (d *drive) key() driveKey {
-	return driveKey{room: d.job.RoomID, core: d.core, provider: d.job.Provider, sandboxed: d.prepareExec != nil, owner: d.seatOwner, requester: d.seatRequester()}
+	return driveKey{room: d.job.RoomID, core: d.core, provider: d.job.Provider, sandboxed: d.prepareExec != nil, ownMachine: d.ownMachine, owner: d.seatOwner, requester: d.seatRequester()}
 }
 
 // seatRequester is the requester whose seat the drive takes: none for the
@@ -330,7 +332,7 @@ func (b *Bridge) bindTarget(ctx context.Context, d *drive) *refusal {
 
 // driveTurn is stage 7: report the job running, then drive it.
 func (b *Bridge) driveTurn(ctx context.Context, d *drive) (driveResult, error) {
-	defer b.turnRunning(d.core)() // the desktop applies core updates only when idle
+	defer b.turnRunning(d.core, d.ownMachine)() // the desktop applies core updates (and own-machine changes) only when idle
 	running := d.agent()
 	running["targetId"], running["sandboxed"] = d.target, d.prepareExec != nil
 	if c := d.content; c.expert != nil {
@@ -468,7 +470,11 @@ func (b *Bridge) detached(ctx context.Context) context.Context {
 type driveKey struct {
 	room, core, provider string
 	sandboxed            bool
-	owner, requester     string
+	// ownMachine: the sandboxed slot runs on the member's own machine
+	// (SandboxConfig.OwnMachine, the private hosts they allowed), never the
+	// shared one: a session, workspace and space of its own.
+	ownMachine       bool
+	owner, requester string
 }
 
 // sessionKey is one channel's session of a drive slot

@@ -3,6 +3,7 @@ import { useTenantPolicy } from "@/lib/tenantPolicy";
 import { desktop } from "@/lib/desktop";
 import {
   canRestartVm,
+  privateHostsLine,
   SANDBOX_MODES,
   shellEnvReloadText,
   statusLine,
@@ -16,6 +17,8 @@ import { Segment } from "@/ui/Segment";
 import { useToast } from "@/ui/Toast";
 import { errorText } from "@/lib/errors";
 import { useVisiblePoll } from "@/lib/useVisiblePoll";
+import { relativeTime } from "@/lib/format";
+import { routeHash } from "@/lib/hashRoute";
 
 const TONE_CLASS = {
   muted: "text-[var(--color-fg-subtle)]",
@@ -32,9 +35,10 @@ export function AgentSandbox() {
   const inShell = desktop.available();
   const toast = useToast();
   const [status, setStatus] = useState<SandboxStatus | null>(null);
-  const [busy, setBusy] = useState<"mode" | "restart" | "env" | "shell" | null>(null);
+  const [busy, setBusy] = useState<"mode" | "restart" | "env" | "shell" | "host" | null>(null);
   // The env names being edited; null = showing the saved list.
   const [envDraft, setEnvDraft] = useState<string | null>(null);
+  const [hostDraft, setHostDraft] = useState("");
   // The organization's policy: when it requires the sandbox for borrowing,
   // this member's agents cannot be borrowed while the sandbox is off/not ready.
   const requiredForBorrow = useTenantPolicy()?.requireSandboxForBorrow ?? false;
@@ -48,7 +52,12 @@ export function AgentSandbox() {
   }, []);
 
   // Poll faster while the VM is coming up.
-  const settling = status?.state === "starting" || status?.state === "installing";
+  const hostsState = status?.privateHosts.state;
+  const settling =
+    status?.state === "starting" ||
+    status?.state === "installing" ||
+    hostsState === "applying" ||
+    hostsState === "waiting";
   useEffect(() => {
     if (inShell) void load();
   }, [inShell, load]);
@@ -87,6 +96,18 @@ export function AgentSandbox() {
     });
   };
 
+  const addHost = () => {
+    const host = hostDraft.trim();
+    if (busy || host === "") return;
+    void run("host", () => desktop.addSandboxPrivateHost(host), `${host} added`).then((ok) => {
+      if (ok) setHostDraft("");
+    });
+  };
+  const removeHost = (host: string) => {
+    if (busy) return;
+    void run("host", () => desktop.removeSandboxPrivateHost(host), `${host} removed`);
+  };
+
   // Read the login shell's environment again; the bridge and the agents
   // restart with it.
   const reloadShellEnv = async () => {
@@ -108,6 +129,8 @@ export function AgentSandbox() {
   };
 
   const line = status ? statusLine(status) : null;
+  const hosts = status?.privateHosts;
+  const hostsLine = hosts ? privateHostsLine(hosts) : null;
   const mode = status?.mode ?? "borrowed";
 
   return (
@@ -178,6 +201,79 @@ export function AgentSandbox() {
             </Button>
           </div>
         </div>
+        {hosts && hosts.state !== "unsupported" && (
+          <div className="flex flex-col gap-1.5 border-t border-[var(--color-border)] pt-3">
+            <label htmlFor="sandbox-private-host" className="text-sm font-medium">
+              Private hosts
+            </label>
+            <p className="text-xs text-[var(--color-fg-muted)]">
+              The VM reaches the public internet but no private address. List a host on your network your own agents
+              need there, such as your team's package registry: a name like npm.internal.example or an address. It
+              opens on any port, and so does anything else at its address. Runs of your agents by other members never
+              reach it.
+            </p>
+            {hosts.hosts.length > 0 && (
+              <ul className="flex flex-col divide-y divide-[var(--color-border)] text-sm">
+                {hosts.hosts.map((h) => (
+                  <li key={h.host} className="flex items-center justify-between gap-3 py-1.5">
+                    <span className="min-w-0 truncate">
+                      <span className="font-mono">{h.host}</span>
+                      <span className="ml-2 text-xs text-[var(--color-fg-subtle)]">
+                        {hosts.applied.includes(h.host) ? "open" : "not open yet"}
+                        {h.addedAtMs ? ` · added ${relativeTime(h.addedAtMs)}` : ""}
+                        {h.roomId ? (
+                          <>
+                            {" · "}
+                            <a className="underline" href={routeHash({ kind: "room", roomId: h.roomId })}>
+                              from a room
+                            </a>
+                          </>
+                        ) : null}
+                      </span>
+                    </span>
+                    <Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => removeHost(h.host)}>
+                      Remove
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="flex items-center gap-2">
+              <Input
+                id="sandbox-private-host"
+                className="font-mono"
+                placeholder="npm.internal.example"
+                value={hostDraft}
+                spellCheck={false}
+                autoCapitalize="none"
+                onChange={(e) => setHostDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") addHost();
+                }}
+              />
+              <Button size="sm" disabled={busy !== null || hostDraft.trim() === ""} onClick={addHost}>
+                {busy === "host" ? "Saving…" : "Add"}
+              </Button>
+            </div>
+            {hostsLine && (
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <span className={`min-w-0 text-xs ${TONE_CLASS[hostsLine.tone]}`}>{hostsLine.text}</span>
+                {(hosts.state === "ready" || hosts.state === "error") && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={busy !== null}
+                    onClick={() =>
+                      void run("host", () => desktop.applySandboxPrivateHosts(), "Applying your private hosts again")
+                    }
+                  >
+                    Apply again
+                  </Button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--color-border)] pt-3">
           <p className="min-w-0 flex-1 text-xs text-[var(--color-fg-muted)]">
             Your agents get the variables your login shell exports (such as in ~/.zshrc or ~/.zprofile), read when the

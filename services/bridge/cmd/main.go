@@ -109,6 +109,7 @@ func main() {
 		VMExec:          strings.TrimSpace(config.FromEnvRaw("BNBLOC_SANDBOX_VMEXEC")),
 		Machine:         strings.TrimSpace(config.FromEnvRaw("BNBLOC_SANDBOX_MACHINE")),
 		WorkspacesRoot:  strings.TrimSpace(config.FromEnvRaw("BNBLOC_SANDBOX_WORKSPACES_ROOT")),
+		OwnMachine:      strings.TrimSpace(config.FromEnvRaw("BNBLOC_SANDBOX_OWN_MACHINE")),
 		MountsDir:       mountsDir,
 		MountGuestRoots: mountRoots,
 	}

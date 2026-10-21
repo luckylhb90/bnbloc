@@ -200,6 +200,19 @@ to a core.
   the environment its agent needs, so an own sandboxed run whose agent
   reports an error ends its notice with a pointer to this setting
   (`docs/bugs/2026-10-13-demo-app-build-issues.md`).
+- **Private hosts: the own machine.** A member who lists private hosts in
+  Settings → Agent sandbox → "Private hosts" (mode `all`, a runtime with
+  `egressHosts`) gets a second machine, `bnbloc-own`, whose egress opens
+  them beside the public internet; the desktop hands it over as
+  `BNBLOC_SANDBOX_OWN_MACHINE` once it runs
+  (`docs/prd/2026-10-21-sandbox-private-hosts.md`). While it is set, every
+  `ownerEnv` drive runs there and nothing else ever does: borrowed,
+  platform and foreign-content drives stay on `bnbloc`. The slot key
+  carries the machine (`driveKey.ownMachine`), so a session, workspace and
+  space never move between machines; the own machine missing (the desktop
+  recreating it for a change of hosts) is a retried `sandbox_starting`.
+  `turns.json` counts the turns on it (`ownMachine`): the desktop recreates
+  it only when none runs.
 - **Agent-host rooms.** Room discovery passes `includeAgentHost=1`; rooms
   listed in `agentHostRooms` (the owner only hosts a platform agent there)
   are streamed and served, but never live-synced, and realtime takes no

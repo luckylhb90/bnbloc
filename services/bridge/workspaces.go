@@ -116,6 +116,8 @@ type workspaceRecord struct {
 	Core      string `json:"core"`
 	Provider  string `json:"provider"`
 	Sandboxed bool   `json:"sandboxed,omitempty"`
+	// OwnMachine: the slot runs on the member's own sandbox machine.
+	OwnMachine bool `json:"ownMachine,omitempty"`
 	// SeatOwner and Requester are the slot's seat (driveKey): empty for
 	// the owner's own.
 	SeatOwner   string            `json:"seatOwner,omitempty"`
@@ -165,7 +167,7 @@ func newAgentWorkspaces(dir string) *agentWorkspaces {
 		if r.WorkspaceID == "" {
 			continue
 		}
-		k := driveKey{room: r.Room, core: r.Core, provider: r.Provider, sandboxed: r.Sandboxed, owner: r.SeatOwner, requester: r.Requester}
+		k := driveKey{room: r.Room, core: r.Core, provider: r.Provider, sandboxed: r.Sandboxed, ownMachine: r.OwnMachine, owner: r.SeatOwner, requester: r.Requester}
 		shared := &workspaceShared{fence: r.Fence}
 		if r.Records != nil {
 			shared.room = *r.Records
@@ -361,7 +363,7 @@ func (w *agentWorkspaces) saveLocked() {
 	}
 	doc := workspacesDoc{Workspaces: make([]workspaceRecord, 0, len(w.m))}
 	for k, ws := range w.m {
-		rec := workspaceRecord{Room: k.room, Core: k.core, Provider: k.provider, Sandboxed: k.sandboxed, SeatOwner: k.owner, Requester: k.requester, WorkspaceID: ws.id, Copies: ws.copies}
+		rec := workspaceRecord{Room: k.room, Core: k.core, Provider: k.provider, Sandboxed: k.sandboxed, OwnMachine: k.ownMachine, SeatOwner: k.owner, Requester: k.requester, WorkspaceID: ws.id, Copies: ws.copies}
 		if ws.shared != nil {
 			ws.shared.mu.Lock()
 			rec.Fence = ws.shared.fence
@@ -389,6 +391,9 @@ func (w *agentWorkspaces) saveLocked() {
 		}
 		if a.Sandboxed != b.Sandboxed {
 			return !a.Sandboxed
+		}
+		if a.OwnMachine != b.OwnMachine {
+			return !a.OwnMachine
 		}
 		if a.SeatOwner != b.SeatOwner {
 			return a.SeatOwner < b.SeatOwner

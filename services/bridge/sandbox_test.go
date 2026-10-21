@@ -26,7 +26,8 @@ import (
 const sandboxAdminToken = "admin-secret-bearer"
 
 // fakeSandboxd is a Sandbox Protocol endpoint holding the desktop's machine
-// "bnbloc": it records space ensures and mints numbered exec tokens.
+// "bnbloc" (and "bnbloc-own" when ownState is set): it records space
+// ensures and mints numbered exec tokens.
 type fakeSandboxd struct {
 	srv     *httptest.Server
 	mu      sync.Mutex
@@ -35,6 +36,11 @@ type fakeSandboxd struct {
 	minted  int
 	ttls    []int64 // each mint's requested TTL (seconds)
 	state   sandbox.State
+	// ownState is the own machine's state ("" = no such machine).
+	ownState sandbox.State
+	// ensureMachines and mintMachines name the machine of each ensure and
+	// each mint, in order.
+	ensureMachines, mintMachines []string
 	// calls is every space call in order: "ensure", "delete", "delete?purge".
 	calls []string
 	// deleteFails makes a space delete answer 500; deleteMissing answers
@@ -73,21 +79,33 @@ func newFakeSandboxd(t *testing.T) *fakeSandboxd {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		p := r.URL.Path
+		machine := "bnbloc"
+		if strings.HasPrefix(p, sandbox.MachinePath("bnbloc-own")) && f.ownState != "" {
+			machine = "bnbloc-own"
+		}
 		switch {
+		case strings.HasPrefix(p, sandbox.MachinePath("bnbloc-own")) && f.ownState == "":
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":{"code":"machine_not_found","message":"no such machine"}}`))
 		case p == sandbox.PathDiscover:
 			_ = json.NewEncoder(w).Encode(sandbox.Discovery{Name: "fake", Version: "1", Contract: sandbox.ContractV1,
 				Protocol:     sandbox.ProtocolRange{Min: "1.0", Max: "1.0"},
 				Capabilities: f.advertised(),
 				Backend:      sandbox.Backend{Name: "fake", Isolation: sandbox.IsolationMicroVM}})
-		case p == sandbox.MachinePath("bnbloc") && r.Method == http.MethodGet:
-			_ = json.NewEncoder(w).Encode(sandbox.Machine{ID: "m1", Name: "bnbloc", State: f.state})
-		case strings.HasPrefix(p, sandbox.SpacesPath("bnbloc")+"/") && strings.HasSuffix(p, "/exec-tokens"):
+		case p == sandbox.MachinePath(machine) && r.Method == http.MethodGet:
+			state := f.state
+			if machine == "bnbloc-own" {
+				state = f.ownState
+			}
+			_ = json.NewEncoder(w).Encode(sandbox.Machine{ID: "m-" + machine, Name: machine, State: state})
+		case strings.HasPrefix(p, sandbox.SpacesPath(machine)+"/") && strings.HasSuffix(p, "/exec-tokens"):
 			f.minted++
+			f.mintMachines = append(f.mintMachines, machine)
 			var req sandbox.ExecTokenRequest
 			_ = json.NewDecoder(r.Body).Decode(&req)
 			f.ttls = append(f.ttls, req.TTLSeconds)
 			_ = json.NewEncoder(w).Encode(sandbox.ExecToken{Token: "tok-" + string(rune('0'+f.minted)), ExpiresAtMs: 99})
-		case strings.HasPrefix(p, sandbox.SpacesPath("bnbloc")+"/") && r.Method == http.MethodDelete:
+		case strings.HasPrefix(p, sandbox.SpacesPath(machine)+"/") && r.Method == http.MethodDelete:
 			call := "delete"
 			if r.URL.Query().Get("purge") == "1" {
 				call += "?purge"
@@ -104,7 +122,7 @@ func newFakeSandboxd(t *testing.T) *fakeSandboxd {
 				return
 			}
 			w.WriteHeader(http.StatusNoContent)
-		case strings.HasPrefix(p, sandbox.SpacesPath("bnbloc")+"/") && r.Method == http.MethodPut:
+		case strings.HasPrefix(p, sandbox.SpacesPath(machine)+"/") && r.Method == http.MethodPut:
 			var req sandbox.SpaceRequest
 			_ = json.NewDecoder(r.Body).Decode(&req)
 			f.calls = append(f.calls, "ensure")
@@ -114,7 +132,8 @@ func newFakeSandboxd(t *testing.T) *fakeSandboxd {
 				return
 			}
 			f.ensures = append(f.ensures, req)
-			f.spaces = append(f.spaces, strings.TrimPrefix(p, sandbox.SpacesPath("bnbloc")+"/"))
+			f.ensureMachines = append(f.ensureMachines, machine)
+			f.spaces = append(f.spaces, strings.TrimPrefix(p, sandbox.SpacesPath(machine)+"/"))
 			_ = json.NewEncoder(w).Encode(sandbox.Space{Name: "s", User: "sp-s", UID: 20001})
 		default:
 			w.WriteHeader(http.StatusNotFound)
@@ -619,6 +638,53 @@ func TestSandbox_ownDriveForwardsTheOwnersEnv_borrowedNever(t *testing.T) {
 	}
 }
 
+// An own drive runs on the member's own machine (the one that reaches the
+// private hosts they listed) in a space and workspace of its own; a
+// borrowed turn stays on the shared machine.
+func TestSandbox_ownDriveRunsOnTheOwnMachine_borrowedOnTheShared(t *testing.T) {
+	gw := newSandboxGateway(t, "room-1", false)
+	sbx := newFakeSandboxd(t)
+	sbx.ownState = sandbox.StateRunning
+	prov := &sandboxProv{supports: true}
+	b, _ := sandboxBridge(t, gw, sbx, SandboxAll, prov)
+	b.sandbox.cfg.OwnMachine = "bnbloc-own"
+	ctx := context.Background()
+
+	b.runBridgeJob(ctx, job("job-1", "alice"))
+	if prov.opts.Execution == nil || prov.opts.Execution.Sandbox.Machine != "bnbloc-own" {
+		t.Fatalf("own drive execution = %+v; want the own machine", prov.opts.Execution)
+	}
+	b.runBridgeJob(ctx, job("job-2", "bob"))
+	if prov.opts.Execution == nil || prov.opts.Execution.Sandbox.Machine != "bnbloc" {
+		t.Fatalf("borrowed turn execution = %+v; want the shared machine", prov.opts.Execution)
+	}
+	if !slices.Equal(sbx.ensureMachines, []string{"bnbloc-own", "bnbloc"}) || !slices.Equal(sbx.mintMachines, []string{"bnbloc-own", "bnbloc"}) {
+		t.Fatalf("ensures on %v, mints on %v", sbx.ensureMachines, sbx.mintMachines)
+	}
+	if len(prov.workdirs) != 2 || prov.workdirs[0] == prov.workdirs[1] {
+		t.Fatalf("workdirs = %v; want one per machine", prov.workdirs)
+	}
+}
+
+// The own machine missing (the desktop recreating it for a change of
+// hosts) is a sandbox not up yet: retried, never run on the shared machine,
+// whose session is another one.
+func TestSandbox_ownMachineMissingIsSandboxStarting_neverTheShared(t *testing.T) {
+	gw := newSandboxGateway(t, "room-1", false)
+	sbx := newFakeSandboxd(t)
+	prov := &sandboxProv{supports: true}
+	b, _ := sandboxBridge(t, gw, sbx, SandboxAll, prov)
+	b.sandbox.cfg.OwnMachine = "bnbloc-own" // handed over, but not there now
+
+	b.runBridgeJob(context.Background(), job("job-1", "alice"))
+	if len(sbx.ensureMachines) != 0 || prov.turns != 0 {
+		t.Fatalf("ensures on %v, %d turns; want none", sbx.ensureMachines, prov.turns)
+	}
+	if st := gw.lastStatus(); st["status"] != "failed" || st["failureReason"] != string(store.FailureSandboxStarting) {
+		t.Fatalf("status = %v", st)
+	}
+}
+
 // failingSandboxProv is a sandboxExec core whose every turn fails: busy
 // once, then idle and failed with the agent's message (default: a missing
 // key).
@@ -722,6 +788,10 @@ func TestSandboxSpaceName(t *testing.T) {
 	seat := sandboxSpaceName(driveKey{room: "room-1", core: "core-a", provider: "codex", requester: "bob"})
 	if seat == a || seat == sandboxSpaceName(driveKey{room: "room-1", core: "core-a", provider: "codex", requester: "carol"}) {
 		t.Fatalf("seats share a space: %s", seat)
+	}
+	// The own machine's space is a space of its own.
+	if own := sandboxSpaceName(driveKey{room: "room-1", core: "core-a", provider: "codex", ownMachine: true}); own == a {
+		t.Fatalf("the own machine shares the space name %s", own)
 	}
 	long := sandboxSpaceName(driveKey{room: "r", core: "A Very Long Core Name", provider: "acp:hermes/agent"})
 	if len("sp-"+long) > 32 || strings.ContainsAny(long, " :/_.") {

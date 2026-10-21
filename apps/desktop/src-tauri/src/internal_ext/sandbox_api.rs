@@ -14,7 +14,10 @@ const PROTOCOL_VERSION: (u32, u32) = (1, 0);
 /// per-room spaces whose workspaces come from the shared workspaces root.
 pub(super) const REQUIRED_CAPABILITIES: [&str; 3] = ["exec", "spaces", "shares"];
 /// Advertised when the implementation offers the `public` egress mode.
-const CAPABILITY_EGRESS: &str = "egressPolicy";
+pub(super) const CAPABILITY_EGRESS: &str = "egressPolicy";
+/// Advertised when `public` egress may carry rules: hosts reachable beside
+/// the public internet, private ones included.
+pub(super) const CAPABILITY_EGRESS_HOSTS: &str = "egressHosts";
 
 const DISCOVER_TIMEOUT: Duration = Duration::from_secs(2);
 const LIFECYCLE_TIMEOUT: Duration = Duration::from_secs(120);
@@ -114,6 +117,9 @@ pub struct MachineView {
     pub last_op_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// The hosts its egress opens beside the public internet.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub egress_hosts: Vec<String>,
 }
 
 pub(super) fn parse_machine(raw: &[u8]) -> Result<MachineView, String> {
@@ -138,13 +144,25 @@ pub(super) fn parse_machine(raw: &[u8]) -> Result<MachineView, String> {
         last_op: text("/timings/lastOp").filter(|s| !s.is_empty()),
         last_op_ms: num("/timings/lastOpMs"),
         error: text("/error").filter(|s| !s.is_empty()),
+        egress_hosts: value
+            .pointer("/egress/rules")
+            .and_then(Value::as_array)
+            .map(|rules| {
+                rules
+                    .iter()
+                    .filter_map(|r| r.get("host").and_then(Value::as_str))
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default(),
     })
 }
 
-/// The machine the desktop creates: the package's guest profile, the one
+/// A machine the desktop creates: the package's guest profile, the one
 /// workspaces root shared at the identical guest path, public-internet
 /// egress when offered (private ranges, host loopback and link-local stay
-/// blocked), labelled with the member.
+/// blocked, but for `hosts` when the runtime can open them), labelled with
+/// the member.
 pub(super) fn create_machine_request(
     name: &str,
     guest: &crate::internal_ext::sidecar_model::GuestProfile,
@@ -152,6 +170,7 @@ pub(super) fn create_machine_request(
     share: &str,
     discovery: &Discovery,
     owner: &str,
+    hosts: &[String],
 ) -> Value {
     let root = workspaces_root.to_string_lossy();
     let mut req = json!({
@@ -167,6 +186,9 @@ pub(super) fn create_machine_request(
     }
     if discovery.has(CAPABILITY_EGRESS) {
         req["egress"] = json!({"mode": "public"});
+        if discovery.has(CAPABILITY_EGRESS_HOSTS) && !hosts.is_empty() {
+            req["egress"]["rules"] = hosts.iter().map(|h| json!({"host": h})).collect();
+        }
     }
     if !owner.trim().is_empty() {
         req["labels"] = json!({"owner": owner.trim()});
@@ -394,6 +416,7 @@ mod tests {
             "workspaces",
             &d,
             "me@example",
+            &[],
         );
         assert_eq!(
             req,
@@ -421,9 +444,40 @@ mod tests {
             "workspaces",
             &no_egress,
             "",
+            &["npm.internal.example".to_string()],
         );
         assert!(
             req.get("egress").is_none() && req.get("cpus").is_none() && req.get("labels").is_none()
+        );
+    }
+
+    /// The own machine's hosts go in as public egress rules, only when the
+    /// runtime can open them.
+    #[test]
+    fn create_request_lists_private_hosts_only_with_egress_hosts() {
+        let mut d = parse_discovery(DISCOVERY.as_bytes()).unwrap();
+        let guest = GuestProfile {
+            image: "img:1".into(),
+            cpus: 0,
+            memory_mib: 0,
+        };
+        let hosts = vec!["npm.internal.example".to_string(), "10.0.0.5".to_string()];
+        let req = |d: &Discovery| {
+            create_machine_request(
+                "bnbloc-own",
+                &guest,
+                std::path::Path::new("/w"),
+                "workspaces",
+                d,
+                "",
+                &hosts,
+            )
+        };
+        assert_eq!(req(&d)["egress"], json!({"mode": "public"}));
+        d.capabilities.push(CAPABILITY_EGRESS_HOSTS.into());
+        assert_eq!(
+            req(&d)["egress"],
+            json!({"mode": "public", "rules": [{"host": "npm.internal.example"}, {"host": "10.0.0.5"}]})
         );
     }
 
@@ -439,6 +493,12 @@ mod tests {
         assert_eq!(m.boot_ms, Some(512));
         assert_eq!(m.last_op.as_deref(), Some("start"));
         assert_eq!(m.last_op_ms, Some(190));
+        assert!(m.egress_hosts.is_empty());
+        let own = parse_machine(
+            br#"{"name":"bnbloc-own","state":"running","egress":{"mode":"public","rules":[{"host":"npm.internal.example"}]}}"#,
+        )
+        .unwrap();
+        assert_eq!(own.egress_hosts, vec!["npm.internal.example".to_string()]);
     }
 
     #[test]

@@ -184,6 +184,7 @@ async fn sandbox_live_bundle_launch_discover_prewarm_restart() {
             "workspaces",
             &discovery,
             "me",
+            &[],
         ))
         .await
         .expect("create machine");

@@ -10,11 +10,16 @@
 //!
 //! 1. polls Sandbox Protocol discover until it answers (else kills it and
 //!    the supervise loop restarts it with backoff);
-//! 2. prewarms the ONE machine the desktop owns (`bnbloc`): pull the
-//!    package's guest image, create (or start) the machine with the shared
-//!    workspaces root; mode `off` deletes it instead;
-//! 3. watches the machine and re-prewarms it when it is gone;
-//! 4. hands the bridge `BNBLOC_SANDBOX_*` (memory/env only) while the
+//! 2. prewarms the shared machine (`bnbloc`): pull the package's guest
+//!    image, create (or start) the machine with the shared workspaces root;
+//!    mode `off` deletes it instead;
+//! 3. runs the member's own machine (`bnbloc-own`) beside it while their own
+//!    runs are sandboxed and they listed private hosts the runtime can open
+//!    (docs/prd/2026-10-21-sandbox-private-hosts.md): the same machine but
+//!    for its egress, recreated for a change of hosts only when no own turn
+//!    runs there;
+//! 4. watches the machines and re-prewarms one that is gone;
+//! 5. hands the bridge `BNBLOC_SANDBOX_*` (memory/env only) while the
 //!    sandbox is ready; the bridge-stabilizing watcher restarts the bridge
 //!    when that handoff appears, disappears or the mode changes.
 //!
@@ -26,17 +31,21 @@ use tauri::Manager;
 
 use crate::child_process::STOP_GRACE;
 use crate::internal_ext::sandbox_api::{
-    create_machine_request, Discovery, MachineView, SandboxApi,
+    create_machine_request, Discovery, MachineView, SandboxApi, CAPABILITY_EGRESS,
+    CAPABILITY_EGRESS_HOSTS,
 };
 use crate::internal_ext::sandbox_bundle;
 use crate::internal_ext::sidecar_model::{ComponentKind, GuestProfile, SidecarSpec};
 use crate::internal_ext::sidecar_util::{cache_stem, home_env};
 use crate::internal_ext::Adapter;
 use crate::secret::Secret;
-use crate::settings::SandboxMode;
+use crate::settings::{PrivateHost, SandboxMode};
 
-/// The machine the desktop owns (`BNBLOC_SANDBOX_MACHINE`).
+/// The shared machine (`BNBLOC_SANDBOX_MACHINE`).
 pub(super) const MACHINE_NAME: &str = "bnbloc";
+/// The member's own machine (`BNBLOC_SANDBOX_OWN_MACHINE`): only their own
+/// runs, egress opening their private hosts.
+pub(super) const OWN_MACHINE_NAME: &str = "bnbloc-own";
 /// The share carrying the workspaces root into the machine.
 const WORKSPACES_SHARE: &str = "workspaces";
 /// The one host directory shared into the machine, under the member's home
@@ -49,6 +58,7 @@ pub(super) const ENV_VMEXEC: &str = "BNBLOC_SANDBOX_VMEXEC";
 pub(super) const ENV_MODE: &str = "BNBLOC_SANDBOX_MODE";
 pub(super) const ENV_MACHINE: &str = "BNBLOC_SANDBOX_MACHINE";
 pub(super) const ENV_WORKSPACES_ROOT: &str = "BNBLOC_SANDBOX_WORKSPACES_ROOT";
+pub(super) const ENV_OWN_MACHINE: &str = "BNBLOC_SANDBOX_OWN_MACHINE";
 /// The names the member lets into their own sandboxed runs (comma list).
 pub(super) const ENV_FORWARD: &str = "BNBLOC_SANDBOX_ENV";
 /// The bridge-stabilizing watcher's key for the sandbox handoff (a slash
@@ -99,9 +109,72 @@ pub(super) struct Launch {
     /// cleared when the machine is lost, the mode turns off, or the launch
     /// ends. A deliberate VM restart keeps it (same URL, token and machine).
     pub(super) handoff: bool,
-    /// A lifecycle operation (prewarm / restart / delete) is in flight.
+    /// A lifecycle operation (prewarm / restart / delete, of either
+    /// machine) is in flight.
     pub(super) busy: bool,
     pub(super) last_prewarm_attempt: Option<Instant>,
+    pub(super) own: OwnLaunch,
+}
+
+/// The member's own machine within a launch.
+#[derive(Default)]
+pub(super) struct OwnLaunch {
+    /// As last observed or created.
+    pub(super) machine: Option<MachineView>,
+    /// The bridge sends own drives there: set once it runs with the wanted
+    /// hosts; cleared when it is not wanted or could not be created (own
+    /// drives then run on the shared machine, the hosts blocked).
+    pub(super) handoff: bool,
+    /// A change of hosts waits for the own turns running there to end.
+    pub(super) waiting: bool,
+    pub(super) error: Option<String>,
+    pub(super) last_attempt: Option<Instant>,
+}
+
+/// What the own machine needs now (plan_own_machine).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum OwnPlan {
+    /// Not wanted and not there.
+    Absent,
+    /// Runs with the wanted hosts.
+    Keep,
+    Create,
+    /// Delete, then create with the wanted hosts.
+    Recreate,
+    Delete,
+    /// A change is due, but own turns run there: never stopped.
+    Wait,
+}
+
+/// The one rule for the own machine: `want` its hosts (None = not wanted),
+/// `observed` the machine as the runtime reports it, `own_turns` the turns
+/// running on it, `force` the member's "Apply again" (a host's addresses
+/// are resolved when the machine is created). A running machine is only
+/// recreated or deleted while no own turn runs there.
+pub(super) fn plan_own_machine(
+    want: Option<&[String]>,
+    observed: Option<&MachineView>,
+    own_turns: u32,
+    force: bool,
+) -> OwnPlan {
+    let busy = |m: &MachineView| own_turns > 0 && m.state == "running";
+    match (want, observed) {
+        (None, None) => OwnPlan::Absent,
+        (None, Some(m)) if busy(m) => OwnPlan::Wait,
+        (None, Some(_)) => OwnPlan::Delete,
+        (Some(_), None) => OwnPlan::Create,
+        (Some(hosts), Some(m)) => {
+            let same = hosts.len() == m.egress_hosts.len()
+                && hosts.iter().all(|h| m.egress_hosts.contains(h));
+            if m.state == "running" && same && !force {
+                OwnPlan::Keep
+            } else if busy(m) {
+                OwnPlan::Wait
+            } else {
+                OwnPlan::Recreate
+            }
+        }
+    }
 }
 
 #[derive(Default)]
@@ -120,6 +193,8 @@ pub(crate) struct BridgeHandoff {
     pub(crate) vmexec: PathBuf,
     pub(crate) machine: String,
     pub(crate) workspaces_root: PathBuf,
+    /// The member's own machine, while it runs with their private hosts.
+    pub(crate) own_machine: Option<String>,
 }
 
 /// The bridge env for `mode`, the member's forwarded names and the current
@@ -140,6 +215,9 @@ pub(crate) fn bridge_env(
             ENV_WORKSPACES_ROOT.into(),
             h.workspaces_root.to_string_lossy().into_owned(),
         ));
+        if let Some(own) = &h.own_machine {
+            env.push((ENV_OWN_MACHINE.into(), own.clone()));
+        }
         if !forward.is_empty() {
             env.push((ENV_FORWARD.into(), forward.join(",")));
         }
@@ -157,11 +235,12 @@ pub(super) fn bridge_fingerprint(
 ) -> Option<String> {
     let h = handoff.filter(|_| mode != SandboxMode::Off)?;
     Some(format!(
-        "{}|{}|{}|{}|{}|{}",
+        "{}|{}|{}|{}|{}|{}|{}",
         mode.as_str(),
         h.seq,
         h.url,
         h.machine,
+        h.own_machine.as_deref().unwrap_or_default(),
         h.vmexec.display(),
         forward.join(",")
     ))
@@ -225,6 +304,68 @@ pub(crate) fn forward_env_list(raw: &[String]) -> Result<Vec<String>, String> {
     }
 }
 
+/// The one rule for a private host a member lets their own sandboxed runs
+/// reach: the Go owner's (`sandbox/protocol.ValidPrivateHost`), as a copy
+/// pinned by `sandbox/protocol/testdata/private_hosts.json`
+/// (`private_host_rule_matches_go`). A lower-case DNS name of at least two
+/// labels or an IP literal; never a wildcard, URL, port, localhost, or a
+/// loopback, link-local, unspecified, broadcast or multicast address.
+pub(crate) fn valid_private_host(host: &str) -> bool {
+    use crate::internal_ext::loopback::{is_loopback_host, is_loopback_ip};
+    use std::net::IpAddr;
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        let ip = match ip {
+            IpAddr::V6(v6) => v6.to_ipv4_mapped().map_or(ip, IpAddr::V4),
+            v4 => v4,
+        };
+        return match ip {
+            IpAddr::V4(v4) => {
+                !(is_loopback_ip(v4.into())
+                    || v4.is_link_local()
+                    || v4.is_unspecified()
+                    || v4.is_broadcast()
+                    || v4.is_multicast())
+            }
+            IpAddr::V6(v6) => {
+                !(is_loopback_ip(v6.into())
+                    || v6.is_unspecified()
+                    || v6.is_multicast()
+                    || (v6.segments()[0] & 0xffc0) == 0xfe80)
+            }
+        };
+    }
+    let labels: Vec<&str> = host.split('.').collect();
+    if host.len() > 253 || labels.len() < 2 {
+        return false;
+    }
+    let shaped = labels.iter().all(|l| {
+        !l.is_empty()
+            && l.len() <= 63
+            && !l.starts_with('-')
+            && !l.ends_with('-')
+            && l.chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    });
+    // A last label of digits only is a malformed address, and localhost is
+    // the guest itself.
+    let last = labels[labels.len() - 1];
+    shaped && !last.chars().all(|c| c.is_ascii_digit()) && !is_loopback_host(last)
+}
+
+/// A host as the member typed it (spaces trimmed, lower-cased), or why it
+/// cannot be one.
+pub(crate) fn private_host(raw: &str) -> Result<String, String> {
+    let host = raw.trim().to_ascii_lowercase();
+    if valid_private_host(&host) {
+        Ok(host)
+    } else {
+        Err(format!(
+            "{:?} is not a host your agents can be allowed to reach: use a name like npm.internal.example or an address like 10.0.0.5 (no URL, port or wildcard; never localhost, link-local or metadata addresses).",
+            raw.trim()
+        ))
+    }
+}
+
 /// The status the Settings → Agent sandbox section renders.
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -250,6 +391,20 @@ pub struct SandboxStatus {
     pub timings: SandboxTimings,
     /// Commands of the selected runs go to the VM right now.
     pub handed_to_bridge: bool,
+    /// The member's private hosts and whether they are open.
+    pub private_hosts: PrivateHostsStatus,
+}
+
+/// Settings → Agent sandbox → Private hosts.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrivateHostsStatus {
+    pub hosts: Vec<PrivateHost>,
+    /// none | unsupported | inactive | waiting | applying | ready | error
+    pub state: &'static str,
+    pub message: String,
+    /// The hosts the own machine opens now.
+    pub applied: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
@@ -416,6 +571,7 @@ impl Adapter {
                 handoff: false,
                 busy: false,
                 last_prewarm_attempt: None,
+                own: OwnLaunch::default(),
             });
             state.seq
         };
@@ -472,6 +628,29 @@ impl Adapter {
             .try_state::<crate::AppState>()
             .map(|state| state.settings.lock().sandbox_env.clone())
             .unwrap_or_default()
+    }
+
+    /// The private hosts the member lets their own sandboxed runs reach.
+    fn sandbox_private_hosts(&self) -> Vec<PrivateHost> {
+        self.app
+            .try_state::<crate::AppState>()
+            .map(|state| state.settings.lock().sandbox_private_hosts.clone())
+            .unwrap_or_default()
+    }
+
+    /// The hosts the own machine should open, None when it is not wanted:
+    /// the member's own runs are sandboxed (mode all), they listed hosts,
+    /// and the runtime can open them.
+    fn own_machine_want(&self, discovery: &Discovery, has_guest: bool) -> Option<Vec<String>> {
+        let hosts: Vec<String> = self
+            .sandbox_private_hosts()
+            .into_iter()
+            .map(|h| h.host)
+            .filter(|h| valid_private_host(h))
+            .collect();
+        let able = discovery.has(CAPABILITY_EGRESS) && discovery.has(CAPABILITY_EGRESS_HOSTS);
+        (self.sandbox_mode() == SandboxMode::All && able && has_guest && !hosts.is_empty())
+            .then_some(hosts)
     }
 
     async fn sandbox_bring_up(&self, seq: u64) {
@@ -556,7 +735,173 @@ impl Adapter {
         } else {
             self.sandbox_prewarm(seq).await;
         }
+        self.sandbox_own_reconcile(seq, false).await;
         self.with_launch(seq, |launch| launch.busy = false);
+    }
+
+    /// Bring the own machine to what the member's hosts want, serialized
+    /// with the shared machine's operations (`busy`); a busy launch is
+    /// retried by the watch.
+    async fn sandbox_own_check(&self, seq: u64, force: bool) {
+        let claimed = self.with_launch(seq, |launch| {
+            if launch.busy || launch.discovery.is_none() {
+                return false;
+            }
+            launch.busy = true;
+            true
+        });
+        if claimed != Some(true) {
+            return;
+        }
+        self.sandbox_own_reconcile(seq, force).await;
+        self.with_launch(seq, |launch| launch.busy = false);
+    }
+
+    /// The own machine's step (plan_own_machine); the caller holds `busy`.
+    /// It is created only beside a ready shared machine (whose prewarm
+    /// pulled the image); after a create, the next one waits
+    /// REPREWARM_BACKOFF unless the member changed the hosts.
+    async fn sandbox_own_reconcile(&self, seq: u64, force: bool) {
+        let Some(api) = self.sandbox_api(seq) else {
+            return;
+        };
+        let Some((guest, discovery, shared_ready, retry_due)) = self.with_launch(seq, |l| {
+            (
+                l.guest.clone(),
+                l.discovery.clone().unwrap_or_default(),
+                l.phase == Phase::Ready,
+                l.own
+                    .last_attempt
+                    .map_or(true, |at| at.elapsed() >= REPREWARM_BACKOFF),
+            )
+        }) else {
+            return;
+        };
+        let want = self.own_machine_want(&discovery, guest.is_some());
+        if want.is_none() {
+            // Not wanted: own drives go back to the shared machine at once
+            // (the bridge restarts when idle); the machine goes when no own
+            // turn runs there.
+            self.with_launch(seq, |l| l.own.handoff = false);
+        }
+        let observed = match api.machine(OWN_MACHINE_NAME).await {
+            Ok(observed) => observed,
+            Err(e) => {
+                self.with_launch(seq, |l| {
+                    l.own.error = Some(format!("Could not reach the sandbox runtime: {e}"))
+                });
+                return;
+            }
+        };
+        let plan = plan_own_machine(
+            want.as_deref(),
+            observed.as_ref(),
+            self.own_machine_turns(),
+            force,
+        );
+        self.with_launch(seq, |l| {
+            l.own.machine = observed.clone();
+            l.own.waiting = plan == OwnPlan::Wait;
+        });
+        match plan {
+            OwnPlan::Absent | OwnPlan::Wait => {
+                if plan == OwnPlan::Absent {
+                    self.with_launch(seq, |l| l.own.error = None);
+                }
+            }
+            OwnPlan::Keep => {
+                self.with_launch(seq, |l| {
+                    l.own.handoff = true;
+                    l.own.error = None;
+                });
+            }
+            OwnPlan::Delete => {
+                let result = api.delete_machine(OWN_MACHINE_NAME).await;
+                eprintln!("[sandbox] own VM {OWN_MACHINE_NAME} deleted (no private hosts wanted)");
+                self.with_launch(seq, |l| {
+                    l.own.machine = None;
+                    l.own.error = result
+                        .err()
+                        .map(|e| format!("Could not stop your own VM: {e}"));
+                });
+            }
+            OwnPlan::Create | OwnPlan::Recreate => {
+                // A shared machine not up (its image not pulled yet, or being
+                // restarted) leaves the own one as it is.
+                if !shared_ready || (!retry_due && !force) {
+                    return;
+                }
+                let (Some(guest), Some(hosts)) = (guest, want) else {
+                    return;
+                };
+                self.with_launch(seq, |l| l.own.last_attempt = Some(Instant::now()));
+                let started = Instant::now();
+                let result = async {
+                    if plan == OwnPlan::Recreate {
+                        api.delete_machine(OWN_MACHINE_NAME)
+                            .await
+                            .map_err(|e| e.to_string())?;
+                    }
+                    let root =
+                        workspaces_root().ok_or("no home directory for the sandbox workspaces")?;
+                    let owner = self
+                        .app
+                        .try_state::<crate::AppState>()
+                        .map(|s| s.settings.lock().owner.clone())
+                        .unwrap_or_default();
+                    let req = create_machine_request(
+                        OWN_MACHINE_NAME,
+                        &guest,
+                        &root,
+                        WORKSPACES_SHARE,
+                        &discovery,
+                        &owner,
+                        &hosts,
+                    );
+                    api.create_machine(req).await.map_err(|e| e.to_string())
+                }
+                .await;
+                match result {
+                    Ok(machine) if machine.state == "running" => {
+                        eprintln!(
+                            "[sandbox] own VM {OWN_MACHINE_NAME} running with {} ({} ms)",
+                            hosts.join(", "),
+                            started.elapsed().as_millis()
+                        );
+                        self.with_launch(seq, |l| {
+                            l.own.machine = Some(machine);
+                            l.own.handoff = true;
+                            l.own.error = None;
+                        });
+                    }
+                    other => {
+                        let why = match other {
+                            Ok(m) => format!("it is {}", m.state),
+                            Err(e) => e,
+                        };
+                        eprintln!("[sandbox] own VM {OWN_MACHINE_NAME} not started: {why}");
+                        self.with_launch(seq, |l| {
+                            l.own.handoff = false;
+                            l.own.error = Some(format!(
+                                "Your own VM with private hosts did not start: {why}"
+                            ));
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    /// The member changed their private hosts (or asked to apply them
+    /// again): reconcile the own machine in the background.
+    pub(super) fn sandbox_private_hosts_changed(&self, force: bool) {
+        let Some(seq) = self.sandbox.lock().launch.as_ref().map(|l| l.seq) else {
+            return;
+        };
+        // The member's change is not a retry: no backoff.
+        self.with_launch(seq, |l| l.own.last_attempt = None);
+        let sup = self.clone();
+        tauri::async_runtime::spawn(async move { sup.sandbox_own_check(seq, force).await });
     }
 
     async fn sandbox_turn_off(&self, seq: u64) {
@@ -638,6 +983,9 @@ impl Adapter {
                         WORKSPACES_SHARE,
                         &discovery,
                         &owner,
+                        // Never a private host: borrowed and platform runs
+                        // execute here.
+                        &[],
                     );
                     api.create_machine(req)
                         .await
@@ -729,6 +1077,9 @@ impl Adapter {
             }
             Err(e) => self.sandbox_error(seq, format!("Could not reach the sandbox runtime: {e}")),
         }
+        // The own machine follows the hosts and the mode; a change that
+        // waited for own turns to end applies here.
+        self.sandbox_own_check(seq, false).await;
     }
 
     /// The member changed the mode: reconcile the machine in the background.
@@ -822,6 +1173,7 @@ impl Adapter {
             vmexec: launch.vmexec.clone()?,
             machine: MACHINE_NAME.to_string(),
             workspaces_root: workspaces_root()?,
+            own_machine: launch.own.handoff.then(|| OWN_MACHINE_NAME.to_string()),
         })
     }
 
@@ -853,6 +1205,15 @@ impl Adapter {
             last_error: state.last_error.clone(),
             timings: SandboxTimings::default(),
             handed_to_bridge: handoff && mode != SandboxMode::Off,
+            private_hosts: PrivateHostsStatus {
+                hosts: self.sandbox_private_hosts(),
+                ..Default::default()
+            },
+        };
+        status.private_hosts.state = if status.private_hosts.hosts.is_empty() {
+            "none"
+        } else {
+            "inactive"
         };
         let Some((Some(spec), sidecar_status, running)) = component else {
             return status;
@@ -872,6 +1233,9 @@ impl Adapter {
             return status;
         };
         status.isolation = launch.discovery.as_ref().map(|d| d.isolation.clone());
+        if let Some(discovery) = &launch.discovery {
+            private_hosts_status(&mut status.private_hosts, mode, discovery, &launch.own);
+        }
         status.machine = launch.machine.clone();
         status.timings = SandboxTimings {
             sidecar_ready_ms: launch.sidecar_ready_ms,
@@ -908,6 +1272,55 @@ impl Adapter {
         status.message = message;
         status
     }
+}
+
+/// The Private hosts line for the member's list, mode, the runtime and the
+/// own machine.
+fn private_hosts_status(
+    status: &mut PrivateHostsStatus,
+    mode: SandboxMode,
+    discovery: &Discovery,
+    own: &OwnLaunch,
+) {
+    status.applied = own
+        .machine
+        .as_ref()
+        .filter(|m| m.state == "running")
+        .map(|m| m.egress_hosts.clone())
+        .unwrap_or_default();
+    let wanted: Vec<&str> = status.hosts.iter().map(|h| h.host.as_str()).collect();
+    let (state, message) = if wanted.is_empty() {
+        ("none", String::new())
+    } else if !(discovery.has(CAPABILITY_EGRESS) && discovery.has(CAPABILITY_EGRESS_HOSTS)) {
+        (
+            "unsupported",
+            format!(
+                "{} cannot open private hosts; update it to use them.",
+                discovery.name
+            ),
+        )
+    } else if mode != SandboxMode::All {
+        (
+            "inactive",
+            "Used when all your agent runs are sandboxed. Now your own runs execute on this computer, which reaches these hosts itself; runs by other members never do.".into(),
+        )
+    } else if own.waiting {
+        (
+            "waiting",
+            "Applies when your agent's current run ends.".into(),
+        )
+    } else if let Some(e) = &own.error {
+        ("error", e.clone())
+    } else if own.handoff
+        && wanted.len() == status.applied.len()
+        && wanted.iter().all(|h| status.applied.iter().any(|a| a == h))
+    {
+        ("ready", "Open to your own agents' sandboxed runs.".into())
+    } else {
+        ("applying", "Starting your own VM with these hosts…".into())
+    };
+    status.state = state;
+    status.message = message;
 }
 
 /// `<home>/bnbloc-workspaces`: the one host directory the machine shares.
@@ -979,6 +1392,60 @@ pub(crate) fn sandbox_env_set(
     Ok(adapter.sandbox_status())
 }
 
+/// Add a private host the member's own sandboxed runs may reach (Settings →
+/// Agent sandbox → Private hosts); `room_id` is the room whose agent reply
+/// proposed it. The own machine takes it when no own turn runs there.
+#[tauri::command]
+pub(crate) fn sandbox_private_host_add(
+    state: tauri::State<'_, crate::AppState>,
+    adapter: tauri::State<'_, Adapter>,
+    host: String,
+    room_id: Option<String>,
+) -> Result<SandboxStatus, String> {
+    let host = private_host(&host)?;
+    let added_at_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64);
+    state.update_settings(|settings| {
+        if !settings
+            .sandbox_private_hosts
+            .iter()
+            .any(|h| h.host == host)
+        {
+            settings.sandbox_private_hosts.push(PrivateHost {
+                host,
+                added_at_ms,
+                room_id: room_id.unwrap_or_default().trim().to_string(),
+            });
+        }
+    })?;
+    adapter.sandbox_private_hosts_changed(false);
+    Ok(adapter.sandbox_status())
+}
+
+/// Remove a private host; applied like an addition.
+#[tauri::command]
+pub(crate) fn sandbox_private_host_remove(
+    state: tauri::State<'_, crate::AppState>,
+    adapter: tauri::State<'_, Adapter>,
+    host: String,
+) -> Result<SandboxStatus, String> {
+    let host = host.trim().to_ascii_lowercase();
+    state.update_settings(|settings| settings.sandbox_private_hosts.retain(|h| h.host != host))?;
+    adapter.sandbox_private_hosts_changed(false);
+    Ok(adapter.sandbox_status())
+}
+
+/// Recreate the own machine with the hosts (their addresses are resolved
+/// again), when no own turn runs there.
+#[tauri::command]
+pub(crate) fn sandbox_private_hosts_apply(
+    adapter: tauri::State<'_, Adapter>,
+) -> Result<SandboxStatus, String> {
+    adapter.sandbox_private_hosts_changed(true);
+    Ok(adapter.sandbox_status())
+}
+
 #[tauri::command]
 pub(crate) async fn sandbox_restart_vm(
     adapter: tauri::State<'_, Adapter>,
@@ -999,6 +1466,7 @@ mod tests {
             vmexec: PathBuf::from("/cache/sandbox/vmrt/0.1.0-abc/bnbloc-vmexec"),
             machine: MACHINE_NAME.into(),
             workspaces_root: PathBuf::from("/Users/me/bnbloc-workspaces"),
+            own_machine: None,
         }
     }
 
@@ -1020,6 +1488,18 @@ mod tests {
         assert_eq!(env[ENV_MACHINE], "bnbloc");
         assert_eq!(env[ENV_WORKSPACES_ROOT], "/Users/me/bnbloc-workspaces");
         assert!(!env.contains_key(ENV_FORWARD), "no names: no variable");
+        assert!(
+            !env.contains_key(ENV_OWN_MACHINE),
+            "no own machine: no variable"
+        );
+        let own = BridgeHandoff {
+            own_machine: Some(OWN_MACHINE_NAME.into()),
+            ..h.clone()
+        };
+        let env: std::collections::HashMap<_, _> = bridge_env(SandboxMode::All, none, Some(&own))
+            .into_iter()
+            .collect();
+        assert_eq!(env[ENV_OWN_MACHINE], "bnbloc-own");
 
         let forward = vec!["EXAMPLE_API_KEY".to_string(), "EXAMPLE_*".to_string()];
         let env: std::collections::HashMap<_, _> = bridge_env(SandboxMode::All, &forward, Some(&h))
@@ -1090,6 +1570,18 @@ mod tests {
             ),
             "a changed name list restarts the bridge"
         );
+        assert_ne!(
+            Some(fp.clone()),
+            bridge_fingerprint(
+                SandboxMode::Borrowed,
+                none,
+                Some(&BridgeHandoff {
+                    own_machine: Some(OWN_MACHINE_NAME.into()),
+                    ..h.clone()
+                })
+            ),
+            "the own machine appearing restarts the bridge"
+        );
         let mut relaunched = h.clone();
         relaunched.seq += 1;
         assert_ne!(
@@ -1135,5 +1627,119 @@ mod tests {
         let err = forward_env_list(&["EXAMPLE_API_KEY".into(), "PATH".into(), "BNBLOC_X".into()])
             .expect_err("refused");
         assert!(err.contains("PATH, BNBLOC_X"), "{err}");
+    }
+    /// The desktop's copy of the private-host rule agrees with the Go owner
+    /// (`protocol.ValidPrivateHost`) on the shared fixture.
+    #[test]
+    fn private_host_rule_matches_go() {
+        #[derive(serde::Deserialize)]
+        struct Fixture {
+            valid: Vec<String>,
+            invalid: Vec<String>,
+        }
+        let fixture: Fixture = serde_json::from_str(include_str!(
+            "../../../../../sandbox/protocol/testdata/private_hosts.json"
+        ))
+        .expect("fixture");
+        assert!(!fixture.valid.is_empty() && !fixture.invalid.is_empty());
+        for h in &fixture.valid {
+            assert!(valid_private_host(h), "valid_private_host({h:?}) = false");
+        }
+        for h in &fixture.invalid {
+            assert!(!valid_private_host(h), "valid_private_host({h:?}) = true");
+        }
+        assert_eq!(
+            private_host(" NPM.Internal.Example "),
+            Ok("npm.internal.example".into())
+        );
+        assert!(private_host("https://npm.internal.example").is_err());
+    }
+
+    fn own(state: &str, hosts: &[&str]) -> MachineView {
+        MachineView {
+            name: OWN_MACHINE_NAME.into(),
+            state: state.into(),
+            egress_hosts: hosts.iter().map(|h| h.to_string()).collect(),
+            ..Default::default()
+        }
+    }
+
+    /// The own machine follows the hosts, and a running one is never
+    /// recreated or deleted while an own turn runs there.
+    #[test]
+    fn own_machine_changes_only_when_no_own_turn_runs() {
+        let hosts = vec!["npm.internal.example".to_string()];
+        let want = Some(hosts.as_slice());
+        let same = own("running", &["npm.internal.example"]);
+        let other = own("running", &["ci.internal.example"]);
+        assert_eq!(plan_own_machine(None, None, 0, false), OwnPlan::Absent);
+        assert_eq!(plan_own_machine(want, None, 0, false), OwnPlan::Create);
+        assert_eq!(plan_own_machine(want, Some(&same), 2, false), OwnPlan::Keep);
+        assert_eq!(
+            plan_own_machine(want, Some(&other), 0, false),
+            OwnPlan::Recreate
+        );
+        assert_eq!(
+            plan_own_machine(want, Some(&other), 1, false),
+            OwnPlan::Wait
+        );
+        assert_eq!(
+            plan_own_machine(want, Some(&same), 0, true),
+            OwnPlan::Recreate,
+            "apply again"
+        );
+        assert_eq!(plan_own_machine(want, Some(&same), 1, true), OwnPlan::Wait);
+        assert_eq!(
+            plan_own_machine(
+                want,
+                Some(&own("stopped", &["npm.internal.example"])),
+                1,
+                false
+            ),
+            OwnPlan::Recreate,
+            "a stopped machine runs no turn"
+        );
+        assert_eq!(
+            plan_own_machine(None, Some(&same), 0, false),
+            OwnPlan::Delete
+        );
+        assert_eq!(plan_own_machine(None, Some(&same), 1, false), OwnPlan::Wait);
+    }
+
+    #[test]
+    fn private_hosts_status_says_what_applies() {
+        let mut discovery = Discovery {
+            name: "vmrt".into(),
+            capabilities: vec![CAPABILITY_EGRESS.into()],
+            ..Default::default()
+        };
+        let mut status = PrivateHostsStatus {
+            hosts: vec![PrivateHost {
+                host: "npm.internal.example".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let mut launch = OwnLaunch::default();
+        let mut state = |mode, d: &Discovery, l: &OwnLaunch| {
+            private_hosts_status(&mut status, mode, d, l);
+            status.state
+        };
+        assert_eq!(state(SandboxMode::All, &discovery, &launch), "unsupported");
+        discovery.capabilities.push(CAPABILITY_EGRESS_HOSTS.into());
+        assert_eq!(
+            state(SandboxMode::Borrowed, &discovery, &launch),
+            "inactive"
+        );
+        assert_eq!(state(SandboxMode::All, &discovery, &launch), "applying");
+        launch.waiting = true;
+        assert_eq!(state(SandboxMode::All, &discovery, &launch), "waiting");
+        launch.waiting = false;
+        launch.error = Some("no".into());
+        assert_eq!(state(SandboxMode::All, &discovery, &launch), "error");
+        launch.error = None;
+        launch.handoff = true;
+        launch.machine = Some(own("running", &["npm.internal.example"]));
+        assert_eq!(state(SandboxMode::All, &discovery, &launch), "ready");
     }
 }

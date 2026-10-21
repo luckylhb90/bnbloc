@@ -30,6 +30,45 @@ export interface SandboxStatus {
   lastError?: string;
   timings: { sidecarReadyMs?: number; prewarmMs?: number };
   handedToBridge: boolean;
+  privateHosts: PrivateHostsStatus;
+}
+
+// A private host the member's own sandboxed runs may reach
+// (docs/prd/2026-10-21-sandbox-private-hosts.md).
+export interface PrivateHost {
+  host: string;
+  addedAtMs: number;
+  // The room whose agent reply proposed it; absent when added in Settings.
+  roomId?: string;
+}
+
+export type PrivateHostsState = "none" | "unsupported" | "inactive" | "waiting" | "applying" | "ready" | "error";
+
+export interface PrivateHostsStatus {
+  hosts: PrivateHost[];
+  state: PrivateHostsState;
+  message: string;
+  // The hosts the member's own VM opens now.
+  applied: string[];
+}
+
+// privateHostsLine is the Private hosts status line (empty when no host is
+// listed).
+export function privateHostsLine(p: PrivateHostsStatus): { tone: SandboxTone; text: string } | null {
+  switch (p.state) {
+    case "none":
+      return null;
+    case "ready":
+      return { tone: "ok", text: p.message };
+    case "waiting":
+    case "applying":
+      return { tone: "busy", text: p.message };
+    case "error":
+      return { tone: "error", text: p.message };
+    case "unsupported":
+    case "inactive":
+      return { tone: "muted", text: p.message };
+  }
 }
 
 export const SANDBOX_MODES: readonly { value: SandboxMode; label: string; hint: string }[] = [

@@ -455,16 +455,30 @@ impl Adapter {
 
     /// The turns the bridge this app runs drives now (update_gate).
     pub fn running_turns(&self) -> u32 {
+        let (file, pid) = self.bridge_turns();
+        update_gate::running_turns(file.as_ref(), pid)
+    }
+
+    /// The turns the bridge this app runs drives on the own sandbox machine
+    /// now (update_gate).
+    pub(super) fn own_machine_turns(&self) -> u32 {
+        let (file, pid) = self.bridge_turns();
+        update_gate::own_machine_turns(file.as_ref(), pid)
+    }
+
+    /// The bridge's running-turns file and the pid of the bridge this app
+    /// runs.
+    fn bridge_turns(&self) -> (Option<update_gate::RunningTurns>, Option<u32>) {
         let Some(state) = self.app.try_state::<crate::AppState>() else {
-            return 0;
+            return (None, None);
         };
         let settings = state.settings.lock().clone();
         let pid = state.supervisor.status().pid;
         let Some(dir) = self.bridge_member_dir_for(&settings) else {
-            return 0;
+            return (None, pid);
         };
         let file = update_gate::read_running_turns(&dir.join(member_dir::BRIDGE_STATE_DIR));
-        update_gate::running_turns(file.as_ref(), pid)
+        (file, pid)
     }
 }
 

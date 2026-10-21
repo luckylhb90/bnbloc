@@ -11,7 +11,7 @@ import { api, type AgentTarget, type UpdatePolicy } from "./api";
 import type { ComponentSettingsUpdate, DesktopComponentSettings } from "./componentSettings";
 import { ApiError } from "./errors.ts";
 import { unframePackedSkill, type SkillsProvider, type SkillsSettings, type SkillsState } from "./localSkills";
-import type { SandboxMode, SandboxStatus, ShellEnvReload } from "./sandboxStatus";
+import type { PrivateHost, SandboxMode, SandboxStatus, ShellEnvReload } from "./sandboxStatus";
 import { SESSION_KEY, parseSessionRecord, type SessionRecord } from "./sessionGrant";
 import { StorageKey, readStored, writeStored } from "./storageKeys.ts";
 
@@ -63,6 +63,9 @@ export interface DesktopSettings {
    *  sandboxed runs of this member's own agents; names only. Shell-owned:
    *  changed through setSandboxEnv. Mirrors BNBLOC_SANDBOX_ENV. */
   sandboxEnv: string[];
+  /** Private hosts this member's own sandboxed runs may reach. Shell-owned:
+   *  changed through addSandboxPrivateHost / removeSandboxPrivateHost. */
+  sandboxPrivateHosts: PrivateHost[];
 }
 
 export interface AppInfo {
@@ -378,6 +381,35 @@ export const desktop = {
     })) as SandboxStatus;
   },
 
+  // The private hosts the member's own sandboxed runs may reach (refused
+  // when the host is not one; the error says why). roomId: the room whose
+  // agent reply proposed it.
+  async addSandboxPrivateHost(host: string, roomId?: string): Promise<SandboxStatus | null> {
+    const t = tauri();
+    if (!t) return null;
+    return (await t.invoke("sandbox_private_host_add", { host, roomId }).catch((e: unknown) => {
+      throw new Error(e instanceof Error ? e.message : String(e));
+    })) as SandboxStatus;
+  },
+
+  async removeSandboxPrivateHost(host: string): Promise<SandboxStatus | null> {
+    const t = tauri();
+    if (!t) return null;
+    return (await t.invoke("sandbox_private_host_remove", { host }).catch((e: unknown) => {
+      throw new Error(e instanceof Error ? e.message : String(e));
+    })) as SandboxStatus;
+  },
+
+  // Recreate the member's own VM with their hosts (addresses resolved
+  // again), when no run of theirs is going on there.
+  async applySandboxPrivateHosts(): Promise<SandboxStatus | null> {
+    const t = tauri();
+    if (!t) return null;
+    return (await t.invoke("sandbox_private_hosts_apply").catch((e: unknown) => {
+      throw new Error(e instanceof Error ? e.message : String(e));
+    })) as SandboxStatus;
+  },
+
   async restartSandboxVm(): Promise<SandboxStatus | null> {
     const t = tauri();
     if (!t) return null;
@@ -528,6 +560,7 @@ export async function ensureBridgeRunning(subject: string, gatewayUrl: string, t
       gatewayToken: "",
       sandboxMode: "borrowed",
       sandboxEnv: [],
+      sandboxPrivateHosts: [],
       gatewayUrl: "",
       owner: "",
       tenant: "",

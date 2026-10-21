@@ -1,4 +1,4 @@
-import { canRestartVm, shellEnvReloadText, statusLine, type SandboxStatus } from "./sandboxStatus.ts";
+import { canRestartVm, privateHostsLine, shellEnvReloadText, statusLine, type SandboxStatus } from "./sandboxStatus.ts";
 
 // The web tsconfig has no node types, so the tests use a local runner (same
 // convention as the other *.test.ts files); a failure throws and fails `node --test`.
@@ -27,7 +27,19 @@ const base: SandboxStatus = {
   handedToBridge: true,
   isolation: "microvm",
   machine: { name: "bnbloc", state: "running", image: "img:1", bootMs: 512 },
+  privateHosts: { hosts: [], state: "none", message: "", applied: [] },
 };
+
+test("private hosts: no line without hosts, the shell's message otherwise", () => {
+  equal(privateHostsLine(base.privateHosts), null);
+  const listed = { ...base.privateHosts, hosts: [{ host: "npm.internal.example", addedAtMs: 1 }] };
+  equal(privateHostsLine({ ...listed, state: "waiting", message: "Applies when your agent's current run ends." }), {
+    tone: "busy",
+    text: "Applies when your agent's current run ends.",
+  });
+  equal(privateHostsLine({ ...listed, state: "error", message: "did not start" })?.tone, "error");
+  equal(privateHostsLine({ ...listed, state: "ready", message: "open" })?.tone, "ok");
+});
 
 test("not installed points at Components", () => {
   const line = statusLine({ ...base, installed: false, state: "notInstalled", machine: undefined });

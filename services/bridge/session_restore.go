@@ -29,6 +29,8 @@ type sessionRecord struct {
 	Core      string `json:"core"`
 	Provider  string `json:"provider"`
 	Sandboxed bool   `json:"sandboxed,omitempty"`
+	// OwnMachine: the slot runs on the member's own sandbox machine.
+	OwnMachine bool `json:"ownMachine,omitempty"`
 	// SeatOwner and Requester are the slot's seat (driveKey): empty for
 	// the owner's own.
 	SeatOwner     string            `json:"seatOwner,omitempty"`
@@ -45,7 +47,7 @@ type sessionRecord struct {
 }
 
 func (r sessionRecord) key() sessionKey {
-	return sessionKey{driveKey: driveKey{room: r.Room, core: r.Core, provider: r.Provider, sandboxed: r.Sandboxed, owner: r.SeatOwner, requester: r.Requester}, channel: r.Channel}
+	return sessionKey{driveKey: driveKey{room: r.Room, core: r.Core, provider: r.Provider, sandboxed: r.Sandboxed, ownMachine: r.OwnMachine, owner: r.SeatOwner, requester: r.Requester}, channel: r.Channel}
 }
 
 func sessionRecordLess(a, b sessionRecord) bool {
@@ -64,6 +66,9 @@ func sessionRecordLess(a, b sessionRecord) bool {
 	if a.Sandboxed != b.Sandboxed {
 		return !a.Sandboxed
 	}
+	if a.OwnMachine != b.OwnMachine {
+		return !a.OwnMachine
+	}
 	if a.SeatOwner != b.SeatOwner {
 		return a.SeatOwner < b.SeatOwner
 	}
@@ -78,7 +83,7 @@ func (b *Bridge) persistSession(sk sessionKey, rs *roomSession) {
 	}
 	rs.mu.Lock()
 	rec := sessionRecord{
-		Room: sk.room, Channel: sk.channel, Core: sk.core, Provider: sk.provider, Sandboxed: sk.sandboxed,
+		Room: sk.room, Channel: sk.channel, Core: sk.core, Provider: sk.provider, Sandboxed: sk.sandboxed, OwnMachine: sk.ownMachine,
 		SeatOwner: sk.owner, Requester: sk.requester,
 		Owner: rs.owner, WorkspaceID: rs.workspaceID, SessionID: rs.sessionID, LastVersion: rs.lastVersion,
 		ProfileSum: rs.profileSum, Guidance: rs.guidance, Context: rs.ctx, Workdir: rs.workdir,

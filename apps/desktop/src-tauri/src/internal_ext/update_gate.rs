@@ -31,6 +31,10 @@ pub(crate) struct RunningTurns {
     pub(crate) pid: u32,
     #[serde(default)]
     pub(crate) running: HashMap<String, u32>,
+    /// The running turns on the member's own sandbox machine
+    /// (sandbox::OWN_MACHINE_NAME).
+    #[serde(default, rename = "ownMachine")]
+    pub(crate) own_machine: u32,
 }
 
 /// Read `turns.json` from the bridge's state directory; None when absent or
@@ -46,6 +50,15 @@ pub(crate) fn read_running_turns(state_dir: &Path) -> Option<RunningTurns> {
 pub(crate) fn running_turns(file: Option<&RunningTurns>, bridge_pid: Option<u32>) -> u32 {
     match (file, bridge_pid) {
         (Some(file), Some(pid)) if file.pid == pid => file.running.values().sum(),
+        _ => 0,
+    }
+}
+
+/// How many turns the bridge running as `bridge_pid` drives on the own
+/// sandbox machine now (as `running_turns`).
+pub(crate) fn own_machine_turns(file: Option<&RunningTurns>, bridge_pid: Option<u32>) -> u32 {
+    match (file, bridge_pid) {
+        (Some(file), Some(pid)) if file.pid == pid => file.own_machine,
         _ => 0,
     }
 }
@@ -97,7 +110,21 @@ mod tests {
         RunningTurns {
             pid,
             running: running.iter().map(|(k, v)| (k.to_string(), *v)).collect(),
+            own_machine: 1,
         }
+    }
+
+    #[test]
+    fn own_machine_turns_count_only_for_the_running_bridge() {
+        let file = turns(41, &[("acp", 2)]);
+        assert_eq!(own_machine_turns(Some(&file), Some(41)), 1);
+        assert_eq!(own_machine_turns(Some(&file), Some(42)), 0);
+        let old: RunningTurns = serde_json::from_str(r#"{"pid":41,"running":{"acp":1}}"#).unwrap();
+        assert_eq!(
+            own_machine_turns(Some(&old), Some(41)),
+            0,
+            "a bridge without the field"
+        );
     }
 
     #[test]
