@@ -1,9 +1,8 @@
 # What an agent installs in the sandbox stays; sign-ins never go through the chat (2026-10-21)
 
-Status: slice 1 built (durable homes and per-user install places; the
-reference passes the full conformance suite with the new `durableHomes`
-step, and a home kept on a machine's disk before is copied in on its first
-ensure, checked live).
+Status: slice 1 built and released (sandbox 0.1.5, optin): durable homes
+and per-user install places. The reference passes the full conformance
+suite with the new `durableHomes` step.
 Slice 2 (sign-ins) is designed here and not built. Owner: the Sandbox
 Protocol (`sandbox/protocol`, `docs/architecture/sandbox-protocol.md`), the
 reference implementation (the sandbox component's own repository); slice 2
@@ -28,8 +27,10 @@ agent ever reading it.
   - A space's home is `/home/sp-<space>` on the machine's own disk. A space
     deleted without purge keeps it (`spaceRestart`), but a machine deleted
     and created again starts with an empty one. The desktop recreates the
-    own machine whenever its hosts change (`plan_own_machine`), and a
-    sandbox update replaces the machines.
+    own machine whenever its hosts change (`plan_own_machine`). Machines
+    also do not outlive the sandbox process (removed when it stops, reaped
+    when it starts), so every desktop restart and sandbox update emptied
+    every home too.
   - A space's uid is durable per space name across machines
     (`meta/space-uids.json`), and files a space creates in a share keep it
     (virtualized ownership). A home kept on the host would read back as the
@@ -108,15 +109,16 @@ agent ever reading it.
 | Defaults and fallbacks | Without `durableHomes`, homes behave as today. No sign-ins means no secrets. The install places apply to every space and change only where tools go. |
 | External contracts | Slice 2 relies on the runtime's TLS interception reaching the tool: a Node CLI trusts its own CA bundle unless `NODE_EXTRA_CA_CERTS` names the runtime's. Verify with the real CLI before building slice 2. |
 | Load on users and agents | No new tool or rule for agents. They install and sign in as they would anywhere. Members see one card when a sign-in is missing. |
-| Release and compatibility | Slice 1 is a sandbox component release (optin first). Existing homes on a running machine are moved into the durable place on their next ensure, so nothing installed is lost. |
+| Release and compatibility | Slice 1 is a sandbox component release (optin first). The update restarts the sandbox, whose machines go with it as at every restart so far: what was installed before the update is gone once more, and kept from then on. A home a machine's disk holds when the homes share is first bound is copied in. |
 | Observability | The reference logs where each home is mounted from. Slice 2: the desktop logs each sign-in applied (name and hosts, never the value). |
 | AI capability | The agent finds and installs what it needs; find-a-way proposes the sign-in the reply asked for. |
 | Component or platform | The capability and its conformance step are platform (a contract any sandbox implements); where homes live and how is the component's. |
 
 **Pre-mortem.**
-1. *An upgrade wipes what agents installed.* The first ensure after the
-   upgrade copies the old guest-disk home into the durable one before
-   mounting it. The live check installs a tool, upgrades and finds it.
+1. *An update wipes what agents installed.* From this release on the homes
+   live outside the machines; the conformance step deletes the machine and
+   finds the tool on another. This first update still restarts the sandbox
+   with its machines, as every restart did: said in the release notes.
 2. *Builds get slow.* Homes are on virtio-fs. `~/.cache` and `~/.npm` stay
    guest-local, and the workspace's heavy directories already can be
    (`BNBLOC_SANDBOXD_LOCAL_DIRS`).

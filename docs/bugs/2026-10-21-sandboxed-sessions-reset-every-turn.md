@@ -156,9 +156,12 @@ default mode.
   session that had not seen the conversation. With the session kept, the
   request came right after "save the expert", so it is not addressed
   separately.
-- **What an agent installs in the sandbox lasts only as long as the VM.** A
-  space's home lives in the VM's own disk. A recreate (the own machine's
-  hosts changing) loses it, and with it any tools installed or signed in
-  there.
+- **What an agent installs in the sandbox lasted only as long as the VM.**
+  A space's home lived in the VM's own disk, so a recreate (the own
+  machine's hosts changing) or any restart of the sandbox lost it, and with
+  it any tools installed or signed in there. Fixed by durable homes
+  (docs/prd/2026-10-21-durable-sandbox-homes.md, slice 1, sandbox 0.1.5).
+  Sign-ins given to the sandbox instead of pasted into the room are that
+  PRD's slice 2.
 
 Landed in: 2877d089 (the fence, the smoke's `session` line, the docs); the commit after `desktop: 0.1.94` (the wait, `pending`, the move notice); the core's fix in its own repository.
