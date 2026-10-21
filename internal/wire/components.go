@@ -29,25 +29,30 @@ type ComponentAdoption struct {
 // PlatformComponent is one installed component in the platform console
 // (GET /v1/platform/components).
 type PlatformComponent struct {
-	Kind          string                       `json:"kind"`
-	Name          string                       `json:"name"`
-	Version       string                       `json:"version"`
-	Publisher     string                       `json:"publisher"`
-	Runtime       string                       `json:"runtime" tstype:"ComponentRuntime"`
-	Contract      string                       `json:"contract,omitempty"`
-	Protocol      ComponentProtocolRange       `json:"protocol"`
-	KeyID         string                       `json:"keyId"`
-	ContentHash   string                       `json:"contentHash"`
-	InstalledAtMs int64                        `json:"installedAtMs"`
-	Description   string                       `json:"description,omitempty"`
-	Capabilities  []string                     `json:"capabilities,omitempty"`
-	Permissions   ComponentPermissions         `json:"permissions"`
-	Hooks         []string                     `json:"hooks,omitempty"`
-	Settings      []ComponentSetting           `json:"settings,omitempty"`
-	SettingsPage  *ComponentSettingsPage       `json:"settingsPage,omitempty"`
-	Artifacts     map[string]ComponentArtifact `json:"artifacts,omitempty"`
-	Endpoint      *ComponentEndpoint           `json:"endpoint,omitempty"`
-	Sidecar       *ComponentSidecar            `json:"sidecar,omitempty"`
+	Kind          string                 `json:"kind"`
+	Name          string                 `json:"name"`
+	Version       string                 `json:"version"`
+	Publisher     string                 `json:"publisher"`
+	Runtime       string                 `json:"runtime" tstype:"ComponentRuntime"`
+	Contract      string                 `json:"contract,omitempty"`
+	Protocol      ComponentProtocolRange `json:"protocol"`
+	KeyID         string                 `json:"keyId"`
+	ContentHash   string                 `json:"contentHash"`
+	InstalledAtMs int64                  `json:"installedAtMs"`
+	Description   string                 `json:"description,omitempty"`
+	Capabilities  []string               `json:"capabilities,omitempty"`
+	Permissions   ComponentPermissions   `json:"permissions"`
+	Hooks         []string               `json:"hooks,omitempty"`
+	Settings      []ComponentSetting     `json:"settings,omitempty"`
+	// SettingsMissing are the keys of the required platform-scope settings
+	// that hold no value (what a super admin still has to set; the platform
+	// console's "needs setup"). Organization and member scopes are their
+	// owners' to set and are not counted here.
+	SettingsMissing []string                     `json:"settingsMissing,omitempty"`
+	SettingsPage    *ComponentSettingsPage       `json:"settingsPage,omitempty"`
+	Artifacts       map[string]ComponentArtifact `json:"artifacts,omitempty"`
+	Endpoint        *ComponentEndpoint           `json:"endpoint,omitempty"`
+	Sidecar         *ComponentSidecar            `json:"sidecar,omitempty"`
 	// RequiresDesktop marks a component that runs on each member's desktop
 	// (a sidecar other than an auth provider, a stdio MCP server).
 	RequiresDesktop bool `json:"requiresDesktop,omitempty"`

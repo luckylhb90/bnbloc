@@ -9,6 +9,7 @@ import { Segment } from "@/ui/Segment";
 import { AdoptionBar, ArtifactFacts, ChipGroup, FactBlock, KindIcon, MCPFacts, PreviewerFacts, RolloutBadge, SettingsFacts, TrustBlock, memberMeta } from "@/views/componentFacts";
 import { ComponentSettingsDialog } from "@/views/settings/ComponentSettingsDialog";
 import { componentKindLabel, holdsCredential } from "@/lib/componentKinds";
+import { needsSetupText } from "@/lib/componentSettings";
 import { exactTime } from "@/lib/format";
 
 const ROLLOUT_SEGMENTS = [
@@ -83,6 +84,9 @@ function AdminComponentCard({
 }) {
   const [confirming, setConfirming] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // What a super admin still has to set (the platform scope's required
+  // settings with no value): the same signal a member's card shows.
+  const setup = needsSetupText(component.settingsMissing ?? [], component.settings ?? []);
   return (
     <Card
       className={cn(
@@ -92,7 +96,8 @@ function AdminComponentCard({
       )}
       id={`component-${component.name}`}
     >
-      <ComponentHeader component={component} />
+      <ComponentHeader component={component} needsSetup={setup !== ""} />
+      {setup && <p className="mt-2 text-xs text-[var(--color-warning)]">{setup}</p>}
       <AdoptionBar component={component} />
       <div className="mt-4 grid gap-3 md:grid-cols-2">
         <TrustBlock trust={component.trust} />
@@ -143,8 +148,8 @@ function AdminComponentCard({
           </div>
         )}
         {(component.settings ?? []).length > 0 && (
-          <Button variant="outline" size="sm" disabled={busy} onClick={() => setSettingsOpen(true)}>
-            Settings
+          <Button variant={setup ? "primary" : "outline"} size="sm" disabled={busy} onClick={() => setSettingsOpen(true)}>
+            {setup ? "Set up" : "Settings"}
           </Button>
         )}
         <Button variant="danger" size="sm" disabled={busy} onClick={() => setConfirming(true)}>
@@ -220,7 +225,7 @@ function MemberComponentCard({
   );
 }
 
-function ComponentHeader({ component }: { readonly component: PlatformComponent }) {
+function ComponentHeader({ component, needsSetup }: { readonly component: PlatformComponent; readonly needsSetup: boolean }) {
   return (
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div className="flex min-w-0 gap-3">
@@ -231,6 +236,7 @@ function ComponentHeader({ component }: { readonly component: PlatformComponent 
             <Badge tone="neutral" className="tabular">v{component.version}</Badge>
             <Badge tone={component.kind === "plugin" ? "neutral" : "accent"}>{componentKindLabel(component.kind)}</Badge>
             {component.requiresDesktop && <Badge tone="warning">Desktop sidecar</Badge>}
+            {needsSetup && <Badge tone="warning">Needs setup</Badge>}
             <RolloutBadge rollout={component.rollout} />
           </div>
           <p className="mt-1 text-sm leading-relaxed text-[var(--color-fg-muted)]">

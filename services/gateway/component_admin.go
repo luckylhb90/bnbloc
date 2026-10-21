@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
@@ -195,9 +196,29 @@ func (s *Service) listInstalledComponents(ctx context.Context) ([]wire.PlatformC
 		if err != nil {
 			return nil, err
 		}
+		component.SettingsMissing = s.platformSettingsMissing(ctx, rec)
 		out = append(out, component)
 	}
 	return out, nil
+}
+
+// platformSettingsMissing is the required platform-scope settings of rec
+// that hold no value: what a super admin still has to set. With the secret
+// store off none can be stored, so every required one is missing. A store
+// read that fails is logged and reads as nothing known (a hint, not a gate:
+// the console shows no "needs setup" rather than a wrong one).
+func (s *Service) platformSettingsMissing(ctx context.Context, rec extpipe.Record) []string {
+	cfg, err := extpipe.DecodeConfig(rec)
+	if err != nil || len(pkgmeta.SettingsOfScope(cfg.Settings, pkgmeta.SettingScopePlatform)) == 0 {
+		return nil
+	}
+	values, err := s.componentSettings().Values(ctx, "", rec.Kind, rec.Name, cfg.Settings, pkgmeta.SettingScopePlatform)
+	if err != nil {
+		slog.Warn("bnbloc-gateway: read component settings failed",
+			"event", "bnbloc.gateway.component_settings_unreadable", "kind", rec.Kind, "component", rec.Name, "error", err)
+		return nil
+	}
+	return pkgmeta.UnsetSettings(cfg.Settings, values, pkgmeta.SettingScopePlatform)
 }
 
 func (s *Service) addComponentAdoption(ctx context.Context, components []wire.PlatformComponent) error {

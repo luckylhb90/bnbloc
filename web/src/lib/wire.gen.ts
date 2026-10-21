@@ -1812,6 +1812,11 @@ export interface PlatformComponent {
   permissions: ComponentPermissions;
   hooks?: string[];
   settings?: ComponentSetting[];
+  // SettingsMissing are the keys of the required platform-scope settings
+  // that hold no value (what a super admin still has to set; the platform
+  // console's "needs setup"). Organization and member scopes are their
+  // owners' to set and are not counted here.
+  settingsMissing?: string[];
   settingsPage?: ComponentSettingsPage;
   artifacts?: Record<string, ComponentArtifact>;
   endpoint?: ComponentEndpoint;

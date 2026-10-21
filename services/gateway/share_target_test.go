@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -97,16 +98,18 @@ func shareRoomBackend(t *testing.T) *httptest.Server {
 }
 
 type shareFixture struct {
-	svc    *Service
-	srv    *httptest.Server
-	token  string
-	secret string
-	audit  *recordingAudit
-	shares chan sharetarget.Share
-	sigs   chan string
-	raws   chan []byte
-	status *int // what the target answers to a share
-	reason *string
+	target  string // the component's base URL
+	svc     *Service
+	srv     *httptest.Server
+	token   string
+	secret  string
+	signKey testKey
+	audit   *recordingAudit
+	shares  chan sharetarget.Share
+	sigs    chan string
+	raws    chan []byte
+	status  *int // what the target answers to a share
+	reason  *string
 }
 
 func newShareFixture(t *testing.T) *shareFixture {
@@ -144,14 +147,15 @@ func newShareFixture(t *testing.T) *shareFixture {
 	svc.ExtAudit = fx.audit
 	room := shareRoomBackend(t)
 	svc.Backends.Room, svc.Backends.Realtime = room.URL, room.URL
-	body := shareTargetPackageBody(t, "corp-share", target.URL+"/share")
+	fx.target = target.URL + "/share"
+	body := shareTargetPackageBody(t, "corp-share", fx.target)
 	raw, code := postComponent(t, srv.URL, token, body, signPackage(key.private, body))
 	var installed wire.PublishedComponent
 	_ = json.Unmarshal(raw, &installed)
 	if code != http.StatusOK || installed.Kind != "share-target" || !strings.HasPrefix(installed.Secret, "whsec_") {
 		t.Fatalf("install = %d %s", code, raw)
 	}
-	fx.svc, fx.srv, fx.token, fx.secret = svc, srv, token, installed.Secret
+	fx.svc, fx.srv, fx.token, fx.secret, fx.signKey = svc, srv, token, installed.Secret, key
 	return fx
 }
 
@@ -441,5 +445,76 @@ func TestShareTargetHiddenOutsideTheTenantScope(t *testing.T) {
 	}
 	if n := fx.calls(); n != 0 {
 		t.Fatalf("the target was called %d times", n)
+	}
+}
+
+// The platform console's component list says what a super admin still has to
+// set: the required platform-scope settings with no value, shrinking as they
+// are set. Organization and member settings are their owners' and never count,
+// and a component declaring no settings has nothing missing.
+func TestPlatformComponentListSaysWhatStillNeedsSetup(t *testing.T) {
+	fx := newShareFixture(t)
+	body, err := json.Marshal(map[string]any{
+		"kind": pkgmeta.KindShareTargetPackageV1, "name": "settings-demo", "version": "0.1.0", "publisher": "Acme Corp",
+		"runtime": pkgmeta.RuntimeEndpoint, "contract": pkgmeta.ShareTargetContractV1,
+		"endpoint":    map[string]any{"baseUrl": fx.target},
+		"permissions": map[string]any{"network": []string{"127.0.0.1"}},
+		"settings": []map[string]any{
+			{"key": "url", "label": "URL", "type": "url", "scope": "platform", "required": true},
+			{"key": "key", "label": "Key", "type": "secret", "scope": "platform", "required": true},
+			{"key": "note", "label": "Note", "type": "text", "scope": "platform"},
+			{"key": "orgNote", "label": "Org note", "type": "text", "scope": "org", "required": true},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The same key signs the fixture's own install; this one is installed the same way.
+	_, srv, token, key := fx.svc, fx.srv, fx.token, fx.signKey
+	if raw, code := postComponent(t, srv.URL, token, body, signPackage(key.private, body)); code != http.StatusOK {
+		t.Fatalf("install = %d %s", code, raw)
+	}
+	missing := func(name string) []string {
+		resp, raw := fx.do(t, http.MethodGet, fx.srv.URL+"/v1/platform/components", nil, fx.token)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("list = %d %s", resp.StatusCode, raw)
+		}
+		var list wire.PlatformComponentsReply
+		if err := json.Unmarshal(raw, &list); err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range list.Components {
+			if c.Name == name {
+				got := append([]string(nil), c.SettingsMissing...)
+				sort.Strings(got)
+				return got
+			}
+		}
+		t.Fatalf("%s is not in the list", name)
+		return nil
+	}
+	set := func(values map[string]string) {
+		resp, raw := fx.do(t, http.MethodPut, fx.srv.URL+"/v1/platform/components/settings-demo/settings?kind=share-target", wire.ComponentSettingsUpdate{Values: values}, fx.token)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("set %v = %d %s", values, resp.StatusCode, raw)
+		}
+	}
+	if got := missing("settings-demo"); strings.Join(got, ",") != "key,url" {
+		t.Fatalf("nothing set: missing = %v, want [key url] (the optional and the organization ones are not counted)", got)
+	}
+	// A save needs every required setting of the scope at once (the server
+	// refuses a form with one left out), so there is no half-set state to show.
+	if resp, _ := fx.do(t, http.MethodPut, fx.srv.URL+"/v1/platform/components/settings-demo/settings?kind=share-target", wire.ComponentSettingsUpdate{Values: map[string]string{"url": "https://x.example"}}, fx.token); resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("a save leaving a required setting out = %d, want 400", resp.StatusCode)
+	}
+	if got := missing("settings-demo"); strings.Join(got, ",") != "key,url" {
+		t.Fatalf("a refused save changed what is missing: %v", got)
+	}
+	set(map[string]string{"url": "https://x.example", "key": "secret-value"})
+	if got := missing("settings-demo"); len(got) != 0 {
+		t.Fatalf("all set: missing = %v, want none (the organization's required setting is the organization's)", got)
+	}
+	if got := missing("corp-share"); len(got) != 0 {
+		t.Fatalf("a component that declares no settings: missing = %v", got)
 	}
 }

@@ -46,7 +46,9 @@ export function ComponentSettingsTab() {
       </div>
       {error && <ErrorBox>{error}</ErrorBox>}
       {components && components.length === 0 && !error && (
-        <p className="text-sm text-[var(--color-fg-subtle)]">No component published to this organization takes organization settings.</p>
+        <p className="text-sm text-[var(--color-fg-subtle)]">
+          No component published to this organization takes organization settings. Settings that apply to the whole platform are set by a platform admin in the platform console, under Components.
+        </p>
       )}
       {(components ?? []).map((c) => {
         const setup = needsSetupText(c.settingsMissing, c.settings);
