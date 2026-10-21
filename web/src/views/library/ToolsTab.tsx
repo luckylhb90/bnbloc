@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { MagnifyingGlassIcon, WrenchIcon } from "@phosphor-icons/react";
 import type { MemberComponent } from "@/lib/api";
 import { contentLabel, type ContentComponent } from "@/lib/contentComponents";
+import { useContentChanged } from "@/lib/useContentChanged";
 import { contentApi } from "@/lib/contentComponentsApi";
 import { desktop } from "@/lib/desktop";
 import { settingsSummary, type DesktopComponentSettings } from "@/lib/componentSettings";
@@ -51,6 +52,8 @@ export function ToolsTab({ tabs }: { readonly tabs: React.ReactNode }) {
       live = false;
     };
   }, [epoch]);
+  // The experts and skills that need a tool follow their changes.
+  useContentChanged(["expert", "skill"], reload);
 
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();

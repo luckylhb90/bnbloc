@@ -1,6 +1,8 @@
 import { AssistContracts } from "./wire.gen.ts";
 import {
+  createCardStore,
   createReplyMemo,
+  findStep,
   DEAD_END_ACTIONS,
   DEAD_END_CAUSES,
   fallbackFixes,
@@ -82,6 +84,45 @@ eq(fallbackFixes({ installable: [], agents: ["acme/maya/codex"], replier: "acme/
   memo.set("r1", 6, { kind: "skipped" });
   memo.set("r1", 7, { kind: "skipped" });
   assert(!memo.has("r1", 5) && memo.has("r1", 7), "the oldest is forgotten past the bound");
+}
+
+// The cards live outside the room view (docs/bugs/2026-10-21-library-stale-
+// after-delete-and-find-a-way-navigation.md): a find that finishes after the
+// member left the room is there when they are back; a room's snapshot is the
+// same object until that room's cards change; the oldest goes past the bound.
+{
+  const store = createCardStore(2);
+  let heard = 0;
+  const stop = store.subscribe(() => heard++);
+  const empty = store.room("r1");
+  assert(store.room("r1") === empty && Object.keys(empty).length === 0, "no cards: one stable empty snapshot");
+  store.set("r1", 5, { status: "finding" });
+  const finding = store.room("r1");
+  assert(finding !== empty && finding[5]?.status === "finding", "a find shows at once");
+  assert(store.room("r2") === store.room("r2") && !store.room("r2")[5], "another room's cards are its own");
+  // The room view is gone (unsubscribed); the answer still lands.
+  stop();
+  store.set("r1", 5, { status: "ready", proposal: null, fixes: [], note: "Could not find a way: the assist model failed" });
+  const back = store.room("r1");
+  eq(back[5], { status: "ready", proposal: null, fixes: [], note: "Could not find a way: the assist model failed" }, "the failure is the card's note when the member is back");
+  assert(store.room("r1") === back, "unchanged cards answer the same snapshot");
+  assert(heard === 1, `listeners hear changes while subscribed (${heard})`);
+  store.set("r1", 6, { status: "finding" });
+  store.set("r2", 1, { status: "finding" });
+  assert(!store.get("r1", 5) && !!store.get("r1", 6) && !!store.get("r2", 1), "the oldest card is forgotten past the bound");
+  store.set("r1", 6, null);
+  assert(!store.room("r1")[6], "dismissed");
+}
+
+// The reply's "Find a way": one assist call per reply at a time (a second
+// click while it runs waits), a proposal already found shows again, no
+// assist model shows the fallback.
+{
+  const proposal = { cause: "access" as const, summary: "s", fixes: [] };
+  eq(findStep({ status: "finding" }, undefined, true), "wait", "a find still running");
+  eq(findStep(undefined, { kind: "proposal", proposal }, true), "proposal", "a proposal already found");
+  eq(findStep({ status: "ready", proposal: null, fixes: [] }, { kind: "skipped" }, true), "run", "asked again after the fallback");
+  eq(findStep(undefined, undefined, false), "fallback", "no assist model");
 }
 
 // The gated call runs when the member's own turn settles with a reply in

@@ -1,4 +1,5 @@
 import { req } from "./api.ts";
+import { changing } from "./contentChanges.ts";
 import {
   archiveContentType,
   formPayload,
@@ -52,8 +53,12 @@ async function postBody<T>(path: string, body: Blob, contentType: string): Promi
   return req<T>(path, { method: "POST", headers: { "Content-Type": contentType }, body });
 }
 
+// kindOf reads a save's kind from its detail (lib/contentChanges.ts).
+const kindOf = (d: ContentComponentDetail) => d.component.kind;
+
 // Content components (experts, skill packs), served by the gateway
-// (services/gateway/content_components.go).
+// (services/gateway/content_components.go). Every mutation announces itself
+// (changing), so every list that shows content reads it again.
 export const contentApi = {
   list: (kind?: ContentKind) =>
     req<{ components: ContentComponent[] }>(`/v1/content-components${kind ? `?kind=${enc(kind)}` : ""}`),
@@ -63,12 +68,18 @@ export const contentApi = {
   // A room component's save may include apps made in its room and room
   // files (include: the gateway reads them from the room).
   create: (form: ContentForm, include?: RoomInclude | null) =>
-    req<ContentComponentDetail>("/v1/content-components", { method: "POST", body: JSON.stringify({ form: formPayload(form), ...(include ? { include } : {}) }) }),
+    changing(
+      req<ContentComponentDetail>("/v1/content-components", { method: "POST", body: JSON.stringify({ form: formPayload(form), ...(include ? { include } : {}) }) }),
+      kindOf,
+    ),
   newVersion: (id: string, form: ContentForm, baseVersion: string, include?: RoomInclude | null) =>
-    req<ContentComponentDetail>(`/v1/content-components/${enc(id)}/versions`, {
-      method: "POST",
-      body: JSON.stringify({ form: formPayload(form), baseVersion, ...(include ? { include } : {}) }),
-    }).then(noteSaved),
+    changing(
+      req<ContentComponentDetail>(`/v1/content-components/${enc(id)}/versions`, {
+        method: "POST",
+        body: JSON.stringify({ form: formPayload(form), baseVersion, ...(include ? { include } : {}) }),
+      }).then(noteSaved),
+      kindOf,
+    ),
   // Import a skill directory, a plugin or a package as a new component, or
   // (existingId) as a new version of one of the caller's; a display name,
   // description and tags given replace what the import reads from the files.
@@ -85,28 +96,32 @@ export const contentApi = {
     if (opts.displayName?.trim()) q.set("displayName", opts.displayName.trim());
     if (opts.description?.trim()) q.set("description", opts.description.trim());
     for (const t of opts.tags ?? []) q.append("tag", t);
-    return postArchive<ContentComponentDetail>(`/v1/content-components/import?${q}`, file).then(noteSaved);
+    return changing(postArchive<ContentComponentDetail>(`/v1/content-components/import?${q}`, file).then(noteSaved), kindOf);
   },
   // A package archive (a tar the web packed from drafted deliverables): a
   // new component (component.json names its kind and name), or a new
   // version of one of the caller's (the server bumps the version).
-  createArchive: (tar: Blob) => postBody<ContentComponentDetail>("/v1/content-components", tar, "application/x-tar"),
+  createArchive: (tar: Blob) => changing(postBody<ContentComponentDetail>("/v1/content-components", tar, "application/x-tar"), kindOf),
   newVersionArchive: (id: string, tar: Blob) =>
-    postBody<ContentComponentDetail>(`/v1/content-components/${enc(id)}/versions`, tar, "application/x-tar").then(noteSaved),
-  remove: (id: string) => req<void>(`/v1/content-components/${enc(id)}`, { method: "DELETE", as: "none" }),
+    changing(postBody<ContentComponentDetail>(`/v1/content-components/${enc(id)}/versions`, tar, "application/x-tar").then(noteSaved), kindOf),
+  remove: (id: string) => changing(req<void>(`/v1/content-components/${enc(id)}`, { method: "DELETE", as: "none" }), null),
   ack: (id: string, version: string, roomId?: string) =>
     req<void>(`/v1/content-components/${enc(id)}/versions/${enc(version)}/ack${roomQuery(roomId)}`, { method: "POST", as: "none" }),
   uses: (roomId?: string) => req<ContentUsesReply>(`/v1/content-uses${roomQuery(roomId)}`),
+  // A use changes what a list shows as on and what a composer offers.
   putUse: (scope: ContentUseScope, componentId: string, opts: { roomId?: string; version?: string } = {}) =>
-    req<void>("/v1/content-uses", {
-      method: "PUT",
-      body: JSON.stringify({ scope, componentId, ...(opts.roomId ? { roomId: opts.roomId } : {}), ...(opts.version ? { version: opts.version } : {}) }),
-      as: "none",
-    }),
+    changing(
+      req<void>("/v1/content-uses", {
+        method: "PUT",
+        body: JSON.stringify({ scope, componentId, ...(opts.roomId ? { roomId: opts.roomId } : {}), ...(opts.version ? { version: opts.version } : {}) }),
+        as: "none",
+      }),
+      null,
+    ),
   removeUse: (scope: ContentUseScope, componentId: string, roomId?: string) => {
     const q = new URLSearchParams({ scope, componentId });
     if (roomId) q.set("roomId", roomId);
-    return req<void>(`/v1/content-uses?${q}`, { method: "DELETE", as: "none" });
+    return changing(req<void>(`/v1/content-uses?${q}`, { method: "DELETE", as: "none" }), null);
   },
   // The bundle archive (download through the artifact entitlement).
   bundle: (bundleUrl: string, roomId?: string): Promise<Blob> => req<Blob>(bundleUrl + roomQuery(roomId), { as: "blob" }),

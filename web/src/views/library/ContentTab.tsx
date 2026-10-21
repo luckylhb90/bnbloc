@@ -162,7 +162,7 @@ export function ContentTab({
                 {kind === "skill" && (
                   <Switch checked={enabled.has(c.id)} onChange={(on) => void toggleForMe(c, on)} label="On for all my agents" />
                 )}
-                <SharingStatus component={c} onChanged={reload} />
+                <SharingStatus component={c} />
                 <div className="mt-auto flex items-center gap-2 pt-1 text-xs text-[var(--color-fg-subtle)]">
                   <span className="min-w-0 flex-1 truncate">
                     <ContentByline component={c} />
@@ -202,7 +202,7 @@ export function ContentTab({
           </div>
         )}
       </div>
-      <ContentEditorDialog target={editing} onClose={closeEditor} onSaved={reload} />
+      <ContentEditorDialog target={editing} onClose={closeEditor} />
       <ContentViewDialog
         component={viewing}
         onClose={() => setViewing(null)}
@@ -215,9 +215,9 @@ export function ContentTab({
               }
         }
       />
-      <ImportDialog kind={kind} open={importing && !assist} mine={mine} onClose={() => setImporting(false)} onImported={reload} />
+      <ImportDialog kind={kind} open={importing && !assist} mine={mine} onClose={() => setImporting(false)} />
       <ShareDialog component={sharing} onClose={() => setSharing(null)} />
-      <PublishDialog component={publishing} onClose={() => setPublishing(null)} onChanged={reload} />
+      <PublishDialog component={publishing} onClose={() => setPublishing(null)} />
       <ConfirmDialog
         open={!!deleting}
         onClose={() => setDeleting(null)}

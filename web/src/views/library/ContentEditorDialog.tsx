@@ -62,15 +62,7 @@ function SkillsEditor({ skills, onChange }: { readonly skills: ContentFormSkill[
 // ContentEditorDialog creates an expert or skill pack by form, or saves a
 // new version of one (the server keeps the base version's scripts and
 // references and bumps the version).
-export function ContentEditorDialog({
-  target,
-  onClose,
-  onSaved,
-}: {
-  readonly target: EditorTarget | null;
-  readonly onClose: () => void;
-  readonly onSaved: () => void;
-}) {
+export function ContentEditorDialog({ target, onClose }: { readonly target: EditorTarget | null; readonly onClose: () => void }) {
   const toast = useToast();
   const [form, setForm] = useState<ContentForm | null>(null);
   const [busy, setBusy] = useState(false);
@@ -132,7 +124,6 @@ export function ContentEditorDialog({
     try {
       const d = base ? await contentApi.newVersion(base.id, form, base.latestVersion) : await contentApi.create(form);
       toast.success(base ? `Saved version ${d.component.latestVersion}` : `Created ${contentKindWord(form.kind)} ${d.component.name}`);
-      onSaved();
       onClose();
     } catch (e) {
       toast.error(errorText(e, "Could not save"));
@@ -234,13 +225,11 @@ export function ImportDialog({
   open,
   mine,
   onClose,
-  onImported,
 }: {
   readonly kind: ContentKind;
   readonly open: boolean;
   readonly mine: readonly ContentComponent[];
   readonly onClose: () => void;
-  readonly onImported: () => void;
 }) {
   const toast = useToast();
   const [file, setFile] = useState<File | null>(null);
@@ -261,7 +250,6 @@ export function ImportDialog({
     try {
       const d = await contentApi.importArchive(file, { kind, name, existingId: into || undefined });
       toast.success(into ? `Imported version ${d.component.latestVersion}` : `Imported ${d.component.name}`);
-      onImported();
       onClose();
     } catch (e) {
       toast.error(errorText(e, "Could not import"));

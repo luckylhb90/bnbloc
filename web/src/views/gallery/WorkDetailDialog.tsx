@@ -6,7 +6,6 @@ import { canShare } from "@/lib/contentSharing";
 import { errorText } from "@/lib/errors";
 import { exactTime, relativeTime } from "@/lib/format";
 import { Markdown } from "@/lib/markdown";
-import { invalidateQueries } from "@/lib/useQuery";
 import { workCategoryLabel } from "@/lib/workGallery";
 import { Button } from "@/ui/Button";
 import { Badge } from "@/ui/Card";
@@ -17,7 +16,7 @@ import { MakeSimilarDialog } from "./MakeSimilarDialog";
 import { RecipePanel } from "./RecipePanel";
 import { UseAppDialog } from "./UseAppDialog";
 import { WorkPreview } from "./WorkPreview";
-import { GALLERY_QUERY, WorkAuthorName, WorkTypeBadge } from "./WorkParts";
+import { WorkAuthorName, WorkTypeBadge } from "./WorkParts";
 
 // WorkDetailDialog is one work of the gallery (app gallery PRD §7, works
 // PRD §2–§4): the work itself in the artifact viewers (WorkPreview), its
@@ -153,7 +152,7 @@ export function WorkDetailDialog({
       />
       <UseAppDialog app={using ? work : null} onClose={() => setUsing(false)} onUsed={onUsed} />
       <MakeSimilarDialog work={similar ? work : null} onClose={() => setSimilar(false)} onDrafted={onDrafted} />
-      <PublishDialog component={publishing ? work : null} onClose={() => setPublishing(false)} onChanged={() => invalidateQueries(GALLERY_QUERY)} />
+      <PublishDialog component={publishing ? work : null} onClose={() => setPublishing(false)} />
     </>
   );
 }

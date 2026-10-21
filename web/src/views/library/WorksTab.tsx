@@ -24,11 +24,8 @@ import { ShareDialog } from "@/views/workbench/ShareDialog";
 import { PublishWorkDialog } from "@/views/gallery/PublishWorkDialog";
 import { WorkCard } from "@/views/gallery/WorkGallery";
 import { WorkDetailDialog } from "@/views/gallery/WorkDetailDialog";
-import { GALLERY_QUERY } from "@/views/gallery/WorkParts";
-import { useAuth } from "@/lib/auth";
+import { useWorks } from "@/views/gallery/WorkParts";
 import type { ContentComponent } from "@/lib/contentComponents";
-import { contentApi } from "@/lib/contentComponentsApi";
-import { invalidateQueries, queryKey, useQuery } from "@/lib/useQuery";
 import { workGalleryApi } from "@/lib/workGalleryApi";
 import { Segment } from "@/ui/Segment";
 
@@ -71,16 +68,14 @@ const WORKS_VIEWS = [
  *  them) of every type, from the content listing: opened in the gallery's
  *  detail. */
 function PublishedWorks({ onOpenRoom }: { readonly onOpenRoom: (roomId: string) => void }) {
-  const { subject, tenant } = useAuth();
   const toast = useToast();
-  const list = useQuery(queryKey(GALLERY_QUERY, { subject, tenant }), () => contentApi.list("work").then((r) => r.components ?? []), { staleMs: 30_000 });
+  const list = useWorks();
   const [openId, setOpenId] = useState<string | null>(null);
   const works = (list.data ?? []).filter((c) => c.kind === "work" && (c.mine || c.removable)).sort((a, b) => b.updatedAtMs - a.updatedAtMs);
   const open = works.find((c) => c.id === openId) ?? null;
   const toggleStar = async (c: ContentComponent) => {
     try {
       await workGalleryApi.favorite(c.id, !c.favorite);
-      invalidateQueries(GALLERY_QUERY);
     } catch (e) {
       toast.error(errorText(e, "Could not change your favorites"));
     }

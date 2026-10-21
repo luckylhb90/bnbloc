@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { CheckIcon, FileCodeIcon, XIcon } from "@phosphor-icons/react";
 import { contentLabel, permissionLabel, type ContentComponent, type ContentPublishRequest } from "@/lib/contentComponents";
+import { useContentChanged } from "@/lib/useContentChanged";
+import { ContentKindValues } from "@/lib/wire.gen";
 import { fileChangeLabel, requestTitle, type ContentAdminComponent, type ContentReview } from "@/lib/contentSharing";
 import { contentSharingApi } from "@/lib/contentSharingApi";
 import { relativeTime } from "@/lib/format";
@@ -49,12 +51,14 @@ export function ContentReviewTab() {
   useEffect(() => {
     void load();
   }, [load]);
+  // Any content change (a decision, an unpublish, a removal here; a publish
+  // request or withdrawal by an author in this page) reads the lists again.
+  useContentChanged(ContentKindValues, () => void load());
 
   const setStatus = async (c: ContentComponent, action: "unpublish" | "restore") => {
     try {
       await contentSharingApi.setOrgStatus(c.id, action);
       toast.success(action === "unpublish" ? `${contentLabel(c)} is unpublished` : `${contentLabel(c)} is published again`);
-      await load();
     } catch (e) {
       toast.error(errorText(e, "Could not change it"));
     }
@@ -63,7 +67,6 @@ export function ContentReviewTab() {
     try {
       await contentSharingApi.removeOrg(c.id);
       toast.success(`${contentLabel(c)} is removed from your organization`);
-      await load();
     } catch (e) {
       toast.error(errorText(e, "Could not remove it"));
     }
@@ -137,10 +140,7 @@ export function ContentReviewTab() {
       <ReviewDialog
         requestId={reviewing}
         onClose={() => setReviewing(null)}
-        onDecided={() => {
-          setReviewing(null);
-          void load();
-        }}
+        onDecided={() => setReviewing(null)}
       />
       <ConfirmDialog
         open={!!removing}

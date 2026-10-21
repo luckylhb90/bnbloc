@@ -4,7 +4,6 @@ import { useAuth } from "@/lib/auth";
 import { contentLabel, type ContentComponent } from "@/lib/contentComponents";
 import { contentApi } from "@/lib/contentComponentsApi";
 import { platformAgentsApi } from "@/lib/platformAgentsApi";
-import { announcePromptPacksChanged } from "@/lib/promptPacksApi";
 import { browserStorage } from "@/lib/storageKeys";
 import { composerAgentPicks, composerDrafts, composerExpertPicks, queueLibraryTab } from "@/lib/team";
 import { routeHash } from "@/lib/useHashRoute";
@@ -152,7 +151,6 @@ export async function tryInRoom(roomId: string, c: ContentComponent): Promise<st
   try {
     await contentApi.putUse("room", c.id, { roomId });
     if (c.kind === "prompt") {
-      announcePromptPacksChanged();
       const draft = tryItDraft(c);
       if (draft) composerDrafts.queue(roomId, draft);
     } else composerDrafts.queue(roomId, `Use the ${c.name} skill to `);

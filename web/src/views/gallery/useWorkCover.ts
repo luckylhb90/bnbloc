@@ -2,14 +2,12 @@ import { useEffect, useMemo } from "react";
 import type { ContentComponent } from "@/lib/contentComponents";
 import { ApiError } from "@/lib/errors";
 import { useMediaCapability } from "@/lib/media";
-import { invalidateQueries } from "@/lib/useQuery";
 import { MaxWorkCoverBytes } from "@/lib/wire.gen";
 import { workGalleryApi } from "@/lib/workGalleryApi";
 import { coverEncodings, createCoverTries, frameTime, workCoverPlan } from "@/lib/workCovers";
 import type { ArtifactViewer, ArtifactViewerProps } from "@/views/artifact/registry";
 import { componentCover, coverStored } from "@/views/workbench/AppCover";
 import { loadComponentCover } from "@/views/workbench/artifactData";
-import { GALLERY_QUERY } from "./WorkParts";
 
 // A work opened without a cover gets one (docs/prd/2026-10-19-work-covers.md
 // §2.3): the detail asks the version's cover (the card's coverUrl) and, when
@@ -62,7 +60,6 @@ async function keepCover(coverUrl: string, make: () => Promise<{ stored: boolean
     );
     if (!missing || !(await make()).stored) return;
     coverStored(componentCover(coverUrl));
-    invalidateQueries(GALLERY_QUERY);
   } catch {
     // The card keeps its generated cover.
   }

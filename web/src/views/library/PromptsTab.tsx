@@ -12,7 +12,6 @@ import {
 } from "@phosphor-icons/react";
 import { contentLabel, matchesContent, type ContentComponent } from "@/lib/contentComponents";
 import { contentApi } from "@/lib/contentComponentsApi";
-import { announcePromptPacksChanged } from "@/lib/promptPacksApi";
 import { relativeTime } from "@/lib/format";
 import { packUses, PERSONAL_PROMPT_PACK } from "@/lib/promptPacks";
 import { takeLibraryQuery } from "@/lib/team";
@@ -39,10 +38,7 @@ function promptOnText(c: ContentComponent, on: boolean): string {
 // version, delete, "on for me" (their composer) and "turn on for a room".
 export function PromptsTab({ tabs, onOpenRoom }: { readonly tabs: React.ReactNode; readonly onOpenRoom: (roomId: string) => void }) {
   const workshop = useOpenWorkshop(onOpenRoom);
-  const { items, error, enabled, reload, remove, toggleForMe } = useContentLibrary("prompt", {
-    onText: promptOnText,
-    onChanged: announcePromptPacksChanged,
-  });
+  const { items, error, enabled, reload, remove, toggleForMe } = useContentLibrary("prompt", { onText: promptOnText });
   const [q, setQ] = useState(takeLibraryQuery);
   const [editing, setEditing] = useState<PromptPackTarget | null>(null);
   const [viewing, setViewing] = useState<ContentComponent | null>(null);
@@ -58,12 +54,9 @@ export function PromptsTab({ tabs, onOpenRoom }: { readonly tabs: React.ReactNod
 
   // A new pack made here is on for its author at once (their composer
   // offers it); they can turn it off. A new version keeps their choice.
+  // The list and the composers follow the save by themselves.
   const saved = async (c: ContentComponent, isNew: boolean) => {
-    if (isNew && !enabled.has(c.id)) {
-      await contentApi.putUse("member", c.id).catch(() => {});
-      announcePromptPacksChanged();
-    }
-    reload();
+    if (isNew && !enabled.has(c.id)) await contentApi.putUse("member", c.id).catch(() => {});
   };
 
   return (
@@ -133,7 +126,7 @@ export function PromptsTab({ tabs, onOpenRoom }: { readonly tabs: React.ReactNod
                     </div>
                   )}
                   <Switch checked={enabled.has(c.id)} onChange={(on) => void toggleForMe(c, on)} label="On in my composer" />
-                  <SharingStatus component={c} onChanged={reload} />
+                  <SharingStatus component={c} />
                   <div className="mt-auto flex items-center gap-2 pt-1 text-xs text-[var(--color-fg-subtle)]">
                     <span className="min-w-0 flex-1 truncate">
                       <ContentByline component={c} /> · {relativeTime(c.updatedAtMs)}
@@ -180,7 +173,7 @@ export function PromptsTab({ tabs, onOpenRoom }: { readonly tabs: React.ReactNod
       <PromptImportDialog open={importing} mine={mine} onClose={() => setImporting(false)} onImported={(c) => void saved(c, !mine.some((m) => m.id === c.id))} />
       <AddToRoomDialog pack={rooming} onClose={() => setRooming(null)} />
       <ShareDialog component={sharing} onClose={() => setSharing(null)} />
-      <PublishDialog component={publishing} onClose={() => setPublishing(null)} onChanged={reload} />
+      <PublishDialog component={publishing} onClose={() => setPublishing(null)} />
       <ConfirmDialog
         open={!!deleting}
         onClose={() => setDeleting(null)}

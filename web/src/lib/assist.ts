@@ -3,6 +3,7 @@ import { req } from "./api.ts";
 import { useAuth } from "./auth";
 import { ApiError } from "./errors.ts";
 import { assistTask, createSSEParser } from "./assistModel.ts";
+import { contentChanges, touches } from "./contentChanges.ts";
 import type {
   AssistDelta,
   AssistDone,
@@ -58,6 +59,12 @@ export function invalidateAssistStatus(): void {
   cached = null;
   for (const l of listeners) l();
 }
+
+// Which assist a task resolves to is content: a saved, deleted, published
+// or withdrawn assist changes the status's tasks (lib/contentChanges.ts).
+contentChanges.subscribe((change) => {
+  if (touches(change, ["assist"])) invalidateAssistStatus();
+});
 
 /** The task the member can run now; null while loading, when assists are
  *  unavailable or the task is missing (the entry is then hidden). */

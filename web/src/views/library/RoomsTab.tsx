@@ -76,7 +76,7 @@ export function RoomsTab({ tabs, onOpenRoom }: { readonly tabs: React.ReactNode;
                 {c.description && <p className="line-clamp-3 text-sm text-[var(--color-fg-muted)]">{c.description}</p>}
                 <p className="text-xs text-[var(--color-fg-subtle)]">{roomSetupSummary(c.room, c.requires)}</p>
                 {(c.room?.sources.length ?? 0) > 0 && <p className="text-xs text-[var(--color-fg-subtle)]">Asks to read organization records (needs an admin's consent)</p>}
-                <SharingStatus component={c} onChanged={reload} />
+                <SharingStatus component={c} />
                 <div className="mt-auto flex items-center gap-2 pt-1 text-xs text-[var(--color-fg-subtle)]">
                   <span className="min-w-0 flex-1 truncate">
                     <ContentByline component={c} />
@@ -107,19 +107,18 @@ export function RoomsTab({ tabs, onOpenRoom }: { readonly tabs: React.ReactNode;
         )}
       </div>
       <ContentViewDialog component={viewing} onClose={() => setViewing(null)} />
-      <SaveRoomComponentDialog target={editing ? { component: editing } : null} onClose={() => setEditing(null)} onSaved={reload} />
+      <SaveRoomComponentDialog target={editing ? { component: editing } : null} onClose={() => setEditing(null)} />
       <CreateRoomFromComponentDialog
         open={!!using}
         component={using}
         onClose={() => setUsing(null)}
         onCreated={(roomId) => {
           setUsing(null);
-          reload();
           onOpenRoom(roomId);
         }}
       />
       <ShareDialog component={sharing} onClose={() => setSharing(null)} />
-      <PublishDialog component={publishing} onClose={() => setPublishing(null)} onChanged={reload} />
+      <PublishDialog component={publishing} onClose={() => setPublishing(null)} />
       <ConfirmDialog
         open={!!deleting}
         onClose={() => setDeleting(null)}

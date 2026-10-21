@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { announceContentChange } from "@/lib/contentChanges";
 import { contentApi } from "@/lib/contentComponentsApi";
 import { contentSaves, isOwnSave, submittedMessage } from "@/lib/contentSavedEvents";
 import { useToast } from "@/ui/Toast";
@@ -16,6 +17,9 @@ export function useWorkshopSaves(roomId: string, subject: string | null): void {
     () =>
       contentSaves.subscribe((room, s) => {
         if (room !== roomId || !isOwnSave(s, subject)) return;
+        // Saved by a job for the member: the server's change, announced
+        // like the member's own (lib/contentChanges.ts).
+        announceContentChange(s.kind);
         if (s.action !== "saved") {
           toast.info(submittedMessage(s));
           return;

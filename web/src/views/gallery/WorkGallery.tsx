@@ -1,11 +1,8 @@
 import { useMemo, useState } from "react";
 import { MagnifyingGlassIcon, SquaresFourIcon, StarIcon } from "@phosphor-icons/react";
-import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/cn";
 import { contentLabel, type ContentComponent } from "@/lib/contentComponents";
-import { contentApi } from "@/lib/contentComponentsApi";
 import { errorText } from "@/lib/errors";
-import { queryKey, useQuery } from "@/lib/useQuery";
 import { galleryWorks, GALLERY_TABS, TYPE_FILTERS, withFavorite, type GalleryTab, type TypeFilter } from "@/lib/workGallery";
 import { workGalleryApi } from "@/lib/workGalleryApi";
 import { Button } from "@/ui/Button";
@@ -17,7 +14,7 @@ import { useToast } from "@/ui/Toast";
 import { AppCover, componentCover } from "@/views/workbench/AppCover";
 import { useInView } from "@/views/workbench/FileCard";
 import { WorkDetailDialog } from "./WorkDetailDialog";
-import { FavoriteStar, GALLERY_QUERY, WorkAuthorName, WorkTypeBadge } from "./WorkParts";
+import { FavoriteStar, useWorks, WorkAuthorName, WorkTypeBadge } from "./WorkParts";
 
 // WorkGallery is Plaza → "Works" (app gallery PRD §7, works PRD §2): the
 // work components the member sees (the content listing, kind work: their
@@ -36,9 +33,8 @@ export function WorkGallery({
 }: {
   readonly onOpenRoom: (roomId: string, artifactId?: string) => void;
 }) {
-  const { subject, tenant } = useAuth();
   const toast = useToast();
-  const list = useQuery(queryKey(GALLERY_QUERY, { subject, tenant }), () => contentApi.list("work").then((r) => r.components ?? []), { staleMs: 30_000 });
+  const list = useWorks();
   const [tab, setTab] = useState<GalleryTab>("all");
   const [type, setType] = useState<TypeFilter>("all");
   const [query, setQuery] = useState("");

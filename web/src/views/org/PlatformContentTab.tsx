@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { CopyIcon, DownloadSimpleIcon, GlobeIcon } from "@phosphor-icons/react";
 import { contentLabel, type ContentComponent } from "@/lib/contentComponents";
+import { useContentChanged } from "@/lib/useContentChanged";
+import { ContentKindValues } from "@/lib/wire.gen";
 import { promoteCommands, tenantScopeBody, tenantScopeLabel, type ContentAdminComponent } from "@/lib/contentSharing";
 import { contentSharingApi } from "@/lib/contentSharingApi";
 import { relativeTime } from "@/lib/format";
@@ -43,12 +45,14 @@ export function PlatformContentTab() {
   useEffect(() => {
     void load();
   }, [load]);
+  // Any content change (an unpublish, a removal, an organization scope
+  // here) reads the list again.
+  useContentChanged(ContentKindValues, () => void load());
 
   const setStatus = async (c: ContentComponent, action: "unpublish" | "restore") => {
     try {
       await contentSharingApi.setPlatformStatus(c.id, action);
       toast.success(action === "unpublish" ? `${contentLabel(c)} is unpublished everywhere` : `${contentLabel(c)} is published again`);
-      await load();
     } catch (e) {
       toast.error(errorText(e, "Could not change it"));
     }
@@ -57,7 +61,6 @@ export function PlatformContentTab() {
     try {
       await contentSharingApi.removePlatform(c.id);
       toast.success(`${contentLabel(c)} is removed from the platform`);
-      await load();
     } catch (e) {
       toast.error(errorText(e, "Could not remove it"));
     }
@@ -124,7 +127,7 @@ export function PlatformContentTab() {
         ))}
       </div>
       <PromoteDialog component={promoting} onClose={() => setPromoting(null)} />
-      <TenantScopeDialog item={scoping} onClose={() => setScoping(null)} onSaved={() => void load()} />
+      <TenantScopeDialog item={scoping} onClose={() => setScoping(null)} />
       <ConfirmDialog
         open={!!removing}
         onClose={() => setRemoving(null)}
@@ -222,7 +225,7 @@ function PromoteDialog({ component: c, onClose }: { readonly component: ContentC
 
 // TenantScopeDialog limits platform content to some organizations, or
 // gives it to every organization again (the component tenant scope).
-function TenantScopeDialog({ item, onClose, onSaved }: { readonly item: ContentAdminComponent | null; readonly onClose: () => void; readonly onSaved: () => void }) {
+function TenantScopeDialog({ item, onClose }: { readonly item: ContentAdminComponent | null; readonly onClose: () => void }) {
   const toast = useToast();
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -235,7 +238,6 @@ function TenantScopeDialog({ item, onClose, onSaved }: { readonly item: ContentA
     try {
       await contentSharingApi.setPlatformTenants(c.name, c.kind, body);
       toast.success("allTenants" in body ? `${contentLabel(c)} reaches every organization` : `${contentLabel(c)} reaches ${tenantScopeLabel(body.enabledTenants).toLowerCase()}`);
-      onSaved();
       onClose();
     } catch (e) {
       toast.error(errorText(e, "Could not change its organizations"));

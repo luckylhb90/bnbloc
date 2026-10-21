@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { cn } from "@/lib/cn";
 import { promptsFromMessages, titleFromText, type PromptDraft } from "@/lib/promptPacks";
-import { announcePromptPacksChanged, promptPacksApi } from "@/lib/promptPacksApi";
+import { promptPacksApi } from "@/lib/promptPacksApi";
 import { parseTags } from "@/lib/team";
 import { Button } from "@/ui/Button";
 import { Dialog } from "@/ui/Dialog";
@@ -88,7 +88,6 @@ export function SavePromptDialog({
     try {
       const saved = await promptPacksApi.savePrompt({ title: title.trim(), body, tags: parseTags(tags) });
       toast.success(saved.created ? "Saved to My prompts (it is on in your composer)" : "Saved to My prompts");
-      announcePromptPacksChanged();
       onClose();
     } catch (e) {
       toast.error(errorText(e, "Could not save the prompt"));

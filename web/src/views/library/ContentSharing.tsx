@@ -56,8 +56,9 @@ export function ContentByline({ component: c }: { readonly component: ContentCom
 }
 
 // SharingStatus is the status line under a card: a copy's newer author
-// version (with Update), or the author's organization publication.
-export function SharingStatus({ component: c, onChanged }: { readonly component: ContentComponent; readonly onChanged: () => void }) {
+// version (with Update), or the author's organization publication. Its
+// list follows the update by itself (lib/contentChanges.ts).
+export function SharingStatus({ component: c }: { readonly component: ContentComponent }) {
   const toast = useToast();
   const [busy, setBusy] = useState(false);
   if (updateAvailable(c)) {
@@ -66,7 +67,6 @@ export function SharingStatus({ component: c, onChanged }: { readonly component:
       try {
         await contentSharingApi.updateCopy(c.id);
         toast.success(`${contentLabel(c)} is now version ${c.sourceLatestVersion}`);
-        onChanged();
       } catch (e) {
         toast.error(errorText(e, "Could not update it"));
       } finally {
@@ -297,16 +297,9 @@ export function ShareDialog({
 }
 
 // PublishDialog asks the organization's admins to publish the latest
-// version, or takes the component back out of the organization.
-export function PublishDialog({
-  component: c,
-  onClose,
-  onChanged,
-}: {
-  readonly component: ContentComponent | null;
-  readonly onClose: () => void;
-  readonly onChanged: () => void;
-}) {
+// version, or takes the component back out of the organization. Every
+// list showing it follows by itself (lib/contentChanges.ts).
+export function PublishDialog({ component: c, onClose }: { readonly component: ContentComponent | null; readonly onClose: () => void }) {
   const toast = useToast();
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
@@ -322,7 +315,6 @@ export function PublishDialog({
     try {
       const reply = await contentSharingApi.publish(c.id, scope, scope === "org" ? note.trim() : undefined);
       toast.success(scope === "org" ? orgPublishToast(reply) : reply.note);
-      onChanged();
       onClose();
     } catch (e) {
       toast.error(errorText(e, scope === "org" ? "Could not ask to publish it" : "Could not take it back"));

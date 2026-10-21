@@ -1,4 +1,5 @@
 import { req } from "./api.ts";
+import { changing } from "./contentChanges.ts";
 import type { ContentComponent, ContentComponentDetail } from "./contentComponents.ts";
 import { noteSaved } from "./contentComponentsApi.ts";
 import { roomPath } from "./roomId.ts";
@@ -22,15 +23,18 @@ export const workGalleryApi = {
   // picture of it (a PNG, WebP or JPEG; kept only while it has none), and
   // the author's AI cover (drawn by the gateway, which replaces a render).
   putCover: (c: Pick<ContentComponent, "id" | "version">, image: Blob) =>
-    req<WorkCoverStored>(`/v1/content-components/${enc(c.id)}/versions/${enc(c.version)}/cover?source=render`, {
-      method: "PUT",
-      headers: { "Content-Type": image.type },
-      body: image,
-    }),
+    changing(
+      req<WorkCoverStored>(`/v1/content-components/${enc(c.id)}/versions/${enc(c.version)}/cover?source=render`, {
+        method: "PUT",
+        headers: { "Content-Type": image.type },
+        body: image,
+      }),
+      "work",
+    ),
   drawCover: (c: Pick<ContentComponent, "id" | "version">) =>
-    req<WorkCoverStored>(`/v1/content-components/${enc(c.id)}/versions/${enc(c.version)}/cover/ai`, { method: "POST" }),
+    changing(req<WorkCoverStored>(`/v1/content-components/${enc(c.id)}/versions/${enc(c.version)}/cover/ai`, { method: "POST" }), "work"),
   favorite: (id: string, on: boolean) =>
-    req<void>(`/v1/content-components/${enc(id)}/favorite`, { method: on ? "PUT" : "DELETE", as: "none" }),
+    changing(req<void>(`/v1/content-components/${enc(id)}/favorite`, { method: on ? "PUT" : "DELETE", as: "none" }), "work"),
   // A site or app work's site in the sandboxed frame: a site URL whose SDK
   // keeps its data in the page (an app's Try demo, a site's preview).
   demo: (c: Pick<ContentComponent, "id" | "version">) =>
@@ -50,5 +54,5 @@ export const workGalleryApi = {
   // A deliverable's current version as a work of the caller's (a new
   // version of a work the organization uses announces where it went).
   publish: (roomId: string, artifactId: string, body: WorkPublishRequest) =>
-    req<ContentComponentDetail>(roomPath(roomId, "artifacts", artifactId, "publish-work"), { method: "POST", body: JSON.stringify(body) }).then(noteSaved),
+    changing(req<ContentComponentDetail>(roomPath(roomId, "artifacts", artifactId, "publish-work"), { method: "POST", body: JSON.stringify(body) }).then(noteSaved), "work"),
 };

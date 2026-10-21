@@ -1,16 +1,17 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { api, type AgentJob, type MemberComponent } from "@/lib/api";
 import { ENHANCE_PROMPT, runGatedJSONAssist, runJSONAssist, runTextAssist, useAssistTask } from "@/lib/assist";
 import {
+  deadEndCards,
   deadEndMemo,
   fallbackFixes,
   FIND_A_WAY,
+  findStep,
   lastReplyOf,
   ownSettledTurn,
   parseProposal,
   requestOf,
-  type DeadEndFix,
-  type DeadEndProposal,
+  type DeadEndCardState,
   type DeadEndScope,
 } from "@/lib/deadEnd";
 import { errorText } from "@/lib/errors";
@@ -29,14 +30,10 @@ import type { FeedItem } from "@/views/room/types";
 // as a card under it for this member only (local state, never posted). Any
 // agent reply's "Didn't work? Find a way" runs it without the gate; with no
 // assist model it offers the fixed fallback. Each fix runs an existing
-// flow, and only on the member's click.
-
-/** A card under one reply: being found, or the proposal (or the fallback's
- *  fixes, with a note saying why there is no proposal). */
-export type DeadEndCardState =
-  | { readonly status: "finding" }
-  | { readonly status: "ready"; readonly proposal: DeadEndProposal | null; readonly fixes: readonly DeadEndFix[]; readonly note?: string };
-
+// flow, and only on the member's click. The cards live in the session's
+// store (lib/deadEnd.ts deadEndCards), not in this view: a find still
+// running when the member leaves the room shows its card when they are
+// back, and a failed one says so on its card.
 /** What the card reaches (views/room/DeadEndCard.tsx). */
 export interface DeadEndRoom {
   readonly cards: Readonly<Record<number, DeadEndCardState>>;
@@ -78,7 +75,7 @@ export function useDeadEnd({
   const toast = useToast();
   const findTask = useAssistTask(FIND_A_WAY);
   const enhanceTask = useAssistTask(ENHANCE_PROMPT);
-  const [cards, setCards] = useState<Record<number, DeadEndCardState>>({});
+  const cards = useSyncExternalStore(deadEndCards.subscribe, () => deadEndCards.room(roomId));
   const [catalog, setCatalog] = useState<readonly MemberComponent[]>([]);
   const pending = useRef(new Set<string>());
   const [settled, setSettled] = useState(0);
@@ -86,14 +83,7 @@ export function useDeadEnd({
   feedRef.current = feed;
 
   const hasOwnAgent = roomAgents.some((a) => a.self && !a.platform);
-  const setCard = useCallback((seq: number, card: DeadEndCardState | null) => {
-    setCards((cur) => {
-      const next = { ...cur };
-      if (card) next[seq] = card;
-      else delete next[seq];
-      return next;
-    });
-  }, []);
+  const setCard = useCallback((seq: number, card: DeadEndCardState | null) => deadEndCards.set(roomId, seq, card), [roomId]);
 
   // The scope a reply's fixes are held to: what the catalog lists as
   // installable now, the room's agents.
@@ -117,10 +107,13 @@ export function useDeadEnd({
   const compute = useCallback(
     async (reply: FeedItem & { readonly seq: number }, gated: boolean) => {
       if (!gated) setCard(reply.seq, { status: "finding" });
-      const scope = await scopeOf(reply);
+      // Until the catalog answers: the room's agents, nothing installable.
+      let scope: DeadEndScope = { installable: [], agents: roomAgents.map(agentHandle), replier: reply.agentLabel };
       const fallback = (note: string): DeadEndCardState => ({ status: "ready", proposal: null, fixes: fallbackFixes(scope), note });
       const body = { text: "", roomId, channelId: channelId ?? undefined, replySeq: reply.seq, hasOwnAgent };
+      // Every way out leaves "finding": a failure is the card's note.
       try {
+        scope = await scopeOf(reply);
         const out = gated ? await runGatedJSONAssist(FIND_A_WAY, body) : await runJSONAssist(FIND_A_WAY, body);
         const proposal = out ? parseProposal(out.fields, scope) : null;
         deadEndMemo.set(roomId, reply.seq, proposal ? { kind: "proposal", proposal } : { kind: "skipped" });
@@ -130,7 +123,7 @@ export function useDeadEnd({
         if (!gated) setCard(reply.seq, fallback(errorText(e, "Could not find a way")));
       }
     },
-    [roomId, channelId, hasOwnAgent, scopeOf, setCard],
+    [roomId, channelId, hasOwnAgent, roomAgents, scopeOf, setCard],
   );
 
   // A settled turn of the member's own, live in this channel.
@@ -160,19 +153,23 @@ export function useDeadEnd({
       if (reply.seq == null) return;
       const seq = reply.seq;
       const known = deadEndMemo.get(roomId, seq);
-      if (known?.kind === "proposal") {
-        void scopeOf(reply).then((scope) =>
-          setCard(seq, { status: "ready", proposal: known.proposal, fixes: known.proposal.fixes.length > 0 ? known.proposal.fixes : fallbackFixes(scope) }),
-        );
-        return;
+      switch (findStep(deadEndCards.get(roomId, seq), known, !!findTask)) {
+        case "wait":
+          return;
+        case "proposal":
+          if (known?.kind !== "proposal") return;
+          void scopeOf(reply).then((scope) =>
+            setCard(seq, { status: "ready", proposal: known.proposal, fixes: known.proposal.fixes.length > 0 ? known.proposal.fixes : fallbackFixes(scope) }),
+          );
+          return;
+        case "fallback":
+          void scopeOf(reply).then((scope) =>
+            setCard(seq, { status: "ready", proposal: null, fixes: fallbackFixes(scope), note: "AI assist is not available here: these may help." }),
+          );
+          return;
+        case "run":
+          void compute({ ...reply, seq }, false);
       }
-      if (!findTask) {
-        void scopeOf(reply).then((scope) =>
-          setCard(seq, { status: "ready", proposal: null, fixes: fallbackFixes(scope), note: "AI assist is not available here: these may help." }),
-        );
-        return;
-      }
-      void compute({ ...reply, seq }, false);
     },
     [roomId, findTask, scopeOf, compute, setCard],
   );

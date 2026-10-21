@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { ContentComponent } from "@/lib/contentComponents";
 import { contentApi } from "@/lib/contentComponentsApi";
 import { promptChoices, starterChoices, type PromptChoice } from "@/lib/promptPacks";
-import { PROMPT_PACKS_CHANGED } from "@/lib/promptPacksApi";
+import { useContentChanged } from "@/lib/useContentChanged";
 
 // The prompts a room offers its members: the choices (their packs, the
 // room's, the Library's) and an empty room's starters. One loader for the
@@ -11,7 +11,7 @@ import { PROMPT_PACKS_CHANGED } from "@/lib/promptPacksApi";
 // libraryPromptPacks are the prompt packs of the member's Library (their
 // own, the org's and the platform's published ones, the default ones
 // among them):
-// loaded once per page and again when packs change (PROMPT_PACKS_CHANGED);
+// loaded once per page and again when packs change (lib/contentChanges.ts);
 // a failed load is retried.
 let libraryPacks: Promise<readonly ContentComponent[]> | null = null;
 function libraryPromptPacks(): Promise<readonly ContentComponent[]> {
@@ -57,13 +57,10 @@ export function usePromptChoices(roomId: string, enabled = true): Loaded {
       live = false;
     };
   }, [roomId, enabled, epoch]);
-  useEffect(() => {
-    const reload = () => {
-      libraryPacks = null;
-      setEpoch((n) => n + 1);
-    };
-    window.addEventListener(PROMPT_PACKS_CHANGED, reload);
-    return () => window.removeEventListener(PROMPT_PACKS_CHANGED, reload);
-  }, []);
+  // A prompt pack saved, deleted or turned on or off (a use names no kind).
+  useContentChanged(["prompt"], () => {
+    libraryPacks = null;
+    setEpoch((n) => n + 1);
+  });
   return state;
 }

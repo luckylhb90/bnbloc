@@ -12,7 +12,7 @@ import {
   type PromptDraft,
   type PromptPackForm,
 } from "@/lib/promptPacks";
-import { announcePromptPacksChanged, promptPacksApi } from "@/lib/promptPacksApi";
+import { promptPacksApi } from "@/lib/promptPacksApi";
 import { Button } from "@/ui/Button";
 import { Dialog } from "@/ui/Dialog";
 import { Field, Input, Textarea } from "@/ui/Input";
@@ -192,7 +192,6 @@ export function PromptPackEditorDialog({
     try {
       const d = into ? await promptPacksApi.newVersion(into.id, form, into.latestVersion) : await promptPacksApi.create(form);
       toast.success(into ? `Saved ${contentLabel(d.component)} v${d.component.latestVersion}` : `Created the prompt pack ${d.component.name}`);
-      announcePromptPacksChanged();
       onSaved?.(d.component);
       onClose();
     } catch (e) {

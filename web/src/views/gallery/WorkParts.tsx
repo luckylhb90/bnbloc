@@ -4,8 +4,11 @@ import { api, type RoomSummary } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/cn";
 import { contentLabel, type ContentComponent } from "@/lib/contentComponents";
+import { contentApi } from "@/lib/contentComponentsApi";
 import { errorText } from "@/lib/errors";
 import { can } from "@/lib/permissions";
+import { useContentChanged } from "@/lib/useContentChanged";
+import { invalidateQueries, queryKey, useQuery, type QueryResult } from "@/lib/useQuery";
 import { defaultGalleryTarget, galleryRoomProblem, galleryRooms, workAuthor, workTypeLabel, type GalleryRoomTarget } from "@/lib/workGallery";
 import { Badge } from "@/ui/Card";
 import { Field, Input } from "@/ui/Input";
@@ -16,8 +19,18 @@ import { UserName } from "@/views/UserName";
 // The gallery's small parts, shared by its cards, a work's detail and the
 // dialogs that put a work into a room ("Use this app", "Make similar").
 
-/** The gallery listing's query name (refetched after a publish). */
-export const GALLERY_QUERY = "content-works";
+/** The gallery listing's query name. */
+const GALLERY_QUERY = "content-works";
+
+/** useWorks is the works listing (the content listing's works): one cached
+ *  query for the gallery and the Library's works, read again after every
+ *  change of a work (lib/contentChanges.ts: a publish, a favorite, a
+ *  stored cover, a delete). */
+export function useWorks(): QueryResult<ContentComponent[]> {
+  const { subject, tenant } = useAuth();
+  useContentChanged(["work"], () => invalidateQueries(GALLERY_QUERY));
+  return useQuery(queryKey(GALLERY_QUERY, { subject, tenant }), () => contentApi.list("work").then((r) => r.components ?? []), { staleMs: 30_000 });
+}
 
 /** WorkAuthorName is a work's author line: the person, or "Platform". */
 export function WorkAuthorName({ work }: { readonly work: ContentComponent }) {

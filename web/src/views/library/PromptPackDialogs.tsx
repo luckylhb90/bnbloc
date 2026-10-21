@@ -4,7 +4,7 @@ import { useAuth } from "@/lib/auth";
 import { contentLabel, type ContentComponent, type ContentComponentDetail } from "@/lib/contentComponents";
 import { contentApi } from "@/lib/contentComponentsApi";
 import { variableLabel, PROMPT_IMPORT_ACCEPT } from "@/lib/promptPacks";
-import { announcePromptPacksChanged, promptPacksApi } from "@/lib/promptPacksApi";
+import { promptPacksApi } from "@/lib/promptPacksApi";
 import { lastRoom } from "@/lib/team";
 import { Button } from "@/ui/Button";
 import { Badge } from "@/ui/Card";
@@ -147,7 +147,6 @@ export function PromptImportDialog({
     try {
       const d = await promptPacksApi.importFile(file, { name, existingId: into || undefined });
       toast.success(into ? `Imported version ${d.component.latestVersion}` : `Imported ${d.component.name} with ${d.component.prompts?.length ?? 0} prompts`);
-      announcePromptPacksChanged();
       onImported(d.component);
       onClose();
     } catch (e) {
@@ -235,7 +234,6 @@ export function AddToRoomDialog({ pack, onClose }: { readonly pack: ContentCompo
     try {
       await contentApi.putUse("room", pack.id, { roomId });
       toast.success(`${contentLabel(pack)} is on in the room`);
-      announcePromptPacksChanged();
       onClose();
     } catch (e) {
       toast.error(errorText(e, "Could not turn it on for the room"));

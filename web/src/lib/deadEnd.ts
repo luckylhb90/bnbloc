@@ -142,6 +142,81 @@ export function createReplyMemo(size = MEMO_SIZE) {
 /** The session's memo: a remount of the room never asks again. */
 export const deadEndMemo = createReplyMemo();
 
+/** A card under one reply: being found, or the proposal (or the fallback's
+ *  fixes, with a note saying why there is no proposal: a failed assist
+ *  says so here, never anywhere else). */
+export type DeadEndCardState =
+  | { readonly status: "finding" }
+  | { readonly status: "ready"; readonly proposal: DeadEndProposal | null; readonly fixes: readonly DeadEndFix[]; readonly note?: string };
+
+type CardsOfRoom = Readonly<Record<number, DeadEndCardState>>;
+const NO_CARDS: CardsOfRoom = {};
+
+/** createCardStore keeps the cards under replies for the page's session,
+ *  by room and sequence, outside the room view: a find still running when
+ *  the member leaves the room lands here, and its card is there when they
+ *  come back (it is theirs alone and never posted). room() answers the
+ *  same object until that room's cards change (useSyncExternalStore). The
+ *  oldest card is forgotten past size. */
+export function createCardStore(size = MEMO_SIZE) {
+  const cards = new Map<string, { readonly roomId: string; readonly seq: number; readonly card: DeadEndCardState }>();
+  const snapshots = new Map<string, CardsOfRoom>();
+  const listeners = new Set<() => void>();
+  const key = (roomId: string, seq: number) => `${roomId}\u0000${seq}`;
+  const changed = (...rooms: string[]) => {
+    for (const r of rooms) snapshots.delete(r);
+    for (const l of [...listeners]) l();
+  };
+  return {
+    get: (roomId: string, seq: number): DeadEndCardState | undefined => cards.get(key(roomId, seq))?.card,
+    /** Shows card under the reply, or (null) takes it away. */
+    set(roomId: string, seq: number, card: DeadEndCardState | null): void {
+      const k = key(roomId, seq);
+      if (!card && !cards.has(k)) return;
+      cards.delete(k);
+      const touched = [roomId];
+      if (card) {
+        cards.set(k, { roomId, seq, card });
+        if (cards.size > size) {
+          const [oldest, entry] = cards.entries().next().value as [string, { readonly roomId: string }];
+          cards.delete(oldest);
+          touched.push(entry.roomId);
+        }
+      }
+      changed(...touched);
+    },
+    room(roomId: string): CardsOfRoom {
+      let snap = snapshots.get(roomId);
+      if (!snap) {
+        const out: Record<number, DeadEndCardState> = {};
+        for (const e of cards.values()) if (e.roomId === roomId) out[e.seq] = e.card;
+        snap = Object.keys(out).length > 0 ? out : NO_CARDS;
+        snapshots.set(roomId, snap);
+      }
+      return snap;
+    },
+    subscribe(listener: () => void): () => void {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+  };
+}
+
+/** The session's cards (views/room/useDeadEnd.ts). */
+export const deadEndCards = createCardStore();
+
+/** What the reply's "Find a way" does: nothing while a find for it is
+ *  still running (one assist call per reply at a time), show the proposal
+ *  already found, show the fallback without an assist model, else run the
+ *  assist. */
+export function findStep(card: DeadEndCardState | undefined, known: DeadEndOutcome | undefined, hasAssist: boolean): "wait" | "proposal" | "fallback" | "run" {
+  if (card?.status === "finding") return "wait";
+  if (known?.kind === "proposal") return "proposal";
+  return hasAssist ? "run" : "fallback";
+}
+
 /** A job event that settles a turn the member asked for themselves (not one
  *  an agent dispatched for them), in the channel they are looking at. */
 export interface SettledJob {

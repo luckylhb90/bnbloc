@@ -6,7 +6,6 @@ import { contentApi } from "@/lib/contentComponentsApi";
 import { errorText } from "@/lib/errors";
 import { formatBytes } from "@/lib/format";
 import { useMediaCapability } from "@/lib/media";
-import { invalidateQueries } from "@/lib/useQuery";
 import { WorkCategoryValues } from "@/lib/wire.gen";
 import {
   publishWorkForm,
@@ -28,7 +27,6 @@ import { Select } from "@/ui/Select";
 import { useToast } from "@/ui/Toast";
 import { AssistButton } from "@/views/AssistButton";
 import { PublishDialog } from "@/views/library/ContentSharing";
-import { GALLERY_QUERY } from "./WorkParts";
 
 // PublishWorkDialog is "Publish to gallery" (app gallery PRD §6, works
 // PRD §2–§3), from any deliverable's card in its room for the members who
@@ -116,7 +114,6 @@ export function PublishWorkDialog({ deliverable, onClose }: { readonly deliverab
     setFailure("");
     try {
       const d = await workGalleryApi.publish(deliverable.roomId, deliverable.artifactId, { ...publishWorkRequest(form, recipe), ...(cover ? { cover } : {}) });
-      invalidateQueries(GALLERY_QUERY);
       toast.success(`${contentLabel(d.component)} v${d.component.latestVersion} is in the gallery`);
       setSaved(d.component);
     } catch (e) {
@@ -177,7 +174,7 @@ export function PublishWorkDialog({ deliverable, onClose }: { readonly deliverab
             </>
           }
         />
-        <PublishDialog component={publishing ? saved : null} onClose={onClose} onChanged={() => invalidateQueries(GALLERY_QUERY)} />
+        <PublishDialog component={publishing ? saved : null} onClose={onClose} />
       </>
     );
   }

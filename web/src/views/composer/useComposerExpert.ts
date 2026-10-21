@@ -10,6 +10,7 @@ import {
 } from "@/lib/contentComponents";
 import { contentApi } from "@/lib/contentComponentsApi";
 import { composerExpertPicks } from "@/lib/team";
+import { useContentChanged } from "@/lib/useContentChanged";
 import { contentUsesChanged } from "@/lib/contentUsesEvents";
 
 export interface ComposerExpert {
@@ -60,6 +61,8 @@ export function useComposerExpert(roomId: string, enabled: boolean): ComposerExp
       if (id === roomId) setEpoch((n) => n + 1);
     });
   }, [roomId, enabled]);
+  // An expert saved, deleted or pinned in this page (lib/contentChanges.ts).
+  useContentChanged(["expert"], () => setEpoch((n) => n + 1));
 
   // A picked expert that left the choices (deleted, unpinned) is dropped.
   useEffect(() => {

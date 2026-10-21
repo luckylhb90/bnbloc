@@ -3,7 +3,7 @@ import { downloadReleaseFile as fetchReleaseFile } from "./releaseDownload.ts";
 import { saveBlob } from "./saveBlob.ts";
 import { tapOnboarding } from "./onboardingEvents.ts";
 import { splitAgentHosts } from "./platformAgents.ts";
-import { apiUrl } from "./config";
+import { apiUrl } from "./config.ts";
 import { ApiError } from "./errors.ts";
 import {
   MaxUnreadRooms,
