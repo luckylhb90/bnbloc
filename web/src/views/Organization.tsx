@@ -148,13 +148,13 @@ export function Organization() {
         )}
       </header>
 
-      <nav className="flex gap-1 overflow-x-auto border-b border-[var(--color-border)]">
+      <nav className="flex gap-1 overflow-x-auto overflow-y-hidden border-b border-[var(--color-border)]">
         {TABS.filter((t) => !t.superOnly || isSuper).map((t) => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
             className={cn(
-              "tactile -mb-px border-b-2 px-3 py-2 text-sm",
+              "tactile shrink-0 whitespace-nowrap border-b-2 px-3 py-2 text-sm",
               tab === t.id
                 ? "border-[var(--color-accent)] text-[var(--color-fg)]"
                 : "border-transparent text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]",

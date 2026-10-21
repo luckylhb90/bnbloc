@@ -134,19 +134,18 @@ export function PlatformComponents() {
   return (
     <section ref={shellRef} className="coarse-targets flex flex-col gap-4">
       <Card className="p-4">
-        <div className="flex items-start gap-3">
+        <div className="flex flex-wrap items-start gap-x-3 gap-y-4">
           <div className="grid size-10 shrink-0 place-items-center rounded-[var(--radius)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]">
             <PackageIcon size={20} weight="fill" />
           </div>
-          <div className="min-w-0 flex-1">
+          <div className="min-w-[14rem] flex-1">
             <h2 className="text-base font-semibold text-[var(--color-fg)]">Components Workbench</h2>
             <p className="mt-1 text-sm leading-relaxed text-[var(--color-fg-muted)]">
               Publish signed core, plugin, auth-provider, notifier, share-target, sandbox, previewer and MCP tool packages, review trust and runtime facts, and choose who receives each component.
             </p>
           </div>
-          <div className="hidden shrink-0 gap-6 pl-5 sm:flex">
+          <div className="flex shrink-0 gap-6 max-sm:basis-full max-sm:pl-[3.25rem]">
             <HeadStat label="Components" value={counts.total} />
-            <HeadStat label="Cores / Plugins / Auth / Notifiers / Share targets / Sandboxes / Previewers / MCP tools" value={`${counts.core} / ${counts.plugin} / ${counts["auth-provider"]} / ${counts.notifier} / ${counts["share-target"]} / ${counts.sandbox} / ${counts.previewer} / ${counts.mcp}`} />
             <HeadStat label="Auto-installed" value={counts.auto} />
             <HeadStat label="Members" value={counts.members > 0 ? counts.members : "—"} />
           </div>
