@@ -432,6 +432,17 @@ form to be filed, can check what was clicked without having watched.
   any room file: "what did the run do on question 7" is answered from it,
   and it is the record a procedure is drawn from (§5).
 
+- **Replay pictures (0.7.3, 2026-10-21).** One replay file holds at most
+  5 MiB (the room's live preview plays pages up to that size; larger HTML
+  opens as source): pictures are JPEG (quality 70, at most 1280 px wide,
+  phone runs at their CSS size), a step whose page did not change plays the
+  earlier picture ("same as step N"), and over budget the first and last
+  steps, pauses and dialogs are kept longest, scrolls and waits go first,
+  then acting steps evenly; a dropped picture says why. Acting steps carry
+  a marker (a frame around the control, or a dot where it was pressed),
+  drawn into the picture, so the GIF guide shows it too; the GIF uses the
+  replay's own kept pictures.
+
 ### 2.8b Device and GIF guides (added 2026-10-20)
 
 Why: a member wanted animated how-to GIFs of their company's real app for
