@@ -99,19 +99,19 @@ func (p *HTTPPublisher) ComponentsChanged(ctx context.Context, c wire.Components
 	p.post(ctx, "/internal/v1/components/changed", c.TenantID, buf, "components_changed")
 }
 
-// PlatformEvent hands a recorded platform event to realtime's scheduler
-// (POST /internal/v1/platform-events), which sets the runs of the
-// schedules following it. Unlike a publish it reports failure: the event
+// PlatformEvent hands a recorded platform event to realtime's event
+// dispatcher (POST /internal/v1/events), which sets the runs of the tasks
+// whose trigger takes it. Unlike a publish it reports failure: the event
 // is recorded once, so its recorder retries the hand-off.
-func (p *HTTPPublisher) PlatformEvent(ctx context.Context, ev wire.PlatformEvent) error {
+func (p *HTTPPublisher) PlatformEvent(ctx context.Context, d wire.EventDispatch) error {
 	if p == nil || p.BaseURL == "" {
 		return errors.New("no realtime configured")
 	}
-	buf, err := json.Marshal(ev)
+	buf, err := json.Marshal(d)
 	if err != nil {
 		return err
 	}
-	return p.send(ctx, "/internal/v1/platform-events", "", buf)
+	return p.send(ctx, "/internal/v1/events", "", buf)
 }
 
 // post makes one signed internal call to realtime as p.Service in tenantID,

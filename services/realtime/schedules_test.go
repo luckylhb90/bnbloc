@@ -63,6 +63,16 @@ func (r schedRoles) MemberRole(_ context.Context, roomID, userID string) (store.
 	return role, ok, nil
 }
 
+func (r schedRoles) Members(_ context.Context, roomID string) ([]store.Membership, error) {
+	var out []store.Membership
+	for k, role := range r.roles {
+		if room, user, _ := strings.Cut(k, "\x00"); room == roomID {
+			out = append(out, store.Membership{RoomID: room, UserID: user, Role: role})
+		}
+	}
+	return out, nil
+}
+
 type schedFixture struct {
 	t       *testing.T
 	srv     *httptest.Server
@@ -87,7 +97,7 @@ func newSchedFixture(t *testing.T) *schedFixture {
 	f := &schedFixture{t: t, members: members, chat: store.NewMemoryChat(), jobs: store.NewMemoryBridgeJobs(), sched: store.NewMemoryRoomSchedules()}
 	f.svc = &Service{
 		Hub: realtime.NewHub(64, 16), Membership: members, Chat: f.chat, BridgeJobs: f.jobs,
-		Schedules: f.sched, RoomRoles: roles,
+		Schedules: f.sched, RoomRoles: roles, Dispatches: f.jobs, HookBox: testCredentialBox(t),
 	}
 	f.srv = httptest.NewServer(f.svc.Handler())
 	t.Cleanup(f.srv.Close)

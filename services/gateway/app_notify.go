@@ -87,8 +87,8 @@ func (s *Service) serveAppNotify(w http.ResponseWriter, r *http.Request, c appCa
 		return
 	}
 	caller := c.tenant + "\x00" + c.scope.Participant
-	if !s.appNotifyLimiters.app.get(appNotifyAppRate, appNotifyAppBurst, s.Peers.Size).allow(c.tenant+"\x00"+c.scope.AppID) ||
-		!s.appNotifyLimiters.caller.get(appNotifyCallerRate, appNotifyCallerBurst, s.Peers.Size).allow(caller) {
+	if !s.appNotifyLimiters.app.Get(appNotifyAppRate, appNotifyAppBurst, s.Peers.Size).Allow(c.tenant+"\x00"+c.scope.AppID) ||
+		!s.appNotifyLimiters.caller.Get(appNotifyCallerRate, appNotifyCallerBurst, s.Peers.Size).Allow(caller) {
 		httpx.Error(w, "too many notices from this app: try again later", http.StatusTooManyRequests)
 		return
 	}

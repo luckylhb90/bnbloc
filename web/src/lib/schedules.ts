@@ -7,9 +7,19 @@ import { defaultDisplayName, formatAgentHandle } from "./displayNames.ts";
 export type { RoomSchedule, ScheduleRecipient, ScheduleRecurrence, ScheduledMarker } from "./wire.gen.ts";
 import type { RoomSchedule, ScheduleRecipient, ScheduleRecurrence, ScheduledMarker } from "./wire.gen.ts";
 
-export type { PlatformEventName, RecurrenceKind } from "./wire.gen.ts";
-import type { PlatformEventName, RecurrenceKind } from "./wire.gen.ts";
-import { PlatformEventNames } from "./wire.gen.ts";
+export type { EventSubscriptionSource, RecurrenceKind } from "./wire.gen.ts";
+import type { EventFilter, EventSubscriptionSource, RecurrenceKind } from "./wire.gen.ts";
+import {
+  EventSubscriptionSourceValues,
+  GitHubEventHeader,
+  GitHubSignatureHeader,
+  HookEventHeader,
+  HookPathPrefix,
+  HookSignatureHeader,
+  PlatformEventTypes,
+  ReservedEventTypePrefixes,
+  RoomEventTypes,
+} from "./wire.gen.ts";
 
 export interface ScheduleInput {
   text: string;
@@ -54,20 +64,38 @@ export function scheduledMarker(payload: unknown): ScheduledMarker | undefined {
   return typeof id === "string" && id ? { scheduleId: id } : undefined;
 }
 
-// What each platform event a schedule may follow is called in the editor
-// and the list. The events are the server's closed list
-// (wire.PlatformEventNames); the record makes a new one fail to compile
-// here until it has words.
-const EVENT_LABELS: Record<PlatformEventName, string> = {
+// What each event a trigger may take is called in the editor and the list.
+// The platform's and the room's types are the server's closed lists
+// (wire.PlatformEventTypes, wire.RoomEventTypes); a type with no words
+// here shows as itself.
+const EVENT_LABELS: Record<string, string> = {
   "platform.deployed": "bnbloc is deployed",
   "component.published": "a component is published",
   "desktop.published": "a desktop version is published",
+  "room.file.added": "a file is added or updated",
+  "room.member.joined": "someone joins",
+  "room.app.data.changed": "an app's data changes",
 };
 
-/** The events a schedule may follow, in the server's order, with their words. */
-export const PLATFORM_EVENTS: readonly { readonly value: PlatformEventName; readonly label: string }[] = PlatformEventNames.filter(
-  (e): e is PlatformEventName => e in EVENT_LABELS,
-).map((value) => ({ value, label: EVENT_LABELS[value] }));
+// Where a trigger's events come from, in words.
+const SOURCE_LABELS: Record<EventSubscriptionSource, string> = {
+  "bnbloc/platform": "The platform",
+  "bnbloc/room": "This room",
+  "bnbloc/member": "A member of this room",
+  webhook: "Another system (webhook)",
+};
+
+/** Where a trigger's events may come from, in the server's order. */
+export const EVENT_SOURCES: readonly { readonly value: EventSubscriptionSource; readonly label: string }[] = EventSubscriptionSourceValues.map(
+  (value) => ({ value, label: SOURCE_LABELS[value] }),
+);
+
+/** The closed list of a source's types (an open source has none: the
+ *  member types them). */
+export function sourceTypes(source: EventSubscriptionSource): readonly { readonly value: string; readonly label: string }[] {
+  const list = source === "bnbloc/platform" ? PlatformEventTypes : source === "bnbloc/room" ? RoomEventTypes : [];
+  return list.map((value) => ({ value, label: EVENT_LABELS[value] ?? value }));
+}
 
 // describeRecurrence renders a recurrence for the list ("Daily at 09:00",
 // "Mon, Wed at 17:15", "Once on …", "Cron 0 9 * * 1-5", "When bnbloc is
@@ -90,13 +118,38 @@ export function describeRecurrence(r: ScheduleRecurrence, timezone: string): str
     }
     case "cron":
       return `Cron ${r.cron ?? ""}`.trim();
-    case "event": {
-      const events = (r.events ?? []).map((e) =>
-        e === "component.published" && r.component ? `component ${r.component} is published` : (EVENT_LABELS[e] ?? e),
-      );
-      return `When ${events.join(" or ") || "the platform changes"}`;
-    }
+    case "event":
+      return describeTrigger(r);
   }
+}
+
+// describeTrigger renders an event trigger: "When a file is added or
+// updated in this room (subject starts with reports/)", "When another system
+// sends com.github.push (ref = refs/heads/main)".
+export function describeTrigger(r: ScheduleRecurrence): string {
+  const types = (r.types ?? []).map((t) => EVENT_LABELS[t] ?? t).join(" or ");
+  const where = filterWords(r.filter);
+  const tail = where ? ` (${where})` : "";
+  switch (r.source) {
+    case "bnbloc/platform":
+      return `When ${types || "the platform changes"}${tail}`;
+    case "bnbloc/room":
+      return `When ${types || "something happens"} in this room${tail}`;
+    case "bnbloc/member":
+      return `When a member sends ${types || "an event"}${tail}`;
+    case "webhook":
+      return `When another system sends ${types || "an event"}${tail}`;
+  }
+  return `When ${types || "an event happens"}${tail}`;
+}
+
+function filterWords(f: EventFilter | undefined): string {
+  if (!f) return "";
+  const parts: string[] = [];
+  if (f.subject) parts.push(`subject is ${f.subject}`);
+  if (f.subjectPrefix) parts.push(`subject starts with ${f.subjectPrefix}`);
+  for (const [k, v] of Object.entries(f.data ?? {}).sort(([a], [b]) => a.localeCompare(b))) parts.push(`${k} = ${v}`);
+  return parts.join(", ");
 }
 
 // formatInZone renders an instant as "Mon, Oct 12, 09:00" in timezone (the
@@ -249,10 +302,15 @@ export interface RecurrenceForm {
   time: string; // "HH:MM"
   days: number[];
   cron: string;
-  // The platform events an event schedule follows, and the one component
-  // it is limited to ("" any) when it follows component.published.
-  events: PlatformEventName[];
-  component: string;
+  // An event trigger: where its events come from, the types it takes (the
+  // picked ones of a closed list; typed, one per line or comma, for an open
+  // source), and its filter: the subject (exact, or a prefix ending in *)
+  // and top-level data fields ("field=value", one per line).
+  source: EventSubscriptionSource;
+  types: string[];
+  typesText: string;
+  subject: string;
+  dataFilter: string;
 }
 
 // formFromRecurrence seeds the editor from a stored recurrence (or defaults:
@@ -265,8 +323,13 @@ export function formFromRecurrence(r: ScheduleRecurrence | undefined, timezone: 
     time: r?.time ?? "09:00",
     days: r?.days?.length ? [...r.days] : [1, 2, 3, 4, 5],
     cron: r?.cron ?? "0 9 * * 1-5",
-    events: r?.events?.length ? [...r.events] : ["platform.deployed"],
-    component: r?.component ?? "",
+    source: r?.source ?? "bnbloc/room",
+    types: r?.types?.length ? [...r.types] : ["room.file.added"],
+    typesText: r?.source === "webhook" || r?.source === "bnbloc/member" ? (r.types ?? []).join("\n") : "",
+    subject: r?.filter?.subject ?? (r?.filter?.subjectPrefix ? r.filter.subjectPrefix + "*" : ""),
+    dataFilter: Object.entries(r?.filter?.data ?? {})
+      .map(([k, v]) => `${k}=${v}`)
+      .join("\n"),
   };
 }
 
@@ -297,11 +360,50 @@ export function recurrenceFromForm(
       if (cron.split(" ").length !== 5) return { error: "Cron needs 5 fields: minute hour day month weekday" };
       return { recurrence: { kind: "cron", cron } };
     }
-    case "event": {
-      const events = PLATFORM_EVENTS.map((e) => e.value).filter((e) => f.events.includes(e));
-      if (events.length === 0) return { error: "Pick at least one change to run on" };
-      const component = events.includes("component.published") ? f.component.trim() : "";
-      return { recurrence: { kind: "event", events, ...(component ? { component } : {}) } };
-    }
+    case "event":
+      return triggerFromForm(f);
   }
+}
+
+// triggerFromForm builds an event trigger from the editor, or a
+// member-facing error. The server validates again (known types, bounds).
+function triggerFromForm(f: RecurrenceForm): { recurrence?: ScheduleRecurrence; error?: string } {
+  const closed = sourceTypes(f.source);
+  const types =
+    closed.length > 0
+      ? closed.map((t) => t.value).filter((t) => f.types.includes(t))
+      : [...new Set(f.typesText.split(/[\s,]+/).filter((t) => t !== ""))];
+  if (types.length === 0) return { error: closed.length > 0 ? "Pick at least one event to run on" : "Name at least one event type" };
+  if (types.some((t) => t.includes("*") && t.indexOf("*") !== t.length - 1)) return { error: "A * goes only at the end of a type" };
+  if (f.source === "bnbloc/member" && types.some((t) => ReservedEventTypePrefixes.some((p) => t.startsWith(p)))) {
+    return { error: `A member's event never starts with ${ReservedEventTypePrefixes.join(" ")}` };
+  }
+  const filter: EventFilter = {};
+  const subject = f.subject.trim();
+  if (subject.endsWith("*")) filter.subjectPrefix = subject.slice(0, -1);
+  else if (subject) filter.subject = subject;
+  for (const line of f.dataFilter.split("\n")) {
+    const t = line.trim();
+    if (!t) continue;
+    const at = t.indexOf("=");
+    if (at <= 0) return { error: `Write each data filter as field=value (${t})` };
+    filter.data = { ...filter.data, [t.slice(0, at).trim()]: t.slice(at + 1).trim() };
+  }
+  const hasFilter = !!(filter.subject || filter.subjectPrefix || filter.data);
+  return { recurrence: { kind: "event", source: f.source, types, ...(hasFilter ? { filter } : {}) } };
+}
+
+/** The webhook URL of a hook on this deployment (origin "" is same-origin). */
+export function hookURL(origin: string, hookId: string): string {
+  return `${origin.replace(/\/+$/, "")}${HookPathPrefix}${encodeURIComponent(hookId)}`;
+}
+
+/** What a hook's sender is told: the URL, the secret, and how to sign. */
+export function hookInstructions(url: string, secret: string): string {
+  return [
+    `URL: ${url}`,
+    `Secret: ${secret}`,
+    `Sign each POST: ${HookSignatureHeader}: sha256=<hex HMAC-SHA256 of the raw body with the secret> (GitHub's ${GitHubSignatureHeader} works as is).`,
+    `Name the event in ${HookEventHeader} (GitHub's ${GitHubEventHeader} reads as com.github.<event>), or as "type" in the JSON body.`,
+  ].join("\n");
 }

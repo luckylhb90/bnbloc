@@ -1,12 +1,14 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -81,22 +83,58 @@ type RoomScheduleStore interface {
 	// answered (wire.RoomSchedule.Event).
 	CompleteScheduleRun(ctx context.Context, r ScheduleRunResult) error
 	// ListEventSchedules returns every enabled schedule with an event
-	// recurrence (wire.RecurEvent) of tenantIDs (none: every tenant),
-	// oldest first (then id). Cross-tenant: the dispatch of a platform
-	// event reads them all, and each row carries its own tenant.
-	ListEventSchedules(ctx context.Context, tenantIDs []string) ([]wire.RoomSchedule, error)
+	// recurrence (wire.RecurEvent) that q reaches, oldest first (then id).
+	// Cross-tenant: the dispatch of a platform event reads every tenant's,
+	// and each row carries its own tenant.
+	ListEventSchedules(ctx context.Context, q EventScheduleQuery) ([]wire.RoomSchedule, error)
 	// TriggerEventSchedule sets the run of an enabled event schedule for
 	// ev (cross-tenant, by its global id), coalesced so a burst of events
 	// runs it at most once per minGapMs: a run already pending keeps its
-	// time and takes ev (the latest event's facts); a run in flight (a
-	// live claim) loses its claim's hold on the schedule (its completion
+	// time and takes ev (the latest event); a run in flight (a live
+	// claim) loses its claim's hold on the schedule (its completion
 	// records only the run) and is followed by one more at minGapMs after
 	// its slot at the earliest; otherwise it runs at nowMs, or minGapMs
 	// after its last run when that is later. It returns when the run is
 	// due; ok is false when the schedule is gone, paused or no longer
 	// follows events.
-	TriggerEventSchedule(ctx context.Context, scheduleID string, ev wire.PlatformEvent, nowMs, minGapMs int64) (runAtMs int64, ok bool, err error)
+	TriggerEventSchedule(ctx context.Context, scheduleID string, ev wire.CloudEvent, nowMs, minGapMs int64) (runAtMs int64, ok bool, err error)
+	// SetScheduleHook gives the tenant's schedule in the room a webhook:
+	// hook (its id and time) with its secret sealed as sealedSecret. A new
+	// id replaces a revoked or rotated one; its refusals start at zero.
+	// ErrScheduleNotFound when there is no such schedule; ErrHookExists
+	// when the id is another schedule's.
+	SetScheduleHook(ctx context.Context, roomID, scheduleID string, hook wire.ScheduleHook, sealedSecret string) error
+	// DeleteScheduleHook revokes the schedule's webhook (none is not an
+	// error); ErrScheduleNotFound when there is no such schedule.
+	DeleteScheduleHook(ctx context.Context, roomID, scheduleID string) error
+	// ScheduleByHook returns the schedule whose webhook id is hookID and
+	// its sealed secret (cross-tenant: a webhook request names only the
+	// hook); ErrScheduleNotFound when no schedule has it.
+	ScheduleByHook(ctx context.Context, hookID string) (wire.RoomSchedule, string, error)
+	// CountHookRefused counts one refused request at hookID (cross-tenant;
+	// a hook that is gone counts nothing).
+	CountHookRefused(ctx context.Context, hookID string, atMs int64) error
+	// CountEventDropped counts one event a rate limit dropped from the
+	// schedule's trigger (cross-tenant). notice is true for the first drop
+	// since the schedule was created or last edited (UpdateSchedule): the
+	// room's owner is told once, not per drop.
+	CountEventDropped(ctx context.Context, scheduleID string) (notice bool, err error)
 }
+
+// EventScheduleQuery is who an event reaches: the tenants (none: every
+// tenant) and, for a room's own event, that room ("" : every room).
+type EventScheduleQuery struct {
+	Tenants []string
+	RoomID  string
+}
+
+// reaches reports whether a schedule of tenantID in roomID is in q.
+func (q EventScheduleQuery) reaches(tenantID, roomID string) bool {
+	return (len(q.Tenants) == 0 || slices.Contains(q.Tenants, tenantID)) && (q.RoomID == "" || q.RoomID == roomID)
+}
+
+// ErrHookExists refuses a webhook id another schedule holds.
+var ErrHookExists = errors.New("store: webhook id already exists")
 
 // --- memory ---
 
@@ -104,6 +142,8 @@ type memSchedule struct {
 	s            wire.RoomSchedule
 	claimToken   string
 	claimedUntil int64
+	hookSecret   string
+	dropNoticed  bool
 }
 
 // MemoryRoomSchedules is the in-memory RoomScheduleStore (dev / tests).
@@ -121,12 +161,20 @@ var _ RoomScheduleStore = (*MemoryRoomSchedules)(nil)
 
 func cloneSchedule(s wire.RoomSchedule) wire.RoomSchedule {
 	s.Recurrence.Days = append([]int(nil), s.Recurrence.Days...)
-	s.Recurrence.Events = append([]string(nil), s.Recurrence.Events...)
+	s.Recurrence.Types = append([]string(nil), s.Recurrence.Types...)
+	if f := s.Recurrence.Filter; f != nil {
+		cp := *f
+		cp.Data = maps.Clone(f.Data)
+		s.Recurrence.Filter = &cp
+	}
 	if s.Event != nil {
 		ev := *s.Event
-		ev.Targets = append([]string(nil), ev.Targets...)
-		ev.Tenants = append([]string(nil), ev.Tenants...)
+		ev.Data = slices.Clone(ev.Data)
 		s.Event = &ev
+	}
+	if s.Hook != nil {
+		h := *s.Hook
+		s.Hook = &h
 	}
 	return s
 }
@@ -136,7 +184,9 @@ func (m *MemoryRoomSchedules) CreateSchedule(ctx context.Context, s wire.RoomSch
 	if err != nil {
 		return wire.RoomSchedule{}, err
 	}
-	s.TenantID = tid
+	// A new schedule has no webhook and no drops (SetScheduleHook,
+	// CountEventDropped), as in MySQL.
+	s.TenantID, s.Hook, s.DroppedEvents = tid, nil, 0
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, taken := m.rows[s.ScheduleID]; taken {
@@ -226,7 +276,7 @@ func (m *MemoryRoomSchedules) UpdateSchedule(ctx context.Context, s wire.RoomSch
 	cur.Timezone, cur.Enabled, cur.NextRunAtMs = s.Timezone, s.Enabled, s.NextRunAtMs
 	cur.LastStatus, cur.LastError, cur.UpdatedAtMs = s.LastStatus, truncateRunError(s.LastError), s.UpdatedAtMs
 	r.s = cloneSchedule(cur)
-	r.claimToken, r.claimedUntil = "", 0
+	r.claimToken, r.claimedUntil, r.dropNoticed = "", 0, false
 	return nil
 }
 
@@ -301,12 +351,12 @@ func (m *MemoryRoomSchedules) CompleteScheduleRun(_ context.Context, res Schedul
 	return nil
 }
 
-func (m *MemoryRoomSchedules) ListEventSchedules(_ context.Context, tenantIDs []string) ([]wire.RoomSchedule, error) {
+func (m *MemoryRoomSchedules) ListEventSchedules(_ context.Context, q EventScheduleQuery) ([]wire.RoomSchedule, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	out := []wire.RoomSchedule{}
 	for _, r := range m.rows {
-		if r.s.Enabled && r.s.Recurrence.Kind == wire.RecurEvent && (len(tenantIDs) == 0 || slices.Contains(tenantIDs, r.s.TenantID)) {
+		if r.s.Enabled && r.s.Recurrence.Kind == wire.RecurEvent && q.reaches(r.s.TenantID, r.s.RoomID) {
 			out = append(out, cloneSchedule(r.s))
 		}
 	}
@@ -319,7 +369,7 @@ func (m *MemoryRoomSchedules) ListEventSchedules(_ context.Context, tenantIDs []
 	return out, nil
 }
 
-func (m *MemoryRoomSchedules) TriggerEventSchedule(_ context.Context, scheduleID string, ev wire.PlatformEvent, nowMs, minGapMs int64) (int64, bool, error) {
+func (m *MemoryRoomSchedules) TriggerEventSchedule(_ context.Context, scheduleID string, ev wire.CloudEvent, nowMs, minGapMs int64) (int64, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	r, ok := m.rows[scheduleID]
@@ -340,6 +390,85 @@ func (m *MemoryRoomSchedules) TriggerEventSchedule(_ context.Context, scheduleID
 	r.s.Event = &ev
 	r.s = cloneSchedule(r.s)
 	return r.s.NextRunAtMs, true, nil
+}
+
+func (m *MemoryRoomSchedules) SetScheduleHook(ctx context.Context, roomID, scheduleID string, hook wire.ScheduleHook, sealedSecret string) error {
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, err := m.getLocked(tid, roomID, scheduleID)
+	if err != nil {
+		return err
+	}
+	for id, other := range m.rows {
+		if id != scheduleID && other.s.Hook != nil && other.s.Hook.HookID == hook.HookID {
+			return ErrHookExists
+		}
+	}
+	h := wire.ScheduleHook{HookID: hook.HookID, CreatedAtMs: hook.CreatedAtMs}
+	r.s.Hook, r.hookSecret = &h, sealedSecret
+	return nil
+}
+
+func (m *MemoryRoomSchedules) DeleteScheduleHook(ctx context.Context, roomID, scheduleID string) error {
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, err := m.getLocked(tid, roomID, scheduleID)
+	if err != nil {
+		return err
+	}
+	r.s.Hook, r.hookSecret = nil, ""
+	return nil
+}
+
+// byHookLocked is the row whose webhook id is hookID. Caller holds mu.
+func (m *MemoryRoomSchedules) byHookLocked(hookID string) *memSchedule {
+	for _, r := range m.rows {
+		if hookID != "" && r.s.Hook != nil && r.s.Hook.HookID == hookID {
+			return r
+		}
+	}
+	return nil
+}
+
+func (m *MemoryRoomSchedules) ScheduleByHook(_ context.Context, hookID string) (wire.RoomSchedule, string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r := m.byHookLocked(hookID)
+	if r == nil {
+		return wire.RoomSchedule{}, "", ErrScheduleNotFound
+	}
+	return cloneSchedule(r.s), r.hookSecret, nil
+}
+
+func (m *MemoryRoomSchedules) CountHookRefused(_ context.Context, hookID string, atMs int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if r := m.byHookLocked(hookID); r != nil {
+		r.s.Hook.Refused++
+		r.s.Hook.LastRefusedAtMs = atMs
+	}
+	return nil
+}
+
+func (m *MemoryRoomSchedules) CountEventDropped(_ context.Context, scheduleID string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	r, ok := m.rows[scheduleID]
+	if !ok {
+		return false, nil
+	}
+	r.s.DroppedEvents++
+	notice := !r.dropNoticed
+	r.dropNoticed = true
+	return notice, nil
 }
 
 // truncateRunError bounds a recorded error to the last_error column.
@@ -367,24 +496,48 @@ func NewMySQLRoomSchedules(db *sql.DB) *MySQLRoomSchedules { return &MySQLRoomSc
 
 var _ RoomScheduleStore = (*MySQLRoomSchedules)(nil)
 
-const scheduleCols = `schedule_id, tenant_id, room_id, channel_id, created_by, text, recipient_json, recurrence_json,
+// scheduleInsertCols are the columns a new schedule is written with (a new
+// schedule has no webhook and no drops).
+const scheduleInsertCols = `schedule_id, tenant_id, room_id, channel_id, created_by, text, recipient_json, recurrence_json,
   timezone, enabled, next_run_at_ms, last_run_at_ms, last_status, last_error, last_summary, failed_runs, last_seq, run_count, created_at_ms, updated_at_ms,
   pending_event_json`
 
+// scheduleCols are the columns a schedule is read with: never the
+// webhook's secret (ScheduleByHook reads it).
+const scheduleCols = scheduleInsertCols + `, hook_id, hook_created_at_ms, hook_refused, hook_refused_at_ms, events_dropped`
+
 func scanSchedule(row rowScanner) (wire.RoomSchedule, error) {
+	return scanScheduleWith(row)
+}
+
+// scanScheduleWith scans scheduleCols and then extra.
+func scanScheduleWith(row rowScanner, extra ...any) (wire.RoomSchedule, error) {
 	var s wire.RoomSchedule
 	var recip, recur, event []byte
-	var next, last sql.NullInt64
-	if err := row.Scan(&s.ScheduleID, &s.TenantID, &s.RoomID, &s.ChannelID, &s.CreatedBy, &s.Text, &recip, &recur,
+	var next, last, hookAt, refusedAt sql.NullInt64
+	var hookID sql.NullString
+	var refused int64
+	dest := []any{&s.ScheduleID, &s.TenantID, &s.RoomID, &s.ChannelID, &s.CreatedBy, &s.Text, &recip, &recur,
 		&s.Timezone, &s.Enabled, &next, &last, &s.LastStatus, &s.LastError, &s.LastSummary, &s.FailedRuns, &s.LastSeq, &s.RunCount,
-		&s.CreatedAtMs, &s.UpdatedAtMs, &event); err != nil {
+		&s.CreatedAtMs, &s.UpdatedAtMs, &event, &hookID, &hookAt, &refused, &refusedAt, &s.DroppedEvents}
+	if err := row.Scan(append(dest, extra...)...); err != nil {
 		return wire.RoomSchedule{}, err
 	}
 	if len(event) > 0 && string(event) != "null" {
-		s.Event = &wire.PlatformEvent{}
+		s.Event = &wire.CloudEvent{}
 		if err := json.Unmarshal(event, s.Event); err != nil {
 			return wire.RoomSchedule{}, err
 		}
+		// A JSON column re-spaces what it stores: the event's data reads
+		// back compact, as it was written (wire.ValidEvent) and as the
+		// memory store holds it.
+		var data bytes.Buffer
+		if len(s.Event.Data) > 0 && json.Compact(&data, s.Event.Data) == nil {
+			s.Event.Data = data.Bytes()
+		}
+	}
+	if hookID.Valid && hookID.String != "" {
+		s.Hook = &wire.ScheduleHook{HookID: hookID.String, CreatedAtMs: hookAt.Int64, Refused: refused, LastRefusedAtMs: refusedAt.Int64}
 	}
 	if err := json.Unmarshal(recip, &s.Recipient); err != nil {
 		return wire.RoomSchedule{}, err
@@ -414,7 +567,8 @@ func (m *MySQLRoomSchedules) CreateSchedule(ctx context.Context, s wire.RoomSche
 	if err != nil {
 		return wire.RoomSchedule{}, err
 	}
-	_, err = m.DB.ExecContext(ctx, `INSERT INTO room_schedules (`+scheduleCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	s.Hook, s.DroppedEvents = nil, 0
+	_, err = m.DB.ExecContext(ctx, `INSERT INTO room_schedules (`+scheduleInsertCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		s.ScheduleID, tid, s.RoomID, s.ChannelID, s.CreatedBy, s.Text, recip, recur,
 		s.Timezone, s.Enabled, nullIfZero(s.NextRunAtMs), nullIfZero(s.LastRunAtMs), s.LastStatus, s.LastError, truncateRunError(s.LastSummary), s.FailedRuns,
 		s.LastSeq, s.RunCount, s.CreatedAtMs, s.UpdatedAtMs, event)
@@ -472,7 +626,7 @@ func (m *MySQLRoomSchedules) UpdateSchedule(ctx context.Context, s wire.RoomSche
 	}
 	res, err := m.DB.ExecContext(ctx, `UPDATE room_schedules SET channel_id = ?, text = ?, recipient_json = ?,
 		recurrence_json = ?, timezone = ?, enabled = ?, next_run_at_ms = ?, last_status = ?, last_error = ?,
-		updated_at_ms = ?, claim_token = NULL, claimed_until_ms = NULL
+		updated_at_ms = ?, claim_token = NULL, claimed_until_ms = NULL, drop_noticed = 0
 		WHERE tenant_id = ? AND room_id = ? AND schedule_id = ?`,
 		s.ChannelID, s.Text, recip, recur, s.Timezone, s.Enabled, nullIfZero(s.NextRunAtMs), s.LastStatus,
 		truncateRunError(s.LastError), s.UpdatedAtMs, tid, s.RoomID, s.ScheduleID)
@@ -560,7 +714,7 @@ func (m *MySQLRoomSchedules) CompleteScheduleRun(ctx context.Context, r Schedule
 
 // pendingEventArg is a schedule's pending event as its column holds it
 // (NULL for none).
-func pendingEventArg(ev *wire.PlatformEvent) (any, error) {
+func pendingEventArg(ev *wire.CloudEvent) (any, error) {
 	if ev == nil {
 		return nil, nil
 	}
@@ -570,25 +724,95 @@ func pendingEventArg(ev *wire.PlatformEvent) (any, error) {
 // eventKindSQL selects the schedules with an event recurrence.
 const eventKindSQL = `JSON_UNQUOTE(JSON_EXTRACT(recurrence_json, '$.kind')) = '` + wire.RecurEvent + `'`
 
-func (m *MySQLRoomSchedules) ListEventSchedules(ctx context.Context, tenantIDs []string) ([]wire.RoomSchedule, error) {
+func (m *MySQLRoomSchedules) ListEventSchedules(ctx context.Context, eq EventScheduleQuery) ([]wire.RoomSchedule, error) {
 	// cross-tenant: a platform event reaches the schedules of every tenant
 	// it names (or of all); each row carries its own tenant.
 	q := `SELECT ` + scheduleCols + ` FROM room_schedules WHERE enabled = 1 AND ` + eventKindSQL
 	args := []any{}
-	if len(tenantIDs) > 0 {
-		q += ` AND tenant_id IN (?` + strings.Repeat(",?", len(tenantIDs)-1) + `)`
-		for _, t := range tenantIDs {
+	if len(eq.Tenants) > 0 {
+		q += ` AND tenant_id IN (?` + strings.Repeat(",?", len(eq.Tenants)-1) + `)`
+		for _, t := range eq.Tenants {
 			args = append(args, t)
 		}
 	}
+	if eq.RoomID != "" {
+		q += ` AND room_id = ?`
+		args = append(args, eq.RoomID)
+	}
 	return queryAll(ctx, m.DB, q+` ORDER BY created_at_ms, schedule_id`, scanSchedule, args...)
+}
+
+func (m *MySQLRoomSchedules) SetScheduleHook(ctx context.Context, roomID, scheduleID string, hook wire.ScheduleHook, sealedSecret string) error {
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	res, err := m.DB.ExecContext(ctx, `UPDATE room_schedules SET hook_id = ?, hook_secret = ?, hook_created_at_ms = ?,
+		hook_refused = 0, hook_refused_at_ms = NULL
+		WHERE tenant_id = ? AND room_id = ? AND schedule_id = ?`,
+		hook.HookID, sealedSecret, hook.CreatedAtMs, tid, roomID, scheduleID)
+	if err != nil {
+		return dupAs(err, ErrHookExists)
+	}
+	return requireMatched(res, ErrScheduleNotFound)
+}
+
+func (m *MySQLRoomSchedules) DeleteScheduleHook(ctx context.Context, roomID, scheduleID string) error {
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	res, err := m.DB.ExecContext(ctx, `UPDATE room_schedules SET hook_id = NULL, hook_secret = NULL, hook_created_at_ms = NULL,
+		hook_refused = 0, hook_refused_at_ms = NULL
+		WHERE tenant_id = ? AND room_id = ? AND schedule_id = ?`, tid, roomID, scheduleID)
+	if err != nil {
+		return err
+	}
+	return requireMatched(res, ErrScheduleNotFound)
+}
+
+func (m *MySQLRoomSchedules) ScheduleByHook(ctx context.Context, hookID string) (wire.RoomSchedule, string, error) {
+	// cross-tenant: a webhook request names only its hook; the row
+	// carries its tenant.
+	var secret sql.NullString
+	s, err := scanScheduleWith(m.DB.QueryRowContext(ctx, `SELECT `+scheduleCols+`, hook_secret FROM room_schedules
+		WHERE hook_id = ?`, hookID), &secret)
+	if errors.Is(err, sql.ErrNoRows) {
+		return wire.RoomSchedule{}, "", ErrScheduleNotFound
+	}
+	return s, secret.String, err
+}
+
+func (m *MySQLRoomSchedules) CountHookRefused(ctx context.Context, hookID string, atMs int64) error {
+	// cross-tenant: the refused request named only the hook.
+	_, err := m.DB.ExecContext(ctx, `UPDATE room_schedules SET hook_refused = hook_refused + 1, hook_refused_at_ms = ?
+		WHERE hook_id = ?`, atMs, hookID)
+	return err
+}
+
+// CountEventDropped is one UPDATE that sets the notice flag and carries its
+// previous value out as the statement's insert id (LAST_INSERT_ID(expr)),
+// so two concurrent drops never both notice and no second read races.
+func (m *MySQLRoomSchedules) CountEventDropped(ctx context.Context, scheduleID string) (bool, error) {
+	// cross-tenant: the dispatch addresses a schedule by its global id.
+	res, err := m.DB.ExecContext(ctx, `UPDATE room_schedules SET events_dropped = events_dropped + 1,
+		drop_noticed = LAST_INSERT_ID(drop_noticed) * 0 + 1
+		WHERE schedule_id = ?`, scheduleID)
+	if err != nil {
+		return false, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return false, nil
+	}
+	prev, err := res.LastInsertId()
+	return err == nil && prev == 0, err
 }
 
 // TriggerEventSchedule is one UPDATE (its row lock serializes it with a
 // claim and a completion). MySQL evaluates single-table SET assignments
 // left to right: next_run_at_ms and claim_token read the claim before
 // claimed_until_ms releases it.
-func (m *MySQLRoomSchedules) TriggerEventSchedule(ctx context.Context, scheduleID string, ev wire.PlatformEvent, nowMs, minGapMs int64) (int64, bool, error) {
+func (m *MySQLRoomSchedules) TriggerEventSchedule(ctx context.Context, scheduleID string, ev wire.CloudEvent, nowMs, minGapMs int64) (int64, bool, error) {
 	// cross-tenant: the dispatch addresses a schedule by its global id.
 	event, err := jsonArg(ev)
 	if err != nil {

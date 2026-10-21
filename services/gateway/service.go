@@ -25,6 +25,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/notify"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/orgsync"
+	"github.com/luckylhb90/bnbloc/internal/ratelimit"
 	"github.com/luckylhb90/bnbloc/internal/rbac"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/sealbox"
@@ -168,22 +169,22 @@ type Service struct {
 	// guessLimiter throttles brute-forceable attempts (login per client IP,
 	// invite redemption per subject, public share token misses per client
 	// IP); publicLimiter throttles public share reads per client IP.
-	limiter       lazyLimiter
-	guessLimiter  lazyLimiter
-	publicLimiter lazyLimiter
+	limiter       ratelimit.Lazy
+	guessLimiter  ratelimit.Lazy
+	publicLimiter ratelimit.Lazy
 	// visitorLimiter throttles visitor-token mints per client IP;
 	// appLimiters an interactive app's data calls per IP, link and
 	// participant, reads and writes apart (appRates).
-	visitorLimiter lazyLimiter
+	visitorLimiter ratelimit.Lazy
 	// assistLimiter throttles a member's AI assist runs (assistRate);
 	// decisionLimiter their decision calls (decisionRate), a step loop's
 	// pace rather than a person's.
-	assistLimiter   lazyLimiter
-	decisionLimiter lazyLimiter
-	appLimiters     [appDims]struct{ read, write lazyLimiter }
+	assistLimiter   ratelimit.Lazy
+	decisionLimiter ratelimit.Lazy
+	appLimiters     [appDims]struct{ read, write ratelimit.Lazy }
 	// appNotifyLimiters bound app notices per app and per caller
 	// (app_notify.go).
-	appNotifyLimiters struct{ app, caller lazyLimiter }
+	appNotifyLimiters struct{ app, caller ratelimit.Lazy }
 	// appFeedRecheck overrides how often an app's change feed re-resolves
 	// its capability (tests; zero: appFeedRecheck).
 	appFeedRecheck time.Duration
@@ -623,7 +624,7 @@ func (s *Service) proxyClaims(r *http.Request, p apiPath) (auth.Claims, bool) {
 
 // rateAllow lazily builds the per-subject limiter and consumes one token.
 func (s *Service) rateAllow(subject string) bool {
-	return s.limiter.get(defaultChatRate, defaultChatBurst, s.Peers.Size).allow(subject)
+	return s.limiter.Get(defaultChatRate, defaultChatBurst, s.Peers.Size).Allow(subject)
 }
 
 // guessAllow lazily builds the slow guess limiter and consumes one token for
@@ -632,18 +633,18 @@ func (s *Service) rateAllow(subject string) bool {
 // bucket), "subject:<id>" for authenticated invite
 // redemption, "share-ip:<addr>" for public share token misses.
 func (s *Service) guessAllow(key string) bool {
-	return s.guessLimiter.get(defaultGuessRate, defaultGuessBurst, s.Peers.Size).allow(key)
+	return s.guessLimiter.Get(defaultGuessRate, defaultGuessBurst, s.Peers.Size).Allow(key)
 }
 
 // guessBlocked reports, without consuming, whether key's guess budget is
 // spent.
 func (s *Service) guessBlocked(key string) bool {
-	return s.guessLimiter.get(defaultGuessRate, defaultGuessBurst, s.Peers.Size).blocked(key)
+	return s.guessLimiter.Get(defaultGuessRate, defaultGuessBurst, s.Peers.Size).Blocked(key)
 }
 
 // publicAllow consumes one public-read token for a client IP.
 func (s *Service) publicAllow(ip string) bool {
-	return s.publicLimiter.get(defaultPublicRate, defaultPublicBurst, s.Peers.Size).allow("ip:" + ip)
+	return s.publicLimiter.Get(defaultPublicRate, defaultPublicBurst, s.Peers.Size).Allow("ip:" + ip)
 }
 
 // clientIP derives the caller's IP for the per-IP limits. X-Forwarded-For is

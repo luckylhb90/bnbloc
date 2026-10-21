@@ -87,7 +87,7 @@ func (s *Service) handleDrawWorkCover(w http.ResponseWriter, r *http.Request, ca
 	if !ok {
 		return
 	}
-	if !s.assistLimiter.get(assistRate, assistBurst, s.Peers.Size).allow(actor.Claims.Tenant + "/" + actor.Claims.Subject) {
+	if !s.assistLimiter.Get(assistRate, assistBurst, s.Peers.Size).Allow(actor.Claims.Tenant + "/" + actor.Claims.Subject) {
 		httpx.Error(w, "too many requests: try again in a minute", http.StatusTooManyRequests)
 		return
 	}

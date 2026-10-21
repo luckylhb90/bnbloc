@@ -28,6 +28,9 @@ const (
 	HeaderApp = "X-Bnbloc-App"
 	// HeaderAppParticipant carries "<kind>:<id>" (AppScope.ParticipantKey).
 	HeaderAppParticipant = "X-Bnbloc-App-Participant"
+	// HeaderAppJob carries the agent job an agent participant acts in
+	// (AppScope.Job), absent for a member or a visitor.
+	HeaderAppJob = "X-Bnbloc-App-Job"
 	// HeaderAppSig carries the hex HMAC over the app scope (appCompute).
 	HeaderAppSig = "X-bnbloc-App-Sig"
 )
@@ -56,6 +59,11 @@ type AppScope struct {
 	AppID       string
 	Kind        AppParticipantKind
 	Participant string
+	// Job is the agent job an agent participant writes in (its job's
+	// grant): the cause a room's event of its write carries
+	// (docs/prd/2026-10-21-room-events.md, no self-trigger). Only with
+	// AppAgent; "" otherwise.
+	Job string
 }
 
 // ParticipantKey is the participant as one string, "<kind>:<id>": a
@@ -77,18 +85,23 @@ func (s AppScope) valid() bool {
 		return false
 	}
 	for _, v := range []string{s.RoomID, s.AppID, s.Participant} {
-		if v == "" || len(v) > maxAppScopeValue || strings.TrimSpace(v) != v || strings.IndexFunc(v, unicode.IsControl) >= 0 {
+		if v == "" || !scopeValue(v) {
 			return false
 		}
 	}
-	return true
+	return s.Job == "" || (s.Kind == AppAgent && scopeValue(s.Job))
+}
+
+// scopeValue reports a bounded, printable, trimmed scope value.
+func scopeValue(v string) bool {
+	return len(v) <= maxAppScopeValue && strings.TrimSpace(v) == v && strings.IndexFunc(v, unicode.IsControl) < 0
 }
 
 // appCompute is the hex HMAC-SHA256 over the scope, bound to the identity
 // assertion's timestamp and tenant.
 func appCompute(key string, tsMs int64, tenantID string, s AppScope) string {
 	mac := hmac.New(sha256.New, []byte(key))
-	for _, part := range []string{"app", strconv.FormatInt(tsMs, 10), tenantID, s.RoomID, s.AppID, s.ParticipantKey()} {
+	for _, part := range []string{"app", strconv.FormatInt(tsMs, 10), tenantID, s.RoomID, s.AppID, s.ParticipantKey(), s.Job} {
 		mac.Write([]byte(part))
 		mac.Write([]byte("\n"))
 	}
@@ -113,6 +126,10 @@ func (k Key) AssertApp(req *http.Request, s AppScope) error {
 	req.Header.Set(HeaderAppRoom, s.RoomID)
 	req.Header.Set(HeaderApp, s.AppID)
 	req.Header.Set(HeaderAppParticipant, s.ParticipantKey())
+	req.Header.Del(HeaderAppJob)
+	if s.Job != "" {
+		req.Header.Set(HeaderAppJob, s.Job)
+	}
 	req.Header.Del(HeaderAppSig)
 	if sig != "" {
 		req.Header.Set(HeaderAppSig, sig)
@@ -125,7 +142,7 @@ func (k Key) AssertApp(req *http.Request, s AppScope) error {
 // request's fresh timestamp and tenant; without one (development) the
 // scope is read unverified, like the identity assertion.
 func AppScopeOf(key string, r *http.Request) (AppScope, error) {
-	s := AppScope{RoomID: r.Header.Get(HeaderAppRoom), AppID: r.Header.Get(HeaderApp)}
+	s := AppScope{RoomID: r.Header.Get(HeaderAppRoom), AppID: r.Header.Get(HeaderApp), Job: r.Header.Get(HeaderAppJob)}
 	kind, id, _ := strings.Cut(r.Header.Get(HeaderAppParticipant), ":")
 	s.Kind, s.Participant = AppParticipantKind(kind), id
 	if !s.valid() {

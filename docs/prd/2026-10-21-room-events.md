@@ -1,6 +1,6 @@
 # Events a room subscribes to (2026-10-21)
 
-Status: proposed. Supersedes the event part of
+Status: slice 1 built (§6). Supersedes the event part of
 `docs/prd/2026-10-20-event-triggered-schedules.md` (its three platform
 events become one source of this mechanism). Owner: one event bus (the
 gateway records, realtime dispatches), the schedules (a subscription is a
@@ -40,6 +40,7 @@ the platform delivers. It names no use case.
 | Platform | the gateway (slice 1) | `platform.deployed`, `component.published`, `desktop.published` |
 | Room | the room service | `room.file.added`, `room.member.joined`, `room.app.data.changed` |
 | Component | a component that declares `events` in its package (name, description, data schema), emitting through its credential (endpoint/sidecar) or the room relay (MCP) | a repository component's `push`, a monitor's `alert` |
+| Member | a room's member (a script, a CI job with their API token, `bnbloc events send`) | "the work is done", "a build passed" |
 | Webhook | an outside system POSTing to a subscription's URL | CI, GitHub, a form service |
 
 ### 2.3 Subscriptions live in the room
@@ -100,3 +101,94 @@ what a sample payload would produce.
 1. The envelope, room events, webhook subscriptions, the no-self-trigger
    rule (slice 1's platform events moved onto it).
 2. Component-declared events; the subscription-drafting assist.
+
+## 6. Slice 1 as built
+
+- **One envelope** (`internal/wire/events.go`): `wire.CloudEvent`
+  (`specversion` 1.0, `id`, `source`, `type`, `time`, `subject?`, `data?`),
+  one validator `wire.ValidEvent` (printable id, source and type without
+  spaces, RFC 3339 time normalized to UTC, subject at most 256, data one
+  JSON value at most 16 KiB once compacted). The slice-1 platform events
+  are this envelope with source `bnbloc/platform` (data
+  `PlatformDeployedData`, `ComponentPublishedData` with the name as
+  subject, `DesktopPublishedData`); `wire.PlatformEvent`, the `events` /
+  `component` recurrence fields and `POST /internal/v1/platform-events`
+  are gone (no compat, pre-launch): the gateway hands `wire.EventDispatch`
+  to `POST /internal/v1/events`.
+- **The subscription is the trigger** (`internal/schedule/event.go`): the
+  `event` recurrence is `{source, types, filter?}`; sources
+  `bnbloc/platform`, `bnbloc/room` (its own room), `bnbloc/member` (its
+  room's members) and `webhook` (its own URL); 1 to 8 type patterns (a
+  trailing `*` is a prefix; the platform's and the room's must take a type
+  of their closed lists; a member trigger never names a reserved prefix);
+  the filter is `subject` (equals), `subjectPrefix` and `data` (top-level
+  field = value, a string, number or boolean as its text; at most 8).
+  `schedule.Triggers` is the one match (source, type, filter, no
+  self-trigger).
+- **One dispatcher** (`services/realtime/events.go` `dispatchEvent`), for
+  platform, room, member and webhook events alike; rate limits per source
+  (5/s, burst 60) and per task (1/s, burst 20), each replica's share, from
+  `internal/ratelimit` (the gateway's bucket moved there, one owner); a
+  drop is counted on the task (`room_schedules.events_dropped`) and the
+  first since its last edit notifies the room's owner
+  (`wire.NotificationScheduleNotice`, operational; `drop_noticed`).
+- **Room events** (`services/realtime/room_events.go`), from realtime's
+  publish tap: `room.file.added` (an `artifact_updated` with a new
+  version, not a thumbnail; subject the file name or title),
+  `room.member.joined` (subject the person), `room.app.data.changed`
+  (coalesced per app and cause: the first change at once, the rest of each
+  minute as one event with `changes`; at most 10,000 open windows a
+  replica), each reaching only that room's tasks.
+- **No self-trigger**: a version's `sourceJobId` now rides
+  `wire.ArtifactUpdated`; an agent's app write carries its job in the
+  signed app scope (`svcauth.AppScope.Job`, `X-Bnbloc-App-Job`, inside the
+  scope's HMAC) to `wire.AppChanged.SourceJobID` (never relayed to an
+  app's change feed); a dispatch names `CauseJob`. `causeRoom` walks the
+  job and its dispatch chain to a run slot's post; that room's tasks do
+  not take the event. Publishes under a job grant: today no job grant can
+  reach a platform or organization publish (`errJobWidens`, the
+  member's own click), so the gateway's producers name no cause yet; the
+  dispatch field and realtime's rule are in place and tested for when one
+  can.
+- **Webhooks** (`internal/schedule/hook.go`, `services/realtime/hooks.go`,
+  `services/gateway/hooks.go`): `POST/DELETE /v1/rooms/{room}/schedules/{id}/hook`
+  (make or rotate by the creator, the URL kept on rotation; revoke by the
+  creator, owner or admin), secret `whsec_…` shown once, sealed with
+  `BNBLOC_SECRET_STORE_KEY` bound to the hook id (columns `hook_id` unique,
+  `hook_secret`, `hook_created_at_ms`, `hook_refused`,
+  `hook_refused_at_ms`; migration `2026_10_room_schedules_hooks`, add
+  only). The open route `POST /v1/hooks/{id}` spends the client IP's
+  public budget and proxies to realtime, which bounds the body (512 KiB),
+  verifies `X-Bnbloc-Signature` or `X-Hub-Signature-256`
+  (`sha256=<hex HMAC-SHA256 of the raw body>`), builds the event
+  (`schedule.HookEvent`: type from `X-Bnbloc-Event`,
+  `com.github.<X-GitHub-Event>` or the body's `type`; a CloudEvent body
+  gives its own attributes; data over 16 KiB keeps the smaller top-level
+  fields and names the rest in `_omitted`) and dispatches to that task
+  only; refusals are counted on the hook, a request over the task's limit
+  answers 429.
+- **Members' events** (added on the owner's ask, 2026-10-21):
+  `POST /v1/rooms/{room}/events` (`services/realtime/member_events.go`,
+  `schedule.MemberEventOf`): a member who may chat (never a visitor),
+  with a session or an API token; body `{type, subject?, data?}`; source
+  `bnbloc/member/<subject>`; types starting `platform.`, `room.`,
+  `component.`, `desktop.` refused (`wire.ReservedEventTypePrefixes`);
+  the member's chat budget at the gateway, then the dispatcher's limits;
+  audited (`event` kind: type, subject, tasks set; never data); reaches
+  only that room. CLI `bnbloc events send <room> <type> [--subject]
+  [--data json|@file]`.
+- **room_setup** `add_schedule` takes `recurrence.source`, `types`,
+  `filter`; the old `name`-as-component rule is gone. Budgets held:
+  tools/list 1,784 (budget 1,790), session prefix 2,518 (2,520), by
+  shortening five tool briefs and listing `source` without an enum.
+- **Web**: the Schedules dialog's "When something happens" editor
+  (`ScheduleEventFields`: source, the closed types or typed ones, subject,
+  data lines), and for a webhook task `ScheduleHookRow` (the URL, refused
+  and dropped counts, make/new secret shown once with how to sign,
+  revoke). Pure helpers in `lib/schedules.ts` (`triggerFromForm`,
+  `describeTrigger`, `hookURL`, `hookInstructions`) with node tests.
+- **CLI**: `bnbloc schedules list` prints a trigger as
+  `schedule.TriggerText` and a webhook's URL.
+- Not in this slice: component-declared events and the drafting assist
+  (§5 step 2); the AI schedule drafter (`DRAFT_SCHEDULE`) still drafts
+  clock recurrences only.

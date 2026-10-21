@@ -27,7 +27,7 @@ import (
 func galleryGW(t *testing.T) *appGW {
 	t.Helper()
 	e := newAppGW(t)
-	e.gw.limiter.get(1000, 1000, nil)
+	e.gw.limiter.Get(1000, 1000, nil)
 	e.gw.ContentComponents = e.b.ContentComponents
 	e.gw.PlatformSettings = store.NewMemoryPlatformSettings()
 	e.gw.TenantSettings = e.b.Tenant.GetTenant

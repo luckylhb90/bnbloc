@@ -78,5 +78,8 @@ func appChangeOf(ev wire.Event) (wire.AppChanged, bool) {
 		return wire.AppChanged{}, false
 	}
 	c, ok := wire.DecodePayload[wire.AppChanged](ev.Payload)
+	// The cause is the room's own record (no self-trigger, room_events.go),
+	// never an app's: its change feed reaches visitors of a public link.
+	c.SourceJobID = ""
 	return c, ok && c.AppID != ""
 }

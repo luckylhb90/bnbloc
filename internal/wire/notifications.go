@@ -43,6 +43,11 @@ const (
 	// could not get done in a room (POST /v1/rooms/{roomId}/report): the
 	// member's reviewed text, linked to the reply it is about.
 	NotificationRoomReport = "room_report"
+	// NotificationScheduleNotice tells a room's owner about one of its
+	// scheduled tasks' event trigger: events a rate limit dropped
+	// (docs/prd/2026-10-21-room-events.md §2.4). Operational, like a budget
+	// warning: sent once per task until it is edited, never muted.
+	NotificationScheduleNotice = "schedule_notice"
 )
 
 // AdminAlertRequest is the body of POST /v1/platform/alerts. Recipients

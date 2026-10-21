@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/roomlog"
+	"github.com/luckylhb90/bnbloc/internal/schedule"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
@@ -60,9 +61,12 @@ func roomSetupTool() Tool {
 			"An AI task (task) is a plain-words job an AI carries out on time with the room's apps' data, notices and messages: use it only when a run must " +
 			"read data or decide something; say in it what to do each time, not when. Both run as the person, with their rights; an AI task spends their " +
 			"organization's assist budget. A person may own 20 schedules in a room, a room holds 50. Recurrence: weekly (days 0=Sunday … 6=Saturday, " +
-			"time HH:MM), daily (time), once (at, RFC 3339), cron (five fields) or event: when the platform changes (events, of " +
-			strings.Join(wire.PlatformEventNames, ", ") + "; name limits component.published to one component), each run's text then ending " +
-			"with the event's facts; ask the person for the time zone when unsure. " +
+			"time HH:MM), daily (time), once (at, RFC 3339), cron (five fields) or event: when something happens, each run's text then ending with the event as data. " +
+			"An event's source is " + wire.SubscribePlatform + " (" + strings.Join(wire.PlatformEventTypes, ", ") + "), " +
+			wire.SubscribeRoom + ", this room (" + strings.Join(wire.RoomEventTypes, ", ") + ") or " + wire.SubscribeWebhook +
+			" (what another system posts to the task's own URL, which the person makes in the room's Schedules; e.g. com.github.push); " +
+			"types: one or more, a trailing * matches a prefix; filter: subject, subjectPrefix and data (top-level field: value), all must hold. " +
+			"Ask the person for the time zone when unsure. " +
 			"With agent (a handle from list_room_agents), task is instead a request posted to that agent as the person each time, like a message they typed: " +
 			"use it when the work needs that agent (its tools, its files, its expert); another member's agent runs it only while its owner allows the person. " +
 			"A schedule that posts as the person is theirs to create in the room's Schedules. " +
@@ -85,8 +89,7 @@ func roomSetupTool() Tool {
 					"required": []string{"title", "prompt"}, "additionalProperties": false,
 				},
 			},
-			"name": map[string]any{"type": "string", "description": "For use and unuse: a Library component's name; for add_channel: the channel's name; " +
-				"for add_schedule on component.published: only that component's."},
+			"name":  map[string]any{"type": "string", "description": "For use and unuse: a Library component's name; for add_channel: the channel's name."},
 			"kind":  map[string]any{"type": "string", "enum": setupKinds, "description": "For use and unuse: the component's kind, when two kinds share the name."},
 			"task":  map[string]any{"type": "string", "description": "For add_schedule, an AI task: what to do each time, in plain words, never when, e.g. \"notify the weekly report group who has not filled in this week's report\"."},
 			"agent": map[string]any{"type": "string", "description": "For add_schedule with task: a handle from list_room_agents; task is then the request posted to that agent each time."},
@@ -103,13 +106,14 @@ func roomSetupTool() Tool {
 			"recurrence": map[string]any{
 				"type": "object", "description": "For add_schedule: when.",
 				"properties": map[string]any{
-					"kind": map[string]any{"type": "string", "enum": []string{wire.RecurOnce, wire.RecurDaily, wire.RecurWeekly, wire.RecurCron, wire.RecurEvent}},
-					"time": map[string]any{"type": "string", "description": "HH:MM, for daily and weekly."},
-					"days": map[string]any{"type": "array", "items": map[string]any{"type": "integer", "minimum": 0, "maximum": 6}, "description": "For weekly: 0=Sunday … 6=Saturday."},
-					"at":   map[string]any{"type": "string", "description": "For once: an RFC 3339 time."},
-					"cron": map[string]any{"type": "string", "description": "For cron: minute hour day-of-month month day-of-week."},
-					"events": map[string]any{"type": "array", "items": map[string]any{"type": "string"},
-						"description": "For event: the platform events it runs on, of " + strings.Join(wire.PlatformEventNames, ", ") + "."},
+					"kind":   map[string]any{"type": "string", "enum": []string{wire.RecurOnce, wire.RecurDaily, wire.RecurWeekly, wire.RecurCron, wire.RecurEvent}},
+					"time":   map[string]any{"type": "string", "description": "HH:MM, for daily and weekly."},
+					"days":   map[string]any{"type": "array", "items": map[string]any{"type": "integer", "minimum": 0, "maximum": 6}, "description": "For weekly: 0=Sunday … 6=Saturday."},
+					"at":     map[string]any{"type": "string", "description": "For once: an RFC 3339 time."},
+					"cron":   map[string]any{"type": "string", "description": "For cron: minute hour day-of-month month day-of-week."},
+					"source": map[string]any{"type": "string", "description": "For event: who emits it, one of " + strings.Join(wire.EventSubscriptionSources, ", ") + "."},
+					"types":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "For event: the event types it runs on."},
+					"filter": map[string]any{"type": "object", "description": "For event: subject, subjectPrefix, data {field: value}."},
 				},
 				"required": []string{"kind"}, "additionalProperties": false,
 			},
@@ -138,12 +142,14 @@ type setupArgs struct {
 		Compose bool            `json:"compose"`
 	} `json:"send"`
 	Recurrence struct {
-		Kind   string   `json:"kind"`
-		Time   string   `json:"time"`
-		Days   []int    `json:"days"`
-		At     string   `json:"at"`
-		Cron   string   `json:"cron"`
-		Events []string `json:"events"`
+		Kind   string            `json:"kind"`
+		Time   string            `json:"time"`
+		Days   []int             `json:"days"`
+		At     string            `json:"at"`
+		Cron   string            `json:"cron"`
+		Source string            `json:"source"`
+		Types  []string          `json:"types"`
+		Filter *wire.EventFilter `json:"filter"`
 	} `json:"recurrence"`
 	Timezone string `json:"timezone"`
 	ID       string `json:"id"`
@@ -463,10 +469,7 @@ func (c setupCall) addSchedule(ctx context.Context, in setupArgs) Result {
 		return toolError("timezone is required (an IANA zone such as Asia/Shanghai): ask the person if you are unsure")
 	}
 	rec := wire.ScheduleRecurrence{Kind: in.Recurrence.Kind, Time: in.Recurrence.Time, Days: in.Recurrence.Days, Cron: in.Recurrence.Cron,
-		Events: in.Recurrence.Events}
-	if rec.Kind == wire.RecurEvent {
-		rec.Component = strings.TrimSpace(in.Name)
-	}
+		Source: in.Recurrence.Source, Types: in.Recurrence.Types, Filter: in.Recurrence.Filter}
 	if in.Recurrence.Kind == wire.RecurOnce {
 		at, err := time.Parse(time.RFC3339, strings.TrimSpace(in.Recurrence.At))
 		if err != nil {
@@ -503,8 +506,11 @@ func (c setupCall) addSchedule(ctx context.Context, in setupArgs) Result {
 	}
 	when := whenText(sc.Recurrence, sc.Timezone)
 	c.announce(ctx, "scheduled "+what+", "+when)
-	out := map[string]any{"id": sc.ScheduleID, "when": when,
-		"note": "Tell the person what you set and when it first runs; they can pause or delete it in the room's Schedules."}
+	note := "Tell the person what you set and when it first runs; they can pause or delete it in the room's Schedules."
+	if sc.Recurrence.Source == wire.SubscribeWebhook {
+		note = "Tell the person what you set: its URL and secret are theirs to make in the room's Schedules (shown once), for the system that sends the events."
+	}
+	out := map[string]any{"id": sc.ScheduleID, "when": when, "note": note}
 	if sc.NextRunAtMs > 0 {
 		out["next"] = timeIn(sc.NextRunAtMs, sc.Timezone)
 	}
@@ -546,11 +552,7 @@ func whenText(r wire.ScheduleRecurrence, tz string) string {
 	case wire.RecurCron:
 		return fmt.Sprintf("cron %q (%s)", r.Cron, tz)
 	case wire.RecurEvent:
-		on := strings.Join(r.Events, ", ")
-		if r.Component != "" {
-			on += " (component " + r.Component + ")"
-		}
-		return "when the platform changes: " + on
+		return schedule.TriggerText(r)
 	}
 	return r.Kind
 }

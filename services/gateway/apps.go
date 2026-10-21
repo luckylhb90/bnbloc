@@ -314,7 +314,7 @@ func (s *Service) roomApp(r *http.Request, caller auth.Claims) (appCapability, e
 			return appCapability{}, err
 		}
 		c.tenant = actor.Tenant
-		c.scope.Kind, c.scope.Participant = svcauth.AppAgent, jobAgent(*actor.Job)
+		c.scope.Kind, c.scope.Participant, c.scope.Job = svcauth.AppAgent, jobAgent(*actor.Job), actor.Job.JobID
 	}
 	return c, nil
 }

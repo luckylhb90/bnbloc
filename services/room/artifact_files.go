@@ -512,7 +512,7 @@ func (s *Service) handlePutArtifactThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if landed {
-		s.publishArtifactEventReason(r.Context(), art, caller(r), "thumbnail")
+		s.publishArtifactEventReason(r.Context(), art, caller(r), "thumbnail", "")
 	}
 	httpx.WriteJSON(w, http.StatusOK, wire.ArtifactThumbnailReply{Version: metadataOnly(stored).View(), Stored: landed})
 }

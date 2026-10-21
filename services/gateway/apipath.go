@@ -414,6 +414,10 @@ func rateLimited(method string, p apiPath) bool {
 	if method == http.MethodPost && p.RoomSub == "schedules" && len(p.segs) == 6 && p.segs[5] == "run" {
 		return true
 	}
+	// A member's event may run the room's tasks: their chat budget.
+	if method == http.MethodPost && p.RoomSub == "events" && len(p.segs) == 4 {
+		return true
+	}
 	// An agent dispatch posts chat on a member's behalf (and drives an
 	// agent): the dispatching member's chat budget.
 	return p.RoomSub == "chat" || p.RoomSub == "shared-agents" || p.isRoomDispatch(method)

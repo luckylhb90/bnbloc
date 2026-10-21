@@ -152,6 +152,9 @@ func main() {
 	// scheduler; runs post as the schedule's creator through the chat path.
 	svc.Schedules = backends.Schedules
 	svc.RoomRoles = backends.Room
+	// Tasks' webhook secrets are sealed with the same key (unset: webhooks
+	// are off).
+	svc.HookBox = credentialBox
 	// AI schedules run in the gateway, the only caller of the assist model
 	// (unset: ai schedules are refused).
 	if gw := config.FromEnvRaw("BNBLOC_GATEWAY_BASE_URL"); gw != "" {

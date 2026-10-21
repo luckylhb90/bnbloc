@@ -84,7 +84,7 @@ func (s *Service) composeNotice(ctx context.Context, run *scheduleRun, room *ass
 	if !ok {
 		return "", "AI is not available: the organization has no AI model, or turned AI off"
 	}
-	if !s.assistLimiter.get(assistRate, assistBurst, s.Peers.Size).allow(claims.Tenant + "/" + claims.Subject) {
+	if !s.assistLimiter.Get(assistRate, assistBurst, s.Peers.Size).Allow(claims.Tenant + "/" + claims.Subject) {
 		return "", "the owner's AI rate is spent: the run stopped"
 	}
 	clock := assist.ClockIn(run.slot, sc.Timezone)

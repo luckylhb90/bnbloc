@@ -422,7 +422,7 @@ A room's scheduled tasks from a script, as the signed-in member or, with
 `BNBLOC_API_TOKEN`, as the token's subject
 (docs/prd/2026-10-20-event-triggered-schedules.md §2.3). `list` prints each
 task's id, creator, recipient kind, when it runs (`on platform.deployed,…`
-for a task that runs when the platform changes), state, next run and last
+for a task that runs on an event, with its filter and, for a webhook, its URL), state, next run and last
 outcome (`GET /v1/rooms/{room}/schedules`). `run` is the room's "Run now"
 (`POST /v1/rooms/{room}/schedules/{schedule}/run`): only the task's creator
 may run it, so a CI job uses an API token whose subject is the task's
@@ -433,7 +433,24 @@ run that failed exits non-zero. `--dry` asks an AI task or a notice what it
 would do: real reads, nothing sent, nothing recorded. A run started this way
 carries no platform event's facts.
 
-A task can also run on the platform's own changes (recurrence `event`):
+## Room events
+
+```sh
+bnbloc events send <room> <type> [--subject <s>] [--data <json>|@<file>]
+```
+
+Tells the room something happened, as the signed-in member or
+`BNBLOC_API_TOKEN`'s subject, who must be a member who may chat
+(`POST /v1/rooms/{room}/events`, docs/prd/2026-10-21-room-events.md). The
+event's source is `bnbloc/member/<subject>`; its type is yours (never one
+starting `platform.`, `room.`, `component.` or `desktop.`), its data at
+most 16 KiB of JSON. The room's tasks whose trigger takes members' events
+of that type (and whose filter holds) run; the command prints the event's
+id and how many it set. A CI job sends one when its work is done; a task
+of the room does what follows.
+
+A task can also run on the platform's own changes (recurrence `event`,
+source `bnbloc/platform`):
 `platform.deployed` (a gateway started on a build new to the deployment),
 `component.published` (a component or platform content got a new version;
 an organization's own publish reaches only that organization) and

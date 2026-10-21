@@ -55,6 +55,7 @@ import { DRAFT_SCHEDULE, scheduleDraftFrom } from "@/lib/assistDrafts";
 import { isSubmitEnter } from "@/lib/keys";
 import { AssistButton, type AssistRunState } from "@/views/AssistButton";
 import { ScheduleEventFields } from "@/views/room/ScheduleEventFields";
+import { ScheduleHookRow } from "@/views/room/ScheduleHookRow";
 
 const SELECT =
   "h-9 w-full rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 text-sm text-[var(--color-fg)] focus:outline-none focus:border-[var(--color-accent)]";
@@ -64,7 +65,7 @@ const KINDS = [
   { value: "daily" as const, label: "Daily" },
   { value: "weekly" as const, label: "Weekly" },
   { value: "cron" as const, label: "Custom" },
-  { value: "event" as const, label: "When the platform changes" },
+  { value: "event" as const, label: "When something happens" },
 ];
 
 // SchedulesDialog is the room's scheduled prompts panel (N2): every member
@@ -258,6 +259,9 @@ export function SchedulesDialog({
                       </Button>
                     )}
                   </div>
+                  {s.recurrence.kind === "event" && s.recurrence.source === "webhook" && (
+                    <ScheduleHookRow roomId={roomId} schedule={s} mine={mine} moderator={moderator} onChanged={reload} />
+                  )}
                 </li>
               );
             })}

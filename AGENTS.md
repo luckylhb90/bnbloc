@@ -2150,20 +2150,42 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   (`TestMigrationsAreDeploySafe`).
 - **A schedule's recurrence is `once`, `daily`, `weekly`, `cron` or
   `event`** (`internal/schedule.Validate`, the one validation; a room
-  package's schedules too). An `event` schedule runs when the platform
-  changes (docs/architecture/schedules.md): `platform.deployed`,
-  `component.published`, `desktop.published` (`wire.PlatformEventNames`, the
-  closed list). **Platform events have one owner:
-  `services/gateway/platform_events.go`** records each once
-  (`recordPlatformEvent` over `store.MovePlatformSetting`: one replica of a
-  deploy, one install of a version) and hands it to realtime's
-  `POST /internal/v1/platform-events`, which only sets runs
-  (`TriggerEventSchedule`, coalesced by `schedule.MinInterval`); the
-  scheduler runs them through its one run path, and a run's text gets the
-  event's facts only through `schedule.RunText` (fenced as data). A new
-  producer calls the owner's helper (`componentPublished`,
-  `desktopPublished`, `RecordDeploy`), never the publisher
-  (`TestPlatformEventsSingleOwner`).
+  package's schedules too). An `event` recurrence is the task's trigger, the
+  one subscription model (docs/prd/2026-10-21-room-events.md,
+  docs/architecture/schedules.md): a source (`bnbloc/platform`,
+  `bnbloc/room` = its own room, `bnbloc/member` = what its room's members
+  send, `webhook` = its own URL), one to eight type patterns (a trailing
+  `*` is a prefix) and an optional filter (subject equals/prefix, top-level
+  data fields equal). **Every event is one CloudEvents envelope**
+  (`wire.CloudEvent`, the one validator `wire.ValidEvent`, data at most
+  `wire.MaxEventDataBytes`, always fenced as data in a run:
+  `schedule.RunText`). **One dispatcher:** realtime's `dispatchEvent`
+  (`services/realtime/events.go`) sets the runs of the tasks an event
+  reaches whose trigger takes it (`schedule.Triggers`, which also holds the
+  no-self-trigger rule), within the per-source and per-task rate limits
+  (`internal/ratelimit`, the one token bucket the gateway uses too; a drop
+  is counted on the task and told once to the room's owner,
+  `wire.NotificationScheduleNotice`), through `TriggerEventSchedule`
+  (coalesced by `schedule.MinInterval`); nothing else calls it
+  (`TestPlatformEventsSingleOwner`). Producers: **platform events have one
+  owner, `services/gateway/platform_events.go`** (`recordPlatformEvent`
+  over `store.MovePlatformSetting`: one replica of a deploy, one install of
+  a version), handed to `POST /internal/v1/events`; a new producer calls
+  `componentPublished`, `desktopPublished` or `RecordDeploy`. **A room's
+  events are emitted only by realtime's publish tap** (`room_events.go`:
+  `room.file.added` from `artifact_updated`, `room.member.joined`,
+  `room.app.data.changed` coalesced per app a minute), reaching only that
+  room. **What a run causes carries its job:** a file version's
+  `sourceJobId`, an agent's app write (`svcauth.AppScope.Job`), a
+  dispatch's `CauseJob`; `causeRoom` walks the job (and its dispatch chain)
+  to the scheduled run that started it, and that room's tasks never take
+  the event. A webhook (`hooks.go`) is a task's own URL
+  (`POST /v1/hooks/{id}`, open at the gateway, verified in realtime: HMAC
+  of the raw body, ours or GitHub's header) with a secret shown once and
+  sealed with `BNBLOC_SECRET_STORE_KEY`; refusals are counted on the hook.
+  A member's event is `POST /v1/rooms/{id}/events` (a member who may chat;
+  source `bnbloc/member/<subject>`; never a type in
+  `wire.ReservedEventTypePrefixes`; audited without its data).
 
 ### Observability
 

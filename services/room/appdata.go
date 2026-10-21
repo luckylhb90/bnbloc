@@ -127,6 +127,7 @@ type appCall struct {
 	scope       store.AppScope
 	kind        svcauth.AppParticipantKind
 	participant string // the scope's ParticipantKey
+	job         string // an agent participant's job (the cause of its writes)
 	subject     string // a member participant's subject
 	owner       bool
 	// key and me (the caller's pseudonym) are set when the app has a key.
@@ -152,7 +153,7 @@ func (s *Service) serveApp(w http.ResponseWriter, r *http.Request, key string, n
 		httpx.Error(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
-	a := &appCall{ctx: ctx, tenantID: tid, scope: store.AppScope{AppID: scope.AppID, RoomID: scope.RoomID}, kind: scope.Kind, participant: scope.ParticipantKey()}
+	a := &appCall{ctx: ctx, tenantID: tid, scope: store.AppScope{AppID: scope.AppID, RoomID: scope.RoomID}, kind: scope.Kind, participant: scope.ParticipantKey(), job: scope.Job}
 	// The app is a site artifact of the scope's room, in its tenant.
 	art, err := s.Artifacts.GetArtifact(ctx, scope.AppID)
 	switch {
@@ -353,7 +354,7 @@ func (s *Service) announceAppChange(a *appCall, collection, id string, version i
 	s.Publisher.Publish(context.WithoutCancel(a.ctx), wire.Event{
 		RoomID:   a.scope.RoomID,
 		Kind:     wire.EventAppChanged,
-		Payload:  wire.AppChanged{AppID: a.scope.AppID, Collection: collection, ID: id, Version: version},
+		Payload:  wire.AppChanged{AppID: a.scope.AppID, Collection: collection, ID: id, Version: version, SourceJobID: a.job},
 		AtUnixMs: s.Now(),
 	})
 }

@@ -161,7 +161,7 @@ const (
 // never the input, the questions or the answers) and the reply.
 func (s *Service) runDecision(w http.ResponseWriter, r *http.Request, claims auth.Claims, ownAuth, auditName string, format decisionFormat) {
 	ctx := r.Context()
-	if !s.decisionLimiter.get(decisionRate, decisionBurst, s.Peers.Size).allow(claims.Tenant + "/" + claims.Subject) {
+	if !s.decisionLimiter.Get(decisionRate, decisionBurst, s.Peers.Size).Allow(claims.Tenant + "/" + claims.Subject) {
 		httpx.Error(w, "too many decision calls: try again in a few seconds", http.StatusTooManyRequests)
 		return
 	}

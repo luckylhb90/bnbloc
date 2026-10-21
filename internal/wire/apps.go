@@ -101,6 +101,10 @@ type AppChanged struct {
 	Collection string `json:"collection,omitempty"`
 	ID         string `json:"id,omitempty"`
 	Version    int64  `json:"version"`
+	// SourceJobID is the agent job whose agent wrote ("" for a person or a
+	// visitor): what caused the change, read by the room's event tap (no
+	// self-trigger) and never relayed to an app's change feed.
+	SourceJobID string `json:"sourceJobId,omitempty"`
 }
 
 // AppVisitorToken answers POST /v1/public/shares/{token}/visitor: a signed

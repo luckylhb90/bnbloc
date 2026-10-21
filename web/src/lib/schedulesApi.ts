@@ -1,6 +1,6 @@
 import { req } from "./api.ts";
 import type { RoomSchedule, ScheduleInput } from "./schedules.ts";
-import type { ScheduleRunReply } from "./wire.gen.ts";
+import type { ScheduleHookSecret, ScheduleRunReply } from "./wire.gen.ts";
 import { roomPath } from "./roomId.ts";
 
 const base = (roomId: string) => roomPath(roomId, "schedules");
@@ -22,4 +22,10 @@ export const schedulesApi = {
   // An AI task's dry run: what a run would do now, nothing sent.
   tryAI: (roomId: string, id: string) =>
     req<ScheduleRunReply>(`${base(roomId)}/${encodeURIComponent(id)}/run?dry=1`, { method: "POST" }),
+  // A webhook task's URL and secret (the secret is answered this once):
+  // make or rotate (creator), revoke (creator, owner or admin).
+  rotateHook: (roomId: string, id: string) =>
+    req<ScheduleHookSecret>(`${base(roomId)}/${encodeURIComponent(id)}/hook`, { method: "POST" }),
+  revokeHook: (roomId: string, id: string) =>
+    req<void>(`${base(roomId)}/${encodeURIComponent(id)}/hook`, { method: "DELETE", as: "none" }),
 };

@@ -61,11 +61,13 @@ type AIRunner interface {
 }
 
 // RoomRoleStore reads room existence and member roles (the shared room
-// store). Schedule moderation (owner/admin pause/delete) and the scheduler's
-// "room deleted" diagnosis use it.
+// store). Schedule moderation (owner/admin pause/delete), the scheduler's
+// "room deleted" diagnosis and an event trigger's drop notice (to the
+// room's owner) use it.
 type RoomRoleStore interface {
 	GetRoom(ctx context.Context, roomID string) (store.Room, error)
 	MemberRole(ctx context.Context, roomID, userID string) (store.Role, bool, error)
+	Members(ctx context.Context, roomID string) ([]store.Membership, error)
 }
 
 func (s *Service) registerScheduleRoutes(mux *http.ServeMux) {

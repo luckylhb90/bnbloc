@@ -14,6 +14,7 @@ import (
 
 	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/membership"
+	"github.com/luckylhb90/bnbloc/internal/ratelimit"
 	"github.com/luckylhb90/bnbloc/internal/sealbox"
 	"github.com/luckylhb90/bnbloc/internal/sse"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -300,8 +301,8 @@ func TestAssistOwnTaskUseAndRate(t *testing.T) {
 	if r := e.call(http.MethodPut, "/v1/content-uses", wire.ContentUseRequest{Scope: "room", RoomID: e.roomID, ComponentID: mine.ID}, e.as("maya")); r.status != http.StatusBadRequest {
 		t.Fatalf("an assist turned on in a room: %d %s", r.status, r.body)
 	}
-	e.gw.assistLimiter = lazyLimiter{}
-	e.gw.assistLimiter.get(assistRate, 1, nil).now = func() time.Time { return time.Unix(0, 0) }
+	e.gw.assistLimiter = ratelimit.Lazy{}
+	e.gw.assistLimiter.Get(assistRate, 1, nil).Now = func() time.Time { return time.Unix(0, 0) }
 	got := 0
 	for i := 0; i < 3; i++ {
 		if r := e.call(http.MethodPost, "/v1/assist/enhance-prompt", wire.AssistRequest{Text: "x"}, e.as("jack")); r.status == http.StatusTooManyRequests {

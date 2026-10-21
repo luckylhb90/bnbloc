@@ -25,7 +25,8 @@ func newFakeScheduleGateway(t *testing.T) *fakeScheduleGateway {
 	g := &fakeScheduleGateway{}
 	schedules := []wire.RoomSchedule{
 		{ScheduleID: "sch_e2e", CreatedBy: "svc:ci", Enabled: true, Timezone: "UTC", Recipient: wire.ScheduleRecipient{Kind: wire.ScheduleRecipientAgent},
-			Recurrence: wire.ScheduleRecurrence{Kind: wire.RecurEvent, Events: []string{wire.PlatformDeployed, wire.ComponentPublished}}},
+			Recurrence: wire.ScheduleRecurrence{Kind: wire.RecurEvent, Source: wire.SubscribeWebhook, Types: []string{"com.github.push"},
+				Filter: &wire.EventFilter{Data: map[string]string{"ref": "refs/heads/main"}}}, Hook: &wire.ScheduleHook{HookID: "hk_1"}},
 		{ScheduleID: "sch_ai", CreatedBy: "svc:ci", Enabled: true, Timezone: "UTC", Recipient: wire.ScheduleRecipient{Kind: wire.ScheduleRecipientAI},
 			Recurrence: wire.ScheduleRecurrence{Kind: wire.RecurDaily, Time: "09:00"}, NextRunAtMs: 1_800_000_000_000, LastStatus: "error"},
 		{ScheduleID: "sch_maya", CreatedBy: "maya", Recipient: wire.ScheduleRecipient{Kind: wire.ScheduleRecipientRoom},
@@ -76,7 +77,7 @@ func TestSchedulesCommand(t *testing.T) {
 	if err := schedulesCmd([]string{"list", "--gateway", g.URL, "room-1"}, &out); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"sch_e2e", "on platform.deployed,component.published", "sch_ai", "daily 09:00 UTC", "error", "cron 0 9 * * 1 UTC", "paused"} {
+	for _, want := range []string{"sch_e2e", "on webhook com.github.push where data.ref=refs/heads/main url=" + g.URL + "/v1/hooks/hk_1", "sch_ai", "daily 09:00 UTC", "error", "cron 0 9 * * 1 UTC", "paused"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("list lacks %q:\n%s", want, out.String())
 		}

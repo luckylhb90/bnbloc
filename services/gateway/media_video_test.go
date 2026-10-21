@@ -9,6 +9,7 @@ import (
 
 	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/media"
+	"github.com/luckylhb90/bnbloc/internal/ratelimit"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
@@ -136,8 +137,8 @@ func TestMediaVideoSpendsOnSubmitOnly(t *testing.T) {
 	if budgets["POST /v1/media/video"] != costBudget || budgets["GET /v1/media/video/{id}"] != noBudget || len(budgets) != 2 {
 		t.Fatalf("budgets = %v", budgets)
 	}
-	e.gw.assistLimiter = lazyLimiter{}
-	e.gw.assistLimiter.get(assistRate, 1, nil).now = func() time.Time { return time.Unix(0, 0) }
+	e.gw.assistLimiter = ratelimit.Lazy{}
+	e.gw.assistLimiter.Get(assistRate, 1, nil).Now = func() time.Time { return time.Unix(0, 0) }
 	if code, _, raw := e.videoCall(http.MethodPost, "/v1/media/video", wire.MediaVideoRequest{Prompt: "x"}, e.as("maya")); code != http.StatusOK {
 		t.Fatalf("first submit = %d %s", code, raw)
 	}

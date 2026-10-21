@@ -180,7 +180,7 @@ func (s *Service) handleCreateArtifact(w http.ResponseWriter, r *http.Request) {
 		art.UpdatedAtMs = v.CreatedAtMs
 		art.MimeType = v.MimeType
 	}
-	s.publishArtifactEvent(r.Context(), art, userID)
+	s.publishArtifactEvent(r.Context(), art, userID, "")
 	httpx.WriteJSON(w, http.StatusOK, wire.ArtifactReply{Artifact: art.View()})
 }
 
@@ -436,7 +436,7 @@ func (s *Service) commitVersion(w http.ResponseWriter, r *http.Request, art stor
 		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	s.publishArtifactEvent(r.Context(), art, userID)
+	s.publishArtifactEvent(r.Context(), art, userID, v.SourceJobID)
 	view := v.View()
 	httpx.WriteJSON(w, http.StatusOK, wire.ArtifactReply{Artifact: art.View(), Version: &view})
 }
@@ -464,15 +464,17 @@ func (s *Service) authorizeArtifactRead(w http.ResponseWriter, r *http.Request, 
 
 // publishArtifactEvent tells the room's subscribers (web panels, bridges) that
 // an artifact changed, so previews refresh live. Metadata only: the SSE stream
-// never carries content.
-func (s *Service) publishArtifactEvent(ctx context.Context, art store.Artifact, actor string) {
-	s.publishArtifactEventReason(ctx, art, actor, "")
+// never carries content. sourceJob is the agent job whose turn published the
+// new version ("" for a person's own): the room's event (room.file.added)
+// carries it as its cause.
+func (s *Service) publishArtifactEvent(ctx context.Context, art store.Artifact, actor, sourceJob string) {
+	s.publishArtifactEventReason(ctx, art, actor, "", sourceJob)
 }
 
 // publishArtifactEventReason is publishArtifactEvent with a reason for a
 // change that is not a new version ("thumbnail": a version thumbnail was
 // stored, so file cards refetch it).
-func (s *Service) publishArtifactEventReason(ctx context.Context, art store.Artifact, actor, reason string) {
+func (s *Service) publishArtifactEventReason(ctx context.Context, art store.Artifact, actor, reason, sourceJob string) {
 	if s.Publisher == nil {
 		return
 	}
@@ -486,6 +488,7 @@ func (s *Service) publishArtifactEventReason(ctx context.Context, art store.Arti
 		UpdatedBy:      actor,
 		UpdatedAtMs:    art.UpdatedAtMs,
 		Reason:         reason,
+		SourceJobID:    sourceJob,
 	}
 	// Artifact events deliver room-wide (empty ChannelID): the Docs panel is a
 	// room-scoped surface, so a viewer sitting in another channel must still

@@ -46,6 +46,10 @@ const (
 	// room): an admin's grant or withdrawal, a schedule's read through
 	// read_records (the source, the range and the count, never a record).
 	AuditKindSource = "source"
+	// AuditKindEvent: an event a member sent to a room (name = the room;
+	// the detail names its type and subject and how many tasks it set,
+	// never its data).
+	AuditKindEvent = "event"
 )
 
 // AuditLogEntry is one normalized audit record. ID is unique across sources

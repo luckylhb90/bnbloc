@@ -13,6 +13,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/schedule"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
@@ -73,14 +74,15 @@ func listSchedules(c *client, room string, out io.Writer) error {
 		if !sc.Enabled {
 			state = "paused"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", sc.ScheduleID, sc.CreatedBy, sc.Recipient.Kind, scheduleWhen(sc), state, msTime(sc.NextRunAtMs), sc.LastStatus)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", sc.ScheduleID, sc.CreatedBy, sc.Recipient.Kind, scheduleWhen(sc, c.cfg.Gateway), state, msTime(sc.NextRunAtMs), sc.LastStatus)
 	}
 	return tw.Flush()
 }
 
 // scheduleWhen is a recurrence in a word or two (the web and room_setup
-// render it for people; the list only tells schedules apart).
-func scheduleWhen(sc wire.RoomSchedule) string {
+// render it for people; the list only tells schedules apart); an event
+// trigger is schedule.TriggerText, with its webhook URL on gateway.
+func scheduleWhen(sc wire.RoomSchedule, gateway string) string {
 	r := sc.Recurrence
 	switch r.Kind {
 	case wire.RecurOnce:
@@ -92,9 +94,9 @@ func scheduleWhen(sc wire.RoomSchedule) string {
 	case wire.RecurCron:
 		return "cron " + r.Cron + " " + sc.Timezone
 	case wire.RecurEvent:
-		on := "on " + strings.Join(r.Events, ",")
-		if r.Component != "" {
-			on += " (" + r.Component + ")"
+		on := schedule.TriggerText(r)
+		if sc.Hook != nil {
+			on += " url=" + strings.TrimRight(gateway, "/") + wire.HookPathPrefix + sc.Hook.HookID
 		}
 		return on
 	}

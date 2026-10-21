@@ -315,9 +315,10 @@ func TestRoomSetupAgentSchedule(t *testing.T) {
 	}
 }
 
-// A schedule can run when the platform changes: the event recurrence goes
-// to the schedules route as is, name limiting component publishing to one
-// component; the line in the room says on which changes it runs.
+// A schedule can run on an event: the trigger (source, types, filter) goes
+// to the schedules route as is; the line in the room says what it runs on,
+// and a webhook trigger's answer sends the person to the Schedules for its
+// URL and secret (an agent never sees the secret).
 func TestRoomSetupEventSchedule(t *testing.T) {
 	gw := setupGateway("")
 	inner := gw.handle
@@ -332,8 +333,8 @@ func TestRoomSetupEventSchedule(t *testing.T) {
 		}
 		return inner(method, path, body)
 	}
-	r := runSetup(setupEnv(t, gw, true), `{"action":"add_schedule","task":"Run the end-to-end test plan and report what failed.","name":"browser",`+
-		`"timezone":"UTC","recurrence":{"kind":"event","events":["platform.deployed","component.published"]}}`)
+	r := runSetup(setupEnv(t, gw, true), `{"action":"add_schedule","task":"Run the end-to-end test plan and report what failed.",`+
+		`"timezone":"UTC","recurrence":{"kind":"event","source":"webhook","types":["com.github.push"],"filter":{"data":{"ref":"refs/heads/main"}}}}`)
 	if r.Err != "" {
 		t.Fatal(r.Err)
 	}
@@ -341,24 +342,16 @@ func TestRoomSetupEventSchedule(t *testing.T) {
 		Recurrence wire.ScheduleRecurrence `json:"recurrence"`
 	}
 	_ = json.Unmarshal(gw.callsTo("POST", "/v1/rooms/room-1/schedules")[0].Body, &body)
-	if rec := body.Recurrence; rec.Kind != wire.RecurEvent || strings.Join(rec.Events, ",") != "platform.deployed,component.published" || rec.Component != "browser" {
+	if rec := body.Recurrence; rec.Kind != wire.RecurEvent || rec.Source != wire.SubscribeWebhook || strings.Join(rec.Types, ",") != "com.github.push" ||
+		rec.Filter == nil || rec.Filter.Data["ref"] != "refs/heads/main" {
 		t.Fatalf("the recurrence sent = %+v", rec)
 	}
 	out := r.Value.(map[string]any)
-	if out["when"] != "when the platform changes: platform.deployed, component.published (component browser)" || out["next"] != nil {
+	want := "on webhook com.github.push where data.ref=refs/heads/main"
+	if out["when"] != want || out["next"] != nil || !strings.Contains(out["note"].(string), "Schedules (shown once)") {
 		t.Fatalf("answer = %v", out)
 	}
-	if l := lines(gw); len(l) != 1 || l[0] != "maya's agent scheduled an AI task, when the platform changes: platform.deployed, component.published (component browser)" {
+	if l := lines(gw); len(l) != 1 || l[0] != "maya's agent scheduled an AI task, "+want {
 		t.Fatalf("lines = %v", l)
-	}
-	// name limits only an event recurrence.
-	gw2 := setupGateway("")
-	if r := runSetup(setupEnv(t, gw2, true), `{"action":"add_schedule","task":"x","name":"browser","timezone":"UTC","recurrence":{"kind":"daily","time":"09:00"}}`); r.Err != "" {
-		t.Fatal(r.Err)
-	}
-	body.Recurrence = wire.ScheduleRecurrence{}
-	_ = json.Unmarshal(gw2.callsTo("POST", "/v1/rooms/room-1/schedules")[0].Body, &body)
-	if body.Recurrence.Kind != wire.RecurDaily || body.Recurrence.Component != "" {
-		t.Fatalf("a clock recurrence took a component: %+v", body.Recurrence)
 	}
 }

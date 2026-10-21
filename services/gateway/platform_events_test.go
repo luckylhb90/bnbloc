@@ -24,14 +24,14 @@ import (
 // and proxies everything else to the realtime that was there.
 type eventRecorder struct {
 	mu     sync.Mutex
-	events []wire.PlatformEvent
+	events []wire.EventDispatch
 	fail   int
-	got    chan wire.PlatformEvent
+	got    chan wire.EventDispatch
 }
 
 func recordEvents(t *testing.T, svc *Service) *eventRecorder {
 	t.Helper()
-	rec := &eventRecorder{got: make(chan wire.PlatformEvent, 16)}
+	rec := &eventRecorder{got: make(chan wire.EventDispatch, 16)}
 	var proxy http.Handler = http.NotFoundHandler()
 	if svc.Backends.Realtime != "" {
 		upstream, err := url.Parse(svc.Backends.Realtime)
@@ -41,7 +41,7 @@ func recordEvents(t *testing.T, svc *Service) *eventRecorder {
 		proxy = httputil.NewSingleHostReverseProxy(upstream)
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/internal/v1/platform-events" {
+		if r.URL.Path != "/internal/v1/events" {
 			proxy.ServeHTTP(w, r)
 			return
 		}
@@ -49,7 +49,7 @@ func recordEvents(t *testing.T, svc *Service) *eventRecorder {
 			t.Errorf("a platform event not from the gateway: %v", r.Header)
 		}
 		raw, _ := io.ReadAll(r.Body)
-		var ev wire.PlatformEvent
+		var ev wire.EventDispatch
 		if err := json.Unmarshal(raw, &ev); err != nil {
 			t.Errorf("event body %s: %v", raw, err)
 		}
@@ -67,7 +67,7 @@ func recordEvents(t *testing.T, svc *Service) *eventRecorder {
 		rec.events = append(rec.events, ev)
 		rec.mu.Unlock()
 		rec.got <- ev
-		_ = json.NewEncoder(w).Encode(wire.PlatformEventReply{})
+		_ = json.NewEncoder(w).Encode(wire.EventDispatchReply{})
 	}))
 	t.Cleanup(srv.Close)
 	svc.Backends.Realtime = srv.URL
@@ -75,15 +75,46 @@ func recordEvents(t *testing.T, svc *Service) *eventRecorder {
 	return rec
 }
 
+// dispatched is one hand-off as a test reads it: its type, subject and
+// organizations, and its data's fields.
+type dispatched struct {
+	Type, Subject string
+	Tenants       []string
+	Data          map[string]any
+	Event         wire.CloudEvent
+}
+
+// str is a data field as text ("" when absent).
+func (d dispatched) str(k string) string {
+	switch v := d.Data[k].(type) {
+	case string:
+		return v
+	case []any:
+		parts := make([]string, len(v))
+		for i, x := range v {
+			parts[i], _ = x.(string)
+		}
+		return strings.Join(parts, ",")
+	}
+	return ""
+}
+
 // next waits for the next event handed off.
-func (rec *eventRecorder) next(t *testing.T) wire.PlatformEvent {
+func (rec *eventRecorder) next(t *testing.T) dispatched {
 	t.Helper()
 	select {
-	case ev := <-rec.got:
-		return ev
+	case d := <-rec.got:
+		out := dispatched{Type: d.Event.Type, Subject: d.Event.Subject, Tenants: d.Tenants, Event: d.Event}
+		if d.Event.Source != wire.SourcePlatform || d.Event.ID == "" || d.Event.Time == "" || d.Event.SpecVersion != wire.CloudEventsVersion {
+			t.Errorf("not a platform CloudEvent: %+v", d.Event)
+		}
+		if err := json.Unmarshal(d.Event.Data, &out.Data); err != nil {
+			t.Errorf("event data %s: %v", d.Event.Data, err)
+		}
+		return out
 	case <-time.After(5 * time.Second):
 		t.Fatal("no platform event was handed to realtime")
-		return wire.PlatformEvent{}
+		return dispatched{}
 	}
 }
 
@@ -133,7 +164,7 @@ func TestDeployRecordedOncePerVersionAcrossReplicas(t *testing.T) {
 	if n != 1 {
 		t.Fatalf("%d replicas recorded the deploy, want exactly one", n)
 	}
-	if ev := rec.next(t); ev.Event != wire.PlatformDeployed || ev.Version != "abc123def4567890" || ev.Previous != "" || ev.AtMs == 0 {
+	if ev := rec.next(t); ev.Type != wire.PlatformDeployed || ev.str("version") != "abc123def4567890" || ev.str("previous") != "" {
 		t.Fatalf("deploy event = %+v", ev)
 	}
 	rec.none(t)
@@ -149,7 +180,7 @@ func TestDeployRecordedOncePerVersionAcrossReplicas(t *testing.T) {
 	if !b.RecordDeploy(context.Background(), "fedcba987654") {
 		t.Fatal("a new build was not recorded")
 	}
-	if ev := rec.next(t); ev.Version != "fedcba987654" || ev.Previous != "abc123def4567890" {
+	if ev := rec.next(t); ev.str("version") != "fedcba987654" || ev.str("previous") != "abc123def4567890" {
 		t.Fatalf("second deploy = %+v", ev)
 	}
 }
@@ -172,7 +203,7 @@ func TestComponentPublishedOnNewVersionsOnly(t *testing.T) {
 	install(body)
 	t.Cleanup(func() { _ = svc.corePipeline().Uninstall(context.Background(), "core", "event-core", "admin") })
 	ev := rec.next(t)
-	if ev.Event != wire.ComponentPublished || ev.Name != "event-core" || ev.Version != "0.2.0" || ev.Kind == "" || ev.Rollout != "auto" || len(ev.Tenants) != 0 {
+	if ev.Type != wire.ComponentPublished || ev.Subject != "event-core" || ev.str("name") != "event-core" || ev.str("version") != "0.2.0" || ev.str("kind") == "" || ev.str("rollout") != "auto" || len(ev.Tenants) != 0 {
 		t.Fatalf("first install = %+v", ev)
 	}
 	install(body)
@@ -185,7 +216,7 @@ func TestComponentPublishedOnNewVersionsOnly(t *testing.T) {
 	pkg["version"] = "0.3.0"
 	next, _ := json.Marshal(pkg)
 	install(next)
-	if ev := rec.next(t); ev.Name != "event-core" || ev.Version != "0.3.0" {
+	if ev := rec.next(t); ev.str("name") != "event-core" || ev.str("version") != "0.3.0" {
 		t.Fatalf("new version = %+v", ev)
 	}
 	// A rollout change is no new version.
@@ -214,7 +245,7 @@ func TestDesktopPublishedOnNewVersionsOnly(t *testing.T) {
 	rec.none(t)
 	cfg := testUpdateConfig()
 	put(cfg)
-	if ev := rec.next(t); ev.Event != wire.DesktopPublished || ev.Version != "0.1.10" || strings.Join(ev.Targets, ",") != "darwin-aarch64" {
+	if ev := rec.next(t); ev.Type != wire.DesktopPublished || ev.str("version") != "0.1.10" || ev.str("targets") != "darwin-aarch64" {
 		t.Fatalf("desktop event = %+v", ev)
 	}
 	cfg.Release.Platforms["darwin-x86_64"] = wire.UpdatePlatform{URL: "https://updates.example/x86.tar.gz", Signature: "sig"}
@@ -222,7 +253,7 @@ func TestDesktopPublishedOnNewVersionsOnly(t *testing.T) {
 	rec.none(t)
 	cfg.Release.Version = "0.1.11"
 	put(cfg)
-	if ev := rec.next(t); ev.Version != "0.1.11" || strings.Join(ev.Targets, ",") != "darwin-aarch64,darwin-x86_64" {
+	if ev := rec.next(t); ev.str("version") != "0.1.11" || ev.str("targets") != "darwin-aarch64,darwin-x86_64" {
 		t.Fatalf("next desktop event = %+v", ev)
 	}
 }
@@ -234,8 +265,9 @@ func TestPlatformContentPublishSetsFollowingSchedules(t *testing.T) {
 	e := galleryGW(t)
 	e.gw.eventRetry = time.Millisecond
 	sc := wire.RoomSchedule{ScheduleID: "sch_follow", RoomID: e.roomID, CreatedBy: "maya", Text: "Draft the release notes.", Enabled: true,
-		Recipient:  wire.ScheduleRecipient{Kind: wire.ScheduleRecipientRoom},
-		Recurrence: wire.ScheduleRecurrence{Kind: wire.RecurEvent, Events: []string{wire.ComponentPublished}, Component: "release-notes"}, Timezone: "UTC"}
+		Recipient: wire.ScheduleRecipient{Kind: wire.ScheduleRecipientRoom},
+		Recurrence: wire.ScheduleRecurrence{Kind: wire.RecurEvent, Source: wire.SubscribePlatform, Types: []string{wire.ComponentPublished},
+			Filter: &wire.EventFilter{Subject: "release-notes"}}, Timezone: "UTC"}
 	if _, err := e.b.Schedules.CreateSchedule(e.ctx(), sc); err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +280,8 @@ func TestPlatformContentPublishSetsFollowingSchedules(t *testing.T) {
 			t.Fatal(err)
 		}
 		if got.NextRunAtMs != 0 {
-			if got.Event == nil || got.Event.Event != wire.ComponentPublished || got.Event.Kind != "skill" || got.Event.Name != "release-notes" || got.Event.Version == "" || got.Event.Rollout != "auto" {
+			if got.Event == nil || got.Event.Type != wire.ComponentPublished || got.Event.Subject != "release-notes" ||
+				!strings.Contains(string(got.Event.Data), `"kind":"skill"`) || !strings.Contains(string(got.Event.Data), `"rollout":"auto"`) {
 				t.Fatalf("the schedule's event = %+v", got.Event)
 			}
 			return
@@ -262,7 +295,9 @@ func TestPlatformContentPublishSetsFollowingSchedules(t *testing.T) {
 
 // Platform events have one owner: only platform_events.go makes one and
 // hands it to realtime (the publisher's PlatformEvent), and only it moves
-// an event's mark.
+// an event's mark. Events have one validator (wire.ValidEvent) and one
+// dispatcher (realtime's dispatchEvent): nothing else sets an event
+// schedule's run.
 func TestPlatformEventsSingleOwner(t *testing.T) {
 	const owner = "services/gateway/platform_events.go"
 	archtest.Scan(t, archtest.Opts{Lang: archtest.Go, Roots: []string{"services", "internal", "cmd"}}, func(rel string, src []byte) {
@@ -270,8 +305,11 @@ func TestPlatformEventsSingleOwner(t *testing.T) {
 		if rel != owner && rel != "internal/realtime/publisher.go" && strings.Contains(text, ".PlatformEvent(") {
 			t.Errorf("%s hands a platform event to realtime: record it through %s (recordPlatformEvent)", rel, owner)
 		}
-		if rel != owner && strings.HasPrefix(rel, "services/gateway/") && (strings.Contains(text, "wire.PlatformEvent{") || strings.Contains(text, "MovePlatformSetting(")) {
+		if rel != owner && strings.HasPrefix(rel, "services/gateway/") && (strings.Contains(text, "wire.EventDispatch{") || strings.Contains(text, "MovePlatformSetting(")) {
 			t.Errorf("%s makes a platform event or moves its mark: only %s does", rel, owner)
+		}
+		if rel != "services/realtime/events.go" && strings.HasPrefix(rel, "services/") && strings.Contains(text, ".TriggerEventSchedule(") {
+			t.Errorf("%s sets an event schedule's run: dispatch the event through realtime's dispatchEvent", rel)
 		}
 	})
 }
@@ -281,8 +319,9 @@ func TestPlatformEventsSingleOwner(t *testing.T) {
 func TestEventRunTextCarriesTheFacts(t *testing.T) {
 	e, model, outbox := scheduleGW(t)
 	slot := time.Date(2026, 10, 22, 1, 0, 0, 0, time.UTC)
-	ev := &wire.PlatformEvent{Event: wire.PlatformDeployed, Version: "abc123", Previous: "9f8e7d"}
-	onEvent := wire.ScheduleRecurrence{Kind: wire.RecurEvent, Events: []string{wire.PlatformDeployed}}
+	ev := &wire.CloudEvent{SpecVersion: "1.0", ID: "evt_1", Source: wire.SourcePlatform, Type: wire.PlatformDeployed, Time: "2026-10-22T01:00:00Z",
+		Data: json.RawMessage(`{"version":"abc123","previous":"9f8e7d"}`)}
+	onEvent := wire.ScheduleRecurrence{Kind: wire.RecurEvent, Source: wire.SubscribePlatform, Types: []string{wire.PlatformDeployed}}
 
 	ai := wire.RoomSchedule{ScheduleID: "sch_ai", Text: "Run the end-to-end test plan.", Recipient: wire.ScheduleRecipient{Kind: wire.ScheduleRecipientAI}, Recurrence: onEvent, Event: ev}
 	if code, reply := e.runSlot(ai, slot, false); code != http.StatusOK || reply.Status != wire.ScheduleRunOK {
@@ -292,7 +331,7 @@ func TestEventRunTextCarriesTheFacts(t *testing.T) {
 	sent, _ := json.Marshal(model.seen[len(model.seen)-1])
 	model.mu.Unlock()
 	if !strings.Contains(string(sent), "Run the end-to-end test plan.") || !strings.Contains(string(sent), "untrusted-content") ||
-		!strings.Contains(string(sent), "platform.deployed version=abc123 previous=9f8e7d") {
+		!strings.Contains(string(sent), "event: platform.deployed") || !strings.Contains(string(sent), `\"previous\":\"9f8e7d\"`) {
 		t.Fatalf("the model was not given the event's facts fenced: %s", sent)
 	}
 
@@ -322,7 +361,7 @@ func TestOrgPublishIsAnOrganizationEvent(t *testing.T) {
 		t.Fatalf("publish = %d", code)
 	}
 	ev := rec.next(t)
-	if ev.Event != wire.ComponentPublished || ev.Kind != "expert" || ev.Name != src.Name || ev.Version != "1.0.0" || strings.Join(ev.Tenants, ",") != "home" {
+	if ev.Type != wire.ComponentPublished || ev.str("kind") != "expert" || ev.str("name") != src.Name || ev.str("version") != "1.0.0" || strings.Join(ev.Tenants, ",") != "home" {
 		t.Fatalf("org publish event = %+v", ev)
 	}
 	if code := publish(); code != http.StatusConflict {
@@ -334,7 +373,7 @@ func TestOrgPublishIsAnOrganizationEvent(t *testing.T) {
 	if code, raw := g.json("maya", http.MethodPost, "/v1/content-components/"+src.ID+"/versions", form); code != http.StatusCreated {
 		t.Fatalf("new version = %d %s", code, raw)
 	}
-	if ev := rec.next(t); ev.Version != "1.0.1" || strings.Join(ev.Tenants, ",") != "home" {
+	if ev := rec.next(t); ev.str("version") != "1.0.1" || strings.Join(ev.Tenants, ",") != "home" {
 		t.Fatalf("new org version event = %+v", ev)
 	}
 }

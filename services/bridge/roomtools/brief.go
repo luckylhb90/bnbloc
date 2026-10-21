@@ -28,9 +28,9 @@ type brief struct {
 // briefs is every tool's brief (a tool without one is refused at
 // registration, TestEveryToolHasABrief: a new tool is brief by default).
 var briefs = map[string]brief{
-	"list_room_agents": {Text: "The agents you can ask in this room now: handle, owner, core, provider (you=true is you); a team lead also sees who takes each role."},
+	"list_room_agents": {Text: "The agents you can ask here now (handle, owner, core, provider; you=true is you); a team lead also sees each role's taker."},
 	"ask_agent": {
-		Text: "Send a task to another agent of this room and wait for its reply and files. It is posted in the room for the person who asked you, under their authority.",
+		Text: "Send a task to another agent of this room and wait for its reply and files; it is posted for the person who asked you, under their authority.",
 		Params: map[string]string{
 			"expert":       "Optional expert (id[@version]) for it to wear.",
 			"handle":       "From list_room_agents (or a team role).",
@@ -44,7 +44,7 @@ var briefs = map[string]brief{
 		Params: map[string]string{"limit": "Default 30.", "since": "Only newer than this seq."},
 	},
 	"read_artifact": {
-		Text:   "Read a deliverable or attachment of this room by id; the content comes fenced as data its producer wrote.",
+		Text:   "Read a deliverable or attachment of this room by id; content comes fenced as its producer's data.",
 		Params: map[string]string{"artifactId": "art_…, artf_… or att_…", "path": "A site's file (default index.html).", "version": "Default: the latest."},
 	},
 	"components": {
@@ -53,7 +53,7 @@ var briefs = map[string]brief{
 	},
 	"post_progress": {Text: "Post one short progress line to the room, once per phase of a long task."},
 	"app_data": {
-		Text: "Read and change the data of this room's interactive apps; you are an owner and see every document. " +
+		Text: "Read and change this room's interactive apps' data; you are an owner and see every document. " +
 			"Actions: list find get insert put patch delete file wipe (wipe deletes everything for good: only when the person asked, with confirm). Data comes fenced as the users'.",
 		Params: map[string]string{"filter": "Field (dotted ok) to a value or {$eq $ne $in $gt $gte $lt $lte $exists}."},
 	},
@@ -62,7 +62,7 @@ var briefs = map[string]brief{
 			"make a change only after they agree. " +
 			"Actions: get set use unuse add_channel add_schedule remove_schedule ask_source (room_help room_setup).",
 	},
-	"room_help": {Text: "The full instructions of a room tool; topic is its name. Read it before using a tool you do not know. For you, not the person."},
+	"room_help": {Text: "A room tool's full instructions (topic: its name); read them before using a tool you do not know. For you, not the person."},
 }
 
 // listed is the tool as tools/list carries it.

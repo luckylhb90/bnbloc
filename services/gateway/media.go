@@ -155,7 +155,7 @@ func (s *Service) handleMediaTranscribe(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	claims = actor.Claims
-	if !s.assistLimiter.get(assistRate, assistBurst, s.Peers.Size).allow(claims.Tenant + "/" + claims.Subject) {
+	if !s.assistLimiter.Get(assistRate, assistBurst, s.Peers.Size).Allow(claims.Tenant + "/" + claims.Subject) {
 		httpx.Error(w, "too many requests: try again in a minute", http.StatusTooManyRequests)
 		return
 	}
@@ -251,7 +251,7 @@ func readJSONMediaImage(w http.ResponseWriter, r *http.Request) (wire.MediaImage
 func (s *Service) runMediaImage(w http.ResponseWriter, r *http.Request, actor contentActor, place *mediaPlace, read func(http.ResponseWriter, *http.Request) (wire.MediaImageRequest, bool), auditName string) {
 	ctx := r.Context()
 	claims := actor.Claims
-	if !s.assistLimiter.get(assistRate, assistBurst, s.Peers.Size).allow(claims.Tenant + "/" + claims.Subject) {
+	if !s.assistLimiter.Get(assistRate, assistBurst, s.Peers.Size).Allow(claims.Tenant + "/" + claims.Subject) {
 		httpx.Error(w, "too many requests: try again in a minute", http.StatusTooManyRequests)
 		return
 	}

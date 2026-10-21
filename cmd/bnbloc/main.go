@@ -52,6 +52,8 @@ func main() {
 		err = runSearch(os.Args[2:])
 	case "schedules":
 		err = runSchedules(os.Args[2:])
+	case "events":
+		err = runEvents(os.Args[2:])
 	case "org-sync":
 		err = runOrgSync(os.Args[2:])
 	case "version":
@@ -124,6 +126,8 @@ Room schedules (as the signed-in member, or BNBLOC_API_TOKEN's subject):
   bnbloc schedules run [--dry] <room> <schedule>
                                           run one now, as its creator (only the creator may);
                                           an AI task's run that fails exits non-zero
+  bnbloc events send <room> <type> [--subject <s>] [--data <json>|@<file>]
+                                          tell the room something happened: its tasks taking it run
 
 Post-deploy smoke:
   bnbloc smoke [--agent <provider|core/provider|targetId|owner/provider>] [--timeout 120s] [--keep]

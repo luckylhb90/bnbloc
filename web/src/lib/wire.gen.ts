@@ -623,6 +623,10 @@ export interface AppChanged {
   collection?: string;
   id?: string;
   version: number;
+  // SourceJobID is the agent job whose agent wrote ("" for a person or a
+  // visitor): what caused the change, read by the room's event tap (no
+  // self-trigger) and never relayed to an app's change feed.
+  sourceJobId?: string;
 }
 
 // AppVisitorToken answers POST /v1/public/shares/{token}/visitor: a signed
@@ -918,6 +922,10 @@ export interface ArtifactUpdated {
   updatedBy: string;
   updatedAtMs: number;
   reason?: string;
+  // SourceJobID is the agent job whose turn published the new version
+  // ("" for a person's own): what caused it, so a scheduled run's own
+  // file never triggers its room's tasks (docs/prd/2026-10-21-room-events.md).
+  sourceJobId?: string;
 }
 
 // ---- wire/assist.go ----
@@ -1263,6 +1271,10 @@ export const AuditKindAssist = "assist";
 // room): an admin's grant or withdrawal, a schedule's read through
 // read_records (the source, the range and the count, never a record).
 export const AuditKindSource = "source";
+// AuditKindEvent: an event a member sent to a room (name = the room;
+// the detail names its type and subject and how many tasks it set,
+// never its data).
+export const AuditKindEvent = "event";
 
 // AuditLogEntry is one normalized audit record. ID is unique across sources
 // ("<source>:<row id>"). Name is the record's subject (component name, member
@@ -2821,6 +2833,236 @@ export interface EventKindSpec {
 // of each row: a kind registered here is a kind the web listens for.
 export const RoomEventKinds: readonly EventKindSpec[] = [{ name: "chat_message", durable: true, replay: true, channelScoped: true }, { name: "agent_messages", durable: true, replay: true, channelScoped: true }, { name: "agent_job_created", channelScoped: true }, { name: "agent_job_updated", channelScoped: true }, { name: "agent_job_progress", channelScoped: true }, { name: "job_live_frame", channelScoped: true }, { name: "agent_session_state" }, { name: "agent_roster" }, { name: "presence_join" }, { name: "presence_leave" }, { name: "presence_snapshot" }, { name: "presence_typing", channelScoped: true }, { name: "message_deleted", channelScoped: true }, { name: "message_edited", channelScoped: true }, { name: "task_updated", channelScoped: true }, { name: "artifact_updated" }, { name: "artifact_state" }, { name: "member_joined" }, { name: "member_removed", revocation: true }, { name: "room_deleted", revocation: true }, { name: "content_saved" }, { name: "content_uses_changed" }, { name: "app_changed" }];
 
+// ---- wire/events.go ----
+
+// CloudEventsVersion is the CloudEvents spec version every event carries.
+export const CloudEventsVersion = "1.0";
+
+// MaxEventDataBytes bounds an event's data (its compact JSON).
+export const MaxEventDataBytes = 16384;
+
+// Event sources: who emitted an event (CloudEvent.Source).
+// SourcePlatform: the platform itself (a deploy, a publish); the
+// gateway records these. A trigger subscribes to it by the same name.
+export const SourcePlatform = "bnbloc/platform";
+// SourceRoomPrefix + a room id: what happened in that room (a
+// file, a member, an app's data); realtime emits these.
+export const SourceRoomPrefix = "bnbloc/room/";
+// SourceWebhookPrefix + a hook id: what an outside system posted
+// to a task's webhook URL (ScheduleHook).
+export const SourceWebhookPrefix = "webhook/";
+// SourceMemberPrefix + a subject: an event a room's member sent
+// to the room (POST /v1/rooms/{roomId}/events: a script, a CI job with
+// the member's API token, the CLI's bnbloc events send).
+export const SourceMemberPrefix = "bnbloc/member/";
+
+// ReservedEventTypePrefixes are the type prefixes only the platform emits:
+// a member's own event (MemberEvent) may not use them, so a task taking
+// the platform's or the room's events never runs on a member's imitation.
+export const ReservedEventTypePrefixes: readonly string[] = ["platform.", "room.", "component.", "desktop."];
+
+// MemberEvent is the body of POST /v1/rooms/{roomId}/events: what a room's
+// member tells the room happened. The server sets the rest of the event
+// (source bnbloc/member/<subject>, id, time); the room's tasks whose
+// trigger subscribes to SubscribeMember take it.
+export interface MemberEvent {
+  type: string;
+  subject?: string;
+  data?: unknown;
+}
+
+// MemberEventReply answers a member's event: the event as sent (its id
+// and time) and how many of the room's tasks it set to run.
+export interface MemberEventReply {
+  event: CloudEvent;
+  triggered: number;
+  dropped?: number;
+}
+
+// The sources a task's trigger may subscribe to (ScheduleRecurrence.Source):
+// the platform's events, its own room's, what the room's members send it
+// (any member: the filter narrows by type and subject), or what is posted
+// to its own webhook URL. A subscription never names another room or
+// another task's URL: delivery reaches only the tenants and rooms an event
+// may reach.
+export const SubscribePlatform = "bnbloc/platform";
+export const SubscribeRoom = "bnbloc/room";
+export const SubscribeMember = "bnbloc/member";
+export const SubscribeWebhook = "webhook";
+
+// EventSubscriptionSources is every source a trigger may name, in the order
+// an editor shows them.
+export const EventSubscriptionSources: readonly string[] = ["bnbloc/platform", "bnbloc/room", "bnbloc/member", "webhook"];
+
+// Platform event types (source SourcePlatform). The gateway records
+// each once and hands it to realtime (POST /internal/v1/events).
+// PlatformDeployed: the gateway started on a build whose version
+// differs from the last one recorded (data: version, previous).
+export const PlatformDeployed = "platform.deployed";
+// ComponentPublished: a component (any kind) or platform content got a
+// new version (subject: its name; data: kind, name, version, rollout).
+export const ComponentPublished = "component.published";
+// DesktopPublished: a desktop version was activated for the updater
+// (data: version, targets).
+export const DesktopPublished = "desktop.published";
+
+// PlatformEventTypes is the closed list of platform event types, in the
+// order an editor shows them.
+export const PlatformEventTypes: readonly string[] = ["platform.deployed", "component.published", "desktop.published"];
+
+// PlatformDeployedData is the data of PlatformDeployed: the build (its
+// commit) and the one recorded before it ("" for the first).
+export interface PlatformDeployedData {
+  version: string;
+  previous?: string;
+}
+
+// ComponentPublishedData is the data of ComponentPublished (the event's
+// subject is the name).
+export interface ComponentPublishedData {
+  kind: string;
+  name: string;
+  version: string;
+  rollout?: string;
+}
+
+// DesktopPublishedData is the data of DesktopPublished: the version and
+// the targets the updater has a file for.
+export interface DesktopPublishedData {
+  version: string;
+  targets: string[];
+}
+
+// Room event types (source SourceRoomPrefix + the room). realtime
+// emits them from the room's own feed and delivers them only to that
+// room's tasks.
+// RoomFileAdded: a file (artifact) of the room got a version, its first
+// or a new one (subject: its file name or title; data: artifactId,
+// kind, title, fileName, mimeType, version, by).
+export const RoomFileAdded = "room.file.added";
+// RoomMemberJoined: a person became a member (subject: their id; data:
+// userId).
+export const RoomMemberJoined = "room.member.joined";
+// RoomAppDataChanged: an interactive app's data changed, coalesced per
+// app (subject: the app id; data: appId, collection, changes).
+export const RoomAppDataChanged = "room.app.data.changed";
+
+// RoomEventTypes is the closed list of room event types, in the order an
+// editor shows them.
+export const RoomEventTypes: readonly string[] = ["room.file.added", "room.member.joined", "room.app.data.changed"];
+
+// RoomFileAddedData is the data of RoomFileAdded: the file, the version it
+// got and who published it.
+export interface RoomFileAddedData {
+  artifactId: string;
+  kind: string;
+  title: string;
+  fileName?: string;
+  mimeType?: string;
+  version: number;
+  by: string;
+}
+
+// RoomMemberJoinedData is the data of RoomMemberJoined.
+export interface RoomMemberJoinedData {
+  userId: string;
+}
+
+// RoomAppDataChangedData is the data of RoomAppDataChanged: the app, the
+// collection of the newest change ("" for a wipe) and how many changes the
+// event stands for (writes within one coalescing window are one event).
+export interface RoomAppDataChangedData {
+  appId: string;
+  collection?: string;
+  changes: number;
+}
+
+// CloudEvent is one event: the CloudEvents 1.0 context attributes and its
+// data (JSON, at most MaxEventDataBytes). Data is the emitter's, untrusted:
+// a run reads it fenced as data, never as instructions.
+export interface CloudEvent {
+  specversion: string;
+  id: string;
+  source: string;
+  type: string;
+  time: string;
+  subject?: string;
+  data?: unknown;
+}
+
+// EventDispatch is the gateway's hand-off of a platform event to realtime
+// (POST /internal/v1/events): the event and the organizations whose tasks
+// it reaches (none: every organization; an organization's own component
+// publish names only it).
+export interface EventDispatch {
+  event: CloudEvent;
+  tenants?: string[];
+  // CauseJob / CauseTenant name the agent job whose grant caused the
+  // event (a publish an agent made for its requester), so a scheduled
+  // run's own action never triggers its room's tasks; empty for a
+  // person's or the platform's own.
+  causeJob?: string;
+  causeTenant?: string;
+}
+
+// EventDispatchReply is realtime's answer to a dispatched event: how many
+// tasks it set to run, and how many it dropped over a rate limit.
+export interface EventDispatchReply {
+  triggered: number;
+  dropped?: number;
+}
+
+// Webhook subscriptions: a task whose trigger subscribes to SubscribeWebhook
+// has its own URL, HookPathPrefix + its hook id, and a secret shown once
+// (ScheduleHookSecret). An outside system signs each request with it.
+// HookPathPrefix opens a task's webhook URL on the gateway (an open
+// route: the signature is the credential).
+export const HookPathPrefix = "/v1/hooks/";
+// HookSignatureHeader carries "sha256=<hex HMAC-SHA256 of the raw
+// body under the hook's secret>". Same header name as a component's
+// signed call (NotificationSignatureHeader), a different scheme: an
+// outside system signs the body alone, the scheme GitHub uses, so CI
+// and repository hosts can call it as they are.
+export const HookSignatureHeader = "X-Bnbloc-Signature";
+// GitHubSignatureHeader is GitHub's header for the same scheme.
+export const GitHubSignatureHeader = "X-Hub-Signature-256";
+// HookEventHeader names the event's type; without it (or
+// GitHubEventHeader) the JSON body's top-level "type" does.
+export const HookEventHeader = "X-Bnbloc-Event";
+// GitHubEventHeader is GitHub's event name ("push"); the type becomes
+// "com.github.<name>".
+export const GitHubEventHeader = "X-GitHub-Event";
+// HookDeliveryHeader / GitHubDeliveryHeader name a delivery (the
+// event's id); without one the body's "id", else a fresh one.
+export const HookDeliveryHeader = "X-Bnbloc-Delivery";
+export const GitHubDeliveryHeader = "X-GitHub-Delivery";
+
+// ScheduleHook is a task's webhook URL as the room's members see it: its id
+// (the URL is HookPathPrefix + HookID on this deployment) and the refused
+// requests; never its secret.
+export interface ScheduleHook {
+  hookId: string;
+  createdAtMs: number;
+  // Refused counts requests refused at it (a bad or missing signature,
+  // too large, not JSON, no type), LastRefusedAtMs the newest.
+  refused?: number;
+  lastRefusedAtMs?: number;
+}
+
+// ScheduleHookSecret answers creating or rotating a task's webhook
+// (POST /v1/rooms/{roomId}/schedules/{scheduleId}/hook): the hook and its
+// secret, shown this once.
+export interface ScheduleHookSecret {
+  hook: ScheduleHook;
+  secret: string;
+}
+
+// HookReply answers a webhook request: how many tasks it set to run (0 or
+// 1: the hook's own task, when its trigger takes the event).
+export interface HookReply {
+  triggered: number;
+}
+
 // ---- wire/handoff.go ----
 
 // RoomExportFormat is the manifest "format" of the only package version this
@@ -3765,6 +4007,11 @@ export const NotificationAppNotice = "app_notice";
 // could not get done in a room (POST /v1/rooms/{roomId}/report): the
 // member's reviewed text, linked to the reply it is about.
 export const NotificationRoomReport = "room_report";
+// NotificationScheduleNotice tells a room's owner about one of its
+// scheduled tasks' event trigger: events a rate limit dropped
+// (docs/prd/2026-10-21-room-events.md §2.4). Operational, like a budget
+// warning: sent once per task until it is edited, never muted.
+export const NotificationScheduleNotice = "schedule_notice";
 
 // AdminAlertRequest is the body of POST /v1/platform/alerts. Recipients
 // default to every configured platform super-admin.
@@ -4900,50 +5147,9 @@ export const RecurWeekly = "weekly";
 // RecurCron runs on a five-field cron-lite expression
 // ("minute hour day-of-month month day-of-week").
 export const RecurCron = "cron";
-// RecurEvent runs when the platform changes: once per platform event
-// it follows (Events, Component), never on the clock
-// (docs/prd/2026-10-20-event-triggered-schedules.md).
+// RecurEvent runs when an event it subscribes to happens (Source,
+// Types, Filter), never on the clock (docs/prd/2026-10-21-room-events.md).
 export const RecurEvent = "event";
-
-// Platform events a schedule may follow (RecurEvent). Only the platform
-// sees them; the gateway records each once and hands it to realtime's
-// scheduler (POST /internal/v1/platform-events).
-// PlatformDeployed: the gateway started on a build whose version
-// differs from the last one recorded (Version, Previous).
-export const PlatformDeployed = "platform.deployed";
-// ComponentPublished: a component (any kind) or platform content got a
-// new version (Kind, Name, Version, Rollout).
-export const ComponentPublished = "component.published";
-// DesktopPublished: a desktop version was activated for the updater
-// (Version, Targets).
-export const DesktopPublished = "desktop.published";
-
-// PlatformEventNames is the closed list of events a schedule may follow,
-// in the order an editor shows them.
-export const PlatformEventNames: readonly string[] = ["platform.deployed", "component.published", "desktop.published"];
-
-// PlatformEvent is one platform event: its name and its facts (public
-// facts only: versions and names, never a secret). Tenants are the
-// organizations whose schedules see it: none is every organization (a
-// deploy, a desktop version, a component published for the platform); an
-// organization's own component publish names only that organization.
-export interface PlatformEvent {
-  event: PlatformEventName;
-  version: string;
-  previous?: string;
-  kind?: string;
-  name?: string;
-  rollout?: string;
-  targets?: string[];
-  tenants?: string[];
-  atMs: number;
-}
-
-// PlatformEventReply is realtime's answer to a dispatched event: how many
-// schedules it set to run.
-export interface PlatformEventReply {
-  triggered: number;
-}
 
 // Schedule run outcomes recorded on the schedule (LastStatus).
 export const ScheduleRunOK = "ok";
@@ -4974,17 +5180,29 @@ export interface ScheduleRecipient {
 
 // ScheduleRecurrence is when a schedule fires. Only the fields of its Kind
 // are meaningful: AtMs (once), Time (daily, weekly), Days (weekly), Cron
-// (cron), Events and Component (event: the platform events it follows,
-// one to all of PlatformEventNames, and for component.published an
-// optional component name it is limited to).
+// (cron); for event, the subscription: Source (one of
+// EventSubscriptionSources), Types (one or more type patterns: a type, or
+// a prefix ending in "*") and an optional Filter.
 export interface ScheduleRecurrence {
   kind: RecurrenceKind;
   atMs?: number;
   time?: string;
   days?: number[];
   cron?: string;
-  events?: PlatformEventName[];
-  component?: string;
+  source?: EventSubscriptionSource;
+  types?: string[];
+  filter?: EventFilter;
+}
+
+// EventFilter narrows an event trigger, every field set must hold: the
+// event's subject equals Subject, or starts with SubjectPrefix; each Data
+// key names a top-level field of the event's data whose value (a string,
+// number or boolean, as its JSON text without quotes) equals the given
+// one. Equality and prefix only: no expressions.
+export interface EventFilter {
+  subject?: string;
+  subjectPrefix?: string;
+  data?: Record<string, string>;
 }
 
 // RoomSchedule is one scheduled prompt: Text posted into the room as
@@ -5015,11 +5233,17 @@ export interface RoomSchedule {
   runCount: number;
   createdAtMs: number;
   updatedAtMs: number;
-  // Event is the platform event the schedule's pending (or claimed) run
-  // answers: set by the dispatch of an event it follows, cleared when
-  // that run completes. A run's text carries its facts
+  // Event is the event the schedule's pending (or claimed) run answers:
+  // set by the dispatch of an event its trigger takes, cleared when that
+  // run completes. A run's text carries it fenced as data
   // (schedule.RunText).
-  event?: PlatformEvent;
+  event?: CloudEvent;
+  // Hook is the task's webhook URL (a trigger subscribing to
+  // SubscribeWebhook), absent until its creator makes one.
+  hook?: ScheduleHook;
+  // DroppedEvents counts events the trigger took that a rate limit
+  // dropped (the room's owner is told once).
+  droppedEvents?: number;
 }
 
 // ScheduleRunRequest is realtime's call to the gateway to run an ai
@@ -6150,6 +6374,12 @@ export type DecisionQuestionType = "predicate" | "choice" | "score";
 export const DecisionQuestionTypeValues: readonly DecisionQuestionType[] = ["predicate", "choice", "score"];
 export type RoomEventKind = "chat_message" | "agent_messages" | "agent_job_created" | "agent_job_updated" | "agent_job_progress" | "job_live_frame" | "agent_session_state" | "agent_roster" | "presence_join" | "presence_leave" | "presence_snapshot" | "presence_typing" | "message_deleted" | "message_edited" | "task_updated" | "artifact_updated" | "artifact_state" | "member_joined" | "member_removed" | "room_deleted" | "content_saved" | "content_uses_changed" | "app_changed";
 export const RoomEventKindValues: readonly RoomEventKind[] = ["chat_message", "agent_messages", "agent_job_created", "agent_job_updated", "agent_job_progress", "job_live_frame", "agent_session_state", "agent_roster", "presence_join", "presence_leave", "presence_snapshot", "presence_typing", "message_deleted", "message_edited", "task_updated", "artifact_updated", "artifact_state", "member_joined", "member_removed", "room_deleted", "content_saved", "content_uses_changed", "app_changed"];
+export type EventSubscriptionSource = "bnbloc/platform" | "bnbloc/room" | "bnbloc/member" | "webhook";
+export const EventSubscriptionSourceValues: readonly EventSubscriptionSource[] = ["bnbloc/platform", "bnbloc/room", "bnbloc/member", "webhook"];
+export type PlatformEventType = "platform.deployed" | "component.published" | "desktop.published";
+export const PlatformEventTypeValues: readonly PlatformEventType[] = ["platform.deployed", "component.published", "desktop.published"];
+export type RoomEventType = "room.file.added" | "room.member.joined" | "room.app.data.changed";
+export const RoomEventTypeValues: readonly RoomEventType[] = ["room.file.added", "room.member.joined", "room.app.data.changed"];
 export type JobActivityKind = "tool" | "thinking" | "text";
 export const JobActivityKindValues: readonly JobActivityKind[] = ["tool", "thinking", "text"];
 export type MediaImageAspect = "square" | "landscape" | "portrait";
@@ -6168,8 +6398,6 @@ export type ScheduleRecipientKind = "room" | "agent" | "ai" | "notice";
 export const ScheduleRecipientKindValues: readonly ScheduleRecipientKind[] = ["room", "agent", "ai", "notice"];
 export type RecurrenceKind = "once" | "daily" | "weekly" | "cron" | "event";
 export const RecurrenceKindValues: readonly RecurrenceKind[] = ["once", "daily", "weekly", "cron", "event"];
-export type PlatformEventName = "platform.deployed" | "component.published" | "desktop.published";
-export const PlatformEventNameValues: readonly PlatformEventName[] = ["platform.deployed", "component.published", "desktop.published"];
 export type ScheduleRunStatus = "ok" | "error" | "skipped";
 export const ScheduleRunStatusValues: readonly ScheduleRunStatus[] = ["ok", "error", "skipped"];
 export type ShareAccess = "org" | "signed_in" | "anyone";

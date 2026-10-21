@@ -22,6 +22,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
+	"github.com/luckylhb90/bnbloc/internal/sealbox"
 	"github.com/luckylhb90/bnbloc/internal/search"
 	"github.com/luckylhb90/bnbloc/internal/shard"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -141,12 +142,21 @@ type Service struct {
 	HeartbeatEvery time.Duration
 	// Now is the live views' clock (job_live.go); nil is time.Now.
 	Now func() time.Time
+	// HookBox seals and opens tasks' webhook secrets (hooks.go): the
+	// deployment's secret store key. Nil turns webhooks off (503).
+	HookBox *sealbox.Box
+	// AppEventWindow is room.app.data.changed's coalescing window
+	// (room_events.go); 0 is appEventWindow.
+	AppEventWindow time.Duration
 
 	liveOnce sync.Once
 	liveJobs *liveStore
 
 	wakeOnce sync.Once
 	wake     chan struct{}
+
+	eventLimits eventLimiters
+	appWindows  appWindows
 }
 
 func (s *Service) now() time.Time {
@@ -243,6 +253,8 @@ func (s *Service) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/rooms/{roomId}/live", s.handleLiveList)
 	s.registerTeamRoutes(mux)
 	s.registerScheduleRoutes(mux)
+	s.registerHookRoutes(mux)
+	s.registerMemberEventRoutes(mux)
 	s.registerPluginRoutes(mux)
 	s.Notifications.Register(mux)
 	// Internal-only routes: callable exclusively by a signed control-plane
@@ -285,9 +297,12 @@ func (s *Service) Handler() http.Handler {
 	// within the organization admin's grant): the one history read, never
 	// the people chat.
 	mux.Handle("GET /internal/v1/rooms/{roomId}/history", services("gateway")(s.handleInternalHistory))
-	// A platform event the gateway recorded sets the runs of the schedules
-	// following it (platform_events.go). Not keyed: any replica serves it.
-	mux.Handle("POST /internal/v1/platform-events", services("gateway")(s.handleInternalPlatformEvent))
+	// A platform event the gateway recorded sets the runs of the tasks whose
+	// trigger takes it (events.go). Not keyed: any replica serves it.
+	mux.Handle("POST /internal/v1/events", services("gateway")(s.handleInternalEvent))
+	// A request to a task's webhook, from the gateway's open route
+	// (hooks.go). Not keyed: the hook names its room only once read.
+	mux.Handle("POST /internal/v1/hooks/{hookId}", services("gateway")(s.handleInternalHook))
 	// Replica-to-replica routes (scaleout.go); the gateway also signals a
 	// component catalog change.
 	s.registerPeerRoutes(mux, services("realtime"), services("realtime", "gateway"))
@@ -738,9 +753,9 @@ func (s *Service) handleInternalPublish(w http.ResponseWriter, r *http.Request) 
 // internal ingest, a transient update): the hub's commit (durable kinds
 // stored first, wire.RoomEventKinds), then the post-publish taps on what was
 // delivered — plugin hooks, the notification observer, the member-join
-// share step. Only presence and the roster, which have no request and are
-// announced by the room's owner, publish to the hub directly
-// (publishOwned).
+// share step, the room's own events (room_events.go). Only presence and
+// the roster, which have no request and are announced by the room's owner,
+// publish to the hub directly (publishOwned).
 func (s *Service) publish(ctx context.Context, ev wire.Event, d realtime.Durable) (wire.Event, error) {
 	published, err := s.Hub.PublishCommit(ev, d)
 	if err != nil {
@@ -748,6 +763,7 @@ func (s *Service) publish(ctx context.Context, ev wire.Event, d realtime.Durable
 	}
 	s.afterPublish(ctx, published)
 	s.onMemberJoined(ctx, published)
+	s.emitRoomEvents(ctx, published)
 	return published, nil
 }
 

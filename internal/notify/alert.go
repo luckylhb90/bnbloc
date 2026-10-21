@@ -17,7 +17,7 @@ import (
 // must not be able to mute "the nightly smoke failed", nor a member the
 // warning that their agents are about to stop).
 func Operational(typ string) bool {
-	return typ == wire.NotificationAdminAlert || typ == wire.NotificationBudgetWarning
+	return typ == wire.NotificationAdminAlert || typ == wire.NotificationBudgetWarning || typ == wire.NotificationScheduleNotice
 }
 
 // Admin alert bounds. Title/text are also truncated by the emitter; a

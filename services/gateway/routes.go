@@ -10,6 +10,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/rbac"
 	"github.com/luckylhb90/bnbloc/internal/sharelink"
 	"github.com/luckylhb90/bnbloc/internal/store"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // The gateway's route table: every route the gateway serves itself is one
@@ -39,6 +40,9 @@ const (
 	// visitorBudget: minting a public link's visitor token spends the
 	// client IP's visitor budget (visitorAllow).
 	visitorBudget
+	// publicBudget: an unauthenticated call another system makes (a task's
+	// webhook) spends the client IP's public budget (publicAllow).
+	publicBudget
 	// appReadBudget / appWriteBudget: an interactive app's data call spends
 	// the client IP's, its link's and its participant's app budgets
 	// (appRates), the write ones stricter.
@@ -188,6 +192,8 @@ func (s *Service) routes() []route {
 		open("POST /v1/notifier/group-binds", "the notifier component's signature", s.handleNotifierGroupBind),
 		// An endpoint component's signed ask for its own settings.
 		open("GET /v1/component-settings", "the endpoint component's signature", s.handleEndpointComponentSettings),
+		// A request to a task's webhook (hooks.go): realtime verifies it.
+		open("POST "+wire.HookPathPrefix+"{hookId}", "the webhook's signature (HMAC of the body), verified by realtime", s.handleHook).spends(publicBudget),
 
 		// Content components (content_components.go and siblings). A write
 		// drives agents' configuration and spends the cost budget; whether
@@ -419,7 +425,8 @@ func (s *Service) spendIP(w http.ResponseWriter, r *http.Request, b rateBudget) 
 	ip := s.clientIP(r)
 	switch {
 	case b == guessBudget && !s.guessAllow("ip:"+ip),
-		b == visitorBudget && !s.visitorAllow(ip):
+		b == visitorBudget && !s.visitorAllow(ip),
+		b == publicBudget && !s.publicAllow(ip):
 		httpx.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 		return false
 	}

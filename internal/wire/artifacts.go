@@ -110,4 +110,8 @@ type ArtifactUpdated struct {
 	UpdatedBy      string `json:"updatedBy"`
 	UpdatedAtMs    int64  `json:"updatedAtMs"`
 	Reason         string `json:"reason,omitempty"`
+	// SourceJobID is the agent job whose turn published the new version
+	// ("" for a person's own): what caused it, so a scheduled run's own
+	// file never triggers its room's tasks (docs/prd/2026-10-21-room-events.md).
+	SourceJobID string `json:"sourceJobId,omitempty"`
 }

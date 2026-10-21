@@ -1,6 +1,9 @@
 import {
-  PLATFORM_EVENTS,
+  EVENT_SOURCES,
   describeRecurrence,
+  hookInstructions,
+  hookURL,
+  sourceTypes,
   formFromRecurrence,
   recurrenceFromForm,
   isBorrowedRecipient,
@@ -115,32 +118,59 @@ eq(noticeTargetLabel(["maya", "jack"]), "maya, jack", "logins label");
 eq(noticeTargetLabel("room"), "the room", "room label");
 eq(recipientLabel({ kind: "notice", to: "group:Infra", title: "t" }), "notice to group Infra", "a notice's recipient label");
 
-// An event schedule (docs/prd/2026-10-20-event-triggered-schedules.md): the
-// editor offers the server's closed list, sends the events in that order,
-// and a component name only with component publishing.
+// An event trigger (docs/prd/2026-10-21-room-events.md): the platform's and
+// the room's types are the server's closed lists, a member's and a
+// webhook's are typed; the subject filter is exact or a prefix ending in *,
+// the data filter field=value lines; a member never takes a platform type.
 {
   const now = Date.UTC(2026, 9, 8, 12, 0);
   eq(
-    PLATFORM_EVENTS.map((e) => e.value),
-    ["platform.deployed", "component.published", "desktop.published"],
-    "the events are the server's list, in its order",
+    EVENT_SOURCES.map((s) => s.value),
+    ["bnbloc/platform", "bnbloc/room", "bnbloc/member", "webhook"],
+    "the sources are the server's list, in its order",
   );
+  eq(sourceTypes("bnbloc/platform").map((t) => t.value), ["platform.deployed", "component.published", "desktop.published"], "the platform's types");
+  eq(sourceTypes("bnbloc/room").map((t) => t.label), ["a file is added or updated", "someone joins", "an app's data changes"], "the room's types in words");
+  eq(sourceTypes("webhook"), [], "a webhook's types are open");
+
   const f = { ...formFromRecurrence(undefined, "UTC", now), kind: "event" as const };
-  eq(f.events, ["platform.deployed"], "a new event schedule follows deploys");
-  eq(recurrenceFromForm(f, "UTC", now).recurrence, { kind: "event", events: ["platform.deployed"] }, "deploys");
+  eq([f.source, f.types], ["bnbloc/room", ["room.file.added"]], "a new trigger takes the room's files");
+  eq(recurrenceFromForm(f, "UTC", now).recurrence, { kind: "event", source: "bnbloc/room", types: ["room.file.added"] }, "no filter");
   eq(
-    recurrenceFromForm({ ...f, events: ["desktop.published", "component.published"], component: " browser " }, "UTC", now).recurrence,
-    { kind: "event", events: ["component.published", "desktop.published"], component: "browser" },
-    "events in the list's order, the component trimmed",
+    recurrenceFromForm({ ...f, types: ["room.member.joined", "room.file.added"], subject: " reports/* " }, "UTC", now).recurrence,
+    { kind: "event", source: "bnbloc/room", types: ["room.file.added", "room.member.joined"], filter: { subjectPrefix: "reports/" } },
+    "types in the list's order; a trailing * is a prefix",
+  );
+  const hook = { ...f, source: "webhook" as const, typesText: "com.github.push, ci.*\ncom.github.push", subject: "", dataFilter: "ref = refs/heads/main\n\nrepo=bnbloc" };
+  eq(
+    recurrenceFromForm(hook, "UTC", now).recurrence,
+    { kind: "event", source: "webhook", types: ["com.github.push", "ci.*"], filter: { data: { ref: "refs/heads/main", repo: "bnbloc" } } },
+    "typed types, unique; data fields",
+  );
+  eq(recurrenceFromForm({ ...hook, typesText: "" }, "UTC", now).error, "Name at least one event type", "an open source needs a type");
+  eq(recurrenceFromForm({ ...hook, typesText: "com.*.push" }, "UTC", now).error, "A * goes only at the end of a type", "a star inside");
+  eq(recurrenceFromForm({ ...hook, dataFilter: "ref" }, "UTC", now).error, "Write each data filter as field=value (ref)", "a data line without =");
+  eq(recurrenceFromForm({ ...f, types: [] }, "UTC", now).error, "Pick at least one event to run on", "a closed source needs a pick");
+  assert(
+    (recurrenceFromForm({ ...hook, source: "bnbloc/member", typesText: "room.file.added" }, "UTC", now).error ?? "").startsWith("A member's event never starts with platform."),
+    "a member never sends the platform's types",
+  );
+  const round = formFromRecurrence({ kind: "event", source: "webhook", types: ["com.github.push"], filter: { subjectPrefix: "v1.", data: { ref: "main" } } }, "UTC", now);
+  eq([round.source, round.typesText, round.subject, round.dataFilter], ["webhook", "com.github.push", "v1.*", "ref=main"], "a webhook trigger round trip");
+  eq(describeRecurrence({ kind: "event", source: "bnbloc/platform", types: ["platform.deployed", "desktop.published"] }, "UTC"), "When bnbloc is deployed or a desktop version is published", "platform events described");
+  eq(
+    describeRecurrence({ kind: "event", source: "bnbloc/room", types: ["room.file.added"], filter: { subjectPrefix: "reports/" } }, "UTC"),
+    "When a file is added or updated in this room (subject starts with reports/)",
+    "a room trigger described",
   );
   eq(
-    recurrenceFromForm({ ...f, events: ["platform.deployed"], component: "browser" }, "UTC", now).recurrence,
-    { kind: "event", events: ["platform.deployed"] },
-    "a component name only goes with component publishing",
+    describeRecurrence({ kind: "event", source: "webhook", types: ["com.github.push"], filter: { data: { ref: "refs/heads/main" } } }, "UTC"),
+    "When another system sends com.github.push (ref = refs/heads/main)",
+    "a webhook trigger described",
   );
-  eq(recurrenceFromForm({ ...f, events: [] }, "UTC", now).error, "Pick at least one change to run on", "an event schedule follows something");
-  const round = formFromRecurrence({ kind: "event", events: ["component.published"], component: "browser" }, "UTC", now);
-  eq([round.kind, round.events, round.component], ["event", ["component.published"], "browser"], "event round trip");
-  eq(describeRecurrence({ kind: "event", events: ["platform.deployed", "desktop.published"] }, "UTC"), "When bnbloc is deployed or a desktop version is published", "events described");
-  eq(describeRecurrence({ kind: "event", events: ["component.published"], component: "browser" }, "UTC"), "When component browser is published", "a component filter described");
+  eq(describeRecurrence({ kind: "event", source: "bnbloc/member", types: ["dev.finished"] }, "UTC"), "When a member sends dev.finished", "a member trigger described");
+  eq(hookURL("https://bnbloc.example.com/", "hk_1"), "https://bnbloc.example.com/v1/hooks/hk_1", "the webhook URL");
+  const told = hookInstructions("https://bnbloc.example.com/v1/hooks/hk_1", "whsec_x");
+  assert(told.includes("Secret: whsec_x") && told.includes("X-Bnbloc-Signature: sha256=") && told.includes("X-Hub-Signature-256"), "the sender is told how to sign");
 }
+

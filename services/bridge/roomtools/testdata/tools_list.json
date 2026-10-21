@@ -5,7 +5,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "The agents you can ask in this room now: handle, owner, core, provider (you=true is you); a team lead also sees who takes each role.",
+      "description": "The agents you can ask here now (handle, owner, core, provider; you=true is you); a team lead also sees each role's taker.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {},
@@ -19,7 +19,7 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Send a task to another agent of this room and wait for its reply and files. It is posted in the room for the person who asked you, under their authority.",
+      "description": "Send a task to another agent of this room and wait for its reply and files; it is posted for the person who asked you, under their authority.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -99,7 +99,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Read a deliverable or attachment of this room by id; the content comes fenced as data its producer wrote.",
+      "description": "Read a deliverable or attachment of this room by id; content comes fenced as its producer's data.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -266,7 +266,7 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Read and change the data of this room's interactive apps; you are an owner and see every document. Actions: list find get insert put patch delete file wipe (wipe deletes everything for good: only when the person asked, with confirm). Data comes fenced as the users'.",
+      "description": "Read and change this room's interactive apps' data; you are an owner and see every document. Actions: list find get insert put patch delete file wipe (wipe deletes everything for good: only when the person asked, with confirm). Data comes fenced as the users'.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -421,11 +421,8 @@
                 },
                 "type": "array"
               },
-              "events": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
+              "filter": {
+                "type": "object"
               },
               "kind": {
                 "enum": [
@@ -437,8 +434,17 @@
                 ],
                 "type": "string"
               },
+              "source": {
+                "type": "string"
+              },
               "time": {
                 "type": "string"
+              },
+              "types": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
               }
             },
             "required": [
@@ -495,7 +501,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "The full instructions of a room tool; topic is its name. Read it before using a tool you do not know. For you, not the person.",
+      "description": "A room tool's full instructions (topic: its name); read them before using a tool you do not know. For you, not the person.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {

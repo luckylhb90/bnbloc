@@ -1729,6 +1729,31 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return addColumnIfMissing(ctx, db, "user_profiles", "feed_layout", "VARCHAR(16) NOT NULL DEFAULT 'time' AFTER email")
 		},
 	},
+	{
+		// A task's webhook (its URL's id, its sealed secret, the requests
+		// refused there) and the events its trigger lost to a rate limit
+		// (docs/prd/2026-10-21-room-events.md). Additive: nullable or
+		// defaulted columns and a unique key the previous release never
+		// reads.
+		id: "2026_10_room_schedules_hooks",
+		run: func(ctx context.Context, db sqlConn) error {
+			for _, c := range [][2]string{
+				{"hook_id", "VARCHAR(64) NULL"},
+				{"hook_secret", "TEXT NULL"},
+				{"hook_created_at_ms", "BIGINT NULL"},
+				{"hook_refused", "BIGINT NOT NULL DEFAULT 0"},
+				{"hook_refused_at_ms", "BIGINT NULL"},
+				{"events_dropped", "BIGINT NOT NULL DEFAULT 0"},
+				{"drop_noticed", "TINYINT(1) NOT NULL DEFAULT 0"},
+			} {
+				if err := addColumnIfMissing(ctx, db, "room_schedules", c[0], c[1]); err != nil {
+					return err
+				}
+			}
+			return addIndexIfMissing(ctx, db, "room_schedules", "uq_room_schedules_hook",
+				"ADD UNIQUE KEY uq_room_schedules_hook (hook_id)")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

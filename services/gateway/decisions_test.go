@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/internal/ratelimit"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
@@ -200,16 +201,16 @@ func TestSystemOne(t *testing.T) {
 func TestDecisionRateIsItsOwn(t *testing.T) {
 	fake := &decisionFake{}
 	e := decisionGW(t, fake, "")
-	e.gw.assistLimiter = lazyLimiter{}
-	e.gw.assistLimiter.get(assistRate, 1, nil).now = func() time.Time { return time.Unix(0, 0) }
-	e.gw.assistLimiter.get(assistRate, 1, nil).allow(e.tenant + "/maya") // the assist bucket is empty
+	e.gw.assistLimiter = ratelimit.Lazy{}
+	e.gw.assistLimiter.Get(assistRate, 1, nil).Now = func() time.Time { return time.Unix(0, 0) }
+	e.gw.assistLimiter.Get(assistRate, 1, nil).Allow(e.tenant + "/maya") // the assist bucket is empty
 	for i := 0; i < 3; i++ {
 		if r := e.call(http.MethodPost, "/v1/decisions", ask("x", "q"), e.as("maya")); r.status != http.StatusOK {
 			t.Fatalf("decision %d with the assist rate spent = %d %s", i, r.status, r.body)
 		}
 	}
-	e.gw.decisionLimiter = lazyLimiter{}
-	e.gw.decisionLimiter.get(decisionRate, 2, nil).now = func() time.Time { return time.Unix(0, 0) }
+	e.gw.decisionLimiter = ratelimit.Lazy{}
+	e.gw.decisionLimiter.Get(decisionRate, 2, nil).Now = func() time.Time { return time.Unix(0, 0) }
 	refused := 0
 	for i := 0; i < 4; i++ {
 		if r := e.call(http.MethodPost, "/v1/decisions", ask("x", "q"), e.as("maya")); r.status == http.StatusTooManyRequests {
