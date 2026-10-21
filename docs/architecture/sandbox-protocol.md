@@ -108,6 +108,7 @@ conforming, advertising one and failing it is not:
 | `warmPool` | warm pools + claim |
 | `execTokens` | space-scoped exec tokens (required by bnbloc's hybrid execution) |
 | `readOnlyMounts` | a shared space mount with `readOnly:true` is enforced: writes, creates and deletes fail in the guest, the host folder is never touched (a component's mounts are applied only where this is advertised) |
+| `durableHomes` | a space's home outlives its machine: the same on every machine created from an image that the space name is ensured on, removed only by a delete with `purge=1`; its commands find tools installed there by name (`PATH` starts with `~/.local/bin`, `~/.bun/bin`, `~/.cargo/bin`, `~/go/bin`; npm's global prefix is `~/.local` unless the run sets `NPM_CONFIG_PREFIX`) |
 
 ## Endpoints
 
@@ -196,7 +197,11 @@ Requirements every implementation must meet:
 - `disk` mounts are guest-local directories owned by the space user;
 - deleting a space kills its processes, unmounts its shares and removes its
   user; `purge=1` also removes its home and disk directories. Host share
-  content is never deleted. Ensuring a space deleted without purge brings
+  content is never deleted. With `durableHomes` the home survives the
+  machine too: a space name ensured on another machine (or the same name
+  after a recreate) finds the home it left, a name ensured on two machines
+  at once shares one home, and a machine restored from a snapshot keeps
+  homes as its snapshot had them. Ensuring a space deleted without purge brings
   back the same user (uid) over its kept home and disks (`spaceRestart` in
   the suite): the bridge deletes a space after every sandboxed turn so no
   guest process outlives its turn, and re-ensures it for the next.

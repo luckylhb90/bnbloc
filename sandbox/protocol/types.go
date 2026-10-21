@@ -94,13 +94,21 @@ const (
 	// touched. A component's mounts (the bridge's mount contributions) are
 	// applied only to a backend that advertises it.
 	CapabilityReadOnlyMounts = "readOnlyMounts"
+	// CapabilityDurableHomes: a space's home outlives its machine. It is the
+	// same on every machine created from an image that the space name is
+	// ensured on, as the space's uid is, and only a delete with purge
+	// removes it (docs/prd/2026-10-21-durable-sandbox-homes.md). A space's
+	// commands find tools installed in it by name: PATH starts with its
+	// ~/.local/bin, ~/.bun/bin, ~/.cargo/bin and ~/go/bin, and npm's global
+	// prefix is ~/.local unless the run sets NPM_CONFIG_PREFIX.
+	CapabilityDurableHomes = "durableHomes"
 )
 
 // Capabilities lists every v1 capability name (validation registry).
 var Capabilities = []string{
 	CapabilityExec, CapabilityTTY, CapabilitySpaces, CapabilityShares, CapabilityPorts, CapabilityDisks,
 	CapabilitySnapshots, CapabilityPause, CapabilityEgressPolicy, CapabilitySpaceEgress, CapabilityEgressHosts, CapabilitySecrets,
-	CapabilityFork, CapabilityWarmPool, CapabilityExecTokens, CapabilityReadOnlyMounts,
+	CapabilityFork, CapabilityWarmPool, CapabilityExecTokens, CapabilityReadOnlyMounts, CapabilityDurableHomes,
 }
 
 // KnownCapability reports whether name is a v1 capability.

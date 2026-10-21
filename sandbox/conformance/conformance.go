@@ -153,6 +153,7 @@ func Run(t *testing.T, cfg Config) {
 		{"fork", s.fork, false},
 		{"warmPool", s.warmPool, false},
 		{"spaceRestart", s.spaceRestart, false},
+		{"durableHomes", s.durableHomes, false},
 		{"deleteSpace", s.deleteSpace, false},
 		{"deleteMachine", s.deleteMachine, false},
 	}
@@ -1473,6 +1474,58 @@ func (s *suite) spaceRestart(t *testing.T) {
 	if got := out(t, s.spaceSh(t, name, "cat \"$HOME/.restart-marker\"")); got != "kept\n" {
 		t.Fatalf("home after a delete without purge = %q, want it kept", got)
 	}
+}
+
+// durableHomes: what a space installs in its home is there on another
+// machine (the first deleted), found by name; a purge empties it.
+func (s *suite) durableHomes(t *testing.T) {
+	s.need(t, protocol.CapabilitySpaces, protocol.CapabilityDurableHomes)
+	const name = "room-home"
+	machine := func(tag string) protocol.Machine {
+		t.Helper()
+		m, err := s.c.CreateMachine(s.ctx, s.ep, protocol.CreateMachineRequest{
+			Name: "conformance-home-" + tag + "-" + strconv.FormatInt(time.Now().UnixNano(), 36), Image: s.cfg.Image, CPUs: 1, MemoryMiB: 512,
+		})
+		if err != nil {
+			t.Fatalf("create machine %s: %v", tag, err)
+		}
+		return s.track(m)
+	}
+	ensure := func(m protocol.Machine) {
+		t.Helper()
+		if _, err := s.c.EnsureSpace(s.ctx, s.ep, m.ID, name, protocol.SpaceRequest{Labels: protocol.Labels{Room: name}}); err != nil {
+			t.Fatalf("ensure %s on %s: %v", name, m.ID, err)
+		}
+	}
+	run := func(m protocol.Machine, script string) string {
+		t.Helper()
+		res, err := s.c.SpaceRun(s.ctx, s.ep, m.ID, name, protocol.ExecRequest{Command: []string{"sh", "-c", script}, TimeoutMs: 60_000})
+		if err != nil {
+			t.Fatalf("run in %s: %v", name, err)
+		}
+		return out(t, res)
+	}
+	first := machine("a")
+	ensure(first)
+	if got := run(first, `mkdir -p "$HOME/.local/bin" && printf '#!/bin/sh\necho tool-ran\n' > "$HOME/.local/bin/conformance-tool" && chmod +x "$HOME/.local/bin/conformance-tool" && echo kept > "$HOME/.home-marker" && test "$NPM_CONFIG_PREFIX" = "$HOME/.local" && echo prefix-ok`); got != "prefix-ok\n" {
+		t.Fatalf("installing into the home: %q; want NPM_CONFIG_PREFIX at the home's .local", got)
+	}
+	if err := s.c.DeleteMachine(s.ctx, s.ep, first.ID); err != nil {
+		t.Fatalf("delete machine: %v", err)
+	}
+	second := machine("b")
+	ensure(second)
+	if got := run(second, `cat "$HOME/.home-marker"; conformance-tool`); got != "kept\ntool-ran\n" {
+		t.Fatalf("on another machine the home holds %q; want the marker and the tool found by name", got)
+	}
+	if err := s.c.DeleteSpace(s.ctx, s.ep, second.ID, name, true); err != nil {
+		t.Fatalf("purge %s: %v", name, err)
+	}
+	ensure(second)
+	if got := run(second, `test -e "$HOME/.home-marker" && echo left; echo checked`); got != "checked\n" {
+		t.Fatalf("after a purge the home holds %q; want it empty", got)
+	}
+	_ = s.c.DeleteSpace(s.ctx, s.ep, second.ID, name, true)
 }
 
 func (s *suite) deleteSpace(t *testing.T) {
