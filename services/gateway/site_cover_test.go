@@ -97,3 +97,19 @@ func TestMyAppsRoute(t *testing.T) {
 		t.Fatalf("/v1/my/apps/x routed to %q", got)
 	}
 }
+
+// Which rooms were deleted is the room service's answer, readable by any
+// member (the owner's bridge asks it) and spending no cost budget.
+func TestMyDeletedRoomsRoute(t *testing.T) {
+	s := &Service{Backends: Backends{Room: "room", Realtime: "rt", Activity: "act", ShareAgent: "share"}}
+	p := mustParseAPIPath(t, http.MethodGet, "/v1/my/deleted-rooms")
+	if got := s.route(p); got != "room" {
+		t.Fatalf("/v1/my/deleted-rooms routed to %q, want room", got)
+	}
+	if perm := requiredPermission(http.MethodGet, p); perm != rbac.PermRead {
+		t.Fatalf("/v1/my/deleted-rooms needs %s, want read", perm)
+	}
+	if rateLimited(http.MethodGet, p) {
+		t.Fatal("/v1/my/deleted-rooms is rate limited")
+	}
+}

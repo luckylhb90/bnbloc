@@ -184,6 +184,12 @@ type RoomStore interface {
 	// (globally unique), so a room-scoped request can resolve its tenant without
 	// already knowing it. false when the room is absent/deleted.
 	RoomTenant(ctx context.Context, roomID string) (string, bool, error)
+	// DeletedRooms returns the ids among roomIDs whose room was deleted (its
+	// soft-delete marker set), in any tenant: positive evidence of a
+	// deletion, never the absence of a room (an unknown or live id is not
+	// returned). A member's bridge removes a deleted room's agent
+	// workspaces on it (docs/bugs/2026-10-22-deleted-room-workspaces-never-removed.md).
+	DeletedRooms(ctx context.Context, roomIDs []string) ([]string, error)
 	// CreateRoomWithOwnerAndChannel atomically creates a room, its owner
 	// membership, and the room's default channel in a single transaction
 	// (design lock: a room always exists with exactly one default channel). If
@@ -450,6 +456,19 @@ func (s *MemoryRoom) RoomTenant(_ context.Context, roomID string) (string, bool,
 		return "", false, nil
 	}
 	return s.rooms[key].TenantID, true, nil
+}
+
+// DeletedRooms returns the soft-deleted rooms among roomIDs, in any tenant.
+func (s *MemoryRoom) DeletedRooms(_ context.Context, roomIDs []string) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []string
+	for _, id := range roomIDs {
+		if key, ok := s.roomKeyLocked(id); ok && s.deleted[key] && !slices.Contains(out, id) {
+			out = append(out, id)
+		}
+	}
+	return out, nil
 }
 
 // GetRoom returns a room or ErrRoomNotFound. Soft-deleted rooms are not found.

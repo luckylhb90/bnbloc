@@ -113,6 +113,10 @@ type agentWorkspaces struct {
 	// places are where each seat's channel last ran (driveKey.place), kept
 	// so a move says so even across the bridge restart that brings it.
 	places map[sessionKey]string
+	// gone marks the rooms the gateway reported deleted, and when first
+	// (Unix ms): their workspaces are purged once the mark is old enough and
+	// the room is still reported deleted (room_cleanup.go).
+	gone map[string]int64
 }
 
 // workspaceRecord is one binding as persisted. Fence is the sandbox fence
@@ -144,6 +148,13 @@ type workspacesDoc struct {
 	Workspaces []workspaceRecord `json:"workspaces"`
 	Sessions   []sessionRecord   `json:"sessions,omitempty"`
 	Places     []placeRecord     `json:"places,omitempty"`
+	Gone       []goneRecord      `json:"gone,omitempty"`
+}
+
+// goneRecord is a room reported deleted, and when first (Unix ms).
+type goneRecord struct {
+	Room string `json:"room"`
+	AtMs int64  `json:"atMs"`
 }
 
 // placeRecord is where a seat's channel last ran, as persisted (the slot's
@@ -163,7 +174,7 @@ type placeRecord struct {
 // reset: the agents then start in new workspaces, and the old ones stay on
 // their cores.
 func newAgentWorkspaces(dir string) *agentWorkspaces {
-	w := &agentWorkspaces{m: map[driveKey]agentWorkspace{}, sessions: map[sessionKey]sessionRecord{}, places: map[sessionKey]string{}}
+	w := &agentWorkspaces{m: map[driveKey]agentWorkspace{}, sessions: map[sessionKey]sessionRecord{}, places: map[sessionKey]string{}, gone: map[string]int64{}}
 	if dir == "" {
 		return w
 	}
@@ -199,6 +210,11 @@ func newAgentWorkspaces(dir string) *agentWorkspaces {
 			continue
 		}
 		w.sessions[r.key()] = r
+	}
+	for _, r := range doc.Gone {
+		if r.Room != "" && r.AtMs > 0 {
+			w.gone[r.Room] = r.AtMs
+		}
 	}
 	for _, r := range doc.Places {
 		if r.Place != "" {
@@ -266,33 +282,93 @@ func (w *agentWorkspaces) unbind(k driveKey, id string) {
 	}
 }
 
-// forgetRoom drops the bindings of a room that is gone and returns its
-// workspaces (slot → workspace id).
-func (w *agentWorkspaces) forgetRoom(room string) map[driveKey]string {
+// rooms are the rooms with a bound workspace.
+func (w *agentWorkspaces) rooms() []string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	changed := false
-	gone := map[driveKey]string{}
+	var out []string
+	for k := range w.m {
+		if !slices.Contains(out, k.room) {
+			out = append(out, k.room)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// slots are room's bound workspaces (slot → workspace id).
+func (w *agentWorkspaces) slots(room string) map[driveKey]string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	out := map[driveKey]string{}
 	for k, ws := range w.m {
 		if k.room == room {
-			gone[k] = ws.id
-			delete(w.m, k)
-			changed = true
+			out[k] = ws.id
 		}
 	}
-	if w.dropSessionsLocked(func(sk sessionKey, _ sessionRecord) bool { return sk.room == room }) {
-		changed = true
+	return out
+}
+
+// markGone records that room was reported deleted at atMs, unless it was
+// already (the first report counts) or holds no workspace. It reports the
+// mark's time (0: none).
+func (w *agentWorkspaces) markGone(room string, atMs int64) int64 {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if at, ok := w.gone[room]; ok {
+		return at
 	}
-	for sk := range w.places {
-		if sk.room == room {
-			delete(w.places, sk)
-			changed = true
+	for k := range w.m {
+		if k.room == room {
+			w.gone[room] = atMs
+			w.saveLocked()
+			return atMs
 		}
 	}
-	if changed {
+	return 0
+}
+
+// goneAt is when room was first reported deleted (0: not marked).
+func (w *agentWorkspaces) goneAt(room string) int64 {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.gone[room]
+}
+
+// clearGone drops room's mark (it is not reported deleted any more).
+func (w *agentWorkspaces) clearGone(room string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if _, ok := w.gone[room]; ok {
+		delete(w.gone, room)
 		w.saveLocked()
 	}
-	return gone
+}
+
+// purged forgets slot k of a deleted room once its workspace id is
+// removed; with the room's last slot go its mark, sessions and places.
+func (w *agentWorkspaces) purged(k driveKey, id string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if ws, ok := w.m[k]; ok && ws.id == id {
+		delete(w.m, k)
+	}
+	w.dropSessionsLocked(func(sk sessionKey, _ sessionRecord) bool { return sk.driveKey == k })
+	left := false
+	for other := range w.m {
+		if other.room == k.room {
+			left = true
+		}
+	}
+	if !left {
+		delete(w.gone, k.room)
+		for sk := range w.places {
+			if sk.room == k.room {
+				delete(w.places, sk)
+			}
+		}
+	}
+	w.saveLocked()
 }
 
 // session is channel session sk's persisted binding (false = none).
@@ -427,6 +503,10 @@ func (w *agentWorkspaces) saveLocked() {
 		doc.Sessions = append(doc.Sessions, r)
 	}
 	sort.Slice(doc.Sessions, func(i, j int) bool { return sessionRecordLess(doc.Sessions[i], doc.Sessions[j]) })
+	for room, at := range w.gone {
+		doc.Gone = append(doc.Gone, goneRecord{Room: room, AtMs: at})
+	}
+	sort.Slice(doc.Gone, func(i, j int) bool { return doc.Gone[i].Room < doc.Gone[j].Room })
 	for sk, place := range w.places {
 		doc.Places = append(doc.Places, placeRecord{Room: sk.room, Channel: sk.channel, Core: sk.core, Provider: sk.provider, SeatOwner: sk.owner, Requester: sk.requester, Place: place})
 	}

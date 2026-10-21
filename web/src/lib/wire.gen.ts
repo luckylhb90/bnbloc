@@ -5152,6 +5152,13 @@ export interface UnreadReply {
   channels: Record<string, ChannelUnread[]>;
 }
 
+// DeletedRooms is GET /v1/my/deleted-rooms?ids= (at most 100): the asked-for
+// rooms that were deleted. A live, unknown or never-created id is absent:
+// only a deletion is evidence (docs/bugs/2026-10-22-deleted-room-workspaces-never-removed.md).
+export interface DeletedRooms {
+  deleted: string[];
+}
+
 // ---- wire/schedules.go ----
 
 // MaxChatTextBytes is the product cap on one chat message's text. realtime

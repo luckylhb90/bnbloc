@@ -119,3 +119,10 @@ type UnreadReply struct {
 	Unread   map[string]int             `json:"unread"`
 	Channels map[string][]ChannelUnread `json:"channels"`
 }
+
+// DeletedRooms is GET /v1/my/deleted-rooms?ids= (at most 100): the asked-for
+// rooms that were deleted. A live, unknown or never-created id is absent:
+// only a deletion is evidence (docs/bugs/2026-10-22-deleted-room-workspaces-never-removed.md).
+type DeletedRooms struct {
+	Deleted []string `json:"deleted"`
+}

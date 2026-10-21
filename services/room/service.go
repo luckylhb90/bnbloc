@@ -7,8 +7,10 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"math"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -199,6 +201,7 @@ func (s *Service) Handler() http.Handler {
 	s.registerAppDataRoutes(mux)
 	s.registerRoomGroupRoutes(mux)
 	mux.HandleFunc("GET /v1/my/apps", s.handleMyApps)
+	mux.HandleFunc("GET /v1/my/deleted-rooms", s.handleDeletedRooms)
 	return svcauth.EnsureTenant(mux)
 }
 
@@ -521,6 +524,44 @@ func (s *Service) handleRoomTenant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]string{"tenantId": tid})
+}
+
+// maxDeletedRoomsQuery bounds one deleted-rooms question (the bridge asks
+// in pages of this size).
+const maxDeletedRoomsQuery = 100
+
+// handleDeletedRooms answers GET /v1/my/deleted-rooms?ids=a,b: which of
+// these rooms were deleted (wire.DeletedRooms). A member's bridge asks about
+// the rooms it keeps agent workspaces for and no longer sees, and removes a
+// deleted room's workspaces only on this answer
+// (docs/bugs/2026-10-22-deleted-room-workspaces-never-removed.md). It says
+// nothing about a live or unknown id, so it tells no one more than creating
+// a room with that id would (ids are global and never reused).
+func (s *Service) handleDeletedRooms(w http.ResponseWriter, r *http.Request) {
+	if caller(r) == "" {
+		httpx.Error(w, "missing caller", http.StatusUnauthorized)
+		return
+	}
+	var ids []string
+	for _, id := range strings.Split(r.URL.Query().Get("ids"), ",") {
+		if id = strings.TrimSpace(id); id != "" && !slices.Contains(ids, id) {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) > maxDeletedRoomsQuery {
+		httpx.Error(w, fmt.Sprintf("at most %d ids", maxDeletedRoomsQuery), http.StatusBadRequest)
+		return
+	}
+	deleted, err := s.Store.DeletedRooms(r.Context(), ids)
+	if err != nil {
+		obs.ServerError(w, "deleted rooms failed", err)
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if deleted == nil {
+		deleted = []string{}
+	}
+	httpx.WriteJSON(w, http.StatusOK, wire.DeletedRooms{Deleted: deleted})
 }
 
 // handleUserRooms returns the room ids a user is a member of. The gateway calls

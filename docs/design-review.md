@@ -159,7 +159,10 @@ types; two components each deciding how long a turn may run.
 ### 8. Defaults, unknowns and silent fallbacks
 
 - What happens when a value is missing, empty, unknown, or still loading?
-  Is "not loaded yet" treated as "does not exist"?
+  Is "not loaded yet" treated as "does not exist"? Is "not visible to me"
+  (a 403, a 404, missing from a list) treated as "deleted"? Anything that
+  destroys data acts on positive evidence of the deletion, never on an
+  absence.
 - Does an automatic correction get saved over what the user chose?
 - When the system falls back (default model, default setting, degraded
   mode), does the user know?

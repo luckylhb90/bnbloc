@@ -1189,6 +1189,17 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `places`), and a turn somewhere else posts one notice naming both places
   (`noticeMoved`): what the agent installed, signed in to or wrote there is
   not here.
+- **A deleted room's workspaces go on positive evidence only, a day later**
+  (`services/bridge/room_cleanup.go`). A 403, a 404 or a room missing from
+  the listing is an absence and deletes nothing: the owner's room-scoped
+  token answers 403 for a deleted room and a live one alike, and the room
+  detail is tenant-scoped. The evidence is the room service's deletion
+  marker (`GET /v1/my/deleted-rooms`, `RoomStore.DeletedRooms`) or the
+  stream's `room_deleted`; it marks the room in `workspaces.json`, and the
+  sweep (at start, then every 10 minutes) purges a mark at least
+  `roomPurgeAfter` old whose room is still reported deleted: the core's
+  workspace, the space with its home, the workdir. Bindings stay until
+  then, so a misread room resumes its workspace.
 - **Guest commands write the shared workdir past the host deny-write; the
   turn fence covers it** (`services/bridge/sandbox_fence.go`). After every
   sandboxed turn the bridge deletes the space without purge (its processes

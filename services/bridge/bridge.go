@@ -237,7 +237,9 @@ type Bridge struct {
 	// lost access) and when: reconcile does not re-subscribe them while they
 	// are in cooldown, so a room that discovery still lists (or a static
 	// BNBLOC_BRIDGE_ROOMS entry) is not re-requested in a loop.
-	gone     map[string]time.Time
+	gone map[string]time.Time
+	// sweep paces the cleanup of deleted rooms' workspaces (room_cleanup.go).
+	sweep    roomSweep
 	claimSem chan struct{} // bounds concurrent claim goroutines
 	started  int64
 	// rosterMu guards lastRoster (the last ?agents= advertised) and targetCache.
@@ -846,6 +848,9 @@ func (b *Bridge) reconcile(ctx context.Context) {
 	for _, room := range rooms {
 		want[room] = struct{}{}
 	}
+	// Workspaces of rooms the owner no longer sees: removed only on the
+	// gateway's word that they were deleted (room_cleanup.go).
+	b.sweepGoneRooms(ctx, want)
 	// A gone room leaves the cooldown when its time is up or when it is no
 	// longer listed (so the set never outgrows the watched rooms).
 	now := time.Now()
@@ -1038,8 +1043,12 @@ func (b *Bridge) isGone(room string) bool {
 }
 
 // dropGoneRoom stops watching a room the gateway reports gone: its stream and
-// sync are cancelled, its per-room state forgotten, and it enters the gone
-// cooldown so reconcile does not immediately re-subscribe it.
+// sync are cancelled, its sessions forgotten, and it enters the gone
+// cooldown so reconcile does not immediately re-subscribe it. Its agents'
+// workspaces stay bound: a 403 or 404 is the absence of a room, never
+// evidence it was deleted (a room-scoped token answers 403 for a deleted
+// room and a live one alike). Only the cleanup sweep removes them, on the
+// gateway's word that the room was deleted (room_cleanup.go).
 func (b *Bridge) dropGoneRoom(room string, err error) {
 	b.mu.Lock()
 	if cancel, ok := b.rooms[room]; ok {
@@ -1051,9 +1060,6 @@ func (b *Bridge) dropGoneRoom(room string, err error) {
 		delete(b.syncs, room)
 	}
 	b.forgetRoom(room)
-	// The room is gone (deleted, or the owner is no longer a member): so
-	// are its agents' workspace bindings.
-	workspaces := b.workspaces.forgetRoom(room)
 	if b.gone == nil {
 		b.gone = map[string]time.Time{}
 	}
@@ -1061,33 +1067,6 @@ func (b *Bridge) dropGoneRoom(room string, err error) {
 	b.mu.Unlock()
 	slog.Warn("bnbloc bridge dropped a room the gateway reports gone",
 		"event", "bnbloc.bridge.room_gone", "room", room, "error", err)
-	// A deleted room's workspaces go with it, its records in .room/ among
-	// them (docs/prd/2026-10-14-multi-member-rooms.md rule 2); a lost
-	// membership (403) keeps them, in case it was a misreport.
-	var ge *gatewayError
-	if errors.As(err, &ge) && ge.Status == http.StatusNotFound && len(workspaces) > 0 {
-		go b.deleteRoomWorkspaces(workspaces)
-	}
-}
-
-// deleteRoomWorkspaces removes a deleted room's workspaces, best-effort
-// (deleteWorkspace).
-func (b *Bridge) deleteRoomWorkspaces(workspaces map[driveKey]string) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-	for k, id := range workspaces {
-		if entry, ok := b.coreEntry(k.core); ok {
-			b.deleteWorkspace(ctx, entry, id)
-		}
-		if k.sandboxed {
-			// The workdir is the bridge's own (a core without deleteWorkspace
-			// would otherwise leave it, records included).
-			if err := b.sandbox.removeRoomWorkspace(ctx, k); err != nil {
-				slog.Warn("bnbloc bridge could not remove a deleted room's sandbox workspace",
-					"event", "bnbloc.bridge.room_workspace_remove_failed", "room", k.room, "core", k.core, "error", err)
-			}
-		}
-	}
 }
 
 // discoverRooms lists the owner's rooms from the gateway, with the subset the
@@ -1291,6 +1270,12 @@ func (b *Bridge) streamRoom(ctx context.Context, room string) {
 		if ctx.Err() != nil {
 			return
 		}
+		if errors.Is(err, errRoomDeleted) {
+			// The room said it was deleted: evidence for the cleanup sweep.
+			b.workspaces.markGone(room, b.clock().UnixMilli())
+			b.dropGoneRoom(room, err)
+			return
+		}
 		if roomGone(err) {
 			// Deleted, or the owner lost access: retrying cannot succeed.
 			b.dropGoneRoom(room, err)
@@ -1362,6 +1347,8 @@ func (b *Bridge) consumeRoom(ctx context.Context, room string) error {
 			return err
 		}
 		switch ev.Name {
+		case wire.EventRoomDeleted:
+			return errRoomDeleted
 		case wire.EventAgentJobUpdated:
 			b.handleJobUpdate(string(ev.Data))
 		case wire.EventArtifactState:

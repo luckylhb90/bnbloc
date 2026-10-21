@@ -155,6 +155,33 @@ func (s *MySQLRoom) RoomTenant(ctx context.Context, roomID string) (string, bool
 	return tid, true, nil
 }
 
+// DeletedRooms returns the soft-deleted rooms among roomIDs, in any tenant
+// (cross-tenant: room ids are global; the deletion marker is the evidence).
+func (s *MySQLRoom) DeletedRooms(ctx context.Context, roomIDs []string) ([]string, error) {
+	if len(roomIDs) == 0 {
+		return nil, nil
+	}
+	args := make([]any, len(roomIDs))
+	for i, id := range roomIDs {
+		args[i] = id
+	}
+	rows, err := s.DB.QueryContext(ctx,
+		`SELECT room_id FROM rooms WHERE room_id IN (?`+strings.Repeat(",?", len(roomIDs)-1)+`) AND deleted_at_ms IS NOT NULL`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 // GetRoom returns a room scoped to the caller's tenant, or ErrRoomNotFound.
 // Room ids are globally unique (the primary key), but a room is only read in
 // its own tenant: a caller reaching a room outside their session tenant

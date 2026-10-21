@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"slices"
 	"strconv"
@@ -111,6 +112,18 @@ func TestContractRoomStoreCreateGetUpdate(t *testing.T) {
 		}
 		if err := s.CreateRoom(ctx, Room{RoomID: gone, Name: "again"}); !errors.Is(err, ErrRoomExists) {
 			t.Fatalf("re-create of a deleted id = %v", err)
+		}
+
+		// DeletedRooms answers on the deletion marker, in any tenant (from
+		// another tenant's context too); a live or unknown id is absent.
+		for _, c := range []context.Context{ctx, octx} {
+			got, err := s.DeletedRooms(c, []string{id, gone, uniq("nope-"), gone})
+			if err != nil || len(got) != 1 || got[0] != gone {
+				t.Fatalf("DeletedRooms = %v %v, want only %s", got, err, gone)
+			}
+		}
+		if got, err := s.DeletedRooms(ctx, nil); err != nil || len(got) != 0 {
+			t.Fatalf("DeletedRooms(nil) = %v %v", got, err)
 		}
 	})
 }
