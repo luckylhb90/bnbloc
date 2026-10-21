@@ -23,6 +23,8 @@ import { useRoomChannels } from "@/views/room/useRoomChannels";
 import { MyMessagesNav } from "@/views/room/RoomNav";
 import { RoomHeader, RoomSearchBar } from "@/views/room/RoomHeader";
 import { MessageFeed } from "@/views/room/MessageFeed";
+import { FeedLayoutSwitch } from "@/views/room/FeedLayoutSwitch";
+import { useFeedLayout } from "@/views/room/useFeedLayout";
 import { RoomComposer } from "@/views/room/RoomComposer";
 import { PeopleChatDock, PeopleChatPanel } from "@/views/room/PeopleChatPanel";
 import { usePeopleChat } from "@/views/room/usePeopleChat";
@@ -176,7 +178,9 @@ export function RoomView({
     onStaleChannel,
   });
   const { feed, setFeed } = conversation;
-  useLayoutEffect(scroller.settle, [feed, scroller.settle]);
+  // By time or By request: the member's choice, on every device.
+  const feedLayout = useFeedLayout();
+  useLayoutEffect(scroller.settle, [feed, feedLayout.layout, scroller.settle]);
   // What the room tools save for the member is announced as it lands
   // (content_saved).
   useWorkshopSaves(roomId, subject);
@@ -589,6 +593,7 @@ export function RoomView({
         ) : (
           <div data-room-chat-column className="@container relative flex min-w-0 flex-1 basis-0 flex-col">
             {team.strip}
+            {feed.length > 0 && <FeedLayoutSwitch layout={feedLayout.layout} onChange={feedLayout.setLayout} />}
             <div
               ref={scroller.scrollRef}
               data-tour="feed"
@@ -627,6 +632,7 @@ export function RoomView({
                   onOpenArtifactInFiles={openArtifactInFiles}
                   onViewAllDeliverables={viewAllDeliverables}
                   agentReady={roomAgents.some((a) => !a.platform) || data.platform.choices.some((c) => c.inRoom && c.online)}
+                  layout={feedLayout.layout}
                 />
                 </DeadEndProvider>
                 </JobLiveProvider>

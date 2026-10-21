@@ -307,7 +307,11 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
 - **A job's notice is shown with its request** (`payload.sourceSeq`): the
   feed (`layoutTurns`) moves a notice that landed after later messages back
   to the end of its request's turn and names the request, so a late failure
-  never reads as news about the newest request.
+  never reads as news about the newest request. The feed's two layouts (By
+  time, `layoutTurns`; By request, `layoutRequests`: a block per request
+  with its steps folded and its answer at the foot) and the unread divider
+  are all `feedTurns.ts`; the member's choice is `GET/PUT
+  /v1/my/preferences` (`user_profiles.feed_layout`, `useFeedLayout`).
 - **The people chat is invisible to agents, enforced server-side.** A room's
   people chat is a channel with `kind='people'` (one per room, lazily created
   by `POST /v1/rooms/{id}/people-chat`; `GET` reads it without creating it).

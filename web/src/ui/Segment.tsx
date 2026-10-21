@@ -6,25 +6,34 @@ export interface SegmentOption<T extends string> {
   hint?: string;
 }
 
+// Segment is a row of exclusive choices. size "sm" is the compact form for
+// a toolbar (a feed's header).
 export function Segment<T extends string>({
   options,
   value,
   onChange,
   className,
+  size = "md",
+  ariaLabel,
 }: {
   options: readonly SegmentOption<T>[];
   value: T;
   onChange: (v: T) => void;
   className?: string;
+  size?: "md" | "sm";
+  ariaLabel?: string;
 }) {
+  const sm = size === "sm";
   return (
     <div
       className={cn(
-        "grid gap-1 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface-2)] p-1",
+        "grid rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface-2)]",
+        sm ? "gap-0.5 p-0.5" : "gap-1 p-1",
         className,
       )}
       style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0,1fr))` }}
       role="tablist"
+      aria-label={ariaLabel}
     >
       {options.map((o) => {
         const active = o.value === value;
@@ -37,7 +46,8 @@ export function Segment<T extends string>({
             title={o.label}
             onClick={() => onChange(o.value)}
             className={cn(
-              "tactile min-w-0 truncate rounded-[calc(var(--radius)-0.25rem)] px-2 py-2 text-sm text-center sm:px-3",
+              "tactile min-w-0 truncate rounded-[calc(var(--radius)-0.25rem)] text-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60",
+              sm ? "px-2 py-0.5 text-xs" : "px-2 py-2 text-sm sm:px-3",
               active
                 ? "bg-[var(--color-elevated)] text-[var(--color-fg)] shadow-[var(--shadow-pop)]"
                 : "text-[var(--color-fg-muted)] hover:text-[var(--color-fg)]",

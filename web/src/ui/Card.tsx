@@ -50,13 +50,14 @@ export function Skeleton({ className }: { className?: string }) {
   return <div className={cn("skeleton rounded-[var(--radius)]", className)} />;
 }
 
-export function Dot({ tone = "accent" }: { tone?: "accent" | "muted" | "danger" }) {
+// Dot is a status light: it pulses (something is live) unless still.
+export function Dot({ tone = "accent", still = false }: { tone?: "accent" | "muted" | "danger"; still?: boolean }) {
   const c = {
     accent: "bg-[var(--color-accent)]",
     muted: "bg-[var(--color-fg-subtle)]",
     danger: "bg-[var(--color-danger)]",
   }[tone];
-  return <span className={cn("inline-block size-2 rounded-full pulse-dot", c)} />;
+  return <span className={cn("inline-block size-2 shrink-0 rounded-full", !still && "pulse-dot", c)} />;
 }
 
 // EmptyCard is a dashed placeholder card: a title and a hint.

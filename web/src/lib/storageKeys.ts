@@ -30,6 +30,9 @@ export const StorageKey = {
   sidebarCollapsed: "bnbloc.sidebarCollapsed",
   peopleChatWidth: "bnbloc.peopleChatWidth",
   deliverablesLayout: "bnbloc.deliverables.layout",
+  // The request blocks a member opened in a room's feed, per member and
+  // room (sessionStorage, views/room/FeedRequestBlock.tsx).
+  feedOpenBlocks: "bnbloc.feedOpenBlocks",
   // Per-member and per-room state.
   welcomeDismissed: "bnbloc.welcomeDismissed",
   desktopHintDismissed: "bnbloc.desktopHint.dismissed",

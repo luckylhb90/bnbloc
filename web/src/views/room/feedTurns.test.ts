@@ -70,9 +70,14 @@ reloaded = mergeHistory(reloaded, items(events.slice(6), false));
 reloaded = mergeHistory(reloaded, items(events.slice(0, 6), false));
 
 // The layout in sequence terms: rows by seq, blocks as [anchorSeq, [[seq, level]...]].
+// (By time has no request blocks; feedRequests.test.ts covers By request.)
 function shape(feed: readonly FeedItem[], entries: readonly FeedEntry[]): unknown[] {
   const s = (i: number) => feed[i].seq ?? 0;
-  return entries.map((e) => (e.kind === "row" ? s(e.index) : [s(e.block.anchor), e.block.rows.map((r) => [s(r.index), r.level])]));
+  return entries.map((e) => {
+    if (e.kind === "row") return s(e.index);
+    if (e.kind === "request") throw new Error("by time has no request blocks");
+    return [s(e.block.anchor), e.block.rows.map((r) => [s(r.index), r.level])];
+  });
 }
 
 const want = [
@@ -204,12 +209,12 @@ if (block?.kind === "block") {
   const unread = [...liveQa, ...items([chat(14, "are you online?")], true)];
   const unreadEntries = layoutTurns(unread);
   const seqOf = (i: number) => unread[i].seq ?? 0;
-  eq(unread[unreadDividerAt(unreadEntries, seqOf, 13)]?.seq, 14, "the divider is above #14, not the late notice");
-  eq(unread[unreadDividerAt(unreadEntries, seqOf, 10)]?.seq, 10, "an earlier baseline");
-  eq(unreadDividerAt(unreadEntries, seqOf, 15), -1, "nothing unread");
-  eq(unreadDividerAt(unreadEntries, seqOf, null), -1, "no baseline");
+  eq(unread[unreadDividerAt(renderOrder(unreadEntries), seqOf, 13)]?.seq, 14, "the divider is above #14, not the late notice");
+  eq(unread[unreadDividerAt(renderOrder(unreadEntries), seqOf, 10)]?.seq, 10, "an earlier baseline");
+  eq(unreadDividerAt(renderOrder(unreadEntries), seqOf, 15), -1, "nothing unread");
+  eq(unreadDividerAt(renderOrder(unreadEntries), seqOf, null), -1, "no baseline");
   // Inside a block: the first unread row on screen.
-  eq(live[unreadDividerAt(layoutTurns(live), (i) => live[i].seq ?? 0, 13)]?.seq, 13, "a block's row");
+  eq(live[unreadDividerAt(renderOrder(layoutTurns(live)), (i) => live[i].seq ?? 0, 13)]?.seq, 13, "a block's row");
 
   eq(aboutRequest("hello, please read the attached file and tell me how many lines it has"), "About: hello, please read the attached file and tell me how many l…", "about: the request's first words");
   eq(aboutRequest("\n\nshort ask\nsecond line"), "About: short ask", "about: the first line");

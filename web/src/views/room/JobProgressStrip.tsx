@@ -24,6 +24,12 @@ import { JobLiveThumb, LiveWaitingNote } from "@/views/live/JobLiveView";
 const JobProgressContext = createContext<Readonly<Record<string, JobProgress>>>({});
 export const JobProgressProvider = JobProgressContext.Provider;
 
+// useJobProgress is one live job's progress (undefined when none is known).
+export function useJobProgress(jobId: string | undefined): JobProgress | undefined {
+  const progress = useContext(JobProgressContext);
+  return jobId ? progress[jobId] : undefined;
+}
+
 // A live job's live view (browser component PRD §2.8) reaches its row the
 // same way: the room's map by job id, how to open the large view, and, for
 // a view waiting for a person (§3.7), who is looking and how to let the
@@ -92,7 +98,7 @@ function StepLine({ step, current, lasted }: { step: JobStep; current?: boolean;
 // page is visible; it renders one line of fixed height for the current step
 // or note so the feed never jumps.
 export function JobProgressStrip({ job }: { job: AgentJob }) {
-  const progress = useContext(JobProgressContext)[job.jobId];
+  const progress = useJobProgress(job.jobId);
   const liveRoom = useContext(JobLiveContext);
   const live = liveRoom?.live[job.jobId];
   const [, setTick] = useState(0);

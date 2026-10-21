@@ -13,8 +13,23 @@ import { placeDeliverables } from "@/lib/deliverablePlacement";
 import { AgentWorking } from "@/views/room/AgentWorking";
 import { Message, sameSender } from "@/views/room/Message";
 import type { FeedItem } from "@/views/room/types";
-import { aboutRequest, blockProgress, blockTitle, layoutTurns, progressText, renderOrder, unreadDividerAt, type BlockProgress, type TurnBlock } from "@/views/room/feedTurns";
+import {
+  aboutRequest,
+  blockProgress,
+  blockTitle,
+  layoutRequests,
+  layoutTurns,
+  progressText,
+  renderOrder,
+  renderRuns,
+  unreadDividerAt,
+  type BlockProgress,
+  type RequestBlock,
+  type TurnBlock,
+} from "@/views/room/feedTurns";
+import { FeedRequestBlock, useOpenBlocks } from "@/views/room/FeedRequestBlock";
 import type { PlacedDeliverables } from "@/lib/deliverablePlacement";
+import { FeedLayoutRequest, FeedLayoutTime, type FeedLayout } from "@/lib/wire.gen";
 
 export function MessageFeed({
   loaded,
@@ -45,6 +60,7 @@ export function MessageFeed({
   people = false,
   onAskAgent,
   agentReady = false,
+  layout = FeedLayoutTime,
 }: {
   readonly loaded: boolean;
   readonly roomId: string;
@@ -82,6 +98,8 @@ export function MessageFeed({
   // empty state points at the composer and its example prompts instead of
   // agent setup.
   readonly agentReady?: boolean;
+  // How the member reads the feed (useFeedLayout): By time or By request.
+  readonly layout?: FeedLayout;
 }) {
   // A turn's cards sit under its last reply (their sourceSeq is the request).
   const deliverablesAfter = useMemo(
@@ -140,7 +158,7 @@ export function MessageFeed({
     );
   }
   return (
-    <div data-room-message-feed className={cn("flex flex-col gap-1.5", READING_MEASURE)}>
+    <div data-room-message-feed data-feed-layout={layout} className={cn("flex flex-col gap-1.5", READING_MEASURE)}>
       {hasMoreHistory && (
         <div className="mb-2 flex justify-center">
           <Button
@@ -174,6 +192,7 @@ export function MessageFeed({
           onViewAllDeliverables={onViewAllDeliverables}
           onAskAgent={onAskAgent}
           people={people}
+          layout={layout}
         />
       )}
       {[...working].map(([key, label]) => (
@@ -198,27 +217,40 @@ type RowActions = {
   readonly people: boolean;
 };
 
-// FeedRows renders the feed in turn order: each request, the delegated work
-// it started as one collapsible block (feedTurns.ts), then the rest; a late
-// notice sits back at its request's turn, naming it.
-function FeedRows({ feed, unreadFromSeq, deliverablesAfter, ...actions }: RowActions & { readonly feed: FeedItem[]; readonly unreadFromSeq: number | null }) {
-  const entries = useMemo(() => layoutTurns(feed), [feed]);
-  // The row rendered just before each row (blocks expanded): the unread
-  // divider and sender grouping follow what is on screen.
+// FeedRows renders the feed in the member's layout (feedTurns.ts). By time:
+// each request, the delegated work it started as one collapsible block,
+// then the rest; a late notice sits back at its request's turn, naming it.
+// By request: a block per request (FeedRequestBlock), the rows that answer
+// no request between them.
+function FeedRows({
+  feed,
+  unreadFromSeq,
+  deliverablesAfter,
+  layout,
+  ...actions
+}: RowActions & { readonly feed: FeedItem[]; readonly unreadFromSeq: number | null; readonly layout: FeedLayout }) {
+  const byRequest = layout === FeedLayoutRequest;
+  const entries = useMemo(() => (byRequest ? layoutRequests(feed) : layoutTurns(feed)), [feed, byRequest]);
+  // The row rendered just before each row in its run (blocks expanded):
+  // sender grouping follows what is on screen.
   const prevOf = useMemo(() => {
-    const order = renderOrder(entries);
     const out = new Map<number, number>();
-    order.forEach((index, k) => out.set(index, k > 0 ? order[k - 1] : -1));
+    for (const run of renderRuns(entries)) run.forEach((index, k) => out.set(index, k > 0 ? run[k - 1] : -1));
     return out;
   }, [entries]);
-  // The divider sits above the first message at or past the baseline, so a
-  // member landing in the channel sees where they stopped reading instead
-  // of guessing.
-  const dividerAt = useMemo(() => unreadDividerAt(entries, (i) => feed[i].seq ?? 0, unreadFromSeq), [entries, feed, unreadFromSeq]);
-  // A member's open/closed choice per block (keyed by its request); unset
-  // follows the block's state (open while its work runs).
+  // The divider sits above the first row of the unread run that ends what
+  // is on screen (a request's folded steps are not), so a member landing in
+  // the channel sees where they stopped reading instead of guessing.
+  const dividerAt = useMemo(
+    () => unreadDividerAt(renderOrder(entries, { steps: !byRequest }), (i) => feed[i].seq ?? 0, unreadFromSeq),
+    [entries, feed, unreadFromSeq, byRequest],
+  );
+  // A member's open/closed choice per delegated-work block (keyed by its
+  // request); unset follows the block's state (open while its work runs).
   const [toggled, setToggled] = useState<Record<number, boolean>>({});
-  const row = (i: number, about?: number) => {
+  // The request blocks the member opened (folded by default).
+  const openBlocks = useOpenBlocks(actions.roomId);
+  const row = (i: number, about?: number, bare = false) => {
     const m = feed[i];
     const seq = m.seq ?? 0;
     const p = prevOf.get(i) ?? -1;
@@ -231,45 +263,84 @@ function FeedRows({ feed, unreadFromSeq, deliverablesAfter, ...actions }: RowAct
         seq={seq}
         startsUnread={startsUnread}
         grouped={!!prev && !startsUnread && sameSender(prev, m)}
-        placed={deliverablesAfter.get(i) ?? []}
+        placed={bare ? [] : (deliverablesAfter.get(i) ?? [])}
         about={about === undefined ? undefined : aboutRequest(feed[about].text)}
+        bare={bare}
         {...actions}
+      />
+    );
+  };
+  const delegated = (block: TurnBlock, bare = false) => {
+    const anchor = feed[block.anchor];
+    const statusOf = (i: number) => {
+      const s = feed[i].seq;
+      return s != null ? actions.agentJobs[s]?.[0]?.status : undefined;
+    };
+    const progress = blockProgress(block, statusOf);
+    const open = toggled[block.anchor] ?? progress.active;
+    return (
+      <DelegatedWork
+        key={`block-${anchor.id}`}
+        block={block}
+        progress={progress}
+        open={open}
+        inset={!bare}
+        onToggle={() => setToggled((cur) => ({ ...cur, [block.anchor]: !open }))}
+      >
+        {block.rows.map((r) => (
+          <div key={feed[r.index].id} style={r.level > 0 ? { marginLeft: `${Math.min(r.level, 3) * 1.25}rem` } : undefined}>
+            {row(r.index, undefined, bare)}
+          </div>
+        ))}
+      </DelegatedWork>
+    );
+  };
+  const request = (r: RequestBlock) => {
+    const ask = feed[r.anchor];
+    const seq = ask.seq;
+    const jobs = typeof seq === "number" ? actions.agentJobs[seq] || [] : [];
+    // Every card of the turn sits at the block's foot.
+    const placed = [r.anchor, ...r.stepRows, ...r.foot].flatMap((i) => deliverablesAfter.get(i) ?? []);
+    return (
+      <FeedRequestBlock
+        key={`request-${ask.id}`}
+        request={r}
+        feed={feed}
+        jobs={jobs}
+        open={openBlocks.isOpen(seq)}
+        onToggle={() => openBlocks.toggle(seq)}
+        onCancelJob={actions.onCancelJob}
+        queueAhead={actions.queueAhead}
+        renderRow={(i) => row(i, undefined, true)}
+        renderStep={(st) => (st.kind === "row" ? row(st.index, undefined, true) : delegated(st.block, true))}
+        foot={
+          <>
+            <WaitingLive jobs={jobs} />
+            {placed.map((d) => (
+              <MessageDeliverables
+                key={d.seq}
+                roomId={actions.roomId}
+                seq={d.seq}
+                artifactIds={d.artifactIds}
+                onOpen={actions.onOpenArtifactInFiles}
+                onViewAll={actions.onViewAllDeliverables ?? (() => {})}
+              />
+            ))}
+          </>
+        }
       />
     );
   };
   return (
     <>
-      {entries.map((e) => {
-        if (e.kind === "row") return row(e.index, e.about);
-        const anchor = feed[e.block.anchor];
-        const statusOf = (i: number) => {
-          const s = feed[i].seq;
-          return s != null ? actions.agentJobs[s]?.[0]?.status : undefined;
-        };
-        const progress = blockProgress(e.block, statusOf);
-        const open = toggled[e.block.anchor] ?? progress.active;
-        return (
-          <DelegatedWork
-            key={`block-${anchor.id}`}
-            block={e.block}
-            progress={progress}
-            open={open}
-            onToggle={() => setToggled((cur) => ({ ...cur, [e.block.anchor]: !open }))}
-          >
-            {e.block.rows.map((r) => (
-              <div key={feed[r.index].id} style={r.level > 0 ? { marginLeft: `${Math.min(r.level, 3) * 1.25}rem` } : undefined}>
-                {row(r.index)}
-              </div>
-            ))}
-          </DelegatedWork>
-        );
-      })}
+      {entries.map((e) => (e.kind === "row" ? row(e.index, e.about) : e.kind === "block" ? delegated(e.block) : request(e.request)))}
     </>
   );
 }
 
 // FeedRow is one message with its job status line and the deliverable cards
-// placed after it.
+// placed after it; a bare row (inside a request block, which draws those
+// itself) is the message alone.
 function FeedRow({
   item: m,
   seq,
@@ -277,6 +348,7 @@ function FeedRow({
   grouped,
   placed,
   about,
+  bare,
   roomId,
   agentJobs,
   onRetry,
@@ -296,6 +368,7 @@ function FeedRow({
   readonly placed: readonly PlacedDeliverables[];
   // A late notice's line naming the request it is about.
   readonly about?: string;
+  readonly bare: boolean;
 }) {
   return (
     <div data-seq={seq || undefined}>
@@ -319,14 +392,14 @@ function FeedRow({
         onAskAgent={onAskAgent}
         showPeopleOnly={!people}
       />
-      {typeof m.seq === "number" && (
+      {!bare && typeof m.seq === "number" && (
         <AgentJobStatus
           jobs={agentJobs[m.seq] || []}
           onCancel={onCancelJob}
           queueAhead={queueAhead}
         />
       )}
-      {typeof m.seq === "number" && <WaitingLive jobs={agentJobs[m.seq] || []} />}
+      {!bare && typeof m.seq === "number" && <WaitingLive jobs={agentJobs[m.seq] || []} />}
       {placed.map((d) => (
         <MessageDeliverables
           key={d.seq}
@@ -348,19 +421,22 @@ function DelegatedWork({
   block,
   progress,
   open,
+  inset,
   onToggle,
   children,
 }: {
   readonly block: TurnBlock;
   readonly progress: BlockProgress;
   readonly open: boolean;
+  // Indented under its request (By time); flush inside a request's steps.
+  readonly inset: boolean;
   readonly onToggle: () => void;
   readonly children: ReactNode;
 }) {
   const team = block.roles.length > 0;
   const Icon = team ? UsersThreeIcon : TreeStructureIcon;
   return (
-    <div data-turn-block={team ? "team" : "delegated"} className="ml-10 my-1 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface)]">
+    <div data-turn-block={team ? "team" : "delegated"} className={cn("my-1 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface)]", inset && "ml-10")}>
       <button
         type="button"
         onClick={onToggle}

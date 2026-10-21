@@ -15,9 +15,13 @@ interface JumpHistory {
 }
 
 // flashMessage scrolls a feed row into view and outlines it briefly. The
-// outline never affects layout, so the feed does not shift.
+// outline never affects layout, so the feed does not shift. A row folded
+// in a request block's steps (By request) has no element: its block, which
+// lists the folded rows' sequences, is flashed instead.
 export function flashMessage(seq: number): boolean {
-  const el = document.querySelector<HTMLElement>(`[data-room-message-feed] [data-seq="${seq}"]`);
+  const el =
+    document.querySelector<HTMLElement>(`[data-room-message-feed] [data-seq="${seq}"]`) ??
+    document.querySelector<HTMLElement>(`[data-room-message-feed] [data-step-seqs~="${seq}"]`);
   if (!el) return false;
   el.scrollIntoView({ behavior: "auto", block: "center" });
   el.style.outline = "2px solid var(--color-accent)";
