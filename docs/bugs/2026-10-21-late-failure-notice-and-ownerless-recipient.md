@@ -65,6 +65,8 @@ naming #7), plus the on-time, unloaded, late-reply and delegated cases and
 the divider; `recipient.test.ts` (no subject, no own agent). Each fails with
 its fix reverted.
 
+Landed in 58d70552.
+
 ## Why it was not caught
 
 - Lens: Time and lifecycle (a result that lands minutes after its request
