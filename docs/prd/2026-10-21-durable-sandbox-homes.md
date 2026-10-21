@@ -3,7 +3,7 @@
 Status: slice 1 built and released (sandbox 0.1.5, optin): durable homes
 and per-user install places. The reference passes the full conformance
 suite with the new `durableHomes` step.
-Slice 2 (sign-ins) is designed here and not built. Owner: the Sandbox
+Slice 2 (sign-ins) was designed and then decided against (§2.2). Owner: the Sandbox
 Protocol (`sandbox/protocol`, `docs/architecture/sandbox-protocol.md`), the
 reference implementation (the sandbox component's own repository); slice 2
 also the sandbox's settings (`core/pkgmeta/sandbox_settings.go`), the
@@ -70,7 +70,30 @@ agent ever reading it.
   and ensure the same space. The file is there and the script runs by name.
   After a purge, the home is empty.
 
-### 2.2 Sign-ins the member gives their sandbox (slice 2, designed)
+### 2.2 Sign-ins the member gives their sandbox (slice 2, not built)
+
+**Decision 2026-10-22: not built.** Checked live in the guest image: the
+substitution itself works (curl and Node `fetch` reach an allowed host with
+the real value; an unlisted host is blocked; the runtime sets
+`NODE_EXTRA_CA_CERTS`). Against the tools it was for, it does not cover
+enough to be worth a platform feature:
+- a CLI that sends the token as-is in a header works (here one reading its
+  token from an environment variable needed no sign-in at all);
+- a CLI that checks the token's format locally rejects the placeholder (the
+  runtime can take a custom placeholder; the protocol does not offer it);
+- a CLI that exchanges the token for another one (in a request body) needs
+  body substitution, and the token it gets back is real and readable in
+  the sandbox;
+- encoded or signed credentials (Basic auth, so git over HTTPS; HMAC and
+  cloud request signing), tokens in HTTP/2 bodies and pinned certificates
+  are not substituted at all.
+Until a service issues short-lived, scoped tokens per task, a member's own
+credentials reach a sandboxed run through `forwardEnv` (readable by the
+agent, never through the room), or the agent runs on the host (mode
+`borrowed`). Revisit when a concrete tool that sends its token in a header
+is the blocker.
+
+The design, kept for that day:
 
 - A **sign-in** is a name, the hosts it is for, and a value, set by the
   member for their own sandboxed runs. It lives in their member store on
