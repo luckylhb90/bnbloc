@@ -699,6 +699,11 @@ the room.)
     (`jev_ultrafast/snapshot.js`, 107 lines).
   - Secret fields (§2.7) are kept as labels; file inputs become upload
     targets instead of being skipped.
+  - Controls a script made (0.7.4, 2026-10-21,
+    `docs/bugs/2026-10-21-browser-script-clickable-controls.md`): the
+    outermost element showing the pointer cursor, or with an `onclick`,
+    that has a name and neither sits in nor holds a listed control, is a
+    `button`; a label stands for its field only when the field is hidden.
 - **The step.** A port of `jev_ultrafast/model.py` `choose` and
   `agent.py` `command`:
   - one `/v1/systemone` request per step through the relay, with an

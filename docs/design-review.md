@@ -186,6 +186,9 @@ dropped without a word; an agent's decks under `out/` never published
   reports before guessing at causes.
 - Does a reader rely on an order (newest first, ascending) the source
   states, or one a comment remembers? Our own services count.
+- Does a reader of pages or files others make (a site, a document) work
+  on one built the common way for its kind (a component library's admin
+  page, an exported spreadsheet), not only on the reference's fixture?
 
 *Test:* a conformance check against the real component; a probe in a
 throwaway environment; read the spec of the version actually negotiated;
@@ -193,7 +196,8 @@ more rows than the reader keeps, so a wrong order or cut shows.
 *Seen:* a newer protocol version requiring fields we did not send (tools
 silently dropped); a CLI reporting errors as normal text; a gateway
 reporting zero token usage, so the client never compacted; an assist
-reading a history page as newest first, so it kept the oldest messages.
+reading a history page as newest first, so it kept the oldest messages;
+a browser snapshot that saw a framework's `li` menu items only as text.
 
 ### 10. Load on users and agents
 
