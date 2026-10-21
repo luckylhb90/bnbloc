@@ -55,6 +55,9 @@ type workspaceShared struct {
 	mu    sync.Mutex
 	room  roomlog.CtxState
 	fence string
+	// fenceEntries are the baseline's entries (nil for one restored from a
+	// restart): what a breach diffs against to name the changed paths.
+	fenceEntries []fenceEntry
 	// pass serializes the .room/ passes (drivePrompt).
 	pass sync.Mutex
 

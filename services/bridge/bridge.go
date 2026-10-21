@@ -224,6 +224,9 @@ type Bridge struct {
 	mu       sync.Mutex
 	rooms    map[string]context.CancelFunc // roomId -> stream canceller
 	sessions map[sessionKey]*roomSession   // channel session -> bound session
+	// fenceResets marks the slots whose sessions a sandboxed turn's fence
+	// dropped, so the next session says why it is new (under mu).
+	fenceResets map[driveKey]bool
 	// workspaces is each drive slot's workspace, which outlives its
 	// sessions (workspaces.go).
 	workspaces *agentWorkspaces
@@ -1566,10 +1569,15 @@ func (b *Bridge) runTurn(ctx context.Context, d *drive, key driveKey, opts corep
 		entry, _ := b.coreEntry(d.core)
 		rs.roomSession.startTurn(b.turnInfo(d, rs.roomSession))
 		prompt := b.drivePrompt(ctx, d, rs.workspaceID, rs.atts, &rs.roomSession.ctx, rs.roomSession.guidance, false)
-		// The fence baseline: the space has no process yet, so everything
-		// there is bnbloc's own, this turn's .room/ refresh included.
+		err := b.sendInput(ctx, entry, rs.workspaceID, rs.sessionID, prompt, opts)
+		// The fence baseline, once the core answered, as for a fresh
+		// session: everything there is bnbloc's own (this turn's .room/
+		// refresh) and the core's for this turn (it rewrites the
+		// instructions file another channel's session left there before it
+		// answers). Taken on a failed input too: the turn's end must not
+		// read this turn's .room/ refresh as a guest's write.
 		rs.roomSession.fenceBaseline()
-		if err := b.sendInput(ctx, entry, rs.workspaceID, rs.sessionID, prompt, opts); err != nil {
+		if err != nil {
 			return driveResult{workspaceID: rs.workspaceID, sessionID: rs.sessionID}, rs.roomSession, atStage(stageStart, err)
 		}
 	}
@@ -1728,18 +1736,25 @@ func (b *Bridge) ensureSession(ctx context.Context, d *drive, key driveKey, prom
 		// before a restart, when it still fits (session_restore.go).
 		existing = b.restoreSession(ctx, d, key, sk, b.sessionInfo(d, opts))
 	}
-	if existing != nil && !existing.fenceIntact() {
-		// The sandboxed workspace's protected paths changed since its last
-		// turn's fence (a quiesce that failed, a write from outside): no
-		// session of it is reused; the fresh session below starts from a
-		// reset tree.
-		slog.Warn("bnbloc bridge sandboxed session's protected paths changed; starting a new session",
-			"event", "bnbloc.bridge.sandbox_fence_breached", "room", room, "core", d.core, "provider", provider, "session", existing.sessionID)
-		b.mu.Lock()
-		b.unbindWorkspaceLocked(key)
-		b.mu.Unlock()
-		existing = nil
-		b.noticeNewSession(ctx, d, "its workspace's protected files changed")
+	if existing != nil {
+		if intact, changes := existing.fenceCheck(); !intact {
+			// The sandboxed workspace's protected paths changed since its
+			// last turn's fence (a quiesce that failed, a write from
+			// outside): no session of it is reused; the fresh session below
+			// starts from a reset tree.
+			slog.Warn("bnbloc bridge sandboxed session's protected paths changed; starting a new session",
+				"event", "bnbloc.bridge.sandbox_fence_breached", "room", room, "core", d.core, "provider", provider,
+				"session", existing.sessionID, "changes", strings.Join(changes, "; "))
+			b.mu.Lock()
+			b.unbindWorkspaceLocked(key)
+			b.mu.Unlock()
+			existing = nil
+			b.takeFenceReset(key)
+			b.noticeNewSession(ctx, d, "its workspace's protected files changed")
+		}
+	} else if b.takeFenceReset(key) {
+		// The last turn's fence dropped the session: never silently.
+		b.noticeNewSession(ctx, d, "its workspace's protected files changed during its last turn")
 	}
 	if existing != nil && b.channelReset(ctx, room, d.job.ChannelID, existing) {
 		// A message of the channel was deleted after the session started:

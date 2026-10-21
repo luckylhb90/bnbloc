@@ -45,15 +45,20 @@ import (
 //     bridge start, a failed quiesce) is quiesced before it is ensured; if
 //     that fails the drive fails, it never proceeds.
 //  2. Verify. The protected paths' fingerprint (protectedFingerprint) is the
-//     session's baseline, taken while every write there is bnbloc's own:
-//     right before a follow-up turn's input reaches the core (the space is
-//     quiesced and only re-ensured since), and right after a fresh
-//     session's create returns. After the quiesce at the end of a turn, and
-//     again before a session is reused, the fingerprint must match it.
+//     session's baseline, taken while every write there is bnbloc's own or
+//     the core's for the turn: right after the core answers the turn's
+//     start (a fresh session's create, a follow-up's input). A core writes
+//     a turn's workspace files before it answers and none during the turn
+//     (docs/architecture/core-providers.md); before that answer the space
+//     is quiesced and only re-ensured. After the quiesce at the end of a
+//     turn, and again before a session is reused, the fingerprint must
+//     match it.
 //  3. Restore. A mismatch means a guest process wrote what the host would
 //     read: the session binding is dropped and every protected path is
 //     removed (resetProtectedPaths), so the next turn starts a fresh
-//     session whose config bnbloc writes from scratch.
+//     session whose config bnbloc writes from scratch. It is never silent:
+//     the log names the changed paths (fenceChanges) and the next session's
+//     notice says why it is new.
 //
 // Why not mount those paths read-only in the guest instead: runtimes refuse
 // overlapping space mounts, and on a case-insensitive host file system a
@@ -63,7 +68,7 @@ import (
 // space deletion, and it judges paths by the case-folding policy the host
 // harnesses are exposed to.
 //
-// Residual: a fresh session's baseline is taken when its create returns, and
+// Residual: a turn's baseline is taken when the core answered its start, and
 // the harness it started could in principle run a guest command before that
 // (it needs a model round trip first). A harness that re-reads its config
 // in the middle of a turn sees a guest write of that same turn; the known
@@ -106,29 +111,34 @@ func walkProtected(workdir string, fn func(rel, path string, d fs.DirEntry) erro
 	})
 }
 
-// protectedFingerprint digests every protected entry of a workdir: its path
-// as it is spelled on disk, its kind and mode, a file's content and a
-// symlink's target. Two equal fingerprints mean nothing there changed.
-func protectedFingerprint(workdir string) (string, error) {
-	h := sha256.New()
-	entries, total := 0, int64(0)
+// fenceEntry is one protected entry of a workdir as the fingerprint digests
+// it: its path as spelled on disk, and its line (kind, mode, a file's
+// content digest or a symlink's target).
+type fenceEntry struct{ rel, line string }
+
+// protectedEntries lists every protected entry of a workdir, in lexical
+// order.
+func protectedEntries(workdir string) ([]fenceEntry, error) {
+	var out []fenceEntry
+	total := int64(0)
 	err := walkProtected(workdir, func(rel, path string, d fs.DirEntry) error {
-		if entries++; entries > maxFenceEntries {
+		if len(out) >= maxFenceEntries {
 			return errFenceTooLarge
 		}
 		info, err := d.Info()
 		if err != nil {
 			return err
 		}
+		var line string
 		switch mode := info.Mode(); {
 		case mode&fs.ModeSymlink != 0:
 			target, err := os.Readlink(path)
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(h, "L %q %q\n", rel, target)
+			line = fmt.Sprintf("L %q %q\n", rel, target)
 		case mode.IsDir():
-			fmt.Fprintf(h, "D %q %o\n", rel, mode.Perm())
+			line = fmt.Sprintf("D %q %o\n", rel, mode.Perm())
 		case mode.IsRegular():
 			if total += info.Size(); total > maxFenceBytes {
 				return errFenceTooLarge
@@ -137,16 +147,75 @@ func protectedFingerprint(workdir string) (string, error) {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(h, "F %q %o %s\n", rel, mode.Perm(), sum)
+			line = fmt.Sprintf("F %q %o %s\n", rel, mode.Perm(), sum)
 		default:
-			fmt.Fprintf(h, "O %q %s\n", rel, mode.Type())
+			line = fmt.Sprintf("O %q %s\n", rel, mode.Type())
 		}
+		out = append(out, fenceEntry{rel: rel, line: line})
 		return nil
 	})
 	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// fingerprintOf digests a workdir's protected entries. Two equal
+// fingerprints mean nothing there changed.
+func fingerprintOf(entries []fenceEntry) string {
+	h := sha256.New()
+	for _, e := range entries {
+		io.WriteString(h, e.line)
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// protectedFingerprint digests every protected entry of a workdir.
+func protectedFingerprint(workdir string) (string, error) {
+	entries, err := protectedEntries(workdir)
+	if err != nil {
 		return "", err
 	}
-	return hex.EncodeToString(h.Sum(nil)), nil
+	return fingerprintOf(entries), nil
+}
+
+// maxFenceChanges bounds the paths a breach names in the log.
+const maxFenceChanges = 8
+
+// fenceChanges names what differs between a baseline's entries and the
+// tree's now ("CLAUDE.md changed", ".claude/settings.json added"), at most
+// maxFenceChanges of them: a breach says which path broke it, so a write
+// that is bnbloc's or the core's own shows as what it is.
+func fenceChanges(before, after []fenceEntry) []string {
+	was := make(map[string]string, len(before))
+	for _, e := range before {
+		was[e.rel] = e.line
+	}
+	var out []string
+	add := func(s string) {
+		if len(out) < maxFenceChanges {
+			out = append(out, s)
+		}
+	}
+	for _, e := range after {
+		line, ok := was[e.rel]
+		switch {
+		case !ok:
+			add(e.rel + " added")
+		case line != e.line:
+			add(e.rel + " changed")
+		}
+		delete(was, e.rel)
+	}
+	gone := make([]string, 0, len(was))
+	for rel := range was {
+		gone = append(gone, rel)
+	}
+	sort.Strings(gone)
+	for _, rel := range gone {
+		add(rel + " removed")
+	}
+	return out
 }
 
 func fileSHA256(path string) (string, error) {
@@ -207,36 +276,54 @@ func protectedDenyWrite(workdir string) []string {
 }
 
 // fenceBaseline records a sandboxed session's protected-path fingerprint:
-// the state its next turns must find. An unreadable tree records no
+// the state its next turns must find. It is taken once the core
+// acknowledged the turn (a session's create, a follow-up's input), when
+// everything there is bnbloc's own and the core's for this turn: a core
+// writes a turn's workspace files before it answers
+// (docs/architecture/core-providers.md). An unreadable tree records no
 // baseline, so the turn's end resets it.
 func (rs *roomSession) fenceBaseline() {
 	if rs.workdir == "" {
 		return
 	}
-	sum, err := protectedFingerprint(rs.workdir)
+	entries, err := protectedEntries(rs.workdir)
+	sum := ""
 	if err != nil {
 		slog.Warn("bnbloc bridge sandbox fence baseline unreadable",
 			"event", "bnbloc.bridge.sandbox_fence_unreadable", "workdir", rs.workdir, "error", err)
-		sum = ""
+		entries = nil
+	} else {
+		sum = fingerprintOf(entries)
 	}
 	sh := rs.shared()
 	sh.mu.Lock()
-	sh.fence = sum
+	sh.fence, sh.fenceEntries = sum, entries
 	sh.mu.Unlock()
 }
 
-// fenceIntact reports whether a sandboxed session's protected paths are
-// still exactly its baseline (a host session always is).
-func (rs *roomSession) fenceIntact() bool {
+// fenceCheck reports whether a sandboxed session's protected paths are
+// still exactly its baseline (a host session always is) and, when not,
+// what changed (empty when the baseline was restored from a restart, which
+// keeps only its fingerprint).
+func (rs *roomSession) fenceCheck() (intact bool, changes []string) {
 	if rs.workdir == "" {
-		return true
+		return true, nil
 	}
 	sh := rs.shared()
 	sh.mu.Lock()
-	want := sh.fence
+	want, before := sh.fence, sh.fenceEntries
 	sh.mu.Unlock()
-	sum, err := protectedFingerprint(rs.workdir)
-	return err == nil && want != "" && sum == want
+	entries, err := protectedEntries(rs.workdir)
+	if err != nil {
+		return false, []string{err.Error()}
+	}
+	if want != "" && fingerprintOf(entries) == want {
+		return true, nil
+	}
+	if before != nil {
+		changes = fenceChanges(before, entries)
+	}
+	return false, changes
 }
 
 // endSandboxedTurn is the fence at the end of a sandboxed turn (whatever its
@@ -253,18 +340,37 @@ func (b *Bridge) endSandboxedTurn(ctx context.Context, key driveKey, sx corepkg.
 		slog.Warn("bnbloc bridge sandbox space not quiesced after a turn",
 			"event", "bnbloc.bridge.sandbox_quiesce_failed", "space", sx.Space, "error", err)
 	}
-	if rs == nil || rs.fenceIntact() {
+	if rs == nil {
+		return
+	}
+	intact, changes := rs.fenceCheck()
+	if intact {
 		return
 	}
 	slog.Warn("bnbloc bridge sandboxed turn changed protected workspace paths; resetting the session",
-		"event", "bnbloc.bridge.sandbox_fence_breached", "room", key.room, "core", key.core, "provider", key.provider, "workdir", sx.Workdir)
+		"event", "bnbloc.bridge.sandbox_fence_breached", "room", key.room, "core", key.core, "provider", key.provider,
+		"workdir", sx.Workdir, "changes", strings.Join(changes, "; "))
 	// Every channel session of the workspace was started on the tree the
-	// guest changed: none is reused.
+	// guest changed: none is reused. The next session says why it is new.
 	b.mu.Lock()
 	b.unbindWorkspaceLocked(key)
+	if b.fenceResets == nil {
+		b.fenceResets = map[driveKey]bool{}
+	}
+	b.fenceResets[key] = true
 	b.mu.Unlock()
 	resetProtectedPaths(sx.Workdir)
 	b.workspaces.roomFilesCleared(key)
+}
+
+// takeFenceReset reports (once) whether slot key's sessions were dropped by
+// a turn's fence since its last session started.
+func (b *Bridge) takeFenceReset(key driveKey) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	reset := b.fenceResets[key]
+	delete(b.fenceResets, key)
+	return reset
 }
 
 // quiesce stops every process of a space: deleting it without purge (the

@@ -433,6 +433,25 @@ type smokeWaiter struct {
 	events    <-chan smokeEvent
 	streamErr <-chan error
 	progress  int
+	// sessions are the agent sessions each agent ("owner/provider")
+	// answered from, in the order first seen (smokeScenarioTurn notes them).
+	sessions map[string][]string
+}
+
+// noteSession records that agent answered from session (once per session).
+func (w *smokeWaiter) noteSession(agent, session string) {
+	if session == "" {
+		return
+	}
+	for _, s := range w.sessions[agent] {
+		if s == session {
+			return
+		}
+	}
+	if w.sessions == nil {
+		w.sessions = map[string][]string{}
+	}
+	w.sessions[agent] = append(w.sessions[agent], session)
 }
 
 // wait returns the first event match accepts; match may also fail the wait.

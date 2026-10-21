@@ -439,6 +439,24 @@ Evidence: docs/bugs/2026-10-21-late-failure-notice-and-ownerless-recipient.md
 (design review lenses 2 and 6 now ask).
 Seen 1× (2026-10-21).
 
+### Make every self-healing path loud, and assert the property, not a proxy
+
+The sandbox turn fence dropped a sandboxed agent's session and reset its
+files after nearly every turn for five days: a core in another repository
+had started writing its instructions file after answering the session's
+create, and the fence read that as a guest's write. The reset posted
+nothing and logged one warning nobody read; the smoke's memory check kept
+passing because a new session reads the codeword back from the room's
+history. A member found it: the agent forgot what it had just done, and
+its installed tools were gone. A reset, fallback or fresh start says so
+where people look; a check asserts the property (one session id), not
+something another path also satisfies; a timing a caller relies on (files
+in place when a call returns) is written in the contract's owner doc.
+
+Evidence: docs/bugs/2026-10-21-sandboxed-sessions-reset-every-turn.md
+(design review lenses 4, 9 and 12 now ask; the smoke's `session` line).
+Seen 1× (2026-10-21).
+
 ## Done right
 
 ### Replay a member's long task across a release, not just a smoke reply

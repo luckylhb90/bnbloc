@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -256,4 +257,118 @@ func TestRemoveWorkdirUnder(t *testing.T) {
 	if _, err := os.Stat(root); err != nil {
 		t.Fatalf("the root itself was removed: %v", err)
 	}
+}
+
+// instrProv is a sandbox-capable core that puts each session's instructions
+// file in the workdir before it answers the session's create and every
+// input, as a core with agentProfile does (the file a harness reads again
+// at every start). Channel sessions of one workspace wear different text
+// (each one's guidance names its channel), so every input rewrites it.
+type instrProv struct {
+	*sandboxProv
+	imu      sync.Mutex
+	sessions int
+}
+
+func (p *instrProv) writeInstructions(workdir, sid string) {
+	_ = os.WriteFile(filepath.Join(workdir, "CLAUDE.md"), []byte("instructions of "+sid+"\n"), 0o644)
+}
+
+func (p *instrProv) CreateSession(ctx context.Context, ep corepkg.Endpoint, req corepkg.SessionRequest) (corepkg.SessionResult, error) {
+	res, err := p.sandboxProv.CreateSession(ctx, ep, req)
+	if err != nil {
+		return res, err
+	}
+	p.imu.Lock()
+	p.sessions++
+	res.SessionID = fmt.Sprintf("s-%d", p.sessions)
+	p.imu.Unlock()
+	p.writeInstructions(req.Options.Execution.Sandbox.Workdir, res.SessionID)
+	return res, nil
+}
+
+func (p *instrProv) SendInput(ctx context.Context, ep corepkg.Endpoint, ws, sid, text string, opts corepkg.SessionOptions) error {
+	p.writeInstructions(opts.Execution.Sandbox.Workdir, sid)
+	return p.sandboxProv.SendInput(ctx, ep, ws, sid, text, opts)
+}
+
+// What a core writes for a turn before it answers (a session's create, an
+// input) is the core's own, not a guest's: two channel sessions of one
+// sandboxed workspace, each rewriting the instructions file on its turn,
+// keep their sessions turn after turn. The fence's baseline was taken
+// before the input was sent, so every channel switch read as a breach and
+// dropped both sessions (docs/bugs/2026-10-21-sandboxed-sessions-reset-every-turn.md).
+func TestSandboxFence_aCoresOwnTurnFilesAreNoBreach(t *testing.T) {
+	gw := newSandboxGateway(t, "room-1", false)
+	sbx := newFakeSandboxd(t)
+	prov := &instrProv{sandboxProv: &sandboxProv{supports: true}}
+	prov.targets = []corepkg.Target{{ID: "c", Provider: "codex"}}
+	b, _ := sandboxBridge(t, gw, sbx, SandboxBorrowed, prov.sandboxProv)
+	b.cores["core-a"] = coreEntry{provider: prov, endpoint: b.cores["core-a"].endpoint}
+	ctx := context.Background()
+	inChannel := func(id, ch string) bridgeJob {
+		j := job(id, "bob")
+		j.ChannelID = ch
+		return j
+	}
+	for i, ch := range []string{"ch", "ch2", "ch", "ch2", "ch"} {
+		b.runBridgeJob(ctx, inChannel(fmt.Sprintf("job-%d", i), ch))
+		if st := gw.lastStatus(); st["status"] != "replied" {
+			t.Fatalf("turn %d status = %v", i, st)
+		}
+	}
+	if prov.sessions != 2 || len(prov.inputs) != 3 {
+		t.Fatalf("sessions %d, inputs %d; want one session per channel, each reused", prov.sessions, len(prov.inputs))
+	}
+	if n := gw.noticesContaining("new session"); n != 0 {
+		t.Fatalf("%d new-session notices; want none", n)
+	}
+}
+
+// A turn whose fence drops the session is never silent: the next session
+// tells the room why it is new.
+func TestSandboxFence_aBreachIsNeverSilent(t *testing.T) {
+	b, prov, _, gw, _ := fenceBridge(t)
+	ctx := context.Background()
+	prov.plantNext(".claude/settings.json")
+	b.runBridgeJob(ctx, job("job-1", "bob"))
+	if n := gw.noticesContaining("new session"); n != 0 {
+		t.Fatalf("%d new-session notices after the first turn; want none yet", n)
+	}
+	b.runBridgeJob(ctx, job("job-2", "bob"))
+	if n := gw.noticesContaining("protected files changed during its last turn"); n != 1 {
+		t.Fatalf("%d notices saying why the session is new; want 1", n)
+	}
+	b.runBridgeJob(ctx, job("job-3", "bob"))
+	if n := gw.noticesContaining("new session"); n != 1 {
+		t.Fatalf("%d new-session notices after an untouched turn; want still 1", n)
+	}
+}
+
+// fenceChanges names what a breach changed, added and removed.
+func TestFenceChangesNameThePaths(t *testing.T) {
+	before := []fenceEntry{{"CLAUDE.md", "F a"}, {".room/INDEX.md", "F b"}, {".claude/skills/x/SKILL.md", "F c"}}
+	after := []fenceEntry{{"CLAUDE.md", "F a2"}, {".room/INDEX.md", "F b"}, {".claude/settings.json", "F d"}}
+	got := strings.Join(fenceChanges(before, after), "; ")
+	if want := "CLAUDE.md changed; .claude/settings.json added; .claude/skills/x/SKILL.md removed"; got != want {
+		t.Fatalf("changes = %q, want %q", got, want)
+	}
+}
+
+// noticesContaining counts the notices posted to the room whose text holds s.
+func (g *activityGateway) noticesContaining(s string) int {
+	posts, _ := g.stored()
+	n := 0
+	for _, in := range posts {
+		for _, m := range in.Messages {
+			p, _ := m.Payload.(map[string]any)
+			if notice, _ := p["notice"].(string); notice == "" {
+				continue
+			}
+			if text, _ := p["text"].(string); strings.Contains(text, s) {
+				n++
+			}
+		}
+	}
+	return n
 }

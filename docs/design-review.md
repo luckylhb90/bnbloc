@@ -98,12 +98,17 @@ refused a skill folder a member needed to sync.
 - Partial success: what is true after half of it happened?
 - Is any failure silent — swallowed, logged only at debug, or turned into
   a misleading message?
+- Does a recovery path (a reset, a fallback, a fresh start) fire silently?
+  What would show it firing on every attempt instead of once in a while?
+  A self-healing path that heals every turn is a broken path nobody sees.
 
 *Test:* inject each failure; retry after a partial success; read the user
 facing text of every error path.
 *Seen:* an attachment dropped silently; a session that failed on every
 message after one overflow; an automatic retry that could repeat work; a
-hint blaming environment variables for an unrelated error.
+hint blaming environment variables for an unrelated error; a sandboxed
+agent's session dropped and its files reset after every turn, without a
+word, for days (docs/bugs/2026-10-21-sandboxed-sessions-reset-every-turn.md).
 
 ### 5. Boundaries and privacy
 
@@ -189,6 +194,11 @@ dropped without a word; an agent's decks under `out/` never published
 - Does a reader of pages or files others make (a site, a document) work
   on one built the common way for its kind (a component library's admin
   page, an exported spreadsheet), not only on the reference's fixture?
+- Does our side rely on *when* the other side did something (a file in
+  place when a call returns, an event before a reply)? Is that timing
+  written in the contract's owner doc and checked against the real
+  implementation, or does it live in a comment of the caller? A change on
+  the other side (another repository) breaks it without touching our code.
 
 *Test:* a conformance check against the real component; a probe in a
 throwaway environment; read the spec of the version actually negotiated;
@@ -197,7 +207,9 @@ more rows than the reader keeps, so a wrong order or cut shows.
 silently dropped); a CLI reporting errors as normal text; a gateway
 reporting zero token usage, so the client never compacted; an assist
 reading a history page as newest first, so it kept the oldest messages;
-a browser snapshot that saw a framework's `li` menu items only as text.
+a browser snapshot that saw a framework's `li` menu items only as text;
+a core that wrote its instructions file after answering a session's
+create, which the sandbox fence read as a guest's write.
 
 ### 10. Load on users and agents
 
@@ -239,6 +251,9 @@ could start.
 - Are failures logged at a level that is kept? Is the version of every
   running piece identifiable?
 - Is there a check that exercises it end to end, the way a user does?
+  Does it assert the property itself, or a proxy another path can also
+  satisfy (an agent that "remembers" by reading the room's history passes
+  a memory question in a new session)?
 
 *Test:* break it on purpose and try to diagnose it from logs and status
 alone.

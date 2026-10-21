@@ -36,6 +36,10 @@ import (
 //	room tools      the agent still answers through its room tools (a core
 //	                that restarts its sessions must not drop them); INFO
 //	                when the agent had none before --between
+//	session         every reply came from one agent session: "memory"
+//	                alone passes for an agent that starts a new session
+//	                each turn, since the room's history holds the codeword
+//	                (docs/bugs/2026-10-21-sandboxed-sessions-reset-every-turn.md)
 //	progress        INFO: agent_job_progress events seen during the turns
 //
 // A failed scenario keeps its room for debugging.
@@ -145,6 +149,16 @@ func smokeLongTask(ctx context.Context, c *client, w *smokeWaiter, roomID, subje
 		})
 	} else {
 		fmt.Fprintf(run.out, "INFO room tools: the agent had none before the change (not checked)\n")
+	}
+	if sessions := w.sessions[rcpt.OwnerID+"/"+rcpt.Provider]; len(sessions) == 0 {
+		fmt.Fprintf(run.out, "INFO session: the replies named no agent session (not checked)\n")
+	} else {
+		run.step("session", func() (string, error) {
+			if len(sessions) > 1 {
+				return "", fmt.Errorf("the agent answered from %d sessions (%s): its conversation was not continued between turns", len(sessions), strings.Join(sessions, ", "))
+			}
+			return sessions[0], nil
+		})
 	}
 	fmt.Fprintf(run.out, "INFO progress events seen: %d\n", w.progress)
 }
@@ -273,6 +287,9 @@ func smokeScenarioTurn(ctx context.Context, c *client, w *smokeWaiter, roomID st
 			if fail != "" {
 				return false, fmt.Errorf("agent job failed: %s", fail)
 			}
+			if len(texts) > 0 {
+				w.noteSession(handle, agentSessionOf(ev))
+			}
 			got = append(got, texts...)
 			return len(texts) > 0, nil
 		})
@@ -300,6 +317,15 @@ func smokeScenarioTurn(ctx context.Context, c *client, w *smokeWaiter, roomID st
 		return reply, fmt.Errorf("the reply does not hold %s: %q", strings.Join(want, ", "), truncateRunes(reply, 120))
 	}
 	return reply, nil
+}
+
+// agentSessionOf is the agent session an agent_messages event came from.
+func agentSessionOf(ev smokeEvent) string {
+	var batch struct {
+		AgentSessionID string `json:"agentSessionId"`
+	}
+	_ = json.Unmarshal(ev.Payload, &batch)
+	return batch.AgentSessionID
 }
 
 // agentReplies reads an agent_messages event: the assistant texts of rcpt's

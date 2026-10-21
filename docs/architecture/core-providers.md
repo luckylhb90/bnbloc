@@ -185,6 +185,14 @@ stale session rebound, a core or bridge restart. The contract is additive
   survives a resume, and it wins over the stale system prompt; a core that maps
   instructions to a system-prompt append or to the first prompt must start a
   new conversation when they change;
+- writes a turn's workspace files (the instructions file, the skills)
+  **before it answers** the create or input that starts the turn, and none
+  of the protected paths (`core.ProtectedWorkspacePath`) while the turn
+  runs: a sandboxed drive fingerprints those paths as soon as the core
+  answered (the sandbox turn fence, `services/bridge/sandbox_fence.go`),
+  and a change after that reads as a guest's write, which drops the
+  agent's sessions and resets the files
+  ([`docs/bugs/2026-10-21-sandboxed-sessions-reset-every-turn.md`](../bugs/2026-10-21-sandboxed-sessions-reset-every-turn.md));
 - answers `404 workspace_not_found` for a workspace it no longer holds —
   including a sandboxed session's workspace whose directory it cannot place
   any more (it lost its record of the workdir), never a `bad_request`; the

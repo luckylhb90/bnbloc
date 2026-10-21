@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -16,16 +17,20 @@ import (
 // it reads attachments, remembers the codeword, keeps a workspace file, and
 // can lose either across --between.
 type fakeScenarioAgent struct {
-	files      map[string]string // attachment id -> content
-	codeword   string            // remembered from the brief
-	plan       string            // notes/plan.md
-	forget     bool              // --between drops the conversation
-	wipe       bool              // --between drops the workspace
-	noAttach   bool              // attachments never reach the agent
-	progress   bool              // publish agent_job_progress before replying
-	noTools    bool              // the agent never has room tools
-	loseTools  bool              // --between drops its room tools
-	betweenRan int
+	files     map[string]string // attachment id -> content
+	codeword  string            // remembered from the brief
+	plan      string            // notes/plan.md
+	forget    bool              // --between drops the conversation
+	wipe      bool              // --between drops the workspace
+	noAttach  bool              // attachments never reach the agent
+	progress  bool              // publish agent_job_progress before replying
+	noTools   bool              // the agent never has room tools
+	loseTools bool              // --between drops its room tools
+	// newSessions makes every reply come from a new agent session that
+	// still recalls the codeword (it reads the room's history).
+	newSessions bool
+	replies     int
+	betweenRan  int
 }
 
 var (
@@ -79,8 +84,15 @@ func (g *fakeSmokeGateway) answerScenario(room, text string, attachmentIDs []str
 // in order (narration first, the answer last).
 func (g *fakeSmokeGateway) publishAgent(room, text string) {
 	var evs []smokeEvent
+	g.mu.Lock()
+	g.fakeAgent.replies++
+	session := "sess-1"
+	if g.fakeAgent.newSessions {
+		session = fmt.Sprintf("sess-%d", g.fakeAgent.replies)
+	}
+	g.mu.Unlock()
 	for _, part := range strings.Split(text, "\x00") {
-		raw, _ := json.Marshal(map[string]any{"messages": []any{map[string]any{"payload": map[string]any{
+		raw, _ := json.Marshal(map[string]any{"agentSessionId": session, "messages": []any{map[string]any{"payload": map[string]any{
 			"role": "assistant", "text": part, "ownerUserId": "alice", "provider": "claude",
 		}}}})
 		g.mu.Lock()
@@ -136,7 +148,7 @@ func TestSmokeLongTaskPasses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("scenario failed: %v\n%s", err, out)
 	}
-	for _, want := range []string{"PASS agent (", "PASS attachment (", "PASS workspace write (", `PASS between (`, "PASS memory (", "PASS workspace file (", "PASS room tools (", "INFO progress events seen: 5", "PASS delete room ("} {
+	for _, want := range []string{"PASS agent (", "PASS attachment (", "PASS workspace write (", `PASS between (`, "PASS memory (", "PASS workspace file (", "PASS room tools (", "PASS session (", "): sess-1", "INFO progress events seen: 5", "PASS delete room ("} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("missing %q:\n%s", want, out)
 		}
@@ -159,6 +171,9 @@ func TestSmokeLongTaskNamesWhatBroke(t *testing.T) {
 		{"files lost", func(a *fakeScenarioAgent) { a.wipe = true }, "FAIL workspace file: the reply does not hold notes/plan.md's", "PASS memory (", false},
 		{"attachment lost", func(a *fakeScenarioAgent) { a.noAttach = true }, "FAIL attachment: the reply does not hold CW-", "", true},
 		{"room tools lost", func(a *fakeScenarioAgent) { a.loseTools = true }, "FAIL room tools: the agent no longer reaches its room tools", "PASS memory (", false},
+		// It still recalls the codeword from the room's history: only the
+		// session line catches it.
+		{"a new session every turn", func(a *fakeScenarioAgent) { a.newSessions = true }, "FAIL session: the agent answered from ", "PASS memory (", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			g := newScenarioGateway(t)

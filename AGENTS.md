@@ -1182,11 +1182,18 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   first a space it has not quiesced itself and refusing the drive when it
   cannot), then checks the protected paths' fingerprint against the
   workspace's baseline (`workspaceShared.fence`, shared by its channel
-  sessions; taken before a follow-up turn's input, or after a fresh
-  session's create); a change drops every session of the workspace and
-  removes every protected path (`resetProtectedPaths`), so no harness
-  starts on config a guest wrote (`TestSandboxFence_*`). A fresh session
-  resets the protected paths first only when no other session of the
+  sessions; taken once the core answered the turn's start, a fresh
+  session's create or a follow-up's input, so what the core writes for
+  the turn before answering is its own: a core writes nothing protected
+  after it answers, `docs/architecture/core-providers.md`); a change drops
+  every session of the workspace and removes every protected path
+  (`resetProtectedPaths`), so no harness starts on config a guest wrote
+  (`TestSandboxFence_*`). A breach is never silent: the log names the
+  changed paths (`changes`) and the next session's notice says why it is
+  new. A fence that fires on a core's own write resets the session after
+  every turn (2026-10-21: days of sandboxed agents without memory,
+  unseen). A fresh session resets the protected paths first only when no
+  other session of the
   workspace is bound (what is there is bnbloc's own, fence-verified, and
   worn by that session). Never skip the quiesce to keep a
   guest process alive between turns, and never trust a protected path a
