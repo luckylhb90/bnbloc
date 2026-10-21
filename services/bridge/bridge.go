@@ -1674,6 +1674,44 @@ func (b *Bridge) noticeNewSession(ctx context.Context, d *drive, why string) {
 	}
 }
 
+// whereRuns says where a place's commands run, for owner's agent.
+func whereRuns(place, owner string) string {
+	switch place {
+	case placeHost:
+		return "on " + owner + "'s computer, outside the agent sandbox"
+	case placeOwnSandbox:
+		return "in " + owner + "'s own agent sandbox (with the private hosts they allowed)"
+	}
+	return "in " + owner + "'s agent sandbox"
+}
+
+// noticeMoved tells the room an agent's commands now run somewhere else
+// than its last turn's in this channel (the sandbox mode changed, the own
+// machine was handed over or withdrawn): each place has a workspace and a
+// session of its own, so what the agent installed, signed in to or wrote
+// there is not here. fresh: it starts a new session here, else it continues
+// the one it had here before. People are told; the agent's text is not.
+func (b *Bridge) noticeMoved(ctx context.Context, d *drive, before, now string, fresh bool) {
+	agent := d.job.Provider
+	text := agent + " now runs " + whereRuns(now, d.owner) + " (until now " + whereRuns(before, d.owner) + "), in a new session and workspace there: files, installed tools and sign-ins from before are not in it."
+	if !fresh {
+		text = agent + " runs " + whereRuns(now, d.owner) + " again (until now " + whereRuns(before, d.owner) + ") and continues the session it had there: what it did meanwhile is in the room's history, not in that workspace."
+	}
+	job := d.ref()
+	n := wire.JobNotice{
+		Kind: wire.NoticeContextReset, Text: text,
+		OwnerUserID: d.owner, Provider: agent,
+		RoomID: job.RoomID, ChannelID: job.ChannelID, JobID: job.ID, SourceSeq: job.MessageSeq,
+		Session: wire.ContextResetNoticeSessionID(job.ID), AtUnixMs: time.Now().UnixMilli(),
+	}
+	slog.Info("bnbloc bridge agent runs somewhere else now",
+		"event", "bnbloc.bridge.place_changed", "room", job.RoomID, "core", d.core, "provider", agent, "before", before, "now", now, "fresh", fresh)
+	if _, err := b.gatewayPOST(ctx, "/v1/rooms/"+job.RoomID+"/agent-activity/messages", n.Report()); err != nil {
+		slog.Warn("bnbloc bridge post notice failed",
+			"event", "bnbloc.bridge.post_failed", "room", job.RoomID, "kind", n.Kind, "error", err)
+	}
+}
+
 // turnInfo is the turn this drive runs in session rs (the session
 // contributors' turn hooks: the room tools bind it).
 func (b *Bridge) turnInfo(d *drive, rs *roomSession) TurnInfo {
@@ -1717,6 +1755,8 @@ func (b *Bridge) ensureSession(ctx context.Context, d *drive, key driveKey, prom
 	}
 	room, provider := d.job.RoomID, d.job.Provider
 	sk := d.sessionKey()
+	// Where this channel's turns ran until now, when it was elsewhere.
+	movedFrom := b.workspaces.moveTo(sk)
 	bindingSum := d.content.bindingSum()
 	b.mu.Lock()
 	existing := b.sessions[sk]
@@ -1752,7 +1792,7 @@ func (b *Bridge) ensureSession(ctx context.Context, d *drive, key driveKey, prom
 			b.takeFenceReset(key)
 			b.noticeNewSession(ctx, d, "its workspace's protected files changed")
 		}
-	} else if b.takeFenceReset(key) {
+	} else if b.takeFenceReset(key) && movedFrom == "" {
 		// The last turn's fence dropped the session: never silently.
 		b.noticeNewSession(ctx, d, "its workspace's protected files changed during its last turn")
 	}
@@ -1782,6 +1822,9 @@ func (b *Bridge) ensureSession(ctx context.Context, d *drive, key driveKey, prom
 			b.mu.Unlock()
 			b.noticeNewSession(ctx, d, "its previous session could not be continued")
 		} else {
+			if movedFrom != "" {
+				b.noticeMoved(ctx, d, movedFrom, key.place(), false)
+			}
 			// Reused session: materialize this turn's attachments into the
 			// existing workspace BEFORE the caller composes the follow-up prompt,
 			// so the prompt can name files that actually exist.
@@ -1789,6 +1832,9 @@ func (b *Bridge) ensureSession(ctx context.Context, d *drive, key driveKey, prom
 			d.edit = b.placeEditTarget(ctx, d, key, entry.endpoint, existing.workspaceID)
 			return &ensureResult{roomSession: existing, freshlyCreated: false, atts: atts}, nil
 		}
+	}
+	if movedFrom != "" {
+		b.noticeMoved(ctx, d, movedFrom, key.place(), true)
 	}
 	if opts.Execution != nil && !b.workspaceBound(key) {
 		// The sandbox workdir outlives sessions: clear the previous

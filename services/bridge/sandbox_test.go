@@ -414,8 +414,9 @@ func TestSandbox_requiredPolicyRefusesVisibly_whenTheSandboxCannotTakeTheDrive(t
 		want     string
 	}{
 		{"mode off", SandboxOff, false, true, "agent sandbox is off"},
-		{"not running", SandboxBorrowed, false, true, "not running"},
 		{"core unsupported", SandboxBorrowed, true, false, "cannot run sandboxed"},
+		// A sandbox the mode wants and that is not up yet is waited for
+		// (TestSandbox_aDriveTheModeSandboxesWaitsForIt), not refused.
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -455,7 +456,7 @@ func TestSandbox_unreadablePolicyRefusesTheUnsandboxedBorrow(t *testing.T) {
 	gw := newSandboxGateway(t, "room-1", false)
 	gw.policyDown = true
 	prov := &sandboxProv{supports: true}
-	b, _ := sandboxBridge(t, gw, nil, SandboxBorrowed, prov)
+	b, _ := sandboxBridge(t, gw, nil, SandboxOff, prov)
 
 	b.runBridgeJob(context.Background(), job("job-1", "bob"))
 
@@ -483,7 +484,7 @@ func TestSandbox_unreadablePolicyRefusesTheUnsandboxedBorrow(t *testing.T) {
 func TestSandbox_borrowingWithoutTheSandboxStillWorks_whenNotRequired(t *testing.T) {
 	gw := newSandboxGateway(t, "room-1", false)
 	prov := &sandboxProv{supports: true}
-	b, _ := sandboxBridge(t, gw, nil, SandboxBorrowed, prov)
+	b, _ := sandboxBridge(t, gw, nil, SandboxOff, prov)
 	b.runBridgeJob(context.Background(), job("job-1", "bob"))
 	if prov.hostWorkspace != 1 || prov.opts.Execution != nil {
 		t.Fatalf("borrow without a sandbox: host workspaces %d, execution %+v", prov.hostWorkspace, prov.opts.Execution)
@@ -579,10 +580,17 @@ func TestDecideSandbox(t *testing.T) {
 		{"borrowed in mode all", true, nil, SandboxAll, true, true, never, true, false},
 		{"own in mode borrowed", false, nil, SandboxBorrowed, true, true, never, false, false},
 		{"own in mode all", false, nil, SandboxAll, true, true, never, true, false},
-		{"own, sandbox down", false, nil, SandboxAll, false, true, never, false, false},
+		{"own, sandbox down", false, nil, SandboxAll, false, true, never, false, false}, // waits
 		{"borrowed, mode off, not required", true, nil, SandboxOff, true, true, off, false, false},
 		{"borrowed, mode off, required", true, nil, SandboxOff, true, true, on, false, true},
-		{"borrowed, not ready, required", true, nil, SandboxBorrowed, false, true, on, false, true},
+		{"borrowed, not ready, required", true, nil, SandboxBorrowed, false, true, never, false, false},  // waits
+		{"borrowed, not ready, mode all", true, nil, SandboxAll, false, true, never, false, false},       // waits
+		{"own, not ready, mode borrowed", false, nil, SandboxBorrowed, false, true, never, false, false}, // the host, as the mode says
+		{"own, sandbox down, unsupported", false, nil, SandboxAll, false, false, never, false, false},
+		// The desktop does not know the mode yet: whatever might be
+		// sandboxed waits.
+		{"own, mode pending", false, nil, SandboxPending, false, true, never, false, false},
+		{"borrowed, mode pending", true, nil, SandboxPending, false, true, never, false, false},
 		{"borrowed, unsupported, not required", true, nil, SandboxBorrowed, true, false, off, false, false},
 		// Someone else's script-bearing content forces the sandbox, own
 		// drive or not, and is refused where the sandbox cannot take it.
@@ -590,15 +598,18 @@ func TestDecideSandbox(t *testing.T) {
 		{"foreign content, own drive, mode all", false, []string{"lint kit"}, SandboxAll, true, true, never, true, false},
 		{"foreign content, mode off", false, []string{"lint kit"}, SandboxOff, false, true, never, false, true},
 		{"foreign content, unsupported", true, []string{"lint kit"}, SandboxBorrowed, true, false, never, false, true},
-		{"foreign content, not ready", false, []string{"lint kit"}, SandboxAll, false, true, never, false, true},
+		{"foreign content, not ready", false, []string{"lint kit"}, SandboxAll, false, true, never, false, false}, // waits
 	}
 	// The owner's forwarded environment goes to exactly one kind of drive:
 	// their own, sandboxed, wearing nothing from someone else that runs
 	// scripts. Never a borrowed one, never one forced by foreign content.
 	ownerEnv := map[string]bool{"own in mode all": true}
+	// A drive the mode puts in the sandbox waits while it is not ready:
+	// never the host meanwhile, never a refusal.
+	wait := map[string]bool{"own, mode pending": true, "borrowed, mode pending": true, "own, sandbox down": true, "borrowed, not ready, required": true, "borrowed, not ready, mode all": true, "foreign content, not ready": true}
 	for _, tc := range cases {
 		d := decideSandbox(tc.borrowed, tc.foreign, tc.mode, tc.ready, "", tc.supports, tc.policy, "alice", "codex")
-		if d.sandboxed != tc.wantSandboxed || (d.refuse != "") != tc.wantRefus || d.ownerEnv != ownerEnv[tc.name] {
+		if d.sandboxed != tc.wantSandboxed || (d.refuse != "") != tc.wantRefus || d.ownerEnv != ownerEnv[tc.name] || d.wait != wait[tc.name] {
 			t.Errorf("%s: %+v", tc.name, d)
 		}
 	}
@@ -844,8 +855,9 @@ func TestSandbox_platformAgentRefusedUnlessSandboxed(t *testing.T) {
 		want     string
 	}{
 		{"mode off", SandboxOff, false, true, "agent sandbox is off"},
-		{"not running", SandboxBorrowed, false, true, "not running"},
 		{"core unsupported", SandboxBorrowed, true, false, "cannot run sandboxed"},
+		// A sandbox the mode wants and that is not up yet is waited for
+		// (TestSandbox_aDriveTheModeSandboxesWaitsForIt), not refused.
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -918,5 +930,68 @@ func TestSandbox_platformAgentDefaultModel(t *testing.T) {
 	}
 	if len(gw.reserves) != 2 || gw.reserves[0]["model"] != "" || gw.reserves[1]["model"] != "member-pick" {
 		t.Fatalf("reserve bodies = %v", gw.reserves)
+	}
+}
+
+// A drive the member's mode puts in the sandbox waits for it while it is
+// not up (the desktop has not handed it over yet, or its machine is
+// starting): it fails sandbox_starting, which retries, and never runs on
+// the host meanwhile (2026-10-21: an own agent in mode all ran on the host
+// while the handoff waited, then in the sandbox without the
+// tools it had installed there).
+func TestSandbox_aDriveTheModeSandboxesWaitsForIt(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		mode      SandboxMode
+		requester string
+	}{
+		{"own drive, mode all", SandboxAll, "alice"},
+		{"borrowed drive, mode borrowed", SandboxBorrowed, "bob"},
+		{"own drive, mode not known yet", SandboxPending, "alice"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gw := newSandboxGateway(t, "room-1", false)
+			prov := &sandboxProv{supports: true}
+			b, _ := sandboxBridge(t, gw, nil, tc.mode, prov)
+			b.runBridgeJob(context.Background(), job("job-1", tc.requester))
+			if st := gw.lastStatus(); st["status"] != "failed" || st["failureReason"] != "sandbox_starting" {
+				t.Fatalf("status = %v; want sandbox_starting (retried)", st)
+			}
+			if prov.turns != 0 || prov.hostWorkspace != 0 || len(prov.workdirs) != 0 || len(gw.reserves) != 0 {
+				t.Fatalf("turns %d, host workspaces %d, sandbox workdirs %v, reserves %v; want nothing reserved or driven", prov.turns, prov.hostWorkspace, prov.workdirs, gw.reserves)
+			}
+		})
+	}
+}
+
+// When an agent's commands run somewhere else than its last turn's in the
+// channel (the member's mode changed), the room is told: a new session and
+// workspace there, without what it had before. The next turn there says
+// nothing; going back says it continues the session it had there.
+func TestSandbox_aMoveToAnotherPlaceIsSaid(t *testing.T) {
+	gw := newSandboxGateway(t, "room-1", false)
+	sbx := newFakeSandboxd(t)
+	prov := &sandboxProv{supports: true}
+	b, _ := sandboxBridge(t, gw, sbx, SandboxBorrowed, prov)
+	ctx := context.Background()
+	moved := func() int { return gw.noticesContaining("until now") }
+
+	b.runBridgeJob(ctx, job("job-1", "alice")) // mode borrowed: the host
+	if prov.hostWorkspace != 1 || moved() != 0 {
+		t.Fatalf("host workspaces %d, moved notices %d; want the first turn on the host, unannounced", prov.hostWorkspace, moved())
+	}
+	b.sandbox.cfg.Mode = SandboxAll
+	b.runBridgeJob(ctx, job("job-2", "alice"))
+	if len(prov.workdirs) != 1 || gw.noticesContaining("now runs in alice's agent sandbox (until now on alice's computer, outside the agent sandbox), in a new session") != 1 {
+		t.Fatalf("sandbox workdirs %v, notices %d; want the move said once", prov.workdirs, moved())
+	}
+	b.runBridgeJob(ctx, job("job-3", "alice"))
+	if moved() != 1 {
+		t.Fatalf("moved notices %d after a turn in the same place; want still 1", moved())
+	}
+	b.sandbox.cfg.Mode = SandboxBorrowed
+	b.runBridgeJob(ctx, job("job-4", "alice"))
+	if gw.noticesContaining("runs on alice's computer, outside the agent sandbox again (until now in alice's agent sandbox) and continues the session it had there") != 1 {
+		t.Fatalf("moved notices %d; want the move back said, continuing the host session", moved())
 	}
 }

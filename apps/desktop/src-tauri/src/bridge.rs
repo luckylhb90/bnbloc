@@ -677,11 +677,11 @@ mod tests {
     }
 
     #[test]
-    fn env_for_hands_the_default_sandbox_mode_without_the_manager() {
+    fn env_for_says_the_sandbox_is_off_without_the_manager() {
         let env = env_for(&Settings::default(), None, None);
         assert_eq!(
             env.get("BNBLOC_SANDBOX_MODE").map(String::as_str),
-            Some("borrowed")
+            Some("off")
         );
         assert!(!env.contains_key("BNBLOC_SANDBOX_URL"));
         assert!(!env.contains_key("BNBLOC_SANDBOX_TOKEN"));

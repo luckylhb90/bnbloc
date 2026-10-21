@@ -43,6 +43,12 @@ const (
 	SandboxBorrowed SandboxMode = "borrowed"
 	// SandboxAll: own drives too.
 	SandboxAll SandboxMode = "all"
+	// SandboxPending: the desktop does not know yet whether a sandbox is
+	// installed or how it is set (its component catalog is not read yet).
+	// Every drive a mode could sandbox waits (sandbox_starting) until the
+	// desktop restarts the bridge with the mode it learned: none runs on
+	// the host on a guess.
+	SandboxPending SandboxMode = "pending"
 )
 
 // ParseSandboxMode reads BNBLOC_SANDBOX_MODE ("" = the default, borrowed).
@@ -50,10 +56,10 @@ func ParseSandboxMode(raw string) (SandboxMode, error) {
 	switch m := SandboxMode(strings.ToLower(strings.TrimSpace(raw))); m {
 	case "":
 		return SandboxBorrowed, nil
-	case SandboxOff, SandboxBorrowed, SandboxAll:
+	case SandboxOff, SandboxBorrowed, SandboxAll, SandboxPending:
 		return m, nil
 	default:
-		return "", fmt.Errorf("BNBLOC_SANDBOX_MODE %q: want off, borrowed or all", raw)
+		return "", fmt.Errorf("BNBLOC_SANDBOX_MODE %q: want off, borrowed, all or pending", raw)
 	}
 }
 
@@ -386,6 +392,10 @@ func (s *sandboxRuntime) invalidate() {
 // sandboxDecision is how one drive runs.
 type sandboxDecision struct {
 	sandboxed bool
+	// wait: the owner's mode puts this drive in the sandbox and the
+	// sandbox is not ready yet; the drive fails sandbox_starting (retried)
+	// instead of running anywhere else meanwhile.
+	wait bool
 	// ownerEnv: the sandboxed drive runs on its owner's own behalf, wearing
 	// nothing from someone else that runs scripts, so it gets the owner's
 	// forwarded environment (SandboxConfig.Env). Never a borrowed or
@@ -419,11 +429,14 @@ func contentSandboxPrefix(foreign []string) string {
 }
 
 // decideSandbox applies the PRD policy. Own drives are sandboxed only in mode
-// all; borrowed drives whenever the sandbox is ready and the core supports
-// sandboxExec (mode borrowed or all). A borrowed drive that cannot be
-// sandboxed runs on the host as before — unless the tenant requires the
-// sandbox for borrowing, or its policy cannot be read, then it is refused
-// (fail closed, visible notice). requirePolicy answers the tenant's switch
+// all; borrowed drives in mode borrowed or all, when the core supports
+// sandboxExec. A drive the mode puts in the sandbox waits for it while it is
+// not ready (wait: sandbox_starting, retried): it never runs on the host
+// meanwhile, where the member's choice would be dropped without a word
+// (docs/bugs/2026-10-21-sandboxed-sessions-reset-every-turn.md). A borrowed
+// drive the mode or the core leaves out runs on the host as before — unless
+// the tenant requires the sandbox for borrowing, or its policy cannot be
+// read, then it is refused (fail closed, visible notice). requirePolicy answers the tenant's switch
 // and an error when it is unreadable. A drive wearing someone else's
 // script-bearing content (foreign, the content's names) is sandboxed like a
 // borrowed one, and refused when it cannot be: such content never runs on
@@ -431,7 +444,10 @@ func contentSandboxPrefix(foreign []string) string {
 // forced gets the owner's forwarded environment (ownerEnv).
 func decideSandbox(borrowed bool, foreign []string, mode SandboxMode, ready bool, notReadyReason string, coreSupports bool, requirePolicy func() (bool, error), owner, provider string) sandboxDecision {
 	forced := len(foreign) > 0
-	if ready && coreSupports && (mode == SandboxAll || ((borrowed || forced) && mode == SandboxBorrowed)) {
+	if coreSupports && (mode == SandboxAll || mode == SandboxPending || ((borrowed || forced) && mode == SandboxBorrowed)) {
+		if !ready {
+			return sandboxDecision{wait: true}
+		}
 		return sandboxDecision{sandboxed: true, ownerEnv: !borrowed && !forced}
 	}
 	if forced {
@@ -529,6 +545,12 @@ func (b *Bridge) planSandbox(ctx context.Context, d *drive) (refuse string) {
 		return b.requireSandboxForBorrow(ctx, d.job.TenantID)
 	}, d.owner, d.job.Provider)
 	d.unsandboxed = dec.unavailable
+	if dec.wait {
+		// Failed as a machine still starting is (sandbox_starting, retried),
+		// before anything is reserved or reaches a core.
+		d.notReady = sandboxNotReadyError{err: errors.New(firstNonEmpty(reason, "the agent sandbox is not ready"))}
+		return ""
+	}
 	if dec.refuse != "" || !dec.sandboxed {
 		return dec.refuse
 	}

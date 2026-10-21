@@ -59,6 +59,9 @@ type drive struct {
 	// the drive holds it for the whole turn; turn_gates.go).
 	startGate   gate
 	unsandboxed string
+	// notReady: the sandbox this drive must run in is not up yet (stage 4);
+	// the job fails sandbox_starting (retried) before stage 5 reserves it.
+	notReady error
 	// ownSandbox: the sandboxed drive runs on its owner's own behalf and
 	// gets the owner's forwarded environment (sandboxDecision.ownerEnv);
 	// ownMachine: it runs on the owner's own machine (driveKey.ownMachine).
@@ -134,6 +137,12 @@ func (b *Bridge) runBridgeJob(ctx context.Context, job bridgeJob) {
 			slog.Info("bnbloc bridge job refused",
 				"event", "bnbloc.bridge.job_refused", "job", job.JobID, "stage", st.name, "reason", string(r.kind.reason))
 			b.refuse(ctx, d, r)
+			return
+		}
+		if d.notReady != nil {
+			slog.Info("bnbloc bridge job waits for the agent sandbox",
+				"event", "bnbloc.bridge.job_waits_for_sandbox", "job", job.JobID, "stage", st.name, "error", d.notReady)
+			b.fail(ctx, d, atStage(stagePrepare, d.notReady), b.sandboxDiagnostics(d))
 			return
 		}
 	}
@@ -496,6 +505,25 @@ type sessionKey struct {
 // sessionKey is the drive's channel session.
 func (d *drive) sessionKey() sessionKey {
 	return sessionKey{driveKey: d.key(), channel: d.job.ChannelID}
+}
+
+// Where a slot's commands run (driveKey.place): on the host, in the shared
+// sandbox machine, or in the member's own machine.
+const (
+	placeHost       = "host"
+	placeSandbox    = "sandbox"
+	placeOwnSandbox = "own-sandbox"
+)
+
+// place is where slot k's commands run.
+func (k driveKey) place() string {
+	switch {
+	case !k.sandboxed:
+		return placeHost
+	case k.ownMachine:
+		return placeOwnSandbox
+	}
+	return placeSandbox
 }
 
 // agentID is the (room, core, provider) identity both execution kinds of

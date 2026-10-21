@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -109,6 +110,9 @@ type agentWorkspaces struct {
 	// sessions are the channel sessions bound in these workspaces, kept so
 	// a bridge restart resumes them (session_restore.go).
 	sessions map[sessionKey]sessionRecord
+	// places are where each seat's channel last ran (driveKey.place), kept
+	// so a move says so even across the bridge restart that brings it.
+	places map[sessionKey]string
 }
 
 // workspaceRecord is one binding as persisted. Fence is the sandbox fence
@@ -139,6 +143,19 @@ type workspaceRecord struct {
 type workspacesDoc struct {
 	Workspaces []workspaceRecord `json:"workspaces"`
 	Sessions   []sessionRecord   `json:"sessions,omitempty"`
+	Places     []placeRecord     `json:"places,omitempty"`
+}
+
+// placeRecord is where a seat's channel last ran, as persisted (the slot's
+// execution kind is Place; the record's slot fields are its seat's).
+type placeRecord struct {
+	Room      string `json:"room"`
+	Channel   string `json:"channel"`
+	Core      string `json:"core"`
+	Provider  string `json:"provider"`
+	SeatOwner string `json:"seatOwner,omitempty"`
+	Requester string `json:"requester,omitempty"`
+	Place     string `json:"place"`
 }
 
 // newAgentWorkspaces loads the bindings persisted under dir ("" = memory
@@ -146,7 +163,7 @@ type workspacesDoc struct {
 // reset: the agents then start in new workspaces, and the old ones stay on
 // their cores.
 func newAgentWorkspaces(dir string) *agentWorkspaces {
-	w := &agentWorkspaces{m: map[driveKey]agentWorkspace{}, sessions: map[sessionKey]sessionRecord{}}
+	w := &agentWorkspaces{m: map[driveKey]agentWorkspace{}, sessions: map[sessionKey]sessionRecord{}, places: map[sessionKey]string{}}
 	if dir == "" {
 		return w
 	}
@@ -183,7 +200,30 @@ func newAgentWorkspaces(dir string) *agentWorkspaces {
 		}
 		w.sessions[r.key()] = r
 	}
+	for _, r := range doc.Places {
+		if r.Place != "" {
+			w.places[sessionKey{driveKey: driveKey{room: r.Room, core: r.Core, provider: r.Provider, owner: r.SeatOwner, requester: r.Requester}, channel: r.Channel}] = r.Place
+		}
+	}
 	return w
+}
+
+// moveTo records that channel session sk runs at its slot's place now and
+// returns where it ran before, "" when that is where it ran last (or it
+// never ran).
+func (w *agentWorkspaces) moveTo(sk sessionKey) (before string) {
+	place := sk.place()
+	seat := sk
+	seat.sandboxed, seat.ownMachine = false, false
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	prev := w.places[seat]
+	if prev == place {
+		return ""
+	}
+	w.places[seat] = place
+	w.saveLocked()
+	return prev
 }
 
 // id is the workspace slot k uses ("", false before its first session).
@@ -242,6 +282,12 @@ func (w *agentWorkspaces) forgetRoom(room string) map[driveKey]string {
 	}
 	if w.dropSessionsLocked(func(sk sessionKey, _ sessionRecord) bool { return sk.room == room }) {
 		changed = true
+	}
+	for sk := range w.places {
+		if sk.room == room {
+			delete(w.places, sk)
+			changed = true
+		}
 	}
 	if changed {
 		w.saveLocked()
@@ -381,6 +427,14 @@ func (w *agentWorkspaces) saveLocked() {
 		doc.Sessions = append(doc.Sessions, r)
 	}
 	sort.Slice(doc.Sessions, func(i, j int) bool { return sessionRecordLess(doc.Sessions[i], doc.Sessions[j]) })
+	for sk, place := range w.places {
+		doc.Places = append(doc.Places, placeRecord{Room: sk.room, Channel: sk.channel, Core: sk.core, Provider: sk.provider, SeatOwner: sk.owner, Requester: sk.requester, Place: place})
+	}
+	sort.Slice(doc.Places, func(i, j int) bool {
+		a, b := doc.Places[i], doc.Places[j]
+		return slices.Compare([]string{a.Room, a.Channel, a.Core, a.Provider, a.SeatOwner, a.Requester},
+			[]string{b.Room, b.Channel, b.Core, b.Provider, b.SeatOwner, b.Requester}) < 0
+	})
 	sort.Slice(doc.Workspaces, func(i, j int) bool {
 		a, b := doc.Workspaces[i], doc.Workspaces[j]
 		if a.Room != b.Room {

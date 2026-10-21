@@ -73,11 +73,12 @@ impl Adapter {
         }
     }
 
-    /// The sandbox handoff's identity in the bridge set (None: no handoff).
-    fn sandbox_bridge_fingerprint(&self) -> Option<String> {
+    /// The sandbox env's identity in the bridge set (its mode, and the
+    /// handoff while there is one).
+    fn sandbox_bridge_fingerprint(&self) -> String {
         let handoff = self.sandbox_handoff();
         super::sandbox::bridge_fingerprint(
-            self.sandbox_mode(),
+            self.sandbox_bridge_mode(),
             &self.sandbox_env(),
             handoff.as_ref(),
         )
@@ -91,18 +92,19 @@ impl Adapter {
             .lock()
             .bridge_cores
             .get(super::sandbox::BRIDGE_KEY)
-            .cloned()
-            == want
+            .is_some_and(|fp| *fp == want)
     }
 
     fn desired_bridge_cores(&self) -> HashMap<String, String> {
         let mut set = bridge_core_set(&self.inner.lock().sidecars);
-        // The sandbox handoff (BNBLOC_SANDBOX_*) is bridge env read at spawn
-        // too: it appearing, going away, or the mode changing restarts the
-        // bridge through the same stabilized path.
-        if let Some(fingerprint) = self.sandbox_bridge_fingerprint() {
-            set.insert(super::sandbox::BRIDGE_KEY.to_string(), fingerprint);
-        }
+        // The sandbox env (BNBLOC_SANDBOX_*) is bridge env read at spawn
+        // too: the handoff appearing or going away, or the mode changing
+        // (pending → known included), restarts the bridge through the same
+        // stabilized path.
+        set.insert(
+            super::sandbox::BRIDGE_KEY.to_string(),
+            self.sandbox_bridge_fingerprint(),
+        );
         // So is the member directory the bridge reads its owner's MCP
         // credentials from: a member or tenant switch restarts the bridge.
         let member = self.app.try_state::<crate::AppState>().and_then(|state| {

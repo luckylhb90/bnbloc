@@ -192,6 +192,9 @@ pub(super) fn plan_own_machine(
 #[derive(Default)]
 pub(super) struct SandboxState {
     seq: u64,
+    /// The component catalog has been read once: until then nobody knows
+    /// whether a sandbox is installed or which mode it is set to.
+    pub(super) catalog_read: bool,
     pub(super) launch: Option<Launch>,
     pub(super) last_error: Option<String>,
     /// The active sandbox component's settings declaration, as the catalog
@@ -242,6 +245,31 @@ pub enum SandboxMode {
     Borrowed,
     /// Every run of this member's agents executes in the VM.
     All,
+}
+
+/// The mode the bridge is told (`BNBLOC_SANDBOX_MODE`): the sandbox's mode,
+/// `off` when no sandbox component is installed, and `pending` until the
+/// catalog says which. A drive the mode might sandbox waits while it is
+/// pending or the sandbox is not up: it never runs on the host meanwhile
+/// (bnbloc docs/bugs/2026-10-21-sandboxed-sessions-reset-every-turn.md).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BridgeMode {
+    Pending,
+    Known(SandboxMode),
+}
+
+impl BridgeMode {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            BridgeMode::Pending => "pending",
+            BridgeMode::Known(m) => m.as_str(),
+        }
+    }
+
+    /// The handoff reaches the bridge only in a known mode that is not off.
+    fn hands_over(self) -> bool {
+        matches!(self, BridgeMode::Known(m) if m != SandboxMode::Off)
+    }
 }
 
 impl SandboxMode {
@@ -374,12 +402,12 @@ pub(crate) struct BridgeHandoff {
 /// handoff: the mode always; the rest (the names included) only while
 /// ready and not off.
 pub(crate) fn bridge_env(
-    mode: SandboxMode,
+    mode: BridgeMode,
     forward: &[String],
     handoff: Option<&BridgeHandoff>,
 ) -> Vec<(String, String)> {
     let mut env = vec![(ENV_MODE.to_string(), mode.as_str().to_string())];
-    if let Some(h) = handoff.filter(|_| mode != SandboxMode::Off) {
+    if let Some(h) = handoff.filter(|_| mode.hands_over()) {
         env.push((ENV_URL.into(), h.url.clone()));
         env.push((ENV_TOKEN.into(), h.token.expose().to_string()));
         env.push((ENV_VMEXEC.into(), h.vmexec.to_string_lossy().into_owned()));
@@ -398,16 +426,19 @@ pub(crate) fn bridge_env(
     env
 }
 
-/// The bridge watcher's identity of the handoff: changes whenever the env
-/// the bridge needs changes (never contains the token; a new launch has a new
-/// seq and therefore a new token).
+/// The bridge watcher's identity of the sandbox env: changes whenever the
+/// env the bridge needs changes, the mode alone included (pending → known
+/// restarts the bridge, so waiting drives run where the mode says). Never
+/// contains the token; a new launch has a new seq and therefore a new token.
 pub(super) fn bridge_fingerprint(
-    mode: SandboxMode,
+    mode: BridgeMode,
     forward: &[String],
     handoff: Option<&BridgeHandoff>,
-) -> Option<String> {
-    let h = handoff.filter(|_| mode != SandboxMode::Off)?;
-    Some(format!(
+) -> String {
+    let Some(h) = handoff.filter(|_| mode.hands_over()) else {
+        return mode.as_str().to_string();
+    };
+    format!(
         "{}|{}|{}|{}|{}|{}|{}",
         mode.as_str(),
         h.seq,
@@ -416,7 +447,7 @@ pub(super) fn bridge_fingerprint(
         h.own_machine.as_deref().unwrap_or_default(),
         h.vmexec.display(),
         forward.join(",")
-    ))
+    )
 }
 
 /// The one rule for an environment variable pattern a member lets into
@@ -754,6 +785,17 @@ impl Adapter {
         self.sandbox.lock().settings.mode
     }
 
+    /// The mode the bridge is told (BridgeMode): pending until the catalog
+    /// was read, off without a sandbox component, else its mode.
+    pub(crate) fn sandbox_bridge_mode(&self) -> BridgeMode {
+        let state = self.sandbox.lock();
+        match (state.catalog_read, &state.declared) {
+            (false, _) => BridgeMode::Pending,
+            (true, None) => BridgeMode::Known(SandboxMode::Off),
+            (true, Some(_)) => BridgeMode::Known(state.settings.mode),
+        }
+    }
+
     /// The names the member lets into their own sandboxed runs.
     pub(super) fn sandbox_env(&self) -> Vec<String> {
         self.sandbox.lock().settings.forward_env.clone()
@@ -785,6 +827,7 @@ impl Adapter {
         });
         let read = {
             let mut state = self.sandbox.lock();
+            state.catalog_read = true;
             // The values read for the same declaration stay until the
             // fresh read answers.
             state.declared = next.map(|mut d| {
@@ -1555,15 +1598,20 @@ fn create_private_dir(dir: &std::path::Path) -> Result<(), String> {
 }
 
 /// Extend the bridge env with the sandbox's mode, forwarded names and
-/// handoff (bridge::env_for); without the manager, the default mode.
+/// handoff (bridge::env_for); without the manager, off.
 pub(crate) fn extend_bridge_env(
     app: Option<&tauri::AppHandle>,
     env: &mut std::collections::HashMap<String, String>,
 ) {
     let adapter = app.and_then(|app| app.try_state::<Adapter>());
     let (mode, forward, handoff) = match adapter {
-        Some(a) => (a.sandbox_mode(), a.sandbox_env(), a.sandbox_handoff()),
-        None => (SandboxMode::default(), Vec::new(), None),
+        Some(a) => (
+            a.sandbox_bridge_mode(),
+            a.sandbox_env(),
+            a.sandbox_handoff(),
+        ),
+        // No sandbox manager: no sandbox can run.
+        None => (BridgeMode::Known(SandboxMode::Off), Vec::new(), None),
     };
     env.extend(bridge_env(mode, &forward, handoff.as_ref()));
 }
@@ -1612,7 +1660,7 @@ mod tests {
         let h = handoff();
         let none: &[String] = &[];
         let env: std::collections::HashMap<_, _> =
-            bridge_env(SandboxMode::Borrowed, none, Some(&h))
+            bridge_env(BridgeMode::Known(SandboxMode::Borrowed), none, Some(&h))
                 .into_iter()
                 .collect();
         assert_eq!(env[ENV_MODE], "borrowed");
@@ -1633,25 +1681,33 @@ mod tests {
             own_machine: Some(OWN_MACHINE_NAME.into()),
             ..h.clone()
         };
-        let env: std::collections::HashMap<_, _> = bridge_env(SandboxMode::All, none, Some(&own))
-            .into_iter()
-            .collect();
+        let env: std::collections::HashMap<_, _> =
+            bridge_env(BridgeMode::Known(SandboxMode::All), none, Some(&own))
+                .into_iter()
+                .collect();
         assert_eq!(env[ENV_OWN_MACHINE], "bnbloc-own");
 
         let forward = vec!["EXAMPLE_API_KEY".to_string(), "EXAMPLE_*".to_string()];
-        let env: std::collections::HashMap<_, _> = bridge_env(SandboxMode::All, &forward, Some(&h))
-            .into_iter()
-            .collect();
+        let env: std::collections::HashMap<_, _> =
+            bridge_env(BridgeMode::Known(SandboxMode::All), &forward, Some(&h))
+                .into_iter()
+                .collect();
         assert_eq!(env[ENV_FORWARD], "EXAMPLE_API_KEY,EXAMPLE_*");
 
         assert_eq!(
-            bridge_env(SandboxMode::All, &forward, None),
+            bridge_env(BridgeMode::Known(SandboxMode::All), &forward, None),
             vec![(ENV_MODE.to_string(), "all".to_string())]
         );
         assert_eq!(
-            bridge_env(SandboxMode::Off, &forward, Some(&h)),
+            bridge_env(BridgeMode::Known(SandboxMode::Off), &forward, Some(&h)),
             vec![(ENV_MODE.to_string(), "off".to_string())],
             "off never hands the sandbox over"
+        );
+        // Until the catalog says whether a sandbox is installed, the bridge
+        // is told so: it waits instead of guessing the host.
+        assert_eq!(
+            bridge_env(BridgeMode::Pending, &forward, Some(&h)),
+            vec![(ENV_MODE.to_string(), "pending".to_string())]
         );
     }
 
@@ -1676,7 +1732,11 @@ mod tests {
             "echo \"$BNBLOC_SANDBOX_ENV|$EXAMPLE_API_KEY|$BNBLOC_SANDBOX_TOKEN\"",
         ]);
         let forward = vec!["EXAMPLE_API_KEY".to_string()];
-        cmd.envs(bridge_env(SandboxMode::All, &forward, Some(&h)));
+        cmd.envs(bridge_env(
+            BridgeMode::Known(SandboxMode::All),
+            &forward,
+            Some(&h),
+        ));
         let (mut rx, _child) = crate::child_process::spawn(cmd, &shell).expect("spawn");
         assert_eq!(
             rx.recv().await,
@@ -1690,27 +1750,27 @@ mod tests {
     fn the_token_never_appears_in_the_fingerprint_or_debug_output() {
         let h = handoff();
         let none: &[String] = &[];
-        let fp = bridge_fingerprint(SandboxMode::Borrowed, none, Some(&h)).expect("ready");
+        let fp = bridge_fingerprint(BridgeMode::Known(SandboxMode::Borrowed), none, Some(&h));
         assert!(!fp.contains("tok-secret-value"), "{fp}");
         assert!(!format!("{h:?}").contains("tok-secret-value"));
         // The fingerprint changes with everything the bridge env carries.
         assert_ne!(
-            Some(fp.clone()),
-            bridge_fingerprint(SandboxMode::All, none, Some(&h))
+            fp.clone(),
+            bridge_fingerprint(BridgeMode::Known(SandboxMode::All), none, Some(&h))
         );
         assert_ne!(
-            Some(fp.clone()),
+            fp.clone(),
             bridge_fingerprint(
-                SandboxMode::Borrowed,
+                BridgeMode::Known(SandboxMode::Borrowed),
                 &["EXAMPLE_API_KEY".to_string()],
                 Some(&h)
             ),
             "a changed name list restarts the bridge"
         );
         assert_ne!(
-            Some(fp.clone()),
+            fp.clone(),
             bridge_fingerprint(
-                SandboxMode::Borrowed,
+                BridgeMode::Known(SandboxMode::Borrowed),
                 none,
                 Some(&BridgeHandoff {
                     own_machine: Some(OWN_MACHINE_NAME.into()),
@@ -1722,11 +1782,27 @@ mod tests {
         let mut relaunched = h.clone();
         relaunched.seq += 1;
         assert_ne!(
-            Some(fp),
-            bridge_fingerprint(SandboxMode::Borrowed, none, Some(&relaunched))
+            fp,
+            bridge_fingerprint(
+                BridgeMode::Known(SandboxMode::Borrowed),
+                none,
+                Some(&relaunched)
+            )
         );
-        assert_eq!(bridge_fingerprint(SandboxMode::Off, none, Some(&h)), None);
-        assert_eq!(bridge_fingerprint(SandboxMode::Borrowed, none, None), None);
+        // Without a handoff it is the mode alone, so a mode change (pending
+        // → known included) restarts the bridge too.
+        assert_eq!(
+            bridge_fingerprint(BridgeMode::Known(SandboxMode::Off), none, Some(&h)),
+            "off"
+        );
+        assert_eq!(
+            bridge_fingerprint(BridgeMode::Known(SandboxMode::Borrowed), none, None),
+            "borrowed"
+        );
+        assert_eq!(
+            bridge_fingerprint(BridgeMode::Pending, none, Some(&h)),
+            "pending"
+        );
     }
 
     /// The desktop's copy of the forwarding rule agrees with the Go owner

@@ -1159,8 +1159,14 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   space-scoped exec token (`execTokens`). Only that token goes to a core,
   inside `execution`, and only to a core advertising `sandboxExec`. Policy
   (`decideSandbox`): own drives are sandboxed only in mode `all`. Borrowed
-  drives are sandboxed when the sandbox is ready and the core supports it.
-  Otherwise they run on the host, unless the tenant's
+  drives are sandboxed in mode `borrowed` or `all` when the core supports
+  it. A drive the mode puts in the sandbox **waits for it** while it is not
+  up (job failure `sandbox_starting`, retried, before any quota is
+  reserved): never the host meanwhile. The desktop tells the bridge `off`
+  without a sandbox component and `pending` until its catalog is read
+  (every drive a mode could sandbox waits), and a mode change restarts the
+  bridge. A borrowed drive the mode or the core leaves out runs on the
+  host, unless the tenant's
   `requireSandboxForBorrow` is on: then they are refused BEFORE any quota is
   reserved, with a `sandbox-required` notice (job failure `sandbox_required`).
   An unreadable policy refuses too. A failed ensure/mint fails the drive; it
@@ -1174,7 +1180,11 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   the owner's names to a borrowed or platform drive. Workspaces, sessions
   and locks are keyed by execution kind (`driveKey`): switching
   host↔sandbox starts a new session and workspace (created IN the sandbox
-  workdir via `CreateWorkspaceAt`). Nothing is moved.
+  workdir via `CreateWorkspaceAt`). Nothing is moved, and a move is never
+  silent: where a channel last ran is persisted (`workspaces.json`
+  `places`), and a turn somewhere else posts one notice naming both places
+  (`noticeMoved`): what the agent installed, signed in to or wrote there is
+  not here.
 - **Guest commands write the shared workdir past the host deny-write; the
   turn fence covers it** (`services/bridge/sandbox_fence.go`). After every
   sandboxed turn the bridge deletes the space without purge (its processes

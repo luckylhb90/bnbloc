@@ -102,16 +102,63 @@ silently.
 - LESSONS.md: "Make every self-healing path loud, and assert the property,
   not a proxy".
 
+## The agent's environment changed without a word (fixed the same day)
+
+The same room ran on the shared sandbox machine (11:00), on the host
+(19:44) and on the member's own machine (20:08). A drive slot is keyed by
+its execution kind (`driveKey`), so each change meant a new workspace and
+session, and the tools installed in the other place were gone. The host
+hour came from a silent fallback. The sandbox runtime was updated at 19:39,
+and the bridge running then had no sandbox handed over. With none handed
+over, an own drive ran on the host whatever the mode (`decideSandbox`: not
+ready, so the host). The bridge restart that brought the handoff waited
+until the release turn ended at 20:06, since the stabilized restart waits
+while turns run. The same gap opens at every desktop start: the bridge
+starts before the desktop has read its component catalog, with the
+default mode.
+
+- **A drive the mode puts in the sandbox waits for it** (`decideSandbox`
+  `wait`: job failure `sandbox_starting`, retried, before stage 5 reserves
+  anything). That covers an own drive in mode `all`, and a borrowed or
+  foreign-content drive in mode `borrowed` or `all`. It never runs on the
+  host meanwhile. After its attempts it fails with "its agent sandbox was
+  still starting".
+- **The desktop tells the bridge what it knows** (`BridgeMode`): `off`
+  without a sandbox component (or without the manager), `pending` until
+  the catalog is read (the bridge's `SandboxPending`: every drive a mode
+  could sandbox waits), else the sandbox's mode. The bridge watcher's
+  fingerprint carries the mode even without a handoff, so pending → known
+  restarts the bridge.
+- **A move is said.** Where each seat's channel last ran is persisted
+  (`workspaces.json` `places`, `agentWorkspaces.moveTo`). A turn
+  somewhere else posts one notice for people, not the agent: "codex now
+  runs in alice's agent sandbox (until now on alice's computer, outside the
+  agent sandbox), in a new session and workspace there: files, installed
+  tools and sign-ins from before are not in it" (`noticeMoved`; a return to
+  a place with a kept session says it continues that session).
+- Tests: `TestSandbox_aDriveTheModeSandboxesWaitsForIt` (own in mode
+  `all`, borrowed in mode `borrowed`, own in mode `pending`: nothing
+  reserved or driven) and `TestSandbox_aMoveToAnotherPlaceIsSaid`. Both fail
+  with their fix reverted. Also the `TestDecideSandbox` wait cases and the
+  desktop's `bridge_env` / `bridge_fingerprint` tests (pending, off).
+- Design review. Actors: the member's mode decides, and nothing new is
+  asked of anyone. Failure: a sandbox that never comes up now fails the
+  member's jobs visibly after their retries, where it used to run them
+  unconfined on the host. Release: the bridge ships inside the desktop, so
+  `pending` and the wait arrive together. Observability: the
+  `job_waits_for_sandbox` and `place_changed` events, plus the notice.
+
 ## Related, from the same room (not fixed here)
 
-- **The agent's environment changed without a word.** The same room ran on
-  the shared sandbox machine (11:00), on the host (19:44) and on the
-  member's own machine (20:08). A drive slot is keyed by its execution kind
-  (`driveKey`), so each change meant a new workspace and session, and the
-  tools installed in the other place were gone. Mode `all` with the sandbox
-  not ready runs an own drive on the host (`decideSandbox`), unannounced.
 - **"Publish this room" was read as "deploy".** In a release room whose
   expert deploys on request, the agent never considered saving the room as
-  a room component (`components` save, kind `room`).
+  a room component (`components` save, kind `room`). It answered from a
+  session that had not seen the conversation. With the session kept, the
+  request came right after "save the expert", so it is not addressed
+  separately.
+- **What an agent installs in the sandbox lasts only as long as the VM.** A
+  space's home lives in the VM's own disk. A recreate (the own machine's
+  hosts changing) loses it, and with it any tools installed or signed in
+  there.
 
-Landed in: the bridge, smoke and docs in the commit that adds this record; the core's fix in its own repository.
+Landed in: 2877d089 (the fence, the smoke's `session` line, the docs); the commit after `desktop: 0.1.94` (the wait, `pending`, the move notice); the core's fix in its own repository.
