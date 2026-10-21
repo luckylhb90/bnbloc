@@ -52,22 +52,6 @@ them.
 
 ## Mistakes
 
-### Reproduce the reporter's exact case, with the real input on the real surface, before you call it fixed or not reproducible
-
-A coding agent was killed a few seconds into every room turn. Every manual
-reproduction passed, because each one used a short prompt. The real room
-prompt is about 3 KB, and endpoint security on the machine refuses to start
-an interpreter whose argv carries an argument that long. Only the exact
-argv, environment and prompt reproduced it.
-
-Evidence: the desktop core's fix of 2026-10-14 (the prompt goes on stdin);
-`bnbloc smoke --agent <core>/<provider>` reproduced it where manual runs
-did not. On 2026-10-19 a browser component's restart was tested from an
-unconfined test process only; the real calls ran inside the agent's sandbox,
-which could not write the browser's profile, and the member's browser was
-closed and never came back (docs/bugs/2026-10-19-browser-closed-from-the-sandbox.md).
-Seen 2× (2026-10-14, 2026-10-19).
-
 ### What an agent cannot see in this turn, it cannot act on: let a tool take what the agent has
 
 An agent wrote two decks and was asked to save them as gallery works. The
@@ -527,6 +511,15 @@ Seen 1× (2026-10-16).
 
 ## Promoted
 
+- **Reproduce the reporter's exact case, and test a change where it will
+  really run, on what it will really meet.** Seen 3× (2026-10-14 a long
+  argv killed only with the real room prompt; 2026-10-19 a browser restart
+  tested only from an unconfined process closed the member's browser from
+  the agent's sandbox; 2026-10-21 a page reader tried only on native-control
+  fixtures could not click a component library's menu,
+  docs/bugs/2026-10-21-browser-script-clickable-controls.md). Promoted
+  2026-10-21 → AGENTS.md "Verification" (the first bullet); design-review
+  lenses 9 and 11 ask the same.
 - **Ship capabilities, not use cases: a use case is a member's to build,
   or a sample in its own repository, never hardcoded in the platform.**
   Seen 3× (2026-10-12 interactive apps with platform modes and lifecycle;

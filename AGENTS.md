@@ -65,7 +65,11 @@ workflow above:
 
 - **Reproduce the reported case exactly** (its real input, on its real
   surface) before you call a bug fixed or not reproducible. A pass on a
-  simplified input proves nothing about the report.
+  simplified input proves nothing about the report. The same holds for a
+  new change: test it where it will really run (inside the agent's sandbox,
+  on a member's machine) and on what it will really meet (a third-party
+  page built the common way), not only from an unconfined test process or
+  on the reference fixture.
 - **Red check for a fix.** The test that covers a bug fails with the fix
   reverted, for the reason the bug names. A test that passes either way is
   not the bug's test.
