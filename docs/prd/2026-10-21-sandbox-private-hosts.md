@@ -6,7 +6,8 @@ reference implementation; the full suite passes against it with an
 internal host listed. Slice 2: the desktop's list (Settings → Agent sandbox
 → Private hosts, `protocol.ValidPrivateHost`), `bnbloc-own` and its apply
 rule (`plan_own_machine`), the bridge's machine per drive
-(`BNBLOC_SANDBOX_OWN_MACHINE`, `driveKey.ownMachine`). Slice 3 proposed. Owner: the Sandbox Protocol (`sandbox/protocol`,
+(`BNBLOC_SANDBOX_OWN_MACHINE`, `driveKey.ownMachine`). Slice 3
+(self-configuring, §2.3 revised) next. Owner: the Sandbox Protocol (`sandbox/protocol`,
 `docs/architecture/sandbox-protocol.md`), the desktop's sandbox adapter
 (`apps/desktop/src-tauri/src/internal_ext/sandbox*.rs`), the bridge's
 sandbox runtime (`services/bridge/sandbox.go`), find-a-way
@@ -110,43 +111,60 @@ What blocks it today, checked against the code:
     ahead). The protocol allows a stricter implementation.
   A listed IP literal keeps its port.
 
-### 2.3 Noticing and asking: find-a-way proposes the host
+### 2.3 Self-configuring: the sandbox notices, the member allows
 
-- find-a-way gets a seventh action, `allow-host`, its target a host name
-  (and port). The `capabilities` context tells it, for the reply's drive,
-  that the agent ran in the sandbox, that private hosts are blocked and
-  whether the member may allow one (the tenant policy, §2.4). It proposes
-  the action only when the reply names a host the agent could not reach.
-- The target is held to a DNS name or an IP literal, never a URL or a
-  path, and never `localhost`, the host's own addresses, link-local or
-  metadata addresses. A host outside the organization's list (when it has
-  one) is dropped.
-- The card says what it would do, in plain words: "Let your own agents
-  reach `npm.internal.example` (port 443) from the sandbox. It applies to
-  your own agents in every room, not to agents borrowed from you." Two
-  buttons: **Allow** and **Not now**. Only the member whose own agent made
-  the reply sees the action (the card is theirs already; a borrowed or
-  platform drive never gets it).
-- Allow: the desktop adds the host to the member's list, applies it to
-  `bnbloc-own` when no own turn runs there (a running turn is never
-  stopped; the card says "applies when your agent's current run ends"),
-  and the card then offers **Ask again** (the existing resend).
-- Nothing in the agent changes: it reports the failure as it does today.
+Revised 2026-10-21 after slice 2 (the owner: "why isn't the sandbox
+self-configuring, why is it in Settings?"). The member never fills a list
+first: the platform sees what the sandbox blocked, proposes it on the turn,
+and one click opens it. Settings only shows what is open and takes it back.
+
+- **The sandbox reports what it blocked.** New capability `egressReport`:
+  `GET /sandbox/v1/machines/{m}/egress/blocked?sinceMs=` answers the names
+  the guest looked up whose answer was a private address the egress did not
+  open (name, the private addresses, first and last time, count), newest
+  first, bounded. The reference implementation sees them by being the
+  guest DNS's upstream: it runs a forwarding resolver on loopback
+  (microsandbox's `dns.nameservers`), forwards each query to the host's
+  resolvers unchanged, and records an answer holding a private address the
+  machine's rules do not cover. A fact the platform observed, not a guess
+  from the agent's reply text (which may leave it out, or be written by a
+  prompt).
+- **The bridge attaches it to the turn.** When an own sandboxed turn ends,
+  the bridge reads the machine's blocked names since the turn started and
+  puts them on the job (`blockedHosts`), names only. Only own drives:
+  a borrowed or platform turn never carries them, and the shared machine's
+  names are read for an own drive only (a borrowed turn running at the same
+  time may add a name; the member still decides).
+- **The card asks.** A settled own turn with `blockedHosts` shows the
+  find-a-way card at once, without the gate: the fix `allow-host` for each
+  name the policy lets the member open ("Your agent's sandbox could not
+  reach `npm.internal.example`. Allow your own agents to reach it?"), with
+  **Allow** and **Not now**. The AI part: find-a-way gets the blocked names
+  in `capabilities`, explains in the summary what failed and why the host
+  fixes it, and may add other fixes; with no assist model the card still
+  offers `allow-host` (the fallback). Allow adds the host on the desktop
+  (applied when no own turn runs there) and the card then offers **Ask
+  again**.
+- **Admins can pre-open hosts.** With the organization's list (§2.4) a
+  listed host needs no question: the desktop opens it for every member
+  whose own runs are sandboxed, and a blocked name on the list is opened at
+  once.
+- Nothing in the agent changes.
 
 ### 2.4 Settings and policy
 
-- Desktop Settings → Agent sandbox → **Private hosts**: the member's list
-  (host, added when, from which room), add and remove, and "Apply again"
-  (re-resolves the names). A host opens on any port: the reference cannot
-  hold a name's port (§2.2), so the list does not pretend to. A removal
-  applies like an addition. Shown only when the runtime advertises
-  `egressHosts`; used only in mode `all` (in `borrowed` the member's own
-  runs are on the host, which reaches the hosts itself).
+- Desktop Settings → Agent sandbox → **Private hosts** shows what is open
+  (the member's own and the organization's), where each came from (a room's
+  card, the organization), and Remove; adding by hand stays for a host no
+  run has hit yet. A host opens on any port: the reference cannot hold a
+  name's port (§2.2). Shown only when the runtime advertises `egressHosts`;
+  used only in mode `all` (in `borrowed` the member's own runs are on the
+  host, which reaches the hosts itself).
 - Organization → Settings → **Sandbox private hosts** (tenant policy,
-  `manage_org`): `off` (members may not allow any), `listed` (only hosts on
-  the organization's list; default) or `any` (members choose), plus the
-  organization's list. With `listed`, a host on the list is still added by
-  the member (the AI still asks); the list only bounds what may be added.
+  `manage_org`): `off` (no private host opens), `listed` (only the
+  organization's list, opened for everyone without asking; the default,
+  empty) or `ask` (the list opens for everyone, and a member may allow
+  another host from the card), plus the list.
 - `GET /v1/my/tenant-policy` carries both, so the desktop and the card read
   one answer. A member's host the policy no longer allows is dropped from
   the machine at the next apply, and the Settings row says why.
@@ -162,7 +180,7 @@ What blocks it today, checked against the code:
 | Boundaries and privacy | The host list stays on the member's computer; the tenant policy is the only server state. Secrets keep their own host rules. |
 | Abuse and untrusted input | The host comes from an agent reply (untrusted): held to a name, never loopback, link-local or metadata, bounded by the organization's list, and opened only on a click that names it. The reference opens the name's addresses, so the card and Settings say "and anything else at its address". |
 | One owner | The protocol owns the rule shape; the desktop owns the machines and the list; the bridge owns the choice of machine; find-a-way owns noticing. |
-| Defaults and fallbacks | Default policy `listed` with an empty list: nothing opens until an admin lists a host. No capability → no Private hosts section and no `allow-host` action. |
+| Defaults and fallbacks | Default policy `listed` with an empty list: nothing opens until an admin lists a host or switches to `ask`. No `egressHosts` → no Private hosts section and no `allow-host` action; no `egressReport` → no `blockedHosts`, the card runs gated as today. |
 | External contracts | `egressHosts` is a new optional capability with a conformance step; `public` without rules is unchanged. |
 | Load on users and agents | One card when a host is blocked; no new tool or rule for agents. |
 | Release and compatibility | Additive. Old sidecar: no capability, behaviour as today. Old desktop: never sends rules. |
@@ -186,8 +204,12 @@ What blocks it today, checked against the code:
 ## 4. Build order (slices of §2)
 
 1. Protocol `egressHosts` + conformance step; the reference
-   implementation's rule translation and rebind admission.
+   implementation's rule translation and rebind admission. (built)
 2. Desktop: the member's list, `bnbloc-own`, apply when idle, Settings;
-   bridge: the machine per drive kind.
-3. Tenant policy and Organization settings; find-a-way's `allow-host`
-   action, the capabilities context and the card.
+   bridge: the machine per drive kind. (built)
+3. Self-configuring: protocol `egressReport` + conformance step, the
+   reference's observing resolver; the bridge's `blockedHosts` on own
+   turns; find-a-way's `allow-host` action, the blocked names in
+   `capabilities`, the card without the gate; tenant policy (`off` /
+   `listed` / `ask` and the list), Organization settings, the
+   organization's hosts opened by the desktop.
