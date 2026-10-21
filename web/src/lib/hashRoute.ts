@@ -128,6 +128,15 @@ export function shareHash(token: string): string {
   return SHARE_PAGE + token;
 }
 
+/** The canonical hash of a room deep link (`#/room/<id>[?seq=…|artifact=…]`,
+ *  what a notification or a shared card links to), else null: any other
+ *  hash, however it parses, is not one. Canonical, so a return remembered
+ *  from it is never the caller's own string. */
+export function roomDeepLinkHash(hash: string): string | null {
+  const route = parseHashRoute(hash);
+  return route.kind === "room" ? routeHash(route) : null;
+}
+
 /** The token of a public share page hash (`shareHash`), else null. */
 export function shareTokenFromHash(hash: string): string | null {
   if (!hash.startsWith(SHARE_PAGE)) return null;

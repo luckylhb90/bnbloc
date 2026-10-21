@@ -248,3 +248,14 @@ creator picks it per link; `org` stays the default.
   mode and switch;
 - web: the selector's options and default, and the share page's sign-in
   redirect and ticket for a `signed_in` link.
+
+## Update (2026-10-21): room deep links
+
+The login return also remembers a room deep link (`#/room/<id>[?seq=|artifact=]`,
+what a notification or a shared card links to), not only a share page: SSO
+used to drop it and land the person on the home page. The sign-in button
+remembers the page's current hash (`beginDeepLinkSignIn`) when it is a room
+deep link, and only its canonical form (`roomDeepLinkHash`: what the route
+parser knows, never the caller's own string); `takeLoginReturn` accepts a share
+page or a room deep link and nothing else. A direct sign-in never navigates,
+so the hash stays. Record: `docs/prd/2026-10-21-share-target-components.md` §2.3.

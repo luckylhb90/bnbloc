@@ -1,4 +1,4 @@
-import { beginShareSignIn, LOGIN_RETURN_TTL_MS, takeLoginReturn, type ReturnStore } from "./loginReturn.ts";
+import { beginDeepLinkSignIn, beginShareSignIn, LOGIN_RETURN_TTL_MS, takeLoginReturn, type ReturnStore } from "./loginReturn.ts";
 
 function test(name: string, fn: () => void): void {
   try {
@@ -39,9 +39,26 @@ test("an expired, foreign or malformed return goes nowhere", () => {
   beginShareSignIn(token, "https://bnbloc.example.com/", 0, store);
   eq(takeLoginReturn(LOGIN_RETURN_TTL_MS + 1, store), null, "expired");
   eq(store.value, "", "an expired return is cleared");
-  for (const raw of ['{"hash":"#/room/r1","atMs":0}', '{"hash":"https://evil.example/","atMs":0}', "not json", '{"hash":1,"atMs":0}']) {
+  for (const raw of ['{"hash":"#/library","atMs":0}', '{"hash":"https://evil.example/","atMs":0}', '{"hash":"#/room/","atMs":0}', "not json", '{"hash":1,"atMs":0}']) {
     store.value = raw;
     eq(takeLoginReturn(1, store), null, `refuses ${raw}`);
   }
   eq(beginShareSignIn("a/b", "https://bnbloc.example.com/", 0, store), null, "a token no share page takes");
+});
+
+test("a room deep link a card opened without a session is brought back after sign-in, canonical", () => {
+  const store = memoryStore();
+  beginDeepLinkSignIn("#/room/r1?seq=7&channel=c1", 1_000, store);
+  eq(takeLoginReturn(2_000, store), "#/room/r1?seq=7&channel=c1", "a message link");
+  beginDeepLinkSignIn("#/room/r%201?artifact=a1&v=2&junk=<script>", 1_000, store);
+  eq(takeLoginReturn(2_000, store), "#/room/r%201?artifact=a1&v=2", "a deliverable link keeps only what the route knows");
+  eq(takeLoginReturn(2_001, store), null, "only once");
+});
+
+test("only a room deep link is remembered at sign-in", () => {
+  const store = memoryStore();
+  for (const hash of ["", "#/library", "#/room/", "#sessionToken=abc", "https://evil.example/", "#/share/" + token]) {
+    beginDeepLinkSignIn(hash, 1_000, store);
+    eq(store.value, "", `nothing is remembered for ${JSON.stringify(hash)}`);
+  }
 });

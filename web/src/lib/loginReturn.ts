@@ -9,11 +9,12 @@
 // it has a session and goes back to the share page, which then mints its
 // share ticket. The return stays in this tab's sessionStorage (it survives
 // the trip to the identity provider and back, and never travels through
-// it), expires, and is only ever a share page's hash.
+// it), expires, and is only ever a share page's hash or a room deep link
+// (a notification's or a shared card's link: `roomDeepLinkHash`, canonical).
 //
 // Pure apart from the injected store; unit-tested under node.
 
-import { appRoot, shareHash, shareTokenFromHash } from "./hashRoute.ts";
+import { appRoot, roomDeepLinkHash, shareHash, shareTokenFromHash } from "./hashRoute.ts";
 import { readStored, StorageKey, writeStored } from "./storageKeys.ts";
 
 /** A remembered return older than this is dropped (a sign-in abandoned
@@ -42,9 +43,24 @@ export function beginShareSignIn(token: string, pageUrl: string, nowMs: number, 
   return appRoot(pageUrl);
 }
 
-/** takeLoginReturn is the share page hash to go back to after sign-in, at
- *  most once (it is cleared), or null: nothing remembered, expired, or not
- *  a share page. */
+/** beginDeepLinkSignIn remembers the room deep link in hash (the page's
+ *  current hash, when a card or a notification opened it without a session)
+ *  before the person leaves for the identity provider. Nothing is remembered
+ *  for any other hash. */
+export function beginDeepLinkSignIn(hash: string, nowMs: number, store: ReturnStore = sessionStore): void {
+  const canonical = roomDeepLinkHash(hash);
+  if (canonical !== null) store.write(JSON.stringify({ hash: canonical, atMs: nowMs }));
+}
+
+/** loginReturnHash is the hash a return may name, canonical: a share page or
+ *  a room deep link; null for anything else. */
+function loginReturnHash(hash: string): string | null {
+  return shareTokenFromHash(hash) !== null ? hash : roomDeepLinkHash(hash);
+}
+
+/** takeLoginReturn is the hash to go back to after sign-in (a share page or
+ *  a room deep link), at most once (it is cleared), or null: nothing
+ *  remembered, expired, or neither. */
 export function takeLoginReturn(nowMs: number, store: ReturnStore = sessionStore): string | null {
   const raw = store.read();
   if (!raw) return null;
@@ -53,7 +69,7 @@ export function takeLoginReturn(nowMs: number, store: ReturnStore = sessionStore
     const v = JSON.parse(raw) as { hash?: unknown; atMs?: unknown };
     if (typeof v.hash !== "string" || typeof v.atMs !== "number") return null;
     if (nowMs - v.atMs > LOGIN_RETURN_TTL_MS || v.atMs > nowMs + 60_000) return null;
-    return shareTokenFromHash(v.hash) === null ? null : v.hash;
+    return loginReturnHash(v.hash);
   } catch {
     return null;
   }

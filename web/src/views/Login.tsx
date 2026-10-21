@@ -7,6 +7,7 @@ import { Mascot } from "@/ui/Mascot";
 import { useToast } from "@/ui/Toast";
 import { gatewayBase, inDesktopShell, needsGatewaySetup } from "@/lib/config";
 import { beginDesktopSso, openExternal } from "@/lib/desktop";
+import { beginDeepLinkSignIn } from "@/lib/loginReturn";
 import { cn } from "@/lib/cn";
 import { GatewaySwitcher } from "@/views/GatewaySwitcher";
 import { LoginBackground } from "@/views/LoginBackground";
@@ -176,6 +177,9 @@ export function Login() {
                   const base = gatewayBase();
                   const cb = (base || window.location.origin) + "/sso-callback";
                   if (!ssoStartPath) return;
+                  // A card or a notification opened a room link without a
+                  // session: sign-in brings the person back to it.
+                  beginDeepLinkSignIn(window.location.hash, Date.now());
                   if (inDesktopShell()) {
                     // The callback carries this app's one-time nonce; the
                     // gateway answers with a nonce-bound code, never a token.
