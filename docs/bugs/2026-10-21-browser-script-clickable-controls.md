@@ -34,14 +34,37 @@ as its label, clicked and hit-tested like any control. A `<label>` is left
 to the control it names, unless that control is hidden (a styled checkbox
 whose input is transparent), where the label is the only way to it.
 
-Test: `TestScriptClickableControlsOnChrome` (a framework-style menu of
-`li`/`div` items routed by script, a card with a button inside, a label
-over a transparent checkbox, and a pointer `span` inside a button).
+The same page showed what else such pages hide from a list of controls,
+fixed in the same release:
 
-Checked read-only on the QA page itself: the whole menu (46 items), the
-dashboard's cards and table rows are listed, 96 controls in all; the
-snapshot took 16.6 ms on its 2,767 elements (one computed style each,
-cached).
+- **State in classes.** The library marks an open submenu, the selected
+  item and a disabled pager button by class (`…-menu-opened`,
+  `…-item-selected`, `…-page-disabled`), not ARIA. The snapshot reads
+  those suffixes: `expanded=true`, `selected=true`, and a control
+  disabled by class (on it or up to two levels above) is left out.
+- **Labels that do not stand alone.** A table's clickable counts read
+  "182", "102"; a row's "Edit" reads the same in every row. A control in
+  a table carries its column header and its row's first cell
+  (`182 (SlowSql; orders-db-0)`), a header's filter its header.
+- **Icons without text.** An icon button (a funnel, the side bar's
+  collapse) had no name and was dropped. It is named by an svg title, its
+  wrapper's `aria-label`/`title`, or the words of an id or class around
+  `icon`/`btn` (`funnel (icon)`, `sidebar collapse (icon)`).
+- **Order.** Native controls were listed before every script control;
+  all are now in page order, so the 400-control cap keeps the top of the
+  page.
+
+Test: `TestScriptClickableControlsOnChrome` (a framework-style menu of
+`li`/`div` items routed by script with its open and selected classes, a
+card with a button inside, a label over a transparent checkbox, a pointer
+`span` inside a button, an icon-only control, a table's per-row "Edit",
+and a pager button disabled by class).
+
+Checked read-only on the QA page itself: the whole menu (46 items, open
+submenus and the selected item marked), the dashboard's cards, table cells
+with their column and instance, the two column filters, and no disabled
+pager arrows, 99 controls in all; the snapshot took 13 to 18 ms on its
+2,767 elements (one computed style each, cached).
 
 ## Why it was not caught
 

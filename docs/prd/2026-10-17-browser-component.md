@@ -704,6 +704,9 @@ the room.)
     outermost element showing the pointer cursor, or with an `onclick`,
     that has a name and neither sits in nor holds a listed control, is a
     `button`; a label stands for its field only when the field is hidden.
+    State comes from the library's class suffixes (`-opened`, `-selected`,
+    `-disabled`); an icon is named by its icon, a table's control with
+    its column and row; controls are in page order.
 - **The step.** A port of `jev_ultrafast/model.py` `choose` and
   `agent.py` `command`:
   - one `/v1/systemone` request per step through the relay, with an
