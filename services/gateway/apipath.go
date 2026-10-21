@@ -88,6 +88,13 @@ func (p apiPath) isMyNotifiers() bool {
 	return len(p.segs) == 3 || (len(p.segs) == 5 && p.segs[4] == "test")
 }
 
+// isMyAccount matches the member's own account routes the room service
+// owns: their display name (/v1/my/profile) and reading preferences
+// (/v1/my/preferences). Neither is cost-bearing.
+func (p apiPath) isMyAccount() bool {
+	return p.is("v1", "my", "profile") || p.is("v1", "my", "preferences")
+}
+
 // isMyPluginEvents matches the member plugin hook routes:
 // /v1/my/plugin-events (SSE) and /v1/my/plugin-events/{id}/ack.
 func (p apiPath) isMyPluginEvents() bool {
@@ -230,9 +237,9 @@ func (s *Service) route(p apiPath) string {
 		if p.is("v1", "my", "tenant-policy") {
 			return s.Backends.ShareAgent
 		}
-		// The member's own display name: the room service owns profiles
-		// (beside /v1/users/profiles, the batch lookup).
-		if p.is("v1", "my", "profile") {
+		// The member's own display name and reading preferences: the room
+		// service owns profiles (beside /v1/users/profiles, the batch lookup).
+		if p.isMyAccount() {
 			return s.Backends.Room
 		}
 		// The member's interactive apps across their rooms: the room
@@ -364,9 +371,9 @@ func requiredPermission(method string, p apiPath) rbac.Permission {
 	if p.isMyPluginEvents() {
 		return rbac.PermRead
 	}
-	// Choosing one's own display name is not cost-bearing: a viewer may set
-	// theirs too.
-	if p.is("v1", "my", "profile") {
+	// Choosing one's own display name or how one reads a room is not
+	// cost-bearing: a viewer may set theirs too.
+	if p.isMyAccount() {
 		return rbac.PermRead
 	}
 	switch {

@@ -72,6 +72,12 @@ type UserProfileStore interface {
 	SetEmail(ctx context.Context, userID, email string, nowMs int64) error
 	// Email returns userID's recorded email ("" when none).
 	Email(ctx context.Context, userID string) (string, error)
+	// MemberPreferences returns userID's reading preferences, the defaults
+	// applied for a person who never chose (FeedLayout: wire.FeedLayoutTime).
+	MemberPreferences(ctx context.Context, userID string) (wire.MemberPreferences, error)
+	// SetFeedLayout stores userID's feed layout (a wire.FeedLayout value,
+	// already checked with wire.ValidFeedLayout). The name and email stay.
+	SetFeedLayout(ctx context.Context, userID, layout string, nowMs int64) error
 }
 
 // MaxEmailLen bounds a recorded email (the RFC 5321 path limit, rounded up).
@@ -79,14 +85,15 @@ const MaxEmailLen = 320
 
 // MemoryUserProfiles is the in-memory UserProfileStore.
 type MemoryUserProfiles struct {
-	mu     sync.Mutex
-	names  map[string]string // user id -> display name
-	emails map[string]string // user id -> asserted email
+	mu      sync.Mutex
+	names   map[string]string // user id -> display name
+	emails  map[string]string // user id -> asserted email
+	layouts map[string]string // user id -> feed layout
 }
 
 // NewMemoryUserProfiles returns an empty in-memory profile store.
 func NewMemoryUserProfiles() *MemoryUserProfiles {
-	return &MemoryUserProfiles{names: map[string]string{}, emails: map[string]string{}}
+	return &MemoryUserProfiles{names: map[string]string{}, emails: map[string]string{}, layouts: map[string]string{}}
 }
 
 var _ UserProfileStore = (*MemoryUserProfiles)(nil)
@@ -133,6 +140,24 @@ func (s *MemoryUserProfiles) Email(_ context.Context, userID string) (string, er
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.emails[userID], nil
+}
+
+// MemberPreferences implements UserProfileStore.
+func (s *MemoryUserProfiles) MemberPreferences(_ context.Context, userID string) (wire.MemberPreferences, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if layout, ok := s.layouts[userID]; ok {
+		return wire.MemberPreferences{FeedLayout: layout}, nil
+	}
+	return wire.MemberPreferences{FeedLayout: wire.FeedLayoutTime}, nil
+}
+
+// SetFeedLayout implements UserProfileStore.
+func (s *MemoryUserProfiles) SetFeedLayout(_ context.Context, userID, layout string, _ int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.layouts[userID] = layout
+	return nil
 }
 
 // MySQLUserProfiles is the MySQL UserProfileStore (table user_profiles).
@@ -196,4 +221,23 @@ func (s *MySQLUserProfiles) Email(ctx context.Context, userID string) (string, e
 		return "", nil
 	}
 	return email, err
+}
+
+// MemberPreferences implements UserProfileStore. No row is the defaults; a
+// row written for a name or an email holds the column default ('time').
+func (s *MySQLUserProfiles) MemberPreferences(ctx context.Context, userID string) (wire.MemberPreferences, error) {
+	p := wire.MemberPreferences{FeedLayout: wire.FeedLayoutTime}
+	err := s.DB.QueryRowContext(ctx, `SELECT feed_layout FROM user_profiles WHERE user_id = ?`, userID).Scan(&p.FeedLayout)
+	if errors.Is(err, sql.ErrNoRows) {
+		return wire.MemberPreferences{FeedLayout: wire.FeedLayoutTime}, nil
+	}
+	return p, err
+}
+
+// SetFeedLayout implements UserProfileStore. It leaves the display name and
+// email as they were (a new row starts with neither).
+func (s *MySQLUserProfiles) SetFeedLayout(ctx context.Context, userID, layout string, nowMs int64) error {
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO user_profiles (user_id, display_name, feed_layout, updated_at_ms) VALUES (?, '', ?, ?)
+    ON DUPLICATE KEY UPDATE feed_layout = VALUES(feed_layout), updated_at_ms = VALUES(updated_at_ms)`, userID, layout, nowMs)
+	return err
 }

@@ -158,6 +158,61 @@ func TestContractUserProfileStore(t *testing.T) {
 	})
 }
 
+// Reading preferences (docs/prd/2026-10-21-feed-by-request.md): the default
+// for a person without a row and for a row written for a name or an email;
+// the stored layout per exact user id; the name and email untouched.
+func TestContractUserProfileStorePreferences(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) {
+		ctx := context.Background()
+		s := b.Profiles
+		maya, jack := uniq("maya-")+"@x.io", uniq("jack-")
+		if got := must(s.MemberPreferences(ctx, maya))(t); got.FeedLayout != wire.FeedLayoutTime {
+			t.Fatalf("no row = %+v, want the time layout", got)
+		}
+		if err := s.SetDisplayName(ctx, jack, "Jack", 1); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.SetEmail(ctx, maya, "maya@x.io", 1); err != nil {
+			t.Fatal(err)
+		}
+		for _, id := range []string{maya, jack} {
+			if got := must(s.MemberPreferences(ctx, id))(t); got.FeedLayout != wire.FeedLayoutTime {
+				t.Fatalf("%s with a name or email only = %+v, want the time layout", id, got)
+			}
+		}
+		if err := s.SetFeedLayout(ctx, maya, wire.FeedLayoutRequest, 2); err != nil {
+			t.Fatal(err)
+		}
+		if got := must(s.MemberPreferences(ctx, maya))(t); got.FeedLayout != wire.FeedLayoutRequest {
+			t.Fatalf("stored = %+v, want the request layout", got)
+		}
+		if got := must(s.MemberPreferences(ctx, strings.ToUpper(maya)))(t); got.FeedLayout != wire.FeedLayoutTime {
+			t.Fatalf("an upper-case variant = %+v, want its own default", got)
+		}
+		if got := must(s.MemberPreferences(ctx, jack))(t); got.FeedLayout != wire.FeedLayoutTime {
+			t.Fatalf("another person = %+v, want the default", got)
+		}
+		if got := must(s.Email(ctx, maya))(t); got != "maya@x.io" {
+			t.Fatalf("email after the layout = %q", got)
+		}
+		if err := s.SetFeedLayout(ctx, jack, wire.FeedLayoutRequest, 3); err != nil {
+			t.Fatal(err)
+		}
+		if got := must(s.DisplayNames(ctx, []string{jack}))(t); got[jack] != "Jack" {
+			t.Fatalf("name after the layout = %v", got)
+		}
+		if err := s.SetFeedLayout(ctx, maya, wire.FeedLayoutTime, 4); err != nil {
+			t.Fatal(err)
+		}
+		if got := must(s.MemberPreferences(ctx, maya))(t); got.FeedLayout != wire.FeedLayoutTime {
+			t.Fatalf("set back = %+v", got)
+		}
+		if got := must(s.DisplayNames(ctx, []string{maya}))(t); len(got) != 0 {
+			t.Fatalf("a layout-only row reads as a name: %v", got)
+		}
+	})
+}
+
 // Organization sync: subjects upsert (nil groups read back as []), list by
 // user id and delete; a default room is recorded once.
 func TestContractOrgSyncStore(t *testing.T) {

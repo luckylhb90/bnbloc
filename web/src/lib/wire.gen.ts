@@ -4340,6 +4340,18 @@ export interface MyProfile {
   isDefault: boolean;
 }
 
+// How a member reads a room's conversation (docs/prd/2026-10-21-feed-by-
+// request.md): every message in arrival order, or one block per request.
+export const FeedLayoutTime = "time";
+export const FeedLayoutRequest = "request";
+
+// MemberPreferences is the caller's own reading preferences (GET/PUT
+// /v1/my/preferences), stored with their profile so every device follows
+// them. FeedLayout defaults to FeedLayoutTime.
+export interface MemberPreferences {
+  feedLayout: FeedLayout;
+}
+
 // ---- wire/retention.go ----
 
 // RetentionKind is one kind of data a retention policy covers.
@@ -6146,6 +6158,8 @@ export type MediaVideoAspect = "16:9" | "9:16";
 export const MediaVideoAspectValues: readonly MediaVideoAspect[] = ["16:9", "9:16"];
 export type MediaVideoStatus = "rendering" | "done" | "failed";
 export const MediaVideoStatusValues: readonly MediaVideoStatus[] = ["rendering", "done", "failed"];
+export type FeedLayout = "time" | "request";
+export const FeedLayoutValues: readonly FeedLayout[] = ["time", "request"];
 export type RoomSource = "runs";
 export const RoomSourceValues: readonly RoomSource[] = ["runs"];
 export type RoomSourceScope = "all" | "opted-in" | "none-private";

@@ -63,8 +63,8 @@ type Service struct {
 	// answers the share routes 503.
 	Tenants store.TenantStore
 	// Profiles holds users' display names (GET/PUT /v1/my/profile, GET
-	// /v1/users/profiles, and the share resolve's "shared by"). Nil answers
-	// those routes 503.
+	// /v1/users/profiles, and the share resolve's "shared by") and reading
+	// preferences (GET/PUT /v1/my/preferences). Nil answers those routes 503.
 	Profiles store.UserProfileStore
 	// AppDocs and AppCipher hold and seal interactive apps' data (the app
 	// data routes, appdata.go). Either nil answers those routes 503: no

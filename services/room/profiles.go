@@ -22,6 +22,8 @@ const maxProfileLookupIDs = 200
 func (s *Service) registerProfileRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/my/profile", s.handleGetMyProfile)
 	mux.HandleFunc("PUT /v1/my/profile", s.handlePutMyProfile)
+	mux.HandleFunc("GET /v1/my/preferences", s.handleGetMyPreferences)
+	mux.HandleFunc("PUT /v1/my/preferences", s.handlePutMyPreferences)
 	mux.HandleFunc("GET /v1/users/profiles", s.handleUserProfiles)
 }
 
@@ -106,6 +108,54 @@ func (s *Service) handlePutMyProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, wire.MyProfile{UserID: user, DisplayName: store.DisplayName(user, name), IsDefault: name == ""})
+}
+
+// handleGetMyPreferences is GET /v1/my/preferences → wire.MemberPreferences,
+// the defaults applied (docs/prd/2026-10-21-feed-by-request.md §3.1).
+func (s *Service) handleGetMyPreferences(w http.ResponseWriter, r *http.Request) {
+	user := caller(r)
+	if user == "" {
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
+		return
+	}
+	if !s.profilesReady(w) {
+		return
+	}
+	p, err := s.Profiles.MemberPreferences(r.Context(), user)
+	if err != nil {
+		obs.ServerError(w, "read preferences failed", err)
+		httpx.Error(w, "read preferences failed", http.StatusInternalServerError)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, p)
+}
+
+// handlePutMyPreferences is PUT /v1/my/preferences {feedLayout} →
+// wire.MemberPreferences. A layout outside wire.FeedLayout (empty included)
+// is a 400.
+func (s *Service) handlePutMyPreferences(w http.ResponseWriter, r *http.Request) {
+	user := caller(r)
+	if user == "" {
+		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
+		return
+	}
+	if !s.profilesReady(w) {
+		return
+	}
+	var body wire.MemberPreferences
+	if !httpx.DecodeJSON(w, r, maxJSONBodyBytes, &body) {
+		return
+	}
+	if !wire.ValidFeedLayout(body.FeedLayout) {
+		httpx.Error(w, `feedLayout must be "time" or "request"`, http.StatusBadRequest)
+		return
+	}
+	if err := s.Profiles.SetFeedLayout(r.Context(), user, body.FeedLayout, s.Now()); err != nil {
+		obs.ServerError(w, "save preferences failed", err)
+		httpx.Error(w, "save preferences failed", http.StatusInternalServerError)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, wire.MemberPreferences{FeedLayout: body.FeedLayout})
 }
 
 // handleUserProfiles is GET /v1/users/profiles?ids=a,b,… → {profiles:

@@ -185,7 +185,7 @@ var routeWords = map[string]bool{
 	"audit-log": true, "org-sync": true, "rules": true, "preview": true, "deprovision": true, "resync": true,
 	"public": true, "shares": true, "resolve": true, "presign": true, "site": true, "sites": true, "site-ticket": true, "ticket": true, "files": true,
 	"tenant-policy": true, "platform-agents": true, "agent-hosts": true,
-	"profile": true,
+	"profile": true, "preferences": true,
 	// realtime replica-to-replica routes (scale-out by key ownership).
 	"desktop": true, "notifications": true, "post": true,
 	// agent dispatch (room tools): /v1 + /internal/v1 rooms/{id}/dispatch.

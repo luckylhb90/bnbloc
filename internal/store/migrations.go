@@ -1720,6 +1720,15 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return addColumnIfMissing(ctx, db, "room_schedules", "pending_event_json", "JSON NULL AFTER updated_at_ms")
 		},
 	},
+	{
+		// How a member reads a room's conversation
+		// (docs/prd/2026-10-21-feed-by-request.md §3.1). Additive: a column
+		// with a default the previous release neither writes nor reads.
+		id: "2026_10_user_profiles_feed_layout",
+		run: func(ctx context.Context, db sqlConn) error {
+			return addColumnIfMissing(ctx, db, "user_profiles", "feed_layout", "VARCHAR(16) NOT NULL DEFAULT 'time' AFTER email")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

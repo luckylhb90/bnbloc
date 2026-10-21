@@ -17,6 +17,9 @@ func TestProfileRoutes(t *testing.T) {
 		{http.MethodGet, "/v1/my/profile"},
 		{http.MethodPut, "/v1/my/profile"},
 		{http.MethodGet, "/v1/users/profiles"},
+		// Reading preferences (docs/prd/2026-10-21-feed-by-request.md).
+		{http.MethodGet, "/v1/my/preferences"},
+		{http.MethodPut, "/v1/my/preferences"},
 	} {
 		p := mustParseAPIPath(t, c.method, c.path)
 		if got := s.route(p); got != "room" {
@@ -29,7 +32,9 @@ func TestProfileRoutes(t *testing.T) {
 			t.Fatalf("%s %s is rate limited; it is not cost-bearing", c.method, c.path)
 		}
 	}
-	if got := s.route(mustParseAPIPath(t, http.MethodGet, "/v1/my/profile/x")); got != "" {
-		t.Fatalf("/v1/my/profile/x routed to %q", got)
+	for _, path := range []string{"/v1/my/profile/x", "/v1/my/preferences/x"} {
+		if got := s.route(mustParseAPIPath(t, http.MethodGet, path)); got != "" {
+			t.Fatalf("%s routed to %q", path, got)
+		}
 	}
 }

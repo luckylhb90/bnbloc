@@ -19,3 +19,24 @@ type MyProfile struct {
 	DisplayName string `json:"displayName"`
 	IsDefault   bool   `json:"isDefault"`
 }
+
+// How a member reads a room's conversation (docs/prd/2026-10-21-feed-by-
+// request.md): every message in arrival order, or one block per request.
+//
+//wire:union FeedLayout
+const (
+	FeedLayoutTime    = "time"
+	FeedLayoutRequest = "request"
+)
+
+// ValidFeedLayout reports whether v is one of the FeedLayout values.
+func ValidFeedLayout(v string) bool {
+	return v == FeedLayoutTime || v == FeedLayoutRequest
+}
+
+// MemberPreferences is the caller's own reading preferences (GET/PUT
+// /v1/my/preferences), stored with their profile so every device follows
+// them. FeedLayout defaults to FeedLayoutTime.
+type MemberPreferences struct {
+	FeedLayout string `json:"feedLayout" tstype:"FeedLayout"`
+}
