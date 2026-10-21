@@ -21,7 +21,10 @@ export function explicitRecipient(text: string, roomAgents: readonly RoomAgent[]
   return mentionedAgent(text, roomAgents) ?? recipient ?? null;
 }
 
-// resolveRecipient is the agent a send drives (null: nobody to drive).
+// resolveRecipient is the agent a send drives (null: nobody to drive). My
+// local target is my own agent only once I am known: a recipient always
+// names its owner (the server refuses an empty ownerId; no bridge would
+// claim one).
 export function resolveRecipient(input: {
   readonly text: string;
   readonly roomAgents: readonly RoomAgent[];
@@ -32,5 +35,5 @@ export function resolveRecipient(input: {
   const named = explicitRecipient(input.text, input.roomAgents, input.recipient);
   if (named) return named;
   const t = input.localTarget;
-  return t?.provider ? { ownerId: input.subject || "", provider: t.provider, core: t.core || undefined, self: true } : null;
+  return t?.provider && input.subject ? { ownerId: input.subject, provider: t.provider, core: t.core || undefined, self: true } : null;
 }

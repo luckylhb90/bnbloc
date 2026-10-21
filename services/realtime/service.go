@@ -669,7 +669,7 @@ func writeChatPostErr(w http.ResponseWriter, err error) {
 		writePlatformAgentOffline(w, offline)
 	case errors.Is(err, errMessageTooLong):
 		httpx.Error(w, err.Error(), http.StatusRequestEntityTooLarge)
-	case errors.Is(err, errEmptyMessage), errors.Is(err, errAgentInPeopleChat), errors.As(err, &bad), errors.As(err, new(errBadFileRef)),
+	case errors.Is(err, errEmptyMessage), errors.Is(err, errRecipientWithoutOwner), errors.Is(err, errAgentInPeopleChat), errors.As(err, &bad), errors.As(err, new(errBadFileRef)),
 		errors.Is(err, errExpertNotAvailable), errors.Is(err, errExpertWithoutAgent):
 		httpx.Error(w, err.Error(), http.StatusBadRequest)
 	case errors.Is(err, errUnknownChannel):

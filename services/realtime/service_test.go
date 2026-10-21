@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -117,6 +118,44 @@ func TestChatCreatesAgentJobWithPromptPayload(t *testing.T) {
 	}
 	if jobs.job.ChannelID != "chan-1" || jobs.job.RequesterUserID != "alice" || jobs.job.OwnerUserID != "alice" || jobs.job.Core != "acme" || jobs.job.Provider != "codex" {
 		t.Fatalf("job routing = %+v", jobs.job)
+	}
+}
+
+// An agent recipient with no owner is refused before anything is stored,
+// published or queued (docs/bugs/2026-10-21-late-failure-notice-and-ownerless-recipient.md):
+// no bridge claims an ownerless job, so it would fail minutes later as
+// no_bridge_online. A blank owner trims to empty and is refused the same.
+func TestChatRefusesRecipientWithoutOwner(t *testing.T) {
+	for _, owner := range []string{`""`, `"  "`} {
+		hub := realtime.NewHub(64, 16)
+		mem := membership.NewStatic()
+		mem.Add("room-1", "alice")
+		jobs := &captureBridgeJobs{}
+		srv := httptest.NewServer((&Service{Hub: hub, Membership: mem, BridgeJobs: jobs}).Handler())
+		sub := hub.SubscribeLive("room-1")
+
+		body := `{"text":"count the lines","clientMsgId":"c-1","recipient":{"ownerId":` + owner + `,"provider":"opencode","core":"acme"}}`
+		req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/rooms/room-1/chat", strings.NewReader(body))
+		req.Header.Set("X-Bnbloc-User", "alice")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest || !strings.Contains(string(raw), "recipient.ownerId is required") {
+			t.Fatalf("owner %s: status %d %s, want 400 naming recipient.ownerId", owner, resp.StatusCode, raw)
+		}
+		if jobs.job.JobID != "" {
+			t.Fatalf("owner %s: a job was queued: %+v", owner, jobs.job)
+		}
+		select {
+		case ev := <-sub.Events():
+			t.Fatalf("owner %s: %s published for a refused chat", owner, ev.Kind)
+		case <-time.After(50 * time.Millisecond):
+		}
+		hub.Unsubscribe("room-1", sub)
+		srv.Close()
 	}
 }
 

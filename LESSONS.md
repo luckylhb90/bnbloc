@@ -425,6 +425,20 @@ Evidence: docs/prd/2026-10-20-rooms-as-components.md §7 ("A grant pinned
 to a person"); `services/gateway/room_sources.go` `watchGrant`.
 Seen 1× (2026-10-20).
 
+### Show a late result with the thing it is about
+
+A queued job failed two minutes after its request, once the member had sent
+three newer requests. Its notice carried the request it was about, but the
+feed placed it by arrival, under the newest request and its live "working"
+strip, and the member read "the agent is offline" about work that was
+running fine. The job was dead because the server accepted a recipient with
+no owner that only an API client sends. Place a late result by what it is
+about and name it; refuse on the server what the client never sends.
+
+Evidence: docs/bugs/2026-10-21-late-failure-notice-and-ownerless-recipient.md
+(design review lenses 2 and 6 now ask).
+Seen 1× (2026-10-21).
+
 ## Done right
 
 ### Replay a member's long task across a release, not just a smoke reply

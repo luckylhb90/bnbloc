@@ -311,8 +311,8 @@ export function Composer({
   const leadAgent = runsOnAgent ? routeSend(runsOnAgent, platformAgents?.route, subject ?? null).recipient : null;
   const teamLead = leadAgent
     ? { ownerId: leadAgent.ownerId, core: leadAgent.core, provider: leadAgent.provider }
-    : myRunsOn
-      ? { ownerId: subject ?? "", core: myRunsOn.core || undefined, provider: myRunsOn.provider }
+    : myRunsOn && subject
+      ? { ownerId: subject, core: myRunsOn.core || undefined, provider: myRunsOn.provider }
       : null;
   const team = useTeamPlan(roomId, people || peopleOnly ? null : exp.expert, teamLead);
 

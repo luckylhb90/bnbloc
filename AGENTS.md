@@ -300,7 +300,14 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
 - **The bridge claims by `recipient`, not author.** A chat with
   `recipient={ownerId,provider,core?}` is driven by the bridge that serves that
   agent; `recipient=room` drives nothing (human-only). `core` (e.g. `acme`/`nimbus`)
-  picks which local core drives it; absent = the sole/default core.
+  picks which local core drives it; absent = the sole/default core. An
+  agent recipient always names its owner (a platform agent's is the routed
+  host): `PostChat` refuses an empty `ownerId` with 400, since no bridge
+  would ever claim the job.
+- **A job's notice is shown with its request** (`payload.sourceSeq`): the
+  feed (`layoutTurns`) moves a notice that landed after later messages back
+  to the end of its request's turn and names the request, so a late failure
+  never reads as news about the newest request.
 - **The people chat is invisible to agents, enforced server-side.** A room's
   people chat is a channel with `kind='people'` (one per room, lazily created
   by `POST /v1/rooms/{id}/people-chat`; `GET` reads it without creating it).

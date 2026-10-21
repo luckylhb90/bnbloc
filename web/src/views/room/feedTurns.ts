@@ -14,8 +14,17 @@
 //   - an agent row's request is its sourceSeq (payload.sourceSeq).
 // A row whose parent request is not loaded (an older history page) stays in
 // place until "Load earlier" brings the request in.
+//
+// A job's notice (a failure, a progress line) is about its request
+// (payload.sourceSeq), not about whatever was posted last. One that lands
+// after a later message (a queued job that failed minutes later, while the
+// member had moved on) renders at the end of its request's turn, before
+// that later message, and names the request (aboutRequest), so it never
+// reads as news about the newest request
+// (docs/bugs/2026-10-21-late-failure-notice-and-ownerless-recipient.md).
 import type { DispatchAttribution } from "../../lib/dispatch.ts";
 import { isLiveJob } from "../../lib/agentRuns.ts";
+import { titleFromText } from "../../lib/promptPacks.ts";
 
 // The fields of a feed row the grouping reads (FeedItem satisfies it).
 export interface TurnRow {
@@ -48,8 +57,11 @@ export interface TurnBlock {
 }
 
 // The feed in render order: plain rows and, right after a request with
-// delegated work, its block.
-export type FeedEntry = { readonly kind: "row"; readonly index: number } | { readonly kind: "block"; readonly block: TurnBlock };
+// delegated work, its block. A late notice's row carries `about`: the feed
+// index of the request it was moved back to.
+export type FeedEntry =
+  | { readonly kind: "row"; readonly index: number; readonly about?: number }
+  | { readonly kind: "block"; readonly block: TurnBlock };
 
 const isAgentRow = (r: TurnRow) => r.author === "agent";
 const seqOf = (r: TurnRow) => r.seq ?? 0;
@@ -112,14 +124,57 @@ export function layoutTurns(feed: readonly TurnRow[]): FeedEntry[] {
     blocks.set(anchor, { anchor, rows, dispatches, roles, agents });
   });
 
+  // Late notices: a top-level notice whose request is loaded and was
+  // followed by another top-level message before the notice landed moves
+  // to just before that message (the end of its request's turn).
+  const late = new Map<number, number>(); // notice index → its request's index
+  const lateBefore = new Map<number, number[]>(); // message index → notices placed before it
+  feed.forEach((r, i) => {
+    const req = parent[i];
+    if (!isAgentRow(r) || !r.notice || req < 0 || nested.has(i)) return;
+    for (let k = req + 1; k < i; k++) {
+      if (isAgentRow(feed[k]) || nested.has(k)) continue;
+      late.set(i, req);
+      const list = lateBefore.get(k);
+      if (list) list.push(i);
+      else lateBefore.set(k, [i]);
+      return;
+    }
+  });
+
   const out: FeedEntry[] = [];
   feed.forEach((_, i) => {
-    if (nested.has(i)) return;
+    if (nested.has(i) || late.has(i)) return;
+    for (const n of lateBefore.get(i) ?? []) out.push({ kind: "row", index: n, about: late.get(n) });
     out.push({ kind: "row", index: i });
     const block = blocks.get(i);
     if (block) out.push({ kind: "block", block });
   });
   return out;
+}
+
+// The longest request excerpt a late notice shows.
+const ABOUT_MAX = 60;
+
+// aboutRequest names the request a late notice is about: "About: <its
+// first line>", shortened; a request with no text (attachments only) is
+// "About an earlier message".
+export function aboutRequest(text: string): string {
+  const title = titleFromText(text, ABOUT_MAX);
+  return title ? `About: ${title}` : "About an earlier message";
+}
+
+// unreadDividerAt is the feed index the "New" divider sits above: the first
+// row on screen at or past the read baseline, a late notice excepted (it
+// sits back at its request, among read rows, and would split the read part
+// of the feed). -1: no divider.
+export function unreadDividerAt(entries: readonly FeedEntry[], seqOf: (index: number) => number, unreadFromSeq: number | null): number {
+  if (unreadFromSeq === null) return -1;
+  for (const e of entries) {
+    const rows = e.kind === "row" ? (e.about === undefined ? [e.index] : []) : e.block.rows.map((r) => r.index);
+    for (const i of rows) if (seqOf(i) >= unreadFromSeq) return i;
+  }
+  return -1;
 }
 
 // renderOrder flattens the layout into the order rows appear on screen

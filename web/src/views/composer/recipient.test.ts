@@ -21,3 +21,7 @@ const mine = resolveRecipient({ ...base, text: "hi", recipient: null });
 assert(mine !== null && mine.self && mine.ownerId === "maya" && mine.provider === "claude" && mine.core === "acme", "my local target");
 assert(resolveRecipient({ ...base, text: "hi", recipient: null, localTarget: undefined }) === null, "nobody to drive");
 assert(explicitRecipient("hi", agents, null) === null, "a local target is not explicit");
+// My local target is my own agent only once I am known: never a recipient
+// with an empty owner (no bridge claims one; the server refuses it).
+assert(resolveRecipient({ ...base, text: "hi", recipient: null, subject: null }) === null, "no subject: no own agent");
+assert(resolveRecipient({ ...base, text: "hi", recipient: null, subject: "" }) === null, "empty subject: no own agent");

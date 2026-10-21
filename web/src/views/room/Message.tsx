@@ -176,10 +176,15 @@ export const Message = memo(function Message({
   onEdit,
   onAskAgent,
   showPeopleOnly = true,
+  about,
 }: {
   roomId: string;
   item: FeedItem;
   grouped?: boolean;
+  // A late notice's line naming the request it is about (feedTurns
+  // aboutRequest): it landed after later messages and sits back at its
+  // request.
+  about?: string;
   onRetry?: (item: FeedItem) => void;
   onDelete?: (item: FeedItem) => void;
   onEdit?: (item: FeedItem, text: string) => void;
@@ -231,6 +236,11 @@ export const Message = memo(function Message({
     return (
       <div id={`msg-${item.id}`} data-notice={item.notice} className="ml-10 mt-1 flex min-w-0 flex-col gap-1 text-xs text-[var(--color-fg-muted)]">
         {line}
+        {about ? (
+          <span data-notice-about className="min-w-0 truncate pl-[18px] text-[var(--color-fg-subtle)]">
+            {about}
+          </span>
+        ) : null}
         {/* The agent's own error output: fenced and verbatim, never
             Markdown and never a reply. */}
         {item.noticeDetail ? (

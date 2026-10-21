@@ -13,7 +13,7 @@ import { placeDeliverables } from "@/lib/deliverablePlacement";
 import { AgentWorking } from "@/views/room/AgentWorking";
 import { Message, sameSender } from "@/views/room/Message";
 import type { FeedItem } from "@/views/room/types";
-import { blockProgress, blockTitle, layoutTurns, progressText, renderOrder, type BlockProgress, type TurnBlock } from "@/views/room/feedTurns";
+import { aboutRequest, blockProgress, blockTitle, layoutTurns, progressText, renderOrder, unreadDividerAt, type BlockProgress, type TurnBlock } from "@/views/room/feedTurns";
 import type { PlacedDeliverables } from "@/lib/deliverablePlacement";
 
 export function MessageFeed({
@@ -199,7 +199,8 @@ type RowActions = {
 };
 
 // FeedRows renders the feed in turn order: each request, the delegated work
-// it started as one collapsible block (feedTurns.ts), then the rest.
+// it started as one collapsible block (feedTurns.ts), then the rest; a late
+// notice sits back at its request's turn, naming it.
 function FeedRows({ feed, unreadFromSeq, deliverablesAfter, ...actions }: RowActions & { readonly feed: FeedItem[]; readonly unreadFromSeq: number | null }) {
   const entries = useMemo(() => layoutTurns(feed), [feed]);
   // The row rendered just before each row (blocks expanded): the unread
@@ -210,19 +211,19 @@ function FeedRows({ feed, unreadFromSeq, deliverablesAfter, ...actions }: RowAct
     order.forEach((index, k) => out.set(index, k > 0 ? order[k - 1] : -1));
     return out;
   }, [entries]);
+  // The divider sits above the first message at or past the baseline, so a
+  // member landing in the channel sees where they stopped reading instead
+  // of guessing.
+  const dividerAt = useMemo(() => unreadDividerAt(entries, (i) => feed[i].seq ?? 0, unreadFromSeq), [entries, feed, unreadFromSeq]);
   // A member's open/closed choice per block (keyed by its request); unset
   // follows the block's state (open while its work runs).
   const [toggled, setToggled] = useState<Record<number, boolean>>({});
-  const row = (i: number) => {
+  const row = (i: number, about?: number) => {
     const m = feed[i];
     const seq = m.seq ?? 0;
     const p = prevOf.get(i) ?? -1;
     const prev = p >= 0 ? feed[p] : null;
-    const prevSeq = prev?.seq ?? 0;
-    // The divider sits above the first message at or past the baseline, so
-    // a member landing in the channel sees where they stopped reading
-    // instead of guessing.
-    const startsUnread = unreadFromSeq !== null && seq >= unreadFromSeq && (p < 0 || prevSeq < unreadFromSeq);
+    const startsUnread = i === dividerAt;
     return (
       <FeedRow
         key={m.id}
@@ -231,6 +232,7 @@ function FeedRows({ feed, unreadFromSeq, deliverablesAfter, ...actions }: RowAct
         startsUnread={startsUnread}
         grouped={!!prev && !startsUnread && sameSender(prev, m)}
         placed={deliverablesAfter.get(i) ?? []}
+        about={about === undefined ? undefined : aboutRequest(feed[about].text)}
         {...actions}
       />
     );
@@ -238,7 +240,7 @@ function FeedRows({ feed, unreadFromSeq, deliverablesAfter, ...actions }: RowAct
   return (
     <>
       {entries.map((e) => {
-        if (e.kind === "row") return row(e.index);
+        if (e.kind === "row") return row(e.index, e.about);
         const anchor = feed[e.block.anchor];
         const statusOf = (i: number) => {
           const s = feed[i].seq;
@@ -274,6 +276,7 @@ function FeedRow({
   startsUnread,
   grouped,
   placed,
+  about,
   roomId,
   agentJobs,
   onRetry,
@@ -291,6 +294,8 @@ function FeedRow({
   readonly startsUnread: boolean;
   readonly grouped: boolean;
   readonly placed: readonly PlacedDeliverables[];
+  // A late notice's line naming the request it is about.
+  readonly about?: string;
 }) {
   return (
     <div data-seq={seq || undefined}>
@@ -307,6 +312,7 @@ function FeedRow({
         roomId={roomId}
         item={m}
         grouped={grouped}
+        about={about}
         onRetry={onRetry}
         onDelete={onDelete}
         onEdit={onEdit}

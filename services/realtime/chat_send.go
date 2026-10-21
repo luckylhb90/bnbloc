@@ -27,6 +27,12 @@ import (
 var (
 	errEmptyMessage   = errors.New("empty message")
 	errMessageTooLong = errors.New("message too long")
+	// errRecipientWithoutOwner refuses an agent recipient that names no
+	// member (400). An agent is always one member's (a platform agent's
+	// too: the client routes it to a host, the recipient's owner), and
+	// the bridge claims by owner, so an ownerless job is one no bridge
+	// will ever take: it would fail minutes later as no_bridge_online.
+	errRecipientWithoutOwner = errors.New("recipient.ownerId is required: name the member whose agent should answer")
 )
 
 // errBadAttachment wraps an attachment reference that does not resolve in
@@ -51,7 +57,8 @@ type ChatAgentOptions struct {
 
 // ChatRecipient routes a message to one member's agent (e.g.
 // {ownerId:"jack", provider:"codex"}); nil/empty provider is people-only (no
-// agent is driven). Core selects which agent core drives it when the owner
+// agent is driven), and an agent recipient always names its owner
+// (errRecipientWithoutOwner). Core selects which agent core drives it when the owner
 // exposes more than one; empty means the driver's default core.
 type ChatRecipient struct {
 	OwnerID      string            `json:"ownerId"`
@@ -107,7 +114,8 @@ type ChatPosted struct {
 // (the original one for a clientMsgId already seen) and the queued job.
 // Errors: a membership refusal (membership.IsRefusal), errEmptyMessage,
 // errMessageTooLong, errBadAttachment, errUnknownChannel,
-// errAgentInPeopleChat, errPlatformAgentOffline, or a persistence failure.
+// errRecipientWithoutOwner, errAgentInPeopleChat, errPlatformAgentOffline,
+// or a persistence failure.
 //
 // The author must be a member who may chat (membership.Member.MayChat), in
 // the tenant ctx is signed for: checked here, once, so no caller (a typed
@@ -153,6 +161,9 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) 
 		p.Recipient.OwnerID = strings.TrimSpace(p.Recipient.OwnerID)
 	}
 	agent := p.Recipient != nil && p.Recipient.Provider != ""
+	if agent && p.Recipient.OwnerID == "" {
+		return ChatPosted{}, errRecipientWithoutOwner
+	}
 	if agent {
 		// The people chat is human-only: no agent is ever driven from it.
 		people, err := s.isPeopleChannel(ctx, p.RoomID, channelID)

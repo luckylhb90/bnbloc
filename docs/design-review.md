@@ -50,10 +50,16 @@ a turn matched by message text.
 - What does each value belong to — the session, the turn, or the call —
   and is it set where that lifetime starts (a per-turn job id in a
   per-session env stays the first turn's)?
+- A result that lands long after its request (a failure, a late reply):
+  is it shown with the request it is about and does it name it, or as the
+  newest event, beside newer work it will be read as being about?
 
 *Test:* run it long; restart each process in the middle; upgrade across
-it; edit or delete its inputs afterwards.
-*Seen:* every release of a tool silently restarting the conversations
+it; edit or delete its inputs afterwards; let a result land after newer
+requests.
+*Seen:* a queued job's failure notice, posted minutes later, shown under
+the newest request, which was running fine;
+every release of a tool silently restarting the conversations
 that used it; a fixed 5-minute turn cap killing real work; a 4-hour token under
 an unbounded turn; sessions lost on every restart; a deleted message still
 in an agent's memory; updates killing running tasks.
@@ -122,10 +128,15 @@ kept in records; internal names nearly pushed to a public repository.
 - Is untrusted text kept apart from instructions (fenced, never trusted for
   identity or permissions)?
 - Can one actor trigger unbounded work or notifications for another?
+- Does the server refuse every shape its own client never sends (an empty
+  id, a blank field), or only what the client happens to check? Any API
+  caller can send it.
 
-*Test:* hostile inputs; repeated triggers; look-alike names.
+*Test:* hostile inputs; repeated triggers; look-alike names; each required
+field empty and blank, sent straight to the API.
 *Seen:* display names that could impersonate an owner; requests that could
-spam an owner if not de-duplicated.
+spam an owner if not de-duplicated; a chat to an agent with an empty owner
+accepted and queued as a job no bridge would ever claim.
 
 ### 7. One rule, one owner
 

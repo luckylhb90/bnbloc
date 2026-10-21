@@ -1,7 +1,7 @@
 import { normalizeRoomEvent, type RoomEvent } from "../../lib/roomEvents.ts";
 import type { FeedItem } from "./types.ts";
 import { applyIncoming, feedItemFromEvent, mergeHistory } from "./feedModel.ts";
-import { blockProgress, blockTitle, layoutTurns, progressText, renderOrder, type FeedEntry } from "./feedTurns.ts";
+import { aboutRequest, blockProgress, blockTitle, layoutTurns, progressText, renderOrder, unreadDividerAt, type FeedEntry } from "./feedTurns.ts";
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
@@ -151,4 +151,67 @@ if (block?.kind === "block") {
     true,
   );
   eq(shape(old, layoutTurns(old)), [1, 2, 3], "no chain: flat");
+}
+
+// A late failure notice sits back at its request, naming it
+// (docs/bugs/2026-10-21-late-failure-notice-and-ownerless-recipient.md): #7's
+// job failed minutes later, after #8–#12 were posted and answered; its notice
+// (#13) renders at the end of #7's turn, before #8, never under #12.
+{
+  const qa: RoomEvent[] = [
+    chat(7, "hello, please read the attached file and tell me how many lines it has"),
+    chat(8, "please read the attached 10MB file and tell me how many lines it has"),
+    agent(9, "jack", "codex", 8, "The file has 132,732 lines."),
+    chat(10, "please query the internal system"),
+    agent(11, "jack", "codex", 10, "I cannot reach that host."),
+    chat(12, "open https://example.com and read its heading"),
+    agent(13, "", "opencode", 7, "The opencode agent is offline: no bridge picked up this request.", "job-failed"),
+  ];
+  const liveQa = items(qa, true).reduce<FeedItem[]>((f, it) => applyIncoming(f, it), []);
+  const reloadedQa = mergeHistory(mergeHistory([], items(qa.slice(3), false)), items(qa.slice(0, 3), false));
+  for (const [name, feed] of [["live", liveQa], ["reloaded", reloadedQa]] as const) {
+    const entries = layoutTurns(feed);
+    eq(shape(feed, entries), [7, 13, 8, 9, 10, 11, 12], `${name}: the late notice is at its request`);
+    const moved = entries[1];
+    assert(moved.kind === "row" && moved.about !== undefined && feed[moved.about].seq === 7, `${name}: the moved notice names #7`);
+    assert(entries.filter((e) => e.kind === "row" && e.about !== undefined).length === 1, `${name}: only the late notice is marked`);
+    eq(renderOrder(entries).map((i) => feed[i].seq), [7, 13, 8, 9, 10, 11, 12], `${name}: render order`);
+  }
+
+  // After its request's own replies, before the next message.
+  const withReply = items([chat(1, "go"), agent(2, "jack", "codex", 1, "working on it"), chat(3, "and this"), agent(4, "jack", "codex", 1, "The agent stopped responding.", "job-failed")], true);
+  eq(shape(withReply, layoutTurns(withReply)), [1, 2, 4, 3], "after the request's replies");
+
+  // A notice that lands before any later message stays where it is, unnamed.
+  const onTime = items([chat(1, "go"), agent(2, "jack", "codex", 1, "The agent stopped responding.", "job-failed"), chat(3, "next")], true);
+  const onTimeEntries = layoutTurns(onTime);
+  eq(shape(onTime, onTimeEntries), [1, 2, 3], "on time: in place");
+  assert(onTimeEntries.every((e) => e.kind !== "row" || e.about === undefined), "on time: not named");
+
+  // A notice whose request is not loaded stays in place.
+  const orphan = items([chat(3, "next"), agent(4, "jack", "codex", 1, "The agent stopped responding.", "job-failed")], true);
+  eq(shape(orphan, layoutTurns(orphan)), [3, 4], "request not loaded: in place");
+
+  // A reply (no notice) that lands late keeps its place: only notices move.
+  const lateReply = items([chat(1, "go"), chat(2, "next"), agent(3, "jack", "codex", 1, "done")], true);
+  eq(shape(lateReply, layoutTurns(lateReply)), [1, 2, 3], "a late reply stays");
+
+  // A request with delegated work keeps its notices in its block.
+  const delegated = items([chat(1, "go"), dispatch(2, 1, ["bob", "claude"]), chat(3, "next"), agent(4, "jack", "codex", 1, "The agent stopped responding.", "job-failed")], true);
+  eq(shape(delegated, layoutTurns(delegated)), [1, [1, [[2, 0], [4, 0]]], 3], "a delegated request's notice is in its block");
+
+  // The "New" divider skips a late notice (it sits among read rows).
+  const unread = [...liveQa, ...items([chat(14, "are you online?")], true)];
+  const unreadEntries = layoutTurns(unread);
+  const seqOf = (i: number) => unread[i].seq ?? 0;
+  eq(unread[unreadDividerAt(unreadEntries, seqOf, 13)]?.seq, 14, "the divider is above #14, not the late notice");
+  eq(unread[unreadDividerAt(unreadEntries, seqOf, 10)]?.seq, 10, "an earlier baseline");
+  eq(unreadDividerAt(unreadEntries, seqOf, 15), -1, "nothing unread");
+  eq(unreadDividerAt(unreadEntries, seqOf, null), -1, "no baseline");
+  // Inside a block: the first unread row on screen.
+  eq(live[unreadDividerAt(layoutTurns(live), (i) => live[i].seq ?? 0, 13)]?.seq, 13, "a block's row");
+
+  eq(aboutRequest("hello, please read the attached file and tell me how many lines it has"), "About: hello, please read the attached file and tell me how many l…", "about: the request's first words");
+  eq(aboutRequest("\n\nshort ask\nsecond line"), "About: short ask", "about: the first line");
+  eq(aboutRequest(""), "About an earlier message", "about: a request without text");
 }
