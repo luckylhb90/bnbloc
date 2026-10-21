@@ -32,6 +32,7 @@ func TestConformance(t *testing.T) {
 		ShareDir:      os.Getenv("SANDBOX_SHARE_DIR"),
 		NetworkTests:  os.Getenv("SANDBOX_NETWORK_TESTS") == "1",
 		AllowHost:     os.Getenv("SANDBOX_ALLOW_HOST"),
+		PrivateHost:   os.Getenv("SANDBOX_PRIVATE_HOST"),
 		ExecP95Budget: budget,
 		Timeout:       15 * time.Minute,
 	})

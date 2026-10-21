@@ -76,6 +76,10 @@ const (
 	// CapabilitySpaceEgress: a per-space egress policy narrower than the
 	// machine's.
 	CapabilitySpaceEgress = "spaceEgress"
+	// CapabilityEgressHosts: egress mode public may carry rules, hosts
+	// reachable in addition to the public internet, private addresses
+	// included (docs/prd/2026-10-21-sandbox-private-hosts.md).
+	CapabilityEgressHosts = "egressHosts"
 	CapabilitySecrets     = "secrets"
 	CapabilityFork        = "fork"
 	CapabilityWarmPool    = "warmPool"
@@ -95,7 +99,7 @@ const (
 // Capabilities lists every v1 capability name (validation registry).
 var Capabilities = []string{
 	CapabilityExec, CapabilityTTY, CapabilitySpaces, CapabilityShares, CapabilityPorts, CapabilityDisks,
-	CapabilitySnapshots, CapabilityPause, CapabilityEgressPolicy, CapabilitySpaceEgress, CapabilitySecrets,
+	CapabilitySnapshots, CapabilityPause, CapabilityEgressPolicy, CapabilitySpaceEgress, CapabilityEgressHosts, CapabilitySecrets,
 	CapabilityFork, CapabilityWarmPool, CapabilityExecTokens, CapabilityReadOnlyMounts,
 }
 
@@ -336,7 +340,8 @@ const (
 	// EgressAllowlist: only the listed rules are reachable.
 	EgressAllowlist EgressMode = "allowlist"
 	// EgressPublic: the public internet; private/loopback/link-local
-	// ranges (including the host) stay unreachable.
+	// ranges (including the host) stay unreachable, but for the hosts its
+	// rules list (requires egressHosts; without it public takes no rules).
 	EgressPublic EgressMode = "public"
 )
 

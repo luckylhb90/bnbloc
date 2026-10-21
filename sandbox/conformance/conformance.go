@@ -63,6 +63,10 @@ type Config struct {
 	NetworkTests bool
 	// AllowHost is the allowlisted host for NetworkTests (default example.com).
 	AllowHost string
+	// PrivateHost is a DNS name the implementation's host resolves to a
+	// private address with an HTTP server on port 80 (egressHosts). Empty:
+	// the reach checks of egressHosts are skipped.
+	PrivateHost string
 	// ExecP95Budget, when set, fails the latency step if the p95 of a
 	// space-level `true` run exceeds it.
 	ExecP95Budget time.Duration
@@ -139,6 +143,7 @@ func Run(t *testing.T, cfg Config) {
 		{"secrets", s.secrets, false},
 		{"egressDenyByDefault", s.egressDeny, false},
 		{"egressPolicy", s.egressPolicy, false},
+		{"egressHosts", s.egressHosts, false},
 		{"ports", s.ports, false},
 		{"files", s.files, false},
 		{"disks", s.disks, false},
@@ -1061,6 +1066,48 @@ func (s *suite) egressPolicy(t *testing.T) {
 	}
 	if got := s.probe(t, m.ID, "http://1.1.1.1/"); got != "BLOCKED" {
 		t.Fatalf("non-allowlisted 1.1.1.1 reachable under allowlist (%s)", got)
+	}
+	_ = s.c.DeleteMachine(s.ctx, s.ep, m.ID)
+}
+
+// egressHosts: public with rules opens the listed hosts beside the public
+// internet, private ones included, and nothing else private; without the
+// capability public refuses rules.
+func (s *suite) egressHosts(t *testing.T) {
+	s.need(t, protocol.CapabilityEgressPolicy)
+	host := s.cfg.PrivateHost
+	if host == "" {
+		host = "private.example"
+	}
+	req := protocol.CreateMachineRequest{
+		Image: s.cfg.Image, MemoryMiB: 256,
+		Egress: &protocol.Egress{Mode: protocol.EgressPublic, Rules: []protocol.EgressRule{{Host: host, Port: 80}}},
+	}
+	if !s.has(protocol.CapabilityEgressHosts) {
+		if _, err := s.c.CreateMachine(s.ctx, s.ep, req); protocol.ErrorCodeOf(err) != protocol.ErrorCapabilityMissing {
+			t.Fatalf("public egress with rules without egressHosts: %v, want capability_missing", err)
+		}
+		return
+	}
+	if !s.cfg.NetworkTests || s.cfg.PrivateHost == "" {
+		t.Skip("needs NetworkTests and PrivateHost")
+	}
+	m, err := s.c.CreateMachine(s.ctx, s.ep, req)
+	if err != nil {
+		t.Fatalf("create public machine with a private host: %v", err)
+	}
+	s.track(m)
+	if got := s.probe(t, m.ID, "http://"+host+"/"); got != "REACHED" {
+		t.Fatalf("listed private host %s not reachable (%s)", host, got)
+	}
+	if got := s.probe(t, m.ID, "http://"+s.cfg.AllowHost+"/"); got != "REACHED" {
+		t.Fatalf("public %s not reachable beside a listed host (%s)", s.cfg.AllowHost, got)
+	}
+	// Another private address, and the host itself, stay closed.
+	for _, target := range []string{"http://10.255.255.254/", "http://192.168.255.254/"} {
+		if got := s.probe(t, m.ID, target); got != "BLOCKED" {
+			t.Fatalf("unlisted private %s reachable (%s)", target, got)
+		}
 	}
 	_ = s.c.DeleteMachine(s.ctx, s.ep, m.ID)
 }

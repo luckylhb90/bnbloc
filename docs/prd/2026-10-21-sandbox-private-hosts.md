@@ -1,6 +1,9 @@
 # Private hosts for a member's own sandboxed agents, asked for by the AI (2026-10-21)
 
-Status: proposed. Owner: the Sandbox Protocol (`sandbox/protocol`,
+Status: slice 1 built (2026-10-21): `egressHosts` in the protocol, the
+conformance step `egressHosts` (`SANDBOX_PRIVATE_HOST`), the reference
+implementation; the full suite passes against it with an internal host
+listed. Slices 2–3 proposed. Owner: the Sandbox Protocol (`sandbox/protocol`,
 `docs/architecture/sandbox-protocol.md`), the desktop's sandbox adapter
 (`apps/desktop/src-tauri/src/internal_ext/sandbox*.rs`), the bridge's
 sandbox runtime (`services/bridge/sandbox.go`), find-a-way
@@ -41,8 +44,10 @@ What blocks it today, checked against the code:
 - Its DNS refuses an answer with a private address (rebind protection)
   unless an address rule covers that address; a name rule alone is not
   enough. That is the "cannot resolve" the agent saw.
-- Its egress policy is fixed when the VM boots: a change needs a restart
-  (0.8 s measured) or a recreate.
+- Its egress policy is fixed when the machine is created: `start` after
+  `stop` boots the stored VM with the same policy (`Vm::start`), so a
+  change needs a recreate (create measured 0.4–0.6 s; the bridge
+  re-ensures its space every turn anyway).
 
 ## 2. What it is (the end state)
 
@@ -73,14 +78,22 @@ What blocks it today, checked against the code:
   connects; an unlisted private host neither resolves nor connects; the
   public internet still works; a listed name does not open the address of
   an unlisted one.
-- The reference implementation (checked against microsandbox 0.7.7): its
-  DNS rebind check admits a private answer only when an **address** rule
-  allows that address (`policies_allow_rebind_address` reads `Cidr` and
-  `Group` rules, never `Domain`). So for a listed name the sidecar resolves
-  it on the host when it applies the policy and adds an address rule for
-  each private address it got, beside the name rule; rebind protection
-  stays on for everything else. The addresses are resolved again at every
-  machine start. A listed IP or CIDR is an address rule as it is.
+- The reference implementation opens a listed name **by its addresses**:
+  it resolves the name on the host when the policy is applied (create, a
+  restore that sets egress) and adds a port-less address rule for each
+  private address. Checked live against microsandbox 0.7.7 (2026-10-21):
+  - its DNS rebind check admits a private answer only for such an address
+    rule (`policies_allow_rebind_address` reads `Cidr` and `Group`, never
+    `Domain`), so a name rule alone does not resolve;
+  - a name rule makes it hold each connection for the TLS hostname, and
+    TLS to the private host then failed (`unexpected eof`); address rules
+    alone connect (`/-/ping` answered 200);
+  - so another name on the same addresses is reachable too (two internal
+    names behind one load balancer both opened), and the port is not
+    held; any other private address stays closed, the public internet
+    open, metadata closed. Wildcards are refused (nothing to resolve
+    ahead). The protocol allows a stricter implementation.
+  A listed IP literal keeps its port.
 
 ### 2.3 Noticing and asking: find-a-way proposes the host
 
@@ -124,17 +137,17 @@ What blocks it today, checked against the code:
 | Lens | Answer |
 |---|---|
 | Actors | The member decides for their own agents; admins bound it; a borrower and a platform drive never reach a private host (§2.1). An agent never adds a host: the member's click does. |
-| Time and lifecycle | A change applies when no own turn runs (never-stop-live-runs); the machine restart is 0.8 s; a host the policy drops is removed at the next apply. |
+| Time and lifecycle | A change applies when no own turn runs (never-stop-live-runs); a recreate takes under a second; a host the policy drops is removed at the next apply. |
 | Scale and cost | A second VM only for members with private hosts; idle cost is memory (paused when idle is a follow-up). |
 | Failure and recovery | `bnbloc-own` not ready → own drives run on `bnbloc` as today (the host just stays blocked); the card says the change did not apply and why. An unreadable policy counts as `off`. |
 | Boundaries and privacy | The host list stays on the member's computer; the tenant policy is the only server state. Secrets keep their own host rules. |
-| Abuse and untrusted input | The host comes from an agent reply (untrusted): held to a name, never loopback, link-local or metadata, bounded by the organization's list, and opened only on a click that names it. |
+| Abuse and untrusted input | The host comes from an agent reply (untrusted): held to a name, never loopback, link-local or metadata, bounded by the organization's list, and opened only on a click that names it. The reference opens the name's addresses, so the card and Settings say "and anything else at its address". |
 | One owner | The protocol owns the rule shape; the desktop owns the machines and the list; the bridge owns the choice of machine; find-a-way owns noticing. |
 | Defaults and fallbacks | Default policy `listed` with an empty list: nothing opens until an admin lists a host. No capability → no Private hosts section and no `allow-host` action. |
 | External contracts | `egressHosts` is a new optional capability with a conformance step; `public` without rules is unchanged. |
 | Load on users and agents | One card when a host is blocked; no new tool or rule for agents. |
 | Release and compatibility | Additive. Old sidecar: no capability, behaviour as today. Old desktop: never sends rules. |
-| Observability | The desktop logs every apply (hosts added or removed, the machine restarted or not); the bridge logs which machine a drive ran on. |
+| Observability | The desktop logs every apply (hosts added or removed, the machine recreated or not); the bridge logs which machine a drive ran on. |
 | AI capability | Notices the block and proposes the exact host; the member decides. |
 | Component or platform | Platform: the protocol capability, the machine choice, the policy (only the platform can enforce a boundary). The sandbox itself stays a component. |
 
@@ -145,7 +158,8 @@ What blocks it today, checked against the code:
 2. *The host still does not resolve after Allow.* The rebind check is what
    blocked it; the reference adds address rules for the name's private
    addresses (§2.2), the conformance step resolves a listed private name,
-   and a host whose address changes is resolved again at the next start.
+   and a host whose address changes is resolved again at the next apply
+   (Settings offers "Apply again").
 3. *A reply talks the member into opening something.* The card names the
    host and the reach in plain words, the target cannot be loopback or
    metadata, and the organization's list bounds it by default.

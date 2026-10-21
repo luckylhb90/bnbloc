@@ -102,6 +102,7 @@ conforming, advertising one and failing it is not:
 | `pause` | pause / resume |
 | `egressPolicy` | egress modes `allowlist` and `public` (`none` is always available) |
 | `spaceEgress` | a per-space egress policy narrower than the machine's |
+| `egressHosts` | egress mode `public` with `rules`: listed hosts reachable beside the public internet, private ones included |
 | `secrets` | host-substituted secrets |
 | `fork` | live fork |
 | `warmPool` | warm pools + claim |
@@ -162,8 +163,11 @@ when the answer is sent; `timings.createMs` reports the server-side cost.
   `none`). `allowlist` rules are `{host, port}` with `host` an exact DNS name,
   a `*.suffix` of at least two labels, or an IP literal (`port` 0 = any).
   `public` allows the public internet but never private, loopback or
-  link-local ranges (including the host). Enforcement must sit outside the
-  guest.
+  link-local ranges (including the host). With `egressHosts`, `public` may
+  carry `rules` (same shape): those hosts are reachable too, private ones
+  included, and a listed name's private DNS answer is admitted for that
+  name only; without the capability `public` with rules is
+  `capability_missing`. Enforcement must sit outside the guest.
 - **Secrets**: the guest sees env var `name` set to an opaque placeholder
   (reported as `placeholder`); the value is substituted on the host side only
   in egress to `hosts`, never returned by any endpoint, never logged.
@@ -390,6 +394,8 @@ suite checks discovery, auth, the error envelope, images, machine create and
 exec, spaces (users, isolation, host-path translation, live shared mounts,
 env allowlist, file ownership), exec latency, piped stdin, tty, signals,
 secrets (never plaintext in the guest or any answer), exec-token scoping,
-egress deny-by-default,
+egress deny-by-default, public egress with listed private hosts
+(`SANDBOX_PRIVATE_HOST`: a name the host resolves to a private address
+serving HTTP on port 80),
 ports, files/archives, disks, pause/resume, stop/start, snapshot/restore,
 fork, warm pools and deletion, logging the timings of each step.
