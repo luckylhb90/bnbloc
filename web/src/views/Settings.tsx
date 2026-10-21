@@ -13,7 +13,6 @@ import { NotifierDelivery } from "@/views/settings/NotifierDelivery";
 import { BrowserPush } from "@/views/settings/BrowserPush";
 import { SignedInDevices } from "@/views/settings/SignedInDevices";
 import { MyBudget } from "@/views/settings/MyBudget";
-import { AgentSandbox } from "@/views/settings/AgentSandbox";
 import { ProfileSettings } from "@/views/settings/ProfileSettings";
 import { errorText } from "@/lib/errors";
 
@@ -135,7 +134,6 @@ export function Settings() {
             </Card>
           )}
         </section>
-        <AgentSandbox />
         <MyBudget />
         <SignedInDevices />
       </div>

@@ -1,24 +1,26 @@
 # Private hosts for a member's own sandboxed agents, asked for by the AI (2026-10-21)
 
-Status: slices 1–2 built (2026-10-21). Slice 1: `egressHosts` in the
-protocol, the conformance step `egressHosts` (`SANDBOX_PRIVATE_HOST`), the
-reference implementation; the full suite passes against it with an
-internal host listed. Slice 2: the desktop's list (Settings → Agent sandbox
-→ Private hosts, `protocol.ValidPrivateHost`), `bnbloc-own` and its apply
-rule (`plan_own_machine`), the bridge's machine per drive
-(`BNBLOC_SANDBOX_OWN_MACHINE`, `driveKey.ownMachine`). Slice 3
-(self-configuring, §2.3 revised) next. Owner: the Sandbox Protocol (`sandbox/protocol`,
-`docs/architecture/sandbox-protocol.md`), the desktop's sandbox adapter
+Status: built (2026-10-21). Slice 1: `egressHosts` in the protocol, the
+conformance step `egressHosts` (`SANDBOX_PRIVATE_HOST`), the reference
+implementation; the full suite passes against it with an internal host
+listed. Slice 2: `bnbloc-own` and its apply rule (`plan_own_machine`), the
+bridge's machine per drive (`BNBLOC_SANDBOX_OWN_MACHINE`,
+`driveKey.ownMachine`). Slice 3: the sandbox's configuration as its own
+component settings, set in Components (§2.3), and find-a-way's
+`allow-host` (§2.4). Owner: the Sandbox Protocol (`sandbox/protocol`,
+`docs/architecture/sandbox-protocol.md`), the sandbox settings contract
+(`core/pkgmeta/sandbox_settings.go`), the desktop's sandbox adapter
 (`apps/desktop/src-tauri/src/internal_ext/sandbox*.rs`), the bridge's
 sandbox runtime (`services/bridge/sandbox.go`), find-a-way
-(`docs/prd/2026-10-20-never-a-dead-end.md`), the tenant policy
-(`internal/wire/tenant_policy.go`).
+(`docs/prd/2026-10-20-never-a-dead-end.md`).
 
 A member whose own agent runs in the VM sandbox can let it reach a named
 private host (the team's package registry, its CI) instead of the sandbox
-blocking every private address. The AI notices the block and proposes the
-host; the member allows it with one click; the organization's admins
-decide whether members may, and which hosts.
+blocking every private address. The organization opens its hosts for
+everyone and decides whether members may add their own; the AI notices a
+blocked host in a reply and proposes it; the member allows it with one
+click. All of it is the sandbox component's own settings, set where every
+component is set up: Components.
 
 ## 1. Why
 
@@ -111,63 +113,81 @@ What blocks it today, checked against the code:
     ahead). The protocol allows a stricter implementation.
   A listed IP literal keeps its port.
 
-### 2.3 Self-configuring: the sandbox notices, the member allows
+### 2.3 The sandbox's settings are its own, set in Components
 
-Revised 2026-10-21 after slice 2 (the owner: "why isn't the sandbox
-self-configuring, why is it in Settings?"). The member never fills a list
-first: the platform sees what the sandbox blocked, proposes it on the turn,
-and one click opens it. Settings only shows what is open and takes it back.
+Revised 2026-10-21 (the owner: "a component's configuration is kept by
+the component itself and set in Components"). Slice 2 first put the mode,
+the forwarded environment and the hosts in desktop Settings → Agent
+sandbox; that section is gone. A sandbox package declares them in its own
+manifest `settings` (`docs/prd/2026-10-19-component-settings.md`), and
+they are set in the one settings dialog on its Components card, like any
+component's:
 
-- **The sandbox reports what it blocked.** New capability `egressReport`:
-  `GET /sandbox/v1/machines/{m}/egress/blocked?sinceMs=` answers the names
-  the guest looked up whose answer was a private address the egress did not
-  open (name, the private addresses, first and last time, count), newest
-  first, bounded. The reference implementation sees them by being the
-  guest DNS's upstream: it runs a forwarding resolver on loopback
-  (microsandbox's `dns.nameservers`), forwards each query to the host's
-  resolvers unchanged, and records an answer holding a private address the
-  machine's rules do not cover. A fact the platform observed, not a guess
-  from the agent's reply text (which may leave it out, or be written by a
-  prompt).
-- **The bridge attaches it to the turn.** When an own sandboxed turn ends,
-  the bridge reads the machine's blocked names since the turn started and
-  puts them on the job (`blockedHosts`), names only. Only own drives:
-  a borrowed or platform turn never carries them, and the shared machine's
-  names are read for an own drive only (a borrowed turn running at the same
-  time may add a name; the member still decides).
-- **The card asks.** A settled own turn with `blockedHosts` shows the
-  find-a-way card at once, without the gate: the fix `allow-host` for each
-  name the policy lets the member open ("Your agent's sandbox could not
-  reach `npm.internal.example`. Allow your own agents to reach it?"), with
-  **Allow** and **Not now**. The AI part: find-a-way gets the blocked names
-  in `capabilities`, explains in the summary what failed and why the host
-  fixes it, and may add other fixes; with no assist model the card still
-  offers `allow-host` (the fallback). Allow adds the host on the desktop
-  (applied when no own turn runs there) and the card then offers **Ask
-  again**.
-- **Admins can pre-open hosts.** With the organization's list (§2.4) a
-  listed host needs no question: the desktop opens it for every member
-  whose own runs are sandboxed, and a blocked name on the list is opened at
-  once.
+| Key | Scope | Type | Default | What it does |
+|---|---|---|---|---|
+| `mode` | member | choice `off` \| `borrowed` \| `all` | `borrowed` | Which of the member's runs execute in the VM (`BNBLOC_SANDBOX_MODE`). |
+| `forwardEnv` | member | lines | — | Names or `PREFIX*` patterns let into the member's own sandboxed runs (`BNBLOC_SANDBOX_ENV`; `pkgmeta.ValidForwardEnv`). |
+| `privateHosts` | member | lines | — | Hosts the member's own sandboxed runs reach (`ValidPrivateHost`); the card's Allow adds one. |
+| `orgHosts` | org | lines | — | Hosts the organization opens to every member's own sandboxed runs, without asking. |
+| `memberHosts` | org | choice `ask` \| `off` | `ask` | Whether a member may allow a host of their own. |
+
+- **The contract.** The keys are the sandbox kind's contract
+  (`wire.SandboxSetting*`, `pkgmeta/sandbox_settings.go`): a package that
+  declares one declares it in that shape (`validateSandboxSettings`), and
+  may declare more or fewer; an undeclared one takes the platform's
+  default. The value rules beyond a type (each `forwardEnv` line a
+  forwardable name, each host line a private host) are
+  `pkgmeta.CheckSandboxSettingValue`: the gateway holds an organization's
+  save to it (`CheckKindSettings`), the desktop a member's (its copy,
+  built from the two pinned rules).
+- **Where values live.** As for every component: the organization's
+  sealed on the gateway, the member's in their member store on the desktop
+  (`component-settings/sandbox@<name>.json`). The sandbox reaches members'
+  computers, so the desktop reads the organization's values
+  (`GET /v1/components/{name}/settings/resolved?kind=sandbox`) each time
+  the catalog changes (a settings save pushes `components_changed`).
+- **What the desktop does with them** (`sandbox_settings`): the mode and
+  the names from the member's values; the own machine's hosts are
+  `orgHosts`, plus `privateHosts` when `memberHosts` is not `off`. Until
+  the organization's values are read, none of the member's hosts opens
+  (fail closed). A change reconciles the machines (the own one when no own
+  turn runs there) and, through the bridge's stabilized restart, the bridge
+  env; it never restarts the sidecar.
+- **The dialog** shows the form (each scope the viewer may set) and, on
+  this computer, the sandbox's state: the VM, the hosts open now ("not open
+  yet" while a change waits), Restart VM, Apply again, Reload shell
+  environment.
+- A host opens on any port: the reference cannot hold a name's port
+  (§2.2), and the settings' help says so. Used only in mode `all` (in
+  `borrowed` the member's own runs are on the host, which reaches the hosts
+  itself).
+
+### 2.4 The AI proposes the host: find-a-way's `allow-host`
+
+- **The fact.** The bridge marks where a turn's commands ran
+  (`AgentJob.sandboxed`: `own` for the owner's own sandboxed run, `shared`
+  for a borrowed one or one wearing someone else's content). The room
+  holds the member's jobs, so the card knows the reply's run was their own
+  agent in their sandbox; the desktop says whether its settings let them
+  allow a host and its runtime can open one.
+- **The assist.** find-a-way gets both in `<capabilities>` ("the reply's
+  run was the member's own agent in their agent sandbox, which reaches the
+  public internet but no private host they did not allow"; "the member may
+  allow a private host: yes|no") and has the action `allow-host`: when the
+  reply shows the agent could not reach a host on the member's network,
+  `target` is that host. Its instructions are content
+  (`bnbloc-default-content/packages/find-a-way`).
+- **The card** holds the target to the host rule (the web's copy of
+  `ValidPrivateHost`, pinned by the same fixture), drops it unless the run
+  was the member's own sandboxed one and they may allow a host, and never
+  offers a host already open. The click asks first, in plain words ("let
+  your own agents' sandboxed runs reach `npm.internal.example` on any port,
+  and anything else at its address; runs by other members never reach
+  it"); Allow adds the host to the member's `privateHosts`; the card then
+  waits until the own VM and the bridge have it and offers **Ask again**
+  (the same request to the same agent). With no assist model the fallback
+  offers `allow-host` with a host field.
 - Nothing in the agent changes.
-
-### 2.4 Settings and policy
-
-- Desktop Settings → Agent sandbox → **Private hosts** shows what is open
-  (the member's own and the organization's), where each came from (a room's
-  card, the organization), and Remove; adding by hand stays for a host no
-  run has hit yet. A host opens on any port: the reference cannot hold a
-  name's port (§2.2). Shown only when the runtime advertises `egressHosts`;
-  used only in mode `all` (in `borrowed` the member's own runs are on the
-  host, which reaches the hosts itself).
-- Organization → Settings → **Sandbox private hosts** (tenant policy,
-  `manage_org`): `off` (no private host opens), `listed` (only the
-  organization's list, opened for everyone without asking; the default,
-  empty) or `ask` (the list opens for everyone, and a member may allow
-  another host from the card), plus the list.
-- `GET /v1/my/tenant-policy` carries both, so the desktop and the card read
-  one answer. A member's host the policy no longer allows is dropped from
-  the machine at the next apply, and the Settings row says why.
 
 ## 3. Design review
 
@@ -176,17 +196,17 @@ and one click opens it. Settings only shows what is open and takes it back.
 | Actors | The member decides for their own agents; admins bound it; a borrower and a platform drive never reach a private host (§2.1). An agent never adds a host: the member's click does. |
 | Time and lifecycle | A change applies when no own turn runs (never-stop-live-runs); a recreate takes under a second; a host the policy drops is removed at the next apply. |
 | Scale and cost | A second VM only for members with private hosts; idle cost is memory (paused when idle is a follow-up). |
-| Failure and recovery | `bnbloc-own` not ready → own drives run on `bnbloc` as today (the host just stays blocked); the card says the change did not apply and why. An unreadable policy counts as `off`. |
-| Boundaries and privacy | The host list stays on the member's computer; the tenant policy is the only server state. Secrets keep their own host rules. |
-| Abuse and untrusted input | The host comes from an agent reply (untrusted): held to a name, never loopback, link-local or metadata, bounded by the organization's list, and opened only on a click that names it. The reference opens the name's addresses, so the card and Settings say "and anything else at its address". |
-| One owner | The protocol owns the rule shape; the desktop owns the machines and the list; the bridge owns the choice of machine; find-a-way owns noticing. |
-| Defaults and fallbacks | Default policy `listed` with an empty list: nothing opens until an admin lists a host or switches to `ask`. No `egressHosts` → no Private hosts section and no `allow-host` action; no `egressReport` → no `blockedHosts`, the card runs gated as today. |
+| Failure and recovery | `bnbloc-own` not ready → own drives run on `bnbloc` as today (the host just stays blocked); the card says the change did not apply and why. Organization values not read yet → none of the member's hosts opens. |
+| Boundaries and privacy | The member's hosts stay on their computer (member store); the organization's are its sealed settings. Secrets keep their own host rules. |
+| Abuse and untrusted input | The host comes from an agent reply (untrusted): held to a name, never loopback, link-local or metadata, offered only where the organization lets members allow hosts, and opened only on a click that names it. The reference opens the name's addresses, so the card and the setting's help say "anything else at its address". |
+| One owner | The protocol owns the rule shape; pkgmeta the settings contract; the component settings store the values; the desktop owns the machines; the bridge owns the choice of machine; find-a-way owns noticing. |
+| Defaults and fallbacks | Default `memberHosts` `ask`, no hosts listed: nothing opens until a member allows one or an admin lists one. No `egressHosts` → no `allow-host` and the dialog says the runtime cannot open hosts. A package that declares no settings runs with the platform's defaults. |
 | External contracts | `egressHosts` is a new optional capability with a conformance step; `public` without rules is unchanged. |
-| Load on users and agents | One card when a host is blocked; no new tool or rule for agents. |
-| Release and compatibility | Additive. Old sidecar: no capability, behaviour as today. Old desktop: never sends rules. |
+| Load on users and agents | One card when a host is blocked; the settings are in the dialog every component uses; no new tool or rule for agents. |
+| Release and compatibility | Old sidecar: no capability, behaviour as today. Old desktop: never sends rules. The slice-2 desktop Settings fields are dropped without migration (pre-launch): a member who chose `all` sets it again in Components. |
 | Observability | The desktop logs every apply (hosts added or removed, the machine recreated or not); the bridge logs which machine a drive ran on. |
 | AI capability | Notices the block and proposes the exact host; the member decides. |
-| Component or platform | Platform: the protocol capability, the machine choice, the policy (only the platform can enforce a boundary). The sandbox itself stays a component. |
+| Component or platform | Platform: the protocol capability, the machine choice, the settings contract (only the platform can enforce a boundary). The sandbox itself and its settings stay the component's. |
 
 **Pre-mortem.**
 1. *A teammate's borrowed prompt reaches the private host.* Borrowed and
@@ -199,17 +219,23 @@ and one click opens it. Settings only shows what is open and takes it back.
    (Settings offers "Apply again").
 3. *A reply talks the member into opening something.* The card names the
    host and the reach in plain words, the target cannot be loopback or
-   metadata, and the organization's list bounds it by default.
+   metadata, and an organization that does not want it turns
+   `memberHosts` off.
+4. *The organization's values are never read and a member's host opens
+   against its choice.* Until they are read, no member host opens
+   (`sandbox_settings` fails closed); a desktop test holds it.
 
 ## 4. Build order (slices of §2)
 
 1. Protocol `egressHosts` + conformance step; the reference
    implementation's rule translation and rebind admission. (built)
-2. Desktop: the member's list, `bnbloc-own`, apply when idle, Settings;
-   bridge: the machine per drive kind. (built)
-3. Self-configuring: protocol `egressReport` + conformance step, the
-   reference's observing resolver; the bridge's `blockedHosts` on own
-   turns; find-a-way's `allow-host` action, the blocked names in
-   `capabilities`, the card without the gate; tenant policy (`off` /
-   `listed` / `ask` and the list), Organization settings, the
-   organization's hosts opened by the desktop.
+2. Desktop: `bnbloc-own`, apply when idle; bridge: the machine per drive
+   kind. (built)
+3. The sandbox's settings as its component settings (§2.3: the contract,
+   the gateway's check, the desktop's reading, the dialog, the sandbox
+   package declaring them) and find-a-way's `allow-host` (§2.4: the job's
+   `sandboxed`, the capabilities, the card, the content). (built)
+
+Not built: the sandbox observing which private names its guest looked up
+(a protocol `egressReport`), which would let the card ask without the AI
+reading the reply; it waits for a reply the AI misreads.

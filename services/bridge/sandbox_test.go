@@ -722,7 +722,7 @@ func TestSandbox_agentErrorHintsAtTheEnvSetting_onOwnRunsOnly(t *testing.T) {
 			t.Fatalf("%s: rows = %+v; want the one notice", tc.requester, fresh)
 		}
 		text := payloadText(fresh[0])
-		if got := strings.Contains(text, "Environment passed to sandboxed agents"); got != tc.hint {
+		if got := strings.Contains(text, sandboxEnvHint); got != tc.hint {
 			t.Fatalf("%s: notice %q; hint = %v, want %v", tc.requester, text, got, tc.hint)
 		}
 		if !strings.Contains(payloadField(fresh[0], "detail"), "EXAMPLE_API_KEY") {
@@ -752,7 +752,7 @@ func TestSandbox_envHintOnlyForCredentialErrors(t *testing.T) {
 		if len(fresh) != 1 {
 			t.Fatalf("%q: rows = %+v", tc.message, fresh)
 		}
-		if got := strings.Contains(payloadText(fresh[0]), "Environment passed to sandboxed agents"); got != tc.hint {
+		if got := strings.Contains(payloadText(fresh[0]), sandboxEnvHint); got != tc.hint {
 			t.Fatalf("%q: hint = %v, want %v", tc.message, got, tc.hint)
 		}
 	}

@@ -67,7 +67,7 @@ func TestLiveTurn_deadlineAndProgress(t *testing.T) {
 		t.Fatalf("status = %v", st)
 	}
 	_, fresh := gw.stored()
-	if len(fresh) != 1 || !strings.Contains(payloadText(fresh[0]), "ran out of time after 45 minutes") || strings.Contains(payloadText(fresh[0]), "Environment passed") {
+	if len(fresh) != 1 || !strings.Contains(payloadText(fresh[0]), "ran out of time after 45 minutes") || strings.Contains(payloadText(fresh[0]), sandboxEnvHint) {
 		t.Fatalf("notice = %q", storedTexts(fresh))
 	}
 }

@@ -54,6 +54,9 @@ type AgentJob struct {
 	// (a skill pack an expert requires, a room expert that is gone); the
 	// turn runs without them.
 	ContentMissing []string `json:"contentMissing,omitempty"`
+	// Sandboxed is where the turn's commands ran when its owner's agent
+	// sandbox ran them: SandboxedOwn or SandboxedShared ("" on the host).
+	Sandboxed string `json:"sandboxed,omitempty"`
 	// ReplySessionID is the activity session a replied job's reply was
 	// posted under (notifications pair the reply with its job by it).
 	ReplySessionID string `json:"replySessionId,omitempty"`
@@ -72,3 +75,14 @@ type AgentJobAttempt struct {
 type AgentJobsReply struct {
 	Jobs []AgentJob `json:"jobs"`
 }
+
+// Where a sandboxed turn ran (AgentJob.Sandboxed).
+const (
+	// SandboxedOwn: the owner's own run, with their forwarded environment
+	// and the private hosts open to them
+	// (docs/prd/2026-10-21-sandbox-private-hosts.md).
+	SandboxedOwn = "own"
+	// SandboxedShared: a borrowed run, or one wearing someone else's
+	// content: neither.
+	SandboxedShared = "shared"
+)

@@ -528,10 +528,10 @@ fn env_for(
     if s.serve_all_owners || std::env::var("BNBLOC_BRIDGE_SERVE_ALL_OWNERS").is_ok() {
         env.insert("BNBLOC_BRIDGE_SERVE_ALL_OWNERS".into(), "1".into());
     }
-    // The local sandbox (BNBLOC_SANDBOX_*): the member's mode always, the
-    // sidecar URL/bearer/machine only while it is ready. Memory only — the
-    // bearer is never written to settings or logged.
-    crate::internal_ext::sandbox::extend_bridge_env(app, &mut env, s.sandbox_mode, &s.sandbox_env);
+    // The local sandbox (BNBLOC_SANDBOX_*): the mode its settings say
+    // always, the sidecar URL/bearer/machine only while it is ready. Memory
+    // only — the bearer is never written to settings or logged.
+    crate::internal_ext::sandbox::extend_bridge_env(app, &mut env);
     env
 }
 
@@ -677,24 +677,14 @@ mod tests {
     }
 
     #[test]
-    fn env_for_hands_the_sandbox_mode_without_a_ready_sandbox() {
-        let s = Settings {
-            sandbox_mode: crate::settings::SandboxMode::All,
-            ..Default::default()
-        };
-        let env = env_for(&s, None, None);
+    fn env_for_hands_the_default_sandbox_mode_without_the_manager() {
+        let env = env_for(&Settings::default(), None, None);
         assert_eq!(
             env.get("BNBLOC_SANDBOX_MODE").map(String::as_str),
-            Some("all")
+            Some("borrowed")
         );
         assert!(!env.contains_key("BNBLOC_SANDBOX_URL"));
         assert!(!env.contains_key("BNBLOC_SANDBOX_TOKEN"));
-        assert_eq!(
-            env_for(&Settings::default(), None, None)
-                .get("BNBLOC_SANDBOX_MODE")
-                .map(String::as_str),
-            Some("borrowed")
-        );
     }
 
     #[test]

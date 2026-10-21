@@ -47,6 +47,10 @@ type Capabilities struct {
 	// OwnAgent: the client says the member has an agent of their own on
 	// this device.
 	OwnAgent bool
+	// SandboxedRun: the client says the reply's turn was the member's own
+	// agent in their agent sandbox; MayAllowHosts that they may allow it a
+	// private host (docs/prd/2026-10-21-sandbox-private-hosts.md).
+	SandboxedRun, MayAllowHosts bool
 	// OtherMembers counts the room's other people.
 	OtherMembers int
 }
@@ -337,6 +341,14 @@ func capabilities(b *strings.Builder, c Capabilities) {
 		own = "yes"
 	}
 	fmt.Fprintf(b, "own agent on this device: %s\n", own)
+	if c.SandboxedRun {
+		may := "no"
+		if c.MayAllowHosts {
+			may = "yes"
+		}
+		b.WriteString("the reply's run was the member's own agent in their agent sandbox, which reaches the public internet but no private host they did not allow\n")
+		fmt.Fprintf(b, "the member may allow a private host: %s\n", may)
+	}
 	if c.InRoom {
 		fmt.Fprintf(b, "other people in the room: %d\n", c.OtherMembers)
 	}

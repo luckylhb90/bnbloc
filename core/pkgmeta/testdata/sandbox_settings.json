@@ -1,0 +1,10 @@
+{
+  "_comment": "The sandbox settings the platform reads by key (core/pkgmeta/sandbox_settings.go). The desktop's copy (apps/desktop/src-tauri/src/internal_ext/sandbox.rs) is pinned to the same keys and shapes.",
+  "shapes": {
+    "mode": {"type": "choice", "scope": "member", "options": ["off", "borrowed", "all"]},
+    "forwardEnv": {"type": "lines", "scope": "member"},
+    "privateHosts": {"type": "lines", "scope": "member"},
+    "orgHosts": {"type": "lines", "scope": "org"},
+    "memberHosts": {"type": "choice", "scope": "org", "options": ["ask", "off"]}
+  }
+}

@@ -456,7 +456,7 @@ func decideSandbox(borrowed bool, foreign []string, mode SandboxMode, ready bool
 func sandboxUnavailable(mode SandboxMode, ready bool, notReadyReason string, coreSupports bool, owner, provider string) string {
 	switch {
 	case mode == SandboxOff:
-		return owner + "'s agent sandbox is off. " + owner + " can turn it on in Settings → Agent sandbox."
+		return owner + "'s agent sandbox is off. " + owner + " can turn it on in Components → the sandbox → Settings."
 	case !ready:
 		reason := notReadyReason
 		if reason == "" {

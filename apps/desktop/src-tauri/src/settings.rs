@@ -85,64 +85,6 @@ pub struct Settings {
     /// deployments). Mirrors `BNBLOC_GATEWAY_TOKEN`.
     #[serde(default)]
     pub gateway_token: String,
-    /// Which of this member's agent runs execute their commands in the local
-    /// sandbox VM (when a sandbox component is installed and ready). Handed
-    /// to the bridge as `BNBLOC_SANDBOX_MODE`; tenant policy may raise it.
-    #[serde(default)]
-    pub sandbox_mode: SandboxMode,
-    /// Environment variable names (or `PREFIX*` patterns) the member lets
-    /// into the sandboxed runs of their own agents, beyond the default
-    /// (terminal, locale, git identity). Names only, never values: a value
-    /// is read from the agent's own environment when a command crosses into
-    /// the VM. Borrowed and platform runs never get them. Handed to the
-    /// bridge as `BNBLOC_SANDBOX_ENV`; validated by
-    /// `sandbox::valid_forward_env` when saved.
-    #[serde(default)]
-    pub sandbox_env: Vec<String>,
-    /// Private hosts (the team's package registry, its CI) the member lets
-    /// the sandboxed runs of their own agents reach beside the public
-    /// internet; borrowed and platform runs never reach them
-    /// (docs/prd/2026-10-21-sandbox-private-hosts.md). They open on the
-    /// member's own machine only; validated by `sandbox::valid_private_host`
-    /// when added.
-    #[serde(default)]
-    pub sandbox_private_hosts: Vec<PrivateHost>,
-}
-
-/// One host of `Settings::sandbox_private_hosts`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct PrivateHost {
-    /// A lower-case DNS name or an IP literal (any port).
-    pub host: String,
-    #[serde(default)]
-    pub added_at_ms: u64,
-    /// The room whose agent reply proposed it ("" = added in Settings).
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub room_id: String,
-}
-
-/// The member's sandbox setting (`BNBLOC_SANDBOX_MODE`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum SandboxMode {
-    /// No sandbox VM runs; every run executes on the host.
-    Off,
-    /// Runs driven by another member (borrowed) execute in the VM.
-    #[default]
-    Borrowed,
-    /// Every run of this member's agents executes in the VM.
-    All,
-}
-
-impl SandboxMode {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            SandboxMode::Off => "off",
-            SandboxMode::Borrowed => "borrowed",
-            SandboxMode::All => "all",
-        }
-    }
 }
 
 // The gateway a fresh install points at before the user configured one. It
@@ -171,22 +113,6 @@ pub fn normalize_gateway_url(raw: &str) -> String {
 }
 
 impl Settings {
-    /// Take the web's settings form: every field but the ones the shell
-    /// owns, which only their own command changes (`sandbox_mode`:
-    /// `sandbox_mode_set`; `sandbox_env`: `sandbox_env_set`;
-    /// `sandbox_private_hosts`: `sandbox_private_host_add` / `_remove`). The
-    /// web writes whole snapshots, which may be stale; a stale snapshot must
-    /// not revert a shell-owned field.
-    pub fn apply_web(&mut self, from_web: Settings) {
-        let sandbox_mode = self.sandbox_mode;
-        let sandbox_env = std::mem::take(&mut self.sandbox_env);
-        let sandbox_private_hosts = std::mem::take(&mut self.sandbox_private_hosts);
-        *self = from_web;
-        self.sandbox_mode = sandbox_mode;
-        self.sandbox_env = sandbox_env;
-        self.sandbox_private_hosts = sandbox_private_hosts;
-    }
-
     /// True when the minimum fields to run the bridge are present. The bridge
     /// itself only requires a gateway and an owner (`services/bridge/cmd`);
     /// with no configured core it runs idle until cores are installed or
@@ -331,68 +257,6 @@ mod tests {
         let mode = std::fs::metadata(&path).expect("stat").permissions().mode();
         assert_eq!(mode & 0o777, 0o600);
         std::fs::remove_dir_all(&dir).expect("cleanup");
-    }
-
-    #[test]
-    fn sandbox_mode_defaults_to_borrowed_and_round_trips() {
-        let s: Settings =
-            serde_json::from_str(r#"{"gatewayUrl":"http://g","owner":"me"}"#).unwrap();
-        assert_eq!(s.sandbox_mode, SandboxMode::Borrowed);
-        for (raw, mode) in [
-            ("off", SandboxMode::Off),
-            ("borrowed", SandboxMode::Borrowed),
-            ("all", SandboxMode::All),
-        ] {
-            let s: Settings =
-                serde_json::from_str(&format!(r#"{{"sandboxMode":"{raw}"}}"#)).unwrap();
-            assert_eq!(s.sandbox_mode, mode);
-            assert_eq!(mode.as_str(), raw);
-        }
-        assert!(serde_json::from_str::<Settings>(r#"{"sandboxMode":"sometimes"}"#).is_err());
-
-        let dir =
-            std::env::temp_dir().join(format!("bnbloc-settings-sandbox-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let path = dir.join(SETTINGS_FILE);
-        let settings = Settings {
-            sandbox_mode: SandboxMode::All,
-            ..Default::default()
-        };
-        save(&path, &settings).expect("save settings");
-        assert_eq!(load(&path).expect("load").sandbox_mode, SandboxMode::All);
-        std::fs::remove_dir_all(&dir).expect("cleanup");
-    }
-
-    /// The sandbox mode is set through its own command; the web's form,
-    /// written as a whole and possibly stale, never reverts it.
-    #[test]
-    fn set_settings_preserves_shell_owned_fields() {
-        let mut current = Settings {
-            owner: "maya".into(),
-            sandbox_mode: SandboxMode::All,
-            sandbox_env: vec!["EXAMPLE_API_KEY".into()],
-            sandbox_private_hosts: vec![PrivateHost {
-                host: "npm.internal.example".into(),
-                ..Default::default()
-            }],
-            ..Default::default()
-        };
-        let stale_form = Settings {
-            owner: "maya".into(),
-            tenant: "t2".into(),
-            sandbox_mode: SandboxMode::Borrowed,
-            sandbox_env: vec![],
-            sandbox_private_hosts: vec![],
-            ..Default::default()
-        };
-        current.apply_web(stale_form);
-        assert_eq!(current.sandbox_mode, SandboxMode::All);
-        assert_eq!(current.sandbox_env, vec!["EXAMPLE_API_KEY".to_string()]);
-        assert_eq!(
-            current.sandbox_private_hosts[0].host,
-            "npm.internal.example"
-        );
-        assert_eq!(current.tenant, "t2", "the web's fields are taken");
     }
 
     #[test]

@@ -416,7 +416,7 @@ func (s *Service) assistContext(ctx context.Context, claims auth.Claims, declare
 		out.Library = lib
 	}
 	if wants(wire.AssistContextCapabilities) && roomID == "" {
-		if out.Capabilities, err = s.assistCapabilities(ctx, claims, auth.Claims{}, "", req.HasOwnAgent); err != nil {
+		if out.Capabilities, err = s.assistCapabilities(ctx, claims, auth.Claims{}, "", req); err != nil {
 			return out, err
 		}
 	}
@@ -449,7 +449,7 @@ func (s *Service) assistContext(ctx context.Context, claims auth.Claims, declare
 		out.Room = room
 	}
 	if wants(wire.AssistContextCapabilities) {
-		if out.Capabilities, err = s.assistCapabilities(ctx, claims, rc, roomID, req.HasOwnAgent); err != nil {
+		if out.Capabilities, err = s.assistCapabilities(ctx, claims, rc, roomID, req); err != nil {
 			return out, err
 		}
 	}

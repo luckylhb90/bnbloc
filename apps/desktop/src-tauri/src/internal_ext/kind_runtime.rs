@@ -267,10 +267,15 @@ impl KindRuntime for Plugin {
 }
 
 /// The sandbox runtime: a per-version bundle, a fresh port, a per-launch
-/// bearer and a member-scoped data dir (sandbox.rs).
+/// bearer and a member-scoped data dir (sandbox.rs), and its settings,
+/// which the desktop reads itself.
 struct Sandbox;
 
 impl KindRuntime for Sandbox {
+    fn sync(&self, adapter: &Adapter, catalog: &ComponentsResponse) {
+        adapter.sync_sandbox_settings(catalog);
+    }
+
     fn sweep(&self, dirs: &SweepDirs, live: &Live, _sign_ins: &SignIns) {
         let keep: HashSet<String> = live
             .names(ComponentKind::Sandbox)
@@ -282,6 +287,11 @@ impl KindRuntime for Sandbox {
         }
         if let Some(member) = &dirs.member {
             forget_entries_except(&member.join(SANDBOX_DATA_DIR), &keep);
+            forget_unlisted(
+                member,
+                ComponentKind::Sandbox,
+                live.names(ComponentKind::Sandbox),
+            );
         }
     }
 

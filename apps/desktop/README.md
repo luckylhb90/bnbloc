@@ -106,13 +106,17 @@ no business logic. IPC commands (Rust ↔ web):
 
 - `bridge_status() -> { state, pid?, lastExitCode?, logsTail }`
 - `bridge_start()` (starts, or restarts a running bridge) / `bridge_stop()`
-- `get_settings()` / `set_settings(Settings)` (every field but the
-  shell-owned sandbox mode, which `sandbox_mode_set` changes)
+- `get_settings()` / `set_settings(Settings)`
+- `component_settings()` / `component_settings_save(kind, name, values,
+  clear)`: the member's own values of a plugin, MCP tool or the sandbox
+  (Components → a component → Settings)
+- `sandbox_status()` / `sandbox_restart_vm()` / `sandbox_private_hosts_apply()`
+  (the sandbox's state on this computer, in its settings dialog)
 - `internal_adapter_session(gatewayUrl, sessionToken)` (+ status/targets/login)
 - `check_update(sessionToken)` / `install_update(sessionToken)`
 - `open_url(url)` / `pop_out_preview(roomId, artifactId)`
 - `app_info() -> { version, platform, inShell }`
-- `shell_env_reload() -> { imported, error? }` (Settings → Agent sandbox →
+- `shell_env_reload() -> { imported, error? }` (Agents → Local bridge →
   "Reload shell environment")
 
 Process lifecycle: every child (bridge and component sidecars) gets a stdin
@@ -145,7 +149,7 @@ applies later inside the core. `BNBLOC_*` and shell-session names (`PWD`,
 imported; PATH is the shell's, then the app's entries it lacks. The log
 shows the imported count (names in debug builds only), never a value.
 Nothing the app sends over the network carries it. After exporting a new
-variable, Settings → Agent sandbox → "Reload shell environment" resolves it
+variable, Agents → Local bridge → "Reload shell environment" resolves it
 again and restarts the bridge and the sidecars. On Windows this is a no-op:
 GUI apps inherit the user's variables there.
 

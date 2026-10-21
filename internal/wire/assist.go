@@ -155,6 +155,12 @@ type AssistRequest struct {
 	// HasOwnAgent is the client's word that the member has an agent of
 	// their own on this device (the capabilities context).
 	HasOwnAgent bool `json:"hasOwnAgent,omitempty"`
+	// SandboxedRun is the client's word that the reply's turn was the
+	// member's own agent running in their agent sandbox, which reaches no
+	// private host it was not allowed; MayAllowHosts that the sandbox's
+	// settings let the member allow one (the capabilities context).
+	SandboxedRun  bool `json:"sandboxedRun,omitempty"`
+	MayAllowHosts bool `json:"mayAllowHosts,omitempty"`
 	// Gated asks the task's gate first (AssistGate): below it, or with no
 	// decision model for the caller, the answer is AssistSkipped; a task
 	// without a gate refuses it.

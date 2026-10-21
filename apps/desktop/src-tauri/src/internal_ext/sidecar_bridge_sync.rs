@@ -73,17 +73,34 @@ impl Adapter {
         }
     }
 
+    /// The sandbox handoff's identity in the bridge set (None: no handoff).
+    fn sandbox_bridge_fingerprint(&self) -> Option<String> {
+        let handoff = self.sandbox_handoff();
+        super::sandbox::bridge_fingerprint(
+            self.sandbox_mode(),
+            &self.sandbox_env(),
+            handoff.as_ref(),
+        )
+    }
+
+    /// The running bridge has the sandbox handoff as it is now (the private
+    /// hosts are open to its next own turn).
+    pub(super) fn sandbox_bridge_current(&self) -> bool {
+        let want = self.sandbox_bridge_fingerprint();
+        self.inner
+            .lock()
+            .bridge_cores
+            .get(super::sandbox::BRIDGE_KEY)
+            .cloned()
+            == want
+    }
+
     fn desired_bridge_cores(&self) -> HashMap<String, String> {
         let mut set = bridge_core_set(&self.inner.lock().sidecars);
         // The sandbox handoff (BNBLOC_SANDBOX_*) is bridge env read at spawn
         // too: it appearing, going away, or the mode changing restarts the
         // bridge through the same stabilized path.
-        let handoff = self.sandbox_handoff();
-        if let Some(fingerprint) = super::sandbox::bridge_fingerprint(
-            self.sandbox_mode(),
-            &self.sandbox_env(),
-            handoff.as_ref(),
-        ) {
+        if let Some(fingerprint) = self.sandbox_bridge_fingerprint() {
             set.insert(super::sandbox::BRIDGE_KEY.to_string(), fingerprint);
         }
         // So is the member directory the bridge reads its owner's MCP

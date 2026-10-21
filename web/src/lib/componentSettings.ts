@@ -18,11 +18,12 @@ export type { ComponentSetting, ComponentSettingField, ComponentSettingScope, Co
 // computer, a secret's never; platform and organization ones only as set or
 // not), what keeps it in needs setup, and its state on this computer.
 export interface DesktopComponentSettings {
-  kind: "plugin" | "mcp";
+  kind: "plugin" | "mcp" | "sandbox";
   name: string;
   version: string;
-  // A plugin sidecar's state, or a stdio MCP tool's download state ("" for
-  // an http tool), and its message.
+  // A plugin sidecar's state, a stdio MCP tool's download state ("" for an
+  // http tool), or the sandbox's (lib/sandboxStatus.ts SandboxState), and
+  // its message.
   state: string;
   message: string;
   transport?: string;

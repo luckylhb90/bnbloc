@@ -22,6 +22,7 @@ import { Dialog } from "@/ui/Dialog";
 import { ErrorBox } from "@/ui/ErrorBox";
 import { useToast } from "@/ui/Toast";
 import { SettingsForm } from "@/views/settings/SettingsForm";
+import { SandboxPanel } from "@/views/settings/SandboxPanel";
 import { SettingsPageFrame } from "@/views/settings/SettingsPageFrame";
 import { errorText } from "@/lib/errors";
 
@@ -110,8 +111,9 @@ function SettingsSections({ target, onClose }: { readonly target: SettingsTarget
 }
 
 // MemberSection is the viewer's own settings, kept on this computer: the
-// one form or the component's own page, and the sign-in of a tool that
-// takes one. In a browser there is nowhere to keep them.
+// one form or the component's own page, the sign-in of a tool that takes
+// one, and a sandbox's state on this computer (SandboxPanel). In a browser
+// there is nowhere to keep them.
 function MemberSection({
   item,
   reload,
@@ -123,6 +125,8 @@ function MemberSection({
   readonly page?: ComponentSettingsPage;
   readonly onClose: () => void;
 }) {
+  // Bumped by a save: the sandbox's state is read again at once.
+  const [saves, setSaves] = useState(0);
   if (item === undefined) return <p className="text-sm text-[var(--color-fg-subtle)]">Loading your settings…</p>;
   if (item === null) {
     return (
@@ -141,6 +145,7 @@ function MemberSection({
     load: own,
     save: async (update) => {
       await desktop.saveComponentSettings(item.kind, item.name, update);
+      setSaves((n) => n + 1);
       await reload();
       return own();
     },
@@ -149,6 +154,7 @@ function MemberSection({
     <section aria-label="Your settings" className="flex flex-col gap-2">
       <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-fg-muted)]">{scopeHeadings.member}</h3>
       {item.auth === "oauth" && <SignInCard item={item} reload={reload} />}
+      {item.kind === "sandbox" && <SandboxPanel version={saves} />}
       {page && ofScope(item.fields, "member").length > 0 ? (
         <SettingsPageFrame
           key={page.bundle.sha256}
@@ -170,15 +176,23 @@ function MemberSection({
           declaration={item.fields}
           onSave={async (update) => {
             await desktop.saveComponentSettings(item.kind, item.name, update);
+            setSaves((n) => n + 1);
             await reload();
           }}
-          savedText={item.kind === "plugin" ? `${item.name} saved on this computer and restarted` : `${item.name} settings saved on this computer`}
+          savedText={savedText(item)}
         >
           {(item.tools ?? []).length > 0 && <p className="text-xs text-[var(--color-fg-subtle)]">Tools: {(item.tools ?? []).map((x) => x.name).join(", ")}</p>}
         </SettingsForm>
       )}
     </section>
   );
+}
+
+// What a save of the member's own values did on this computer.
+function savedText(c: DesktopComponentSettings): string {
+  if (c.kind === "plugin") return `${c.name} saved on this computer and restarted`;
+  if (c.kind === "sandbox") return `${c.name} saved on this computer: the VM follows it once no run of yours is going on there`;
+  return `${c.name} settings saved on this computer`;
 }
 
 // The heading of each scope's section (and of its settings page).
@@ -287,9 +301,11 @@ function SignInCard({ item, reload }: { readonly item: DesktopComponentSettings;
 }
 
 // statusLine is one line: what the component is and, for a stdio tool, its
-// download on this computer; a plugin's state on this computer.
+// download on this computer; a plugin's or the sandbox's state on this
+// computer.
 function statusLine(c: DesktopComponentSettings): string {
   if (c.kind === "plugin") return `A plugin of this desktop app. ${c.message || c.state}`.trim();
+  if (c.kind === "sandbox") return "The agent sandbox of this desktop app: what runs in its VM, and what that reaches.";
   if (c.transport !== "stdio") return "An MCP tool at its service URL.";
   const local = c.state === "ready" ? "Downloaded and verified." : c.state === "failed" ? `Download failed: ${c.message}` : c.message || "Downloading…";
   return `An MCP tool on this computer. ${local}`;

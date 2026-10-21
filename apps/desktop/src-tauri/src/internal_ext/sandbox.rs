@@ -14,14 +14,24 @@
 //!    image, create (or start) the machine with the shared workspaces root;
 //!    mode `off` deletes it instead;
 //! 3. runs the member's own machine (`bnbloc-own`) beside it while their own
-//!    runs are sandboxed and they listed private hosts the runtime can open
-//!    (docs/prd/2026-10-21-sandbox-private-hosts.md): the same machine but
-//!    for its egress, recreated for a change of hosts only when no own turn
-//!    runs there;
+//!    runs are sandboxed and private hosts are open to them that the runtime
+//!    can open (docs/prd/2026-10-21-sandbox-private-hosts.md): the same
+//!    machine but for its egress, recreated for a change of hosts only when
+//!    no own turn runs there;
 //! 4. watches the machines and re-prewarms one that is gone;
 //! 5. hands the bridge `BNBLOC_SANDBOX_*` (memory/env only) while the
 //!    sandbox is ready; the bridge-stabilizing watcher restarts the bridge
 //!    when that handoff appears, disappears or the mode changes.
+//!
+//! What it does is the sandbox component's own settings (its manifest
+//! `settings`, set in Components through the one settings dialog like any
+//! component's; component_settings.rs): the mode, the environment let into
+//! the member's own runs, their private hosts, and the organization's hosts
+//! and whether members may allow their own. The desktop reads them by the
+//! keys pkgmeta's sandbox contract names (`sandbox_settings`): the member's
+//! from the member store, the organization's from the gateway when the
+//! catalog changes. A change reconciles the machines; it never restarts the
+//! sidecar.
 //!
 //! At most one sandbox component is active per desktop (sidecar_model).
 use std::path::PathBuf;
@@ -30,16 +40,18 @@ use std::time::{Duration, Instant};
 use tauri::Manager;
 
 use crate::child_process::STOP_GRACE;
+use crate::internal_ext::component_settings::{split_lines, Setting, Values, SCOPE_MEMBER};
 use crate::internal_ext::sandbox_api::{
     create_machine_request, Discovery, MachineView, SandboxApi, CAPABILITY_EGRESS,
     CAPABILITY_EGRESS_HOSTS,
 };
 use crate::internal_ext::sandbox_bundle;
-use crate::internal_ext::sidecar_model::{ComponentKind, GuestProfile, SidecarSpec};
+use crate::internal_ext::sidecar_model::{
+    active_sandbox, ComponentKind, ComponentsResponse, GuestProfile, SidecarSpec,
+};
 use crate::internal_ext::sidecar_util::{cache_stem, home_env};
 use crate::internal_ext::Adapter;
 use crate::secret::Secret;
-use crate::settings::{PrivateHost, SandboxMode};
 
 /// The shared machine (`BNBLOC_SANDBOX_MACHINE`).
 pub(super) const MACHINE_NAME: &str = "bnbloc";
@@ -182,6 +194,167 @@ pub(super) struct SandboxState {
     seq: u64,
     pub(super) launch: Option<Launch>,
     pub(super) last_error: Option<String>,
+    /// The active sandbox component's settings declaration, as the catalog
+    /// lists it.
+    pub(super) declared: Option<Declared>,
+    /// What its settings say now (sandbox_settings).
+    pub(super) settings: SandboxSettings,
+}
+
+/// The active sandbox component's settings as the catalog lists them, and
+/// its organization's values (None until read from the gateway).
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct Declared {
+    pub(super) name: String,
+    pub(super) version: String,
+    pub(super) decl: Vec<Setting>,
+    /// Which platform and organization settings are set, and the required
+    /// ones that are not (never their values).
+    pub(super) set: Vec<String>,
+    pub(super) missing: Vec<String>,
+    pub(super) org: Option<Values>,
+}
+
+// ---- the sandbox's settings (pkgmeta sandbox_settings.go) ----
+
+/// The keys the desktop reads a sandbox component's settings by: pkgmeta's
+/// contract (`SandboxSetting*`), pinned by
+/// core/pkgmeta/testdata/sandbox_settings.json
+/// (`sandbox_setting_keys_match_go`).
+pub(super) const SETTING_MODE: &str = "mode";
+pub(super) const SETTING_FORWARD_ENV: &str = "forwardEnv";
+pub(super) const SETTING_PRIVATE_HOSTS: &str = "privateHosts";
+pub(super) const SETTING_ORG_HOSTS: &str = "orgHosts";
+pub(super) const SETTING_MEMBER_HOSTS: &str = "memberHosts";
+/// memberHosts' "only the organization's hosts" (pkgmeta
+/// SandboxMemberHostsOff); its other choice, "ask", is the default.
+const MEMBER_HOSTS_OFF: &str = "off";
+
+/// Which of the member's agent runs execute their commands in the VM
+/// (the `mode` setting; `BNBLOC_SANDBOX_MODE`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum SandboxMode {
+    /// No sandbox VM runs; every run executes on the host.
+    Off,
+    /// Runs driven by another member (borrowed) execute in the VM.
+    #[default]
+    Borrowed,
+    /// Every run of this member's agents executes in the VM.
+    All,
+}
+
+impl SandboxMode {
+    const ALL: [SandboxMode; 3] = [SandboxMode::Off, SandboxMode::Borrowed, SandboxMode::All];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SandboxMode::Off => "off",
+            SandboxMode::Borrowed => "borrowed",
+            SandboxMode::All => "all",
+        }
+    }
+
+    fn parse(v: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|m| m.as_str() == v)
+    }
+}
+
+/// What the sandbox's settings say.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(super) struct SandboxSettings {
+    pub(super) mode: SandboxMode,
+    /// The names (or `PREFIX*` patterns) let into the member's own
+    /// sandboxed runs; values are read from the agent's environment.
+    pub(super) forward_env: Vec<String>,
+    /// The private hosts the member's own sandboxed runs reach: the
+    /// organization's, and the member's own when they may allow them.
+    pub(super) hosts: Vec<String>,
+    /// The member may allow a private host of their own: the component
+    /// declares `privateHosts`, the organization's values are known and do
+    /// not turn it off.
+    pub(super) member_may_allow: bool,
+}
+
+/// The sandbox's settings from its declaration, its organization's values
+/// (None: not read yet) and the member's: each declared one's value from
+/// its scope, else its default; an undeclared one is the platform's default
+/// (mode `borrowed`, nothing forwarded or open). Until the organization's
+/// values are read, a member may allow no host of their own (fail closed).
+/// A line the rule refuses (a value stored before a rule tightened) is
+/// left out.
+pub(super) fn sandbox_settings(
+    decl: &[Setting],
+    org: Option<&Values>,
+    member: &Values,
+) -> SandboxSettings {
+    use crate::internal_ext::component_settings::effective_settings;
+    let mut values = Values::new();
+    for s in decl {
+        let from = if s.scope == SCOPE_MEMBER {
+            Some(member)
+        } else {
+            org
+        };
+        if let Some(v) = from.and_then(|from| from.get(&s.key)) {
+            values.insert(s.key.clone(), v.clone());
+        }
+    }
+    let effective = effective_settings(decl, &values);
+    let lines = |key: &str, valid: fn(&str) -> bool| -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for l in split_lines(effective.get(key).map(String::as_str).unwrap_or_default()) {
+            if valid(l) && !out.iter().any(|o| o == l) {
+                out.push(l.to_string());
+            }
+        }
+        out
+    };
+    let org_known = org.is_some() || decl.iter().all(|s| s.scope == SCOPE_MEMBER);
+    let member_may_allow = org_known
+        && decl.iter().any(|s| s.key == SETTING_PRIVATE_HOSTS)
+        && effective.get(SETTING_MEMBER_HOSTS).map(String::as_str) != Some(MEMBER_HOSTS_OFF);
+    let mut hosts = lines(SETTING_ORG_HOSTS, valid_private_host);
+    if member_may_allow {
+        for h in lines(SETTING_PRIVATE_HOSTS, valid_private_host) {
+            if !hosts.contains(&h) {
+                hosts.push(h);
+            }
+        }
+    }
+    SandboxSettings {
+        mode: effective
+            .get(SETTING_MODE)
+            .and_then(|v| SandboxMode::parse(v))
+            .unwrap_or_default(),
+        forward_env: lines(SETTING_FORWARD_ENV, valid_forward_env),
+        hosts,
+        member_may_allow,
+    }
+}
+
+/// The rule for a sandbox setting's value beyond its type: every
+/// `forwardEnv` line a forwardable name, every host line a private host.
+/// The Go owner's (`pkgmeta.CheckSandboxSettingValue`), built from the two
+/// pinned rules (valid_forward_env, valid_private_host); a member's save is
+/// held to it, as an organization's is on the gateway.
+pub(super) fn check_sandbox_setting_value(key: &str, v: &str) -> Result<(), String> {
+    let bad: Vec<&str> = split_lines(v)
+        .into_iter()
+        .filter(|l| match key {
+            SETTING_FORWARD_ENV => !valid_forward_env(l),
+            SETTING_PRIVATE_HOSTS | SETTING_ORG_HOSTS => !valid_private_host(l),
+            _ => false,
+        })
+        .collect();
+    if bad.is_empty() {
+        return Ok(());
+    }
+    if key == SETTING_FORWARD_ENV {
+        Err(format!("not an environment variable name a sandboxed run may receive: {} (upper-case names like EXAMPLE_API_KEY, or a prefix like EXAMPLE_*; never BNBLOC_*, HOME, PATH, …)", bad.join(", ")))
+    } else {
+        Err(format!("not a host the sandbox may open: {} (a name like npm.internal.example or an address like 10.0.0.5; no URL, port or wildcard, never localhost, link-local or metadata addresses)", bad.join(", ")))
+    }
 }
 
 /// What the bridge gets while the sandbox is ready (Phase 1 contracts).
@@ -278,32 +451,6 @@ pub(crate) fn valid_forward_env(pattern: &str) -> bool {
     })
 }
 
-/// The member's list as entered (comma, space or newline separated):
-/// each pattern once, in order, or the patterns the rule refuses.
-pub(crate) fn forward_env_list(raw: &[String]) -> Result<Vec<String>, String> {
-    let mut out: Vec<String> = Vec::new();
-    let mut refused: Vec<String> = Vec::new();
-    for p in raw
-        .iter()
-        .flat_map(|s| s.split(|c: char| c == ',' || c.is_whitespace()))
-        .filter(|p| !p.is_empty())
-    {
-        if !valid_forward_env(p) {
-            refused.push(p.to_string());
-        } else if !out.iter().any(|o| o == p) {
-            out.push(p.to_string());
-        }
-    }
-    if refused.is_empty() {
-        Ok(out)
-    } else {
-        Err(format!(
-            "Not an environment variable name a sandboxed run may receive: {}. Use upper-case names like EXAMPLE_API_KEY, or a prefix like EXAMPLE_*; bnbloc's own and the system's variables (BNBLOC_*, HOME, PATH, …) cannot be passed.",
-            refused.join(", ")
-        ))
-    }
-}
-
 /// The one rule for a private host a member lets their own sandboxed runs
 /// reach: the Go owner's (`sandbox/protocol.ValidPrivateHost`), as a copy
 /// pinned by `sandbox/protocol/testdata/private_hosts.json`
@@ -352,21 +499,7 @@ pub(crate) fn valid_private_host(host: &str) -> bool {
     shaped && !last.chars().all(|c| c.is_ascii_digit()) && !is_loopback_host(last)
 }
 
-/// A host as the member typed it (spaces trimmed, lower-cased), or why it
-/// cannot be one.
-pub(crate) fn private_host(raw: &str) -> Result<String, String> {
-    let host = raw.trim().to_ascii_lowercase();
-    if valid_private_host(&host) {
-        Ok(host)
-    } else {
-        Err(format!(
-            "{:?} is not a host your agents can be allowed to reach: use a name like npm.internal.example or an address like 10.0.0.5 (no URL, port or wildcard; never localhost, link-local or metadata addresses).",
-            raw.trim()
-        ))
-    }
-}
-
-/// The status the Settings → Agent sandbox section renders.
+/// The sandbox's state on this computer, as its Components card renders it.
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SandboxStatus {
@@ -379,9 +512,6 @@ pub struct SandboxStatus {
     pub state: &'static str,
     pub message: String,
     pub mode: SandboxMode,
-    /// The names the member lets into their own sandboxed runs (never
-    /// values).
-    pub env: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub isolation: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -391,15 +521,20 @@ pub struct SandboxStatus {
     pub timings: SandboxTimings,
     /// Commands of the selected runs go to the VM right now.
     pub handed_to_bridge: bool,
-    /// The member's private hosts and whether they are open.
+    /// The private hosts open to the member's own runs and whether they
+    /// are.
     pub private_hosts: PrivateHostsStatus,
 }
 
-/// Settings → Agent sandbox → Private hosts.
+/// The private hosts of the sandbox's settings on this computer.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PrivateHostsStatus {
-    pub hosts: Vec<PrivateHost>,
+    /// The organization's and the member's (sandbox_settings).
+    pub hosts: Vec<String>,
+    /// The member may allow a host of their own (an agent reply's card
+    /// offers it).
+    pub member_may_allow: bool,
     /// none | unsupported | inactive | waiting | applying | ready | error
     pub state: &'static str,
     pub message: String,
@@ -616,41 +751,106 @@ impl Adapter {
     }
 
     pub(super) fn sandbox_mode(&self) -> SandboxMode {
-        self.app
-            .try_state::<crate::AppState>()
-            .map(|state| state.settings.lock().sandbox_mode)
-            .unwrap_or_default()
+        self.sandbox.lock().settings.mode
     }
 
     /// The names the member lets into their own sandboxed runs.
     pub(super) fn sandbox_env(&self) -> Vec<String> {
-        self.app
-            .try_state::<crate::AppState>()
-            .map(|state| state.settings.lock().sandbox_env.clone())
-            .unwrap_or_default()
-    }
-
-    /// The private hosts the member lets their own sandboxed runs reach.
-    fn sandbox_private_hosts(&self) -> Vec<PrivateHost> {
-        self.app
-            .try_state::<crate::AppState>()
-            .map(|state| state.settings.lock().sandbox_private_hosts.clone())
-            .unwrap_or_default()
+        self.sandbox.lock().settings.forward_env.clone()
     }
 
     /// The hosts the own machine should open, None when it is not wanted:
-    /// the member's own runs are sandboxed (mode all), they listed hosts,
-    /// and the runtime can open them.
+    /// the member's own runs are sandboxed (mode all), hosts are open to
+    /// them, and the runtime can open them.
     fn own_machine_want(&self, discovery: &Discovery, has_guest: bool) -> Option<Vec<String>> {
-        let hosts: Vec<String> = self
-            .sandbox_private_hosts()
-            .into_iter()
-            .map(|h| h.host)
-            .filter(|h| valid_private_host(h))
-            .collect();
+        let settings = self.sandbox.lock().settings.clone();
         let able = discovery.has(CAPABILITY_EGRESS) && discovery.has(CAPABILITY_EGRESS_HOSTS);
-        (self.sandbox_mode() == SandboxMode::All && able && has_guest && !hosts.is_empty())
-            .then_some(hosts)
+        (settings.mode == SandboxMode::All && able && has_guest && !settings.hosts.is_empty())
+            .then_some(settings.hosts)
+    }
+
+    // -------------------------------------------------------------- settings
+
+    /// Follow the catalog: the active sandbox's declaration, then its
+    /// organization's values read in the background (a settings save
+    /// pushes a catalog hint, so a change arrives within seconds).
+    pub(super) fn sync_sandbox_settings(&self, catalog: &ComponentsResponse) {
+        let next = active_sandbox(catalog).map(|c| Declared {
+            name: c.name.clone(),
+            version: c.version.clone(),
+            decl: c.settings.clone(),
+            set: c.settings_set.clone(),
+            missing: c.settings_missing.clone(),
+            org: None,
+        });
+        let read = {
+            let mut state = self.sandbox.lock();
+            // The values read for the same declaration stay until the
+            // fresh read answers.
+            state.declared = next.map(|mut d| {
+                d.org = state
+                    .declared
+                    .as_ref()
+                    .filter(|old| old.name == d.name && old.decl == d.decl)
+                    .and_then(|old| old.org.clone());
+                d
+            });
+            state
+                .declared
+                .as_ref()
+                .filter(|d| d.decl.iter().any(|s| s.scope != SCOPE_MEMBER))
+                .map(|d| (d.name.clone(), d.decl.clone()))
+        };
+        self.refresh_sandbox_settings();
+        let Some((name, decl)) = read else {
+            return;
+        };
+        let sup = self.clone();
+        tauri::async_runtime::spawn(async move {
+            match sup.resolved_settings(ComponentKind::Sandbox, &name).await {
+                Ok(values) => {
+                    if let Some(d) = sup
+                        .sandbox
+                        .lock()
+                        .declared
+                        .as_mut()
+                        .filter(|d| d.name == name && d.decl == decl)
+                    {
+                        d.org = Some(values);
+                    }
+                    sup.refresh_sandbox_settings();
+                }
+                // The last values read stay; never logged with a value.
+                Err(e) => eprintln!("[sandbox] {e}"),
+            }
+        });
+    }
+
+    /// Recompute what the settings say (the member's from the member store)
+    /// and, when it changed, bring the machines to it.
+    pub(super) fn refresh_sandbox_settings(&self) {
+        let declared = self.sandbox.lock().declared.clone();
+        let next = match &declared {
+            Some(d) => {
+                let member = self
+                    .member_settings(ComponentKind::Sandbox, &d.name)
+                    .unwrap_or_else(|e| {
+                        eprintln!("[sandbox] your settings of {}: {e}", d.name);
+                        Values::new()
+                    });
+                sandbox_settings(&d.decl, d.org.as_ref(), &member)
+            }
+            None => SandboxSettings::default(),
+        };
+        let changed = {
+            let mut state = self.sandbox.lock();
+            let changed = state.settings != next;
+            state.settings = next;
+            changed
+        };
+        if changed {
+            self.sandbox_settings_changed();
+        }
     }
 
     async fn sandbox_bring_up(&self, seq: u64) {
@@ -892,16 +1092,16 @@ impl Adapter {
         }
     }
 
-    /// The member changed their private hosts (or asked to apply them
-    /// again): reconcile the own machine in the background.
-    pub(super) fn sandbox_private_hosts_changed(&self, force: bool) {
+    /// The member asked to apply the private hosts again (their addresses
+    /// are resolved again): recreate the own machine in the background.
+    pub(super) fn sandbox_private_hosts_apply(&self) {
         let Some(seq) = self.sandbox.lock().launch.as_ref().map(|l| l.seq) else {
             return;
         };
-        // The member's change is not a retry: no backoff.
+        // The member's ask is not a retry: no backoff.
         self.with_launch(seq, |l| l.own.last_attempt = None);
         let sup = self.clone();
-        tauri::async_runtime::spawn(async move { sup.sandbox_own_check(seq, force).await });
+        tauri::async_runtime::spawn(async move { sup.sandbox_own_check(seq, true).await });
     }
 
     async fn sandbox_turn_off(&self, seq: u64) {
@@ -1082,16 +1282,19 @@ impl Adapter {
         self.sandbox_own_check(seq, false).await;
     }
 
-    /// The member changed the mode: reconcile the machine in the background.
-    pub(super) fn sandbox_mode_changed(&self) {
+    /// The settings changed: reconcile both machines in the background (a
+    /// change is not a retry: no backoff). A reconcile already running
+    /// leaves it to the watch.
+    fn sandbox_settings_changed(&self) {
         let Some(seq) = self.sandbox.lock().launch.as_ref().map(|l| l.seq) else {
             return;
         };
+        self.with_launch(seq, |l| l.own.last_attempt = None);
         let sup = self.clone();
         tauri::async_runtime::spawn(async move { sup.sandbox_reconcile(seq).await });
     }
 
-    /// Restart the VM (Settings → "Restart VM"): stop + start the same
+    /// Restart the VM (its Components card's "Restart VM"): stop + start the same
     /// machine (spaces are re-established by the runtime), recreating it when
     /// that fails. The bridge keeps its env (same URL, token and machine).
     pub(super) async fn sandbox_restart_vm(&self) -> Result<(), String> {
@@ -1191,6 +1394,7 @@ impl Adapter {
             })
             .map(|s| (s.spec.clone(), s.status.clone(), s.child.is_some()));
         let handoff = self.sandbox_handoff().is_some();
+        let bridge_current = self.sandbox_bridge_current();
         let state = self.sandbox.lock();
         let mut status = SandboxStatus {
             installed: false,
@@ -1199,14 +1403,14 @@ impl Adapter {
             state: "notInstalled",
             message: "No sandbox component is installed".into(),
             mode,
-            env: self.sandbox_env(),
             isolation: None,
             machine: None,
             last_error: state.last_error.clone(),
             timings: SandboxTimings::default(),
             handed_to_bridge: handoff && mode != SandboxMode::Off,
             private_hosts: PrivateHostsStatus {
-                hosts: self.sandbox_private_hosts(),
+                hosts: state.settings.hosts.clone(),
+                member_may_allow: state.settings.member_may_allow,
                 ..Default::default()
             },
         };
@@ -1235,6 +1439,13 @@ impl Adapter {
         status.isolation = launch.discovery.as_ref().map(|d| d.isolation.clone());
         if let Some(discovery) = &launch.discovery {
             private_hosts_status(&mut status.private_hosts, mode, discovery, &launch.own);
+            // Open on the own VM, but the bridge still runs without it (it
+            // restarts once no turn runs).
+            if status.private_hosts.state == "ready" && !bridge_current {
+                status.private_hosts.state = "applying";
+                status.private_hosts.message =
+                    "Handing them to your agents when no run of theirs is going on…".into();
+            }
         }
         status.machine = launch.machine.clone();
         status.timings = SandboxTimings {
@@ -1288,10 +1499,12 @@ fn private_hosts_status(
         .filter(|m| m.state == "running")
         .map(|m| m.egress_hosts.clone())
         .unwrap_or_default();
-    let wanted: Vec<&str> = status.hosts.iter().map(|h| h.host.as_str()).collect();
-    let (state, message) = if wanted.is_empty() {
-        ("none", String::new())
-    } else if !(discovery.has(CAPABILITY_EGRESS) && discovery.has(CAPABILITY_EGRESS_HOSTS)) {
+    let wanted: Vec<&str> = status.hosts.iter().map(String::as_str).collect();
+    // "unsupported" first: an agent reply's card offers no host to allow
+    // on a runtime that cannot open one.
+    let (state, message) = if !(discovery.has(CAPABILITY_EGRESS)
+        && discovery.has(CAPABILITY_EGRESS_HOSTS))
+    {
         (
             "unsupported",
             format!(
@@ -1299,6 +1512,8 @@ fn private_hosts_status(
                 discovery.name
             ),
         )
+    } else if wanted.is_empty() {
+        ("none", String::new())
     } else if mode != SandboxMode::All {
         (
             "inactive",
@@ -1339,17 +1554,18 @@ fn create_private_dir(dir: &std::path::Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Extend the bridge env with the sandbox handoff (bridge::env_for).
+/// Extend the bridge env with the sandbox's mode, forwarded names and
+/// handoff (bridge::env_for); without the manager, the default mode.
 pub(crate) fn extend_bridge_env(
     app: Option<&tauri::AppHandle>,
     env: &mut std::collections::HashMap<String, String>,
-    mode: SandboxMode,
-    forward: &[String],
 ) {
-    let handoff = app
-        .and_then(|app| app.try_state::<Adapter>())
-        .and_then(|adapter| adapter.sandbox_handoff());
-    env.extend(bridge_env(mode, forward, handoff.as_ref()));
+    let adapter = app.and_then(|app| app.try_state::<Adapter>());
+    let (mode, forward, handoff) = match adapter {
+        Some(a) => (a.sandbox_mode(), a.sandbox_env(), a.sandbox_handoff()),
+        None => (SandboxMode::default(), Vec::new(), None),
+    };
+    env.extend(bridge_env(mode, &forward, handoff.as_ref()));
 }
 
 // ------------------------------------------------------------------ commands
@@ -1359,91 +1575,12 @@ pub(crate) fn sandbox_status(adapter: tauri::State<'_, Adapter>) -> SandboxStatu
     adapter.sandbox_status()
 }
 
+/// Recreate the own machine with the private hosts (their addresses are
+/// resolved again), when no own turn runs there.
 #[tauri::command]
-pub(crate) fn sandbox_mode_get(state: tauri::State<'_, crate::AppState>) -> SandboxMode {
-    state.settings.lock().sandbox_mode
-}
-
-/// Persist the member's mode and reconcile the VM; the bridge-stabilizing
-/// watcher restarts the bridge when its sandbox env changes.
-#[tauri::command]
-pub(crate) fn sandbox_mode_set(
-    state: tauri::State<'_, crate::AppState>,
-    adapter: tauri::State<'_, Adapter>,
-    mode: SandboxMode,
-) -> Result<SandboxStatus, String> {
-    state.update_settings(|settings| settings.sandbox_mode = mode)?;
-    adapter.sandbox_mode_changed();
-    Ok(adapter.sandbox_status())
-}
-
-/// Persist the names the member lets into their own sandboxed runs
-/// (Settings → Agent sandbox → "Environment passed to sandboxed agents"),
-/// refused whole when one is not a valid pattern (`forward_env_list`). The
-/// bridge-stabilizing watcher restarts the bridge when its env changes.
-#[tauri::command]
-pub(crate) fn sandbox_env_set(
-    state: tauri::State<'_, crate::AppState>,
-    adapter: tauri::State<'_, Adapter>,
-    names: Vec<String>,
-) -> Result<SandboxStatus, String> {
-    let names = forward_env_list(&names)?;
-    state.update_settings(|settings| settings.sandbox_env = names)?;
-    Ok(adapter.sandbox_status())
-}
-
-/// Add a private host the member's own sandboxed runs may reach (Settings →
-/// Agent sandbox → Private hosts); `room_id` is the room whose agent reply
-/// proposed it. The own machine takes it when no own turn runs there.
-#[tauri::command]
-pub(crate) fn sandbox_private_host_add(
-    state: tauri::State<'_, crate::AppState>,
-    adapter: tauri::State<'_, Adapter>,
-    host: String,
-    room_id: Option<String>,
-) -> Result<SandboxStatus, String> {
-    let host = private_host(&host)?;
-    let added_at_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_millis() as u64);
-    state.update_settings(|settings| {
-        if !settings
-            .sandbox_private_hosts
-            .iter()
-            .any(|h| h.host == host)
-        {
-            settings.sandbox_private_hosts.push(PrivateHost {
-                host,
-                added_at_ms,
-                room_id: room_id.unwrap_or_default().trim().to_string(),
-            });
-        }
-    })?;
-    adapter.sandbox_private_hosts_changed(false);
-    Ok(adapter.sandbox_status())
-}
-
-/// Remove a private host; applied like an addition.
-#[tauri::command]
-pub(crate) fn sandbox_private_host_remove(
-    state: tauri::State<'_, crate::AppState>,
-    adapter: tauri::State<'_, Adapter>,
-    host: String,
-) -> Result<SandboxStatus, String> {
-    let host = host.trim().to_ascii_lowercase();
-    state.update_settings(|settings| settings.sandbox_private_hosts.retain(|h| h.host != host))?;
-    adapter.sandbox_private_hosts_changed(false);
-    Ok(adapter.sandbox_status())
-}
-
-/// Recreate the own machine with the hosts (their addresses are resolved
-/// again), when no own turn runs there.
-#[tauri::command]
-pub(crate) fn sandbox_private_hosts_apply(
-    adapter: tauri::State<'_, Adapter>,
-) -> Result<SandboxStatus, String> {
-    adapter.sandbox_private_hosts_changed(true);
-    Ok(adapter.sandbox_status())
+pub(crate) fn sandbox_private_hosts_apply(adapter: tauri::State<'_, Adapter>) -> SandboxStatus {
+    adapter.sandbox_private_hosts_apply();
+    adapter.sandbox_status()
 }
 
 #[tauri::command]
@@ -1614,20 +1751,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn forward_env_list_splits_dedupes_and_refuses_whole() {
-        assert_eq!(
-            forward_env_list(&[
-                " EXAMPLE_API_KEY, EXAMPLE_*\nEXAMPLE_API_KEY ".into(),
-                String::new()
-            ]),
-            Ok(vec!["EXAMPLE_API_KEY".to_string(), "EXAMPLE_*".to_string()])
-        );
-        assert_eq!(forward_env_list(&[]), Ok(vec![]));
-        let err = forward_env_list(&["EXAMPLE_API_KEY".into(), "PATH".into(), "BNBLOC_X".into()])
-            .expect_err("refused");
-        assert!(err.contains("PATH, BNBLOC_X"), "{err}");
-    }
     /// The desktop's copy of the private-host rule agrees with the Go owner
     /// (`protocol.ValidPrivateHost`) on the shared fixture.
     #[test]
@@ -1648,11 +1771,165 @@ mod tests {
         for h in &fixture.invalid {
             assert!(!valid_private_host(h), "valid_private_host({h:?}) = true");
         }
+    }
+
+    fn setting(key: &str, kind: &str, scope: &str, default: &str) -> Setting {
+        Setting {
+            key: key.into(),
+            label: key.into(),
+            kind: kind.into(),
+            scope: scope.into(),
+            default: default.into(),
+            ..Default::default()
+        }
+    }
+
+    /// The sandbox package's settings as scripts/package.sh declares them.
+    fn declared() -> Vec<Setting> {
+        vec![
+            setting(SETTING_MODE, "choice", "member", "borrowed"),
+            setting(SETTING_FORWARD_ENV, "lines", "member", ""),
+            setting(SETTING_PRIVATE_HOSTS, "lines", "member", ""),
+            setting(SETTING_ORG_HOSTS, "lines", "org", ""),
+            setting(SETTING_MEMBER_HOSTS, "choice", "org", "ask"),
+        ]
+    }
+
+    fn values(pairs: &[(&str, &str)]) -> Values {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    /// The keys the desktop reads are pkgmeta's sandbox contract, in the
+    /// shapes it holds a package to (the shared fixture).
+    #[test]
+    fn sandbox_setting_keys_match_go() {
+        #[derive(serde::Deserialize)]
+        struct Shape {
+            #[serde(rename = "type")]
+            kind: String,
+            scope: String,
+            #[serde(default)]
+            options: Vec<String>,
+        }
+        #[derive(serde::Deserialize)]
+        struct Fixture {
+            shapes: std::collections::BTreeMap<String, Shape>,
+        }
+        let fixture: Fixture = serde_json::from_str(include_str!(
+            "../../../../../core/pkgmeta/testdata/sandbox_settings.json"
+        ))
+        .expect("fixture");
+        let keys: Vec<&str> = fixture.shapes.keys().map(String::as_str).collect();
+        let mut ours = vec![
+            SETTING_MODE,
+            SETTING_FORWARD_ENV,
+            SETTING_PRIVATE_HOSTS,
+            SETTING_ORG_HOSTS,
+            SETTING_MEMBER_HOSTS,
+        ];
+        ours.sort();
+        assert_eq!(keys, ours);
+        for s in declared() {
+            let shape = &fixture.shapes[&s.key];
+            assert_eq!(
+                (&shape.kind, &shape.scope),
+                (&s.kind, &s.scope),
+                "{}",
+                s.key
+            );
+        }
+        let modes: Vec<&str> = SandboxMode::ALL.iter().map(|m| m.as_str()).collect();
+        assert_eq!(fixture.shapes[SETTING_MODE].options, modes);
+        assert!(fixture.shapes[SETTING_MEMBER_HOSTS]
+            .options
+            .iter()
+            .any(|o| o == MEMBER_HOSTS_OFF));
+    }
+
+    #[test]
+    fn sandbox_settings_read_each_scope_and_fail_closed() {
+        let decl = declared();
+        let org = values(&[(SETTING_ORG_HOSTS, "ci.internal.example")]);
+        let member = values(&[
+            (SETTING_MODE, "all"),
+            (SETTING_FORWARD_ENV, "EXAMPLE_API_KEY\nEXAMPLE_*"),
+            (
+                SETTING_PRIVATE_HOSTS,
+                "npm.internal.example\nci.internal.example",
+            ),
+            // Out of scope: an organization setting in the member store.
+            (SETTING_ORG_HOSTS, "10.0.0.9"),
+        ]);
+        let s = sandbox_settings(&decl, Some(&org), &member);
+        assert_eq!(s.mode, SandboxMode::All);
+        assert_eq!(s.forward_env, vec!["EXAMPLE_API_KEY", "EXAMPLE_*"]);
+        assert_eq!(s.hosts, vec!["ci.internal.example", "npm.internal.example"]);
+        assert!(s.member_may_allow);
+
+        let off = values(&[
+            (SETTING_MEMBER_HOSTS, "off"),
+            (SETTING_ORG_HOSTS, "ci.internal.example"),
+        ]);
+        let s = sandbox_settings(&decl, Some(&off), &member);
         assert_eq!(
-            private_host(" NPM.Internal.Example "),
-            Ok("npm.internal.example".into())
+            s.hosts,
+            vec!["ci.internal.example"],
+            "only the organization's"
         );
-        assert!(private_host("https://npm.internal.example").is_err());
+        assert!(!s.member_may_allow);
+
+        let s = sandbox_settings(&decl, None, &member);
+        assert!(
+            s.hosts.is_empty() && !s.member_may_allow,
+            "not read yet: none of the member's"
+        );
+
+        // Defaults: borrowed, nothing forwarded or open; an undeclared key
+        // is the platform's default and a refused line is left out.
+        assert_eq!(
+            sandbox_settings(&decl, Some(&Values::new()), &Values::new()),
+            SandboxSettings {
+                member_may_allow: true,
+                ..Default::default()
+            }
+        );
+        let s = sandbox_settings(&[], None, &member);
+        assert_eq!(s, SandboxSettings::default());
+        let bad = values(&[
+            (SETTING_FORWARD_ENV, "PATH\nEXAMPLE_TOKEN"),
+            (SETTING_MODE, "sometimes"),
+        ]);
+        let s = sandbox_settings(&decl, Some(&Values::new()), &bad);
+        assert_eq!(s.forward_env, vec!["EXAMPLE_TOKEN"]);
+        assert_eq!(s.mode, SandboxMode::Borrowed);
+    }
+
+    #[test]
+    fn sandbox_setting_values_follow_the_two_rules() {
+        assert!(
+            check_sandbox_setting_value(SETTING_FORWARD_ENV, "EXAMPLE_API_KEY\nEXAMPLE_*").is_ok()
+        );
+        let err = check_sandbox_setting_value(SETTING_FORWARD_ENV, "EXAMPLE_TOKEN\nPATH")
+            .expect_err("PATH");
+        assert!(
+            err.contains(": PATH (") && !err.contains("EXAMPLE_TOKEN"),
+            "{err}"
+        );
+        assert!(check_sandbox_setting_value(
+            SETTING_PRIVATE_HOSTS,
+            "npm.internal.example\n10.0.0.5"
+        )
+        .is_ok());
+        let err = check_sandbox_setting_value(SETTING_ORG_HOSTS, "169.254.169.254")
+            .expect_err("metadata");
+        assert!(err.contains("169.254.169.254"), "{err}");
+        assert!(
+            check_sandbox_setting_value(SETTING_MODE, "anything").is_ok(),
+            "its type's rule only"
+        );
     }
 
     fn own(state: &str, hosts: &[&str]) -> MachineView {
@@ -1714,10 +1991,7 @@ mod tests {
             ..Default::default()
         };
         let mut status = PrivateHostsStatus {
-            hosts: vec![PrivateHost {
-                host: "npm.internal.example".into(),
-                ..Default::default()
-            }],
+            hosts: vec!["npm.internal.example".into()],
             ..Default::default()
         };
         let mut launch = OwnLaunch::default();

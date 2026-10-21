@@ -29,10 +29,11 @@ import (
 // assistCapabilities is the capabilities context as claims' member sees
 // it: the executable components the member catalog lists to them, the
 // organization's platform agents and, with a room (rc, roomID; "" for
-// none), its agents and how many other people it has. hasOwnAgent is the
-// client's word. Names and one-liners only.
-func (s *Service) assistCapabilities(ctx context.Context, claims, rc auth.Claims, roomID string, hasOwnAgent bool) (*assist.Capabilities, error) {
-	out := &assist.Capabilities{OwnAgent: hasOwnAgent, InRoom: roomID != ""}
+// none), its agents and how many other people it has. The member's own
+// agent and the sandboxed run are the client's word (req). Names and
+// one-liners only.
+func (s *Service) assistCapabilities(ctx context.Context, claims, rc auth.Claims, roomID string, req wire.AssistRequest) (*assist.Capabilities, error) {
+	out := &assist.Capabilities{OwnAgent: req.HasOwnAgent, InRoom: roomID != "", SandboxedRun: req.SandboxedRun, MayAllowHosts: req.SandboxedRun && req.MayAllowHosts}
 	view, err := s.loadMemberComponents(ctx, claims)
 	if err != nil {
 		return nil, err

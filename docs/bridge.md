@@ -153,8 +153,10 @@ startup (SSE replay buffer).
 ## Agent sandbox (hybrid execution)
 
 Design: [`docs/prd/2026-10-09-agent-vm-sandbox.md`](prd/2026-10-09-agent-vm-sandbox.md).
-The desktop hands the bridge its local sandbox through `BNBLOC_SANDBOX_MODE`
-(always) and `BNBLOC_SANDBOX_URL` / `_TOKEN` / `_VMEXEC` / `_MACHINE` /
+What the sandbox does is the sandbox component's own settings, set in
+Components (`docs/prd/2026-10-21-sandbox-private-hosts.md` §2.3); the
+desktop reads them and hands the bridge its local sandbox through
+`BNBLOC_SANDBOX_MODE` (always) and `BNBLOC_SANDBOX_URL` / `_TOKEN` / `_VMEXEC` / `_MACHINE` /
 `_WORKSPACES_ROOT` (only while the sandbox is ready; see
 [environment variables](environment-variables.md)). All of it stays in memory:
 the bridge unsets `BNBLOC_SANDBOX_TOKEN` after reading it, never logs it
@@ -187,8 +189,8 @@ to a core.
   reserved; the bridge then refuses through the same notice and job failure.
 - **Environment passed to sandboxed agents.** A guest command gets the
   default environment only (terminal, locale, git identity). A member lets
-  more into the sandboxed runs of their OWN agents in Settings → Agent
-  sandbox → "Environment passed to sandboxed agents": names or `PREFIX*`
+  more into the sandboxed runs of their OWN agents in the sandbox's setting
+  `forwardEnv` (Components → the sandbox → Settings): names or `PREFIX*`
   patterns (`pkgmeta.ValidForwardEnv`: never `BNBLOC_*`, the guest's
   `HOME`/`USER`/`PATH`/…, or loader variables), handed to the bridge as
   `BNBLOC_SANDBOX_ENV`. Only names travel (the execution descriptor's
@@ -200,9 +202,9 @@ to a core.
   the environment its agent needs, so an own sandboxed run whose agent
   reports an error ends its notice with a pointer to this setting
   (`docs/bugs/2026-10-13-demo-app-build-issues.md`).
-- **Private hosts: the own machine.** A member who lists private hosts in
-  Settings → Agent sandbox → "Private hosts" (mode `all`, a runtime with
-  `egressHosts`) gets a second machine, `bnbloc-own`, whose egress opens
+- **Private hosts: the own machine.** A member with private hosts open to
+  them (the sandbox's settings `orgHosts` and `privateHosts`; mode `all`, a
+  runtime with `egressHosts`) gets a second machine, `bnbloc-own`, whose egress opens
   them beside the public internet; the desktop hands it over as
   `BNBLOC_SANDBOX_OWN_MACHINE` once it runs
   (`docs/prd/2026-10-21-sandbox-private-hosts.md`). While it is set, every
@@ -212,7 +214,9 @@ to a core.
   space never move between machines; the own machine missing (the desktop
   recreating it for a change of hosts) is a retried `sandbox_starting`.
   `turns.json` counts the turns on it (`ownMachine`): the desktop recreates
-  it only when none runs.
+  it only when none runs. A settled sandboxed turn reports where it ran
+  (diagnostics `sandboxed`: `own` for an `ownerEnv` drive, else `shared`;
+  `AgentJob.sandboxed`), which find-a-way's `allow-host` reads.
 - **Agent-host rooms.** Room discovery passes `includeAgentHost=1`; rooms
   listed in `agentHostRooms` (the owner only hosts a platform agent there)
   are streamed and served, but never live-synced, and realtime takes no

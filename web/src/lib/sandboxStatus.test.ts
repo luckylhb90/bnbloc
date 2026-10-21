@@ -1,4 +1,5 @@
-import { canRestartVm, privateHostsLine, shellEnvReloadText, statusLine, type SandboxStatus } from "./sandboxStatus.ts";
+import privateHosts from "../../../sandbox/protocol/testdata/private_hosts.json" with { type: "json" };
+import { canRestartVm, mayAllowHosts, privateHostsLine, shellEnvReloadText, statusLine, validPrivateHost, type SandboxStatus } from "./sandboxStatus.ts";
 
 // The web tsconfig has no node types, so the tests use a local runner (same
 // convention as the other *.test.ts files); a failure throws and fails `node --test`.
@@ -22,17 +23,28 @@ const base: SandboxStatus = {
   state: "ready",
   message: "VM up",
   mode: "borrowed",
-  env: [],
   timings: { sidecarReadyMs: 120, prewarmMs: 900 },
   handedToBridge: true,
   isolation: "microvm",
   machine: { name: "bnbloc", state: "running", image: "img:1", bootMs: 512 },
-  privateHosts: { hosts: [], state: "none", message: "", applied: [] },
+  privateHosts: { hosts: [], memberMayAllow: true, state: "none", message: "", applied: [] },
 };
+
+test("the private-host rule agrees with Go's on the shared fixture", () => {
+  for (const h of privateHosts.valid) equal([h, validPrivateHost(h)], [h, true]);
+  for (const h of privateHosts.invalid) equal([h, validPrivateHost(h)], [h, false]);
+});
+
+test("a member may allow a host when the settings let them and the runtime can", () => {
+  equal(mayAllowHosts(base), true);
+  equal(mayAllowHosts({ ...base, privateHosts: { ...base.privateHosts, memberMayAllow: false } }), false);
+  equal(mayAllowHosts({ ...base, privateHosts: { ...base.privateHosts, state: "unsupported" } }), false);
+  equal(mayAllowHosts({ ...base, installed: false }), false);
+});
 
 test("private hosts: no line without hosts, the shell's message otherwise", () => {
   equal(privateHostsLine(base.privateHosts), null);
-  const listed = { ...base.privateHosts, hosts: [{ host: "npm.internal.example", addedAtMs: 1 }] };
+  const listed = { ...base.privateHosts, hosts: ["npm.internal.example"] };
   equal(privateHostsLine({ ...listed, state: "waiting", message: "Applies when your agent's current run ends." }), {
     tone: "busy",
     text: "Applies when your agent's current run ends.",

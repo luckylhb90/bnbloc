@@ -1,5 +1,6 @@
 import { AssistContracts } from "./wire.gen.ts";
 import {
+  withHostLine,
   createCardStore,
   createReplyMemo,
   findStep,
@@ -74,6 +75,27 @@ eq(parseProposal({ summary: "x", fixes: [{ action: "attach", target: "  the Q3 s
 // The fallback: attach, ask another agent of the room (never the one that
 // replied), rephrase; no other agent, no ask.
 eq(fallbackFixes(scope).map((f) => `${f.action}:${f.target}`), ["attach:", "ask-agent:jack/claude", "rephrase:"], "the fallback");
+
+// allow-host: only for the member's own sandboxed run whose settings let
+// them allow a host, a host the rule takes (lower-cased) and not open yet.
+{
+  const fixes = [
+    { action: "allow-host", target: "NPM.internal.example", why: "The registry is private." },
+    { action: "allow-host", target: "169.254.169.254", why: "Metadata." },
+    { action: "allow-host", target: "https://ci.internal.example", why: "A URL." },
+    { action: "allow-host", target: "ci.internal.example", why: "Already open." },
+  ];
+  const sandboxed: DeadEndScope = { ...scope, sandboxedRun: true, mayAllowHosts: true, openHosts: ["ci.internal.example"] };
+  eq(parseProposal({ summary: "x", fixes }, sandboxed)?.fixes, [{ action: "allow-host", target: "npm.internal.example", why: "The registry is private." }], "allow-host held to the rule");
+  eq(parseProposal({ summary: "x", fixes }, { ...sandboxed, mayAllowHosts: false })?.fixes, [], "the organization allows only its own hosts");
+  eq(parseProposal({ summary: "x", fixes }, scope)?.fixes, [], "not a sandboxed run");
+  eq(fixLabel({ action: "allow-host", target: "npm.internal.example", why: "" }), "Let your agents reach npm.internal.example", "allow-host label");
+  eq(fallbackFixes(sandboxed).map((f) => `${f.action}:${f.target}`), ["attach:", "ask-agent:jack/claude", "allow-host:", "rephrase:"], "the fallback asks for a host");
+  eq(fallbackFixes({ ...sandboxed, mayAllowHosts: false }).some((f) => f.action === "allow-host"), false, "no host the member may not allow");
+  eq(withHostLine("", "npm.internal.example"), "npm.internal.example", "the first host");
+  eq(withHostLine("ci.internal.example\n", "npm.internal.example"), "ci.internal.example\nnpm.internal.example", "a host appended");
+  eq(withHostLine("npm.internal.example", "npm.internal.example"), "npm.internal.example", "a host once");
+}
 eq(fallbackFixes({ installable: [], agents: ["acme/maya/codex"], replier: "acme/maya/codex" }).map((f) => f.action), ["attach", "rephrase"], "the fallback alone in a room");
 
 // Once per reply: the memo keeps outcomes by room and sequence, bounded.
@@ -147,6 +169,7 @@ eq(DEAD_END_ACTIONS.map((action) => fixLabel({ action, target: "browser", why: "
   "Use your own agent",
   "Say it another way",
   "Tell your admins",
+  "Let your agents reach browser",
 ], "the labels");
 
 // The task's output contract (wire.AssistContracts) names this closed

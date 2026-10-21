@@ -302,7 +302,7 @@ func credentialError(detail string) bool {
 // sandboxEnvHint ends the notice of an own sandboxed run whose agent could
 // not authenticate: the guest gets only the default environment plus what
 // the owner listed (SandboxConfig.Env).
-const sandboxEnvHint = "It ran in the agent sandbox, which receives only the environment variables listed in Settings → Agent sandbox → Environment passed to sandboxed agents: add any its agent needs from this computer, such as an API key."
+const sandboxEnvHint = "It ran in the agent sandbox, which receives only the environment variables listed in its settings (Components → the sandbox → Settings): add any its agent needs from this computer, such as an API key."
 
 // maxNoticeDetailBytes bounds the agent's own error output a notice
 // carries (wire.JobNotice.Detail).

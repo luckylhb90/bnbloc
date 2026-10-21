@@ -319,6 +319,9 @@ export interface AgentJob {
   // (a skill pack an expert requires, a room expert that is gone); the
   // turn runs without them.
   contentMissing?: string[];
+  // Sandboxed is where the turn's commands ran when its owner's agent
+  // sandbox ran them: SandboxedOwn or SandboxedShared ("" on the host).
+  sandboxed?: string;
   // ReplySessionID is the activity session a replied job's reply was
   // posted under (notifications pair the reply with its job by it).
   replySessionId?: string;
@@ -337,6 +340,15 @@ export interface AgentJobAttempt {
 export interface AgentJobsReply {
   jobs: AgentJob[];
 }
+
+// Where a sandboxed turn ran (AgentJob.Sandboxed).
+// SandboxedOwn: the owner's own run, with their forwarded environment
+// and the private hosts open to them
+// (docs/prd/2026-10-21-sandbox-private-hosts.md).
+export const SandboxedOwn = "own";
+// SandboxedShared: a borrowed run, or one wearing someone else's
+// content: neither.
+export const SandboxedShared = "shared";
 
 // ---- wire/agent_runs.go ----
 
@@ -1062,6 +1074,12 @@ export interface AssistRequest {
   // HasOwnAgent is the client's word that the member has an agent of
   // their own on this device (the capabilities context).
   hasOwnAgent?: boolean;
+  // SandboxedRun is the client's word that the reply's turn was the
+  // member's own agent running in their agent sandbox, which reaches no
+  // private host it was not allowed; MayAllowHosts that the sandbox's
+  // settings let the member allow one (the capabilities context).
+  sandboxedRun?: boolean;
+  mayAllowHosts?: boolean;
   // Gated asks the task's gate first (AssistGate): below it, or with no
   // decision model for the caller, the answer is AssistSkipped; a task
   // without a gate refuses it.
@@ -1191,7 +1209,7 @@ export interface AssistContractField {
 }
 
 // AssistContracts are the contracts, one per task name.
-export const AssistContracts: readonly AssistContract[] = [{ task: "enhance-prompt", output: "text" }, { task: "describe-work", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "category", values: ["office", "data", "productivity", "content", "learning", "engineering", "finance", "life", "other"] }, { name: "tags", type: "list" }] }, { task: "describe-room", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "category" }, { name: "tags", type: "list" }, { name: "welcome" }, { name: "instructions" }, { name: "dependsOn", type: "items", item: [{ name: "what" }, { name: "kind", values: ["instructions", "app", "file", "tool", "schedule", "agent", "data", "other"] }, { name: "included", values: ["yes", "no"] }, { name: "why" }] }, { name: "findings", type: "items", item: [{ name: "field" }, { name: "quote" }, { name: "why", values: ["secret", "internal-link", "personal-name", "private-data"] }] }] }, { task: "draft-expert", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "instructions" }, { name: "welcome" }, { name: "quickPrompts", type: "items", item: [{ name: "title" }, { name: "prompt" }] }, { name: "tags", type: "list" }] }, { task: "draft-skill-pack", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "skills", type: "items", item: [{ name: "name" }, { name: "description" }, { name: "body" }] }, { name: "tags", type: "list" }] }, { task: "draft-prompt-pack", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "prompts", type: "items", item: [{ name: "title" }, { name: "body" }] }, { name: "tags", type: "list" }] }, { task: "plan-room", output: "json", fields: [{ name: "roomId" }, { name: "name" }, { name: "description" }, { name: "expert" }, { name: "skills", type: "list" }, { name: "firstMessage" }] }, { task: "draft-schedule", output: "json", fields: [{ name: "text" }, { name: "kind", values: ["once", "daily", "weekly", "cron"] }, { name: "time" }, { name: "days", type: "list" }, { name: "cron" }, { name: "at" }] }, { task: "explain-source-use", output: "json", fields: [{ name: "summary" }, { name: "uses", type: "list" }, { name: "mismatch" }], consent: true }, { task: "review-skill", output: "json", fields: [{ name: "findings", type: "list" }, { name: "name" }, { name: "displayName" }, { name: "description" }, { name: "tags", type: "list" }] }, { task: "fill-settings", output: "json", fields: [{ name: "values", type: "items", item: [{ name: "key" }, { name: "value" }] }, { name: "notes" }] }, { task: "suggest-skill-dirs", output: "json", fields: [{ name: "add", type: "items", item: [{ name: "path" }, { name: "why" }] }, { name: "notes" }] }, { task: "find-a-way", output: "json", fields: [{ name: "cause", values: ["access", "missing-file", "capability", "unclear", "agent-error", "other"] }, { name: "summary" }, { name: "fixes", type: "items", item: [{ name: "action", values: ["install", "ask-agent", "attach", "own-agent", "rephrase", "report"] }, { name: "target" }, { name: "why" }] }], gate: true }];
+export const AssistContracts: readonly AssistContract[] = [{ task: "enhance-prompt", output: "text" }, { task: "describe-work", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "category", values: ["office", "data", "productivity", "content", "learning", "engineering", "finance", "life", "other"] }, { name: "tags", type: "list" }] }, { task: "describe-room", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "category" }, { name: "tags", type: "list" }, { name: "welcome" }, { name: "instructions" }, { name: "dependsOn", type: "items", item: [{ name: "what" }, { name: "kind", values: ["instructions", "app", "file", "tool", "schedule", "agent", "data", "other"] }, { name: "included", values: ["yes", "no"] }, { name: "why" }] }, { name: "findings", type: "items", item: [{ name: "field" }, { name: "quote" }, { name: "why", values: ["secret", "internal-link", "personal-name", "private-data"] }] }] }, { task: "draft-expert", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "instructions" }, { name: "welcome" }, { name: "quickPrompts", type: "items", item: [{ name: "title" }, { name: "prompt" }] }, { name: "tags", type: "list" }] }, { task: "draft-skill-pack", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "skills", type: "items", item: [{ name: "name" }, { name: "description" }, { name: "body" }] }, { name: "tags", type: "list" }] }, { task: "draft-prompt-pack", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "prompts", type: "items", item: [{ name: "title" }, { name: "body" }] }, { name: "tags", type: "list" }] }, { task: "plan-room", output: "json", fields: [{ name: "roomId" }, { name: "name" }, { name: "description" }, { name: "expert" }, { name: "skills", type: "list" }, { name: "firstMessage" }] }, { task: "draft-schedule", output: "json", fields: [{ name: "text" }, { name: "kind", values: ["once", "daily", "weekly", "cron"] }, { name: "time" }, { name: "days", type: "list" }, { name: "cron" }, { name: "at" }] }, { task: "explain-source-use", output: "json", fields: [{ name: "summary" }, { name: "uses", type: "list" }, { name: "mismatch" }], consent: true }, { task: "review-skill", output: "json", fields: [{ name: "findings", type: "list" }, { name: "name" }, { name: "displayName" }, { name: "description" }, { name: "tags", type: "list" }] }, { task: "fill-settings", output: "json", fields: [{ name: "values", type: "items", item: [{ name: "key" }, { name: "value" }] }, { name: "notes" }] }, { task: "suggest-skill-dirs", output: "json", fields: [{ name: "add", type: "items", item: [{ name: "path" }, { name: "why" }] }, { name: "notes" }] }, { task: "find-a-way", output: "json", fields: [{ name: "cause", values: ["access", "missing-file", "capability", "unclear", "agent-error", "other"] }, { name: "summary" }, { name: "fixes", type: "items", item: [{ name: "action", values: ["install", "ask-agent", "attach", "own-agent", "rephrase", "report", "allow-host"] }, { name: "target" }, { name: "why" }] }], gate: true }];
 
 // ---- wire/attachment_types.go ----
 
@@ -1519,6 +1537,26 @@ export interface OrgSettingsComponent {
 export interface OrgSettingsComponentsReply {
   components: OrgSettingsComponent[];
 }
+
+// The settings of a sandbox component the platform reads by key
+// (docs/prd/2026-10-21-sandbox-private-hosts.md): a sandbox package
+// declares them in its own `settings` in the shapes pkgmeta holds it to
+// (core/pkgmeta/sandbox_settings.go), and they are set in Components.
+// SandboxSettingMode (member, choice off|borrowed|all): which of the
+// member's agent runs execute their commands in the VM.
+export const SandboxSettingMode = "mode";
+// SandboxSettingForwardEnv (member, lines): environment variable names
+// or PREFIX* patterns let into the member's own sandboxed runs.
+export const SandboxSettingForwardEnv = "forwardEnv";
+// SandboxSettingPrivateHosts (member, lines): private hosts the
+// member's own sandboxed runs reach (an agent reply's card adds one).
+export const SandboxSettingPrivateHosts = "privateHosts";
+// SandboxSettingOrgHosts (org, lines): private hosts the organization
+// opens to every member's own sandboxed runs.
+export const SandboxSettingOrgHosts = "orgHosts";
+// SandboxSettingMemberHosts (org, choice ask|off): whether a member may
+// allow a private host of their own.
+export const SandboxSettingMemberHosts = "memberHosts";
 
 // ---- wire/component_shapes.go ----
 

@@ -463,6 +463,14 @@ pub(super) fn desktop_components(
         .filter(|c| c.active_desktop_component())
 }
 
+/// The one sandbox runtime a desktop runs (it owns the machines): the
+/// lexically first installed name wins, deterministically.
+pub(super) fn active_sandbox(response: &ComponentsResponse) -> Option<&ComponentEntry> {
+    desktop_components(response)
+        .filter(|c| c.kind == ComponentKind::Sandbox)
+        .min_by(|a, b| a.name.cmp(&b.name))
+}
+
 pub(super) fn resolve_component_specs(
     response: &ComponentsResponse,
     platform: &str,
@@ -471,12 +479,7 @@ pub(super) fn resolve_component_specs(
     let mut discovered = HashSet::new();
     let mut failures = Vec::new();
     let mut inactive = Vec::new();
-    // One sandbox runtime per desktop (it owns the one machine): the
-    // lexically first installed name wins, deterministically.
-    let active_sandbox = desktop_components(response)
-        .filter(|c| c.kind == ComponentKind::Sandbox)
-        .map(|c| c.name.as_str())
-        .min();
+    let active_sandbox = active_sandbox(response).map(|c| c.name.as_str());
 
     for component in desktop_components(response) {
         discovered.insert(component.id());

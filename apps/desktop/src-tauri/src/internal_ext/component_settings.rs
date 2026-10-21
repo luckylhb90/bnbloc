@@ -1,9 +1,9 @@
 //! Component settings on the member's desktop
 //! (docs/prd/2026-10-19-component-settings.md).
 //!
-//! A plugin or MCP tool package declares `settings`: each a key, a type, a
-//! scope (`platform`, `org` or `member`) and how its value reaches the
-//! component. This module is the desktop's one owner of them:
+//! A plugin, MCP tool or sandbox package declares `settings`: each a key, a
+//! type, a scope (`platform`, `org` or `member`) and how its value reaches
+//! the component. This module is the desktop's one owner of them:
 //!
 //! - The value rules: a Rust copy of `core/pkgmeta/settings.go`
 //!   (`check_setting_value`, `merge_settings`, `effective_settings`,
@@ -22,6 +22,9 @@
 //!   `BNBLOC_COMPONENT_SETTINGS_FILE` (`<member>/component-settings/launch/`;
 //!   a `lines` value as a JSON array of strings) plus each declared
 //!   `deliver.env`.
+//! - A sandbox's: the desktop reads them itself (sandbox.rs), its
+//!   organization's from the same route when the catalog changes; a save
+//!   is also held to the sandbox's own value rules and reconciles the VM.
 //! - Needs setup: a component whose required settings (any scope) are not
 //!   all set does not run. The catalog says which platform and organization
 //!   ones are missing (`settingsMissing`); the member store says the rest. A
@@ -33,7 +36,7 @@ use crate::internal_ext::gateway_client::API_TIMEOUT;
 use crate::internal_ext::sidecar_model::{ComponentKind, McpToolEntry, SidecarSpec};
 use crate::internal_ext::sidecar_status::component_id;
 use crate::internal_ext::sidecar_util::cache_stem;
-use crate::internal_ext::{member_dir, Adapter};
+use crate::internal_ext::{member_dir, sandbox, Adapter};
 
 /// The env var naming the file with every value of a component's settings
 /// (pkgmeta.ComponentSettingsFileEnv).
@@ -174,7 +177,7 @@ fn number_syntax(v: &str) -> bool {
 
 /// A `lines` value's lines: the stored value split at "\n" (none for an
 /// empty value; pkgmeta.SplitSettingLines).
-fn split_lines(v: &str) -> Vec<&str> {
+pub(super) fn split_lines(v: &str) -> Vec<&str> {
     if v.is_empty() {
         Vec::new()
     } else {
@@ -592,6 +595,7 @@ fn parse_kind(kind: &str) -> Result<ComponentKind, String> {
     match kind {
         "plugin" => Ok(ComponentKind::Plugin),
         "mcp" => Ok(ComponentKind::Mcp),
+        "sandbox" => Ok(ComponentKind::Sandbox),
         _ => Err(format!(
             "components of kind {kind:?} take no member settings here"
         )),
@@ -632,6 +636,37 @@ impl Adapter {
         )
     }
 
+    /// The platform and organization values of component `name` of `kind`
+    /// installed for the member, from the gateway (secrets included: never
+    /// logged).
+    async fn resolved(&self, kind: ComponentKind, name: &str) -> Result<Resolved, String> {
+        let path = format!(
+            "/v1/components/{name}/settings/resolved?kind={}",
+            kind_name(kind)
+        );
+        let raw = self
+            .gateway
+            .session()
+            .send(reqwest::Method::GET, &path, |r| r.timeout(API_TIMEOUT))
+            .await
+            .map_err(|e| format!("read {name}'s settings: {e}"))?
+            .bytes()
+            .await
+            .map_err(|e| format!("read {name}'s settings: {}", e.without_url()))?;
+        // The answer holds secrets: a decode error names no content.
+        serde_json::from_slice(&raw)
+            .map_err(|_| format!("read {name}'s settings: the gateway's answer is malformed"))
+    }
+
+    /// The platform and organization values alone (resolved).
+    pub(super) async fn resolved_settings(
+        &self,
+        kind: ComponentKind,
+        name: &str,
+    ) -> Result<Values, String> {
+        Ok(self.resolved(kind, name).await?.values)
+    }
+
     /// Hand plugin `spec` its settings at launch: the platform and
     /// organization values from the gateway (when it declares any), the
     /// member's from the store, all in the settings file and each
@@ -644,23 +679,7 @@ impl Adapter {
         let decl = &spec.plugin.settings;
         let mut resolved = Resolved::default();
         if decl.iter().any(|s| s.scope != SCOPE_MEMBER) {
-            let path = format!("/v1/components/{}/settings/resolved?kind=plugin", spec.name);
-            let raw = self
-                .gateway
-                .session()
-                .send(reqwest::Method::GET, &path, |r| r.timeout(API_TIMEOUT))
-                .await
-                .map_err(|e| format!("read {}'s settings: {e}", spec.name))?
-                .bytes()
-                .await
-                .map_err(|e| format!("read {}'s settings: {}", spec.name, e.without_url()))?;
-            // The answer holds secrets: a decode error names no content.
-            resolved = serde_json::from_slice(&raw).map_err(|_| {
-                format!(
-                    "read {}'s settings: the gateway's answer is malformed",
-                    spec.name
-                )
-            })?;
+            resolved = self.resolved(ComponentKind::Plugin, &spec.name).await?;
         }
         if let Some(why) = needs_setup(&spec.name, decl, &resolved.missing) {
             return Err(why);
@@ -706,6 +725,7 @@ impl Adapter {
                 })
                 .collect()
         };
+        out.extend(self.sandbox_settings_view(&dir)?);
         for (spec, state, message) in plugins {
             let decl = &spec.plugin.settings;
             let (member, unreadable) =
@@ -731,9 +751,39 @@ impl Adapter {
         Ok(out)
     }
 
+    /// The active sandbox's settings view, when it declares any; its state
+    /// and message are the sandbox's own (sandbox_status).
+    fn sandbox_settings_view(&self, dir: &Path) -> Result<Option<ComponentSettingsView>, String> {
+        let Some(d) = self.sandbox.lock().declared.clone() else {
+            return Ok(None);
+        };
+        if d.decl.is_empty() {
+            return Ok(None);
+        }
+        let (member, unreadable) = match load(&settings_path(dir, ComponentKind::Sandbox, &d.name)?)
+        {
+            Ok(values) => (values, None),
+            Err(e) => (Values::new(), Some(e)),
+        };
+        let status = self.sandbox_status();
+        Ok(Some(ComponentSettingsView {
+            kind: ComponentKind::Sandbox,
+            version: d.version,
+            state: status.state.to_string(),
+            message: unreadable.unwrap_or(status.message),
+            transport: None,
+            tools: None,
+            auth: String::new(),
+            sign_in: None,
+            fields: fields(&d.decl, &member, &d.set),
+            missing: missing(&d.decl, &member, &d.missing),
+            name: d.name,
+        }))
+    }
+
     /// Validate and store the member's values for a component (member
-    /// scope only), then restart a plugin with them; the bridge reads an
-    /// MCP tool's per session.
+    /// scope only), then restart a plugin with them, or bring the sandbox's
+    /// VM to them; the bridge reads an MCP tool's per session.
     pub fn save_component_settings(
         &self,
         kind: &str,
@@ -753,14 +803,20 @@ impl Adapter {
             &values,
             &clear,
         )?;
+        if kind == ComponentKind::Sandbox {
+            check_sandbox_settings(&decl, &next)?;
+        }
         save(&path, &next)?;
-        if kind == ComponentKind::Plugin {
-            self.restart_sidecar(&component_id(kind, name));
+        match kind {
+            ComponentKind::Plugin => self.restart_sidecar(&component_id(kind, name)),
+            ComponentKind::Sandbox => self.refresh_sandbox_settings(),
+            _ => {}
         }
         Ok(())
     }
 
-    /// The declaration of an installed plugin or MCP tool.
+    /// The declaration of an installed plugin, MCP tool or the active
+    /// sandbox.
     fn component_settings_decl(&self, kind: ComponentKind, name: &str) -> Option<Vec<Setting>> {
         let decl = match kind {
             ComponentKind::Plugin => self
@@ -771,17 +827,38 @@ impl Adapter {
                 .and_then(|sidecar| sidecar.spec.as_ref())
                 .map(|spec| spec.plugin.settings.clone()),
             ComponentKind::Mcp => self.mcp_settings_decl(name),
+            ComponentKind::Sandbox => self
+                .sandbox
+                .lock()
+                .declared
+                .as_ref()
+                .filter(|d| d.name == name)
+                .map(|d| d.decl.clone()),
             _ => None,
         }?;
         (!decl.is_empty()).then_some(decl)
     }
 }
 
-/// The kind's catalog name (sort order of the settings views).
+/// A sandbox's values to store, held to its own rules beyond their types
+/// (pkgmeta.CheckKindSettings): a refusal names the setting.
+fn check_sandbox_settings(decl: &[Setting], values: &Values) -> Result<(), SettingRefusal> {
+    for s in decl {
+        if let Some(v) = values.get(&s.key) {
+            sandbox::check_sandbox_setting_value(&s.key, v)
+                .map_err(|e| SettingRefusal::new(&s.key, format!("{}: {e}", s.label)))?;
+        }
+    }
+    Ok(())
+}
+
+/// The kind's catalog name (the resolved route's `kind`, the sort order of
+/// the settings views).
 fn kind_name(kind: ComponentKind) -> &'static str {
     match kind {
         ComponentKind::Plugin => "plugin",
         ComponentKind::Mcp => "mcp",
+        ComponentKind::Sandbox => "sandbox",
         _ => "other",
     }
 }

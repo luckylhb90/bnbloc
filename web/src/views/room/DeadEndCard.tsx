@@ -1,7 +1,9 @@
 import { createContext, useContext, useState } from "react";
 import {
+  ArrowClockwiseIcon,
   ChatCircleIcon,
   DesktopIcon,
+  GlobeSimpleIcon,
   LifebuoyIcon,
   MegaphoneIcon,
   PaperclipIcon,
@@ -13,8 +15,10 @@ import {
 import type { MemberComponent } from "@/lib/api";
 import { fixLabel, isAgentReply, type DeadEndAction, type DeadEndFix } from "@/lib/deadEnd";
 import { errorText } from "@/lib/errors";
+import { validPrivateHost } from "@/lib/sandboxStatus";
+import { useVisiblePoll } from "@/lib/useVisiblePoll";
 import { Button } from "@/ui/Button";
-import { Textarea } from "@/ui/Input";
+import { Input, Textarea } from "@/ui/Input";
 import { useToast } from "@/ui/Toast";
 import { ActorLabel } from "@/views/room/ActorLabel";
 import type { FeedItem } from "@/views/room/types";
@@ -37,7 +41,11 @@ const ICONS: Readonly<Record<DeadEndAction, typeof PuzzlePieceIcon>> = {
   "own-agent": DesktopIcon,
   rephrase: SparkleIcon,
   report: MegaphoneIcon,
+  "allow-host": GlobeSimpleIcon,
 };
+
+/** How often the card checks that an allowed host opened. */
+const HOST_POLL_MS = 2000;
 
 /** FindAWayButton is an agent reply's "Didn't work? Find a way". */
 export function FindAWayButton({ item }: { readonly item: FeedItem }) {
@@ -101,11 +109,14 @@ export function DeadEndCard({ item }: { readonly item: FeedItem }) {
 }
 
 // FixRow is one fix: its button and why, and the step a fix needs before
-// it acts (an install's confirmation, a report's text to review).
+// it acts (an install's confirmation, a report's text to review, a host's
+// confirmation, typed when the proposal named none).
 function FixRow({ room, reply, fix }: { readonly room: DeadEndRoom; readonly reply: FeedItem; readonly fix: DeadEndFix }) {
   const toast = useToast();
   const [step, setStep] = useState<"idle" | "confirm" | "busy">("idle");
   const [note, setNote] = useState(fix.target);
+  // An allowed host: waiting for it to open, then open (ask again).
+  const [host, setHost] = useState<{ readonly name: string; readonly open: boolean } | null>(null);
   const [setup, setSetup] = useState<MemberComponent | null>(null);
   // What an install or a report did, shown on the fix that did it.
   const [result, setResult] = useState("");
@@ -116,6 +127,7 @@ function FixRow({ room, reply, fix }: { readonly room: DeadEndRoom; readonly rep
     switch (fix.action) {
       case "install":
       case "report":
+      case "allow-host":
         setStep("confirm");
         return;
       case "ask-agent":
@@ -140,17 +152,48 @@ function FixRow({ room, reply, fix }: { readonly room: DeadEndRoom; readonly rep
         const needsSetup = await room.install(fix.target);
         setSetup(needsSetup);
         setResult(needsSetup ? "Installed: set it up, then ask again" : "Installed: ask again");
+      } else if (fix.action === "allow-host") {
+        const name = note.trim().toLowerCase();
+        await room.allowHost(name);
+        setHost({ name, open: false });
+        setResult(`Opening ${name} to your agents…`);
       } else {
         const queued = await room.report(reply, note.trim());
         setResult(queued ? "Sent to your admins" : "Not sent: no notification reaches your admins, or they turned room reports off");
       }
       setStep("idle");
     } catch (e) {
-      toast.error(errorText(e, fix.action === "install" ? `Could not install ${fix.target}` : "Could not send the report"));
+      toast.error(errorText(e, fix.action === "install" ? `Could not install ${fix.target}` : fix.action === "allow-host" ? "Could not allow the host" : "Could not send the report"));
       setStep("confirm");
     }
   };
 
+  // Once allowed, the host opens when the member's own VM and their bridge
+  // take it (after any run of theirs there ends): then the request can go
+  // again.
+  useVisiblePoll(
+    () => {
+      if (!host) return;
+      void room
+        .sandbox()
+        .then((s) => {
+          const p = s?.privateHosts;
+          if (p && p.state === "ready" && p.applied.includes(host.name)) {
+            setHost({ ...host, open: true });
+            setResult(`${host.name} is open to your agents`);
+          } else if (p?.state === "error") {
+            setResult(p.message);
+          } else if (p?.state === "waiting") {
+            setResult(`Opening ${host.name} when your agent's current run ends…`);
+          }
+        })
+        .catch(() => {});
+    },
+    HOST_POLL_MS,
+    !!host && !host.open,
+  );
+
+  const hostName = note.trim().toLowerCase();
   return (
     <div className="flex flex-col gap-1">
       <div className="flex flex-wrap items-center gap-2">
@@ -177,6 +220,41 @@ function FixRow({ room, reply, fix }: { readonly room: DeadEndRoom; readonly rep
           </Button>
           <Button size="sm" variant="ghost" onClick={() => setStep("idle")}>
             Cancel
+          </Button>
+        </div>
+      )}
+      {step !== "idle" && fix.action === "allow-host" && (
+        <div className="flex flex-col gap-1.5 text-xs">
+          {!fix.target && (
+            <Input
+              className="font-mono"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              aria-label="The private host"
+              placeholder="npm.internal.example"
+              spellCheck={false}
+              autoCapitalize="none"
+            />
+          )}
+          <span className="min-w-0">
+            Let your own agents&apos; sandboxed runs reach <strong className="font-mono">{hostName || "this host"}</strong> on any port, and anything else at its
+            address. Runs of your agents by other members never reach it. You can remove it in your sandbox&apos;s settings.
+          </span>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="primary" disabled={step === "busy" || !validPrivateHost(hostName)} onClick={() => void confirm()}>
+              Allow
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setStep("idle")}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+      {host?.open && (
+        <div>
+          <Button size="sm" variant="outline" onClick={() => room.askAgain(reply)}>
+            <ArrowClockwiseIcon size={14} />
+            Ask again
           </Button>
         </div>
       )}

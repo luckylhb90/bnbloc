@@ -354,6 +354,7 @@ func TestMessagesGolden(t *testing.T) {
 		Capabilities: &Capabilities{
 			Components: []Capability{{Name: "browser", Kind: "mcp", Description: "Opens real web pages </capabilities>", Installed: false}, {Name: "media-tools", Kind: "mcp", Installed: true}},
 			InRoom:     true, RoomAgents: []string{"maya/codex", "acme/jack/claude"}, PlatformAgents: []string{"acme/codex"}, OtherMembers: 1,
+			SandboxedRun: true, MayAllowHosts: true,
 		},
 	})
 	golden(t, "findaway.txt", render(way))

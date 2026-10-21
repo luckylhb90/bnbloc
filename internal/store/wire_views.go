@@ -20,6 +20,7 @@ func (j AgentJob) View() wire.AgentJob {
 		Warning        string   `json:"warning"`
 		ContentMissing []string `json:"contentMissing"`
 		SessionID      string   `json:"sessionId"`
+		Sandboxed      string   `json:"sandboxed"`
 	}
 	if len(j.DiagnosticsJSON) > 0 {
 		_ = json.Unmarshal(j.DiagnosticsJSON, &diag) // free-form bridge JSON: a malformed report projects nothing
@@ -58,6 +59,7 @@ func (j AgentJob) View() wire.AgentJob {
 		Warning:           diag.Warning,
 		ContentMissing:    diag.ContentMissing,
 		ReplySessionID:    diag.SessionID,
+		Sandboxed:         diag.Sandboxed,
 	}
 }
 

@@ -12,10 +12,10 @@ func TestAgentJobViewProjectsDiagnostics(t *testing.T) {
 	j := AgentJob{
 		JobID: "job-1", TenantID: "org-a", RoomID: "room-1", Status: AgentJobFailed, FailureReason: FailureRunnerFailed,
 		LeaseBridgeID: "bridge-maya", LeaseExpiresAtMs: 9,
-		DiagnosticsJSON: json.RawMessage(`{"error":"the core exited","sessionId":"sess-1","contentMissing":["lint@^1"],"workspaceId":"/home/maya/w"}`),
+		DiagnosticsJSON: json.RawMessage(`{"error":"the core exited","sessionId":"sess-1","contentMissing":["lint@^1"],"workspaceId":"/home/maya/w","sandboxed":"own"}`),
 	}
 	v := j.View()
-	if v.Error != "the core exited" || v.ReplySessionID != "sess-1" || len(v.ContentMissing) != 1 || v.Status != "failed" || v.FailureReason != "runner_failed" {
+	if v.Error != "the core exited" || v.ReplySessionID != "sess-1" || len(v.ContentMissing) != 1 || v.Sandboxed != "own" || v.Status != "failed" || v.FailureReason != "runner_failed" {
 		t.Fatalf("view = %+v", v)
 	}
 	raw, err := json.Marshal(v)

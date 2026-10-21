@@ -11,13 +11,17 @@ import {
   ownSettledTurn,
   parseProposal,
   requestOf,
+  withHostLine,
   type DeadEndCardState,
   type DeadEndScope,
 } from "@/lib/deadEnd";
+import { desktop } from "@/lib/desktop";
 import { errorText } from "@/lib/errors";
+import { mayAllowHosts, type SandboxStatus } from "@/lib/sandboxStatus";
 import { agentHandle } from "@/lib/roomAgents";
 import type { RoomEvent } from "@/lib/roomEvents";
 import { composerAgentPicks, composerDrafts, composerFilePicks } from "@/lib/team";
+import { SandboxedOwn, SandboxSettingPrivateHosts } from "@/lib/wire.gen";
 import { routeHash } from "@/lib/hashRoute";
 import { useToast } from "@/ui/Toast";
 import type { RoomAgent } from "@/views/composer/types";
@@ -51,6 +55,14 @@ export interface DeadEndRoom {
   /** Sends the member's reviewed note to the admins: whether it was
    *  queued for one. */
   readonly report: (reply: FeedItem, text: string) => Promise<boolean>;
+  /** Lets the member's own sandboxed agents reach host (the member
+   *  confirmed): adds it to their sandbox's private hosts on this computer. */
+  readonly allowHost: (host: string) => Promise<void>;
+  /** The sandbox's state on this computer, read again (the card waits for
+   *  the host to open before offering to ask again). */
+  readonly sandbox: () => Promise<SandboxStatus | null>;
+  /** Sends the reply's request again, to the same agent. */
+  readonly askAgain: (reply: FeedItem) => void;
 }
 
 /** Turns settled but whose reply is not in the feed yet wait at most for
@@ -64,6 +76,7 @@ export function useDeadEnd({
   feed,
   roomAgents,
   send,
+  agentJobs,
 }: {
   readonly roomId: string;
   readonly channelId: string | null;
@@ -71,6 +84,8 @@ export function useDeadEnd({
   readonly feed: readonly FeedItem[];
   readonly roomAgents: readonly RoomAgent[];
   readonly send: (text: string, opts: SendOptions) => Promise<boolean>;
+  /** The channel's agent jobs by the request's seq (useRoomActivity). */
+  readonly agentJobs: Readonly<Record<number, readonly AgentJob[]>>;
 }): { readonly observe: (e: RoomEvent) => void; readonly room: DeadEndRoom } {
   const toast = useToast();
   const findTask = useAssistTask(FIND_A_WAY);
@@ -81,12 +96,16 @@ export function useDeadEnd({
   const [settled, setSettled] = useState(0);
   const feedRef = useRef(feed);
   feedRef.current = feed;
+  const jobsRef = useRef(agentJobs);
+  jobsRef.current = agentJobs;
 
   const hasOwnAgent = roomAgents.some((a) => a.self && !a.platform);
   const setCard = useCallback((seq: number, card: DeadEndCardState | null) => deadEndCards.set(roomId, seq, card), [roomId]);
 
   // The scope a reply's fixes are held to: what the catalog lists as
-  // installable now, the room's agents.
+  // installable now, the room's agents and, when the reply's run was the
+  // member's own agent in their agent sandbox on this computer, whether
+  // they may allow it a private host there.
   const scopeOf = useCallback(
     async (reply: FeedItem): Promise<DeadEndScope> => {
       let list = catalog;
@@ -96,9 +115,20 @@ export function useDeadEnd({
       } catch {
         /* the last catalog read: an install then still asks */
       }
-      return { installable: list.filter((c) => !c.installed).map((c) => c.name), agents: roomAgents.map(agentHandle), replier: reply.agentLabel };
+      const job = reply.jobId ? Object.values(jobsRef.current).flat().find((j) => j.jobId === reply.jobId) : undefined;
+      const sandboxedRun = !!job && job.sandboxed === SandboxedOwn && job.ownerUserId === subject;
+      let sandbox: SandboxStatus | null = null;
+      if (sandboxedRun) sandbox = await desktop.sandboxStatus().catch(() => null);
+      return {
+        installable: list.filter((c) => !c.installed).map((c) => c.name),
+        agents: roomAgents.map(agentHandle),
+        replier: reply.agentLabel,
+        sandboxedRun,
+        mayAllowHosts: !!sandbox && mayAllowHosts(sandbox),
+        openHosts: sandbox?.privateHosts.hosts ?? [],
+      };
     },
-    [catalog, roomAgents],
+    [catalog, roomAgents, subject],
   );
 
   // compute runs find-a-way on a reply, once: gated (on its own, after a
@@ -110,10 +140,18 @@ export function useDeadEnd({
       // Until the catalog answers: the room's agents, nothing installable.
       let scope: DeadEndScope = { installable: [], agents: roomAgents.map(agentHandle), replier: reply.agentLabel };
       const fallback = (note: string): DeadEndCardState => ({ status: "ready", proposal: null, fixes: fallbackFixes(scope), note });
-      const body = { text: "", roomId, channelId: channelId ?? undefined, replySeq: reply.seq, hasOwnAgent };
       // Every way out leaves "finding": a failure is the card's note.
       try {
         scope = await scopeOf(reply);
+        const body = {
+          text: "",
+          roomId,
+          channelId: channelId ?? undefined,
+          replySeq: reply.seq,
+          hasOwnAgent,
+          sandboxedRun: scope.sandboxedRun,
+          mayAllowHosts: scope.mayAllowHosts,
+        };
         const out = gated ? await runGatedJSONAssist(FIND_A_WAY, body) : await runJSONAssist(FIND_A_WAY, body);
         const proposal = out ? parseProposal(out.fields, scope) : null;
         deadEndMemo.set(roomId, reply.seq, proposal ? { kind: "proposal", proposal } : { kind: "skipped" });
@@ -234,6 +272,21 @@ export function useDeadEnd({
         composerDrafts.queue(roomId, text);
       },
       report: async (reply, text) => (await api.reportRoom(roomId, { text, seq: reply.seq, channelId: channelId ?? undefined })).queued,
+      allowHost: async (host) => {
+        const sandbox = await desktop.sandboxStatus();
+        const item = sandbox?.name ? (await desktop.componentSettings())?.find((i) => i.kind === "sandbox" && i.name === sandbox.name) : undefined;
+        const field = item?.fields.find((f) => f.key === SandboxSettingPrivateHosts);
+        if (!item || !field) throw new Error("Your agent sandbox takes no private hosts on this computer");
+        await desktop.saveComponentSettings("sandbox", item.name, { values: { [SandboxSettingPrivateHosts]: withHostLine(field.value ?? "", host) } });
+      },
+      sandbox: () => desktop.sandboxStatus(),
+      askAgain: (reply) => {
+        const req = requestText(reply);
+        const recipient = roomAgents.find((a) => agentHandle(a) === reply.agentLabel) ?? roomAgents.find((a) => a.self && !a.platform);
+        if (!req || !recipient) return;
+        const attachments = req.attachments ?? [];
+        void send(req.text, { peopleOnly: false, recipient, attachmentIds: attachments.map((a) => a.id), attachments });
+      },
     }),
     [cards, find, setCard, catalog, toast, requestText, roomAgents, send, roomId, channelId, enhanceTask],
   );

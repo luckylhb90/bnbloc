@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
+	coreprotocol "github.com/luckylhb90/bnbloc/core/protocol"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
@@ -215,5 +216,45 @@ func TestResolvedComponentSettings(t *testing.T) {
 	}
 	if code, _ := resolved("/v1/components/notes/settings/resolved?kind=mcp"); code != http.StatusNotFound {
 		t.Fatalf("an opt-in component maya did not add = %d", code)
+	}
+}
+
+// A sandbox declares its own settings like any component: the organization's
+// private hosts are set in Components, held to the kind's own rule, and sent
+// to the members' desktops that supervise it.
+func TestSandboxComponentSettings(t *testing.T) {
+	g, _ := mcpGateway(t, true)
+	g.tokens["root"] = superAdminToken(t, g)
+	sha := strings.Repeat("d", 64)
+	pkg := pkgmeta.Package{
+		Kind: pkgmeta.KindSandboxPackageV1, Name: "vmrt", Version: "1.0.0", Publisher: "acme",
+		Contract: pkgmeta.SandboxContractV1, Runtime: pkgmeta.RuntimeSidecar,
+		Protocol:     coreprotocol.ProtocolRange{Min: "1.0", Max: "1.0"},
+		Capabilities: []string{"exec"},
+		Artifacts:    map[string]pkgmeta.Artifact{"darwin-arm64": {URL: "https://gw.example/v1/artifacts/sha256/" + sha, SHA256: sha}},
+		Sidecar:      &pkgmeta.Sidecar{LocalURL: "http://127.0.0.1:7311", ListenEnv: "VMRT_LISTEN", TokenEnv: "VMRT_TOKEN"},
+		Settings: []pkgmeta.Setting{
+			{Key: pkgmeta.SandboxSettingOrgHosts, Label: "Organization hosts", Type: pkgmeta.SettingLines, Scope: pkgmeta.SettingScopeOrg},
+			{Key: pkgmeta.SandboxSettingPrivateHosts, Label: "Private hosts", Type: pkgmeta.SettingLines, Scope: pkgmeta.SettingScopeMember},
+		},
+	}
+	raw, _ := json.Marshal(pkg)
+	if _, err := g.svc.corePipeline().Install(context.Background(), extpipe.InstallRequest{Body: raw, Actor: "root"}); err != nil {
+		t.Fatalf("install vmrt: %v", err)
+	}
+	put := func(hosts string) (int, []byte) {
+		return g.json("ada", http.MethodPut, "/v1/tenant/components/vmrt/settings?kind=sandbox", map[string]any{"values": map[string]string{"orgHosts": hosts}})
+	}
+	if code, raw := put("npm.internal.example\n169.254.169.254"); code != http.StatusBadRequest || !strings.Contains(string(raw), `"field":"orgHosts"`) || !strings.Contains(string(raw), "169.254.169.254") {
+		t.Fatalf("a metadata address = %d %s", code, raw)
+	}
+	if code, raw := put("npm.internal.example\nci.internal.example"); code != http.StatusOK {
+		t.Fatalf("save = %d %s", code, raw)
+	}
+	code, raw := g.do("maya", http.MethodGet, "/v1/components/vmrt/settings/resolved?kind=sandbox", "", nil)
+	var out wire.ComponentSettingsResolved
+	_ = json.Unmarshal(raw, &out)
+	if code != http.StatusOK || out.Values["orgHosts"] != "npm.internal.example\nci.internal.example" {
+		t.Fatalf("resolved = %d %s", code, raw)
 	}
 }

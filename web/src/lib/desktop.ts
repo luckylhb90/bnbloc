@@ -11,7 +11,7 @@ import { api, type AgentTarget, type UpdatePolicy } from "./api";
 import type { ComponentSettingsUpdate, DesktopComponentSettings } from "./componentSettings";
 import { ApiError } from "./errors.ts";
 import { unframePackedSkill, type SkillsProvider, type SkillsSettings, type SkillsState } from "./localSkills";
-import type { PrivateHost, SandboxMode, SandboxStatus, ShellEnvReload } from "./sandboxStatus";
+import type { SandboxStatus, ShellEnvReload } from "./sandboxStatus";
 import { SESSION_KEY, parseSessionRecord, type SessionRecord } from "./sessionGrant";
 import { StorageKey, readStored, writeStored } from "./storageKeys.ts";
 
@@ -56,16 +56,6 @@ export interface DesktopSettings {
    *  gateways that reject the bridge's dev login. Empty keeps the default
    *  owner-login path. Mirrors BNBLOC_GATEWAY_TOKEN. */
   gatewayToken: string;
-  /** Which of this member's agent runs execute their commands in the local
-   *  sandbox VM. Mirrors BNBLOC_SANDBOX_MODE. */
-  sandboxMode: SandboxMode;
-  /** Environment variable names (or PREFIX* patterns) passed into the
-   *  sandboxed runs of this member's own agents; names only. Shell-owned:
-   *  changed through setSandboxEnv. Mirrors BNBLOC_SANDBOX_ENV. */
-  sandboxEnv: string[];
-  /** Private hosts this member's own sandboxed runs may reach. Shell-owned:
-   *  changed through addSandboxPrivateHost / removeSandboxPrivateHost. */
-  sandboxPrivateHosts: PrivateHost[];
 }
 
 export interface AppInfo {
@@ -356,48 +346,12 @@ export const desktop = {
     });
   },
 
-  // The local agent sandbox (Settings → Agent sandbox). Null outside the shell.
+  // The agent sandbox on this computer (its Components settings dialog;
+  // what it does is its component settings). Null outside the shell.
   async sandboxStatus(): Promise<SandboxStatus | null> {
     const t = tauri();
     if (!t) return null;
     return (await t.invoke("sandbox_status")) as SandboxStatus;
-  },
-
-  async setSandboxMode(mode: SandboxMode): Promise<SandboxStatus | null> {
-    const t = tauri();
-    if (!t) return null;
-    return (await t.invoke("sandbox_mode_set", { mode }).catch((e: unknown) => {
-      throw new Error(e instanceof Error ? e.message : String(e));
-    })) as SandboxStatus;
-  },
-
-  // The names passed into the sandboxed runs of the member's own agents
-  // (refused whole when one is not a valid name; the error says which).
-  async setSandboxEnv(names: string[]): Promise<SandboxStatus | null> {
-    const t = tauri();
-    if (!t) return null;
-    return (await t.invoke("sandbox_env_set", { names }).catch((e: unknown) => {
-      throw new Error(e instanceof Error ? e.message : String(e));
-    })) as SandboxStatus;
-  },
-
-  // The private hosts the member's own sandboxed runs may reach (refused
-  // when the host is not one; the error says why). roomId: the room whose
-  // agent reply proposed it.
-  async addSandboxPrivateHost(host: string, roomId?: string): Promise<SandboxStatus | null> {
-    const t = tauri();
-    if (!t) return null;
-    return (await t.invoke("sandbox_private_host_add", { host, roomId }).catch((e: unknown) => {
-      throw new Error(e instanceof Error ? e.message : String(e));
-    })) as SandboxStatus;
-  },
-
-  async removeSandboxPrivateHost(host: string): Promise<SandboxStatus | null> {
-    const t = tauri();
-    if (!t) return null;
-    return (await t.invoke("sandbox_private_host_remove", { host }).catch((e: unknown) => {
-      throw new Error(e instanceof Error ? e.message : String(e));
-    })) as SandboxStatus;
   },
 
   // Recreate the member's own VM with their hosts (addresses resolved
@@ -558,9 +512,6 @@ export async function ensureBridgeRunning(subject: string, gatewayUrl: string, t
       syncSecret: "",
       serveAllOwners: false,
       gatewayToken: "",
-      sandboxMode: "borrowed",
-      sandboxEnv: [],
-      sandboxPrivateHosts: [],
       gatewayUrl: "",
       owner: "",
       tenant: "",

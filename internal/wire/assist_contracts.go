@@ -122,7 +122,7 @@ var AssistContracts = []AssistContract{
 		{Name: "cause", Values: []string{"access", "missing-file", "capability", "unclear", "agent-error", "other"}},
 		{Name: "summary"},
 		{Name: "fixes", Type: AssistFieldItems, Item: []AssistContractField{
-			{Name: "action", Values: []string{"install", "ask-agent", "attach", "own-agent", "rephrase", "report"}},
+			{Name: "action", Values: []string{"install", "ask-agent", "attach", "own-agent", "rephrase", "report", "allow-host"}},
 			{Name: "target"}, {Name: "why"},
 		}},
 	}},

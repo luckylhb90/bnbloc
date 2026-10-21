@@ -5,7 +5,9 @@ Status: slice 1 built (2026-10-20, §5); slice 2's own settings page built
 built (2026-10-20, §2.3, §5: endpoint components ask, in a staged
 migration); the `lines` type, local skills' own settings and "Fill from a
 note" built (2026-10-20, docs/prd/2026-10-20-lines-settings-and-local-skills-ai.md);
-slices 4–5 proposed. Owner: the component contract
+the sandbox's part of slice 5 built (2026-10-21,
+docs/prd/2026-10-21-sandbox-private-hosts.md §2.3); slice 4 and the rest
+of 5 proposed. Owner: the component contract
 (`core/pkgmeta`), the settings store (`internal/componentsettings`), the
 one settings form.
 
@@ -55,7 +57,7 @@ outside QA too. Each is a migration of a slice (§5):
 | a SAML auth provider | auth provider | IdP metadata URL, SP entity, ACS and login URLs, attribute mapping, SP certificate and key, allowed redirects: deployment env | 3 |
 | a chat notifier | notifier | API URL, app id and key, bot id, tenants, recipient map, signing secret: deployment env | 3 |
 | media-tools | MCP tool | none of its own: its providers are the platform's media settings | provider components |
-| sandbox | sandbox | mode and env as fixed desktop fields; guest CPUs and memory | 5 |
+| sandbox | sandbox | mode, forwarded env, private hosts (member), the organization's hosts and whether members may add theirs (org): its declared settings, read by key (built 2026-10-21); guest CPUs and memory | 5 |
 | other cores (a CLI-fronting sidecar, an adapter daemon, a manifest core) | core | their own CLI's or daemon's configuration; an upstream URL; a listener path | 5 |
 | six previewers | previewer | none | — |
 
@@ -497,5 +499,6 @@ organization or a member (decided 2026-10-20):
      provider that answers discover but waits for its settings, and the
      activation must retry until it is healthy.
 4. **Model providers.** `docs/prd/2026-10-20-model-provider-components.md`.
-5. **The rest.** The sandbox's and core connection's desktop fields as
-   their components' settings; Fill with AI and Check.
+5. **The rest.** The sandbox's desktop fields as its settings (built
+   2026-10-21: `docs/prd/2026-10-21-sandbox-private-hosts.md` §2.3); the
+   core connection's; Fill with AI and Check.

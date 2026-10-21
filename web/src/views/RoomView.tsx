@@ -257,7 +257,7 @@ export function RoomView({
   });
   // Never a dead end: a card under a reply that left the member's own
   // request undone, theirs alone (the find-a-way assist).
-  const deadEnd = useDeadEnd({ roomId, channelId, subject, feed, roomAgents, send });
+  const deadEnd = useDeadEnd({ roomId, channelId, subject, feed, roomAgents, send, agentJobs: activity.agentJobs });
   // A queued platform job shows how many of its host's jobs are ahead.
   const platformInRoom = data.platform.inRoom;
   const queueAhead = useCallback((job: AgentJob) => jobQueueAhead(job, platformInRoom), [platformInRoom]);

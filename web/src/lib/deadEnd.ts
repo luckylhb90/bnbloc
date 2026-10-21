@@ -6,6 +6,7 @@
 // assist model) and the once-per-reply memo. Pure: the requests are
 // lib/assist.ts and lib/api.ts, the card views/room/DeadEndCard.tsx.
 
+import { validPrivateHost } from "./sandboxStatus.ts";
 import { AssistTaskFindAWay } from "./wire.gen.ts";
 
 /** The assist that proposes the fixes (resolved by name; its output contract is wire.AssistContracts). */
@@ -13,7 +14,7 @@ export const FIND_A_WAY = AssistTaskFindAWay;
 
 /** The closed list of actions a fix may take: each is wired to an existing
  *  flow by the card, nothing else is ever offered. */
-export const DEAD_END_ACTIONS = ["install", "ask-agent", "attach", "own-agent", "rephrase", "report"] as const;
+export const DEAD_END_ACTIONS = ["install", "ask-agent", "attach", "own-agent", "rephrase", "report", "allow-host"] as const;
 export type DeadEndAction = (typeof DEAD_END_ACTIONS)[number];
 
 /** What stopped a request (the assist's `cause`); anything else is "other". */
@@ -30,8 +31,8 @@ const MAX_WHY = 300;
 const MAX_SUMMARY = 400;
 
 /** One proposed fix: an action, its target (a component name, an agent
- *  handle, a file hint, a note to admins; "" when the action takes none)
- *  and one sentence on how it helps. */
+ *  handle, a file hint, a note to admins, a private host; "" when the
+ *  action takes none) and one sentence on how it helps. */
 export interface DeadEndFix {
   readonly action: DeadEndAction;
   readonly target: string;
@@ -47,11 +48,17 @@ export interface DeadEndProposal {
 
 /** What the member can act on here: the components they could install
  *  (listed to them, not installed), the agents they can ask in the room
- *  (agentHandle form) and the agent that replied (never re-asked). */
+ *  (agentHandle form), the agent that replied (never re-asked) and, when
+ *  the reply's run was their own agent in their agent sandbox, whether they
+ *  may allow it a private host there (its settings let them; the hosts
+ *  already open are not offered again). */
 export interface DeadEndScope {
   readonly installable: readonly string[];
   readonly agents: readonly string[];
   readonly replier?: string;
+  readonly sandboxedRun?: boolean;
+  readonly mayAllowHosts?: boolean;
+  readonly openHosts?: readonly string[];
 }
 
 function text(v: unknown, max: number): string {
@@ -73,6 +80,10 @@ function fixTarget(action: DeadEndAction, raw: unknown, scope: DeadEndScope): st
       return text(target, MAX_HINT);
     case "report":
       return target;
+    case "allow-host": {
+      const host = target.toLowerCase();
+      return scope.sandboxedRun && scope.mayAllowHosts && validPrivateHost(host) && !scope.openHosts?.includes(host) ? host : null;
+    }
     case "own-agent":
     case "rephrase":
       return "";
@@ -107,14 +118,23 @@ export function parseProposal(fields: Readonly<Record<string, unknown>>, scope: 
 
 /** fallbackFixes is what the menu offers with no assist model (or nothing
  *  the assist proposed fits): attach a file, ask another agent of the
- *  room, say the request another way. */
+ *  room, let the member's own sandboxed agent reach a private host they
+ *  name (when they may), say the request another way. */
 export function fallbackFixes(scope: DeadEndScope): DeadEndFix[] {
   const other = scope.agents.find((a) => a !== scope.replier);
   return [
     { action: "attach", target: "", why: "" },
     ...(other ? [{ action: "ask-agent" as const, target: other, why: "" }] : []),
+    ...(scope.sandboxedRun && scope.mayAllowHosts ? [{ action: "allow-host" as const, target: "", why: "" }] : []),
     { action: "rephrase", target: "", why: "" },
   ];
+}
+
+/** withHostLine is the private-hosts setting's value with host added (a
+ *  `lines` value: one host per line), unchanged when it is there. */
+export function withHostLine(current: string, host: string): string {
+  const lines = current.split("\n").map((l) => l.trim()).filter((l) => l !== "");
+  return lines.includes(host) ? lines.join("\n") : [...lines, host].join("\n");
 }
 
 /** A reply's outcome, remembered so a card is never computed twice for the
@@ -282,5 +302,7 @@ export function fixLabel(fix: DeadEndFix): string {
       return "Say it another way";
     case "report":
       return "Tell your admins";
+    case "allow-host":
+      return fix.target ? `Let your agents reach ${fix.target}` : "Let your agents reach a private host";
   }
 }

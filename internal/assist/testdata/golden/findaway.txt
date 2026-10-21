@@ -24,6 +24,8 @@ room agents:
 platform agents (can be added to a room):
 - acme/codex
 own agent on this device: no
+the reply's run was the member's own agent in their agent sandbox, which reaches the public internet but no private host they did not allow
+the member may allow a private host: yes
 other people in the room: 1
 </capabilities>
 

@@ -381,6 +381,13 @@ func (b *Bridge) settle(ctx context.Context, d *drive, res driveResult, err erro
 	}
 	b.publishTurn(ctx, d)
 	diag := d.content.withTools(d.agent(), calls)
+	if d.prepareExec != nil {
+		// The member's card reads it (find-a-way's allow-host).
+		diag["sandboxed"] = wire.SandboxedShared
+		if d.ownSandbox {
+			diag["sandboxed"] = wire.SandboxedOwn
+		}
+	}
 	if res.sessionID != "" {
 		diag["workspaceId"], diag["sessionId"] = res.workspaceID, res.sessionID
 	}

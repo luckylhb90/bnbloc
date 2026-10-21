@@ -12,6 +12,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/componentsettings"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
+	"github.com/luckylhb90/bnbloc/internal/extreg"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -38,9 +39,11 @@ func (s *Service) componentSettings() *componentsettings.Store {
 
 // reachesMembers reports a component that runs on members' computers: its
 // platform and organization values are sent to them (a plugin sidecar the
-// desktop launches, a stdio MCP tool the bridge starts).
+// desktop launches, a stdio MCP tool the bridge starts, a sandbox sidecar
+// the desktop supervises).
 func reachesMembers(rec extpipe.Record, cfg extpipe.PackageConfig) bool {
-	return rec.Kind == string(pkgmeta.KindPlugin) || (isMCP(rec) && cfg.Runtime == pkgmeta.RuntimeStdio)
+	return rec.Kind == string(pkgmeta.KindPlugin) || (isMCP(rec) && cfg.Runtime == pkgmeta.RuntimeStdio) ||
+		(rec.Kind == string(extreg.KindSandbox) && cfg.Runtime == pkgmeta.RuntimeSidecar)
 }
 
 // settingsRecord resolves {name} (and ?kind=) to an installed component and
@@ -165,6 +168,9 @@ func (s *Service) handlePutComponentSettings(scope string) sessionHandler {
 		var invalid error
 		_, err := st.Update(r.Context(), scope, settingsTenant(scope, claims), rec.Kind, rec.Name, claims.Subject, func(current map[string]string) (map[string]string, error) {
 			next, keys, err := pkgmeta.MergeSettings(cfg.Settings, scope, current, req.Values, req.Clear)
+			if err == nil {
+				err = pkgmeta.CheckKindSettings(rec.Kind, cfg.Settings, next)
+			}
 			invalid, changed = err, keys
 			return next, err
 		})

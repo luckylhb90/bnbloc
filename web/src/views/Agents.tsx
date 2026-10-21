@@ -28,6 +28,7 @@ import { isCore, sidecarCoreView, sidecarProviders, type SidecarCoreView } from 
 import { sidecarAgents, useSidecarAgents } from "@/lib/useSidecarAgents";
 import { CoreHeader, coreStatus } from "@/views/agents/MyAgents";
 import { ManagedSidecars } from "@/views/agents/ManagedSidecars";
+import { ShellEnvReload } from "@/views/agents/ShellEnvReload";
 import { PendingUpdates } from "@/views/agents/PendingUpdates";
 import { AgentCoreEmptyState } from "@/views/AgentCoreEmptyState";
 import { DesktopUpdatePanel } from "@/views/DesktopUpdates";
@@ -74,9 +75,6 @@ const EMPTY: DesktopSettings = {
   syncSecret: "",
   serveAllOwners: false,
   gatewayToken: "",
-  sandboxMode: "borrowed",
-  sandboxEnv: [],
-  sandboxPrivateHosts: [],
 };
 
 export function Agents() {
@@ -441,6 +439,8 @@ export function Agents() {
               </Card>
 
               <ManagedSidecars entries={sidecars.entries} />
+
+              <ShellEnvReload />
 
               <Card className="p-4">
                 <div className="flex flex-col gap-4">

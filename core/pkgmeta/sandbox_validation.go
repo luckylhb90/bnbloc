@@ -39,6 +39,9 @@ func validateSandboxPackage(pkg Package) error {
 	if err := validateSandboxGuest(pkg.Guest); err != nil {
 		return err
 	}
+	if err := validateSandboxSettings(pkg.Settings); err != nil {
+		return err
+	}
 	switch pkg.Runtime {
 	case RuntimeSidecar:
 		if err := requireSidecarRuntime(pkg, "sandbox"); err != nil {

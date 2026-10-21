@@ -47,8 +47,6 @@ struct AppState {
 impl AppState {
     /// The one writer of the settings: `edit` changes the current settings
     /// under the lock, the result is saved, then cached and returned.
-    /// Concurrent writers (the web's form, the sandbox mode) apply in order,
-    /// each over the other's result, never over a stale copy.
     fn update_settings(&self, edit: impl FnOnce(&mut Settings)) -> Result<Settings, String> {
         let mut current = self.settings.lock();
         let path = self
@@ -87,11 +85,10 @@ fn get_settings(state: State<'_, AppState>) -> Settings {
     state.settings.lock().clone()
 }
 
-/// The web's settings form. The web owns every field but the shell's own
-/// (`Settings::apply_web`): a stale snapshot never reverts those.
+/// The web's settings form.
 #[tauri::command]
 fn set_settings(state: State<'_, AppState>, settings: Settings) -> Result<(), String> {
-    let settings = state.update_settings(|current| current.apply_web(settings))?;
+    let settings = state.update_settings(|current| *current = settings)?;
     // Apply immediately: (re)start if runnable, else stop.
     if settings.is_runnable() {
         state.supervisor.start(settings)?;
@@ -318,7 +315,7 @@ pub(crate) fn resume_children(app: &tauri::AppHandle) {
     }
 }
 
-/// "Reload shell environment" (Settings → Agent sandbox): resolve the
+/// "Reload shell environment" (Agents → Local bridge): resolve the
 /// member's login-shell environment again (shell_env), then restart the
 /// bridge and every sidecar so they and the agents they run get it.
 #[tauri::command]
@@ -486,11 +483,6 @@ pub fn run() {
             app_commands::pop_out_people_chat,
             app_commands::pop_out_live,
             internal_ext::sandbox::sandbox_status,
-            internal_ext::sandbox::sandbox_mode_get,
-            internal_ext::sandbox::sandbox_mode_set,
-            internal_ext::sandbox::sandbox_env_set,
-            internal_ext::sandbox::sandbox_private_host_add,
-            internal_ext::sandbox::sandbox_private_host_remove,
             internal_ext::sandbox::sandbox_private_hosts_apply,
             internal_ext::sandbox::sandbox_restart_vm,
             shell_env_reload,

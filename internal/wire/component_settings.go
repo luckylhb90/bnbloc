@@ -124,3 +124,25 @@ type OrgSettingsComponent struct {
 type OrgSettingsComponentsReply struct {
 	Components []OrgSettingsComponent `json:"components"`
 }
+
+// The settings of a sandbox component the platform reads by key
+// (docs/prd/2026-10-21-sandbox-private-hosts.md): a sandbox package
+// declares them in its own `settings` in the shapes pkgmeta holds it to
+// (core/pkgmeta/sandbox_settings.go), and they are set in Components.
+const (
+	// SandboxSettingMode (member, choice off|borrowed|all): which of the
+	// member's agent runs execute their commands in the VM.
+	SandboxSettingMode = "mode"
+	// SandboxSettingForwardEnv (member, lines): environment variable names
+	// or PREFIX* patterns let into the member's own sandboxed runs.
+	SandboxSettingForwardEnv = "forwardEnv"
+	// SandboxSettingPrivateHosts (member, lines): private hosts the
+	// member's own sandboxed runs reach (an agent reply's card adds one).
+	SandboxSettingPrivateHosts = "privateHosts"
+	// SandboxSettingOrgHosts (org, lines): private hosts the organization
+	// opens to every member's own sandboxed runs.
+	SandboxSettingOrgHosts = "orgHosts"
+	// SandboxSettingMemberHosts (org, choice ask|off): whether a member may
+	// allow a private host of their own.
+	SandboxSettingMemberHosts = "memberHosts"
+)
