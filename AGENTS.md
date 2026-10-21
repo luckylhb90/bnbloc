@@ -305,9 +305,12 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   host): `PostChat` refuses an empty `ownerId` with 400, since no bridge
   would ever claim the job.
 - **A job's notice is shown with its request** (`payload.sourceSeq`): the
-  feed (`layoutTurns`) moves a notice that landed after later messages back
-  to the end of its request's turn and names the request, so a late failure
-  never reads as news about the newest request. The feed's two layouts (By
+  feed (`layoutTurns`) moves an outcome notice (a failure, a refusal, a
+  timeout, an undelivered attachment) that landed after later messages
+  back to the end of its request's turn and names the request, so a late
+  failure never reads as news about the newest request. Lines an agent
+  posts while working (progress, room setup, a publish card, a context
+  reset) and its replies stay in arrival order. The feed's two layouts (By
   time, `layoutTurns`; By request, `layoutRequests`: a block per request
   with its steps folded and its answer at the foot) and the unread divider
   are all `feedTurns.ts`; the member's choice is `GET/PUT

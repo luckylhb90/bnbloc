@@ -197,9 +197,25 @@ if (block?.kind === "block") {
   const orphan = items([chat(3, "next"), agent(4, "jack", "codex", 1, "The agent stopped responding.", "job-failed")], true);
   eq(shape(orphan, layoutTurns(orphan)), [3, 4], "request not loaded: in place");
 
-  // A reply (no notice) that lands late keeps its place: only notices move.
+  // A reply (no notice) that lands late keeps its place: only outcome
+  // notices move.
   const lateReply = items([chat(1, "go"), chat(2, "next"), agent(3, "jack", "codex", 1, "done")], true);
   eq(shape(lateReply, layoutTurns(lateReply)), [1, 2, 3], "a late reply stays");
+
+  // Lines an agent posts while it works keep their time: By time means time.
+  for (const kind of ["progress", "room-setup", "context-reset"]) {
+    const working = items([chat(1, "go"), chat(2, "next"), agent(3, "jack", "codex", 1, "Step A done", kind)], true);
+    const entries = layoutTurns(working);
+    eq(shape(working, entries), [1, 2, 3], `a late ${kind} line stays`);
+    assert(entries.every((e) => e.kind !== "row" || e.about === undefined), `a late ${kind} line is not named`);
+  }
+
+  // Every other notice reports how the job ended and moves back: a
+  // timeout, attachments that did not arrive, a bridge refusal.
+  for (const kind of ["member-timeout", "attachment-undelivered", "borrow-denied"]) {
+    const ended = items([chat(1, "go"), chat(2, "next"), agent(3, "jack", "codex", 1, "It ended.", kind)], true);
+    eq(shape(ended, layoutTurns(ended)), [1, 3, 2], `a late ${kind} notice moves to its request`);
+  }
 
   // A request with delegated work keeps its notices in its block.
   const delegated = items([chat(1, "go"), dispatch(2, 1, ["bob", "claude"]), chat(3, "next"), agent(4, "jack", "codex", 1, "The agent stopped responding.", "job-failed")], true);

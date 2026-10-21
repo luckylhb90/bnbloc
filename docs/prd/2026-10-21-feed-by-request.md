@@ -17,6 +17,11 @@ Decided while building:
   same failure).
 - The head's latest step takes a second line on a narrow column; the count
   shows from a small width.
+- By time moves back only notices that report how a job ended (a failure,
+  a refusal, a timeout, an undelivered attachment, any new kind by
+  default); progress lines, room-setup lines, publish cards and
+  context-reset lines keep their arrival place (owner's decision: By time
+  means time).
 - The "New" divider is one rule for both views (`unreadDividerAt` over the
   render order: the start of the unread run that ends the feed), replacing
   By time's late-notice exception, which it covers.

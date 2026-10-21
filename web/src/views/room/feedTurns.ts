@@ -20,19 +20,22 @@
 // A row whose parent request is not loaded (an older history page) stays in
 // place until "Load earlier" brings the request in.
 //
-// A job's notice (a failure, a progress line) is about its request
-// (payload.sourceSeq), not about whatever was posted last. By time, one that
-// lands after a later message (a queued job that failed minutes later, while
-// the member had moved on) renders at the end of its request's turn, before
-// that later message, and names the request (aboutRequest), so it never
-// reads as news about the newest request
-// (docs/bugs/2026-10-21-late-failure-notice-and-ownerless-recipient.md). By
-// request, it is in its request's block.
+// A job's outcome notice (a failure, a refusal, attachments that did not
+// arrive) is about its request (payload.sourceSeq), not about whatever was
+// posted last. By time, one that lands after a later message (a queued job
+// that failed minutes later, while the member had moved on) renders at the
+// end of its request's turn, before that later message, and names the
+// request (aboutRequest), so it never reads as news about the newest
+// request (docs/bugs/2026-10-21-late-failure-notice-and-ownerless-
+// recipient.md). The lines an agent posts while it works (progress, a
+// setup change, a publish card, a context reset) and its replies stay in
+// arrival order: By time means time. By request, every row is in its
+// request's block.
 import type { DispatchAttribution } from "../../lib/dispatch.ts";
 import { isLiveJob } from "../../lib/agentRuns.ts";
 import { turnStart, type JobProgress } from "../../lib/jobProgress.ts";
 import { titleFromText } from "../../lib/promptPacks.ts";
-import { AgentJobTerminalStatuses, NoticeJobFailed, NoticeProgress, type AgentJob } from "../../lib/wire.gen.ts";
+import { AgentJobTerminalStatuses, NoticeContextReset, NoticeJobFailed, NoticeProgress, NoticePublishProposal, NoticeRoomSetup, type AgentJob } from "../../lib/wire.gen.ts";
 
 // The fields of a feed row the layouts read (FeedItem satisfies it).
 export interface TurnRow {
@@ -162,6 +165,16 @@ function delegatedBlock(feed: readonly TurnRow[], chain: Chain, anchor: number, 
   return { anchor, rows, dispatches, roles, agents };
 }
 
+// The notices an agent posts while its job works: they belong at the time
+// they were posted. Every other notice reports how the job ended (the
+// server's job-failed, the bridge's refusals, a member timeout,
+// attachments or a file edit that did not arrive), so a new kind of
+// failure is placed with its request by default.
+const IN_TURN_NOTICES: ReadonlySet<string> = new Set([NoticeProgress, NoticeRoomSetup, NoticePublishProposal, NoticeContextReset]);
+
+// reportsOutcome: the row is a notice about how its job ended.
+const reportsOutcome = (r: Pick<TurnRow, "notice">) => !!r.notice && !IN_TURN_NOTICES.has(r.notice);
+
 const isRoot = (feed: readonly TurnRow[], chain: Chain, i: number) => chain.parent[i] < 0 && !isAgentRow(feed[i]);
 
 // layoutTurns is By time: rows in arrival order, delegated work grouped
@@ -181,14 +194,14 @@ export function layoutTurns(feed: readonly TurnRow[]): FeedEntry[] {
     if (block) blocks.set(anchor, block);
   });
 
-  // Late notices: a top-level notice whose request is loaded and was
+  // Late notices: a top-level outcome notice whose request is loaded and was
   // followed by another top-level message before the notice landed moves
   // to just before that message (the end of its request's turn).
   const late = new Map<number, number>(); // notice index → its request's index
   const lateBefore = new Map<number, number[]>(); // message index → notices placed before it
   feed.forEach((r, i) => {
     const req = parent[i];
-    if (!isAgentRow(r) || !r.notice || req < 0 || nested.has(i)) return;
+    if (!isAgentRow(r) || !reportsOutcome(r) || req < 0 || nested.has(i)) return;
     for (let k = req + 1; k < i; k++) {
       if (isAgentRow(feed[k]) || nested.has(k)) continue;
       late.set(i, req);

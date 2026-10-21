@@ -40,9 +40,9 @@ talked to her own agent (core `acp`, provider `opencode`).
 ## Fix
 
 - `layoutTurns` (`web/src/views/room/feedTurns.ts`) moves a top-level
-  notice whose request is loaded and was followed by a later message to
-  the end of that request's turn (before the next message), and marks the
-  entry with the request (`about`). The notice line then reads
+  outcome notice whose request is loaded and was followed by a later
+  message to the end of that request's turn (before the next message), and
+  marks the entry with the request (`about`). The notice line then reads
   "About: <the request's first line>" (`aboutRequest`). Replies keep their
   place; a request with delegated work keeps its notices in its block, as
   before. The "New" divider is one rule now (`unreadDividerAt`): above the
@@ -50,6 +50,17 @@ talked to her own agent (core `acp`, provider `opencode`).
   so a moved notice never splits the read part of the feed. The feed has no
   "jump to" for anchored rows, so none is added; the request's own job
   status line still shows the failure.
+- Narrowed the same day (with the By request feed,
+  docs/prd/2026-10-21-feed-by-request.md): only notices that report how a
+  job ended move (job-failed, the bridge's refusals, member-timeout,
+  attachment-undelivered, file-edit, and any new kind by default). Lines
+  an agent posts while it works (`progress`, `room-setup`,
+  `publish-proposal`, `context-reset`) keep their arrival place: in the
+  E2E room of two agents at once, an agent's progress line had moved above
+  a person's message and been labelled "About: …", which read as out of
+  time order. By time means time; By request already puts every row in its
+  request's block. The divider is now one rule over the render order of
+  either view (the start of the unread run that ends the feed).
 - `PostChat` refuses an agent recipient without an owner (blank after
   trimming) with 400 `recipient.ownerId is required: name the member whose
   agent should answer` (`errRecipientWithoutOwner`), before anything is

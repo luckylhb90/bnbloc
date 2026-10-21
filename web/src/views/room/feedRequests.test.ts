@@ -103,10 +103,10 @@ function shape(feed: readonly FeedItem[], entries: readonly FeedEntry[]): unknow
   });
 }
 
-// By time: arrival order, as built before this change: #2's delegated check
-// and its progress lines grouped under it; a notice that landed after a
-// later message (the late failure #15, opencode's progress line #9 after
-// jack's #7) back at its request, naming it.
+// By time: arrival order. #2's delegated check and its progress lines are
+// grouped under it (the delegated block, as before); the late failure #15
+// is back at its request #1, naming it; opencode's progress line #9 stays
+// after jack's #7 (a line posted while working is placed at its time).
 const byTime = [
   1,
   [15, "about", 1],
@@ -114,8 +114,8 @@ const byTime = [
   ["T", 2, [[4, 0], [6, 0], [8, 0], [10, 1], [13, 0]]],
   3,
   5,
-  [9, "about", 3],
   7,
+  9,
   11,
   12,
   14,
