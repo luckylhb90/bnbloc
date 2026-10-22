@@ -56,9 +56,16 @@ type confineSpec struct {
 	// that already exist when the CLI starts.
 	AllowWritePrefix []string
 	DenyRead         []string
-	DenyWrite        []string
-	DenyKeychain     bool
-	TempDirs         []string
+	// DenyReadFinal are paths the profile denies reading AFTER every allow: the
+	// descriptor's hostConfine.denyRead (a host tool's private state), which no
+	// allow root (the workspace, a temp dir, a harness tree, an allow-read flag)
+	// may re-open. DenyRead, the flag's list, keeps its older meaning: a deny
+	// that a later allow of a sub-path overrides (how a core hides a directory
+	// but one folder in it).
+	DenyReadFinal []string
+	DenyWrite     []string
+	DenyKeychain  bool
+	TempDirs      []string
 
 	layouts    []harnessLayout // listed harnesses (resolve)
 	others     []harnessLayout // known harnesses not listed: denied
@@ -634,6 +641,8 @@ func (s *confineSpec) seatbeltProfile() string {
 	}
 	rule("deny", "file-read-data", s.denyReads(), s.denyReadFiles(), "")
 	rule("allow", "file-read-data", s.allowReads(), s.allowReadFiles(), "")
+	// Last for reads, so nothing above re-opens it.
+	rule("deny", "file-read-data", uniqCanonical(s.DenyReadFinal), nil, "")
 	b.WriteString("(deny file-write*)\n")
 	rule("allow", "file-write*", s.allowWrites(), s.allowWriteFiles(),
 		`  (literal "/dev/null") (literal "/dev/zero") (literal "/dev/tty") (literal "/dev/dtracehelper")
@@ -882,7 +891,7 @@ func parseConfine(args []string, getenv func(string) string) (spec confineSpec, 
 		return spec, nil, false, herr
 	}
 	if hc != nil {
-		spec.Workspace, spec.AllowRead, spec.AllowWrite, spec.DenyWrite, spec.DenyRead = hc.Workspace, hc.AllowRead, hc.AllowWrite, hc.DenyWrite, hc.DenyRead
+		spec.Workspace, spec.AllowRead, spec.AllowWrite, spec.DenyWrite, spec.DenyReadFinal = hc.Workspace, hc.AllowRead, hc.AllowWrite, hc.DenyWrite, hc.DenyRead
 	}
 	spec.VMExecDir = filepath.Dir(vmexecPath(getenv))
 	pathFlags := map[string]*[]string{
@@ -928,7 +937,7 @@ func parseConfine(args []string, getenv func(string) string) (spec confineSpec, 
 	if spec.Workspace == "" || !filepath.IsAbs(spec.Workspace) {
 		return spec, nil, false, fmt.Errorf("the workspace must be an absolute path (%s or --workspace)", coreprotocol.EnvConfineWorkspace)
 	}
-	for _, list := range [][]string{spec.AllowRead, spec.AllowWrite, spec.AllowWritePrefix, spec.DenyRead, spec.DenyWrite} {
+	for _, list := range [][]string{spec.AllowRead, spec.AllowWrite, spec.AllowWritePrefix, spec.DenyRead, spec.DenyReadFinal, spec.DenyWrite} {
 		for _, p := range list {
 			if !filepath.IsAbs(p) {
 				return spec, nil, false, fmt.Errorf("path %q is not absolute", p)

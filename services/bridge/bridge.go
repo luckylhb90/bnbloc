@@ -1549,6 +1549,8 @@ func (b *Bridge) runTurn(ctx context.Context, d *drive, key driveKey, opts corep
 	if opts.Execution != nil {
 		defer b.renewExecution(ctx, d, rs.workspaceID, rs.sessionID, opts.Execution)()
 	}
+	// Whatever the turn granted ends with it, however the drive returns.
+	defer rs.roomSession.endTurn(TurnInfo{JobID: d.job.JobID})
 	b.noticeUndelivered(ctx, d, rs.atts.undelivered)
 	// If the session was freshly created, the initial prompt already ran; only
 	// send follow-up input for an existing session.

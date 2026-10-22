@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"os/exec"
 	"strconv"
 	"sync"
@@ -68,6 +69,9 @@ type Runner struct {
 	mu     sync.Mutex
 	proc   *process
 	closed bool
+	// spawning is a process started and not yet initialized: Close stops it too.
+	spawning *process
+	starts   int
 	// starting serializes starts: a second request waits for the first's
 	// initialize instead of starting a second process.
 	starting sync.Mutex
@@ -106,11 +110,14 @@ func (r *Runner) Call(ctx context.Context, method string, params json.RawMessage
 func (r *Runner) Close() {
 	r.mu.Lock()
 	r.closed = true
-	p := r.proc
-	r.proc = nil
+	p, sp := r.proc, r.spawning
+	r.proc, r.spawning = nil, nil
 	r.mu.Unlock()
 	if p != nil {
 		p.stop()
+	}
+	if sp != nil {
+		sp.stop()
 	}
 }
 
@@ -141,7 +148,22 @@ func (r *Runner) live(ctx context.Context) (*process, error) {
 	}
 	r.mu.Unlock()
 
-	p, err := start(ctx, r.spec)
+	p, err := start(ctx, r.spec, func(p *process) {
+		r.mu.Lock()
+		if r.closed {
+			r.mu.Unlock()
+			p.stop() // closed while it was starting: it does not outlive that
+			return
+		}
+		r.spawning = p
+		r.starts++
+		starts := r.starts
+		r.mu.Unlock()
+		slog.Info("bnbloc bridge host tool started", "event", "bnbloc.bridge.hosttool_started", "tool", r.spec.Name, "starts", starts)
+	})
+	r.mu.Lock()
+	r.spawning = nil
+	r.mu.Unlock()
 	if err != nil {
 		return nil, err
 	}
@@ -173,9 +195,11 @@ type process struct {
 	progress map[string]func(json.RawMessage)
 	info     json.RawMessage
 
-	done chan struct{}
-	err  error // why it ended; read after done closes
-	tail *tailBuffer
+	done    chan struct{}
+	waited  chan struct{} // the tool exited
+	waitErr error         // read after waited closes
+	err     error         // why it ended; read after done closes
+	tail    *tailBuffer
 }
 
 func (p *process) ended() bool {
@@ -188,7 +212,7 @@ func (p *process) ended() bool {
 }
 
 // start spawns the tool and performs the MCP initialize handshake.
-func start(ctx context.Context, spec Spec) (*process, error) {
+func start(ctx context.Context, spec Spec, onSpawn func(*process)) (*process, error) {
 	if spec.Command == "" {
 		return nil, fmt.Errorf("the %s tool has no command", spec.Name)
 	}
@@ -202,18 +226,35 @@ func start(ctx context.Context, spec Spec) (*process, error) {
 	if err != nil {
 		return nil, err
 	}
-	stdout, err := cmd.StdoutPipe()
+	// A plain pipe, not cmd.StdoutPipe: a grandchild that inherited it must not keep
+	// the reader (and so every request) waiting after the tool itself has died.
+	outR, outW, err := os.Pipe()
 	if err != nil {
 		return nil, err
 	}
+	cmd.Stdout = outW
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("the %s tool did not start: %w", spec.Name, err)
+		outR.Close()
+		outW.Close()
+		// The cause (it names the launcher's path) is the bridge's log, not the agent's.
+		slog.Warn("bnbloc bridge host tool did not start", "event", "bnbloc.bridge.hosttool_start_failed", "tool", spec.Name, "error", err)
+		return nil, fmt.Errorf("the %s tool did not start", spec.Name)
 	}
+	outW.Close()
 	p := &process{
 		spec: spec, cmd: cmd, stdin: stdin, tail: tail,
-		pending: map[int64]chan response{}, progress: map[string]func(json.RawMessage){}, done: make(chan struct{}),
+		pending: map[int64]chan response{}, progress: map[string]func(json.RawMessage){}, done: make(chan struct{}), waited: make(chan struct{}),
 	}
-	go p.read(stdout)
+	go func() {
+		p.waitErr = cmd.Wait()
+		close(p.waited)
+		// Whatever still holds the pipe has this long to finish: then it is closed.
+		time.AfterFunc(2*time.Second, func() { outR.Close() })
+	}()
+	if onSpawn != nil {
+		onSpawn(p)
+	}
+	go p.read(outR)
 
 	init, rerr, err := p.call(ctx, "initialize", json.RawMessage(
 		`{"protocolVersion":"`+protocolVersion+`","capabilities":{},"clientInfo":{"name":"bnbloc-bridge","version":"1"}}`), nil)
@@ -346,15 +387,16 @@ func (p *process) read(stdout io.Reader) {
 			break
 		}
 	}
-	waitErr := p.cmd.Wait()
+	<-p.waited
 	switch {
-	case readErr != nil:
+	case readErr != nil && !errors.Is(readErr, os.ErrClosed):
 		p.err = readErr
-	case waitErr != nil:
-		p.err = waitErr
+	case p.waitErr != nil:
+		p.err = p.waitErr
 	}
+	slog.Info("bnbloc bridge host tool ended", "event", "bnbloc.bridge.hosttool_ended", "tool", p.spec.Name, "error", fmt.Sprint(p.err))
 	if tail := p.tail.String(); tail != "" {
-		slog.Debug("bnbloc bridge host tool ended", "event", "bnbloc.bridge.hosttool_ended", "tool", p.spec.Name, "stderr_tail", tail)
+		slog.Debug("bnbloc bridge host tool stderr", "event", "bnbloc.bridge.hosttool_stderr", "tool", p.spec.Name, "stderr_tail", tail)
 	}
 	close(p.done)
 }
@@ -388,6 +430,8 @@ func (p *process) dispatch(line []byte) {
 			default:
 			}
 		}
+	case m.Method == "ping" && hasID:
+		_ = p.write(map[string]any{"jsonrpc": "2.0", "id": m.ID, "result": map[string]any{}})
 	case m.Method != "" && hasID:
 		// A request of the tool's client (sampling, roots): the agent's
 		// session is not the tool's to ask.

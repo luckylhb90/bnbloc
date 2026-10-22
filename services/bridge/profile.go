@@ -229,6 +229,10 @@ type SessionContribution struct {
 	// session (the first one included), before the turn's input reaches
 	// the core.
 	Turn func(TurnInfo)
+	// TurnEnd, when set, is called when a turn driven in the session is over
+	// (its answer drained, or the drive failed): revoke what Turn granted for
+	// that turn, so nothing acts between turns.
+	TurnEnd func(TurnInfo)
 	// Release, when set, is called once when the bridge drops the session
 	// binding (rebind, room forgotten, core endpoint changed): revoke
 	// whatever the contribution granted.
@@ -296,6 +300,7 @@ func (b *Bridge) sessionContributors() []SessionContributor {
 // grant cannot be restored.
 type sessionHooks struct {
 	turn         []func(TurnInfo)
+	turnEnd      []func(TurnInfo)
 	release      []func()
 	states       []json.RawMessage
 	unrestorable bool
@@ -303,7 +308,7 @@ type sessionHooks struct {
 
 // granted reports whether a contribution grants the session anything.
 func (part SessionContribution) granted() bool {
-	return len(part.MCPServers) > 0 || len(part.Env) > 0 || len(part.RelayEnv) > 0 || part.Turn != nil || part.Release != nil || part.RoomTools
+	return len(part.MCPServers) > 0 || len(part.Env) > 0 || len(part.RelayEnv) > 0 || part.Turn != nil || part.TurnEnd != nil || part.Release != nil || part.RoomTools
 }
 
 // contribute asks every contributor for its part of a new session's profile
@@ -338,6 +343,9 @@ func (b *Bridge) contribute(ctx context.Context, info SessionInfo, p *corepkg.Ag
 		roomTools = roomTools || part.RoomTools
 		if part.Turn != nil {
 			hooks.turn = append(hooks.turn, part.Turn)
+		}
+		if part.TurnEnd != nil {
+			hooks.turnEnd = append(hooks.turnEnd, part.TurnEnd)
 		}
 		if part.Release != nil {
 			hooks.release = append(hooks.release, part.Release)
@@ -381,6 +389,9 @@ func (b *Bridge) restoreContributions(ctx context.Context, info SessionInfo, sta
 		}
 		if part.Turn != nil {
 			hooks.turn = append(hooks.turn, part.Turn)
+		}
+		if part.TurnEnd != nil {
+			hooks.turnEnd = append(hooks.turnEnd, part.TurnEnd)
 		}
 		if part.Release != nil {
 			hooks.release = append(hooks.release, part.Release)
@@ -442,6 +453,14 @@ func (b *Bridge) sessionGuidance(ctx context.Context, d *drive, ep corepkg.Endpo
 			profile.MCPServers = slices.DeleteFunc(profile.MCPServers, func(s corepkg.MCPServer) bool { return s.Name == h.Server.Name })
 		}
 		hooks, facts.HasTools = b.contribute(ctx, info, profile)
+		// A host tool whose endpoint no contributor gave the agent is not attached at
+		// all (never as the agent's child): say so, with the tool's name.
+		for _, h := range info.HostTools {
+			if profileServer(profile, h.Server.Name) == nil {
+				slog.Warn("bnbloc bridge host tool not attached: the room tools server did not give the agent its endpoint",
+					"event", "bnbloc.bridge.hosttool_unattached", "room", info.RoomID, "tool", h.Server.Name, "core", info.Core, "provider", info.Provider)
+			}
+		}
 		profile.Instructions = appendInstructions(roomlog.SessionGuidance(facts), profile.Instructions)
 		return profile, "", hooks, facts
 	}
@@ -460,6 +479,16 @@ func (b *Bridge) sessionGuidance(ctx context.Context, d *drive, ep corepkg.Endpo
 func (rs *roomSession) startTurn(t TurnInfo) {
 	rs.mu.Lock()
 	hooks := append([]func(TurnInfo){}, rs.hooks.turn...)
+	rs.mu.Unlock()
+	for _, h := range hooks {
+		h(t)
+	}
+}
+
+// endTurn runs the session's turn-end hooks.
+func (rs *roomSession) endTurn(t TurnInfo) {
+	rs.mu.Lock()
+	hooks := append([]func(TurnInfo){}, rs.hooks.turnEnd...)
 	rs.mu.Unlock()
 	for _, h := range hooks {
 		h(t)
@@ -528,4 +557,14 @@ func (b *Bridge) workspaceBound(key driveKey) bool {
 		}
 	}
 	return false
+}
+
+// profileServer is the profile's MCP server called name, or nil.
+func profileServer(p *corepkg.AgentProfile, name string) *corepkg.MCPServer {
+	for i := range p.MCPServers {
+		if p.MCPServers[i].Name == name {
+			return &p.MCPServers[i]
+		}
+	}
+	return nil
 }

@@ -2,12 +2,15 @@ package bridge
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/url"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 
@@ -98,7 +101,25 @@ func (c *jobContent) bindingSum() string {
 	if c == nil {
 		return ""
 	}
-	return c.profile().BindingSum()
+	sum := c.profile().BindingSum()
+	if len(c.mcp.host) == 0 {
+		return sum
+	}
+	// Where a tool runs and what it keeps private are part of the session's
+	// identity: a tool republished from the agent's child to a host process, or with
+	// other private paths, leaves the profile's own sum (name, launcher, env names)
+	// unchanged, and a live session would keep the old confinement.
+	names := make([]string, 0, len(c.mcp.host))
+	for name := range c.mcp.host {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	h := sha256.New()
+	fmt.Fprintf(h, "%s\n", sum)
+	for _, name := range names {
+		fmt.Fprintf(h, "host\n%s\n%s\n", name, strings.Join(c.mcp.host[name], "\n"))
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // expertLabel names the expert for notices and the prompt prefix.

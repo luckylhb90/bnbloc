@@ -103,7 +103,7 @@ func TestHostPlacementIsRecordedOnlyOnTheMembersOwnDrive(t *testing.T) {
 	tool := codewordTool(f.sha)
 	tool.Placement, tool.PrivatePaths = pkgmeta.MCPPlacementHost, []string{"acme/codeword"}
 	refs := []wire.ContentRef{{ComponentID: "cc_reviewer", Owner: "maya", Name: "reviewer"}}
-	b := &Bridge{cfg: Config{MCPToolsDir: f.tools, ComponentSettingsDir: f.settings}}
+	b := &Bridge{cfg: Config{MCPToolsDir: f.tools, ComponentSettingsDir: f.settings, StateDir: t.TempDir()}}
 
 	mcp, missing, _ := b.resolveMCP([]wire.ContentMCPTool{tool}, refs, "maya", "home", true)
 	if len(missing) != 0 || len(mcp.servers) != 1 || len(mcp.host["codeword"]) != 1 || mcp.host["codeword"][0] != "acme/codeword" {
@@ -380,5 +380,106 @@ func TestSandboxedSessionProfileHasNoHostToolCommand(t *testing.T) {
 	}()
 	if m := serverNamed(p2, "mailer"); m == nil || m.Command != os.Args[0] {
 		t.Fatalf("unsandboxed mailer = %+v; it stays the agent's child", m)
+	}
+}
+
+// The turn's end reaches the contributor: the session is unbound and a host tool
+// refuses calls until the next turn.
+func TestTurnEndUnbindsTheSessionOfAHostTool(t *testing.T) {
+	g := newActivityGateway(t, "room-1")
+	b := New(Config{GatewayBaseURL: g.srv.URL, GatewayToken: "t", OwnerSubject: "alice"})
+	stop, err := b.EnableRoomTools("/opt/bnbloc/bnbloc-bridge")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	info := SessionInfo{RoomID: "room-1", Owner: "alice", Core: "core-a", Provider: "codex", Sandboxed: true, Workdir: t.TempDir(),
+		MCPTransports: []string{corepkg.MCPStdio, corepkg.MCPHTTP}, HostTools: []HostTool{{Server: mailerServer()}}}
+	part, err := b.sessionContributors()[0].ContributeSession(context.Background(), info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer part.Release()
+	if part.TurnEnd == nil {
+		t.Fatal("the contribution has no turn-end hook")
+	}
+	host := part.MCPServers[1]
+	token := strings.TrimPrefix(host.Headers[0].Value, "Bearer ")
+	call := `{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"whoami"}}`
+	part.Turn(TurnInfo{JobID: "job-1", RequesterUserID: "alice"})
+	if r := hostToolPost(t, host.URL, token, call); r["result"] == nil {
+		t.Fatalf("in the turn = %v", r)
+	}
+	part.TurnEnd(TurnInfo{JobID: "job-1"})
+	if r := hostToolPost(t, host.URL, token, call); r["error"] == nil {
+		t.Fatalf("after the turn's end the tool still answered: %v", r)
+	}
+}
+
+// A host tool's settings file (member and platform values) is in the bridge's
+// private state directory, never in the temp directory a confined agent can read;
+// with no state directory the tool is not attached rather than given a readable file.
+func TestAHostToolsSettingsFileIsPrivate(t *testing.T) {
+	f := newMCPFixture(t)
+	f.setMember(t, "codeword", map[string]string{"salt": "s"})
+	state := t.TempDir()
+	tool := codewordTool(f.sha)
+	tool.Placement = pkgmeta.MCPPlacementHost
+	refs := []wire.ContentRef{{ComponentID: "cc_reviewer", Owner: "maya", Name: "reviewer"}}
+
+	b := &Bridge{cfg: Config{MCPToolsDir: f.tools, ComponentSettingsDir: f.settings, StateDir: state}}
+	mcp, missing, _ := b.resolveMCP([]wire.ContentMCPTool{tool}, refs, "maya", "home", true)
+	if len(missing) != 0 || len(mcp.servers) != 1 {
+		t.Fatalf("servers=%+v missing=%v", mcp.servers, missing)
+	}
+	var file string
+	for _, e := range mcp.servers[0].Env {
+		if e.Name == pkgmeta.ComponentSettingsFileEnv {
+			file = e.Value
+		}
+	}
+	if !strings.HasPrefix(file, filepath.Join(state, "host-tool-settings")+string(filepath.Separator)) {
+		t.Fatalf("the settings file is at %q; want it under the state directory", file)
+	}
+	if st, err := os.Stat(file); err != nil || st.Mode().Perm() != 0o600 {
+		t.Fatalf("settings file: %v %v", st, err)
+	}
+	if st, _ := os.Stat(filepath.Dir(file)); st.Mode().Perm() != 0o700 {
+		t.Fatalf("settings dir mode = %v", st.Mode().Perm())
+	}
+	// An agent-placed tool keeps the temp-dir file as before.
+	plain := codewordTool(f.sha)
+	mcp, _, _ = b.resolveMCP([]wire.ContentMCPTool{plain}, refs, "maya", "home", true)
+	for _, e := range mcp.servers[0].Env {
+		if e.Name == pkgmeta.ComponentSettingsFileEnv && strings.HasPrefix(e.Value, state) {
+			t.Fatalf("an agent-placed tool's file moved into the state directory: %q", e.Value)
+		}
+	}
+	// No state directory: not attached, and said.
+	b2 := &Bridge{cfg: Config{MCPToolsDir: f.tools, ComponentSettingsDir: f.settings}}
+	mcp, missing, _ = b2.resolveMCP([]wire.ContentMCPTool{tool}, refs, "maya", "home", true)
+	if len(mcp.servers) != 0 || len(missing) != 1 || !strings.Contains(missing[0], "settings file could not be written") {
+		t.Fatalf("without a state directory: servers=%+v missing=%v", mcp.servers, missing)
+	}
+}
+
+// Where a tool runs and what it keeps private are part of a session's identity.
+func TestBindingSumFollowsHostPlacement(t *testing.T) {
+	servers := []corepkg.MCPServer{mailerServer()}
+	agent := &jobContent{mcp: jobMCP{servers: servers}}
+	host := &jobContent{mcp: jobMCP{servers: servers, host: map[string][]string{"mailer": {"acme/mail"}}}}
+	moved := &jobContent{mcp: jobMCP{servers: servers, host: map[string][]string{"mailer": {"acme/other"}}}}
+	same := &jobContent{mcp: jobMCP{servers: servers, host: map[string][]string{"mailer": {"acme/mail"}}}}
+	if agent.bindingSum() != agent.profile().BindingSum() {
+		t.Fatal("content with no host tool changed its sum: every live session would restart")
+	}
+	if host.bindingSum() == agent.bindingSum() {
+		t.Error("a tool moved from the agent to the host kept its session")
+	}
+	if host.bindingSum() == moved.bindingSum() {
+		t.Error("changed private paths kept the session (its confinement would be the old one)")
+	}
+	if host.bindingSum() != same.bindingSum() {
+		t.Error("equal content got different sums")
 	}
 }

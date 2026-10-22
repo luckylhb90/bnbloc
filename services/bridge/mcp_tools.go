@@ -138,7 +138,10 @@ func (b *Bridge) resolveMCP(tools []wire.ContentMCPTool, refs []wire.ContentRef,
 				server.Env = append(server.Env, corepkg.NameValue{Name: nv.Name, Value: nv.Value})
 			}
 			if len(t.Settings) > 0 {
-				file, err := b.writeSettingsFile(t.Name, tenantID, own, pkgmeta.SettingsFile(t.Settings, values))
+				// A tool the bridge runs on the host keeps its settings file out of
+				// the agent's reach: temp dirs are readable and writable to a confined
+				// agent, the bridge's state directory is not.
+				file, err := b.writeSettingsFile(t.Name, tenantID, own, own && t.Placement == pkgmeta.MCPPlacementHost, pkgmeta.SettingsFile(t.Settings, values))
 				if err != nil {
 					slog.Warn("bnbloc bridge MCP settings file not written",
 						"event", "bnbloc.bridge.mcp_settings_file_failed", "tool", t.Name, "error", err)
@@ -283,14 +286,35 @@ func (b *Bridge) settingsFilesDir() (string, error) {
 	return b.settingsTmpDir, b.settingsTmpErr
 }
 
+// privateSettingsDir holds the settings files of host-run tools: under the
+// bridge's state directory (0700), which a confined agent can neither read nor
+// write. Without a state directory there is no such place, and a host tool is
+// not attached rather than given a file the agent could read.
+func (b *Bridge) privateSettingsDir() (string, error) {
+	if strings.TrimSpace(b.cfg.StateDir) == "" {
+		return "", errors.New("no private place for a host tool's settings (no bridge state directory)")
+	}
+	dir := filepath.Join(b.cfg.StateDir, "host-tool-settings")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	return dir, os.Chmod(dir, 0o700)
+}
+
 // writeSettingsFile writes a stdio tool's settings file (every effective
 // value, secrets included, as pkgmeta.SettingsFile shapes it; owner-only)
 // and returns its path. A tool's file
 // is one per organization and per drive kind (the member's own values, or
 // none for a lent drive), rewritten whenever a session is set up, so a
 // running server reads the current values at its next start.
-func (b *Bridge) writeSettingsFile(name, tenantID string, own bool, values map[string]any) (string, error) {
-	dir, err := b.settingsFilesDir()
+func (b *Bridge) writeSettingsFile(name, tenantID string, own, private bool, values map[string]any) (string, error) {
+	var dir string
+	var err error
+	if private {
+		dir, err = b.privateSettingsDir()
+	} else {
+		dir, err = b.settingsFilesDir()
+	}
 	if err != nil {
 		return "", err
 	}

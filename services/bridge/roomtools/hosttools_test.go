@@ -257,3 +257,44 @@ func TestHostToolRefusesAForeignOrigin(t *testing.T) {
 		t.Fatalf("a web page's origin = %d", code)
 	}
 }
+
+// A turn's end unbinds the session: a process of the agent that outlives the turn
+// holds the bearer and still cannot act (a host tool has no downstream check that
+// the job is running, as the gateway is for the room relay).
+func TestAHostToolIsRefusedOnceTheTurnHasEnded(t *testing.T) {
+	srv, token, sess, _ := hostServer(t)
+	sess.Bind(Job{JobID: "job-1", RequesterUserID: "maya"})
+	if code, _ := toolPost(t, srv, token, "mailer", callReq, nil); code != 200 {
+		t.Fatalf("in the turn = %d", code)
+	}
+	sess.Unbind("job-0") // another job's end: nothing
+	if code, _ := toolPost(t, srv, token, "mailer", callReq, nil); code != 200 {
+		t.Fatalf("an unrelated end unbound the turn: %d", code)
+	}
+	sess.Unbind("job-1")
+	if code, body := toolPost(t, srv, token, "mailer", callReq, nil); code != http.StatusConflict || !strings.Contains(body, "no turn is running") {
+		t.Fatalf("after the turn = %d %s; want 409", code, body)
+	}
+	if code, body := toolPost(t, srv, token, "mailer", listReq, nil); code != 200 {
+		t.Fatalf("a list is a handshake and needs no turn: %d %s", code, body)
+	}
+	// The room relay answers the same: no turn, no facts.
+	req, _ := http.NewRequest(http.MethodGet, srv.RelayURL()+"/session", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("relay session after the turn = %d", resp.StatusCode)
+	}
+	// A view that outlives its turn may still name the job it belongs to.
+	if !sess.drove("job-1") {
+		t.Fatal("the ended turn's job is no longer one the session drove")
+	}
+	sess.Bind(Job{JobID: "job-2", RequesterUserID: "maya"})
+	if code, _ := toolPost(t, srv, token, "mailer", callReq, nil); code != 200 {
+		t.Fatalf("the next turn = %d", code)
+	}
+}

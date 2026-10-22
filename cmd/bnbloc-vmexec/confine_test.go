@@ -355,8 +355,10 @@ func TestParseConfine_denyReadFromEnvAndFlags(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(spec.DenyRead, ",") != "/e/a,/f/b" {
-		t.Fatalf("DenyRead = %v", spec.DenyRead)
+	// The flag keeps its older meaning (a later allow of a sub-path may override
+	// it); the descriptor's list, from the environment, is final.
+	if strings.Join(spec.DenyRead, ",") != "/f/b" || strings.Join(spec.DenyReadFinal, ",") != "/e/a" {
+		t.Fatalf("DenyRead = %v, DenyReadFinal = %v", spec.DenyRead, spec.DenyReadFinal)
 	}
 }
 
@@ -390,10 +392,28 @@ func TestConfineDenyReadHoldsInTheRealSandbox(t *testing.T) {
 	if err != nil || out != "top-secret" {
 		t.Fatalf("without the deny the file reads: %q %v", out, err)
 	}
-	s.DenyRead = append(s.DenyRead, filepath.Join(s.Home, "Library", "Application Support", "acme", "mail"))
+	s.DenyReadFinal = append(s.DenyReadFinal, filepath.Join(s.Home, "Library", "Application Support", "acme", "mail"))
 	out, err = read(s.seatbeltProfile())
 	if err == nil || strings.Contains(out, "top-secret") {
 		t.Fatalf("the denied state was read: %q %v", out, err)
+	}
+	// An allow root that covers the private path (a core's allow-read, the
+	// workspace, a temp dir) must not re-open it: the descriptor's deny is last.
+	covering := testSpec(t, "claude")
+	covering.Home = s.Home
+	covering.AllowRead = append(covering.AllowRead, filepath.Join(s.Home, "Library"))
+	covering.DenyReadFinal = s.DenyReadFinal
+	if out, err := read(covering.seatbeltProfile()); err == nil || strings.Contains(out, "top-secret") {
+		t.Fatalf("an allow root re-opened the denied state: %q %v", out, err)
+	}
+	// The flag's older deny IS overridden by an allow of a sub-path (how a core
+	// hides a directory but one folder in it).
+	soft := testSpec(t, "claude")
+	soft.Home = s.Home
+	soft.AllowRead = append(soft.AllowRead, filepath.Join(s.Home, "Library"))
+	soft.DenyRead = append(soft.DenyRead, filepath.Join(s.Home, "Library", "Application Support", "acme", "mail"))
+	if out, err := read(soft.seatbeltProfile()); err != nil || out != "top-secret" {
+		t.Fatalf("the flag's deny no longer yields to a covering allow: %q %v", out, err)
 	}
 	// And a write there is denied either way (the profile denies writes by default).
 	if out, err := exec.Command("/usr/bin/sandbox-exec", "-p", s.seatbeltProfile(), "/usr/bin/touch", filepath.Join(state, "planted")).CombinedOutput(); err == nil {

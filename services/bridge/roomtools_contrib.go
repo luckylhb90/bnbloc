@@ -208,9 +208,11 @@ func (c *roomToolsContributor) bearer(nonce string) string {
 }
 
 // hooks are a session's turn and release callbacks.
-func (c *roomToolsContributor) hooks(sess *roomtools.Session) (func(TurnInfo), func()) {
+func (c *roomToolsContributor) hooks(sess *roomtools.Session) (turn, turnEnd func(TurnInfo), release func()) {
 	return func(t TurnInfo) {
 			sess.Bind(roomtools.Job{JobID: t.JobID, RequesterUserID: t.RequesterUserID, ChannelID: t.ChannelID, MessageSeq: t.MessageSeq, ByRequester: t.ByRequester, Workspace: t.Workspace, Team: t.Team})
+		}, func(t TurnInfo) {
+			sess.Unbind(t.JobID)
 		}, func() {
 			c.srv.Revoke(sess)
 		}
@@ -227,12 +229,12 @@ func (c *roomToolsContributor) RestoreSession(_ context.Context, info SessionInf
 	if err != nil {
 		return SessionContribution{}, false
 	}
-	turn, release := c.hooks(sess)
+	turn, turnEnd, release := c.hooks(sess)
 	// The session keeps its host tools' endpoints in its profile; the tools
 	// themselves ended with the bridge, so they are fronted again (and start
 	// on their next call).
 	c.attachHostTools(sess, info, c.bearer(g.Nonce))
-	return SessionContribution{RoomTools: true, Turn: turn, Release: release, State: state}, true
+	return SessionContribution{RoomTools: true, Turn: turn, TurnEnd: turnEnd, Release: release, State: state}, true
 }
 
 func roomToolsScope(info SessionInfo) roomtools.Scope {
@@ -283,8 +285,8 @@ func (c *roomToolsContributor) ContributeSession(_ context.Context, info Session
 	} else {
 		server.Env = []corepkg.NameValue{{Name: roomtools.TokenEnv, Value: token}}
 	}
-	turn, release := c.hooks(sess)
-	part := SessionContribution{MCPServers: append([]corepkg.MCPServer{server}, hostServers...), RoomTools: true, Turn: turn, Release: release, State: state}
+	turn, turnEnd, release := c.hooks(sess)
+	part := SessionContribution{MCPServers: append([]corepkg.MCPServer{server}, hostServers...), RoomTools: true, Turn: turn, TurnEnd: turnEnd, Release: release, State: state}
 	if len(info.RoomRelayServers) > 0 {
 		// The session's room-credential tools reach the gateway through
 		// this server's relay with the same bearer: bound to each turn's

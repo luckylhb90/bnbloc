@@ -146,6 +146,25 @@ func (s *Session) Bind(j Job) {
 	s.mu.Unlock()
 }
 
+// Unbind ends the turn the session is driving: the bound job is remembered as
+// one the session drove and nothing is bound until the next turn's Bind. A call
+// that acts (a room tool, a relayed call, a host tool) is refused between turns:
+// a process of the agent that outlives its turn holds the bearer, and the bearer
+// alone must not be enough. It does nothing when another job is bound already
+// (the next turn began before this one's end was reported).
+func (s *Session) Unbind(jobID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if jobID == "" || s.job.JobID != jobID {
+		return
+	}
+	s.ran = append(s.ran, s.job.JobID)
+	if len(s.ran) > maxRanJobs {
+		s.ran = s.ran[len(s.ran)-maxRanJobs:]
+	}
+	s.job = Job{}
+}
+
 // droveJobs is every job the session drove that it remembers, the bound
 // one last.
 func (s *Session) droveJobs() []string {

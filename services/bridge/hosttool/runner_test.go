@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"testing"
@@ -31,6 +32,7 @@ func fakeTool() {
 		defer wmu.Unlock()
 		os.Stdout.Write(append(raw, '\n'))
 	}
+	pingAck := make(chan string, 1)
 	release := map[string]chan struct{}{}
 	var rmu sync.Mutex
 	gate := func(name string) chan struct{} {
@@ -57,11 +59,22 @@ func fakeTool() {
 			continue
 		}
 		if m.Method == "" { // a response to a request we made
+			if string(m.ID) == `"p1"` {
+				select {
+				case pingAck <- string(m.Result):
+				default:
+				}
+			}
 			continue
 		}
 		go func() {
 			switch m.Method {
 			case "initialize":
+				if d := os.Getenv("HOSTTOOL_INIT_DELAY"); d != "" {
+					if dur, err := time.ParseDuration(d); err == nil {
+						time.Sleep(dur)
+					}
+				}
 				send(map[string]any{"jsonrpc": "2.0", "id": m.ID, "result": map[string]any{
 					"protocolVersion": "2025-06-18", "capabilities": map[string]any{"tools": map[string]any{}},
 					"serverInfo": map[string]any{"name": "fake", "version": "1"}}})
@@ -80,6 +93,19 @@ func fakeTool() {
 				switch p.Name {
 				case "crash":
 					os.Exit(3)
+				case "orphan": // a grandchild holds our stdout, then we die
+					c := exec.Command("sleep", "30")
+					c.Stdout = os.Stdout
+					_ = c.Start()
+					os.Exit(3)
+				case "ping": // the tool pings its client and needs the answer
+					send(map[string]any{"jsonrpc": "2.0", "id": "p1", "method": "ping"})
+					select {
+					case got := <-pingAck:
+						p.Args.Text = "pong-ok " + got
+					case <-time.After(3 * time.Second):
+						p.Args.Text = "no pong"
+					}
 				case "wait": // answers only when "open" is called with the same gate
 					<-gate(p.Args.Gate)
 				case "open":
@@ -313,5 +339,74 @@ func TestAToolThatCannotStartIsAnError(t *testing.T) {
 	defer r.Close()
 	if _, err := r.Info(context.Background()); err == nil || !strings.Contains(err.Error(), "did not start") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// A grandchild that inherited the tool's output must not keep its requests
+// waiting after the tool itself has died.
+func TestAGrandchildHoldingThePipeDoesNotHangRequests(t *testing.T) {
+	r := New(fakeSpec())
+	defer r.Close()
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := callTool(r, context.Background(), "orphan", nil, nil)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "stopped") {
+			t.Fatalf("err = %v", err)
+		}
+	case <-time.After(8 * time.Second):
+		t.Fatal("a request hung after the tool died with a grandchild holding its pipe")
+	}
+	out, _, err := callTool(r, context.Background(), "echo", map[string]any{"text": "again"}, nil)
+	if err != nil || out["text"] != "again" {
+		t.Fatalf("no restart after that: %v %v", out, err)
+	}
+}
+
+// Closing a runner while its tool is still starting stops that process too.
+func TestCloseWhileTheToolIsStartingStopsIt(t *testing.T) {
+	r := New(fakeSpec("HOSTTOOL_INIT_DELAY=5s"))
+	started := make(chan error, 1)
+	go func() {
+		_, err := r.Info(context.Background())
+		started <- err
+	}()
+	var sp *process
+	deadline := time.Now().Add(3 * time.Second)
+	for sp == nil && time.Now().Before(deadline) {
+		r.mu.Lock()
+		sp = r.spawning
+		r.mu.Unlock()
+		time.Sleep(10 * time.Millisecond)
+	}
+	if sp == nil {
+		t.Fatal("the tool never started")
+	}
+	r.Close()
+	select {
+	case <-sp.done:
+	case <-time.After(6 * time.Second):
+		t.Fatal("the process that was starting outlived Close")
+	}
+	select {
+	case err := <-started:
+		if err == nil {
+			t.Fatal("a call on a closed runner succeeded")
+		}
+	case <-time.After(6 * time.Second):
+		t.Fatal("the call waiting for the start never ended")
+	}
+}
+
+// A tool's own keepalive ping is answered, as an MCP client must.
+func TestAPingFromTheToolIsAnswered(t *testing.T) {
+	r := New(fakeSpec())
+	defer r.Close()
+	out, rerr, err := callTool(r, context.Background(), "ping", map[string]any{"text": "x"}, nil)
+	if err != nil || rerr != nil || out["text"] != "pong-ok {}" {
+		t.Fatalf("out=%v rerr=%v err=%v", out, rerr, err)
 	}
 }
