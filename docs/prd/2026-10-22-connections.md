@@ -196,8 +196,10 @@ cannot see it.
   loopback. A turn of the member's own drive with connections in effect
   gets `HTTPS_PROXY` and `HTTP_PROXY` in its commands' environment (host
   commands, and the space's for a sandboxed turn), carrying a bearer bound
-  to that turn's job, as the room tools bearer is. A `CONNECT` to one of
-  the requester's connector hosts is answered with a certificate from the
+  to that turn's job, as the room tools bearer is. A `CONNECT` to a host of
+  a connector in effect for the requester (connected or not, so a call to
+  one not yet connected answers `not_connected` and the person is asked)
+  is answered with a certificate from the
   bridge's own local CA (generated per member, its key 0600 in the member
   directory, never leaving the computer). The proxy reads the request and
   sends it as `POST /v1/connections/{connector}/request` through the
@@ -216,9 +218,17 @@ cannot see it.
   and is revoked with the turn. A borrowed or platform drive gets no proxy
   environment, so its calls go out unauthenticated, as without connections.
 - **What the agent knows** is data, not a rule. The session's room facts
-  (`.room/README.md`) list the requester's connections in effect, one line
-  each: "wiki.acme.example: as maya, read; changes are asked first". The
-  connector's skill explains its API with ordinary `curl` examples.
+  (`.room/README.md`) list the connectors in effect for the requester, one
+  line each with its state: "calendar (www.googleapis.com): as maya,
+  read; changes are asked first", or "wiki (wiki.acme.example): not
+  connected". The connector's skill explains its API with ordinary `curl`
+  examples.
+- **A room can say what it uses.** A room's setup may name connectors
+  (`requires.connectors`, beside `requires.skills`, in the room and in a
+  room package). Each member who has not connected one sees it on the room's
+  start card ("this room uses your calendar: Connect"). Installing a room
+  package asks the same. Nothing connects for them, and nothing is shared:
+  each member's agent uses that member's own connection.
 - **Refusals are ordinary HTTP.** `not_connected` and `needs_changes`
   answer `403` with a JSON body naming the reason and saying that the
   person was asked in the room (the card, §2.6). A held write answers
