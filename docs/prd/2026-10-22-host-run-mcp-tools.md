@@ -109,6 +109,9 @@ child. It can no longer reach the tool's process, environment or files.
 - The bearer is the session's; it is bound to the job being driven each turn
   (the room relay's rule): between turns a call is refused (409), and a
   bearer that outlives its session is revoked with it.
+- The binding is also dropped when the turn ends (`Unbind` at turn end, not only
+  on close), so a bearer the agent kept cannot call between turns even before the
+  session closes.
 - A call reaches only a tool that was placed for **this session's** profile.
   A tool that could not be attached (needs setup, not downloaded, a drive the
   member did not ask for) is not started; it is reported as missing as today,
@@ -135,6 +138,24 @@ descriptor must carry the field too. Both were found on 2026-10-22 by asking a r
 sandboxed agent to read a file in a tool's private directory: it could, through a
 core whose descriptor copy lacked the field and then through a helper that did not
 know the variable; with both fixed it gets `EPERM`.
+
+Review of 2026-10-22 changed three details of this section:
+
+- **The deny is final.** `BNBLOC_CONFINE_DENY_READ_FINAL` (`DenyReadFinal`) makes
+  the deny win over any allow that covers the path (the workspace allow, a
+  parent directory); the soft `--deny-read` flag stays for helpers older than the
+  variable. A real macOS profile test reads a denied file under a covering allow.
+  On Linux (bwrap) the deny is a placeholder mount and is not built yet: the
+  record claims the protection on macOS only.
+- **The settings file is private.** The file that carries a host tool's placement
+  into the session is written owner-only, in a directory the profile denies, and
+  the content's binding checksum covers the placement (a changed placement is a
+  changed binding).
+- **What is shown and what is not.** A real sandboxed agent got `EPERM` on the
+  tool's state files and could not reach the tool's process by path. Reading the
+  tool's *environment* from the agent's side was tried and the control failed, so
+  "the agent cannot read the tool's environment" is not claimed; the environment
+  is kept small instead (`BNBLOC_*` stripped).
 
 ### 2.5 What does not change
 
@@ -223,6 +244,10 @@ know the variable; with both fixed it gets `EPERM`.
   reads files as the same user. Confining those agents is its own record
   ([`2026-10-22-acp-sandbox.md`](2026-10-22-acp-sandbox.md)), after which their
   sandboxed sessions use host tools like any other.
+- The session's working directory and temp directory are shared between the
+  agent and a host tool by design; a link the agent leaves there is the tool's
+  to refuse (a tool that saves downloads checks its download directory and re-checks a
+  file's resolved path and content when a proposal is confirmed).
 - A tool that works on the session's directory *and* holds a sign-in (a
   sender of files, say) runs host-side with the sandbox workdir as its
   directory, but can no longer see files the agent wrote outside it; the

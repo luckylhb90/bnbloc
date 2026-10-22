@@ -125,6 +125,14 @@ the sibling core does).
   sandboxed session it advertises none, so an agent uses its own tools, which are
   confined and routed. (Routing the core's own terminals through `vmexec run` is
   possible and is not needed for opencode.)
+- **The adapter writes nothing the sandbox would stop.** The adapter itself is
+  not in the sandbox, so its file writes for an agent (`fs/write_text_file`, the
+  bridge's context files) are checked against what the OS sandbox protects: the
+  project config a harness executes on the host (`CLAUDE.md`, `.claude/`,
+  `.mcp.json`, …) and the bridge's `denyWrite` list, compared on resolved paths
+  (`/var` and `/private/var` are the same place). A terminal request from an agent
+  that asks anyway is refused with `terminal=…` as the reason; the capability is not
+  offered, so this only catches a rogue agent.
 - **A changed descriptor.** The session pins what the spawn depends on (space,
   workdir, mounts, host confinement, passthrough, forwarded environment): every
   field but the token and its expiry. An input whose descriptor differs stops the
