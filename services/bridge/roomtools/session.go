@@ -120,6 +120,8 @@ type Session struct {
 	gone       bool
 	// notes holds the bound job's team guard and progress state.
 	notes jobNotes
+	// host are the host tools this session fronts (hosttools.go).
+	host map[string]HostTool
 }
 
 // dispatched is one dispatch this session made.
@@ -223,6 +225,7 @@ func (s *Session) revoke() {
 	s.job = Job{}
 	s.ran = nil
 	s.mu.Unlock()
+	s.closeHostTools()
 }
 
 func (s *Session) revoked() bool {

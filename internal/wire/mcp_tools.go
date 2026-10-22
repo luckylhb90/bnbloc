@@ -46,6 +46,10 @@ type ContentMCPTool struct {
 	// only when it carries this platform's pin.
 	Artifacts map[string]string `json:"artifacts,omitempty"`
 	Args      []string          `json:"args,omitempty"`
+	// Placement and PrivatePaths are the stdio server's declaration
+	// (ComponentMCPStdio): where it runs and what it keeps private.
+	Placement    string   `json:"placement,omitempty"`
+	PrivatePaths []string `json:"privatePaths,omitempty"`
 	// URL and Auth describe an http server.
 	URL  string                `json:"url,omitempty"`
 	Auth *ComponentMCPHTTPAuth `json:"auth,omitempty"`

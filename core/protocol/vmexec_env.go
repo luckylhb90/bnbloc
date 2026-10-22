@@ -37,6 +37,7 @@ const (
 	EnvConfineAllowRead  = "BNBLOC_CONFINE_ALLOW_READ"  // JSON array of host paths
 	EnvConfineAllowWrite = "BNBLOC_CONFINE_ALLOW_WRITE" // JSON array of host paths
 	EnvConfineDenyWrite  = "BNBLOC_CONFINE_DENY_WRITE"  // JSON array of host paths
+	EnvConfineDenyRead   = "BNBLOC_CONFINE_DENY_READ"   // JSON array of host paths
 )
 
 // VMExecEnv returns the KEY=VALUE environment entries for s. A core appends
@@ -62,11 +63,13 @@ func VMExecEnv(s SandboxExecution) []string {
 		read, _ := json.Marshal(nonNil(c.AllowRead))
 		write, _ := json.Marshal(nonNil(c.AllowWrite))
 		deny, _ := json.Marshal(nonNil(c.DenyWrite))
+		denyRead, _ := json.Marshal(nonNil(c.DenyRead))
 		env = append(env,
 			EnvConfineWorkspace+"="+c.Workspace,
 			EnvConfineAllowRead+"="+string(read),
 			EnvConfineAllowWrite+"="+string(write),
 			EnvConfineDenyWrite+"="+string(deny),
+			EnvConfineDenyRead+"="+string(denyRead),
 		)
 	}
 	return env
@@ -169,7 +172,7 @@ func HostConfineFromEnv(getenv func(string) string) (*HostConfine, error) {
 	for _, l := range []struct {
 		name string
 		dst  *[]string
-	}{{EnvConfineAllowRead, &c.AllowRead}, {EnvConfineAllowWrite, &c.AllowWrite}, {EnvConfineDenyWrite, &c.DenyWrite}} {
+	}{{EnvConfineAllowRead, &c.AllowRead}, {EnvConfineAllowWrite, &c.AllowWrite}, {EnvConfineDenyWrite, &c.DenyWrite}, {EnvConfineDenyRead, &c.DenyRead}} {
 		raw := strings.TrimSpace(getenv(l.name))
 		if raw == "" {
 			continue

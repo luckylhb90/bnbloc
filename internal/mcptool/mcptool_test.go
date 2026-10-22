@@ -248,6 +248,29 @@ func TestResolve(t *testing.T) {
 	}
 }
 
+// A host-placed tool reaches the bridge with where it runs and what it keeps
+// private; an agent-placed one with neither.
+func TestResolveCarriesPlacement(t *testing.T) {
+	host := stdioPackage("mailer")
+	host.MCP.Stdio = &pkgmeta.MCPStdio{Placement: pkgmeta.MCPPlacementHost, PrivatePaths: []string{"acme/mailer"}}
+	refs := []wire.ContentRef{{ComponentID: "cc", MCP: []wire.ContentMCPRequirement{{Name: "mailer"}, {Name: "codeword"}}}}
+	tools, missing, err := Resolve(refs, nil, lookupOf(t, candidate(t, host, true), candidate(t, stdioPackage("codeword"), true)),
+		func(string, []pkgmeta.Setting) (map[string]string, []string, error) { return nil, nil, nil })
+	if err != nil || len(missing) != 0 || len(tools) != 2 {
+		t.Fatalf("tools=%+v missing=%v err=%v", tools, missing, err)
+	}
+	byName := map[string]wire.ContentMCPTool{}
+	for _, tool := range tools {
+		byName[tool.Name] = tool
+	}
+	if m := byName["mailer"]; m.Placement != wire.MCPPlacementHost || !reflect.DeepEqual(m.PrivatePaths, []string{"acme/mailer"}) {
+		t.Fatalf("mailer = %+v", m)
+	}
+	if c := byName["codeword"]; c.Placement != "" || len(c.PrivatePaths) != 0 {
+		t.Fatalf("codeword = %+v", c)
+	}
+}
+
 func TestResolveOAuthNeedsNoSettings(t *testing.T) {
 	pkg := httpPackage("drive", "https://tools.example.com/mcp")
 	pkg.Settings = nil

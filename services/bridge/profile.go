@@ -51,6 +51,25 @@ type SessionInfo struct {
 	// (pkgmeta.MCPCredentialsRoom): the contributor holding the room relay
 	// sets its env on them (SessionContribution.RelayEnv).
 	RoomRelayServers []string
+	// HostTools are the session's MCP tools placed on the host
+	// (pkgmeta.MCPPlacementHost), only in a sandboxed session: the room tools
+	// server starts and fronts each one instead of the agent CLI, so a tool
+	// that holds a member's sign-in stays outside the agent's confinement
+	// (docs/prd/2026-10-22-host-run-mcp-tools.md). They are not in
+	// RoomRelayServers: the host start gives them the relay itself.
+	HostTools []HostTool
+	// Workdir is the session's working directory on the host when it is known
+	// (a sandboxed session's sandbox workdir): where a host tool runs.
+	Workdir string
+}
+
+// HostTool is one MCP tool the bridge runs on the host for a session.
+type HostTool struct {
+	// Server is the tool as the agent's own child would have been started:
+	// command, arguments and the environment its settings give it.
+	Server corepkg.MCPServer
+	// Relayed: the tool's credentials are the room (it gets the room relay).
+	Relayed bool
 }
 
 // TurnInfo is one turn driven in a session: the claimed job and the human
@@ -415,6 +434,12 @@ func (b *Bridge) sessionGuidance(ctx context.Context, d *drive, ep corepkg.Endpo
 		profile = d.content.profile()
 		if profile == nil {
 			profile = &corepkg.AgentProfile{}
+		}
+		// A host-placed tool is not the agent's child in a sandboxed session:
+		// the room tools contributor starts it and hands the agent its
+		// endpoint under the same name.
+		for _, h := range info.HostTools {
+			profile.MCPServers = slices.DeleteFunc(profile.MCPServers, func(s corepkg.MCPServer) bool { return s.Name == h.Server.Name })
 		}
 		hooks, facts.HasTools = b.contribute(ctx, info, profile)
 		profile.Instructions = appendInstructions(roomlog.SessionGuidance(facts), profile.Instructions)

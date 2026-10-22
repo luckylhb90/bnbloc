@@ -988,6 +988,18 @@ tool by name and can never inline a command.
     revoked with the session binding. A route joins the list only with
     job-grant admission. Platform content (a default pack) requiring a
     stdio tool does not force the sandbox; another member's still does.
+  - `mcp.stdio.placement: "host"` (stdio only; with `privatePaths`, relative to
+    the user's config directory): where the tool runs
+    ([`docs/prd/2026-10-22-host-run-mcp-tools.md`](../prd/2026-10-22-host-run-mcp-tools.md)).
+    The default, `"agent"`, is a child of the agent CLI, confined with it in a
+    sandboxed session. A `"host"` tool is for one that keeps a member's
+    sign-in or state: in a sandboxed session on the member's own drive the
+    bridge runs it as a host process and fronts it on the room tools server
+    (`/tools/<name>`, the session's bearer, calls only inside a turn), the
+    agent gets that endpoint under the tool's name, and a core that confines
+    its CLI read-denies `privatePaths` (`hostConfine.denyRead`). Elsewhere it
+    stays the agent's child. Placement is part of what an admin approves: the
+    process runs with the user's rights.
 - **Which tools a turn gets** (`mcptool.Resolve`, browser PRD §3.6): the
   ones its content requires, plus every MCP tool its requester installed
   (an opt-in tool they added, or one rolled out to everyone), with no

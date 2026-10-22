@@ -1930,12 +1930,19 @@ func (b *Bridge) startSession(ctx context.Context, d *drive, key driveKey, entry
 // sessionInfo is what the session contributors are told about a drive's
 // session.
 func (b *Bridge) sessionInfo(d *drive, opts corepkg.SessionOptions) SessionInfo {
-	return SessionInfo{
+	info := SessionInfo{
 		TenantID: d.job.TenantID, RoomID: d.job.RoomID, ChannelID: d.job.ChannelID, Owner: d.owner, Core: d.core, Provider: d.job.Provider,
 		Sandboxed: opts.Execution != nil, MCPTransports: b.targetTransports(d.core, d.target, d.job.Provider),
 		JobID: d.job.JobID, RequesterUserID: d.job.RequesterUserID,
 		RoomRelayServers: d.content.relayedMCP(),
 	}
+	if opts.Execution != nil {
+		// A confined agent would confine its tools with it: the tools that
+		// hold a sign-in run on the host instead (hostTools).
+		info.Workdir = opts.Execution.Sandbox.Workdir
+		info.HostTools, info.RoomRelayServers = d.content.hostTools(info.RoomRelayServers)
+	}
+	return info
 }
 
 // --- local agent core (via core.Provider) ---

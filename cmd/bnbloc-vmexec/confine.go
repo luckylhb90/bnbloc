@@ -882,7 +882,7 @@ func parseConfine(args []string, getenv func(string) string) (spec confineSpec, 
 		return spec, nil, false, herr
 	}
 	if hc != nil {
-		spec.Workspace, spec.AllowRead, spec.AllowWrite, spec.DenyWrite = hc.Workspace, hc.AllowRead, hc.AllowWrite, hc.DenyWrite
+		spec.Workspace, spec.AllowRead, spec.AllowWrite, spec.DenyWrite, spec.DenyRead = hc.Workspace, hc.AllowRead, hc.AllowWrite, hc.DenyWrite, hc.DenyRead
 	}
 	spec.VMExecDir = filepath.Dir(vmexecPath(getenv))
 	pathFlags := map[string]*[]string{

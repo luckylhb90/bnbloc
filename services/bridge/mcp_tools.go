@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -72,6 +73,11 @@ type jobMCP struct {
 	// offered names the servers no content requires (the requester
 	// installed them): one the session cannot attach is dropped quietly.
 	offered []string
+	// host are the servers their package places on the host
+	// (pkgmeta.MCPPlacementHost), by name, with the paths each keeps private
+	// (relative to the user's config directory). Only on the member's own
+	// drive: a drive for someone else keeps every tool with the agent.
+	host map[string][]string
 }
 
 // resolveMCP builds the MCP servers of a job's tools. refs are the packages
@@ -140,6 +146,12 @@ func (b *Bridge) resolveMCP(tools []wire.ContentMCPTool, refs []wire.ContentRef,
 					continue
 				}
 				server.Env = append(server.Env, corepkg.NameValue{Name: pkgmeta.ComponentSettingsFileEnv, Value: file})
+			}
+			if own && t.Placement == pkgmeta.MCPPlacementHost {
+				if out.host == nil {
+					out.host = map[string][]string{}
+				}
+				out.host[t.Name] = append([]string(nil), t.PrivatePaths...)
 			}
 			if t.Credentials == pkgmeta.MCPCredentialsRoom {
 				// The session's room relay is its credential, granted when
@@ -464,6 +476,65 @@ func (c *jobContent) relayedMCP() []string {
 		}
 	}
 	return out
+}
+
+// hostServers are the content's servers placed on the host, as the agent's
+// own children would have been started (command, arguments, environment):
+// the tool host starts them instead of the agent
+// (docs/prd/2026-10-22-host-run-mcp-tools.md).
+func (c *jobContent) hostServers() []corepkg.MCPServer {
+	if c == nil || len(c.mcp.host) == 0 {
+		return nil
+	}
+	var out []corepkg.MCPServer
+	for _, s := range c.mcp.servers {
+		if _, ok := c.mcp.host[s.Name]; ok && s.Transport() == corepkg.MCPStdio {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// hostTools are the session's host-placed tools, and relayed without them: a
+// host tool gets the room relay when it is started, not through the profile.
+func (c *jobContent) hostTools(relayed []string) ([]HostTool, []string) {
+	servers := c.hostServers()
+	if len(servers) == 0 {
+		return nil, relayed
+	}
+	var tools []HostTool
+	rest := slices.Clone(relayed)
+	for _, s := range servers {
+		tools = append(tools, HostTool{Server: s, Relayed: slices.Contains(relayed, s.Name)})
+		rest = slices.DeleteFunc(rest, func(n string) bool { return n == s.Name })
+	}
+	return tools, rest
+}
+
+// hostPrivateDirs are the absolute directories the host-placed tools keep
+// private, from their declared paths under the user's config directory: what a
+// confined agent may not read. An error (no config directory) means they
+// cannot be named, so the drive must not run confined without them.
+func (c *jobContent) hostPrivateDirs() ([]string, error) {
+	if c == nil || len(c.mcp.host) == 0 {
+		return nil, nil
+	}
+	var rel []string
+	for _, s := range c.hostServers() {
+		rel = append(rel, c.mcp.host[s.Name]...)
+	}
+	if len(rel) == 0 {
+		return nil, nil
+	}
+	cfg, err := os.UserConfigDir()
+	if err != nil {
+		return nil, fmt.Errorf("a host-run tool's private paths cannot be placed: %w", err)
+	}
+	out := make([]string, 0, len(rel))
+	for _, r := range rel {
+		out = append(out, filepath.Join(cfg, filepath.FromSlash(r)))
+	}
+	return out, nil
 }
 
 // mcpAttach reports whether a core's sessions can carry a profile, and the

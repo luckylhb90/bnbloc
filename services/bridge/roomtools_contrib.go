@@ -16,9 +16,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	corepkg "github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
+	"github.com/luckylhb90/bnbloc/services/bridge/hosttool"
 	"github.com/luckylhb90/bnbloc/services/bridge/roomtools"
 )
 
@@ -135,6 +137,54 @@ func (g roomToolsGateway) client(rb roomtools.RawBody) *http.Client {
 	return g.b.http
 }
 
+// hostToolEnv is the environment of a tool the bridge runs on the host: this
+// process's, without the bridge's own settings and credentials (BNBLOC_*), then
+// the tool's own (its settings), then the room relay when the room is its
+// credential. Never the agent's environment.
+func hostToolEnv(tool HostTool, relayURL, token string) []string {
+	var env []string
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "BNBLOC_") {
+			env = append(env, kv)
+		}
+	}
+	for _, nv := range tool.Server.Env {
+		env = append(env, nv.Name+"="+nv.Value)
+	}
+	if tool.Relayed {
+		env = append(env, pkgmeta.RoomRelayURLEnv+"="+relayURL, pkgmeta.RoomRelayTokenEnv+"="+token)
+	}
+	return env
+}
+
+// attachHostTools starts (on first use) and fronts the session's host-placed
+// tools on the server: one process per tool and session, in the session's
+// working directory.
+func (c *roomToolsContributor) attachHostTools(sess *roomtools.Session, info SessionInfo, token string) {
+	for _, tool := range info.HostTools {
+		sess.AttachHostTool(tool.Server.Name, hosttool.New(hosttool.Spec{
+			Name: tool.Server.Name, Command: tool.Server.Command, Args: tool.Server.Args,
+			Env: hostToolEnv(tool, c.srv.RelayURL(), token), Dir: info.Workdir,
+		}))
+	}
+}
+
+// hostToolServer is the MCP server the agent is given for a host tool: the
+// tool's endpoint on the room tools server under the tool's own name, over http
+// when the agent accepts it, else through the stdio shim.
+func (c *roomToolsContributor) hostToolServer(info SessionInfo, name, token string) (corepkg.MCPServer, error) {
+	url := c.srv.HostToolURL(name)
+	switch {
+	case (corepkg.Target{MCPTransports: info.MCPTransports}).TransportSupported(corepkg.MCPHTTP):
+		return corepkg.MCPServer{Name: name, Type: corepkg.MCPHTTP, URL: url,
+			Headers: []corepkg.NameValue{{Name: "Authorization", Value: "Bearer " + token}}}, nil
+	case c.shimCommand != "":
+		return corepkg.MCPServer{Name: name, Type: corepkg.MCPStdio, Command: c.shimCommand,
+			Args: []string{"roomtools-stdio", "--url", url}, Env: []corepkg.NameValue{{Name: roomtools.TokenEnv, Value: token}}}, nil
+	}
+	return corepkg.MCPServer{}, fmt.Errorf("the %s agent accepts no http MCP server and no stdio shim is available for the %s tool", info.Provider, name)
+}
+
 // roomToolsContributor attaches the server to one session.
 type roomToolsContributor struct {
 	srv         *roomtools.Server
@@ -178,6 +228,10 @@ func (c *roomToolsContributor) RestoreSession(_ context.Context, info SessionInf
 		return SessionContribution{}, false
 	}
 	turn, release := c.hooks(sess)
+	// The session keeps its host tools' endpoints in its profile; the tools
+	// themselves ended with the bridge, so they are fronted again (and start
+	// on their next call).
+	c.attachHostTools(sess, info, c.bearer(g.Nonce))
 	return SessionContribution{RoomTools: true, Turn: turn, Release: release, State: state}, true
 }
 
@@ -214,13 +268,23 @@ func (c *roomToolsContributor) ContributeSession(_ context.Context, info Session
 		return SessionContribution{}, err
 	}
 	state, _ := json.Marshal(roomToolsGrant{URL: c.srv.URL(), Nonce: nonce})
+	var hostServers []corepkg.MCPServer
+	for _, tool := range info.HostTools {
+		hs, err := c.hostToolServer(info, tool.Server.Name, token)
+		if err != nil {
+			c.srv.Revoke(sess)
+			return SessionContribution{}, err
+		}
+		hostServers = append(hostServers, hs)
+	}
+	c.attachHostTools(sess, info, token)
 	if server.Type == corepkg.MCPHTTP {
 		server.Headers = []corepkg.NameValue{{Name: "Authorization", Value: "Bearer " + token}}
 	} else {
 		server.Env = []corepkg.NameValue{{Name: roomtools.TokenEnv, Value: token}}
 	}
 	turn, release := c.hooks(sess)
-	part := SessionContribution{MCPServers: []corepkg.MCPServer{server}, RoomTools: true, Turn: turn, Release: release, State: state}
+	part := SessionContribution{MCPServers: append([]corepkg.MCPServer{server}, hostServers...), RoomTools: true, Turn: turn, Release: release, State: state}
 	if len(info.RoomRelayServers) > 0 {
 		// The session's room-credential tools reach the gateway through
 		// this server's relay with the same bearer: bound to each turn's

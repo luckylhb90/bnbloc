@@ -338,6 +338,9 @@ type HostConfine struct {
 	AllowRead  []string `json:"allowRead,omitempty"`
 	AllowWrite []string `json:"allowWrite,omitempty"`
 	DenyWrite  []string `json:"denyWrite,omitempty"`
+	// DenyRead paths whose content the CLI and what it spawns may not read
+	// (the state of a tool the bridge runs on the host).
+	DenyRead []string `json:"denyRead,omitempty"`
 }
 
 // WireExecution maps the neutral descriptor onto the wire (nil stays nil).
@@ -353,7 +356,7 @@ func WireExecution(e *core.Execution) *Execution {
 	return &Execution{Mode: ExecutionModeSandbox, Sandbox: &SandboxExecution{
 		URL: s.URL, ExecToken: s.ExecToken, ExpiresAtMs: s.ExpiresAtMs, Machine: s.Machine, Space: s.Space,
 		VMExec: s.VMExec, Workdir: s.Workdir, Mounts: mounts, Passthrough: s.Passthrough, Env: s.Env,
-		HostConfine: &HostConfine{Workspace: s.HostConfine.Workspace, AllowRead: s.HostConfine.AllowRead, AllowWrite: s.HostConfine.AllowWrite, DenyWrite: s.HostConfine.DenyWrite},
+		HostConfine: &HostConfine{Workspace: s.HostConfine.Workspace, AllowRead: s.HostConfine.AllowRead, AllowWrite: s.HostConfine.AllowWrite, DenyWrite: s.HostConfine.DenyWrite, DenyRead: s.HostConfine.DenyRead},
 	}}
 }
 
@@ -377,7 +380,7 @@ func (e *Execution) Core() (*core.Execution, error) {
 		VMExec: s.VMExec, Workdir: s.Workdir, Mounts: mounts, Passthrough: s.Passthrough, Env: s.Env,
 	}}
 	if s.HostConfine != nil {
-		out.Sandbox.HostConfine = core.HostConfine{Workspace: s.HostConfine.Workspace, AllowRead: s.HostConfine.AllowRead, AllowWrite: s.HostConfine.AllowWrite, DenyWrite: s.HostConfine.DenyWrite}
+		out.Sandbox.HostConfine = core.HostConfine{Workspace: s.HostConfine.Workspace, AllowRead: s.HostConfine.AllowRead, AllowWrite: s.HostConfine.AllowWrite, DenyWrite: s.HostConfine.DenyWrite, DenyRead: s.HostConfine.DenyRead}
 	}
 	return out, nil
 }

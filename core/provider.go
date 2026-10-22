@@ -318,6 +318,10 @@ type HostConfine struct {
 	AllowRead  []string
 	AllowWrite []string
 	DenyWrite  []string
+	// DenyRead paths the agent's process tree may not read (their content;
+	// metadata stays visible): where a host-run tool keeps its sign-in
+	// (docs/prd/2026-10-22-host-run-mcp-tools.md).
+	DenyRead []string
 }
 
 // SessionRequest is the neutral request to create an agent session.

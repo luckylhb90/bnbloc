@@ -1745,7 +1745,19 @@ export interface ComponentMCPTool {
 // settings file).
 export interface ComponentMCPStdio {
   args?: string[];
+  // Placement is where the server runs: "agent" (or empty) as a child of
+  // the agent CLI, "host" as a host process of the bridge that the agent
+  // reaches only as an MCP server (docs/prd/2026-10-22-host-run-mcp-tools.md).
+  placement?: string;
+  // PrivatePaths (placement "host" only) are what the server keeps its
+  // state in, relative to the user's config directory: a core that
+  // confines its agent CLI denies reading them.
+  privatePaths?: string[];
 }
+
+// Where a stdio MCP server runs (ComponentMCPStdio.Placement).
+export const MCPPlacementAgent = "agent";
+export const MCPPlacementHost = "host";
 
 // ComponentMCPHTTP is how an endpoint server is called.
 export interface ComponentMCPHTTP {
@@ -3698,6 +3710,10 @@ export interface ContentMCPTool {
   // only when it carries this platform's pin.
   artifacts?: Record<string, string>;
   args?: string[];
+  // Placement and PrivatePaths are the stdio server's declaration
+  // (ComponentMCPStdio): where it runs and what it keeps private.
+  placement?: string;
+  privatePaths?: string[];
   // URL and Auth describe an http server.
   url?: string;
   auth?: ComponentMCPHTTPAuth;

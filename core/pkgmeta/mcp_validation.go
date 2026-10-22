@@ -6,6 +6,9 @@ import (
 	"slices"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/luckylhb90/bnbloc/core"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // KindMCPPackageV1 is the package-envelope kind of an MCP tool component
@@ -46,6 +49,14 @@ const (
 	RoomRelayTokenEnv = "BNBLOC_ROOM_RELAY_TOKEN"
 )
 
+// Where a stdio MCP server runs (MCP.Stdio.Placement,
+// docs/prd/2026-10-22-host-run-mcp-tools.md); the values and the question
+// RunsOnHost live with the wire shape.
+const (
+	MCPPlacementAgent = wire.MCPPlacementAgent
+	MCPPlacementHost  = wire.MCPPlacementHost
+)
+
 // HTTP auth schemes of an endpoint MCP component (MCPHTTPAuth.Scheme).
 const (
 	MCPAuthNone   = "none"
@@ -61,13 +72,15 @@ const (
 
 // MCP bounds: a display catalog, not the server's schema.
 const (
-	maxMCPTools       = 64
-	maxMCPToolDesc    = 1024
-	maxMCPArgs        = 32
-	maxMCPArgLen      = 1024
-	maxMCPOAuthScopes = 32
-	maxMCPOAuthScope  = 128
-	maxMCPClientID    = 256
+	maxMCPTools        = 64
+	maxMCPToolDesc     = 1024
+	maxMCPArgs         = 32
+	maxMCPArgLen       = 1024
+	maxMCPPrivatePaths = 8
+	maxMCPPrivatePath  = 256
+	maxMCPOAuthScopes  = 32
+	maxMCPOAuthScope   = 128
+	maxMCPClientID     = 256
 )
 
 var (
@@ -133,6 +146,9 @@ func validateMCPPackage(pkg Package) error {
 		if m.HTTP != nil {
 			return fmt.Errorf(`mcp runtime "stdio" must not declare mcp.http`)
 		}
+		if err := validateMCPPlacement(m.Stdio); err != nil {
+			return err
+		}
 		if m.Stdio != nil {
 			if len(m.Stdio.Args) > maxMCPArgs {
 				return fmt.Errorf("mcp.stdio.args: at most %d arguments", maxMCPArgs)
@@ -160,6 +176,39 @@ func validateMCPPackage(pkg Package) error {
 		}
 	default:
 		return fmt.Errorf(`mcp runtime must be "stdio" or "endpoint", got %q`, pkg.Runtime)
+	}
+	return nil
+}
+
+// validateMCPPlacement checks mcp.stdio.placement and privatePaths: a path is
+// a plain relative path under the user's config directory, so it can name
+// neither another place nor an agent-chosen one.
+func validateMCPPlacement(st *MCPStdio) error {
+	if st == nil {
+		return nil
+	}
+	switch st.Placement {
+	case "", MCPPlacementAgent, MCPPlacementHost:
+	default:
+		return fmt.Errorf("mcp.stdio.placement must be %q or %q, got %q", MCPPlacementAgent, MCPPlacementHost, st.Placement)
+	}
+	if len(st.PrivatePaths) == 0 {
+		return nil
+	}
+	if !st.RunsOnHost() {
+		return fmt.Errorf("mcp.stdio.privatePaths belong to placement %q: an agent-placed server is confined with its agent", MCPPlacementHost)
+	}
+	if len(st.PrivatePaths) > maxMCPPrivatePaths {
+		return fmt.Errorf("mcp.stdio.privatePaths: at most %d paths", maxMCPPrivatePaths)
+	}
+	for i, p := range st.PrivatePaths {
+		if p == "" || len(p) > maxMCPPrivatePath || !utf8.ValidString(p) || strings.ContainsRune(p, 0) {
+			return fmt.Errorf("mcp.stdio.privatePaths[%d] must be text of at most %d bytes", i, maxMCPPrivatePath)
+		}
+		// A plain relative path: the one rule, already in its clean form.
+		if clean, ok := core.CleanRelPath(p); !ok || clean != p {
+			return fmt.Errorf("mcp.stdio.privatePaths[%d] %q must be a plain relative path (no leading slash, backslash, dot segment or ..)", i, p)
+		}
 	}
 	return nil
 }

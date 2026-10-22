@@ -301,7 +301,7 @@ func slugPart(s string, max int) string {
 // forwarded names for this drive (nil unless decideSandbox marked it
 // ownerEnv): the space's envAllowlist is re-ensured from it every turn, so
 // a turn for someone else after the owner's converges back to the default.
-func (s *sandboxRuntime) prepare(ctx context.Context, k driveKey, owner string, env []string, ttl time.Duration, borrowed bool) (*corepkg.Execution, error) {
+func (s *sandboxRuntime) prepare(ctx context.Context, k driveKey, owner string, env []string, ttl time.Duration, borrowed bool, denyRead []string) (*corepkg.Execution, error) {
 	room, core, provider := k.room, k.core, k.provider
 	space, machine := sandboxSpaceName(k), s.machineOf(k)
 	workdir := filepath.Join(s.cfg.WorkspacesRoot, space)
@@ -354,7 +354,7 @@ func (s *sandboxRuntime) prepare(ctx context.Context, k driveKey, owner string, 
 		// borrowed prompt can neither rewrite its role nor plant config a
 		// harness would execute on the host. Guest commands write the
 		// shared workdir directly; the turn fence covers those.
-		HostConfine: corepkg.HostConfine{Workspace: workdir, DenyWrite: protectedDenyWrite(workdir)},
+		HostConfine: corepkg.HostConfine{Workspace: workdir, DenyWrite: protectedDenyWrite(workdir), DenyRead: denyRead},
 	}}, nil
 }
 
@@ -566,7 +566,14 @@ func (b *Bridge) planSandbox(ctx context.Context, d *drive) (refuse string) {
 	owner := d.owner
 	key := driveKey{room: d.job.RoomID, core: d.core, provider: d.job.Provider, sandboxed: true, ownMachine: d.ownMachine, owner: d.seatOwner, requester: d.seatRequester()}
 	d.prepareExec = func(ctx context.Context) (*corepkg.Execution, error) {
-		exec, err := s.prepare(ctx, key, owner, env, d.execTokenTTL(), d.borrowed)
+		// What the host-run tools keep private is read-denied to the confined
+		// agent (docs/prd/2026-10-22-host-run-mcp-tools.md §2.4); when it
+		// cannot be named the drive does not run confined without it.
+		denyRead, err := d.content.hostPrivateDirs()
+		if err != nil {
+			return nil, err
+		}
+		exec, err := s.prepare(ctx, key, owner, env, d.execTokenTTL(), d.borrowed, denyRead)
 		if err != nil {
 			return nil, s.prepareFailure(ctx, err)
 		}

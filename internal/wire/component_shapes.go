@@ -199,7 +199,26 @@ type ComponentMCPTool struct {
 // settings file).
 type ComponentMCPStdio struct {
 	Args []string `json:"args,omitempty"`
+	// Placement is where the server runs: "agent" (or empty) as a child of
+	// the agent CLI, "host" as a host process of the bridge that the agent
+	// reaches only as an MCP server (docs/prd/2026-10-22-host-run-mcp-tools.md).
+	Placement string `json:"placement,omitempty"`
+	// PrivatePaths (placement "host" only) are what the server keeps its
+	// state in, relative to the user's config directory: a core that
+	// confines its agent CLI denies reading them.
+	PrivatePaths []string `json:"privatePaths,omitempty"`
 }
+
+// Where a stdio MCP server runs (ComponentMCPStdio.Placement).
+const (
+	MCPPlacementAgent = "agent"
+	MCPPlacementHost  = "host"
+)
+
+// RunsOnHost reports whether the declaration places the server on the host:
+// the one question the gateway's install, the job's tool list and the bridge
+// ask.
+func (s *ComponentMCPStdio) RunsOnHost() bool { return s != nil && s.Placement == MCPPlacementHost }
 
 // ComponentMCPHTTP is how an endpoint server is called.
 type ComponentMCPHTTP struct {

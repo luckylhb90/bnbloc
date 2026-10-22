@@ -96,5 +96,5 @@ func usage(w io.Writer) {
 	fmt.Fprintf(w, "environment: %s\n             %s\n",
 		strings.Join([]string{coreprotocol.EnvVMExecURL, coreprotocol.EnvVMExecToken, coreprotocol.EnvVMExecMachine, coreprotocol.EnvVMExecSpace,
 			coreprotocol.EnvVMExecMounts, coreprotocol.EnvVMExecPassthrough, coreprotocol.EnvVMExecEnv, coreprotocol.EnvVMExecPath, coreprotocol.EnvVMExecWorkdir}, ", "),
-		strings.Join([]string{coreprotocol.EnvConfineWorkspace, coreprotocol.EnvConfineAllowRead, coreprotocol.EnvConfineAllowWrite, coreprotocol.EnvConfineDenyWrite}, ", "))
+		strings.Join([]string{coreprotocol.EnvConfineWorkspace, coreprotocol.EnvConfineAllowRead, coreprotocol.EnvConfineAllowWrite, coreprotocol.EnvConfineDenyWrite, coreprotocol.EnvConfineDenyRead}, ", "))
 }

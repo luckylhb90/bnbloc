@@ -3,8 +3,10 @@ package main
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -343,5 +345,58 @@ func TestConfinedEnvOverridesGitHooksAndFsmonitor(t *testing.T) {
 	want = []string{"GIT_CONFIG_KEY_0=core.fsmonitor", "GIT_CONFIG_VALUE_0=false", "GIT_CONFIG_KEY_1=core.hooksPath", "GIT_CONFIG_VALUE_1=/dev/null", "GIT_CONFIG_COUNT=2"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("confinedEnv(unreadable count) = %q\nwant %q", got, want)
+	}
+}
+
+func TestParseConfine_denyReadFromEnvAndFlags(t *testing.T) {
+	ws := t.TempDir()
+	spec, _, _, err := parseConfine([]string{"--deny-read", "/f/b", "--", "claude"},
+		confineEnv(map[string]string{coreprotocol.EnvConfineWorkspace: ws, coreprotocol.EnvConfineDenyRead: `["/e/a"]`}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(spec.DenyRead, ",") != "/e/a,/f/b" {
+		t.Fatalf("DenyRead = %v", spec.DenyRead)
+	}
+}
+
+// The deny of a host tool's state is enforced by the real macOS sandbox: the
+// CLI's child cannot read the file, and the same file reads without it. It is
+// skipped where the sandbox cannot be applied (not macOS, or already inside one).
+func TestConfineDenyReadHoldsInTheRealSandbox(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("the Seatbelt profile is macOS-only")
+	}
+	if _, err := os.Stat("/usr/bin/sandbox-exec"); err != nil {
+		t.Skip("no sandbox-exec")
+	}
+	s := testSpec(t, "claude")
+	state := filepath.Join(s.Home, "Library", "Application Support", "acme", "mail")
+	if err := os.MkdirAll(state, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	secret := filepath.Join(state, "keyring.key")
+	if err := os.WriteFile(secret, []byte("top-secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	read := func(profile string) (string, error) {
+		out, err := exec.Command("/usr/bin/sandbox-exec", "-p", profile, "/bin/cat", secret).CombinedOutput()
+		return string(out), err
+	}
+	out, err := read(s.seatbeltProfile())
+	if err != nil && strings.Contains(out, "sandbox_apply") {
+		t.Skipf("the sandbox cannot be applied here: %s", out)
+	}
+	if err != nil || out != "top-secret" {
+		t.Fatalf("without the deny the file reads: %q %v", out, err)
+	}
+	s.DenyRead = append(s.DenyRead, filepath.Join(s.Home, "Library", "Application Support", "acme", "mail"))
+	out, err = read(s.seatbeltProfile())
+	if err == nil || strings.Contains(out, "top-secret") {
+		t.Fatalf("the denied state was read: %q %v", out, err)
+	}
+	// And a write there is denied either way (the profile denies writes by default).
+	if out, err := exec.Command("/usr/bin/sandbox-exec", "-p", s.seatbeltProfile(), "/usr/bin/touch", filepath.Join(state, "planted")).CombinedOutput(); err == nil {
+		t.Fatalf("a write into the state succeeded: %s", out)
 	}
 }

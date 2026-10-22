@@ -114,6 +114,76 @@ func TestMCPPackageValid(t *testing.T) {
 	}
 }
 
+func TestMCPStdioPlacement(t *testing.T) {
+	pkg, err := ParsePackage(mcpStdioBody(t, func(b map[string]any) {
+		mcpBlock(b)["stdio"] = map[string]any{"args": []string{"--stdio"}, "placement": "host", "privatePaths": []string{"acme/mail", "acme/mail-cache"}}
+	}))
+	if err != nil {
+		t.Fatalf("host placement: %v", err)
+	}
+	if !pkg.MCP.Stdio.RunsOnHost() || len(pkg.MCP.Stdio.PrivatePaths) != 2 {
+		t.Fatalf("stdio = %+v", pkg.MCP.Stdio)
+	}
+	// The default and the explicit "agent" are the same, and run in the agent's tree.
+	for _, placement := range []string{"", "agent"} {
+		pkg, err := ParsePackage(mcpStdioBody(t, func(b map[string]any) {
+			mcpBlock(b)["stdio"] = map[string]any{"placement": placement}
+		}))
+		if err != nil || pkg.MCP.Stdio.RunsOnHost() {
+			t.Fatalf("placement %q: runsOnHost=%v err=%v", placement, err == nil && pkg.MCP.Stdio.RunsOnHost(), err)
+		}
+	}
+	if (*MCPStdio)(nil).RunsOnHost() {
+		t.Fatal("no stdio block runs on the host")
+	}
+}
+
+func TestMCPStdioPlacementRefusals(t *testing.T) {
+	stdio := func(placement string, paths ...string) func(map[string]any) {
+		return func(b map[string]any) {
+			st := map[string]any{"placement": placement}
+			if paths != nil {
+				st["privatePaths"] = paths
+			}
+			mcpBlock(b)["stdio"] = st
+		}
+	}
+	long := strings.Repeat("a", maxMCPPrivatePath+1)
+	many := make([]string, maxMCPPrivatePaths+1)
+	for i := range many {
+		many[i] = "acme/p" + string(rune('a'+i))
+	}
+	for name, c := range map[string]struct {
+		mutate func(map[string]any)
+		want   string
+	}{
+		"unknown placement":        {stdio("vm"), "placement must be"},
+		"paths on an agent tool":   {stdio("agent", "acme/mail"), "belong to placement"},
+		"paths with no placement":  {stdio("", "acme/mail"), "belong to placement"},
+		"absolute path":            {stdio("host", "/etc"), "plain relative path"},
+		"parent escape":            {stdio("host", "../.ssh"), "plain relative path"},
+		"embedded parent":          {stdio("host", "acme/../.ssh"), "plain relative path"},
+		"dot":                      {stdio("host", "."), "plain relative path"},
+		"unclean path":             {stdio("host", "acme//mail"), "plain relative path"},
+		"backslash":                {stdio("host", `acme\mail`), "plain relative path"},
+		"empty path":               {stdio("host", ""), "at most"},
+		"too long":                 {stdio("host", long), "at most"},
+		"too many":                 {stdio("host", many...), "at most"},
+		"placement on an endpoint": {func(b map[string]any) { mcpBlock(b)["stdio"] = map[string]any{"placement": "host"} }, "must not declare mcp.stdio"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			body := mcpStdioBody
+			if name == "placement on an endpoint" {
+				body = mcpEndpointBody
+			}
+			_, err := ParsePackage(body(t, c.mutate))
+			if err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("err = %v, want %q", err, c.want)
+			}
+		})
+	}
+}
+
 func TestMCPPackageRefusals(t *testing.T) {
 	cases := []struct {
 		name   string

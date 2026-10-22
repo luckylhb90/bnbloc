@@ -70,6 +70,14 @@ reply in the room; deliverables published with sourceSeq = the dispatch's seq
   a total timeout), so a slow picture or a video's publish finishes, and a
   stalled gateway ends with the agent's tool call
   (`docs/prd/2026-10-19-video-generation.md` §2.4).
+- **Host tools** (`hosttools.go`, `services/bridge/hosttool`): the same server
+  fronts an MCP tool placed `"host"` at `/tools/<name>` (content-components.md
+  "mcp.stdio.placement"). The bridge starts the tool as a host process at the
+  first request (one per session and tool, in the session's directory, with its
+  settings and the relay, without the bridge's own `BNBLOC_*`), speaks MCP over
+  stdio to it, and answers the agent's initialize itself. The session's bearer
+  is the only way in; a call that acts needs the turn bound to the session (the
+  handshake and the lists do not); revoking the session stops the tool.
 - **Protocol:** MCP Streamable HTTP, dual-era. Legacy clients
   (2025-03-26 … 2025-11-25) open with `initialize`; modern clients
   (2026-07-28) carry `_meta.io.modelcontextprotocol/protocolVersion` per

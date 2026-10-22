@@ -28,6 +28,19 @@ func TestHostConfineFromEnv(t *testing.T) {
 	if err != nil || c.Workspace != "/w" || c.AllowRead != nil || !reflect.DeepEqual(c.AllowWrite, []string{"/o"}) {
 		t.Fatalf("full = %+v, %v", c, err)
 	}
+	// A deny-read list alone is honored too, and round-trips VMExecEnv.
+	c, err = HostConfineFromEnv(env(map[string]string{EnvConfineDenyRead: `["/h/.config/acme/mail"]`}))
+	if err != nil || c == nil || !reflect.DeepEqual(c.DenyRead, []string{"/h/.config/acme/mail"}) {
+		t.Fatalf("deny-read alone = %+v, %v", c, err)
+	}
+	sent := map[string]string{}
+	for _, kv := range VMExecEnv(SandboxExecution{Workdir: "/w", HostConfine: &HostConfine{Workspace: "/w", DenyRead: []string{"/h/.config/acme/mail"}}}) {
+		k, v, _ := strings.Cut(kv, "=")
+		sent[k] = v
+	}
+	if back, err := HostConfineFromEnv(env(sent)); err != nil || !reflect.DeepEqual(back.DenyRead, []string{"/h/.config/acme/mail"}) {
+		t.Fatalf("VMExecEnv does not carry DenyRead: %+v %v", back, err)
+	}
 	if _, err := HostConfineFromEnv(env(map[string]string{EnvConfineDenyWrite: `/w/.claude`})); err == nil {
 		t.Fatal("an unparsable deny list must fail, never read as empty")
 	}

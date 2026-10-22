@@ -122,6 +122,8 @@ func Resolve(refs []wire.ContentRef, installed []string, lookup Lookup, settings
 			}
 			if cfg.MCP.Stdio != nil {
 				tool.Args = append([]string(nil), cfg.MCP.Stdio.Args...)
+				tool.Placement = cfg.MCP.Stdio.Placement
+				tool.PrivatePaths = append([]string(nil), cfg.MCP.Stdio.PrivatePaths...)
 			}
 		case wire.MCPTransportHTTP:
 			tool.URL = cfg.Endpoint.BaseURL
