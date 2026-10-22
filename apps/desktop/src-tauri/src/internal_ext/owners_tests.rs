@@ -179,6 +179,7 @@ fn every_child_gets_the_shell_env() {
         "Command::new(",
         &[
             "bridge.rs",
+            "internal_ext/core_host.rs",
             "internal_ext/sidecar_runtime.rs",
             "internal_ext/sidecar_orphan.rs",
             "shell_env.rs",
@@ -186,7 +187,11 @@ fn every_child_gets_the_shell_env() {
     );
     only_in_any(
         "child_process::spawn(",
-        &["bridge.rs", "internal_ext/sidecar_runtime.rs"],
+        &[
+            "bridge.rs",
+            "internal_ext/core_host.rs",
+            "internal_ext/sidecar_runtime.rs",
+        ],
     );
     only_in_any(
         ".spawn()",
@@ -199,7 +204,11 @@ fn every_child_gets_the_shell_env() {
     only_in("ShellEnv::default()", "shell_env.rs");
     only_in(".apply(&mut cmd)", "child_process.rs");
     let sources = sources();
-    for spawner in ["bridge.rs", "internal_ext/sidecar_runtime.rs"] {
+    for spawner in [
+        "bridge.rs",
+        "internal_ext/core_host.rs",
+        "internal_ext/sidecar_runtime.rs",
+    ] {
         let code = &sources.iter().find(|(rel, _)| rel == spawner).unwrap().1;
         assert!(
             code.contains("shell_env::current().await"),
@@ -222,18 +231,21 @@ fn restarts_follow_one_policy() {
         "Backoff::new(",
         &[
             "child_process.rs",
-            // Not process restarts: the catalog poll retry and the member
-            // stream reconnect.
+            // Not process restarts: the catalog poll retry, the member
+            // stream reconnect and an account's session renewal retry.
             "internal_ext.rs",
             "internal_ext/plugin_events.rs",
+            "keeper.rs",
         ],
     );
 }
 
-/// settings.json has one writer (AppState::update_settings).
+/// The machine's settings file and every account's have one writer each (the
+/// registry applies the web's form; an account's own switch is its runtime).
 #[test]
 fn settings_have_one_writer() {
-    only_in("settings::save(", "lib.rs");
+    only_in_any("save_machine_settings(", &["account.rs", "runtime.rs"]);
+    only_in_any("save_account_settings(", &["account.rs", "runtime.rs"]);
 }
 
 /// The generic machinery (reconcile, supervision, the sweep) asks the kind's
@@ -286,4 +298,24 @@ fn component_settings_have_one_owner() {
     ] {
         only_in(needle, "internal_ext/component_settings.rs");
     }
+}
+
+/// An account's adapter holds no app handle and looks nothing up in the app
+/// state: its bridge, what it shares with the other accounts and its
+/// directories are handed to it (`BridgeControl`, `Shared`, `Dirs`), so each
+/// account can have its own (docs/prd/2026-10-22-multi-account.md §2.3).
+#[test]
+fn an_adapter_reaches_no_app_state() {
+    let offenders: Vec<String> = sources()
+        .into_iter()
+        .filter(|(rel, code)| {
+            rel.starts_with("internal_ext/")
+                && (code.contains("try_state::<") || code.contains("AppHandle"))
+        })
+        .map(|(rel, _)| rel)
+        .collect();
+    assert!(
+        offenders.is_empty(),
+        "the adapter looks the app state up in: {offenders:?}"
+    );
 }

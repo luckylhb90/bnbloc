@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::Path;
 use std::time::Duration;
 
@@ -56,16 +57,13 @@ pub(super) fn parse_cache_file(name: &str) -> Option<(&str, String)> {
         .then(|| (owner, sha.to_ascii_lowercase()))
 }
 
-/// The cached binaries and partial downloads in `names` that belong to
-/// component `id` and are not `keep`.
-pub(super) fn stale_cache_files(names: &[String], id: &str, keep: Option<&str>) -> Vec<String> {
-    let stem = cache_stem(id);
-    names
-        .iter()
-        .filter(|name| Some(name.as_str()) != keep)
-        .filter(|name| parse_cache_file(name).is_some_and(|(owner, _)| owner == stem))
-        .cloned()
-        .collect()
+/// Whether the cache entry `name` is a build some live catalog pins
+/// (`live` holds `(stem, sha256)` pairs); None for a name that is not a cache
+/// name, which is not ours to judge. A partial download is judged by the
+/// build it is for.
+pub(super) fn cache_file_is_live(name: &str, live: &HashSet<(String, String)>) -> Option<bool> {
+    let (stem, sha) = parse_cache_file(name)?;
+    Some(live.contains(&(stem.to_string(), sha)))
 }
 
 /// Resolve a catalog artifact URL against the configured gateway and require
@@ -107,7 +105,7 @@ pub(super) fn direct_download_url(resolved: &str) -> String {
     url.into()
 }
 
-pub(super) fn hex_lower(bytes: &[u8]) -> String {
+pub(crate) fn hex_lower(bytes: &[u8]) -> String {
     let mut s = String::with_capacity(bytes.len() * 2);
     for b in bytes {
         s.push_str(&format!("{b:02x}"));
@@ -169,6 +167,20 @@ pub(super) fn set_executable(_path: &Path) -> Result<(), String> {
 pub(super) struct RuntimeListener {
     pub(super) url: String,
     pub(super) listener: Option<std::net::TcpListener>,
+}
+
+/// Reserve a fresh loopback port for a sidecar that is told where to listen
+/// (its `listenEnv`): its callers learn the address from the desktop.
+pub(super) fn ephemeral_listener(what: &str) -> Result<RuntimeListener, String> {
+    use crate::internal_ext::loopback;
+    let listener = loopback::bind_ephemeral().map_err(|e| format!("reserve {what} port: {e}"))?;
+    let addr = listener
+        .local_addr()
+        .map_err(|e| format!("reserve {what} port: {e}"))?;
+    Ok(RuntimeListener {
+        url: loopback::LoopbackHttp::of_addr(addr),
+        listener: Some(listener),
+    })
 }
 
 /// Reserve a sidecar's fixed `localUrl` (loopback::LoopbackHttp) until the
@@ -295,32 +307,56 @@ mod tests {
     const SHA_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
     #[test]
-    fn stale_cache_selection_keeps_current_and_other_components() {
-        let keep = cache_file_name("foo", SHA_B);
-        let names: Vec<String> = vec![
-            cache_file_name("foo", SHA_A), // old foo build: stale
-            keep.clone(),                  // current foo build: kept
-            format!(".{}.0123456789abcdef.part", cache_file_name("foo", SHA_A)), // stale partial
-            cache_file_name("foo-bar", SHA_A), // another component
-            cache_file_name("plugin/foo", SHA_A), // the plugin namesake
-            format!("foo-{}", &SHA_A[..10]), // not a cache name
-            "foo-notes.txt".into(),
-        ];
-
-        let mut stale = stale_cache_files(&names, "foo", Some(&keep));
-        stale.sort();
-        let mut want = vec![
-            cache_file_name("foo", SHA_A),
-            format!(".{}.0123456789abcdef.part", cache_file_name("foo", SHA_A)),
-        ];
-        want.sort();
-        assert_eq!(stale, want);
-
-        // Uninstall: every cached build of the plugin goes, nothing else.
+    fn a_cache_entry_is_live_when_a_catalog_pins_that_build() {
+        let live: HashSet<(String, String)> = [
+            ("foo".to_string(), SHA_A.to_string()),
+            ("foo".to_string(), SHA_B.to_string()),
+            ("plugin@foo".to_string(), SHA_A.to_string()),
+        ]
+        .into();
+        // Two accounts pin two builds of foo: both stay.
         assert_eq!(
-            stale_cache_files(&names, "plugin/foo", None),
-            vec![cache_file_name("plugin/foo", SHA_A)]
+            cache_file_is_live(&cache_file_name("foo", SHA_A), &live),
+            Some(true)
         );
+        assert_eq!(
+            cache_file_is_live(&cache_file_name("foo", SHA_B), &live),
+            Some(true)
+        );
+        assert_eq!(
+            cache_file_is_live(&cache_file_name("plugin/foo", SHA_A), &live),
+            Some(true)
+        );
+        // A build nobody pins any more, and its partial download, go.
+        let old = "c".repeat(64);
+        assert_eq!(
+            cache_file_is_live(&cache_file_name("foo", &old), &live),
+            Some(false)
+        );
+        assert_eq!(
+            cache_file_is_live(
+                &format!(".{}.0123456789abcdef.part", cache_file_name("foo", &old)),
+                &live
+            ),
+            Some(false)
+        );
+        assert_eq!(
+            cache_file_is_live(
+                &format!(".{}.0123456789abcdef.part", cache_file_name("foo", SHA_A)),
+                &live
+            ),
+            Some(true),
+            "the partial of a live build stays"
+        );
+        // Another component with a similar name is judged on its own stem.
+        assert_eq!(
+            cache_file_is_live(&cache_file_name("foo-bar", SHA_A), &live),
+            Some(false)
+        );
+        // Not cache names: never judged.
+        for name in [format!("foo-{}", &SHA_A[..10]), "foo-notes.txt".to_string()] {
+            assert_eq!(cache_file_is_live(&name, &live), None, "{name}");
+        }
     }
 
     #[test]

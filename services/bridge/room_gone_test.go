@@ -253,7 +253,7 @@ func TestDeletedRoomWorkspacesArePurgedOnEvidence(t *testing.T) {
 	b.workspaces.bind(gone, "ws-gone")
 	b.workspaces.bind(left, "ws-left")
 	for _, k := range []driveKey{gone, left} {
-		if err := os.MkdirAll(filepath.Join(root, sandboxSpaceName(k)), 0o700); err != nil {
+		if err := os.MkdirAll(filepath.Join(root, sandboxSpaceName(k, "")), 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -288,7 +288,7 @@ func TestDeletedRoomWorkspacesArePurgedOnEvidence(t *testing.T) {
 	if id := <-prov.deleted; id != "ws-gone" {
 		t.Fatalf("core workspace deleted = %q", id)
 	}
-	if _, err := os.Stat(filepath.Join(root, sandboxSpaceName(gone))); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, sandboxSpaceName(gone, ""))); !os.IsNotExist(err) {
 		t.Fatalf("the deleted room's workdir is still there: %v", err)
 	}
 	if !slices.Contains(sbx.spaceCalls(), "delete?purge") {
@@ -301,7 +301,7 @@ func TestDeletedRoomWorkspacesArePurgedOnEvidence(t *testing.T) {
 	if id, ok := b.workspaces.id(left); !ok || id != "ws-left" {
 		t.Fatal("a room that was not deleted lost its workspace")
 	}
-	if _, err := os.Stat(filepath.Join(root, sandboxSpaceName(left))); err != nil {
+	if _, err := os.Stat(filepath.Join(root, sandboxSpaceName(left, ""))); err != nil {
 		t.Fatalf("a room that was not deleted lost its workdir: %v", err)
 	}
 }

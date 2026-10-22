@@ -63,13 +63,14 @@ async function enterRoom(pg, roomId) {
     await bp.fill("input#who", "maya"); await bp.click("button[type=submit]"); await bp.waitForTimeout(3500);
   }
   const fx = await bp.evaluate(async () => {
-    const s = JSON.parse(sessionStorage.getItem("bnbloc.session") || "{}");
+    // The signed-in account's record, from the vault (localStorage).
+    const s = JSON.parse(localStorage.getItem("bnbloc.vault") || "{}").accounts?.[0]?.record ?? {};
     const H = { "Content-Type": "application/json", Authorization: "Bearer " + s.token };
     const j = async (u, o) => { const r = await fetch(u, o); if (!r.ok) throw new Error(u + " " + r.status); return r.json(); };
     const rid = "regress-" + Date.now();
     await j("/v1/rooms", { method: "POST", headers: H, body: JSON.stringify({ roomId: rid, name: rid, visibility: "private" }) });
     await j(`/v1/rooms/${rid}/messages`, { method: "POST", headers: H, body: JSON.stringify({ text: "id 42211f79ce5843dca9ffee0248c0b011 " + "x".repeat(60), clientMsgId: "c" + Date.now() }) }).catch(() => {});
-    return { rid, token: s.token, subject: s.subject };
+    return { rid, token: s.token, subject: s.subject, vault: localStorage.getItem("bnbloc.vault") };
   });
   console.log("fixture room:", fx.rid, "\n");
   await boot.close();
@@ -82,7 +83,7 @@ async function enterRoom(pg, roomId) {
     const pg = await ctx.newPage();
     await pg.goto(BASE, { waitUntil: "load" });
     await pg.waitForSelector("#root", { timeout: 20000 });
-    await pg.evaluate((f) => sessionStorage.setItem("bnbloc.session", JSON.stringify({ token: f.token, subject: f.subject })), fx);
+    await pg.evaluate((f) => localStorage.setItem("bnbloc.vault", f.vault), fx);
     await pg.reload({ waitUntil: "load" });
     await pg.waitForTimeout(2000);
 

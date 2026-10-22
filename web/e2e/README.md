@@ -37,3 +37,15 @@ and exits non-zero with a per-assertion failure list if any invariant breaks.
 
 The test creates a plain room and message only; it depends on no specific agent
 core, so it runs identically on the public and internal builds.
+
+## Multi-account (`multi-account.mjs`)
+
+The accounts of one app, in a real browser against a mocked gateway (the
+browser answers `/v1/*` itself, so no backend is needed): the vault, a window
+bound to one account, a second window for another, switching, removing,
+a refused credential, the renewal lock across windows, the last view, and
+signing in. Run it the same way, with a web server on `BNBLOC_E2E_URL`:
+
+```sh
+BNBLOC_E2E_URL=http://localhost:5173 node web/e2e/multi-account.mjs
+```

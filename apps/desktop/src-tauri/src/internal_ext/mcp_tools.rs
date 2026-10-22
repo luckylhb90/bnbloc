@@ -53,7 +53,7 @@ use mcp_oauth::{OAuthSpec, RefreshOutcome};
 pub(super) const TOOLS_DIR_ENV: &str = "BNBLOC_MCP_TOOLS_DIR";
 /// The env var naming the member's MCP sign-ins dir the bridge reads.
 pub(super) const SIGN_INS_DIR_ENV: &str = "BNBLOC_MCP_SIGN_INS_DIR";
-/// The index the bridge reads in the tools dir.
+/// The index the bridge reads in the member's `mcp-tools` directory.
 const INDEX_FILE: &str = "index.json";
 
 /// One installed MCP tool of the member catalog, as this desktop needs it.
@@ -78,10 +78,27 @@ pub(super) struct McpTool {
 /// What the uninstall sweep (sidecar_sweep) keeps of the member's MCP
 /// files: the installed tools' member settings, and the sign-ins of those
 /// that take one.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct McpKeep {
     pub(super) tools: HashSet<String>,
     pub(super) sign_ins: HashSet<String>,
+    /// The cache file names of the stdio binaries this platform needs (the
+    /// binaries live in the shared store, content-addressed: a sweep keeps
+    /// what ANY signed-in account's catalog still lists).
+    pub(super) files: HashSet<String>,
+}
+
+impl McpKeep {
+    /// What every one of `keeps` keeps.
+    pub(super) fn union<'a>(keeps: impl IntoIterator<Item = &'a McpKeep>) -> McpKeep {
+        let mut out = McpKeep::default();
+        for keep in keeps {
+            out.tools.extend(keep.tools.iter().cloned());
+            out.sign_ins.extend(keep.sign_ins.iter().cloned());
+            out.files.extend(keep.files.iter().cloned());
+        }
+        out
+    }
 }
 
 pub(super) fn mcp_keep(tools: &[McpTool]) -> McpKeep {
@@ -91,6 +108,16 @@ pub(super) fn mcp_keep(tools: &[McpTool]) -> McpKeep {
             .iter()
             .filter(|t| t.oauth.is_some())
             .map(|t| t.name.clone())
+            .collect(),
+        files: tools
+            .iter()
+            .filter_map(|t| {
+                let binary = t.binary.as_ref()?;
+                Some(cache_file_name(
+                    &component_id(ComponentKind::Mcp, &t.name),
+                    binary.sha256.as_str(),
+                ))
+            })
             .collect(),
     }
 }
@@ -204,16 +231,21 @@ pub(super) fn write_index(dir: &Path, entries: &[IndexEntry]) -> Result<(), Stri
     crate::files::atomic_write(&path, &raw)
 }
 
-/// Delete everything in the tools dir but the index and `keep` (the current
-/// binaries): binaries of removed or replaced tools and stale partial
-/// downloads. The dir is this module's alone.
-pub(super) fn collect_garbage(dir: &Path, keep: &HashSet<PathBuf>) {
+/// Delete everything in the shared binaries dir but the files in `keep`
+/// (the cache file names ANY account's catalog still lists): binaries of
+/// removed or replaced tools and stale partial downloads. The dir is this
+/// module's alone.
+pub(super) fn collect_garbage(dir: &Path, keep: &HashSet<String>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.file_name().and_then(|n| n.to_str()) == Some(INDEX_FILE) || keep.contains(&path) {
+        if path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|name| keep.contains(name))
+        {
             continue;
         }
         if let Err(e) = std::fs::remove_file(&path) {
@@ -273,8 +305,12 @@ impl Adapter {
             .await
             .map_err(|e| format!("create MCP tools dir: {e}"))?;
         let gateway = self.gateway.session();
+        // The index of THIS scope's tools is its member's; the binaries it
+        // lists are in the shared store.
+        let index_dir = self
+            .session_scope(&gateway)
+            .map(|(_, member)| member.join(crate::internal_ext::member_dir::MCP_TOOLS_INDEX_DIR));
         let mut entries = Vec::new();
-        let mut keep = HashSet::new();
         for tool in &tools {
             if tool.transport != "stdio" {
                 continue;
@@ -288,7 +324,6 @@ impl Adapter {
                 continue;
             };
             let dest = tool_file(&dir, &tool.name, sha);
-            keep.insert(dest.clone());
             let name = tool.name.clone();
             let result = ensure_verified(&gateway, url, sha, &dest, true, |p| {
                 let (state, message) = p.status(&name);
@@ -320,10 +355,23 @@ impl Adapter {
                 }
             }
         }
+        // What the shared store keeps: the binaries of every account's
+        // catalog (this scope's was registered by its reconcile).
+        let keep = self.live.union().mcp().files.clone();
+        let machine_wide = self.live.settled();
         let dir_for_io = dir.clone();
         tauri::async_runtime::spawn_blocking(move || {
-            write_index(&dir_for_io, &entries)?;
-            collect_garbage(&dir_for_io, &keep);
+            if let Some(index_dir) = index_dir {
+                std::fs::create_dir_all(&index_dir)
+                    .map_err(|e| format!("create MCP tools index dir: {e}"))?;
+                write_index(&index_dir, &entries)?;
+            }
+            // Only once every live account's catalog is registered
+            // (LiveRegistry::settled): until then the union lacks what the
+            // others keep.
+            if machine_wide {
+                collect_garbage(&dir_for_io, &keep);
+            }
             Ok::<(), String>(())
         })
         .await

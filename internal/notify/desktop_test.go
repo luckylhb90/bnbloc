@@ -57,7 +57,7 @@ func (f *fixture) installNotificationPlugin(t *testing.T) {
 		"kind": pkgmeta.KindPluginPackageV1, "name": "personal-bot", "version": "0.1.0", "publisher": "test",
 		"runtime": "sidecar", "contract": pkgmeta.PluginContractV1, "hooks": []string{pkgmeta.NotificationHook},
 		"artifacts":   map[string]any{"darwin-arm64": map[string]string{"url": "https://gw.example/plugin", "sha256": strings.Repeat("0", 64)}},
-		"sidecar":     map[string]any{"localUrl": "http://127.0.0.1:7193"},
+		"sidecar":     map[string]any{"localUrl": "http://127.0.0.1:7193", "listenEnv": "BNBLOC_PLUGIN_LISTEN"},
 		"permissions": map[string]any{"network": []string{"127.0.0.1"}},
 	})
 	if err != nil {

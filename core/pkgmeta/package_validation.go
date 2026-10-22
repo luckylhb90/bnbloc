@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strings"
 
 	"github.com/luckylhb90/bnbloc/internal/extreg"
 	"github.com/luckylhb90/bnbloc/internal/wire"
@@ -152,6 +153,12 @@ func validatePluginPackage(pkg Package) error {
 	}
 	if err := requireSidecarRuntime(pkg, "plugin"); err != nil {
 		return err
+	}
+	// A plugin runs once per signed-in account on a port the desktop picks
+	// (docs/prd/2026-10-22-multi-account.md §2.4), told in listenEnv: the
+	// package's localUrl is the declared shape, never an address it may bind.
+	if pkg.Sidecar == nil || strings.TrimSpace(pkg.Sidecar.ListenEnv) == "" {
+		return fmt.Errorf("plugin sidecar must declare listenEnv: it runs once per account on a port the desktop picks and tells it there")
 	}
 	if err := validatePluginJobs(pkg); err != nil {
 		return err

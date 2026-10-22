@@ -8,37 +8,41 @@ import {
   useState,
 } from "react";
 import { api } from "@/lib/api";
-import { gatewayBase, inDesktopShell } from "@/lib/config";
+import { openAccountWindow } from "@/lib/accountWindow";
+import { bindGatewayBase, gatewayBase } from "@/lib/config";
+import { isAuxWindow } from "@/lib/previewRoute";
+import { renewAccount, withAccountLock, type RenewIo } from "@/lib/renewal";
+import { visiblePoll } from "@/lib/useVisiblePoll";
+import { bindActingTenant, clearActingTenant, getToken, refreshSession, setReauthHandler, setToken } from "@/lib/session";
 import {
-  accountKind,
-  accountsOn,
-  keyOf,
-  park,
-  readAccounts,
-  sessionSubjectChanged,
-  unpark,
-  writeAccounts,
-  type Account,
-  type AccountKind,
-} from "@/lib/accounts";
-import { bindActingTenant, clearActingTenant, refreshSession, setReauthHandler, setToken } from "@/lib/session";
-import {
-  SESSION_KEY,
-  credentialMint,
-  errorStatus,
-  parseSessionRecord,
   parseSsoFragment,
   recordFromGrant,
   renewDelayMs,
-  renewSession,
   type Grant,
   type SessionRecord,
 } from "@/lib/sessionGrant";
-import { takeDesktopSsoNonce } from "@/lib/desktop";
+import { desktop, syncDesktopAccounts, takeDesktopSsoNonce } from "@/lib/desktop";
 import { forgetBrowserPush } from "@/lib/webPush";
 import { clearQueryCache } from "@/lib/useQuery";
 import { forgetLocalAgent } from "@/lib/useLocalAgent";
-import { StorageKey, readStored, writeStored } from "@/lib/storageKeys";
+import { StorageKey } from "@/lib/storageKeys";
+import {
+  accountKey,
+  accountKind,
+  find,
+  keyOf,
+  markSignedOut,
+  put,
+  readVault,
+  remove,
+  touch,
+  updateVault,
+  withRecord,
+  withView,
+  type AccountKind,
+  type VaultAccount,
+} from "@/lib/vault";
+import { parseIntent, readBinding, resolveBinding, writeBinding } from "@/lib/windowBinding";
 
 interface AuthState {
   subject: string | null;
@@ -57,37 +61,70 @@ interface AuthState {
   tokenEra: number;
   login: (idpToken: string) => Promise<void>;
   switchTenant: (tenantId: string) => Promise<void>;
+  // Signs this window's account out everywhere: the vault forgets it, its
+  // sign-in is revoked at the gateway, every window showing it signs out.
   logout: () => void;
   reauth: () => Promise<void>;
-  // The accounts of this browser besides the signed-in one, on this gateway
-  // (docs/prd/2026-10-22-multi-account.md). multiAccount is false where
-  // switching is not supported yet (the desktop shell's bridge is bound to
-  // one account).
-  multiAccount: boolean;
-  // Whether the signed-in account is a person who signed in or a test account.
+  // Whether this window's account is a person who signed in or a test account.
   kind: AccountKind;
-  accounts: readonly Account[];
+  // Every account of the vault, this window's included, and which one this
+  // window shows (docs/prd/2026-10-22-multi-account.md).
+  accounts: readonly VaultAccount[];
+  current: string | null;
+  // Shows another account in THIS window (renews it, re-binds, reloads).
   switchAccount: (key: string) => Promise<void>;
-  // Parks the signed-in account and goes to sign in as another one.
+  // Opens an account in a window of its own, so two are side by side.
+  openAccount: (key: string) => Promise<void>;
+  // A window to sign in another account; this window is untouched.
   addAccount: () => void;
-  // Adds a test account by its API token; activate makes it the signed-in one.
+  // Adds a test account by its API token; activate shows it in this window.
   addTestAccount: (apiToken: string, activate: boolean) => Promise<void>;
-  removeAccount: (key: string) => Promise<void>;
+  // `deleteLocalData` (the desktop only) also forgets what this computer keeps
+  // of the account: its settings, sign-ins to tools, sandbox disks.
+  removeAccount: (key: string, deleteLocalData?: boolean) => Promise<void>;
 }
+
+// The intent this window was opened with (lib/windowBinding.ts), read ONCE
+// when the module loads and taken off the URL: the boot effect may run twice
+// (React's strict mode in development), and the second run must not find the
+// window opened for nothing in particular.
+const bootIntent = (() => {
+  if (typeof window === "undefined") return null;
+  const { intent, rest } = parseIntent(window.location.hash);
+  if (intent) window.history.replaceState(null, "", window.location.pathname + window.location.search + rest);
+  return intent;
+})();
 
 const AuthCtx = createContext<AuthState>(null!);
 export const useAuth = () => useContext(AuthCtx);
 
-// sessionStore: the session persists in localStorage everywhere — reopening
-// the app or the browser lands you signed-in. The 1h session bearer is renewed
-// from the stored ~30d refresh token; Sign Out clears both.
+// The accounts live in the vault (lib/vault.ts, localStorage: reopening the
+// app lands you signed in as the account you used last); a window shows the
+// one it is bound to (lib/windowBinding.ts). The 1h session bearer is renewed
+// from the account's refresh token (or a test account's API token); Sign Out
+// forgets the account and revokes that sign-in.
 
-function storedSession(): SessionRecord | null {
-  return parseSessionRecord(readStored(SESSION_KEY) || null);
+// renewIo is the renewal's view of one account in the vault: its record, and
+// the credential calls on ITS gateway (not the window's) with no session
+// headers of the window's.
+function renewIo(key: string): RenewIo {
+  const gateway = find(readVault(), key)?.gateway ?? gatewayBase();
+  return {
+    read: () => find(readVault(), key)?.record ?? null,
+    write: (record) => void updateVault((list) => withRecord(list, key, record)),
+    markSignedOut: () => void updateVault((list) => markSignedOut(list, key)),
+    now: Date.now,
+    mintDeps: {
+      refresh: (refreshToken) => api.refresh(refreshToken, gateway),
+      exchangeApiToken: (apiToken) => api.exchangeApiToken(apiToken, gateway),
+    },
+  };
 }
 
-function persistSession(record: SessionRecord) {
-  writeStored(SESSION_KEY, JSON.stringify(record));
+// renewUnderLock is the ONE renewal of an account: under its lock, from the
+// vault's record, adopting a sibling window's renewal instead of minting again.
+function renewUnderLock(key: string, have: string | null) {
+  return withAccountLock(key, () => renewAccount(renewIo(key), have));
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -99,28 +136,80 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [directLoginAvailable, setDirectLoginAvailable] = useState(true);
   const [ssoStartPath, setSsoStartPath] = useState<string | null>(null);
   const [tokenEra, setTokenEra] = useState(0);
-  // The accounts parked in this browser (every gateway; the context shows this
-  // gateway's).
-  const [parked, setParked] = useState<Account[]>(() => readAccounts());
-  const saveParked = useCallback((list: Account[]) => {
-    writeAccounts(list);
-    setParked(list);
-  }, []);
-  // apply installs a session record: bearer, state, persistence, and a
-  // tokenEra bump so the desktop shell re-feeds its sidecars/bridge.
-  const apply = useCallback((record: SessionRecord) => {
+  const [accounts, setAccounts] = useState<VaultAccount[]>(() => readVault());
+  // The account this window shows (its key), and the same for readers that
+  // must see the current one, not a stale closure.
+  const [current, setCurrent] = useState<string | null>(null);
+  const currentRef = useRef<string | null>(null);
+  currentRef.current = current;
+  const tenantRef = useRef<string | null>(null);
+  tenantRef.current = tenant;
+
+  const syncAccounts = useCallback(() => setAccounts(readVault()), []);
+
+  // install makes record the session of this window: bearer, acting tenant,
+  // state, and a tokenEra bump so the desktop shell is handed what the vault
+  // holds now.
+  const install = useCallback((record: SessionRecord) => {
     setToken(record.token);
     bindActingTenant(record.subject);
     setTokenEra((n) => n + 1);
     setSubject(record.subject);
     setTenant(record.tenant);
     setRole(record.role);
-    persistSession(record);
-    // The signed-in account is never also a parked one.
-    saveParked(unpark(readAccounts(), gatewayBase(), record.subject));
-  }, [saveParked]);
+  }, []);
+
+  // bind shows the vault's account `key` in this window.
+  const bind = useCallback(
+    (account: VaultAccount) => {
+      const key = keyOf(account);
+      bindGatewayBase(account.gateway);
+      writeBinding(key);
+      setCurrent(key);
+      install(account.record);
+    },
+    [install],
+  );
+
+  // adopt makes a freshly signed-in account the one this window shows: into
+  // the vault (used now, signed in again), then bound.
+  const adopt = useCallback(
+    (record: SessionRecord) => {
+      if (!record.subject || !(record.refreshToken || record.apiToken)) {
+        throw new Error("The gateway issued a session that cannot be renewed");
+      }
+      const gateway = gatewayBase();
+      const list = updateVault((l) => put(l, gateway, record, Date.now()));
+      setAccounts(list);
+      const account = find(list, accountKey(gateway, record.subject));
+      if (account) bind(account);
+    },
+    [bind],
+  );
+
+  // signOutLocally unbinds this window: it shows nobody, the next account it
+  // shows never reads this one's cached answers, and this browser stops
+  // receiving its push notifications. The vault is not touched.
+  const signOutLocally = useCallback(() => {
+    clearActingTenant();
+    clearQueryCache();
+    forgetLocalAgent();
+    setToken(null);
+    setSubject(null);
+    setTenant(null);
+    setRole(null);
+    setCurrent(null);
+    writeBinding(null);
+    void forgetBrowserPush().catch(() => {});
+  }, []);
 
   useEffect(() => {
+    // What this window shows: the account it was opened for, the one it was
+    // already bound to (a reload), else the one used last. Its gateway is this
+    // window's before anything is asked of one.
+    const vault = readVault();
+    const account = find(vault, resolveBinding({ stored: readBinding(), intent: bootIntent, vault }).key);
+    if (account) bindGatewayBase(account.gateway);
     api
       .ssoConfig()
       .then((c) => {
@@ -129,10 +218,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setSsoStartPath(c.authProviderStartPath ?? null);
       })
       .catch(() => {});
-    // Restore an SSO-callback grant from the URL hash, else the persisted
-    // session. Every sign-in path lands through adopt() with its refresh token.
-    const adopt = (g: Grant) => {
-      apply(recordFromGrant(g));
+    // Every sign-in path lands through signedIn() with its refresh token.
+    const signedIn = (g: Grant) => {
+      try {
+        adopt(recordFromGrant(g));
+      } catch {
+        /* a session that cannot be kept: stay on the sign-in */
+      }
       setReady(true);
     };
     const fragment = parseSsoFragment(window.location.hash);
@@ -146,226 +238,252 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (nonce) {
         api
           .ssoExchange(fragment.ssoCode, nonce)
-          .then(adopt)
+          .then(signedIn)
           .catch(() => setReady(true));
         return;
       }
     }
     if (fragment.grant) {
       window.history.replaceState(null, "", "/");
-      adopt(fragment.grant);
+      signedIn(fragment.grant);
       return;
     }
-    const saved = storedSession();
-    if (saved) {
-      setToken(saved.token);
-      bindActingTenant(saved.subject);
-      setSubject(saved.subject);
-      setTenant(saved.tenant);
-      setRole(saved.role);
+    if (account) {
+      updateVault((l) => touch(l, keyOf(account), Date.now()));
+      bind(account);
+      // A window that was not opened for a place of its own goes where the
+      // account last was.
+      const hash = window.location.hash;
+      if (account.lastView && (!hash || hash === "#" || hash === "#/") && !isAuxWindow()) {
+        window.history.replaceState(null, "", window.location.pathname + window.location.search + account.lastView);
+      }
+    } else {
+      writeBinding(null);
     }
     setReady(true);
-  }, []);
+  }, [adopt, bind]);
 
   // Mirrors of the session scope for the re-auth handler, which is installed
-  // once and must read the CURRENT subject, not a stale closure.
-  const subjectRef = useRef(subject);
-  subjectRef.current = subject;
-  const directLoginRef = useRef(directLoginAvailable);
-  directLoginRef.current = directLoginAvailable;
-
-  // establish mints a grant (login or refresh) and installs it. The gateway
-  // mints it in the tenant the member chose: a tenant switch persists on the
-  // sign-in's refresh family, so no client-side re-switch is needed.
-  const establish = useCallback(
-    async (mint: () => Promise<Grant>) => {
-      const record = recordFromGrant(await mint());
-      apply(record);
-      return record;
-    },
-    [apply],
-  );
-
+  // once and must read the CURRENT account, not a stale closure.
   const login = useCallback(
     async (idpToken: string) => {
-      await establish(() => api.login(idpToken));
+      adopt(recordFromGrant(await api.login(idpToken)));
     },
-    [establish],
+    [adopt],
   );
 
   const switchTenant = useCallback(async (tenantId: string) => {
     const { sessionToken, subject, tenant, role } = await api.switchTenant(tenantId);
-    setToken(sessionToken);
-    setSubject(subject);
-    setTenant(tenant ?? null);
-    setRole(role ?? null);
+    const key = currentRef.current;
+    const held = find(readVault(), key)?.record;
     // switch-tenant mints no refresh token: the sign-in's stays, and its
     // family now refreshes into the switched tenant (server-side).
-    persistSession({
+    const next: SessionRecord = {
       token: sessionToken,
-      refreshToken: storedSession()?.refreshToken ?? null,
-      apiToken: storedSession()?.apiToken ?? null,
+      refreshToken: held?.refreshToken ?? null,
+      apiToken: held?.apiToken ?? null,
       subject,
       tenant: tenant ?? null,
       role: role ?? null,
-    });
+    };
+    if (key) updateVault((l) => withRecord(l, key, next));
+    setToken(sessionToken);
+    setSubject(subject);
+    setTenant(next.tenant);
+    setRole(next.role);
     // Rooms/agents/RBAC are all scoped to the token's tenant; reload so every
     // view re-fetches under the new scope instead of showing stale data.
     clearQueryCache();
     window.location.reload();
   }, []);
 
-  // signOutLocally ends this window's session without touching the gateway:
-  // the next account never reads this one's cached answers, and this browser
-  // stops receiving its push notifications.
-  const signOutLocally = useCallback(() => {
-    clearActingTenant();
-    // The next member never reads this one's cached answers.
-    clearQueryCache();
-    forgetLocalAgent();
-    setToken(null);
-    setSubject(null);
-    setTenant(null);
-    setRole(null);
-    writeStored(SESSION_KEY, "");
-    void forgetBrowserPush().catch(() => {});
-  }, []);
-
-  const logout = useCallback(() => {
-    const refreshToken = storedSession()?.refreshToken;
-    signOutLocally();
-    // Revoke the sign-in server-side so the refresh token cannot renew a
-    // session again. Best-effort: the local sign-out above never waits on it.
-    if (refreshToken) void api.logout(refreshToken).catch(() => {});
-  }, [signOutLocally]);
-
-  // installAndReload makes next the signed-in account and parks the one that
-  // was: the same swap-and-reload as a tenant switch, which restarts every
-  // singleton (token, acting tenant, caches, streams).
-  const installAndReload = useCallback((next: SessionRecord) => {
-    const gateway = gatewayBase();
-    const current = storedSession();
-    let list = unpark(readAccounts(), gateway, next.subject);
-    if (current && current.subject !== next.subject) list = park(list, gateway, current);
-    writeAccounts(list);
-    persistSession(next);
-    clearQueryCache();
-    forgetLocalAgent();
-    void forgetBrowserPush().catch(() => {});
-    window.location.reload();
-  }, []);
-
-  const mintDeps = useMemo(() => ({ refresh: api.refresh, exchangeApiToken: api.exchangeApiToken }), []);
-
-  const switchAccount = useCallback(
-    async (key: string) => {
-      const gateway = gatewayBase();
-      const target = accountsOn(readAccounts(), gateway).find((a) => keyOf(a) === key);
-      if (!target) throw new Error("That account is not in this browser any more");
-      const mint = credentialMint(target.record, mintDeps);
-      if (!mint) throw new Error("That account cannot sign in again");
-      let record: SessionRecord;
-      try {
-        record = recordFromGrant(await mint());
-      } catch (e) {
-        // Refused: its sign-in ended or its token was revoked. Drop it; the
-        // signed-in account stays as it is.
-        const status = errorStatus(e);
-        if (status === 401 || status === 403) {
-          saveParked(unpark(readAccounts(), gateway, target.record.subject));
-          throw new Error("That account can no longer sign in, so it was removed");
-        }
-        throw e;
+  // removeAccount forgets an account: its sign-in is revoked at the gateway (a
+  // person's; a test account's API token stays valid until it is revoked in
+  // the platform console), the vault drops it, and every window that shows it
+  // signs out (the storage event below; this one right here).
+  const removeAccount = useCallback(
+    async (key: string, deleteLocalData = false) => {
+      const target = find(readVault(), key);
+      if (!target) return;
+      if (target.record.refreshToken) void api.logout(target.record.refreshToken, target.gateway).catch(() => {});
+      setAccounts(updateVault((l) => remove(l, key)));
+      if (key === currentRef.current) signOutLocally();
+      if (deleteLocalData && desktop.available()) {
+        // The shell stops the account when it is handed the vault without it,
+        // then forgets its data.
+        await syncDesktopAccounts();
+        await desktop.forgetAccountData(target.gateway, target.record.subject ?? "");
       }
-      installAndReload(record);
     },
-    [installAndReload, mintDeps, saveParked],
+    [signOutLocally],
   );
 
+  const logout = useCallback(() => {
+    const key = currentRef.current;
+    if (key) void removeAccount(key);
+    else signOutLocally();
+  }, [removeAccount, signOutLocally]);
+
+  // switchAccount shows another account in THIS window: renew it (from the
+  // vault's record, under its lock), re-bind, go where it last was, reload:
+  // every singleton of the page (bearer, acting tenant, caches, streams,
+  // local-agent store) belongs to an account, and restarting them is the only
+  // way to be sure nothing of the old account shows in the new one.
+  const switchAccount = useCallback(
+    async (key: string) => {
+      if (!find(readVault(), key)) throw new Error("That account is not in this app any more");
+      const result = await renewUnderLock(key, null);
+      syncAccounts();
+      if (result.outcome === "refused") throw new Error("That account can no longer sign in: sign in again");
+      if (result.outcome === "failed") throw new Error("Could not reach the gateway to sign in as that account");
+      if (result.outcome === "none") throw new Error("That account cannot sign in again");
+      const list = updateVault((l) => touch(l, key, Date.now()));
+      writeBinding(key);
+      clearQueryCache();
+      forgetLocalAgent();
+      void forgetBrowserPush().catch(() => {});
+      window.location.hash = find(list, key)?.lastView ?? "";
+      window.location.reload();
+    },
+    [syncAccounts],
+  );
+
+  // openAccount shows an account in a window of its own; where none can be
+  // opened it takes this window.
+  const openAccount = useCallback(
+    async (key: string) => {
+      if (!(await openAccountWindow({ kind: "account", key }))) await switchAccount(key);
+    },
+    [switchAccount],
+  );
+
+  // addAccount opens a window with the sign-in and leaves this one as it is;
+  // where none can be opened this window shows the sign-in (the account it
+  // showed stays in the vault, signed in).
   const addAccount = useCallback(() => {
-    const current = storedSession();
-    if (current) saveParked(park(readAccounts(), gatewayBase(), current));
-    // The parked account's sign-in stays valid: a local sign-out only.
-    signOutLocally();
-  }, [saveParked, signOutLocally]);
+    void openAccountWindow({ kind: "add" }).then((opened) => {
+      if (!opened) signOutLocally();
+    });
+  }, [signOutLocally]);
 
   const addTestAccount = useCallback(
     async (apiToken: string, activate: boolean) => {
       const token = apiToken.trim();
       const record = recordFromGrant({ ...(await api.exchangeApiToken(token)), apiToken: token });
-      if (record.subject === storedSession()?.subject) throw new Error("You are already signed in as this account");
-      if (activate) {
-        installAndReload(record);
-        return;
-      }
-      saveParked(park(readAccounts(), gatewayBase(), record));
-    },
-    [installAndReload, saveParked],
-  );
-
-  const removeAccount = useCallback(
-    async (key: string) => {
       const gateway = gatewayBase();
-      const target = accountsOn(readAccounts(), gateway).find((a) => keyOf(a) === key);
-      if (!target) return;
-      // A person's sign-in is revoked at the gateway; a test account's API
-      // token stays valid until it is revoked in the platform console.
-      if (target.record.refreshToken) void api.logout(target.record.refreshToken).catch(() => {});
-      saveParked(unpark(readAccounts(), gateway, target.record.subject));
+      const key = accountKey(gateway, record.subject ?? "");
+      if (key === currentRef.current) throw new Error("You are already signed in as this account");
+      // Added, not used: it does not become the account a new window binds to.
+      const list = updateVault((l) => put(l, gateway, record, activate ? Date.now() : (find(l, key)?.lastUsed ?? 0)));
+      setAccounts(list);
+      if (activate) await switchAccount(key);
     },
-    [saveParked],
+    [switchAccount],
   );
 
-  // Another window of this browser signed in as someone else (or out): this
-  // one shows the wrong account until it reloads; a renewal of the same
-  // account reloads nothing. The parked list is shared too.
+  // What other windows do to the vault: an account removed or refused (by any
+  // window) signs this window out if it shows it; a renewal of the account
+  // this window shows is adopted without a reload; the account moving to
+  // another tenant reloads it.
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
-      if (e.key === SESSION_KEY && sessionSubjectChanged(e.oldValue, e.newValue)) window.location.reload();
-      else if (e.key === StorageKey.accounts) setParked(readAccounts());
+      if (e.key !== StorageKey.vault) return;
+      const list = readVault();
+      setAccounts(list);
+      const key = currentRef.current;
+      if (!key) return;
+      const mine = find(list, key);
+      if (!mine || mine.signedOut) {
+        signOutLocally();
+        return;
+      }
+      if (mine.record.tenant !== tenantRef.current) {
+        window.location.reload();
+        return;
+      }
+      if (mine.record.token !== getToken()) install(mine.record);
     };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
-  }, []);
+  }, [install, signOutLocally]);
 
   // The ONE silent re-auth path. Every 401 recovery — api requests, uploads,
   // downloads, the SSE loop, an explicit join, the proactive renewal below —
   // funnels through session.refreshSession(), which coalesces concurrent
-  // callers onto this handler. renewSession decides: refresh token → refresh;
-  // none → direct re-login only where the gateway offers it; else sign out.
-  // The gateway mints the new grant in the tenant the member chose. The
-  // subject comes from refs/storage, not render closures: the handler can run
-  // during the first render after a reload, before state is populated.
+  // callers onto this handler. The handler renews the window's account under
+  // its lock: a renewal a sibling window already made is adopted, otherwise
+  // the vault's credential mints it. A refusal (401/403) marks the account
+  // "sign in again" in the vault and takes this window to the sign-in instead
+  // of rendering empty views with a dead token; a network failure keeps the
+  // session so a later request retries. The gateway mints in the tenant the
+  // member chose (it persists on the sign-in's refresh family).
   useEffect(() => {
-    setReauthHandler(() => {
-      const stored = storedSession();
-      return renewSession({
-        stored,
-        subject: subjectRef.current,
-        directLoginAvailable: directLoginRef.current,
-        refresh: api.refresh,
-        exchangeApiToken: api.exchangeApiToken,
-        login: api.login,
-        establish,
-        logout,
-      });
+    setReauthHandler(async () => {
+      const key = currentRef.current;
+      if (!key) return false;
+      const result = await renewUnderLock(key, getToken());
+      syncAccounts();
+      if (result.outcome === "fresh" || result.outcome === "renewed") {
+        install(result.record);
+        return true;
+      }
+      if (result.outcome === "refused") signOutLocally();
+      return false;
     });
     return () => setReauthHandler(null);
-  }, [establish, logout]);
+  }, [install, signOutLocally, syncAccounts]);
 
   // Proactive renewal: one timer renews the session shortly before its bearer
   // expires, so long-lived SSE streams and uploads never hit a dead token.
   // Re-armed on every token swap (tokenEra) and cleared on sign-out/unmount.
-  // Only with a refresh token: without one a renewal would end the session.
   useEffect(() => {
-    if (!subject) return;
-    const stored = storedSession();
-    if (!stored?.refreshToken && !stored?.apiToken) return;
-    const delay = renewDelayMs(stored.token, Date.now());
+    if (!current) return;
+    const held = find(readVault(), current)?.record;
+    if (!held) return;
+    const delay = renewDelayMs(held.token, Date.now());
     if (delay === null) return;
     const timer = window.setTimeout(() => void refreshSession(), delay);
     return () => window.clearTimeout(timer);
-  }, [subject, tokenEra]);
+  }, [current, tokenEra]);
+
+  // The keep-alive: every other account of the vault stays signed in while the
+  // app is open (a refresh family ages out after 30 days unused). Each is
+  // renewed, when it is due, under its own lock.
+  useEffect(() => {
+    if (!ready || isAuxWindow()) return;
+    let stopped = false;
+    const keepAlive = async () => {
+      for (const account of readVault()) {
+        const key = keyOf(account);
+        if (stopped) return;
+        if (key === currentRef.current || account.signedOut) continue;
+        await renewUnderLock(key, null);
+      }
+      if (!stopped) syncAccounts();
+    };
+    void keepAlive();
+    const stop = visiblePoll(() => void keepAlive(), KEEP_ALIVE_EVERY_MS);
+    return () => {
+      stopped = true;
+      stop();
+    };
+  }, [ready, syncAccounts]);
+
+  // Where the account last was is where a window binding to it again goes.
+  useEffect(() => {
+    if (!current || isAuxWindow()) return;
+    let timer: number | undefined;
+    const save = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => void updateVault((l) => withView(l, current, window.location.hash)), 400);
+    };
+    save();
+    window.addEventListener("hashchange", save);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("hashchange", save);
+    };
+  }, [current]);
 
   // reauth is the context-facing form of the same refresh; it throws when the
   // session could not be renewed so callers (join) surface the failure.
@@ -373,21 +491,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!(await refreshSession())) throw new Error("Could not refresh your session");
   }, []);
 
-  const multiAccount = !inDesktopShell();
-  // Read from storage: the record changes with the subject and every token swap.
-  const kind = useMemo<AccountKind>(() => accountKind(storedSession() ?? { token: "", refreshToken: null, apiToken: null, subject: null, tenant: null, role: null }), [subject, tokenEra]);
-  const accounts = useMemo(() => accountsOn(parked, gatewayBase()), [parked]);
+  const kind = useMemo<AccountKind>(() => {
+    const held = find(accounts, current)?.record;
+    return held ? accountKind(held) : "member";
+  }, [accounts, current]);
   const value = useMemo(
     () => ({
       subject, tenant, role, ready, ssoAvailable, directLoginAvailable, ssoStartPath, tokenEra,
       login, switchTenant, logout, reauth,
-      multiAccount, kind, accounts, switchAccount, addAccount, addTestAccount, removeAccount,
+      kind, accounts, current, switchAccount, openAccount, addAccount, addTestAccount, removeAccount,
     }),
     [
       subject, tenant, role, ready, ssoAvailable, directLoginAvailable, ssoStartPath, tokenEra,
       login, switchTenant, logout, reauth,
-      multiAccount, kind, accounts, switchAccount, addAccount, addTestAccount, removeAccount,
+      kind, accounts, current, switchAccount, openAccount, addAccount, addTestAccount, removeAccount,
     ],
   );
   return <AuthCtx.Provider value={value}>{children}</AuthCtx.Provider>;
 }
+
+// How often the keep-alive looks at the accounts no window of this one shows.
+const KEEP_ALIVE_EVERY_MS = 30 * 60 * 1000;

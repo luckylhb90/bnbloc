@@ -48,7 +48,7 @@ func TestPublishWithSettingsPage(t *testing.T) {
 	gw.published = nil
 	plugin := writeTemp(t, "plugin.json", `{"kind":"bnbloc.plugin.package/v1","name":"notes","version":"1.0.0","publisher":"acme",
  "runtime":"sidecar","contract":"bnbloc.plugin.contract/v1","hooks":["chat_message.v1"],
- "sidecar":{"localUrl":"http://127.0.0.1:7199"},
+ "sidecar":{"localUrl":"http://127.0.0.1:7199","listenEnv":"BNBLOC_PLUGIN_LISTEN"},
  "settings":[{"key":"folder","label":"Folder","type":"path","scope":"member"}],
  "settingsPage":{"entry":"index.html","bundle":{"url":"","sha256":""}}}`)
 	bin := writeTemp(t, "notes", "notes binary")

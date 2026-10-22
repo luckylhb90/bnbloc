@@ -209,6 +209,23 @@ func TestParsePackage_refuses_whenPluginSidecarLocalUrlMissing(t *testing.T) {
 	}
 }
 
+func TestParsePackage_refuses_whenPluginSidecarDeclaresNoListenEnv(t *testing.T) {
+	// Given a plugin whose sidecar names no env var for its listen address: it
+	// runs once per signed-in account on a port the desktop picks, so it could
+	// only listen where the package hard-codes, which two accounts would share.
+	body := validPluginPackageBody(t, func(b map[string]any) {
+		b["sidecar"] = map[string]any{"localUrl": "http://127.0.0.1:7191"}
+	})
+
+	// When
+	_, err := ParsePackage(body)
+
+	// Then
+	if err == nil || !strings.Contains(err.Error(), "plugin sidecar must declare listenEnv") {
+		t.Fatalf("error = %v, want listenEnv required", err)
+	}
+}
+
 func TestParsePackage_refuses_whenPluginNameMissing(t *testing.T) {
 	// Given a plugin package with no name (a shared-shell required field).
 	body := validPluginPackageBody(t, func(b map[string]any) { delete(b, "name") })

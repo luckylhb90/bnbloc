@@ -173,11 +173,15 @@ impl LocalFiles {
                     st.pending.push(opened);
                     Ok(())
                 });
-                let _ = app.emit(OPENED_EVENT, ());
-                if let Some(win) = app.get_webview_window(crate::MAIN_WINDOW) {
-                    let _ = win.show();
-                    let _ = win.unminimize();
-                    let _ = win.set_focus();
+                // To the app window in front (a person with two accounts open
+                // two windows): its page takes the file.
+                match crate::windows::focus_app_window(app) {
+                    Some(label) => {
+                        let _ = app.emit_to(label, OPENED_EVENT, ());
+                    }
+                    None => {
+                        let _ = app.emit(OPENED_EVENT, ());
+                    }
                 }
             }
             Err(e) => eprintln!("[local-files] {e}"),

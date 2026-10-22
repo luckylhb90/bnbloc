@@ -91,8 +91,20 @@ pub(super) fn bundle_plan(base: &Path, spec: &SidecarSpec) -> Result<BundlePlan,
             executable: file.executable,
         });
     }
+    let dir_name = dir_name_of(spec, &entries);
+    let root = base.join(cache_stem(&spec.name));
+    Ok(BundlePlan {
+        dir: root.join(&dir_name),
+        staging: root.join(format!(".{dir_name}.part")),
+        root,
+        entries,
+    })
+}
+
+/// The name of a bundle's directory: its version and the digest of its files.
+fn dir_name_of(spec: &SidecarSpec, entries: &[BundleEntry]) -> String {
     let mut hasher = Sha256::new();
-    for entry in &entries {
+    for entry in entries {
         hasher.update(format!("{}={}\n", entry.rel, entry.sha256));
     }
     let id = hex_lower(&hasher.finalize());
@@ -107,14 +119,16 @@ pub(super) fn bundle_plan(base: &Path, spec: &SidecarSpec) -> Result<BundlePlan,
             }
         })
         .collect();
-    let dir_name = format!("{version}-{}", &id[..16]);
-    let root = base.join(cache_stem(&spec.name));
-    Ok(BundlePlan {
-        dir: root.join(&dir_name),
-        staging: root.join(format!(".{dir_name}.part")),
-        root,
-        entries,
-    })
+    format!("{version}-{}", &id[..16])
+}
+
+/// The directory name of sandbox `spec`'s bundle (None when the spec cannot
+/// make one): what a sweep keeps while a catalog pins it.
+pub(super) fn bundle_dir_name(spec: &SidecarSpec) -> Option<String> {
+    let plan = bundle_plan(Path::new(""), spec).ok()?;
+    plan.dir
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
 }
 
 /// Whether every file of the bundle is in place and hashes to its pin.
@@ -171,26 +185,22 @@ pub(super) async fn prepare_bundle(
     Ok(true)
 }
 
-/// Remove every bundle directory of the component except `keep` (None: the
-/// component was uninstalled — remove them all). Blocking; best-effort.
-pub(super) fn remove_stale_bundles(root: &Path, keep: Option<&Path>) {
+/// Remove every entry of a component's bundle `root` that is not one of the
+/// `keep` bundle directories (or the staging directory of a kept one: it may
+/// hold verified files of an interrupted download). Blocking; best-effort.
+pub(super) fn forget_bundles_except(root: &Path, keep: &std::collections::HashSet<String>) {
     let Ok(entries) = std::fs::read_dir(root) else {
         return;
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if Some(path.as_path()) == keep {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let staged = name
+            .strip_prefix('.')
+            .and_then(|n| n.strip_suffix(".part"))
+            .is_some_and(|dir| keep.contains(dir));
+        if keep.contains(&name) || staged {
             continue;
-        }
-        // The staging dir of the kept bundle may hold verified files of an
-        // interrupted download; keep it too.
-        if let Some(keep) = keep {
-            let staging = keep
-                .file_name()
-                .map(|name| keep.with_file_name(format!(".{}.part", name.to_string_lossy())));
-            if staging.as_deref() == Some(path.as_path()) {
-                continue;
-            }
         }
         let removed = if path.is_dir() {
             std::fs::remove_dir_all(&path)
@@ -200,9 +210,6 @@ pub(super) fn remove_stale_bundles(root: &Path, keep: Option<&Path>) {
         if let Err(e) = removed {
             eprintln!("[sandbox] could not remove stale {}: {e}", path.display());
         }
-    }
-    if keep.is_none() {
-        let _ = std::fs::remove_dir(root);
     }
 }
 
@@ -441,13 +448,18 @@ mod tests {
         prepare_bundle(&gateway2, &plan2, |_, _| {})
             .await
             .expect("v2");
-        remove_stale_bundles(&plan2.root, Some(&plan2.dir));
+        // Two accounts may pin the two builds: while both are pinned both stay.
+        let both = std::collections::HashSet::from([
+            bundle_dir_name(&spec).unwrap(),
+            bundle_dir_name(&spec2).unwrap(),
+        ]);
+        forget_bundles_except(&plan2.root, &both);
+        assert!(plan.dir.exists() && plan2.dir.exists());
+        // Once no catalog pins the old one, it goes (and the new one stays).
+        let only_new = std::collections::HashSet::from([bundle_dir_name(&spec2).unwrap()]);
+        forget_bundles_except(&plan2.root, &only_new);
         assert!(!plan.dir.exists());
         assert_eq!(std::fs::read(plan2.dir.join("vmm")).unwrap(), vmm2);
-
-        // Uninstall removes every bundle.
-        remove_stale_bundles(&plan2.root, None);
-        assert!(!plan2.root.exists());
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -547,13 +559,18 @@ mod tests {
             app_pid: 1,
         };
         assert_eq!(
-            owned_orphan(4242, Some(&record), Some(&exe), &root, 2).map(|o| o.pid),
+            owned_orphan(4242, Some(&record), Some(&exe), &root, 2, |_| false).map(|o| o.pid),
             Some(4242)
         );
         // Our own child (same app process) is never an orphan.
-        assert!(owned_orphan(4242, Some(&record), Some(&exe), &root, 1).is_none());
+        assert!(owned_orphan(4242, Some(&record), Some(&exe), &root, 1, |_| false).is_none());
         // A reused pid running something else is never signalled.
-        assert!(owned_orphan(4242, Some(&record), Some("/usr/bin/vim"), &root, 2).is_none());
+        assert!(
+            owned_orphan(4242, Some(&record), Some("/usr/bin/vim"), &root, 2, |_| {
+                false
+            })
+            .is_none()
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 }

@@ -26,10 +26,10 @@ use std::time::{Duration, Instant};
 use parking_lot::Mutex;
 use serde::Serialize;
 use tauri::async_runtime::JoinHandle;
-use tauri::AppHandle;
 
 use crate::child_process::{self, Child, ChildEvent, RestartPolicy, Stopping};
 use crate::internal_ext::sidecar_util::core_env_var;
+use crate::internal_ext::Adapter;
 use crate::settings::Settings;
 
 const MAX_LOG_LINES: usize = 200;
@@ -112,10 +112,19 @@ impl Inner {
     }
 }
 
-/// The supervisor: cheaply cloneable handle to the shared state.
+/// Where a supervisor reports its status (the web shows it): the account
+/// runtime sends it to the windows that show the account.
+pub(crate) type StatusEmit = Arc<dyn Fn(&Status) + Send + Sync>;
+
+/// The supervisor of one account's bridge: cheaply cloneable handle to the
+/// shared state.
 #[derive(Clone)]
 pub struct Supervisor {
-    app: AppHandle,
+    emit: StatusEmit,
+    /// The adapter of the same account, whose managed cores, MCP tools and
+    /// sandbox the bridge's env names (`attach`; none until attached and
+    /// after `release`).
+    adapter: Arc<Mutex<Option<Adapter>>>,
     inner: Arc<Mutex<Inner>>,
     /// Stops of earlier runs still in progress: a start waits for them, so
     /// two bridges never overlap.
@@ -123,9 +132,10 @@ pub struct Supervisor {
 }
 
 impl Supervisor {
-    pub fn new(app: AppHandle) -> Self {
+    pub fn new(emit: StatusEmit) -> Self {
         Self {
-            app,
+            emit,
+            adapter: Arc::new(Mutex::new(None)),
             inner: Arc::new(Mutex::new(Inner {
                 state: State::Stopped,
                 pid: None,
@@ -142,6 +152,37 @@ impl Supervisor {
                 log_emit_pending: false,
             })),
             stopping: Stopping::default(),
+        }
+    }
+
+    /// The tenant the current run of the bridge was started for (None: it
+    /// never started).
+    pub(crate) fn running_tenant(&self) -> Option<String> {
+        self.inner
+            .lock()
+            .settings
+            .as_ref()
+            .map(|s| s.tenant.clone())
+    }
+
+    /// Tie the bridge's env to this account's adapter.
+    pub(crate) fn attach(&self, adapter: Adapter) {
+        *self.adapter.lock() = Some(adapter);
+    }
+
+    /// Let go of the adapter (the account is leaving): the two reference each
+    /// other, and this ends the loop.
+    pub(crate) fn release(&self) {
+        self.adapter.lock().take();
+    }
+
+    /// The status of a bridge that does not exist (no supervisor yet).
+    pub fn stopped_status() -> Status {
+        Status {
+            state: State::Stopped,
+            pid: None,
+            last_exit_code: None,
+            logs_tail: Vec::new(),
         }
     }
 
@@ -326,7 +367,12 @@ impl Supervisor {
             }
             g.refresh_token.clone()
         };
-        cmd.envs(env_for(settings, refresh_token.as_deref(), Some(&self.app)));
+        let adapter = self.adapter.lock().clone();
+        cmd.envs(env_for(
+            settings,
+            refresh_token.as_deref(),
+            adapter.as_ref(),
+        ));
         let shell_env = crate::shell_env::current().await;
         let (mut rx, child) =
             child_process::spawn(cmd, &shell_env).map_err(|e| format!("spawn sidecar: {e}"))?;
@@ -418,8 +464,7 @@ impl Supervisor {
     }
 
     fn emit_status(&self) {
-        use tauri::Emitter;
-        let _ = self.app.emit("bridge://status", self.status());
+        (self.emit)(&self.status());
     }
 }
 
@@ -450,14 +495,14 @@ fn needs_refresh_restart(desired_up: bool, run_has_refresh: bool, have_token: bo
 fn env_for(
     s: &Settings,
     refresh_token: Option<&str>,
-    app: Option<&AppHandle>,
+    adapter: Option<&Adapter>,
 ) -> std::collections::HashMap<String, String> {
     let mut env = std::collections::HashMap::new();
     // Mark the child as supervised: it shuts down gracefully on stdin EOF —
     // the shell's stop signal, which also fires if this shell dies (SIGKILL,
     // crash), so the bridge never outlives it.
     env.insert("BNBLOC_BRIDGE_SUPERVISED".into(), "1".into());
-    let gateway = crate::settings::gateway_url(s);
+    let gateway = crate::settings::normalize_gateway_url(&s.gateway_url);
     env.insert("BNBLOC_GATEWAY_BASE_URL".into(), gateway.clone());
     // Live file sync: the public edge serves the relay under /relay/* on the
     // gateway's own origin, and the bridge appends /relay/stream/<key> itself,
@@ -495,7 +540,7 @@ fn env_for(
     }
     // Desktop builds wire managed sidecar cores after user settings so
     // the verified package contract remains the source of truth for localUrl.
-    names = crate::internal_ext::extend_core_env(app, &mut env, names, s);
+    names = crate::internal_ext::extend_core_env(adapter, &mut env, names, s);
     if !names.is_empty() {
         env.insert("BNBLOC_CORES".into(), names.join(","));
     }
@@ -531,18 +576,14 @@ fn env_for(
     // The local sandbox (BNBLOC_SANDBOX_*): the mode its settings say
     // always, the sidecar URL/bearer/machine only while it is ready. Memory
     // only — the bearer is never written to settings or logged.
-    crate::internal_ext::sandbox::extend_bridge_env(app, &mut env);
+    crate::internal_ext::sandbox::extend_bridge_env(adapter, &mut env, s);
     env
 }
 
 /// The bridge's relay base for a gateway URL: its origin (scheme://host[:port])
 /// with any path dropped. None for an empty or non-http(s) gateway.
 fn relay_base_url(gateway_url: &str) -> Option<String> {
-    let url = tauri::Url::parse(gateway_url.trim()).ok()?;
-    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
-        return None;
-    }
-    Some(url.origin().ascii_serialization())
+    crate::account::gateway_origin(gateway_url)
 }
 
 #[cfg(test)]
@@ -669,11 +710,10 @@ mod tests {
                 .map(String::as_str),
             Some("https://gw.example:8443")
         );
-        if crate::settings::gateway_url(&Settings::default()).is_empty() {
-            assert!(
-                !env_for(&Settings::default(), None, None).contains_key("BNBLOC_RELAY_BASE_URL")
-            );
-        }
+        assert!(
+            !env_for(&Settings::default(), None, None).contains_key("BNBLOC_RELAY_BASE_URL"),
+            "no gateway: no relay"
+        );
     }
 
     #[test]

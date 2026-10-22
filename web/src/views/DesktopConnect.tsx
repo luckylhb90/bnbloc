@@ -6,7 +6,8 @@ import { usePlatformAgents } from "@/lib/usePlatformAgents";
 import { Button } from "@/ui/Button";
 import { Dialog } from "@/ui/Dialog";
 import { DesktopHandoffCard } from "@/views/DesktopHandoffCard";
-import { StorageKey, keyFor, readStored, writeStored } from "@/lib/storageKeys";
+import { gatewayBase } from "@/lib/config";
+import { StorageKey, memberKey, readStored, writeStored } from "@/lib/storageKeys";
 
 // DesktopConnectNotice is the persistent sidebar entry shown in a browser while
 // the member's own desktop app is not connected; it opens the open/install
@@ -42,7 +43,7 @@ export function DesktopConnectNotice({ collapsed }: { readonly collapsed: boolea
   );
 }
 
-const dismissKey = (subject: string) => keyFor(StorageKey.desktopHintDismissed, subject);
+const dismissKey = (subject: string) => memberKey(StorageKey.desktopHintDismissed, { gateway: gatewayBase(), subject });
 
 // DesktopConnectBanner is the in-room hint for a browser member whose desktop
 // app is not connected. Dismissible per member; the sidebar entry stays. A room

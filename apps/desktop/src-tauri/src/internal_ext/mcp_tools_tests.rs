@@ -131,26 +131,26 @@ fn index_is_replaced_atomically_and_garbage_is_collected() {
         sha256: pin("a"),
         path: keep.to_string_lossy().into_owned(),
     }];
-    write_index(&dir, &entries).unwrap();
-    collect_garbage(&dir, &HashSet::from([keep.clone()]));
+    // The index of a member is its own directory's (not the shared store's);
+    // the binaries it lists stay in the store, which keeps what any catalog
+    // keeps and nothing else.
+    let member = temp_dir("gc-member");
+    write_index(&member, &entries).unwrap();
+    let kept_name = keep.file_name().unwrap().to_string_lossy().into_owned();
+    collect_garbage(&dir, &HashSet::from([kept_name.clone()]));
     let mut left: Vec<String> = std::fs::read_dir(&dir)
         .unwrap()
         .flatten()
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
     left.sort();
-    assert_eq!(
-        left,
-        vec![
-            INDEX_FILE.to_string(),
-            keep.file_name().unwrap().to_string_lossy().into_owned()
-        ]
-    );
+    assert_eq!(left, vec![kept_name]);
     let index: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(dir.join(INDEX_FILE)).unwrap()).unwrap();
+        serde_json::from_slice(&std::fs::read(member.join(INDEX_FILE)).unwrap()).unwrap();
     assert_eq!(index["tools"][0]["name"], "codeword");
     assert_eq!(index["tools"][0]["path"], keep.to_string_lossy().as_ref());
     let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&member);
 }
 
 /// A one-route HTTP server answering every request with `body`; counts hits.

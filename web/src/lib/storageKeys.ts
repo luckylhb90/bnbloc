@@ -6,10 +6,11 @@
 // imports: lib/config.ts reads its override through this file at load.)
 
 export const StorageKey = {
-  // The signed-in session (lib/sessionGrant.ts) and the gateway override.
-  session: "bnbloc.session",
-  // The other accounts of this browser, parked (lib/accounts.ts).
-  accounts: "bnbloc.accounts",
+  // Every account this app holds (lib/vault.ts), the account this window shows
+  // (lib/windowBinding.ts, sessionStorage), and the gateway a sign-in starts
+  // on.
+  vault: "bnbloc.vault",
+  windowAccount: "bnbloc.window.account",
   gatewayOverride: "bnbloc.gatewayOverride",
   // The desktop sign-in nonce (lib/desktop.ts).
   ssoNonce: "bnbloc.ssoNonce",

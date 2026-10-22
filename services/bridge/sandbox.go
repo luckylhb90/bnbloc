@@ -111,6 +111,22 @@ type SandboxConfig struct {
 	// MountGuestRoots the guest folders they may mount under.
 	MountsDir       string
 	MountGuestRoots []string
+	// Account names who this bridge serves (its gateway and owner,
+	// BridgeAccount): it is part of every space's name, so two accounts on one
+	// computer, with agents of one core and provider in one room, never share
+	// a space or its workspace folder. Empty keeps the names an agent had
+	// before (a bridge that serves no account of a desktop's).
+	Account string
+}
+
+// BridgeAccount is SandboxConfig.Account for the bridge that serves owner on
+// the gateway: "" when either is not known.
+func BridgeAccount(gatewayBaseURL, owner string) string {
+	gateway, owner := strings.TrimRight(strings.TrimSpace(gatewayBaseURL), "/"), strings.TrimSpace(owner)
+	if gateway == "" || owner == "" {
+		return ""
+	}
+	return gateway + "\n" + owner
 }
 
 // LogValue keeps the config (and its bearer) out of every log line.
@@ -262,13 +278,16 @@ func (s *sandboxRuntime) machineOf(k driveKey) string {
 // seat of one (room, core, provider) (driveKey): readable, path- and
 // user-name-safe (the default guest user is "sp-<space>", so it stays well
 // under 32 characters), and collision-free through the hash of the full
-// key. The owner's own seat keeps the name the agent always had; another
-// requester's seat is a space of its own.
-func sandboxSpaceName(k driveKey) string {
+// key and the account the bridge serves. The owner's own seat is a space of
+// its own per account; another requester's seat is one too.
+func sandboxSpaceName(k driveKey, account string) string {
 	id := k.seatAgentID()
 	if k.ownMachine {
 		// A workspace of its own: both machines share the workspaces root.
 		id += "\x00own-machine"
+	}
+	if account != "" {
+		id += "\x00account\x00" + account
 	}
 	sum := sha256.Sum256([]byte(id))
 	return slugPart(k.core, 8) + "-" + slugPart(k.provider, 8) + "-" + hex.EncodeToString(sum[:5])
@@ -303,7 +322,7 @@ func slugPart(s string, max int) string {
 // a turn for someone else after the owner's converges back to the default.
 func (s *sandboxRuntime) prepare(ctx context.Context, k driveKey, owner string, env []string, ttl time.Duration, borrowed bool, denyRead []string) (*corepkg.Execution, error) {
 	room, core, provider := k.room, k.core, k.provider
-	space, machine := sandboxSpaceName(k), s.machineOf(k)
+	space, machine := sandboxSpaceName(k, s.cfg.Account), s.machineOf(k)
 	workdir := filepath.Join(s.cfg.WorkspacesRoot, space)
 	if err := os.MkdirAll(workdir, 0o700); err != nil {
 		return nil, fmt.Errorf("agent sandbox workspace: %w", err)

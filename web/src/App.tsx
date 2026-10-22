@@ -1,15 +1,14 @@
 import { lazy, Suspense, useCallback, useEffect } from "react";
 import { useAuth } from "@/lib/auth";
 import { startPreviewerSync } from "@/views/artifact/remotePreviewers";
-import { ensureBridgeRunning, desktop } from "@/lib/desktop";
-import { gatewayBase } from "@/lib/config";
+import { syncDesktopAccounts } from "@/lib/desktop";
 import { routeHash, useHashRoute } from "@/lib/useHashRoute";
 import { artifactLinks, listenForSharedComposerRefs, messageJumps } from "@/lib/team";
 import { listenForPushNavigation } from "@/lib/webPush";
 import { Shell, type View } from "@/views/Shell";
 import { Plaza } from "@/views/Plaza";
 import { MyRooms } from "@/views/MyRooms";
-import { isPreviewRoute, liveRouteFromHash, peopleChatRoomFromHash } from "@/lib/previewRoute";
+import { isAuxWindow, isPreviewRoute, liveRouteFromHash, peopleChatRoomFromHash } from "@/lib/previewRoute";
 import { useDesktopUpdate } from "@/views/DesktopUpdateWatcher";
 import { DesktopPresenceProvider } from "@/lib/desktopPresence";
 import { DesktopConnectNotice } from "@/views/DesktopConnect";
@@ -57,7 +56,7 @@ function Spinner() {
 }
 
 export function App() {
-  const { subject, tenant, ready, tokenEra } = useAuth();
+  const { subject, tenant, ready, tokenEra, accounts } = useAuth();
   const [route, navigate] = useHashRoute();
   // Derive the shell's view/room from the URL hash so rooms and top-level views
   // are deep-linkable and survive reload/back-forward. Preview windows are
@@ -93,22 +92,14 @@ export function App() {
   const desktopUpdate = useDesktopUpdate(!!subject);
   const webUpdate = useWebUpdate(!!subject);
 
-  // Zero-config local bridge: once signed in, the desktop shell seeds and
-  // starts the bridge for this member so room chat has a runner. No-op in a
-  // plain browser and after the first configured launch.
+  // The desktop shell serves this app's accounts: it is handed the vault (re-
+  // handed on every change: sign-in, renewal, tenant switch, an account added,
+  // removed or refused, sign-out) and this window is bound to its own account.
+  // A torn-out window (preview, people chat, live page) inherits its opener's
+  // account from the shell and hands nothing. No-op in a plain browser.
   useEffect(() => {
-    if (subject) void ensureBridgeRunning(subject, gatewayBase(), tenant);
-  }, [subject, tenant]);
-
-  // The shell's managed sidecar adapters authenticate to the gateway with the
-  // member's session token, and the supervised bridge renews its own session
-  // from the member's refresh token: both are fed once signed in and re-fed on
-  // every swap (tokenEra bumps on sign-in, renewal and tenant switch), so the
-  // shell always holds the newest tokens. Signing out re-feeds an empty
-  // session, which stops the shell handing a refresh token to the bridge.
-  useEffect(() => {
-    if (ready) void desktop.refreshInternalAdapter(gatewayBase());
-  }, [ready, subject, tokenEra]);
+    if (ready && !isAuxWindow()) void syncDesktopAccounts();
+  }, [ready, subject, tenant, tokenEra, accounts]);
 
   // Installed previewer components join the viewer registry from the
   // member's catalog (rollout + tenant gated); re-read on sign-in, tenant

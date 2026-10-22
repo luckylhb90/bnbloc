@@ -8,9 +8,10 @@
 //!   uninstalled bundles from memory, MCP tools materialize their binaries),
 //!   and `sweep` forgets on disk what the live catalog no longer lists.
 //! - Supervised sidecars (core, plugin, sandbox): `blocker` (may it launch
-//!   now), `prepare` (its verified executable), `listener` (where it
-//!   listens), `reuses_listener` (may a compatible listener already on its
-//!   port be driven in place), `launch` (its kind-only launch env, as a
+//!   now), `prepare` (its verified executable), `shared` (one process for
+//!   every account, or one per account), `listener` (where it listens),
+//!   `reuses_listener` (may a compatible listener already on its port be
+//!   driven in place), `launch` (its kind-only launch env, as a
 //!   `LaunchGuard`), `on_spawned`, and `member_scoped` (restart it when the
 //!   member scope changes).
 //!
@@ -32,7 +33,9 @@ use crate::internal_ext::sandbox_bundle;
 use crate::internal_ext::sidecar_fetch::FetchError;
 use crate::internal_ext::sidecar_model::{ComponentKind, ComponentsResponse, SidecarSpec};
 use crate::internal_ext::sidecar_sweep::{forget_entries_except, Live, SweepDirs};
-use crate::internal_ext::sidecar_util::{cache_stem, runtime_listener_for, RuntimeListener};
+use crate::internal_ext::sidecar_util::{
+    cache_stem, ephemeral_listener, runtime_listener_for, RuntimeListener,
+};
 use crate::internal_ext::skills_provider;
 use crate::internal_ext::Adapter;
 use crate::secret::Secret;
@@ -63,12 +66,35 @@ pub(super) trait KindRuntime: Sync {
     /// Follow a freshly fetched catalog (in memory; quick).
     fn sync(&self, _adapter: &Adapter, _catalog: &ComponentsResponse) {}
 
-    /// Forget on disk what `live` no longer lists. Blocking.
-    fn sweep(&self, _dirs: &SweepDirs, _live: &Live, _sign_ins: &SignIns) {}
+    /// Forget on disk what the live catalogs no longer list: the member
+    /// directory's state against `own` (the scope's catalog), the
+    /// machine-wide caches against `machine` (every scope's). Blocking.
+    fn sweep(&self, _dirs: &SweepDirs, _own: &Live, _machine: &Live, _sign_ins: &SignIns) {}
+
+    /// Whether this kind is only for the agents an account serves from this
+    /// computer (an account that does not serve runs none of it): everything
+    /// but what a window shows (previewers).
+    fn for_agents(&self) -> bool {
+        true
+    }
 
     /// Whether this sidecar reads its member scope's state (it restarts
     /// when the member, tenant or gateway changes).
     fn member_scoped(&self, _spec: &SidecarSpec) -> bool {
+        false
+    }
+
+    /// The directory name of this sidecar's bundle in the bundle cache, for a
+    /// kind that keeps one (what a sweep keeps while a catalog pins it).
+    fn bundle_dir(&self, _spec: &SidecarSpec) -> Option<String> {
+        None
+    }
+
+    /// Whether one process of it serves every account on this computer (a
+    /// core_host.rs `CoreHost` runs and supervises it, on the package's fixed
+    /// `localUrl`) rather than one per account (an adapter runs it, on a port
+    /// the desktop picks). A shared kind has no launch hook.
+    fn shared(&self) -> bool {
         false
     }
 
@@ -86,7 +112,8 @@ pub(super) trait KindRuntime: Sync {
         Box::pin(adapter.ensure_binary(spec))
     }
 
-    /// Where the sidecar listens: the package's fixed `localUrl`, reserved.
+    /// Where the sidecar listens: the package's fixed `localUrl`, reserved
+    /// (a shared kind's; the others pick a port).
     fn listener<'a>(
         &'a self,
         _adapter: &'a Adapter,
@@ -182,6 +209,11 @@ async fn grant_host(
 struct Core;
 
 impl KindRuntime for Core {
+    /// The one daemon of this computer, whoever's catalog installs it.
+    fn shared(&self) -> bool {
+        true
+    }
+
     /// A daemon without a manifest speaks Core Protocol (`/core/v1/discover`
     /// identifies it); a REST-manifest core is never probed for reuse.
     fn reuses_listener(&self, spec: &SidecarSpec) -> bool {
@@ -193,14 +225,18 @@ impl KindRuntime for Core {
 struct Plugin;
 
 impl KindRuntime for Plugin {
-    fn sweep(&self, dirs: &SweepDirs, live: &Live, _sign_ins: &SignIns) {
+    fn sweep(&self, dirs: &SweepDirs, own: &Live, _machine: &Live, _sign_ins: &SignIns) {
         if let Some(member) = &dirs.member {
             forget_unlisted(
                 member,
                 ComponentKind::Plugin,
-                live.names(ComponentKind::Plugin),
+                own.names(ComponentKind::Plugin),
             );
-            skills_provider::sweep_member(member, live.names(ComponentKind::Plugin));
+            skills_provider::sweep_member(
+                member,
+                dirs.mirror.as_deref(),
+                own.names(ComponentKind::Plugin),
+            );
         }
     }
 
@@ -218,7 +254,30 @@ impl KindRuntime for Plugin {
     /// (which restarts it); a platform or organization one waits for the
     /// catalog to say it is set (a new spec restarts it).
     fn blocker(&self, adapter: &Adapter, spec: &SidecarSpec) -> Option<String> {
+        if spec.listen_env.trim().is_empty() {
+            return Some(format!(
+                "{} declares no sidecar.listenEnv: a plugin runs once per account, on a port the desktop picks",
+                spec.name
+            ));
+        }
         adapter.plugin_settings_blocker(spec)
+    }
+
+    /// One instance per account on a port of its own: its address is the
+    /// desktop's to hand out (`listenEnv`), never the package's fixed one.
+    fn listener<'a>(
+        &'a self,
+        adapter: &'a Adapter,
+        spec: &'a SidecarSpec,
+    ) -> BoxFuture<'a, Result<RuntimeListener, String>> {
+        Box::pin(async move {
+            if let Ok(dirs) = adapter.dirs() {
+                adapter
+                    .replace_recorded_orphan(spec, dirs.binaries(), "plugin")
+                    .await;
+            }
+            ephemeral_listener("plugin")
+        })
     }
 
     fn launch<'a>(
@@ -276,27 +335,43 @@ impl KindRuntime for Sandbox {
         adapter.sync_sandbox_settings(catalog);
     }
 
-    fn sweep(&self, dirs: &SweepDirs, live: &Live, _sign_ins: &SignIns) {
-        let keep: HashSet<String> = live
-            .names(ComponentKind::Sandbox)
-            .iter()
-            .map(|name| cache_stem(name))
-            .collect();
+    fn sweep(&self, dirs: &SweepDirs, own: &Live, machine: &Live, _sign_ins: &SignIns) {
+        let stems = |live: &Live| -> HashSet<String> {
+            live.names(ComponentKind::Sandbox)
+                .iter()
+                .map(|name| cache_stem(name))
+                .collect()
+        };
+        // The bundles are a machine-wide cache: any scope's sandbox keeps
+        // them. A member's VM data is judged by its own scope's catalog.
         if let Some(bundles) = &dirs.sandbox_bundles {
-            forget_entries_except(bundles, &keep);
+            let live = stems(machine);
+            forget_entries_except(bundles, &live);
+            // Of a component that stays, the builds some catalog pins stay
+            // (two accounts may pin two), the others go.
+            for stem in &live {
+                sandbox_bundle::forget_bundles_except(
+                    &bundles.join(stem),
+                    &machine.bundle_dirs(stem),
+                );
+            }
         }
         if let Some(member) = &dirs.member {
-            forget_entries_except(&member.join(SANDBOX_DATA_DIR), &keep);
+            forget_entries_except(&member.join(SANDBOX_DATA_DIR), &stems(own));
             forget_unlisted(
                 member,
                 ComponentKind::Sandbox,
-                live.names(ComponentKind::Sandbox),
+                own.names(ComponentKind::Sandbox),
             );
         }
     }
 
     fn member_scoped(&self, _spec: &SidecarSpec) -> bool {
         true
+    }
+
+    fn bundle_dir(&self, spec: &SidecarSpec) -> Option<String> {
+        sandbox_bundle::bundle_dir_name(spec)
     }
 
     fn prepare<'a>(
@@ -359,13 +434,17 @@ impl KindRuntime for Sandbox {
 struct Previewer;
 
 impl KindRuntime for Previewer {
+    fn for_agents(&self) -> bool {
+        false
+    }
+
     fn sync(&self, adapter: &Adapter, catalog: &ComponentsResponse) {
         adapter.retain_previewers(catalog);
     }
 
-    fn sweep(&self, dirs: &SweepDirs, live: &Live, _sign_ins: &SignIns) {
+    fn sweep(&self, dirs: &SweepDirs, _own: &Live, machine: &Live, _sign_ins: &SignIns) {
         if let Some(dir) = &dirs.previewers {
-            crate::internal_ext::previewer_cache::forget_bundles_except(dir, live.previewers());
+            crate::internal_ext::previewer_cache::forget_bundles_except(dir, machine.previewers());
         }
     }
 }
@@ -378,10 +457,10 @@ impl KindRuntime for Mcp {
         adapter.sync_mcp_tools(catalog);
     }
 
-    fn sweep(&self, dirs: &SweepDirs, live: &Live, sign_ins: &SignIns) {
+    fn sweep(&self, dirs: &SweepDirs, own: &Live, _machine: &Live, sign_ins: &SignIns) {
         if let Some(member) = &dirs.member {
-            forget_unlisted(member, ComponentKind::Mcp, &live.mcp().tools);
-            sign_ins.retain(&member.join(MCP_SIGN_INS_DIR), &live.mcp().sign_ins);
+            forget_unlisted(member, ComponentKind::Mcp, &own.mcp().tools);
+            sign_ins.retain(&member.join(MCP_SIGN_INS_DIR), &own.mcp().sign_ins);
         }
     }
 }
@@ -428,6 +507,26 @@ mod tests {
         guard.on_end(move |tail| seen.lock().push(tail.to_string()));
         guard.exited("vm stopped");
         assert_eq!(*ended.lock(), vec!["vm stopped".to_string()]);
+    }
+
+    /// Which kinds run once per computer and which once per account
+    /// (docs/prd/2026-10-22-multi-account.md §2.4): only a core is shared;
+    /// what a window shows (a previewer) is the one kind an account that
+    /// serves no agents still follows.
+    #[test]
+    fn only_cores_are_shared_and_only_previewers_are_for_windows() {
+        for kind in KINDS {
+            assert_eq!(
+                runtime(kind).shared(),
+                kind == ComponentKind::Core,
+                "{kind:?}"
+            );
+            assert_eq!(
+                runtime(kind).for_agents(),
+                kind != ComponentKind::Previewer,
+                "{kind:?}"
+            );
+        }
     }
 
     #[test]

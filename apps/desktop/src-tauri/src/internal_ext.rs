@@ -2,13 +2,19 @@
 //! the gateway, download and pin their platform artifacts, then keep the local
 //! binaries alive for the bridge to drive through core endpoint env overrides.
 #[cfg(test)]
+mod account_scope_tests;
+#[cfg(test)]
 mod owners_tests;
 #[cfg(test)]
 mod reconcile_tests;
 #[cfg(test)]
 mod sandbox_live_tests;
+#[cfg(test)]
+mod shared_core_tests;
 
+pub(super) mod bridge_control;
 pub(super) mod component_settings;
+pub(super) mod core_host;
 pub(super) mod gateway_client;
 pub(super) mod kind_runtime;
 pub(super) mod loopback;
@@ -39,7 +45,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use tauri::{AppHandle, Manager};
+
+pub(crate) use bridge_control::BridgeControl;
 
 pub use component_settings::{ComponentSettingsView, SettingsSaveError};
 use gateway_client::GatewayClient;
@@ -64,7 +71,6 @@ const RECONCILE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60
 
 #[derive(Clone)]
 pub struct Adapter {
-    app: AppHandle,
     /// Where everything on disk lives (dirs.rs); an error when the app dirs
     /// could not be resolved.
     dirs: Arc<Result<crate::dirs::Dirs, String>>,
@@ -89,6 +95,28 @@ pub struct Adapter {
     mcp: Arc<mcp_tools::McpState>,
     /// Coalesces pushed catalog hints into one refresh (plugin_events.rs).
     catalog_hints: Arc<plugin_events::HintDebounce>,
+    /// The previewer pins this account's catalog resolved and the bundles it
+    /// serves from memory (previewer_cache.rs).
+    previewers: Arc<previewer_cache::PreviewerBundles>,
+    /// The live catalog of every signed-in account, by scope (shared by all
+    /// adapters): the machine-wide caches are swept by the union
+    /// (sidecar_sweep), so this adapter's reconcile never deletes what another
+    /// account lists.
+    live: Arc<sidecar_sweep::LiveRegistry>,
+    /// The core daemons of this computer, held by every account that
+    /// installs them (core_host.rs), and this adapter's hold on them.
+    cores: Arc<core_host::CoreHost>,
+    holder: core_host::HolderId,
+    /// The name of this adapter's account for the machine-wide directories it
+    /// keeps a directory in (the spawn records of its own sidecars): the
+    /// account directory's name (`AccountKey::dir_name`).
+    scope: String,
+    /// Whether this account serves agents from this computer. One that does
+    /// not (a test account, which only looks) runs no component: it follows
+    /// its catalog for what its windows show (previewers) and nothing else.
+    serves: bool,
+    /// The bridge that serves this adapter's account (bridge_control).
+    bridge: Arc<dyn BridgeControl>,
     /// Stops of sidecar runs still in progress, by sidecar id: a relaunch
     /// waits for its own (a fixed port is free again, a data dir released).
     stopping: Stopping,
@@ -97,16 +125,46 @@ pub struct Adapter {
     apply_now_until: Arc<Mutex<Option<std::time::Instant>>>,
 }
 
+/// Remove what earlier layouts left under the app's directories (once, at
+/// app start, before any account's adapter runs). Blocking, best-effort.
+pub(crate) fn remove_retired_state(dirs: &crate::dirs::Dirs) {
+    member_dir::remove_retired_dirs(dirs.config(), dirs.data());
+    let _ = std::fs::remove_dir_all(dirs.retired_core_manifests());
+}
+
+/// What every account's adapter shares on this computer.
+#[derive(Clone)]
+pub(crate) struct Shared {
+    pub(crate) live: Arc<sidecar_sweep::LiveRegistry>,
+    pub(crate) cores: Arc<core_host::CoreHost>,
+}
+
+impl Shared {
+    pub(crate) fn new(dirs: Result<crate::dirs::Dirs, String>) -> Self {
+        Self {
+            live: Arc::default(),
+            cores: core_host::CoreHost::new(dirs),
+        }
+    }
+}
+
 impl Adapter {
     /// A manager for the gateway at `gateway_url`, with no member session
-    /// until the web hands one over (`update_gateway`).
-    pub fn new(app: AppHandle, dirs: Result<crate::dirs::Dirs, String>, gateway_url: &str) -> Self {
-        if let Ok(dirs) = &dirs {
-            member_dir::remove_retired_dirs(dirs.config(), dirs.data());
-        }
+    /// until the web hands one over (`update_gateway`). `scope` names its
+    /// account where the machine keeps a directory per account; `serves` says
+    /// whether the account serves agents from this computer.
+    pub fn new(
+        dirs: Result<crate::dirs::Dirs, String>,
+        gateway_url: &str,
+        shared: Shared,
+        scope: &str,
+        serves: bool,
+        bridge: Arc<dyn BridgeControl>,
+    ) -> Self {
         let gateway = GatewayClient::new(gateway_url);
-        Self {
-            app,
+        let holder = shared.cores.register();
+        shared.live.expect(holder);
+        let adapter = Self {
             dirs: Arc::new(dirs),
             host: plugin_host::PluginHost::new(gateway.clone()),
             gateway,
@@ -121,9 +179,31 @@ impl Adapter {
             providers: Arc::new(Mutex::new(skills_provider::Providers::default())),
             mcp: Arc::new(mcp_tools::McpState::default()),
             catalog_hints: Arc::new(plugin_events::HintDebounce::default()),
+            previewers: Arc::new(previewer_cache::PreviewerBundles::default()),
+            live: shared.live,
+            cores: shared.cores,
+            holder,
+            scope: scope.to_string(),
+            serves,
+            bridge,
             stopping: Stopping::default(),
             apply_now_until: Arc::new(Mutex::new(None)),
-        }
+        };
+        // The core host asks this adapter's bridge for its turns: the update
+        // of a core waits for every account's. `leave` ends the loop of
+        // references.
+        let counted = adapter.clone();
+        adapter
+            .cores
+            .set_turns(holder, Arc::new(move || counted.running_turns()));
+        adapter
+    }
+
+    /// This adapter's account is leaving: it holds no core and counts no
+    /// turns.
+    pub(crate) fn leave(&self) {
+        self.cores.unregister(self.holder);
+        self.live.leave(self.holder);
     }
 
     /// Take over the web's session; an empty token is the web's sign-out,
@@ -136,6 +216,11 @@ impl Adapter {
         let before = self.member_dir().ok();
         self.gateway.set(gateway_url, gateway_token);
         if self.member_dir().ok() != before {
+            // The scope left is no longer in force: its catalog stops
+            // holding the machine-wide caches.
+            if let Some(dir) = &before {
+                self.live.remove(&live_scope(Some(dir)));
+            }
             self.restart_member_sidecars();
         }
     }
@@ -157,6 +242,15 @@ impl Adapter {
         let dir =
             member_dir::member_dir(config, &gateway.base_url, &member.subject, &member.tenant)?;
         Some((member, dir))
+    }
+
+    /// The subject the manager's own session acts as ("" when none): the
+    /// sandbox machines are labelled with it, not with whatever the app's
+    /// settings slot holds.
+    pub(super) fn session_subject(&self) -> String {
+        member_dir::token_member(&self.gateway.session().token)
+            .map(|m| m.subject)
+            .unwrap_or_default()
     }
 
     /// The private directory of the member scope the manager's session acts
@@ -224,12 +318,22 @@ impl Adapter {
         let _serialized = self.reconcile_lock.lock().await;
         let gateway = self.gateway.session();
         let catalog = self.fetch_components(&gateway).await?;
+        // This scope's catalog is in force before anything sweeps or
+        // materializes: the machine-wide caches keep what it lists.
+        let live = sidecar_sweep::Live::of(&catalog, &sidecar_util::current_platform());
+        let scope = self.session_scope(&gateway).map(|(_, dir)| dir);
+        self.live.set(&live_scope(scope.as_ref()), live);
+        self.live.arrived(self.holder);
         for kind in kind_runtime::KINDS {
-            kind_runtime::runtime(kind).sync(self, &catalog);
+            if self.serves || !kind_runtime::runtime(kind).for_agents() {
+                kind_runtime::runtime(kind).sync(self, &catalog);
+            }
         }
-        let (specs, discovered) = self.resolve_specs(&catalog);
-        self.write_manifests(&specs).await?;
-        self.apply_specs(specs, discovered);
+        if self.serves {
+            let (specs, discovered) = self.resolve_specs(&catalog);
+            self.write_manifests(&specs).await?;
+            self.apply_specs(specs, discovered);
+        }
         self.sweep_uninstalled(&gateway, &catalog).await;
         Ok(())
     }
@@ -244,16 +348,37 @@ impl Adapter {
         gateway: &GatewayAccess,
         catalog: &sidecar_model::ComponentsResponse,
     ) {
-        let live = sidecar_sweep::Live::of(catalog, &sidecar_util::current_platform());
+        let own = sidecar_sweep::Live::of(catalog, &sidecar_util::current_platform());
+        // The machine-wide caches are judged by what every account's catalog
+        // lists, this one included (set in reconcile).
+        // Plus the builds of the cores that run: they restart from their
+        // binary, whatever a catalog pins by now.
+        let machine = self.live.union().with_running(self.cores.held_builds());
+        // The machine-wide caches are swept only once every live account's
+        // catalog is registered (LiveRegistry::settled).
+        let machine_wide = self.live.settled();
         let dirs = sidecar_sweep::SweepDirs {
-            binaries: self.dirs().ok().map(crate::dirs::Dirs::binaries),
-            sandbox_bundles: self.dirs().ok().map(crate::dirs::Dirs::sandbox_bundles),
-            previewers: self.dirs().ok().map(crate::dirs::Dirs::previewers),
+            binaries: self
+                .dirs()
+                .ok()
+                .filter(|_| machine_wide)
+                .map(crate::dirs::Dirs::binaries),
+            sandbox_bundles: self
+                .dirs()
+                .ok()
+                .filter(|_| machine_wide)
+                .map(crate::dirs::Dirs::sandbox_bundles),
+            previewers: self
+                .dirs()
+                .ok()
+                .filter(|_| machine_wide)
+                .map(crate::dirs::Dirs::previewers),
             member: self.session_scope(gateway).map(|(_, dir)| dir),
+            mirror: skills_provider::mirror_root(&self.scope),
         };
         let mcp = Arc::clone(&self.mcp);
         let swept = tauri::async_runtime::spawn_blocking(move || {
-            sidecar_sweep::sweep(&dirs, &live, &mcp.sign_ins)
+            sidecar_sweep::sweep(&dirs, &own, &machine, &mcp.sign_ins)
         })
         .await;
         if let Err(e) = swept {
@@ -337,6 +462,9 @@ impl Adapter {
                 .filter_map(|(id, sidecar)| sidecar.child.take().map(|child| (id.clone(), child)))
                 .collect()
         };
+        // The shared sidecars this account held are let go of (the core host
+        // keeps them for the accounts that still hold them).
+        self.cores.nudge();
         // A clean stop: these children are terminated by the caller, so they
         // are not orphans for the next session.
         children
@@ -399,7 +527,7 @@ impl Adapter {
     }
 
     fn apply_specs(&self, specs: Vec<SidecarSpec>, discovered: HashSet<String>) {
-        let running = self.running_turns();
+        let running = self.gate_turns();
         let apply_now = self.apply_now();
         let applied = {
             let mut inner = self.inner.lock();
@@ -410,6 +538,9 @@ impl Adapter {
 
     /// Stop what an apply removed or replaced and start the rest.
     fn finish_applied(&self, applied: AppliedSpecs) {
+        // A shared sidecar this replaced or removed is let go of by the
+        // follower that held it: it looks now.
+        self.cores.nudge();
         // What an uninstalled component leaves on disk goes with the
         // reconcile's sweep (sidecar_sweep).
         for (id, child) in applied.removed {
@@ -432,7 +563,7 @@ impl Adapter {
         if !has_pending {
             return;
         }
-        let running = self.running_turns();
+        let running = self.gate_turns();
         let apply_now = self.apply_now();
         let applied = {
             let mut inner = self.inner.lock();
@@ -453,7 +584,13 @@ impl Adapter {
         update_gate::apply_now_active(*self.apply_now_until.lock(), std::time::Instant::now())
     }
 
-    /// The turns the bridge this app runs drives now (update_gate).
+    /// The turns every account's bridge drives now: what an update of a core
+    /// (one process under all of them) waits for (update_gate).
+    pub(super) fn gate_turns(&self) -> u32 {
+        self.cores.running_turns()
+    }
+
+    /// The turns this account's bridge drives now (update_gate).
     pub fn running_turns(&self) -> u32 {
         let (file, pid) = self.bridge_turns();
         update_gate::running_turns(file.as_ref(), pid)
@@ -469,17 +606,22 @@ impl Adapter {
     /// The bridge's running-turns file and the pid of the bridge this app
     /// runs.
     fn bridge_turns(&self) -> (Option<update_gate::RunningTurns>, Option<u32>) {
-        let Some(state) = self.app.try_state::<crate::AppState>() else {
-            return (None, None);
-        };
-        let settings = state.settings.lock().clone();
-        let pid = state.supervisor.status().pid;
+        let settings = self.bridge.settings();
+        let pid = self.bridge.status().pid;
         let Some(dir) = self.bridge_member_dir_for(&settings) else {
             return (None, pid);
         };
         let file = update_gate::read_running_turns(&dir.join(member_dir::BRIDGE_STATE_DIR));
         (file, pid)
     }
+}
+
+/// The registry key of a scope's catalog: its member directory (a scope
+/// without one, a legacy token, is one entry of its own).
+fn live_scope(member: Option<&std::path::PathBuf>) -> String {
+    member
+        .map(|dir| dir.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }
 
 fn apply_specs_to_inner(
@@ -612,31 +754,32 @@ struct AppliedSpecs {
 /// (`Adapter::bridge_member_dir`); the bridge-stabilizing watcher restarts
 /// the bridge when that directory changes (a member or tenant switch).
 pub fn extend_core_env(
-    app: Option<&AppHandle>,
+    adapter: Option<&Adapter>,
     env: &mut std::collections::HashMap<String, String>,
     names: Vec<String>,
     settings: &crate::settings::Settings,
 ) -> Vec<String> {
-    let Some(app) = app else {
-        return names;
-    };
-    let Some(adapter) = app.try_state::<Adapter>() else {
+    let Some(adapter) = adapter else {
         return names;
     };
     let mut out = names;
-    if let Some(manifest_dir) = adapter.manifest_dir() {
-        env.insert("BNBLOC_CORE_MANIFESTS_DIR".into(), manifest_dir);
-    }
-    // MCP tools: the materialized stdio binaries, and the member's own
-    // settings values and sign-ins, read by the bridge per session (no
-    // restart on change).
-    if let Ok(dirs) = adapter.dirs() {
+    // What the member's catalog decides (the manifest cores, the MCP tools
+    // index, the MCP settings and sign-ins) is the member's own, read from
+    // their directory per session (no restart on change), and only the
+    // bridge that runs for that member gets it.
+    if let Some(dir) = adapter.bridge_member_dir_for(settings) {
+        env.insert(
+            "BNBLOC_CORE_MANIFESTS_DIR".into(),
+            dir.join(member_dir::CORE_MANIFESTS_DIR)
+                .to_string_lossy()
+                .into_owned(),
+        );
         env.insert(
             mcp_tools::TOOLS_DIR_ENV.into(),
-            dirs.mcp_tools().to_string_lossy().into_owned(),
+            dir.join(member_dir::MCP_TOOLS_INDEX_DIR)
+                .to_string_lossy()
+                .into_owned(),
         );
-    }
-    if let Some(dir) = adapter.bridge_member_dir_for(settings) {
         env.insert(
             component_settings::SETTINGS_DIR_ENV.into(),
             dir.join(member_dir::COMPONENT_SETTINGS_DIR)
@@ -662,7 +805,7 @@ pub fn extend_core_env(
     // compares (sidecar_bridge_sync::bridge_cores), so the env and the
     // restart decision never disagree. A URL only for a daemon that answers
     // now; manifest cores resolve their own endpoint via discovery.
-    for core in adapter.bridge_cores() {
+    for core in adapter.bridge_cores_for(settings) {
         if let Some(url) = &core.url {
             env.insert(core_env_var(&core.name, "URL"), url.clone());
         }

@@ -44,9 +44,11 @@ export function gatewayBase(): string {
   return apiBase;
 }
 
-// setGatewayBase lets the shell (or settings UI) point the client at a gateway
-// at runtime. Persisted by the caller; this only updates the in-memory base.
-export function setGatewayBase(url: string) {
+// bindGatewayBase points THIS window at its account's gateway (what a window
+// shows is one account's, docs/prd/2026-10-22-multi-account.md §2.1). In memory
+// only: the persisted override is where a sign-in starts, not where an
+// account lives.
+export function bindGatewayBase(url: string) {
   apiBase = normalizeBase(url);
 }
 
@@ -72,6 +74,13 @@ export function defaultGatewayBase(): string {
 // one. A browser is always same-origin, so it never needs setup.
 export function needsGatewaySetup(): boolean {
   return inDesktopShell() && !gatewayBase();
+}
+
+// apiUrlOn is a gateway path on a given gateway (an account of the vault that
+// is not this window's): "" is same-origin.
+export function apiUrlOn(gateway: string, path: string): string {
+  const base = normalizeBase(gateway);
+  return base ? base + path : path;
 }
 
 // apiUrl prefixes a gateway path (e.g. "/v1/rooms") with the configured base.

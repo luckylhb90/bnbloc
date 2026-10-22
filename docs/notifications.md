@@ -335,8 +335,10 @@ nobody is left without a notification.
 
 ### What the plugin receives
 
-The desktop posts each delivery to the sidecar's `POST {localUrl}/events`
-(10 s timeout) and acks the outcome; the plugin answers 2xx **only once it
+The desktop posts each delivery to the sidecar's `POST /events` at the address
+it started it on for that member's account (`sidecar.listenEnv` carries it; the
+package's `localUrl` is only the declared shape), 10 s timeout, and acks the
+outcome; the plugin answers 2xx **only once it
 delivered the notification** (any other answer or a timeout triggers the
 fallback):
 

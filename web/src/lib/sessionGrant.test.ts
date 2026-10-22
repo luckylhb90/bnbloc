@@ -1,25 +1,15 @@
 import {
+  credentialMint,
   parseSessionRecord,
   parseSsoFragment,
   renewDelayMs,
-  renewSession,
   RENEW_AHEAD_MS,
-  recordFromGrant,
   type Grant,
-  type RenewDeps,
   type SessionRecord,
 } from "./sessionGrant.ts";
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
-}
-
-class HttpError extends Error {
-  status: number;
-  constructor(status: number) {
-    super(`http ${status}`);
-    this.status = status;
-  }
 }
 
 // token builds a bnbloc-style two-segment token: base64url(claims).sig
@@ -28,131 +18,29 @@ function token(claims: Record<string, unknown>): string {
   return `${b64}.sig`;
 }
 
-const stored: SessionRecord = { token: "old", refreshToken: "rt-1", apiToken: null, subject: "ann@corp", tenant: "t2", role: "member" };
-
-// A harness wiring renewSession the way auth.tsx does: the minted grant is
-// installed and persisted as the gateway answered it.
-function harness(over: Partial<RenewDeps>) {
-  const state = { token: "old" as string | null, persisted: null as SessionRecord | null, loggedOut: false, refreshedWith: [] as string[] };
-  const deps: RenewDeps = {
-    stored,
-    subject: "ann@corp",
-    directLoginAvailable: false,
-    refresh: async (rt) => {
-      state.refreshedWith.push(rt);
-      // The gateway refreshes into the tenant the member switched to (the
-      // refresh family's tenant hint): t2.
-      return { sessionToken: "fresh", refreshToken: "rt-2", subject: "ann@corp", tenant: "t2", role: "member" };
-    },
-    exchangeApiToken: async () => {
-      throw new Error("an API token must not be exchanged");
-    },
-    login: async () => {
-      throw new Error("direct login must not run");
-    },
-    establish: async (mint) => {
-      const record = recordFromGrant(await mint());
-      state.token = record.token;
-      state.persisted = record;
-    },
-    logout: () => {
-      state.loggedOut = true;
-      state.token = null;
-    },
-    ...over,
-  };
-  return { state, deps };
-}
-
-async function testRefreshSuccessRotates(): Promise<void> {
-  const { state, deps } = harness({});
-  assert((await renewSession(deps)) === true, "a refresh renews the session");
-  assert(state.refreshedWith.join() === "rt-1", "the stored refresh token is spent");
-  assert(state.token === "fresh", "the refreshed bearer is installed as minted (no client re-switch)");
-  assert(state.persisted?.refreshToken === "rt-2", "the ROTATED refresh token is stored");
-  assert(state.persisted?.tenant === "t2", "the record is in the tenant the gateway minted it for");
-  assert(!state.loggedOut, "no sign-out on success");
-}
-
-async function testRefreshRefusedSignsOut(): Promise<void> {
-  for (const status of [401, 403]) {
-    const { state, deps } = harness({
-      refresh: async () => {
-        throw new HttpError(status);
-      },
-    });
-    assert((await renewSession(deps)) === false, `refresh ${status} fails`);
-    assert(state.loggedOut, `refresh ${status} signs out`);
-  }
-}
-
-async function testRefreshNetworkErrorKeepsSession(): Promise<void> {
-  const { state, deps } = harness({
-    refresh: async () => {
-      throw new TypeError("Failed to fetch");
-    },
-  });
-  assert((await renewSession(deps)) === false, "network failure reports no renewal");
-  assert(!state.loggedOut && state.token === "old", "network failure keeps the session");
-}
-
-async function testNoRefreshTokenFallsBack(): Promise<void> {
-  const noRt = { ...stored, refreshToken: null };
-  const sso = harness({ stored: noRt });
-  assert((await renewSession(sso.deps)) === false && sso.state.loggedOut, "SSO-only without refresh token signs out");
-
-  let loggedInAs = "";
-  const dev = harness({
-    stored: noRt,
-    directLoginAvailable: true,
-    login: async (sub): Promise<Grant> => {
-      loggedInAs = sub;
-      return { sessionToken: "dev", refreshToken: "rt-dev", subject: sub, tenant: "t2" };
-    },
-  });
-  assert((await renewSession(dev.deps)) === true, "dev gateway re-logs-in");
-  assert(loggedInAs === "ann@corp" && dev.state.persisted?.refreshToken === "rt-dev", "direct login adopts its refresh token");
-  assert(dev.state.refreshedWith.length === 0, "no refresh without a refresh token");
-}
-
-// A test account renews from its API token: the exchange mints a session with
-// no refresh token, and the grant keeps the API token for the next renewal.
-async function testApiTokenAccountRenews(): Promise<void> {
-  const testAccount: SessionRecord = { token: "old", refreshToken: null, apiToken: "bnbloc_at_x", subject: "svc:qa-viewer", tenant: "t2", role: "viewer" };
+// The credential a record mints from: the refresh token first, else the API
+// token of a test account (kept on the grant); neither: nothing to mint.
+async function testCredentialMint(): Promise<void> {
   const spent: string[] = [];
-  const ok = harness({
-    stored: testAccount,
-    subject: "svc:qa-viewer",
-    exchangeApiToken: async (t) => {
-      spent.push(t);
-      return { sessionToken: "fresh", subject: "svc:qa-viewer", tenant: "t2", role: "viewer" };
+  const deps = {
+    refresh: async (rt: string): Promise<Grant> => {
+      spent.push(`refresh:${rt}`);
+      return { sessionToken: "fresh", refreshToken: "rt-2", subject: "ann@corp" };
     },
-  });
-  assert((await renewSession(ok.deps)) === true, "an API token renews the session");
-  assert(spent.join() === "bnbloc_at_x" && ok.state.refreshedWith.length === 0, "the API token is exchanged, no refresh");
-  assert(ok.state.persisted?.apiToken === "bnbloc_at_x" && ok.state.persisted?.refreshToken === null, "the API token is kept for the next renewal");
-  assert(ok.state.token === "fresh" && !ok.state.loggedOut, "the new bearer is installed");
-
-  // A revoked token signs the test account out; a network failure keeps it.
-  const revoked = harness({
-    stored: testAccount,
-    exchangeApiToken: async () => {
-      throw new HttpError(401);
+    exchangeApiToken: async (t: string): Promise<Grant> => {
+      spent.push(`api:${t}`);
+      return { sessionToken: "fresh", subject: "svc:qa" };
     },
-  });
-  assert((await renewSession(revoked.deps)) === false && revoked.state.loggedOut, "a revoked API token signs out");
-  const offline = harness({
-    stored: testAccount,
-    exchangeApiToken: async () => {
-      throw new TypeError("Failed to fetch");
-    },
-  });
-  assert((await renewSession(offline.deps)) === false && !offline.state.loggedOut, "a network failure keeps the test account");
-
-  // A record holding both renews from the refresh token (a person's sign-in
-  // outranks nothing else: the order is fixed and stated).
-  const both = harness({ stored: { ...testAccount, refreshToken: "rt-1" } });
-  assert((await renewSession(both.deps)) === true && both.state.refreshedWith.join() === "rt-1", "the refresh token is used first");
+  };
+  const person: SessionRecord = { token: "old", refreshToken: "rt-1", apiToken: null, subject: "ann@corp", tenant: "t2", role: "member" };
+  const grant = await credentialMint(person, deps)!();
+  assert(spent.join() === "refresh:rt-1" && grant.refreshToken === "rt-2", "a person's refresh token is spent");
+  const tester: SessionRecord = { ...person, refreshToken: null, apiToken: "bnbloc_at_x", subject: "svc:qa" };
+  const minted = await credentialMint(tester, deps)!();
+  assert(spent.at(-1) === "api:bnbloc_at_x" && minted.apiToken === "bnbloc_at_x", "a test account exchanges its API token, which stays on the grant");
+  const both = await credentialMint({ ...tester, refreshToken: "rt-1" }, deps)!();
+  assert(spent.at(-1) === "refresh:rt-1" && both.apiToken === undefined, "a record holding both renews from the refresh token");
+  assert(credentialMint({ ...person, refreshToken: null }, deps) === null && credentialMint(null, deps) === null, "no credential: nothing to mint");
 }
 
 function testFragmentAdoption(): void {
@@ -187,11 +75,7 @@ function testRenewDelay(): void {
   assert(renewDelayMs(token({ sub: "x" }), now) === null && renewDelayMs("junk", now) === null, "no exp → no timer");
 }
 
-await testRefreshSuccessRotates();
-await testRefreshRefusedSignsOut();
-await testRefreshNetworkErrorKeepsSession();
-await testNoRefreshTokenFallsBack();
-await testApiTokenAccountRenews();
+await testCredentialMint();
 testFragmentAdoption();
 testSessionRecordParsing();
 testRenewDelay();

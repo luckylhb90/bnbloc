@@ -25,11 +25,6 @@
 //! migrated.
 use std::path::{Path, PathBuf};
 
-use reqwest::Url;
-use sha2::{Digest, Sha256};
-
-use crate::internal_ext::sidecar_util::hex_lower;
-
 /// `<app config>/members`: one directory per (gateway, member, tenant).
 const MEMBERS_DIR: &str = "members";
 /// A member's values of component settings
@@ -37,6 +32,14 @@ const MEMBERS_DIR: &str = "members";
 pub(super) const COMPONENT_SETTINGS_DIR: &str = "component-settings";
 /// A member's MCP OAuth sign-ins (`<member>/mcp-sign-ins/<tool>.json`).
 pub(super) const MCP_SIGN_INS_DIR: &str = "mcp-sign-ins";
+/// The manifest cores a member's catalog installs, which that member's
+/// bridge reads at spawn (`<member>/core-manifests/<core>.json`). What a
+/// catalog decides is the member's; the binaries it points to are shared.
+pub(super) const CORE_MANIFESTS_DIR: &str = "core-manifests";
+/// The index of a member's materialized MCP tools
+/// (`<member>/mcp-tools/index.json`), which lists binaries of the shared,
+/// content-addressed store by absolute path.
+pub(super) const MCP_TOOLS_INDEX_DIR: &str = "mcp-tools";
 /// Retired settings dirs: under the app config dir (member-unkeyed) and
 /// under each member dir, deleted at startup (remove_retired_dirs).
 const RETIRED_SETTINGS_DIRS: [&str; 2] = ["plugin-settings", "mcp-settings"];
@@ -60,35 +63,34 @@ pub(super) const BRIDGE_KEY: &str = "member/dir";
 
 /// Who a session acts as: the subject and the tenant its token names.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct SessionMember {
-    pub(super) subject: String,
-    pub(super) tenant: String,
+pub(crate) struct SessionMember {
+    pub(crate) subject: String,
+    pub(crate) tenant: String,
 }
 
 /// The private directory of `subject` acting in `tenant` on the gateway at
-/// `gateway_url`, under the app config dir. None without a gateway origin,
-/// a subject or a tenant.
+/// `gateway_url`: `<app config>/accounts/<account>/members/<tenant digest>`,
+/// inside the account's own directory (account.rs), so everything the shell
+/// keeps for an account (its settings, every tenant's member state) is one
+/// tree, and forgetting the account's data on this computer is removing it.
+/// None without a gateway origin, a subject or a tenant.
 pub(crate) fn member_dir(
     config_dir: &Path,
     gateway_url: &str,
     subject: &str,
     tenant: &str,
 ) -> Option<PathBuf> {
-    let url = Url::parse(gateway_url.trim()).ok()?;
-    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+    let account = crate::account::AccountKey::new(gateway_url, subject)?;
+    let tenant = tenant.trim();
+    if tenant.is_empty() {
         return None;
     }
-    let (subject, tenant) = (subject.trim(), tenant.trim());
-    if subject.is_empty() || tenant.is_empty() {
-        return None;
-    }
-    let mut hasher = Sha256::new();
-    for part in [url.origin().ascii_serialization().as_str(), subject, tenant] {
-        hasher.update(part.as_bytes());
-        hasher.update(b"\n");
-    }
-    let key = hex_lower(&hasher.finalize());
-    Some(config_dir.join(MEMBERS_DIR).join(&key[..32]))
+    Some(
+        account
+            .dir(config_dir)
+            .join(MEMBERS_DIR)
+            .join(account.digest(&[tenant])),
+    )
 }
 
 /// The subject (`sub`) and tenant (`tenant`) a gateway session token names
@@ -96,7 +98,7 @@ pub(crate) fn member_dir(
 /// not verified here (the gateway does that on every call): the claims only
 /// pick which member directory this desktop uses for the catalog fetched
 /// with that token. None when either claim is missing.
-pub(super) fn token_member(token: &str) -> Option<SessionMember> {
+pub(crate) fn token_member(token: &str) -> Option<SessionMember> {
     let (payload, _) = token.trim().split_once('.')?;
     let claims: serde_json::Value = serde_json::from_slice(&b64url_decode(payload)?).ok()?;
     let claim = |name: &str| {
@@ -112,6 +114,14 @@ pub(super) fn token_member(token: &str) -> Option<SessionMember> {
     })
 }
 
+/// When a session token expires (Unix seconds, its `exp` claim): what the
+/// keeper renews it by. None when it names none.
+pub(crate) fn token_exp(token: &str) -> Option<u64> {
+    let (payload, _) = token.trim().split_once('.')?;
+    let claims: serde_json::Value = serde_json::from_slice(&b64url_decode(payload)?).ok()?;
+    claims["exp"].as_u64()
+}
+
 /// Delete the state of earlier layouts: the member-unkeyed secret dirs under
 /// the app config dir, the sandbox data base under the app data dir, and the
 /// retired settings dirs of every member dir. Blocking, best-effort.
@@ -121,8 +131,16 @@ pub(super) fn remove_retired_dirs(config_dir: &Path, data_dir: &Path) {
         .map(|dir| config_dir.join(dir))
         .collect();
     dirs.push(data_dir.join(SANDBOX_DATA_DIR));
-    if let Ok(members) = std::fs::read_dir(config_dir.join(MEMBERS_DIR)) {
-        for member in members.flatten() {
+    let accounts = std::fs::read_dir(crate::account::accounts_dir(config_dir))
+        .into_iter()
+        .flatten()
+        .flatten();
+    for account in accounts {
+        let members = std::fs::read_dir(account.path().join(MEMBERS_DIR))
+            .into_iter()
+            .flatten()
+            .flatten();
+        for member in members {
             dirs.extend(
                 RETIRED_SETTINGS_DIRS
                     .iter()
@@ -163,28 +181,32 @@ fn b64url_decode(s: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
+/// A session token carrying `claims`, as the gateway builds one (base64url
+/// claims, a signature that is not checked here), for tests.
+#[cfg(test)]
+pub(crate) fn session_token(claims: serde_json::Value) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let data = claims.to_string().into_bytes();
+    let mut enc = String::new();
+    for chunk in data.chunks(3) {
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
+        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
+        for i in 0..chunk.len() + 1 {
+            enc.push(ALPHABET[((n >> (18 - 6 * i)) & 63) as usize] as char);
+        }
+    }
+    format!("{enc}.signature")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn token(claims: serde_json::Value) -> String {
-        const ALPHABET: &[u8; 64] =
-            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-        let data = claims.to_string().into_bytes();
-        let mut enc = String::new();
-        for chunk in data.chunks(3) {
-            let b = [
-                chunk[0],
-                *chunk.get(1).unwrap_or(&0),
-                *chunk.get(2).unwrap_or(&0),
-            ];
-            let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
-            for i in 0..chunk.len() + 1 {
-                enc.push(ALPHABET[((n >> (18 - 6 * i)) & 63) as usize] as char);
-            }
-        }
-        format!("{enc}.signature")
-    }
+    use super::session_token as token;
 
     #[test]
     fn the_session_token_names_the_member_and_tenant() {
@@ -221,7 +243,16 @@ mod tests {
         let config = Path::new("/config");
         let gw = "https://gw.example.com";
         let maya = member_dir(config, gw, "maya", "t1").expect("dir");
-        assert!(maya.starts_with("/config/members"));
+        assert!(maya.starts_with("/config/accounts"));
+        // Inside the account's own directory: forgetting the account is one
+        // removal.
+        let account = crate::account::AccountKey::new(gw, "maya").unwrap();
+        assert!(maya.starts_with(account.dir(config).join("members")));
+        assert_eq!(
+            member_dir(config, gw, "maya", "t2").unwrap().parent(),
+            maya.parent(),
+            "one account's tenants share its directory"
+        );
         // One gateway origin, however it is written.
         assert_eq!(
             member_dir(config, " https://GW.example.com/app/ ", " maya ", " t1 "),

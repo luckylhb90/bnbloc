@@ -20,7 +20,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
-use tauri::Manager;
 
 use crate::internal_ext::pin::Sha256Pin;
 use crate::internal_ext::previewer_bundle::{parse_ustar, Bundle, MAX_BUNDLE_BYTES};
@@ -123,7 +122,10 @@ impl PreviewerBundles {
     }
 }
 
-/// The installed previewers of a member catalog and their bundle pins.
+/// The installed previewers of a member catalog and their bundle pins. The
+/// resolved pins and cached bundles in memory are one account's
+/// (`Adapter::previewers`): another account's catalog may pin the same name
+/// and version differently. The archives on disk are shared by their hash.
 pub(super) fn installed_previewers(
     catalog: &ComponentsResponse,
 ) -> HashMap<(String, String), BundlePin> {
@@ -151,10 +153,7 @@ impl Adapter {
         name: &str,
         version: &str,
     ) -> Result<Arc<Bundle>, PreviewerError> {
-        let state = self
-            .app
-            .try_state::<PreviewerBundles>()
-            .ok_or_else(|| PreviewerError::Unavailable("previewer cache not ready".into()))?;
+        let state = &self.previewers;
         let pin = match state.cached_pin(name, version) {
             Some(pin) => pin,
             None => {
@@ -173,7 +172,7 @@ impl Adapter {
                 pin
             }
         };
-        self.verified_bundle(&state, &pin).await
+        self.verified_bundle(state, &pin).await
     }
 
     /// The verified bundle of a component's settings page, by the pin of
@@ -186,17 +185,13 @@ impl Adapter {
         &self,
         sha256: &Sha256Pin,
     ) -> Result<Arc<Bundle>, PreviewerError> {
-        let state = self
-            .app
-            .try_state::<PreviewerBundles>()
-            .ok_or_else(|| PreviewerError::Unavailable("previewer cache not ready".into()))?;
         let pin = BundlePin {
             // The gateway's content-addressed artifact path of the pin
             // (pkgmeta.GatewayArtifactPath), on the signed-in gateway.
             url: format!("/v1/artifacts/sha256/{sha256}"),
             sha256: sha256.clone(),
         };
-        self.verified_bundle(&state, &pin).await
+        self.verified_bundle(&self.previewers, &pin).await
     }
 
     /// The parsed bundle `pin` names: from memory, else its verified
@@ -250,9 +245,7 @@ impl Adapter {
     /// Reconcile sync (kind_runtime::Previewer): stop serving previewers no
     /// longer installed for this member. Their archives go with the sweep.
     pub(super) fn retain_previewers(&self, catalog: &ComponentsResponse) {
-        if let Some(state) = self.app.try_state::<PreviewerBundles>() {
-            state.retain(&installed_previewers(catalog));
-        }
+        self.previewers.retain(&installed_previewers(catalog));
     }
 }
 

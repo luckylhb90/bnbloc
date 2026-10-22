@@ -180,7 +180,10 @@ function testPersistence(): void {
   const st = memoryStorage();
   const s = run(started, { type: "next" }, ev({ kind: "invite_created", roomId: ROOM }), { type: "collapse", collapsed: true });
   saveOnboarding(st, "jack", s);
-  assert(st.data.has("bnbloc.onboarding.v1:jack") && onboardingKey("JACK") === "bnbloc.onboarding.v1:JACK", "per-member key (exact subject)");
+  assert(
+    st.data.has("bnbloc.onboarding.v1:same-origin:jack") && onboardingKey("JACK") === "bnbloc.onboarding.v1:same-origin:JACK",
+    "per-member key on this gateway (exact subject)",
+  );
   const back = loadOnboarding(st, "jack");
   assert(JSON.stringify(back) === JSON.stringify(s), "round-trips");
   assert(loadOnboarding(st, "rose") === INITIAL_ONBOARDING, "another member starts fresh");

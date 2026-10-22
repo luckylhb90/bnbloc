@@ -12,8 +12,10 @@ import type { ComponentSettingsUpdate, DesktopComponentSettings } from "./compon
 import { ApiError } from "./errors.ts";
 import { unframePackedSkill, type SkillsProvider, type SkillsSettings, type SkillsState } from "./localSkills";
 import type { SandboxStatus, ShellEnvReload } from "./sandboxStatus";
-import { SESSION_KEY, parseSessionRecord, type SessionRecord } from "./sessionGrant";
+import { isNotBound, snapshotOf, type HeldAccount } from "./desktopAccounts";
 import { StorageKey, readStored, writeStored } from "./storageKeys.ts";
+import { readVault, readVaultRev } from "./vault";
+import { boundAccount } from "./windowBinding";
 
 export type BridgeState = "stopped" | "starting" | "running" | "failed";
 
@@ -41,9 +43,10 @@ export interface DefaultAgent {
 }
 
 export interface DesktopSettings {
+  /** The account's own gateway, subject and tenant: read-only here (they are
+   *  the account, not settings; the shell ignores them on save). */
   gatewayUrl: string;
   owner: string;
-  /** Active tenant/workspace; bridge switches to it before subscribing. */
   tenant: string;
   cores: CoreConfig[];
   defaultAgent: DefaultAgent;
@@ -56,6 +59,19 @@ export interface DesktopSettings {
    *  gateways that reject the bridge's dev login. Empty keeps the default
    *  owner-login path. Mirrors BNBLOC_GATEWAY_TOKEN. */
   gatewayToken: string;
+}
+
+/** One account's state in the shell (src-tauri/src/runtime.rs `AccountStatus`). */
+export interface AccountStatus {
+  gatewayUrl: string;
+  subject: string;
+  /** "active"; "retrying" (no session yet, or the gateway is down); "signedOut" (its credential was refused). */
+  session: "active" | "retrying" | "signedOut";
+  /** Whether it serves agents from this computer at all (a test account never does) and whether it does now. */
+  canServe: boolean;
+  serving: boolean;
+  bridge: BridgeState;
+  runningTurns: number;
 }
 
 export interface AppInfo {
@@ -111,25 +127,36 @@ export function tauri(): { invoke: InvokeFn; listen: ListenFn } | null {
       event?: { listen?: ListenFn };
     };
   };
-  const invoke = w.__TAURI__?.core?.invoke;
+  const raw = w.__TAURI__?.core?.invoke;
   const listen = w.__TAURI__?.event?.listen;
-  if (!invoke || !listen) return null;
+  if (!raw || !listen) return null;
+  // A command that raced this window's binding to its account waits for the
+  // binding and goes again (once); every other answer is the caller's.
+  const invoke: InvokeFn = async (cmd, args, options) => {
+    try {
+      return await raw(cmd, args, options);
+    } catch (e) {
+      if (!isNotBound(e)) throw e;
+      await Promise.race([binding, new Promise<void>((resolve) => setTimeout(resolve, BINDING_WAIT_MS))]);
+      return raw(cmd, args, options);
+    }
+  };
   return { invoke, listen };
 }
 
-// Reads the web session for shell IPC (sidecar adapter, bridge refresh
-// token, updater). The session persists in localStorage (see auth.tsx).
-function storedSession(): SessionRecord | null {
-  if (typeof window === "undefined") return null;
-  try {
-    return parseSessionRecord(readStored(SESSION_KEY) || null);
-  } catch {
-    return null;
-  }
-}
+// The binding of this window to its account (syncAccounts): a command that
+// found the window unbound waits for it, for a while, and goes again. Pending
+// until the first sync has bound the window.
+const BINDING_WAIT_MS = 10_000;
+let bindingDone: () => void = () => {};
+let binding: Promise<void> = new Promise((resolve) => {
+  bindingDone = resolve;
+});
 
+// The bearer of the account this window shows (the updater's call as it).
 function sessionToken(): string | null {
-  return storedSession()?.token ?? null;
+  if (typeof window === "undefined") return null;
+  return boundAccount(readVault())?.record.token ?? null;
 }
 
 // popOutWindow asks the shell to open one of its auxiliary windows (a
@@ -205,22 +232,59 @@ export const desktop = {
     await t.invoke("set_settings", { settings });
   },
 
-  // Hand the current session to the shell: the sidecar adapter gets the
-  // bearer, the bridge supervisor the refresh token (the bridge renews its own
-  // session from it). Called on every token swap so the shell always holds the
-  // newest refresh token. Signed out (no stored session) it sends empty
-  // tokens, which tells the shell to stop handing a refresh token on.
-  async refreshInternalAdapter(gatewayUrl: string): Promise<void> {
+  // Hand the shell the accounts this app holds and bind this window to its
+  // own. The shell reconciles its account runtimes to the list (an account
+  // missing from it stops serving and its sign-in on the gateway ends) and
+  // renews each from its own session family, never from the web's token
+  // again; the window's commands are then that account's. Called on every
+  // change of what the web holds. Signed out (an empty list) it stops them
+  // all.
+  async syncAccounts(held: readonly HeldAccount[], window: HeldAccount | null, revision: number): Promise<void> {
     const t = tauri();
     if (!t) return;
-    const session = storedSession();
-    await t
-      .invoke("internal_adapter_session", {
-        gatewayUrl,
-        sessionToken: session?.token ?? "",
-        refreshToken: session?.refreshToken ?? "",
-      })
-      .catch(() => {});
+    const accounts = snapshotOf(held);
+    const mine = window ? snapshotOf([window])[0] : undefined;
+    try {
+      await t.invoke("accounts_sync", { revision, accounts });
+      if (mine) await t.invoke("window_bind", { gatewayUrl: mine.gatewayUrl, subject: mine.subject });
+    } catch {
+      /* the next change of the vault hands it again */
+    }
+    bindingDone();
+  },
+
+  // Open a shell window bound to an account (gateway and subject), or, with
+  // none, one to sign in another account. The shell binds the window to the
+  // account before its page loads; an account that is already shown in a window
+  // is focused instead. False when the shell refused.
+  async openAccountWindow(gatewayUrl: string | null, subject: string | null): Promise<boolean> {
+    const t = tauri();
+    if (!t) return false;
+    try {
+      await t.invoke("open_account_window", { gatewayUrl, subject });
+      return true;
+    } catch {
+      return false;
+    }
+  },
+
+  // Forget what this computer keeps of an account that left the vault: its
+  // settings, its member state (component values, sign-ins to tools, sandbox
+  // disks). The shell refuses an account that is still signed in here.
+  async forgetAccountData(gatewayUrl: string, subject: string): Promise<void> {
+    const t = tauri();
+    if (!t) return;
+    await t.invoke("account_forget_data", { gatewayUrl, subject }).catch((e: unknown) => {
+      throw new Error(e instanceof Error ? e.message : String(e));
+    });
+  },
+
+  // Every account's state beside its name (the switcher): session, whether
+  // it serves agents from this computer, its bridge and running turns.
+  async accountsStatus(): Promise<AccountStatus[]> {
+    const t = tauri();
+    if (!t) return [];
+    return (await t.invoke("accounts_status").catch(() => [])) as AccountStatus[];
   },
 
   async internalAdapterStatus(): Promise<InternalAdapterStatus[]> {
@@ -440,6 +504,17 @@ export const desktop = {
   },
 };
 
+// syncDesktopAccounts hands the shell every account of the vault that can
+// still sign in, and binds this window to the one it shows
+// (desktop.syncAccounts).
+export async function syncDesktopAccounts(): Promise<void> {
+  if (!desktop.available()) return;
+  const vault = readVault();
+  const held = vault.filter((a) => !a.signedOut).map((a) => ({ gateway: a.gateway, record: a.record }));
+  const mine = boundAccount(vault);
+  await desktop.syncAccounts(held, mine && !mine.signedOut ? { gateway: mine.gateway, record: mine.record } : null, readVaultRev());
+}
+
 // openExternal opens a URL for the user regardless of environment: in the
 // desktop shell it hands off to the OS browser via IPC (the webview swallows
 // <a target="_blank">); in a plain browser it opens a new tab. Use this for
@@ -449,85 +524,15 @@ export async function openExternal(url: string): Promise<void> {
   window.open(url, "_blank", "noopener,noreferrer");
 }
 
-// ensureBridgeRunning gives the desktop shell a zero-config bridge: the bridge
-// is what consumes room chat and drives the local agent, so without it a room
-// message reaches no runner. On first launch the persisted settings are empty
-// (no owner), so nothing auto-starts. Seed the two fields the bridge actually
-// requires — the gateway URL and the owner (the signed-in subject) — persist
-// them, and let set_settings auto-start (with no core the bridge runs idle
-// until cores are installed or configured). Idempotent: once an owner is set
-// we leave settings alone, and if the bridge is already live we do nothing.
-// No-op outside the shell.
-//
-// The bridge also FOLLOWS the UI's gateway: the UI gateway (switcher/login)
-// is the source of truth for which deployment's rooms the user is looking at,
-// so a mismatch would leave every chat on that gateway "waiting for bridge"
-// with the supervised bridge pinned to another deployment. On a mismatch we
-// persist the UI's gateway (and tenant) and let set_settings restart the
-// bridge against the same gateway.
-//
-// The bridge's OWNER follows the signed-in subject too: chat jobs are queued
-// for the message author's identity (an SSO login is "user@corp", a dev login
-// is the typed string), and the bridge only claims jobs whose owner matches
-// its own — an owner pinned to a previous identity left every chat on that
-// gateway dead ("no bridge online"). The owner is the member this client acts
-// for; the signed-in subject is exactly that.
-export async function ensureBridgeRunning(subject: string, gatewayUrl: string, tenant?: string | null): Promise<void> {
-  if (!desktop.available() || !subject.trim()) return;
-  await desktop.refreshInternalAdapter(gatewayUrl);
-  const desiredGateway = (gatewayUrl || "").trim().replace(/\/+$/, "");
-  const desiredOwner = subject.trim();
-  const current = await desktop.getSettings();
-  if (current && current.owner.trim()) {
-    const desiredTenant = (tenant || "").trim();
-    const gatewayDrifted =
-      desiredGateway !== "" && current.gatewayUrl.trim().replace(/\/+$/, "") !== desiredGateway;
-    // Keep the supervised bridge scoped to the same tenant/workspace as the UI.
-    // A null tenant (the SSO callback path before the claims restore) must not
-    // persist an empty tenant over the configured one — that blanked the
-    // bridge's scope and made agents look broken after an SSO sign-in.
-    const tenantDrifted = desiredTenant !== "" && (current.tenant || "") !== desiredTenant;
-    const ownerDrifted = current.owner.trim() !== desiredOwner;
-    if (gatewayDrifted || tenantDrifted || ownerDrifted) {
-      await desktop.setSettings({
-        ...current,
-        ...(gatewayDrifted ? { gatewayUrl: desiredGateway } : {}),
-        ...(tenantDrifted ? { tenant: desiredTenant } : {}),
-        ...(ownerDrifted ? { owner: desiredOwner } : {}),
-      });
-      return;
-    }
-    // Already configured: start only if not already running.
-    const st = await desktop.status();
-    if (current.gatewayUrl.trim() && st && st.state !== "running" && st.state !== "starting") {
-      await desktop.start().catch(() => {});
-    }
-    return;
-  }
-  const seeded: DesktopSettings = {
-    ...(current ?? {
-      cores: [],
-      defaultAgent: { core: "", provider: "" },
-      disabledProviders: [],
-      syncSecret: "",
-      serveAllOwners: false,
-      gatewayToken: "",
-      gatewayUrl: "",
-      owner: "",
-      tenant: "",
-    }),
-    owner: subject.trim(),
-    tenant: (tenant || "").trim(),
-    gatewayUrl: (current?.gatewayUrl.trim() || desiredGateway).replace(/\/+$/, ""),
-  };
-  await desktop.setSettings(seeded); // set_settings auto-starts when runnable
-}
-
 // Desktop SSO hand-off nonce. The desktop opens SSO in the system browser with
 // a fresh random nonce in the callback URL; the gateway binds the one-time
 // code it returns (via the bnbloc://sso deep link) to that nonce. Only the app
-// that started the flow holds the nonce, so a deep link crafted from someone
-// else's login cannot sign this app in (login CSRF). Single use, short-lived.
+// window that started the flow holds the nonce, so a deep link crafted from
+// someone else's login cannot sign this app in (login CSRF), and a window
+// never takes the code of a sign-in another window started (the shell gives
+// the link to every app window; only the one with a nonce in its own
+// sessionStorage acts). A copy in localStorage is for a link that arrives
+// after the app was restarted. Single use, short-lived.
 const SSO_NONCE_KEY = StorageKey.ssoNonce;
 const SSO_NONCE_TTL_MS = 10 * 60 * 1000;
 
@@ -535,12 +540,15 @@ export function beginDesktopSso(): string {
   const bytes = new Uint8Array(32);
   crypto.getRandomValues(bytes);
   const nonce = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-  writeStored(SSO_NONCE_KEY, JSON.stringify({ nonce, at: Date.now() }));
+  const stored = JSON.stringify({ nonce, at: Date.now() });
+  writeStored(SSO_NONCE_KEY, stored, "session");
+  writeStored(SSO_NONCE_KEY, stored);
   return nonce;
 }
 
 export function takeDesktopSsoNonce(): string | null {
-  const raw = readStored(SSO_NONCE_KEY) || null;
+  const raw = readStored(SSO_NONCE_KEY, "session") || readStored(SSO_NONCE_KEY) || null;
+  writeStored(SSO_NONCE_KEY, "", "session");
   writeStored(SSO_NONCE_KEY, "");
   if (!raw) return null;
   try {

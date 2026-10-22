@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use tauri::Manager;
-
 use crate::internal_ext::sidecar_model::{ComponentKind, ManagedSidecar};
 use crate::internal_ext::sidecar_status::manifest_fingerprint;
 use crate::internal_ext::update_gate;
@@ -25,8 +23,14 @@ use crate::internal_ext::Adapter;
 const CHECK_INTERVAL: Duration = Duration::from_secs(2);
 
 impl Adapter {
-    /// The managed cores the bridge env carries now (bridge_cores).
-    pub(super) fn bridge_cores(&self) -> Vec<BridgeCore> {
+    /// The managed cores the env of the bridge running with `settings`
+    /// carries now (bridge_cores): this account's, handed only to the
+    /// bridge that runs for this adapter's own account. Another account's
+    /// bridge reaches its own cores through its own adapter, never these.
+    pub(super) fn bridge_cores_for(&self, settings: &crate::settings::Settings) -> Vec<BridgeCore> {
+        if self.bridge_member_dir_for(settings).is_none() {
+            return Vec::new();
+        }
         bridge_cores(&self.inner.lock().sidecars)
     }
 
@@ -76,12 +80,8 @@ impl Adapter {
     /// The sandbox env's identity in the bridge set (its mode, and the
     /// handoff while there is one).
     fn sandbox_bridge_fingerprint(&self) -> String {
-        let handoff = self.sandbox_handoff();
-        super::sandbox::bridge_fingerprint(
-            self.sandbox_bridge_mode(),
-            &self.sandbox_env(),
-            handoff.as_ref(),
-        )
+        let (mode, forward, handoff) = self.sandbox_for_bridge(&self.bridge.settings());
+        super::sandbox::bridge_fingerprint(mode, &forward, handoff.as_ref())
     }
 
     /// The running bridge has the sandbox handoff as it is now (the private
@@ -96,7 +96,12 @@ impl Adapter {
     }
 
     fn desired_bridge_cores(&self) -> HashMap<String, String> {
-        let mut set = bridge_core_set(&self.inner.lock().sidecars);
+        let settings = self.bridge.settings();
+        let mut set = if self.bridge_member_dir_for(&settings).is_some() {
+            bridge_core_set(&self.inner.lock().sidecars)
+        } else {
+            HashMap::new()
+        };
         // The sandbox env (BNBLOC_SANDBOX_*) is bridge env read at spawn
         // too: the handoff appearing or going away, or the mode changing
         // (pending → known included), restarts the bridge through the same
@@ -107,10 +112,7 @@ impl Adapter {
         );
         // So is the member directory the bridge reads its owner's MCP
         // credentials from: a member or tenant switch restarts the bridge.
-        let member = self.app.try_state::<crate::AppState>().and_then(|state| {
-            let settings = state.settings.lock().clone();
-            self.bridge_member_dir_for(&settings)
-        });
+        let member = self.bridge_member_dir_for(&settings);
         if let Some(dir) = member {
             set.insert(
                 super::member_dir::BRIDGE_KEY.to_string(),
@@ -121,19 +123,16 @@ impl Adapter {
     }
 
     fn restart_bridge(&self, desired: HashMap<String, String>) {
-        let Some(state) = self.app.try_state::<crate::AppState>() else {
-            return;
-        };
-        let settings = state.settings.lock().clone();
+        let settings = self.bridge.settings();
         let up = matches!(
-            state.supervisor.status().state,
+            self.bridge.status().state,
             crate::bridge::State::Starting | crate::bridge::State::Running
         );
         // Never override an explicitly stopped bridge: the user's stop wins.
         // Record the set so the watcher doesn't keep retrying; the next
         // explicit start rebuilds its env from the live sidecar state anyway.
         if up && settings.is_runnable() {
-            let _ = state.supervisor.start(settings);
+            let _ = self.bridge.start(settings);
         }
         self.inner.lock().bridge_cores = desired;
     }

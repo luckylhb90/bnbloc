@@ -406,7 +406,7 @@ func (s *sandboxRuntime) removeRoomWorkspace(ctx context.Context, k driveKey) er
 	if s == nil || !s.cfg.present() {
 		return nil
 	}
-	space := sandboxSpaceName(k)
+	space := sandboxSpaceName(k, s.cfg.Account)
 	if err := s.client.DeleteSpace(ctx, s.endpoint(), s.machineOf(k), space, true); err != nil && sandbox.ErrorCodeOf(err) != sandbox.ErrorSpaceNotFound {
 		return err
 	}

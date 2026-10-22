@@ -75,7 +75,7 @@ func fenceBridge(t *testing.T) (*Bridge, *guestProv, *fakeSandboxd, *sandboxGate
 	prov.targets = []corepkg.Target{{ID: "c", Provider: "codex"}}
 	b, root := sandboxBridge(t, gw, sbx, SandboxBorrowed, prov.sandboxProv)
 	b.cores["core-a"] = coreEntry{provider: prov, endpoint: b.cores["core-a"].endpoint}
-	return b, prov, sbx, gw, filepath.Join(root, sandboxSpaceName(driveKey{room: "room-1", core: "core-a", provider: "codex", requester: "bob"}))
+	return b, prov, sbx, gw, filepath.Join(root, sandboxSpaceName(driveKey{room: "room-1", core: "core-a", provider: "codex", requester: "bob"}, ""))
 }
 
 func (b *Bridge) sandboxedSession() *roomSession {

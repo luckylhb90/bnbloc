@@ -37,3 +37,11 @@ export function liveRouteFromHash(hash: string): { roomId: string; jobId: string
 export function liveRouteHash(roomId: string, jobId: string): string {
   return `#/live/${encodeURIComponent(roomId)}/${encodeURIComponent(jobId)}`;
 }
+
+// isAuxWindow: this page is a torn-out window (a preview, a people chat or a
+// live page) rather than an app window. It shows the account of the window
+// that opened it, which the desktop shell binds when it creates the window.
+export function isAuxWindow(): boolean {
+  const hash = window.location.hash;
+  return isPreviewRoute() !== null || peopleChatRoomFromHash(hash) !== null || liveRouteFromHash(hash) !== null;
+}

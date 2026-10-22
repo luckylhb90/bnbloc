@@ -125,15 +125,18 @@ pub(super) fn mounts_dir(member: &Path) -> PathBuf {
         .join(MOUNTS_DIR)
 }
 
-/// `<workspaces root>/.mounts`: every component's copies.
-pub(super) fn mirror_root() -> Option<PathBuf> {
-    sandbox::workspaces_root().map(|root| root.join(MIRROR_DIR))
+/// `<workspaces root>/.mounts/<account>`: the copies of every component of
+/// one account (`scope` is its account directory's name): two accounts'
+/// plugins never write one folder, and one account's sweep never judges
+/// another's.
+pub(super) fn mirror_root(scope: &str) -> Option<PathBuf> {
+    sandbox::workspaces_root().map(|root| root.join(MIRROR_DIR).join(scope))
 }
 
 /// Forget the descriptors, data dirs and copies of plugins `live` no longer
-/// lists.
-pub(super) fn sweep_member(member: &Path, live: &HashSet<String>) {
-    sweep_dirs(member, mirror_root().as_deref(), live);
+/// lists (`mirror` is the account's copies folder, `mirror_root`).
+pub(super) fn sweep_member(member: &Path, mirror: Option<&Path>, live: &HashSet<String>) {
+    sweep_dirs(member, mirror, live);
 }
 
 fn sweep_dirs(member: &Path, mirror: Option<&Path>, live: &HashSet<String>) {
@@ -255,7 +258,7 @@ impl Adapter {
             return Ok(None);
         }
         let member = self.member_dir()?;
-        let job = job_env(spec, &member, mirror_root().as_deref())?;
+        let job = job_env(spec, &member, mirror_root(&self.scope).as_deref())?;
         for (key, value) in job.env {
             cmd.env(key, value);
         }

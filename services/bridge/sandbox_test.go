@@ -342,7 +342,7 @@ func TestSandbox_borrowedDriveRunsInTheSpace_withAFreshSpaceTokenPerTurn(t *test
 	b.runBridgeJob(ctx, job("job-2", "bob"))
 
 	// bob's turns take bob's seat: a space and workdir of their own.
-	space := sandboxSpaceName(driveKey{room: "room-1", core: "core-a", provider: "codex", requester: "bob"})
+	space := sandboxSpaceName(driveKey{room: "room-1", core: "core-a", provider: "codex", requester: "bob"}, "")
 	workdir := filepath.Join(root, space)
 	if fi, err := os.Stat(workdir); err != nil || !fi.IsDir() || fi.Mode().Perm() != 0o700 {
 		t.Fatalf("workspace dir %s: %v %v", workdir, fi, err)
@@ -791,22 +791,60 @@ func TestParseSandboxMode(t *testing.T) {
 }
 
 func TestSandboxSpaceName(t *testing.T) {
-	a := sandboxSpaceName(driveKey{room: "room-1", core: "core-a", provider: "codex"})
-	if a != sandboxSpaceName(driveKey{room: "room-1", core: "core-a", provider: "codex"}) || a == sandboxSpaceName(driveKey{room: "room-1", core: "core-a", provider: "claude"}) || a == sandboxSpaceName(driveKey{room: "room-2", core: "core-a", provider: "codex"}) {
+	a := sandboxSpaceName(driveKey{room: "room-1", core: "core-a", provider: "codex"}, "")
+	if a != sandboxSpaceName(driveKey{room: "room-1", core: "core-a", provider: "codex"}, "") || a == sandboxSpaceName(driveKey{room: "room-1", core: "core-a", provider: "claude"}, "") || a == sandboxSpaceName(driveKey{room: "room-2", core: "core-a", provider: "codex"}, "") {
 		t.Fatalf("space names must be stable and distinct: %s", a)
 	}
 	// A borrower's seat is a space of its own; the owner's keeps its name.
-	seat := sandboxSpaceName(driveKey{room: "room-1", core: "core-a", provider: "codex", requester: "bob"})
-	if seat == a || seat == sandboxSpaceName(driveKey{room: "room-1", core: "core-a", provider: "codex", requester: "carol"}) {
+	seat := sandboxSpaceName(driveKey{room: "room-1", core: "core-a", provider: "codex", requester: "bob"}, "")
+	if seat == a || seat == sandboxSpaceName(driveKey{room: "room-1", core: "core-a", provider: "codex", requester: "carol"}, "") {
 		t.Fatalf("seats share a space: %s", seat)
 	}
 	// The own machine's space is a space of its own.
-	if own := sandboxSpaceName(driveKey{room: "room-1", core: "core-a", provider: "codex", ownMachine: true}); own == a {
+	if own := sandboxSpaceName(driveKey{room: "room-1", core: "core-a", provider: "codex", ownMachine: true}, ""); own == a {
 		t.Fatalf("the own machine shares the space name %s", own)
 	}
-	long := sandboxSpaceName(driveKey{room: "r", core: "A Very Long Core Name", provider: "acp:hermes/agent"})
+	long := sandboxSpaceName(driveKey{room: "r", core: "A Very Long Core Name", provider: "acp:hermes/agent"}, "")
 	if len("sp-"+long) > 32 || strings.ContainsAny(long, " :/_.") {
 		t.Fatalf("unsafe space name %q", long)
+	}
+}
+
+// Two accounts on one computer, with agents of one core and provider in one
+// room, never share a space (or its workspace folder): the name carries the
+// account the bridge serves (docs/prd/2026-10-22-multi-account.md §2.4).
+func TestSandboxSpaceNameIsPerAccount(t *testing.T) {
+	k := driveKey{room: "room-1", core: "core-a", provider: "codex"}
+	maya := BridgeAccount("https://gw.example.com/", "maya")
+	jack := BridgeAccount("https://gw.example.com", "jack")
+	elsewhere := BridgeAccount("https://other.example.com", "maya")
+	if maya != BridgeAccount("https://gw.example.com", " maya ") {
+		t.Fatalf("one account has one name: %q", maya)
+	}
+	names := map[string]string{
+		"none":      sandboxSpaceName(k, ""),
+		"maya":      sandboxSpaceName(k, maya),
+		"jack":      sandboxSpaceName(k, jack),
+		"elsewhere": sandboxSpaceName(k, elsewhere),
+	}
+	seen := map[string]string{}
+	for who, name := range names {
+		if prev, dup := seen[name]; dup {
+			t.Fatalf("%s and %s share the space %s", who, prev, name)
+		}
+		seen[name] = who
+		if len("sp-"+name) > 32 {
+			t.Fatalf("%s: %q is too long for a guest user", who, name)
+		}
+	}
+	// A bridge that serves no known account keeps the names an agent had.
+	if BridgeAccount("", "maya") != "" || BridgeAccount("https://gw.example.com", "") != "" {
+		t.Fatal("an unknown account must be empty")
+	}
+	// Borrowed seats are per account too.
+	bob := driveKey{room: "room-1", core: "core-a", provider: "codex", requester: "bob"}
+	if sandboxSpaceName(bob, maya) == sandboxSpaceName(bob, jack) {
+		t.Fatal("a seat of two accounts shares a space")
 	}
 }
 

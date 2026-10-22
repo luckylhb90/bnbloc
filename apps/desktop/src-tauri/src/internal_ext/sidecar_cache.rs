@@ -9,7 +9,7 @@ use crate::internal_ext::sidecar_fetch::FetchError;
 use crate::internal_ext::sidecar_model::{GatewayAccess, SidecarSpec};
 use crate::internal_ext::sidecar_util::{
     artifact_download_url, cache_file_name, direct_download_url, download_message, hex_lower,
-    set_executable, stale_cache_files,
+    set_executable,
 };
 use crate::internal_ext::Adapter;
 
@@ -42,35 +42,7 @@ impl Adapter {
             format!("{} is already downloaded", spec.name)
         };
         self.set_status(&id, "ready", message, None);
-        // Only the verified binary for the current spec stays cached.
-        let keep = cache_file_name(&id, artifact.sha256.as_str());
-        self.remove_cached_binaries(&id, &keep);
         Ok(cache_path)
-    }
-
-    /// Delete cached binaries (and stale partial downloads) of component `id`
-    /// except `keep` (an uninstalled component's binaries go with the
-    /// reconcile's sweep, sidecar_sweep). Best-effort and off the async
-    /// runtime.
-    fn remove_cached_binaries(&self, id: &str, keep: &str) {
-        let Ok(dir) = self.dirs().map(crate::dirs::Dirs::binaries) else {
-            return;
-        };
-        let id = id.to_string();
-        let keep = Some(keep.to_string());
-        tauri::async_runtime::spawn_blocking(move || {
-            let Ok(entries) = std::fs::read_dir(&dir) else {
-                return;
-            };
-            let names: Vec<String> = entries
-                .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
-                .collect();
-            for name in stale_cache_files(&names, &id, keep.as_deref()) {
-                if let Err(e) = std::fs::remove_file(dir.join(&name)) {
-                    eprintln!("[sidecar-manager:{id}] could not remove cached {name}: {e}");
-                }
-            }
-        });
     }
 
     fn cache_path(&self, id: &str, sha256: &Sha256Pin) -> Result<PathBuf, String> {

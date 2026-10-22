@@ -32,7 +32,7 @@ use crate::internal_ext::sidecar_model::GatewayAccess;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const READ_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 /// Total bound for small JSON API calls (catalog, acks).
-pub(super) const API_TIMEOUT: Duration = Duration::from_secs(30);
+pub(crate) const API_TIMEOUT: Duration = Duration::from_secs(30);
 /// Bound on the error text kept from a refusal.
 const MAX_REASON_BYTES: usize = 512;
 
@@ -104,6 +104,41 @@ pub(crate) fn client() -> Result<reqwest::Client, String> {
                 .map_err(|e| format!("build http client: {e}"))
         })
         .clone()
+}
+
+/// One JSON POST to the gateway outside a member session: a sign-in call (the
+/// credential is in the body: fork, renew, exchange, logout) or, with a
+/// bearer, one made as a session the caller holds (a tenant switch). The
+/// answer is read once by `check`; its body is returned.
+pub(crate) async fn post_json(
+    base_url: &str,
+    path: &str,
+    bearer: Option<&str>,
+    body: &serde_json::Value,
+    timeout: Duration,
+) -> Result<Vec<u8>, GatewayError> {
+    let failed = |reason: String| GatewayError::Failed {
+        status: None,
+        reason,
+    };
+    let http = client().map_err(failed)?;
+    let mut request = http
+        .post(format!("{base_url}{path}"))
+        .timeout(timeout)
+        .header("content-type", "application/json")
+        .body(body.to_string());
+    if let Some(token) = bearer {
+        request = request.bearer_auth(token);
+    }
+    let resp = request
+        .send()
+        .await
+        .map_err(|e| failed(format!("gateway unreachable: {}", e.without_url())))?;
+    let resp = check(resp).await?;
+    resp.bytes()
+        .await
+        .map(|raw| raw.to_vec())
+        .map_err(|e| failed(format!("gateway answer unreadable: {}", e.without_url())))
 }
 
 impl GatewayAccess {

@@ -14,7 +14,7 @@ import {
   type DesktopSettings,
   type CoreConfig,
 } from "@/lib/desktop";
-import { setGatewayBase, inDesktopShell } from "@/lib/config";
+import { inDesktopShell } from "@/lib/config";
 import { api, type Core, type ReleaseFile } from "@/lib/api";
 import { Button } from "@/ui/Button";
 import { Input, Field } from "@/ui/Input";
@@ -34,7 +34,6 @@ import { AgentCoreEmptyState } from "@/views/AgentCoreEmptyState";
 import { DesktopUpdatePanel } from "@/views/DesktopUpdates";
 import { ReleaseDownloadButton } from "@/views/ReleaseDownloadButton";
 import { PlatformAgentsHint } from "@/views/PlatformAgentsHint";
-import { EmailInput } from "@/views/UserName";
 import { errorText } from "@/lib/errors";
 import { refreshMyAgents, useMyAgents } from "@/lib/queries";
 
@@ -220,7 +219,6 @@ export function Agents() {
     setSaving(true);
     try {
       await desktop.setSettings(settings);
-      if (settings.gatewayUrl) setGatewayBase(settings.gatewayUrl);
       setDirty(false);
       toast.success("Settings saved");
     } catch (e) {
@@ -444,12 +442,13 @@ export function Agents() {
 
               <Card className="p-4">
                 <div className="flex flex-col gap-4">
-                  <Field label="Gateway URL" hint="The bnbloc control-plane address, e.g. https://bnbloc.example.com">
-                    <Input
-                      value={settings.gatewayUrl}
-                      placeholder="https://bnbloc.example.com"
-                      onChange={(e) => update({ gatewayUrl: e.target.value })}
-                    />
+                  <Field
+                    label="Account"
+                    hint="This window's account: its agents, plugins and sandbox run on this computer as it. The settings below are its own, except Single-host mode, which is the computer's."
+                  >
+                    <p className="tabular text-sm text-[var(--color-fg)]">
+                      {settings.owner} <span className="text-[var(--color-fg-muted)]">on {settings.gatewayUrl}</span>
+                    </p>
                   </Field>
                   <Field
                     label="Gateway token"
@@ -460,13 +459,6 @@ export function Agents() {
                       value={settings.gatewayToken}
                       placeholder="paste an access token"
                       onChange={(e) => update({ gatewayToken: e.target.value })}
-                    />
-                  </Field>
-                  <Field label="Owner" hint="The member this client acts for">
-                    <EmailInput
-                      value={settings.owner}
-                      placeholder="your-subject"
-                      onChange={(e) => update({ owner: e.target.value })}
                     />
                   </Field>
                   <Field

@@ -3,6 +3,7 @@
 //! and thin config/status IPC only — no business logic (that stays in the
 //! control plane and the bridge/core).
 
+mod account;
 mod app_commands;
 mod artifact_scheme;
 mod bridge;
@@ -10,174 +11,157 @@ mod child_process;
 mod dirs;
 mod files;
 mod internal_ext;
+mod keeper;
 mod local_files;
 mod previewer_scheme;
+mod runtime;
 mod secret;
 mod settings;
 mod shell_env;
 mod site_scheme;
 mod sso_deep_link;
 mod updater_client;
-
-use std::path::PathBuf;
-
-use parking_lot::Mutex;
+mod windows;
 
 use serde_json::json;
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
 
-use bridge::{Status, Supervisor};
-use settings::{gateway_url, Settings};
-
-/// The main window's label. Its close ends the app; any other window (the
-/// `preview-*` pop-outs) is just a view and never touches supervision.
-pub(crate) const MAIN_WINDOW: &str = "main";
+use bridge::Status;
+use runtime::{Account, AccountEntry, Registry};
+use settings::Settings;
 
 /// Bound on the app-exit stop of the bridge + sidecars (graceful, then kill).
 const EXIT_GRACE: std::time::Duration = std::time::Duration::from_secs(3);
 
-/// App-managed supervisor handle.
-struct AppState {
-    supervisor: Supervisor,
-    /// Cached last-known settings; written only by `update_settings`.
-    settings: Mutex<Settings>,
-    settings_path: Option<PathBuf>,
+/// The bridge of the account the window shows.
+#[tauri::command]
+fn bridge_status(account: Account) -> Status {
+    account.supervisor.status()
 }
 
-impl AppState {
-    /// The one writer of the settings: `edit` changes the current settings
-    /// under the lock, the result is saved, then cached and returned.
-    fn update_settings(&self, edit: impl FnOnce(&mut Settings)) -> Result<Settings, String> {
-        let mut current = self.settings.lock();
-        let path = self
-            .settings_path
-            .as_deref()
-            .ok_or("settings dir unavailable")?;
-        let mut next = current.clone();
-        edit(&mut next);
-        settings::save(path, &next)?;
-        *current = next.clone();
-        Ok(next)
-    }
+/// Serve the account's agents from this computer: start its bridge, or
+/// restart it when it runs (the supervisor stops the current run first). The
+/// person's switch, kept.
+#[tauri::command]
+fn bridge_start(account: Account) -> Result<(), String> {
+    account.set_serving(true)
 }
 
 #[tauri::command]
-fn bridge_status(state: State<'_, AppState>) -> Status {
-    state.supervisor.status()
+fn bridge_stop(account: Account) -> Result<(), String> {
+    account.set_serving(false)
 }
 
-/// Start the bridge, or restart it when it runs (the supervisor stops the
-/// current run first): the one start/restart command.
+/// The settings of the account the window shows: the machine's and its own.
 #[tauri::command]
-fn bridge_start(state: State<'_, AppState>) -> Result<(), String> {
-    let settings = state.settings.lock().clone();
-    state.supervisor.start(settings)
-}
-
-#[tauri::command]
-fn bridge_stop(state: State<'_, AppState>) -> Result<(), String> {
-    state.supervisor.stop();
-    Ok(())
-}
-
-#[tauri::command]
-fn get_settings(state: State<'_, AppState>) -> Settings {
-    state.settings.lock().clone()
+fn get_settings(account: Account) -> Settings {
+    account.settings()
 }
 
 /// The web's settings form.
 #[tauri::command]
-fn set_settings(state: State<'_, AppState>, settings: Settings) -> Result<(), String> {
-    let settings = state.update_settings(|current| *current = settings)?;
-    // Apply immediately: (re)start if runnable, else stop.
-    if settings.is_runnable() {
-        state.supervisor.start(settings)?;
-    } else {
-        state.supervisor.stop();
-    }
-    Ok(())
+fn set_settings(
+    account: Account,
+    registry: State<'_, Registry>,
+    settings: Settings,
+) -> Result<(), String> {
+    registry.apply_settings(&account.0, settings)
 }
 
-/// Hand the web session to the shell. The component sidecar manager gets the
-/// session bearer; the bridge supervisor gets the member's refresh token
-/// (memory only), which the bridge renews its own session from — the
-/// supervisor restarts the bridge only when it is running without one. An
-/// empty session token is the web's sign-out: the refresh token and the
-/// manager's session are cleared, the bridge is stopped and the owner it ran
-/// for is forgotten (nothing may keep serving a member who signed out,
-/// docs/bugs/2026-10-22-desktop-sign-out-leaves-the-bridge-serving.md).
-/// Returns immediately: the
-/// catalog refresh runs in the background (a gateway outage must not stall
-/// the UI's boot).
+/// The web's vault, as it is now: one entry per signed-in account, with its
+/// credential and tenant. The shell makes its account runtimes match (creates
+/// the missing, re-scopes a changed tenant, stops and forgets the absent): an
+/// account that leaves the vault stops serving, and its sign-in on the
+/// gateway ends (docs/bugs/2026-10-22-desktop-sign-out-leaves-the-bridge-
+/// serving.md). `revision` is the vault's count of its writes: a snapshot
+/// older than the newest seen is dropped. Returns at once: nothing here waits
+/// for a gateway.
 #[tauri::command]
-fn internal_adapter_session(
-    state: State<'_, AppState>,
-    adapter: State<'_, internal_ext::Adapter>,
+fn accounts_sync(registry: State<'_, Registry>, revision: u64, accounts: Vec<AccountEntry>) {
+    registry.reconcile(revision, accounts);
+}
+
+/// Every account's state beside its name: session, whether it serves agents
+/// from this computer, its bridge and its running turns.
+#[tauri::command]
+fn accounts_status(registry: State<'_, Registry>) -> Vec<runtime::AccountStatus> {
+    registry.statuses()
+}
+
+/// Forget what this computer keeps of an account that is no longer in the
+/// vault (the web asks it after the account's removal, when the person chose to
+/// delete its data). An account that is still live is refused.
+#[tauri::command]
+async fn account_forget_data(
+    registry: State<'_, Registry>,
     gateway_url: String,
-    session_token: String,
-    refresh_token: Option<String>,
-) {
-    if session_token.trim().is_empty() {
-        // Signed out: nothing acts as the member any more (no catalog
-        // fetches, downloads, member stream or plugin chat with the old
-        // session).
-        state.supervisor.set_refresh_token(None);
-        state.supervisor.stop();
-        // Best effort: a settings file that cannot be written must not keep
-        // the bridge from stopping (it is stopped above).
-        let _ = state.update_settings(Settings::forget_member);
-        adapter.update_gateway(&gateway_url, String::new());
-        return;
-    }
-    state.supervisor.set_refresh_token(refresh_token);
-    adapter.update_gateway(&gateway_url, session_token);
-    adapter.start();
-    adapter.refresh_in_background();
+    subject: String,
+) -> Result<(), String> {
+    let key = account::AccountKey::new(&gateway_url, &subject)
+        .ok_or("an account needs a gateway and a subject")?;
+    registry.forget_local_data(&key).await
+}
+
+/// Bind the calling window to an account of the vault (after
+/// `accounts_sync`): every command of the window, and every request of its
+/// pages to the shell's schemes, is that account's.
+#[tauri::command]
+fn window_bind(
+    window: tauri::WebviewWindow,
+    registry: State<'_, Registry>,
+    gateway_url: String,
+    subject: String,
+) -> Result<(), String> {
+    let key = account::AccountKey::new(&gateway_url, &subject)
+        .ok_or("an account needs a gateway and a subject")?;
+    registry.bind(window.label(), &key)
 }
 
 #[tauri::command]
-fn internal_adapter_status(
-    state: State<'_, internal_ext::Adapter>,
-) -> Vec<internal_ext::AdapterStatus> {
-    state.status()
+fn internal_adapter_status(account: Account) -> Vec<internal_ext::AdapterStatus> {
+    account.adapter.status()
 }
 
 /// The member's "apply now" for component updates that wait for the
-/// bridge's running turns to finish (internal_ext/update_gate.rs).
+/// bridges' running turns to finish (internal_ext/update_gate.rs): every
+/// account's, as the turns they wait for are every account's.
 #[tauri::command]
-fn internal_adapter_apply_updates(state: State<'_, internal_ext::Adapter>) {
-    state.apply_pending_now();
+fn internal_adapter_apply_updates(registry: State<'_, Registry>) {
+    for runtime in registry.runtimes() {
+        runtime.adapter.apply_pending_now();
+    }
 }
 
-/// How many agent turns the bridge drives now: an update that restarts it
-/// (the app's own, or a pending component update) warns before cutting them.
+/// How many agent turns every account's bridge drives now: an update that
+/// restarts them (the app's own, or a pending component update) warns before
+/// cutting them.
 #[tauri::command]
-fn bridge_running_turns(state: State<'_, internal_ext::Adapter>) -> u32 {
-    state.running_turns()
+fn bridge_running_turns(registry: State<'_, Registry>) -> u32 {
+    registry.running_turns()
 }
 
 #[tauri::command]
 async fn internal_adapter_targets(
-    state: State<'_, internal_ext::Adapter>,
+    account: Account,
     name: String,
 ) -> Result<serde_json::Value, String> {
-    state.targets(&name).await
+    account.adapter.targets(&name).await
 }
 
 #[tauri::command]
 async fn internal_adapter_auth_status(
-    state: State<'_, internal_ext::Adapter>,
+    account: Account,
     name: String,
 ) -> Result<internal_ext::SidecarAuthStatus, String> {
-    state.auth_status(&name).await
+    account.adapter.auth_status(&name).await
 }
 
 #[tauri::command]
 async fn internal_adapter_login(
-    state: State<'_, internal_ext::Adapter>,
+    account: Account,
     name: String,
 ) -> Result<serde_json::Value, String> {
-    state.login(&name).await
+    account.adapter.login(&name).await
 }
 
 /// Installed components with settings (the Components page): every MCP
@@ -186,9 +170,9 @@ async fn internal_adapter_login(
 /// returned.
 #[tauri::command]
 fn component_settings(
-    state: State<'_, internal_ext::Adapter>,
+    account: Account,
 ) -> Result<Vec<internal_ext::ComponentSettingsView>, String> {
-    state.component_settings()
+    account.adapter.component_settings()
 }
 
 /// Store the member's own values of a component's settings on this machine
@@ -196,52 +180,56 @@ fn component_settings(
 /// clears keys) and restart a plugin with them. Never sent to the gateway.
 #[tauri::command]
 fn component_settings_save(
-    state: State<'_, internal_ext::Adapter>,
+    account: Account,
     kind: String,
     name: String,
     values: std::collections::BTreeMap<String, String>,
     clear: Vec<String>,
 ) -> Result<(), internal_ext::SettingsSaveError> {
-    state.save_component_settings(&kind, &name, values, clear)
+    account
+        .adapter
+        .save_component_settings(&kind, &name, values, clear)
 }
 
 /// Installed plugins that provide skills (the skills panel their card opens),
-/// with their state.
+/// with their account.adapter.
 #[tauri::command]
-fn skills_providers(
-    state: State<'_, internal_ext::Adapter>,
-) -> Vec<internal_ext::SkillsProviderView> {
-    state.skills_providers()
+fn skills_providers(account: Account) -> Vec<internal_ext::SkillsProviderView> {
+    account.adapter.skills_providers()
 }
 
 /// A skills provider's state (`bnbloc.skills.provider/v1`, GET /v1/state).
 #[tauri::command]
 async fn skills_provider_state(
-    state: State<'_, internal_ext::Adapter>,
+    account: Account,
     plugin: String,
 ) -> Result<serde_json::Value, String> {
-    state.skills_provider_state(&plugin).await
+    account.adapter.skills_provider_state(&plugin).await
 }
 
-/// Replace a skills provider's settings (PUT /v1/settings); answers its state.
+/// Replace a skills provider's settings (PUT /v1/settings); answers its account.adapter.
 #[tauri::command]
 async fn skills_provider_settings(
-    state: State<'_, internal_ext::Adapter>,
+    account: Account,
     plugin: String,
     settings: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    state.skills_provider_apply(&plugin, settings).await
+    account
+        .adapter
+        .skills_provider_apply(&plugin, settings)
+        .await
 }
 
 /// One skill packed by its provider (POST /v1/pack): its hash, a line feed,
 /// then the tar, as raw bytes.
 #[tauri::command]
 async fn skills_provider_pack(
-    state: State<'_, internal_ext::Adapter>,
+    account: Account,
     plugin: String,
     name: String,
 ) -> Result<tauri::ipc::Response, String> {
-    state
+    account
+        .adapter
         .skills_provider_pack(&plugin, &name)
         .await
         .map(tauri::ipc::Response::new)
@@ -268,17 +256,14 @@ async fn skills_pick_folder(app: tauri::AppHandle) -> Result<Option<String>, Str
 /// Sign the member in to an MCP tool that takes an OAuth sign-in: the tool's
 /// sign-in page opens in the browser; the tokens stay on this machine.
 #[tauri::command]
-async fn mcp_tool_sign_in(
-    state: State<'_, internal_ext::Adapter>,
-    tool: String,
-) -> Result<(), String> {
-    state.sign_in_mcp_tool(&tool).await
+async fn mcp_tool_sign_in(account: Account, tool: String) -> Result<(), String> {
+    account.adapter.sign_in_mcp_tool(&tool).await
 }
 
 /// Forget the member's sign-in to an MCP tool on this machine.
 #[tauri::command]
-fn mcp_tool_sign_out(state: State<'_, internal_ext::Adapter>, tool: String) -> Result<(), String> {
-    state.sign_out_mcp_tool(&tool)
+fn mcp_tool_sign_out(account: Account, tool: String) -> Result<(), String> {
+    account.adapter.sign_out_mcp_tool(&tool)
 }
 
 #[tauri::command]
@@ -292,33 +277,20 @@ fn app_info(app: tauri::AppHandle) -> serde_json::Value {
     })
 }
 
-/// Detach every supervised child (bridge + component sidecars) for one joint
-/// stop. Used at app exit and before an update install.
+/// Detach every supervised child (every account's bridge and component
+/// sidecars) for one joint stop. Used at app exit and before an update
+/// install.
 pub(crate) fn detach_children(app: &tauri::AppHandle) -> Vec<child_process::Child> {
-    let mut children = Vec::new();
-    if let Some(state) = app.try_state::<AppState>() {
-        children.extend(state.supervisor.detach());
-    }
-    if let Some(adapter) = app.try_state::<internal_ext::Adapter>() {
-        children.extend(adapter.detach_all());
-    }
-    children
+    app.try_state::<Registry>()
+        .map(|registry| registry.detach_all())
+        .unwrap_or_default()
 }
 
-/// Bring the bridge and the sidecar manager back up (after a failed update
-/// install stopped them).
+/// Bring every account's bridge and sidecar manager back up (after a failed
+/// update install stopped them).
 pub(crate) fn resume_children(app: &tauri::AppHandle) {
-    if let Some(state) = app.try_state::<AppState>() {
-        let settings = state.settings.lock().clone();
-        if settings.is_runnable() {
-            if let Err(e) = state.supervisor.start(settings) {
-                eprintln!("[shell] bridge restart after failed update: {e}");
-            }
-        }
-    }
-    if let Some(adapter) = app.try_state::<internal_ext::Adapter>() {
-        adapter.start();
-        adapter.refresh_in_background();
+    if let Some(registry) = app.try_state::<Registry>() {
+        registry.resume_all();
     }
 }
 
@@ -333,13 +305,6 @@ async fn shell_env_reload(app: tauri::AppHandle) -> shell_env::Reloaded {
     reloaded
 }
 
-/// Whether closing this window ends the app (and with it the bridge and the
-/// sidecars). Only the main window does; preview and people-chat pop-outs
-/// never do.
-fn window_close_ends_app(label: &str) -> bool {
-    label == MAIN_WINDOW
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
@@ -350,10 +315,7 @@ pub fn run() {
         // window and exits; with the `deep-link` feature its argv link is
         // forwarded to the deep-link handler first.
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
-            if let Some(win) = app.get_webview_window(MAIN_WINDOW) {
-                let _ = win.show();
-                let _ = win.set_focus();
-            }
+            windows::focus_app_window(app);
             // `bnbloc-desktop <file>` while the app runs: open it here.
             local_files::hand(app, local_files::paths_in_args(&args));
         }))
@@ -367,39 +329,36 @@ pub fn run() {
         })
         // Installed previewer bundles, sha256-verified from the member
         // catalog, each from this scheme's origin (see previewer_scheme).
-        .manage(internal_ext::previewer_cache::PreviewerBundles::default())
         .register_asynchronous_uri_scheme_protocol(
             previewer_scheme::SCHEME,
             |ctx, request, responder| {
-                previewer_scheme::handle(ctx.app_handle(), request, responder)
+                previewer_scheme::handle(ctx.app_handle(), ctx.webview_label(), request, responder)
             },
         )
         // Web-app (site) artifacts: the gateway's ticketed site route,
         // proxied without a session (see site_scheme).
         .register_asynchronous_uri_scheme_protocol(
             site_scheme::SCHEME,
-            |ctx, request, responder| site_scheme::handle(ctx.app_handle(), request, responder),
+            |ctx, request, responder| {
+                site_scheme::handle(ctx.app_handle(), ctx.webview_label(), request, responder)
+            },
         )
         .setup(|app| {
             // Start resolving the member's shell environment now: the first
             // child spawn waits for it (shell_env).
             tauri::async_runtime::spawn(shell_env::current());
             let handle = app.handle().clone();
-            let supervisor = Supervisor::new(handle.clone());
             let dirs = dirs::Dirs::resolve(&handle);
             if let Err(e) = &dirs {
                 eprintln!("[shell] app dirs unavailable: {e}");
             }
-            let settings_path = dirs.as_ref().ok().map(dirs::Dirs::settings_file);
-            let settings = match settings_path.as_deref().map(settings::load) {
-                Some(Ok(settings)) => settings,
-                Some(Err(e)) => {
-                    // Shown in the bridge log (Agents); the unreadable file
-                    // was moved aside, never overwritten.
-                    supervisor.note(format!("[settings] {e}; starting unconfigured"));
-                    Settings::default()
-                }
-                None => Settings::default(),
+            let machine = match dirs.as_ref().ok().map(|d| d.settings_file()) {
+                Some(path) => account::load_machine_settings(&path).unwrap_or_else(|e| {
+                    // The unreadable file was moved aside, never overwritten.
+                    eprintln!("[settings] {e}; starting with the defaults");
+                    account::MachineSettings::default()
+                }),
+                None => account::MachineSettings::default(),
             };
             sso_deep_link::setup(&handle);
             app.manage(local_files::LocalFiles::load(
@@ -419,8 +378,8 @@ pub fn run() {
             // reads window.__BNBLOC_GATEWAY__. With no configured gateway this
             // is the build's BNBLOC_DEFAULT_GATEWAY, or empty (the user picks a
             // gateway in the UI) — never a baked-in deployment host.
-            let gateway = gateway_url(&settings);
-            tauri::WebviewWindowBuilder::new(app, MAIN_WINDOW, tauri::WebviewUrl::default())
+            let gateway = settings::default_gateway();
+            tauri::WebviewWindowBuilder::new(app, windows::MAIN, tauri::WebviewUrl::default())
                 .title("bnbloc")
                 .inner_size(1200.0, 820.0)
                 .min_inner_size(720.0, 560.0)
@@ -432,31 +391,35 @@ pub fn run() {
                 .initialization_script(gateway_init_script(&gateway))
                 .build()?;
 
-            // Auto-start the bridge when the user is already configured.
-            if settings.is_runnable() {
-                let _ = supervisor.start(settings.clone());
-            }
-
-            // Desktop builds supervise installed Components sidecars only; the
-            // package catalog supplies names, artifacts, and launch metadata.
-            let adapter = internal_ext::Adapter::new(handle.clone(), dirs, &gateway);
-            adapter.start();
-            app.manage(adapter);
-
-            app.manage(AppState {
-                supervisor,
-                settings: Mutex::new(settings),
-                settings_path,
-            });
+            // The accounts come with the web's vault (`accounts_sync`): each
+            // gets its own runtime when the page hands it over.
+            let status_app = handle.clone();
+            app.manage(Registry::new(
+                dirs,
+                machine,
+                std::sync::Arc::new(move |key, status| {
+                    let Some(registry) = status_app.try_state::<Registry>() else {
+                        return;
+                    };
+                    for label in registry.windows_of(key) {
+                        let _ = status_app.emit_to(label, runtime::STATUS_EVENT, status);
+                    }
+                }),
+            ));
             Ok(())
         })
         .on_window_event(|window, event| {
-            // Closing the main window quits the app; the exit handler below
-            // stops the bridge and sidecars. Closing a preview pop-out is just
-            // a window close.
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
-                if window_close_ends_app(window.label()) {
-                    window.app_handle().exit(0);
+            // A window that is gone shows no account any more; the app ends
+            // with its last app window (the exit handler below stops every
+            // account's bridge and sidecars). Closing a pop-out is just a
+            // window close.
+            if let tauri::WindowEvent::Destroyed = event {
+                let app = window.app_handle();
+                if let Some(registry) = app.try_state::<Registry>() {
+                    registry.unbind(window.label());
+                }
+                if windows::closing_ends_app(app, window.label()) {
+                    app.exit(0);
                 }
             }
         })
@@ -466,7 +429,10 @@ pub fn run() {
             bridge_stop,
             get_settings,
             set_settings,
-            internal_adapter_session,
+            accounts_sync,
+            accounts_status,
+            account_forget_data,
+            window_bind,
             internal_adapter_status,
             internal_adapter_apply_updates,
             bridge_running_turns,
@@ -486,6 +452,7 @@ pub fn run() {
             updater_client::check_update,
             updater_client::install_update,
             app_commands::open_url,
+            app_commands::open_account_window,
             app_commands::pop_out_preview,
             app_commands::pop_out_people_chat,
             app_commands::pop_out_live,
@@ -504,7 +471,7 @@ pub fn run() {
             // A pending cold-start SSO link is applied once the main page has
             // FINISHED loading: on `Started` the SPA is not there yet and the
             // one-shot link would be consumed into a page that discards it.
-            if webview.label() == MAIN_WINDOW
+            if windows::is_app_window(webview.label())
                 && matches!(payload.event(), tauri::webview::PageLoadEvent::Finished)
             {
                 sso_deep_link::on_page_load(webview);
@@ -516,7 +483,14 @@ pub fn run() {
     app.run(|app, event| match event {
         // App exit (quit, main window closed, updater restart): stop the
         // bridge and every sidecar together — gracefully, then forced.
-        tauri::RunEvent::Exit => child_process::terminate_all(detach_children(app), EXIT_GRACE),
+        tauri::RunEvent::Exit => {
+            child_process::terminate_all(detach_children(app), EXIT_GRACE);
+            // Then every account's own sign-in on the gateway ends, so a
+            // restart leaves no dangling sign-ins in the member's list.
+            if let Some(registry) = app.try_state::<Registry>() {
+                registry.revoke_all();
+            }
+        }
         // macOS Open With / a double-click on an associated document.
         #[cfg(target_os = "macos")]
         tauri::RunEvent::Opened { urls } => {
@@ -537,14 +511,6 @@ pub(crate) fn gateway_init_script(gateway: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn only_the_main_window_close_ends_the_app() {
-        assert!(window_close_ends_app("main"));
-        assert!(!window_close_ends_app("preview-artifact-1"));
-        assert!(!window_close_ends_app("preview-main"));
-        assert!(!window_close_ends_app("people-room-1"));
-    }
 
     #[test]
     fn crate_version_matches_the_bundle_version_source() {

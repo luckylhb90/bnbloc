@@ -54,7 +54,7 @@ use tauri::http::{header, HeaderMap, HeaderName, Method, Request, Response, Stat
 use tauri::{AppHandle, Manager, UriSchemeResponder};
 use tokio::sync::watch;
 
-use crate::internal_ext::Adapter;
+use crate::runtime::Registry;
 
 /// Scheme name; the web side (web/src/lib/siteFrame.ts) builds URLs with it.
 pub(crate) const SCHEME: &str = "bnbloc-site";
@@ -706,7 +706,12 @@ async fn stream_feed(feed: &Feed, url: &str, mut headers: HeaderMap, idle: Durat
 }
 
 /// Handles one scheme request asynchronously (it goes to the network).
-pub(crate) fn handle(app: &AppHandle, request: Request<Vec<u8>>, responder: UriSchemeResponder) {
+pub(crate) fn handle(
+    app: &AppHandle,
+    webview_label: &str,
+    request: Request<Vec<u8>>,
+    responder: UriSchemeResponder,
+) {
     let (parts, body) = request.into_parts();
     let call = match preflight(
         &parts.method,
@@ -719,12 +724,13 @@ pub(crate) fn handle(app: &AppHandle, request: Request<Vec<u8>>, responder: UriS
     };
     let headers = forwarded_headers(&parts.headers);
     let method = parts.method;
-    let app = app.clone();
+    // The gateway of the account the requesting window shows.
+    let gateway = app
+        .try_state::<Registry>()
+        .and_then(|registry| registry.runtime_of_window(webview_label))
+        .map(|runtime| runtime.adapter.gateway_base_url())
+        .unwrap_or_default();
     tauri::async_runtime::spawn(async move {
-        let gateway = app
-            .try_state::<Adapter>()
-            .map(|adapter| adapter.gateway_base_url())
-            .unwrap_or_default();
         if gateway.is_empty() {
             return responder.respond(status_only(StatusCode::SERVICE_UNAVAILABLE));
         }

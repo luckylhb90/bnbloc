@@ -123,6 +123,14 @@ function isAuthPath(url: string): boolean {
 
 export type FetchImpl = (url: string, init: RequestInit) => Promise<Response>;
 
+// anonymousFetch sends a request with none of this window's session headers:
+// a call that is its own credential (a refresh token, an API token) goes to
+// the gateway of the account it belongs to, which may not be this window's,
+// and must never carry this window's bearer there.
+export function anonymousFetch(url: string, init: RequestInit = {}, fetchImpl: FetchImpl = (u, i) => fetch(u, i)): Promise<Response> {
+  return fetchImpl(url, init);
+}
+
 // authedFetch sends a request with the session headers and, on a 401 only,
 // refreshes the session once and retries with the new bearer. A 403 is an
 // authorization answer (not a stale token) and is returned as-is.

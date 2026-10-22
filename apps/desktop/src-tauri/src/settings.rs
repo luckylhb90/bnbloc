@@ -9,13 +9,11 @@
 //! it is written and read through `files` (owner-only, atomic; an unreadable
 //! file is moved aside, never reset and overwritten).
 
-use std::path::Path;
-
 use serde::{Deserialize, Serialize};
 
 /// One configured agent source (daemon backend). Empty `url`/`token` rely on
 /// the bridge's per-source auto-discovery.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CoreConfig {
     pub name: String,
@@ -34,7 +32,7 @@ fn default_kind() -> String {
 }
 
 /// The global default agent: used when a room chat names no provider.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct DefaultAgent {
     pub core: String,
@@ -94,17 +92,11 @@ pub struct Settings {
 // talking to someone else's deployment.
 const DEFAULT_GATEWAY_URL: Option<&str> = option_env!("BNBLOC_DEFAULT_GATEWAY");
 
-/// The gateway base URL every part of the shell uses (the page's init
-/// script, the bridge env, the updater, pop-out windows): the configured
-/// one, else the build's default, else empty (not configured); normalized
-/// by `normalize_gateway_url`.
-pub fn gateway_url(settings: &Settings) -> String {
-    let configured = settings.gateway_url.trim();
-    normalize_gateway_url(if configured.is_empty() {
-        DEFAULT_GATEWAY_URL.unwrap_or_default()
-    } else {
-        configured
-    })
+/// The gateway a window starts on before it is bound to an account: the
+/// build's default, or empty (the person picks a gateway in the UI). An
+/// account's own windows start on its gateway.
+pub fn default_gateway() -> String {
+    normalize_gateway_url(DEFAULT_GATEWAY_URL.unwrap_or_default())
 }
 
 /// The one spelling of a gateway origin: trimmed, no trailing slash.
@@ -113,14 +105,6 @@ pub fn normalize_gateway_url(raw: &str) -> String {
 }
 
 impl Settings {
-    /// Forget the member this client acted for (sign-out): no owner or tenant
-    /// is left, so nothing restarts the bridge as them. The gateway, cores and
-    /// machine-level choices stay: they are not the member's.
-    pub fn forget_member(&mut self) {
-        self.owner.clear();
-        self.tenant.clear();
-    }
-
     /// True when the minimum fields to run the bridge are present. The bridge
     /// itself only requires a gateway and an owner (`services/bridge/cmd`);
     /// with no configured core it runs idle until cores are installed or
@@ -130,38 +114,9 @@ impl Settings {
     }
 }
 
-/// Load settings: a missing file is a fresh, unconfigured client; an
-/// unreadable one is moved aside and reported (`Err`), so the caller shows it
-/// instead of saving defaults over the member's credentials. An existing file
-/// is re-tightened to owner-only on load.
-pub fn load(path: &Path) -> Result<Settings, String> {
-    let _ = restrict_to_owner(path);
-    crate::files::read_json(path).map(Option::unwrap_or_default)
-}
-
-/// Persist settings atomically with owner-only permissions.
-pub fn save(path: &Path, settings: &Settings) -> Result<(), String> {
-    let raw = serde_json::to_vec_pretty(settings).map_err(|e| e.to_string())?;
-    crate::files::atomic_write(path, &raw)
-}
-
-#[cfg(unix)]
-fn restrict_to_owner(path: &Path) -> std::io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
-}
-
-#[cfg(not(unix))]
-fn restrict_to_owner(_path: &Path) -> std::io::Result<()> {
-    // Windows: the app data dir is already per-user (ACL-scoped).
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    const SETTINGS_FILE: &str = "settings.json";
 
     #[test]
     fn empty_settings_stay_coreless() {
@@ -218,105 +173,14 @@ mod tests {
     }
 
     #[test]
-    fn save_writes_owner_only_and_round_trips() {
-        let dir = std::env::temp_dir().join(format!("bnbloc-settings-test-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let path = dir.join(SETTINGS_FILE);
-        let settings = Settings {
-            gateway_url: "https://gw.example".into(),
-            owner: "me".into(),
-            gateway_token: "secret".into(),
-            ..Default::default()
-        };
-
-        save(&path, &settings).expect("save settings");
-        // A second save replaces the file in place (temp + rename).
-        save(&path, &settings).expect("re-save settings");
-
-        let loaded = load(&path).expect("load");
-        assert_eq!(loaded.gateway_url, "https://gw.example");
-        assert_eq!(loaded.gateway_token, "secret");
-        assert_eq!(
-            std::fs::read_dir(&dir).expect("list").count(),
-            1,
-            "no temp left"
-        );
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mode = std::fs::metadata(&path).expect("stat").permissions().mode();
-            assert_eq!(mode & 0o777, 0o600, "settings must be owner-only");
-        }
-        std::fs::remove_dir_all(&dir).expect("cleanup");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn load_tightens_a_world_readable_file() {
-        use std::os::unix::fs::PermissionsExt;
-        let dir = std::env::temp_dir().join(format!("bnbloc-settings-perm-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("mkdir");
-        let path = dir.join(SETTINGS_FILE);
-        std::fs::write(&path, br#"{"owner":"me"}"#).expect("write");
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).expect("chmod");
-
-        assert_eq!(load(&path).expect("load").owner, "me");
-        let mode = std::fs::metadata(&path).expect("stat").permissions().mode();
-        assert_eq!(mode & 0o777, 0o600);
-        std::fs::remove_dir_all(&dir).expect("cleanup");
-    }
-
-    #[test]
-    fn unconfigured_gateway_follows_the_build_default() {
-        let resolved = gateway_url(&Settings::default());
+    fn a_window_without_an_account_starts_on_the_build_default() {
         match DEFAULT_GATEWAY_URL {
-            Some(default) => assert_eq!(resolved, normalize_gateway_url(default)),
-            None => assert_eq!(resolved, ""),
+            Some(default) => assert_eq!(default_gateway(), normalize_gateway_url(default)),
+            None => assert_eq!(default_gateway(), ""),
         }
-        let s = Settings {
-            gateway_url: " https://gw.example.com/ ".into(),
-            ..Default::default()
-        };
-        assert_eq!(gateway_url(&s), "https://gw.example.com");
-    }
-
-    #[test]
-    fn signing_out_forgets_the_member_and_nothing_else() {
-        let mut s = Settings {
-            gateway_url: "https://gw.example.com".into(),
-            owner: "maya".into(),
-            tenant: "org-a".into(),
-            disabled_providers: vec!["acme/codex".into()],
-            ..Default::default()
-        };
-        assert!(s.is_runnable());
-        s.forget_member();
-        assert!(!s.is_runnable(), "no owner: the bridge is not runnable as anyone");
-        assert_eq!((s.owner.as_str(), s.tenant.as_str()), ("", ""));
-        assert_eq!(s.gateway_url, "https://gw.example.com");
-        assert_eq!(s.disabled_providers, vec!["acme/codex".to_string()]);
-    }
-
-    #[test]
-    fn missing_file_is_an_unconfigured_client() {
-        let s = load(Path::new("/nonexistent/bnbloc/settings.json")).expect("missing");
-        assert!(!s.is_runnable());
-    }
-
-    /// A corrupt settings file is reported and kept (moved aside), never
-    /// reset to defaults and saved over: it carries the member's tokens.
-    #[test]
-    fn corrupt_settings_are_moved_aside_and_reported() {
-        let dir = std::env::temp_dir().join(format!("bnbloc-settings-bad-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("mkdir");
-        let path = dir.join(SETTINGS_FILE);
-        std::fs::write(&path, br#"{"gatewayToken":"keep"#).expect("write");
-        let err = load(&path).expect_err("corrupt");
-        assert!(err.contains("moved aside"), "{err}");
-        let kept = std::fs::read_dir(&dir).expect("list").count();
-        assert_eq!(kept, 1, "the corrupt copy is kept beside");
-        std::fs::remove_dir_all(&dir).expect("cleanup");
+        assert_eq!(
+            normalize_gateway_url(" https://gw.example.com/ "),
+            "https://gw.example.com"
+        );
     }
 }

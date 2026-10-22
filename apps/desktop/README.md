@@ -104,15 +104,29 @@ the `APPLE_*` env vars at build time; see
 The shell contributes **process supervision and thin config/status IPC only** —
 no business logic. IPC commands (Rust ↔ web):
 
+- `accounts_sync(accounts)`: the accounts the web holds (gateway, subject,
+  tenant, credential). The shell keeps one runtime per account (session
+  keeper, adapter, bridge, settings) and stops and revokes an account that is
+  no longer in the list. `window_bind(gatewayUrl, subject)` binds the calling
+  window to one of them; every command below that is account-scoped answers
+  for the window's account (`accounts_status()` lists them all)
+- `open_account_window(gatewayUrl?, subject?)`: a window bound to that
+  account (one already showing it is brought to the front), or, with neither,
+  a window to sign another account in. The app ends when its last app window
+  closes; pop-outs never count. `account_forget_data(gatewayUrl, subject)`:
+  forget what this computer keeps of an account that left the vault
 - `bridge_status() -> { state, pid?, lastExitCode?, logsTail }`
-- `bridge_start()` (starts, or restarts a running bridge) / `bridge_stop()`
-- `get_settings()` / `set_settings(Settings)`
+- `bridge_start()` / `bridge_stop()`: serve this account's agents from this
+  computer, or stop (the person's switch, kept; a start restarts a running
+  bridge)
+- `get_settings()` / `set_settings(Settings)`: the machine's settings (cores,
+  single-host) and this account's own
 - `component_settings()` / `component_settings_save(kind, name, values,
   clear)`: the member's own values of a plugin, MCP tool or the sandbox
   (Components → a component → Settings)
 - `sandbox_status()` / `sandbox_restart_vm()` / `sandbox_private_hosts_apply()`
   (the sandbox's state on this computer, in its settings dialog)
-- `internal_adapter_session(gatewayUrl, sessionToken)` (+ status/targets/login)
+- `internal_adapter_status` / `_targets` / `_login` / `_auth_status`
 - `check_update(sessionToken)` / `install_update(sessionToken)`
 - `open_url(url)` / `pop_out_preview(roomId, artifactId)`
 - `app_info() -> { version, platform, inShell }`
@@ -124,10 +138,11 @@ pipe the shell holds open; a stop closes it (supervised children exit on EOF),
 SIGTERMs the child's process group on Unix, and force-kills the child's whole
 tree after a grace period (process group on Unix, Job Object on Windows). Children stop only at app exit (quit, main window closed, updater
 restart) — closing a preview pop-out never touches them. A restart waits for
-the run it replaces to stop. The settings file holds credentials and is
-written owner-only (0600) through a temp file unique to each write; an
-unreadable settings file is moved aside (`settings.json.corrupt-<ms>`) and
-reported in the bridge log, never reset and overwritten.
+the run it replaces to stop. The settings files (the machine's, and each
+account's under `accounts/<hash>/`) hold credentials and are written
+owner-only (0600) through a temp file unique to each write; an unreadable one
+is moved aside (`settings.json.corrupt-<ms>`) and reported in the bridge log,
+never reset and overwritten.
 
 ## The member's shell environment
 

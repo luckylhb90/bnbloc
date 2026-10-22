@@ -3,7 +3,9 @@
 //! at startup, and of every directory the shell names below them.
 //!
 //! - cache (rebuildable, machine-wide): sidecar binaries, previewer bundles,
-//!   MCP tool binaries, core manifests, spawn records, sandbox bundles;
+//!   MCP tool binaries, spawn records, sandbox bundles (what a catalog
+//!   decides, the core manifests and the MCP tools index, is the member's:
+//!   `member_dir`);
 //! - config: the member directories (`member_dir`), one per gateway, member
 //!   and tenant;
 //! - data: the settings file and the opened local documents.
@@ -31,6 +33,17 @@ impl Dirs {
                 .app_data_dir()
                 .map_err(|e| format!("resolve the app data dir: {e}"))?,
         })
+    }
+
+    /// Every directory under `root`, for tests that need an adapter without
+    /// an app (the adapter holds no app handle).
+    #[cfg(test)]
+    pub(crate) fn under(root: &Path) -> Self {
+        Self {
+            cache: root.join("cache"),
+            config: root.join("config"),
+            data: root.join("data"),
+        }
     }
 
     /// The persisted shell settings (settings.rs).
@@ -65,13 +78,16 @@ impl Dirs {
         self.cache.join("previewers")
     }
 
-    /// Materialized stdio MCP tool binaries and their index.
+    /// Materialized stdio MCP tool binaries (content-addressed, shared by
+    /// every account; each member's index of them is in its own directory).
     pub(crate) fn mcp_tools(&self) -> PathBuf {
         self.cache.join("mcp-tools")
     }
 
-    /// The manifest cores the bridge reads at spawn.
-    pub(crate) fn manifests(&self) -> PathBuf {
+    /// Where the manifest cores and the MCP tools index used to be kept,
+    /// machine-wide: removed at startup, not migrated (the member
+    /// directories hold them now).
+    pub(crate) fn retired_core_manifests(&self) -> PathBuf {
         self.cache.join("core-manifests")
     }
 

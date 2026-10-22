@@ -6,7 +6,7 @@ use crate::internal_ext::Adapter;
 impl Adapter {
     pub fn status(&self) -> Vec<AdapterStatus> {
         // Read once, outside the lock: what a waiting update waits for.
-        let running = self.running_turns();
+        let running = self.gate_turns();
         let mut statuses: Vec<AdapterStatus> = self
             .inner
             .lock()
@@ -57,13 +57,13 @@ impl Adapter {
         }
     }
 
-    pub(super) fn manifest_dir(&self) -> Option<String> {
-        self.manifest_dir_path()
-            .map(|dir| dir.to_string_lossy().into_owned())
-    }
-
+    /// The manifest cores of the manager's own scope, in that scope's
+    /// member directory: what a catalog decides is the member's, so another
+    /// account's reconcile never rewrites or prunes them.
     fn manifest_dir_path(&self) -> Option<std::path::PathBuf> {
-        self.dirs().ok().map(crate::dirs::Dirs::manifests)
+        self.member_dir()
+            .ok()
+            .map(|dir| dir.join(crate::internal_ext::member_dir::CORE_MANIFESTS_DIR))
     }
 }
 

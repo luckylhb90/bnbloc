@@ -11,6 +11,11 @@
 //! of them. MCP binaries and core manifests follow the catalog where they
 //! are written (the MCP pass, the manifest writer).
 //!
+//! A machine-wide cache is shared by every signed-in account, so it is judged
+//! against what ALL of their catalogs still list (`LiveRegistry::union`), never
+//! against whichever catalog reconciled last: one account's reconcile must not
+//! delete a binary another account runs.
+//!
 //! State is only ever judged against a catalog of its own scope. The
 //! catalog belongs to one member acting in one tenant (a super-admin's
 //! tenant switch hands over a whole other catalog), so what that member
@@ -24,19 +29,27 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+use parking_lot::Mutex;
+
 use crate::internal_ext::kind_runtime::{runtime, KINDS};
 use crate::internal_ext::mcp_tools::{installed_mcp_tools, mcp_keep, McpKeep, SignIns};
 use crate::internal_ext::pin::Sha256Pin;
 use crate::internal_ext::previewer_cache::installed_previewers;
-use crate::internal_ext::sidecar_model::{desktop_components, ComponentKind, ComponentsResponse};
-use crate::internal_ext::sidecar_status::component_id;
-use crate::internal_ext::sidecar_util::{cache_stem, parse_cache_file};
+use crate::internal_ext::sidecar_model::{
+    desktop_components, resolve_component_specs, ComponentKind, ComponentsResponse,
+};
+use crate::internal_ext::sidecar_util::{cache_file_is_live, cache_stem};
 
 /// What the live catalog still has, per kind of thing this desktop keeps.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct Live {
-    /// Cache stems of the desktop components (binary cache names).
-    binaries: HashSet<String>,
+    /// The binary builds the catalog pins: `(cache stem, sha256)` of every
+    /// desktop sidecar's artifact for this platform. Two accounts may pin two
+    /// builds of one component, and both are kept.
+    binaries: HashSet<(String, String)>,
+    /// The sandbox bundle directories the catalog pins: `(cache stem, directory
+    /// name)`.
+    bundles: HashSet<(String, String)>,
     /// The desktop components (cores, plugins, sandboxes) by kind.
     names: HashMap<ComponentKind, HashSet<String>>,
     mcp: McpKeep,
@@ -47,9 +60,17 @@ impl Live {
     pub(super) fn of(catalog: &ComponentsResponse, platform: &str) -> Self {
         let mut live = Live::default();
         for c in desktop_components(catalog) {
-            live.binaries
-                .insert(cache_stem(&component_id(c.kind, &c.name)));
             live.names.entry(c.kind).or_default().insert(c.name.clone());
+        }
+        for spec in resolve_component_specs(catalog, platform).specs {
+            if let Some(pin) = spec.pin() {
+                live.binaries
+                    .insert((cache_stem(&spec.id()), pin.as_str().to_string()));
+            }
+            // A bundle cache holds one directory per component NAME.
+            if let Some(dir) = runtime(spec.kind).bundle_dir(&spec) {
+                live.bundles.insert((cache_stem(&spec.name), dir));
+            }
         }
         live.mcp = mcp_keep(&installed_mcp_tools(catalog, platform));
         live.previewers = installed_previewers(catalog)
@@ -59,12 +80,52 @@ impl Live {
         live
     }
 
+    /// What every one of `lives` still has: the live set of the machine-wide
+    /// caches when several accounts' catalogs are in force at once.
+    pub(super) fn union<'a>(lives: impl IntoIterator<Item = &'a Live>) -> Live {
+        let lives: Vec<&Live> = lives.into_iter().collect();
+        let mut out = Live::default();
+        for live in &lives {
+            out.binaries.extend(live.binaries.iter().cloned());
+            out.bundles.extend(live.bundles.iter().cloned());
+            for (kind, names) in &live.names {
+                out.names
+                    .entry(*kind)
+                    .or_default()
+                    .extend(names.iter().cloned());
+            }
+            out.previewers.extend(live.previewers.iter().cloned());
+        }
+        out.mcp = McpKeep::union(lives.iter().map(|live| &live.mcp));
+        out
+    }
+
+    /// What `self` lists and, besides, the builds in `running` (as `(stem,
+    /// sha256)`): a core that runs keeps the build it runs from, whatever a
+    /// catalog pins by now, or its restart would find no binary.
+    pub(super) fn with_running(
+        mut self,
+        running: impl IntoIterator<Item = (String, String)>,
+    ) -> Self {
+        self.binaries.extend(running);
+        self
+    }
+
     /// The live desktop components of `kind`.
     pub(super) fn names(&self, kind: ComponentKind) -> &HashSet<String> {
         static NONE: std::sync::OnceLock<HashSet<String>> = std::sync::OnceLock::new();
         self.names
             .get(&kind)
             .unwrap_or_else(|| NONE.get_or_init(HashSet::new))
+    }
+
+    /// The sandbox bundle directories of component `stem` the catalog pins.
+    pub(super) fn bundle_dirs(&self, stem: &str) -> HashSet<String> {
+        self.bundles
+            .iter()
+            .filter(|(s, _)| s == stem)
+            .map(|(_, dir)| dir.clone())
+            .collect()
     }
 
     /// The installed MCP tools, and those whose sign-ins the catalog still
@@ -76,6 +137,64 @@ impl Live {
     /// The pins of the installed previewer bundles.
     pub(super) fn previewers(&self) -> &HashSet<Sha256Pin> {
         &self.previewers
+    }
+}
+
+/// The live set of every signed-in account's catalog, by scope: what a
+/// machine-wide sweep judges against (the union), so no account's reconcile
+/// deletes what another account still lists. A scope is set when its
+/// catalog is fetched and removed when its account signs out or changes scope.
+///
+/// An account that has not fetched its catalog yet (it just came up, or its
+/// gateway is slow or down) lists nothing in the registry, so a machine-wide
+/// sweep waits until every account that is live has (`settled`): the first to
+/// reconcile must not delete what the others have cached.
+#[derive(Default)]
+pub(crate) struct LiveRegistry {
+    by_scope: Mutex<HashMap<String, Live>>,
+    /// The adapters that are live and have not registered a catalog yet.
+    unsettled: Mutex<HashSet<u64>>,
+}
+
+impl LiveRegistry {
+    pub(super) fn set(&self, scope: &str, live: Live) {
+        self.by_scope.lock().insert(scope.to_string(), live);
+    }
+
+    /// An adapter (by holder id) came up: it has no catalog registered yet.
+    pub(super) fn expect(&self, holder: u64) {
+        self.unsettled.lock().insert(holder);
+    }
+
+    /// The adapter registered its first catalog.
+    pub(super) fn arrived(&self, holder: u64) {
+        self.unsettled.lock().remove(&holder);
+    }
+
+    /// The adapter is gone: nothing waits for it.
+    pub(super) fn leave(&self, holder: u64) {
+        self.unsettled.lock().remove(&holder);
+    }
+
+    /// Whether every live account's catalog is registered: only then is the
+    /// union what the machine still needs.
+    pub(super) fn settled(&self) -> bool {
+        self.unsettled.lock().is_empty()
+    }
+
+    pub(super) fn remove(&self, scope: &str) {
+        self.by_scope.lock().remove(scope);
+    }
+
+    /// How many scopes are registered.
+    #[cfg(test)]
+    pub(super) fn len(&self) -> usize {
+        self.by_scope.lock().len()
+    }
+
+    /// What any registered scope still lists.
+    pub(super) fn union(&self) -> Live {
+        Live::union(self.by_scope.lock().values())
     }
 }
 
@@ -95,23 +214,31 @@ pub(super) struct SweepDirs {
     /// was fetched with: its component settings, MCP sign-ins and sandbox
     /// data.
     pub(super) member: Option<PathBuf>,
+    /// The account's folder of component copies the sandbox mounts
+    /// (`<workspaces root>/.mounts/<account>`).
+    pub(super) mirror: Option<PathBuf>,
 }
 
-/// Delete everything in `dirs` the live catalog no longer has: the shared
+/// Delete everything in `dirs` the live catalogs no longer have: the shared
 /// binary cache here, then each kind's own things (`KindRuntime::sweep`).
+/// `own` is the catalog of the scope whose member directory is swept (its
+/// settings, sign-ins, sandbox data); `machine` is what ALL scopes list
+/// (`LiveRegistry::union`), which the machine-wide caches are judged by.
 /// Blocking, best-effort: a failure is logged and retried by the next
 /// reconcile.
-pub(super) fn sweep(dirs: &SweepDirs, live: &Live, sign_ins: &SignIns) {
+pub(super) fn sweep(dirs: &SweepDirs, own: &Live, machine: &Live, sign_ins: &SignIns) {
     if let Some(dir) = &dirs.binaries {
         for (name, path) in entries(dir) {
-            // Only cache-shaped names are ours to judge.
-            if parse_cache_file(&name).is_some_and(|(stem, _)| !live.binaries.contains(stem)) {
+            // Only cache-shaped names are ours to judge, and each is judged
+            // by the build it is: a component every account has stopped
+            // pinning that build of is forgotten, whichever accounts remain.
+            if cache_file_is_live(&name, &machine.binaries) == Some(false) {
                 remove(&path);
             }
         }
     }
     for kind in KINDS {
-        runtime(kind).sweep(dirs, live, sign_ins);
+        runtime(kind).sweep(dirs, own, machine, sign_ins);
     }
 }
 
@@ -174,6 +301,8 @@ mod tests {
             sandbox_bundles: Some(root.join("cache/sandbox")),
             previewers: Some(root.join("cache/previewers")),
             member: member_dir(&root.join("config"), GW, "maya", tenant),
+            // Never the real home's.
+            mirror: None,
         }
     }
 
@@ -192,11 +321,17 @@ mod tests {
                  "rollout": "auto", "installed": true,
                  "previewer": {"bundleUrl": "/v1/artifacts/v", "bundleSha256": view_pin(p)}},
                 {"kind": "core", "name": format!("{p}core"), "version": "1", "runtime": "sidecar",
-                 "requiresDesktop": true, "rollout": "auto", "installed": true},
+                 "requiresDesktop": true, "rollout": "auto", "installed": true,
+                 "artifacts": {"darwin-arm64": {"url": "/v1/artifacts/c", "sha256": SHA}},
+                 "sidecar": {"localUrl": "http://127.0.0.1:7190"}},
                 {"kind": "plugin", "name": format!("{p}bot"), "version": "1", "runtime": "sidecar",
-                 "requiresDesktop": true, "rollout": "auto", "installed": true},
+                 "requiresDesktop": true, "rollout": "auto", "installed": true,
+                 "artifacts": {"darwin-arm64": {"url": "/v1/artifacts/p", "sha256": SHA}},
+                 "sidecar": {"localUrl": "http://127.0.0.1:7191", "listenEnv": "L"}},
                 {"kind": "sandbox", "name": format!("{p}vm"), "version": "1", "runtime": "sidecar",
-                 "requiresDesktop": true, "rollout": "auto", "installed": true},
+                 "requiresDesktop": true, "rollout": "auto", "installed": true,
+                 "artifacts": {"darwin-arm64": {"url": "/v1/artifacts/s", "sha256": SHA}},
+                 "sidecar": {"localUrl": "http://127.0.0.1:7192", "tokenEnv": "T"}},
                 {"kind": "mcp", "name": format!("{p}kept"), "version": "1", "runtime": "stdio",
                  "rollout": "auto", "installed": true,
                  "settings": [{"key": "token", "label": "Token", "type": "secret", "scope": "member", "required": true}],
@@ -208,6 +343,15 @@ mod tests {
             ]})),
             "darwin-arm64",
         )
+    }
+
+    /// The bundle directory of tenant `p`'s sandbox `<p>vm`.
+    fn bundle_dir(p: &str) -> String {
+        tenant_catalog(p)
+            .bundle_dirs(&format!("{p}vm"))
+            .into_iter()
+            .next()
+            .expect("the sandbox pins a bundle")
     }
 
     /// What a tenant's catalog leaves in the member directory.
@@ -255,7 +399,9 @@ mod tests {
         stays.extend([
             cores.join(cache_file_name("acore", SHA)),
             cores.join(cache_file_name("plugin/abot", SHA)),
-            root.join("cache/sandbox/avm/0.1.0-abc/avm"),
+            root.join("cache/sandbox/avm")
+                .join(bundle_dir("a"))
+                .join("avm"),
             root.join(format!("cache/previewers/{}.tar", view_pin("a"))),
         ]);
         for path in gone.iter().chain(&stays) {
@@ -263,7 +409,8 @@ mod tests {
         }
         write(&cores.join("notes.txt"));
 
-        sweep(&dirs, &tenant_catalog("a"), &SignIns::default());
+        let live = tenant_catalog("a");
+        sweep(&dirs, &live, &live, &SignIns::default());
 
         for path in &gone {
             assert!(!path.exists(), "{} survived the sweep", path.display());
@@ -275,7 +422,12 @@ mod tests {
         }
 
         // An empty catalog of the same scope forgets every component's files.
-        sweep(&dirs, &Live::default(), &SignIns::default());
+        sweep(
+            &dirs,
+            &Live::default(),
+            &Live::default(),
+            &SignIns::default(),
+        );
         for path in &stays {
             assert!(!path.exists(), "{} survived", path.display());
         }
@@ -304,8 +456,10 @@ mod tests {
         write(&a_binary);
 
         // Signed in to tenant A, then switched to tenant B: B's reconcile.
-        sweep(&in_a, &tenant_catalog("a"), &SignIns::default());
-        sweep(&in_b, &tenant_catalog("b"), &SignIns::default());
+        let live_a = tenant_catalog("a");
+        sweep(&in_a, &live_a, &live_a, &SignIns::default());
+        let live_b = tenant_catalog("b");
+        sweep(&in_b, &live_b, &live_b, &SignIns::default());
         for path in a_state.iter().chain(&b_state) {
             assert!(path.exists(), "{} lost on a tenant switch", path.display());
         }
@@ -313,10 +467,201 @@ mod tests {
         assert!(!a_binary.exists());
 
         // Back to tenant A: everything of A is still there.
-        sweep(&in_a, &tenant_catalog("a"), &SignIns::default());
+        let live_a = tenant_catalog("a");
+        sweep(&in_a, &live_a, &live_a, &SignIns::default());
         for path in a_state.iter().chain(&b_state) {
             assert!(path.exists(), "{} lost switching back", path.display());
         }
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Two accounts' catalogs are in force at once: a reconcile of one never
+    /// deletes a machine-wide binary, bundle or previewer the other still
+    /// lists (the registry's union judges them), while each account's own
+    /// member state is judged by its own catalog only. When an account's scope
+    /// leaves the registry, what only it listed goes at the next sweep.
+    #[test]
+    fn two_accounts_share_the_machine_caches_by_union() {
+        let root = std::env::temp_dir().join(format!("bnbloc-sweep-union-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (in_a, in_b) = (dirs(&root, "t-a"), dirs(&root, "t-b"));
+        let cores = in_a.binaries.clone().unwrap();
+        let a_binary = cores.join(cache_file_name("acore", SHA));
+        let b_binary = cores.join(cache_file_name("bcore", SHA));
+        let a_bundle = root
+            .join("cache/sandbox/avm")
+            .join(bundle_dir("a"))
+            .join("avm");
+        let a_view = root.join(format!("cache/previewers/{}.tar", view_pin("a")));
+        let shared = [&a_binary, &b_binary, &a_bundle, &a_view];
+        for path in shared {
+            write(path);
+        }
+        let a_state = member_state(&in_a.member.clone().unwrap(), "a");
+        for path in &a_state {
+            write(path);
+        }
+
+        let registry = LiveRegistry::default();
+        registry.set("a", tenant_catalog("a"));
+        registry.set("b", tenant_catalog("b"));
+
+        // B reconciles: A's machine-wide files stay (A's catalog is in
+        // force), and so does all of A's member state (never B's to judge).
+        let live_b = tenant_catalog("b");
+        sweep(&in_b, &live_b, &registry.union(), &SignIns::default());
+        for path in shared.iter().copied().chain(&a_state) {
+            assert!(
+                path.exists(),
+                "{} was swept by another account",
+                path.display()
+            );
+        }
+
+        // A signs out: its catalog leaves the registry, and B's next reconcile
+        // forgets what only A listed. A's member state is still A's.
+        registry.remove("a");
+        sweep(&in_b, &live_b, &registry.union(), &SignIns::default());
+        assert!(b_binary.exists(), "B's own core stays");
+        for path in [&a_binary, &a_bundle, &a_view] {
+            assert!(
+                !path.exists(),
+                "{} outlived its only account",
+                path.display()
+            );
+        }
+        for path in &a_state {
+            assert!(path.exists(), "A's member state is not B's to sweep");
+        }
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The registry's union is what any scope lists, and a scope that is set
+    /// again replaces its own entry.
+    #[test]
+    fn the_registry_unions_what_every_scope_lists() {
+        let registry = LiveRegistry::default();
+        assert!(registry.union().names(ComponentKind::Core).is_empty());
+        registry.set("a", tenant_catalog("a"));
+        registry.set("b", tenant_catalog("b"));
+        let both = registry.union();
+        assert!(both.names(ComponentKind::Core).contains("acore"));
+        assert!(both.names(ComponentKind::Core).contains("bcore"));
+        assert!(both.mcp().tools.contains("akept") && both.mcp().tools.contains("bkept"));
+        assert_eq!(
+            both.mcp().files.len(),
+            0,
+            "no stdio binary for this platform in the fixture"
+        );
+        registry.set("a", tenant_catalog("c"));
+        let after = registry.union();
+        assert!(!after.names(ComponentKind::Core).contains("acore"));
+        assert!(after.names(ComponentKind::Core).contains("ccore"));
+        registry.remove("a");
+        registry.remove("b");
+        assert!(registry.union().names(ComponentKind::Core).is_empty());
+    }
+
+    /// Two accounts may pin two builds of one core (a staged rollout): both
+    /// builds stay while a catalog pins them, one account's reconcile never
+    /// deletes the build the other runs, and a build nobody pins goes.
+    #[test]
+    fn two_accounts_may_pin_two_builds_of_one_core() {
+        const SHA_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let pinning = |sha: &str| {
+            Live::of(
+                &catalog(serde_json::json!({"components": [
+                    {"kind": "core", "name": "acme", "version": "1", "runtime": "sidecar",
+                     "requiresDesktop": true, "rollout": "auto", "installed": true,
+                     "artifacts": {"darwin-arm64": {"url": "/v1/artifacts/c", "sha256": sha}},
+                     "sidecar": {"localUrl": "http://127.0.0.1:7190"}}
+                ]})),
+                "darwin-arm64",
+            )
+        };
+        let root = std::env::temp_dir().join(format!("bnbloc-sweep-builds-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dirs = dirs(&root, "t-a");
+        let cores = dirs.binaries.clone().unwrap();
+        let (build_a, build_b, build_old) = (
+            cores.join(cache_file_name("acme", SHA)),
+            cores.join(cache_file_name("acme", SHA_B)),
+            cores.join(cache_file_name("acme", &"c".repeat(64))),
+        );
+        for path in [&build_a, &build_b, &build_old] {
+            write(path);
+        }
+        let registry = LiveRegistry::default();
+        registry.set("a", pinning(SHA));
+        registry.set("b", pinning(SHA_B));
+        // Either account's reconcile: both pinned builds stay, the unpinned goes.
+        sweep(&dirs, &pinning(SHA), &registry.union(), &SignIns::default());
+        assert!(
+            build_a.exists() && build_b.exists(),
+            "a pinned build was swept"
+        );
+        assert!(!build_old.exists(), "a build nobody pins stayed");
+        // B leaves: the build only B pinned goes at the next sweep.
+        registry.remove("b");
+        sweep(&dirs, &pinning(SHA), &registry.union(), &SignIns::default());
+        assert!(build_a.exists());
+        assert!(!build_b.exists());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The first account to reconcile must not sweep what an account that has
+    /// not fetched its catalog yet keeps cached: machine-wide sweeps wait until
+    /// every live account has registered one.
+    #[test]
+    fn machine_wide_sweeps_wait_for_every_live_account() {
+        let registry = LiveRegistry::default();
+        assert!(registry.settled(), "nobody is waited for");
+        registry.expect(1);
+        registry.expect(2);
+        registry.arrived(1);
+        assert!(!registry.settled(), "account 2 has not fetched its catalog");
+        registry.arrived(2);
+        assert!(registry.settled());
+        registry.expect(3);
+        assert!(!registry.settled());
+        registry.leave(3);
+        assert!(registry.settled(), "an account that left is not waited for");
+    }
+
+    /// A core that runs keeps the build it runs from, whatever a catalog pins
+    /// by now: its restart finds the binary.
+    #[test]
+    fn a_running_cores_build_survives_a_catalog_that_pins_another() {
+        const SHA_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let root =
+            std::env::temp_dir().join(format!("bnbloc-sweep-running-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dirs = dirs(&root, "t-a");
+        let cores = dirs.binaries.clone().unwrap();
+        let (running, pinned) = (
+            cores.join(cache_file_name("acore", SHA_B)),
+            cores.join(cache_file_name("acore", SHA)),
+        );
+        write(&running);
+        write(&pinned);
+        let live = tenant_catalog("a"); // pins SHA
+        sweep(
+            &dirs,
+            &live,
+            &live
+                .clone()
+                .with_running([("acore".to_string(), SHA_B.to_string())]),
+            &SignIns::default(),
+        );
+        assert!(
+            running.exists() && pinned.exists(),
+            "the running build and the pinned one stay"
+        );
+        sweep(&dirs, &live, &live, &SignIns::default());
+        assert!(
+            !running.exists(),
+            "once it no longer runs, the unpinned build goes"
+        );
         std::fs::remove_dir_all(&root).unwrap();
     }
 }

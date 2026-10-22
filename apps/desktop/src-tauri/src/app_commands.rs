@@ -1,6 +1,9 @@
 use tauri::{Manager, State};
 
-use crate::{gateway_init_script, settings::gateway_url, AppState};
+use crate::account::AccountKey;
+use crate::gateway_init_script;
+use crate::runtime::Registry;
+use crate::windows::{self, AuxKind};
 
 /// Open an http(s) URL in the OS default browser (ShellExecuteExW on Windows,
 /// `open`/`xdg-open` elsewhere — never through a command interpreter).
@@ -26,19 +29,22 @@ fn validate_external_url(raw: &str) -> Result<tauri::Url, String> {
 #[tauri::command]
 pub(crate) fn pop_out_preview(
     app: tauri::AppHandle,
-    state: State<'_, AppState>,
+    window: tauri::WebviewWindow,
+    registry: State<'_, Registry>,
     room_id: String,
     artifact_id: String,
 ) -> Result<(), String> {
     open_aux_window(
         &app,
-        &state,
+        &window,
+        &registry,
         AuxWindow {
-            label: format!("preview-{}", window_label_part(&artifact_id)),
+            kind: AuxKind::Preview,
+            id: artifact_id.clone(),
             route: format!(
                 "preview/{}/{}",
-                encode_segment(&room_id),
-                encode_segment(&artifact_id)
+                windows::percent_encode(&room_id),
+                windows::percent_encode(&artifact_id)
             ),
             title: "bnbloc preview",
             size: (960.0, 720.0),
@@ -53,15 +59,18 @@ pub(crate) fn pop_out_preview(
 #[tauri::command]
 pub(crate) fn pop_out_people_chat(
     app: tauri::AppHandle,
-    state: State<'_, AppState>,
+    window: tauri::WebviewWindow,
+    registry: State<'_, Registry>,
     room_id: String,
 ) -> Result<(), String> {
     open_aux_window(
         &app,
-        &state,
+        &window,
+        &registry,
         AuxWindow {
-            label: format!("people-{}", window_label_part(&room_id)),
-            route: format!("people-chat/{}", encode_segment(&room_id)),
+            kind: AuxKind::People,
+            id: room_id.clone(),
+            route: format!("people-chat/{}", windows::percent_encode(&room_id)),
             title: "bnbloc people chat",
             size: (420.0, 680.0),
             min_size: (320.0, 420.0),
@@ -75,19 +84,22 @@ pub(crate) fn pop_out_people_chat(
 #[tauri::command]
 pub(crate) fn pop_out_live(
     app: tauri::AppHandle,
-    state: State<'_, AppState>,
+    window: tauri::WebviewWindow,
+    registry: State<'_, Registry>,
     room_id: String,
     job_id: String,
 ) -> Result<(), String> {
     open_aux_window(
         &app,
-        &state,
+        &window,
+        &registry,
         AuxWindow {
-            label: format!("live-{}", window_label_part(&job_id)),
+            kind: AuxKind::Live,
+            id: job_id.clone(),
             route: format!(
                 "live/{}/{}",
-                encode_segment(&room_id),
-                encode_segment(&job_id)
+                windows::percent_encode(&room_id),
+                windows::percent_encode(&job_id)
             ),
             title: "bnbloc live page",
             size: (1120.0, 800.0),
@@ -100,7 +112,10 @@ pub(crate) fn pop_out_live(
 /// chat, a live page): just a view — closing it never ends the app or
 /// touches supervision.
 struct AuxWindow {
-    label: String,
+    kind: AuxKind,
+    /// The thing it shows (an artifact, a room, a job): one window per account
+    /// and id.
+    id: String,
     /// Hash route (without `#/`) the web UI renders for this window.
     route: String,
     title: &'static str,
@@ -113,24 +128,32 @@ struct AuxWindow {
 /// from the main window so it never lands exactly on top of it.
 fn open_aux_window(
     app: &tauri::AppHandle,
-    state: &State<'_, AppState>,
+    opener: &tauri::WebviewWindow,
+    registry: &Registry,
     win: AuxWindow,
 ) -> Result<(), String> {
-    if let Some(existing) = app.get_webview_window(&win.label) {
+    // It shows the account its opener shows, and its label names that
+    // account: the same artifact of two accounts is two windows.
+    let account = registry
+        .account_of_window(opener.label())
+        .ok_or(crate::runtime::NOT_BOUND)?;
+    let label = windows::aux_label(win.kind, &account, &win.id);
+    if let Some(existing) = app.get_webview_window(&label) {
         let _ = existing.set_focus();
         return Ok(());
     }
-    let gateway = gateway_url(&state.settings.lock());
+    registry.inherit(&label, opener.label())?;
+    let gateway = account.gateway().to_string();
     let path = format!("index.html#/{}", win.route);
     let mut builder =
-        tauri::WebviewWindowBuilder::new(app, &win.label, tauri::WebviewUrl::App(path.into()))
+        tauri::WebviewWindowBuilder::new(app, &label, tauri::WebviewUrl::App(path.into()))
             .title(win.title)
             .inner_size(win.size.0, win.size.1)
             .min_inner_size(win.min_size.0, win.min_size.1)
             .resizable(true)
             .initialization_script(gateway_init_script(&gateway));
-    if let Some(main) = app.get_webview_window(crate::MAIN_WINDOW) {
-        if let Ok(pos) = main.outer_position() {
+    {
+        if let Ok(pos) = opener.outer_position() {
             let offset: i32 = 40 + 24 * (app.webview_windows().len() % 5) as i32;
             builder = builder.position(
                 (pos.x + offset).max(0) as f64,
@@ -138,38 +161,77 @@ fn open_aux_window(
             );
         }
     }
-    builder
-        .build()
-        .map_err(|e| format!("could not open {} window: {e}", win.title))?;
+    builder.build().map_err(|e| {
+        registry.unbind(&label);
+        format!("could not open {} window: {e}", win.title)
+    })?;
     Ok(())
 }
 
-/// A window label carries only `[A-Za-z0-9_-]` (Tauri's label alphabet
-/// minus its separators); anything else becomes `_`.
-fn window_label_part(id: &str) -> String {
-    id.chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect()
-}
-
-/// Percent-encodes one hash-route path segment (the web UI decodes it with
-/// decodeURIComponent), so an id can never inject a route separator.
-fn encode_segment(id: &str) -> String {
-    let mut out = String::with_capacity(id.len());
-    for b in id.bytes() {
-        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
-            out.push(b as char);
-        } else {
-            out.push_str(&format!("%{b:02X}"));
+/// Open a window for an account (`gateway_url` and `subject`: it shows that
+/// account, which must be live; a window that already shows it is brought to
+/// the front instead), or, with neither, a window to sign another account in.
+/// Two accounts side by side are two windows (docs/prd/2026-10-22-multi-
+/// account.md §2.2). The window is bound to its account before its page loads.
+#[tauri::command]
+pub(crate) fn open_account_window(
+    app: tauri::AppHandle,
+    opener: tauri::WebviewWindow,
+    registry: State<'_, Registry>,
+    gateway_url: Option<String>,
+    subject: Option<String>,
+) -> Result<(), String> {
+    let account = match (gateway_url.as_deref(), subject.as_deref()) {
+        (Some(gateway), Some(subject)) => Some((
+            AccountKey::new(gateway, subject).ok_or("an account needs a gateway and a subject")?,
+            // The web's own key for it, which its window reads back.
+            format!("{}\n{}", gateway.trim(), subject.trim()),
+        )),
+        _ => None,
+    };
+    if let Some((key, _)) = &account {
+        let open = registry
+            .windows_of(key)
+            .into_iter()
+            .find(|label| windows::is_app_window(label) && app.get_webview_window(label).is_some());
+        if let Some(window) = open.and_then(|label| app.get_webview_window(&label)) {
+            let _ = window.unminimize();
+            let _ = window.set_focus();
+            return Ok(());
         }
     }
-    out
+    let label = windows::app_label(account.as_ref().map(|(key, _)| key));
+    let gateway = match &account {
+        Some((key, _)) => {
+            registry.bind(&label, key)?;
+            key.gateway().to_string()
+        }
+        None => crate::settings::default_gateway(),
+    };
+    let path = format!(
+        "index.html{}",
+        windows::intent_hash(account.as_ref().map(|(_, web_key)| web_key.as_str()))
+    );
+    let mut builder =
+        tauri::WebviewWindowBuilder::new(&app, &label, tauri::WebviewUrl::App(path.into()))
+            .title("bnbloc")
+            .inner_size(1200.0, 820.0)
+            .min_inner_size(720.0, 560.0)
+            .resizable(true)
+            .disable_drag_drop_handler()
+            .initialization_script(gateway_init_script(&gateway));
+    if let Ok(pos) = opener.outer_position() {
+        let offset: i32 = 40 + 24 * (app.webview_windows().len() % 5) as i32;
+        builder = builder.position(
+            (pos.x + offset).max(0) as f64,
+            (pos.y + offset).max(0) as f64,
+        );
+    }
+    builder.build().map_err(|e| {
+        registry.unbind(&label);
+        format!("could not open the window: {e}")
+    })?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -177,11 +239,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn aux_window_ids_cannot_escape_their_label_or_route() {
-        assert_eq!(window_label_part("room-1_a"), "room-1_a");
-        assert_eq!(window_label_part("a/b:c d"), "a_b_c_d");
-        assert_eq!(encode_segment("room-1.a_b~"), "room-1.a_b~");
-        assert_eq!(encode_segment("a/b?c#d"), "a%2Fb%3Fc%23d");
+    fn aux_window_ids_cannot_escape_their_route() {
+        assert_eq!(windows::percent_encode("room-1.a_b~"), "room-1.a_b~");
+        assert_eq!(windows::percent_encode("a/b?c#d"), "a%2Fb%3Fc%23d");
     }
 
     #[test]

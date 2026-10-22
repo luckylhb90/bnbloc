@@ -44,7 +44,7 @@ interface Issued {
 export function TestAccountsTab() {
   const toast = useToast();
   const copy = useCopy();
-  const { multiAccount, addTestAccount } = useAuth();
+  const { addTestAccount } = useAuth();
   const [rows, setRows] = useState<TestAccountRow[] | null>(null);
   const [tokens, setTokens] = useState<readonly APITokenView[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -121,20 +121,16 @@ export function TestAccountsTab() {
             <Button size="sm" variant="outline" onClick={() => void copy(issued.token, "token")}>
               Copy
             </Button>
-            {multiAccount && (
-              <>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => void run("add", () => addTestAccount(issued.token, false).then(() => void toast.success("Added to this browser")))}
-                >
-                  Add to this browser
-                </Button>
-                <Button size="sm" variant="primary" onClick={() => void run("switch", () => addTestAccount(issued.token, true))}>
-                  Add and switch
-                </Button>
-              </>
-            )}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void run("add", () => addTestAccount(issued.token, false).then(() => void toast.success("Added to the accounts signed in here")))}
+            >
+              Add to my accounts
+            </Button>
+            <Button size="sm" variant="primary" onClick={() => void run("switch", () => addTestAccount(issued.token, true))}>
+              Add and switch
+            </Button>
             <Button size="sm" variant="ghost" onClick={() => setIssued(null)}>
               Done
             </Button>

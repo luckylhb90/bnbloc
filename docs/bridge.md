@@ -300,17 +300,20 @@ HTTP or business surface to the bridge, keeping it a connector:
   `bnbloc-bridge` sidecar, tracks its state (`starting` → `running` →
   `stopped`/`failed`), tails its logs, restarts it with bounded backoff on
   crash, and stops it on app quit.
-- Configuration lives in the app's settings store (`get_settings`/
-  `set_settings` IPC) and maps one-to-one to the environment variables above;
-  the shell injects them when spawning the sidecar.
-- **Zero-config start.** The sidecar needs only a gateway URL and an owner. On
-  sign-in the renderer seeds those two — owner = the signed-in subject, gateway
-  = the shell's configured base (defaulting to `http://localhost:7090`) — and
-  persists them (`ensureBridgeRunning` in `web/src/App.tsx`), and `set_settings`
-  auto-starts the sidecar. The shell also auto-starts a already-configured
-  bridge on launch (`is_runnable` = gateway + owner). So a fresh install drives
-  room chat with no manual bridge setup; the **Local bridge** panel's Start
-  button surfaces any start error rather than failing silently.
+- Configuration lives in the app's settings (`get_settings`/`set_settings`
+  IPC: the machine's cores and single-host flag, and the signed-in account's
+  own choices) and maps one-to-one to the environment variables above; the
+  shell injects them when spawning the sidecar.
+- **Zero-config start.** The sidecar needs only a gateway URL and an owner,
+  and both are the account: the web hands the shell the accounts it holds
+  (`accounts_sync`, `web/src/lib/desktop.ts`), the shell makes one runtime
+  per account, and each runtime starts its own bridge as that account once
+  its session is up (owner = the subject, gateway = the account's, tenant =
+  the account's), unless the person turned serving off for it. Each bridge
+  forks its refresh family from its account's own (never from the web's
+  token). So a fresh install drives room chat with no manual bridge setup;
+  the **Local bridge** panel's Start button surfaces any start error rather
+  than failing silently.
 - **Host core resolution.** The sidecar runs on the host and the shell injects
   no core-specific environment. A manifest core locates its daemon from the
   manifest alone: `discover.listener.defaultPath` (a `~/` path, expanded to the

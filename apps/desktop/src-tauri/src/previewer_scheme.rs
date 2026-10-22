@@ -36,7 +36,7 @@ use crate::internal_ext::pin::Sha256Pin;
 use crate::internal_ext::previewer_bundle::{valid_bundle_path, valid_package_version, Bundle};
 use crate::internal_ext::previewer_cache::PreviewerError;
 use crate::internal_ext::sidecar_model::valid_package_name;
-use crate::internal_ext::Adapter;
+use crate::runtime::Registry;
 
 /// Scheme name; the web side (web/src/lib/previewerFrame.ts) resolves it via
 /// Tauri's `convertFileSrc(`${name}/${version}/${entry}`, "bnbloc-previewer")`.
@@ -217,15 +217,26 @@ fn status_only(status: StatusCode) -> Resp {
 }
 
 /// Handles one scheme request asynchronously (resolution may download).
-pub(crate) fn handle(app: &AppHandle, request: Request<Vec<u8>>, responder: UriSchemeResponder) {
+pub(crate) fn handle(
+    app: &AppHandle,
+    webview_label: &str,
+    request: Request<Vec<u8>>,
+    responder: UriSchemeResponder,
+) {
     let target = match preflight(request.method(), request.uri().path()) {
         Ok(target) => target,
         Err(resp) => return responder.respond(resp),
     };
     let app = app.clone();
     let method = request.method().clone();
+    // The adapter of the account the requesting window shows: its catalog
+    // pins the previewer versions it may load.
+    let adapter = app
+        .try_state::<Registry>()
+        .and_then(|registry| registry.runtime_of_window(webview_label))
+        .map(|runtime| runtime.adapter.clone());
     tauri::async_runtime::spawn(async move {
-        let Some(adapter) = app.try_state::<Adapter>().map(|s| s.inner().clone()) else {
+        let Some(adapter) = adapter else {
             return responder.respond(status_only(StatusCode::SERVICE_UNAVAILABLE));
         };
         let (bundle, file, label) = match &target {

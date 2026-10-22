@@ -12,7 +12,7 @@ import {
   UserCircleIcon,
   UsersThreeIcon,
 } from "@phosphor-icons/react";
-import { accountKind, keyOf } from "@/lib/accounts";
+import { accountKind, keyOf } from "@/lib/vault";
 import { useAuth } from "@/lib/auth";
 import { errorText } from "@/lib/errors";
 import { AccountsDialog, TestBadge } from "@/views/accounts/AccountsDialog";
@@ -57,7 +57,7 @@ export function AccountMenu({
 }) {
   const active = MENU_VIEWS.has(view);
   // The accounts of this browser (docs/prd/2026-10-22-multi-account.md).
-  const { multiAccount, kind, accounts, switchAccount } = useAuth();
+  const { kind, accounts, current, switchAccount } = useAuth();
   const toast = useToast();
   const [managing, setManaging] = useState(false);
   // The member's display name, never their id (PRD 2026-10-10 §1); the id is
@@ -125,9 +125,10 @@ export function AccountMenu({
           )}
         </div>
       )}
-      {multiAccount && (
-        <MenuGroup label="Accounts">
-          {accounts.map((a) => (
+      <MenuGroup label="Accounts">
+        {accounts
+          .filter((a) => keyOf(a) !== current)
+          .map((a) => (
             <MenuItem
               key={keyOf(a)}
               icon={UserCircleIcon}
@@ -136,14 +137,14 @@ export function AccountMenu({
               <span className="flex min-w-0 items-center gap-2">
                 <span className="truncate">{a.record.subject}</span>
                 {accountKind(a.record) === "test" && <TestBadge />}
+                {a.signedOut && <span className="shrink-0 text-xs text-[var(--color-fg-subtle)]">sign in again</span>}
               </span>
             </MenuItem>
           ))}
-          <MenuItem icon={SwapIcon} onSelect={() => setManaging(true)}>
-            {accounts.length ? "Manage accounts…" : "Add or switch account…"}
-          </MenuItem>
-        </MenuGroup>
-      )}
+        <MenuItem icon={SwapIcon} onSelect={() => setManaging(true)}>
+          {accounts.length > 1 ? "Manage accounts…" : "Add an account…"}
+        </MenuItem>
+      </MenuGroup>
       <MenuGroup label="Work">
         {item("agents", "Agents", CpuIcon)}
         {/* Team dashboard + borrow billing: every member sees their own
@@ -169,7 +170,7 @@ export function AccountMenu({
         <BuildVersion />
       </div>
     </Menu>
-    {multiAccount && <AccountsDialog open={managing} onClose={() => setManaging(false)} />}
+    <AccountsDialog open={managing} onClose={() => setManaging(false)} />
     </>
   );
 }

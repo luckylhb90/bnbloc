@@ -117,18 +117,21 @@ pub(super) fn plan_occupied_listener(facts: OccupiedListener<'_>) -> ListenerPla
 
 /// The one orphan rule: `pid` is a process this app spawned in an EARLIER
 /// session only when its spawn `record` names that pid and another app
-/// process, AND its executable (`exe`, as the OS reports it) lives under the
-/// component's private `root`. Either piece alone is not evidence: a record
-/// survives a crash while the OS reuses the pid, and an executable path says
-/// nothing about which session started it. Blocking (canonicalizes paths).
+/// process that is gone (`alive` says whether a process still runs: a live
+/// app that recorded it owns it, and its child is not an orphan), AND its
+/// executable (`exe`, as the OS reports it) lives under the component's
+/// private `root`. Either piece alone is not evidence: a record survives a
+/// crash while the OS reuses the pid, and an executable path says nothing
+/// about which session started it. Blocking (canonicalizes paths).
 pub(super) fn owned_orphan(
     pid: u32,
     record: Option<&SpawnRecord>,
     exe: Option<&str>,
     root: &Path,
     app_pid: u32,
+    alive: impl Fn(u32) -> bool,
 ) -> Option<Orphan> {
-    let record = record.filter(|r| r.pid == pid && r.app_pid != app_pid)?;
+    let record = record.filter(|r| r.pid == pid && r.app_pid != app_pid && !alive(r.app_pid))?;
     let exe = PathBuf::from(exe?.trim().trim_end_matches(" (deleted)"));
     let parent = exe.parent()?;
     let parent = std::fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf());
@@ -192,6 +195,26 @@ pub(super) fn listening_pid(port: u16) -> Option<u32> {
 #[cfg(not(unix))]
 pub(super) fn listening_pid(_port: u16) -> Option<u32> {
     None
+}
+
+/// Whether a process with this pid runs (it exists, whoever owns it).
+#[cfg(unix)]
+pub(super) fn process_alive(pid: u32) -> bool {
+    let Ok(pid) = libc::pid_t::try_from(pid) else {
+        return false;
+    };
+    // SAFETY: signal 0 only checks that the process exists.
+    unsafe {
+        libc::kill(pid, 0) == 0
+            || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+    }
+}
+
+/// Orphans are only stopped where a listener's process can be found
+/// (`CAN_TERMINATE`), so elsewhere the answer is never consulted.
+#[cfg(not(unix))]
+pub(super) fn process_alive(_pid: u32) -> bool {
+    false
 }
 
 /// The executable path of `pid`, best-effort.
@@ -376,14 +399,14 @@ mod tests {
 
         // Both: an orphan of an earlier session, running the recorded build.
         assert_eq!(
-            owned_orphan(42, Some(&record), Some(&exe), &root, APP),
+            owned_orphan(42, Some(&record), Some(&exe), &root, APP, |_| false),
             Some(Orphan {
                 pid: 42,
                 sha256: pin(SHA_OLD)
             })
         );
         let deleted = format!("{exe} (deleted)");
-        assert!(owned_orphan(42, Some(&record), Some(&deleted), &root, APP).is_some());
+        assert!(owned_orphan(42, Some(&record), Some(&deleted), &root, APP, |_| false).is_some());
 
         // A matching record but an executable outside the cache root: the OS
         // reused the pid for something else after a crash or reboot.
@@ -393,30 +416,46 @@ mod tests {
             "samplecore".to_string(),
         ] {
             assert_eq!(
-                owned_orphan(42, Some(&record), Some(&foreign), &root, APP),
+                owned_orphan(42, Some(&record), Some(&foreign), &root, APP, |_| false),
                 None,
                 "{foreign}"
             );
         }
-        assert_eq!(owned_orphan(42, Some(&record), None, &root, APP), None);
+        assert_eq!(
+            owned_orphan(42, Some(&record), None, &root, APP, |_| false),
+            None
+        );
+
+        // The app that recorded it still runs (another app instance on this
+        // cache): its child is its own, never an orphan to stop.
+        assert_eq!(
+            owned_orphan(42, Some(&record), Some(&exe), &root, APP, |pid| pid == 7),
+            None
+        );
 
         // Our executable but no record of an earlier session: never ours to
         // kill (a child of this session being replaced has no record left,
         // and a running one is recorded by this app).
-        assert_eq!(owned_orphan(42, None, Some(&exe), &root, APP), None);
+        assert_eq!(
+            owned_orphan(42, None, Some(&exe), &root, APP, |_| false),
+            None
+        );
         let ours = SpawnRecord {
             app_pid: APP,
             ..record.clone()
         };
-        assert_eq!(owned_orphan(42, Some(&ours), Some(&exe), &root, APP), None);
+        assert_eq!(
+            owned_orphan(42, Some(&ours), Some(&exe), &root, APP, |_| false),
+            None
+        );
         // The record names another pid than the one in question.
         assert_eq!(
-            owned_orphan(43, Some(&record), Some(&exe), &root, APP),
+            owned_orphan(43, Some(&record), Some(&exe), &root, APP, |_| false),
             None
         );
         // An empty root never contains anything.
         assert_eq!(
-            owned_orphan(42, Some(&record), Some(&exe), Path::new(""), APP),
+            owned_orphan(42, Some(&record), Some(&exe), Path::new(""), APP, |_| false),
             None
         );
         std::fs::remove_dir_all(&root).expect("cleanup");

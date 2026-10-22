@@ -1,12 +1,21 @@
 import { useState } from "react";
 import { clearGatewayOverride, defaultGatewayBase, gatewayBase, setGatewayOverride } from "@/lib/config";
+import { intentHash } from "@/lib/windowBinding";
 import { Button } from "@/ui/Button";
 import { Field, Input } from "@/ui/Input";
 
 // GatewaySwitcher points this client at a gateway. Its only presets come from
 // configuration — the build's default gateway, if the build has one — never
 // from host names baked into the source. Applying a gateway reloads the app so
-// every boot-time read (sign-in options, session) runs against it.
+// every boot-time read (sign-in options, session) runs against it; the window
+// comes back to the sign-in on it (an account of the vault would show its own
+// gateway), so the choice is where the next sign-in goes.
+// The window reloads to a sign-in, not to an account of the vault.
+function signInAfterReload() {
+  window.history.replaceState(null, "", window.location.pathname + window.location.search + intentHash({ kind: "add" }));
+  window.location.reload();
+}
+
 export function GatewaySwitcher({ firstRun = false }: { readonly firstRun?: boolean }) {
   const active = gatewayBase();
   const builtIn = defaultGatewayBase();
@@ -23,12 +32,12 @@ export function GatewaySwitcher({ firstRun = false }: { readonly firstRun?: bool
       return;
     }
     setGatewayOverride(next);
-    window.location.reload();
+    signInAfterReload();
   };
 
   const reset = () => {
     clearGatewayOverride();
-    window.location.reload();
+    signInAfterReload();
   };
 
   return (

@@ -728,8 +728,9 @@ paths, host rewrites) are manifest data or composition-root config, never in
 ## Managed sidecar extras (desktop)
 
 - **Optional sign-in status.** A sidecar that needs its own user sign-in may expose
-  `GET {localUrl}/v1/auth/status` → `{"authenticated": bool, "user": string,
-  "checkedAtMs": number}` (and `POST {localUrl}/v1/auth/login` to start sign-in). The
+  `GET /v1/auth/status` (at its address: a core's fixed `localUrl`, a plugin's the
+  one the desktop gave it) → `{"authenticated": bool, "user": string,
+  "checkedAtMs": number}` (and `POST /v1/auth/login` to start sign-in). The
   desktop shows/starts sign-in only when `authenticated` is false and
   `checkedAtMs > 0`; `checkedAtMs: 0` means the first check is pending; 404 means the
   sidecar has no sign-in concept.

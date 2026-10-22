@@ -112,6 +112,7 @@ func main() {
 		OwnMachine:      strings.TrimSpace(config.FromEnvRaw("BNBLOC_SANDBOX_OWN_MACHINE")),
 		MountsDir:       mountsDir,
 		MountGuestRoots: mountRoots,
+		Account:         bridge.BridgeAccount(gateway, owner),
 	}
 	// Memory only from here on: nothing this process spawns inherits the
 	// sandbox admin bearer.

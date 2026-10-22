@@ -37,9 +37,6 @@
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use tauri::Manager;
-
-use crate::child_process::STOP_GRACE;
 use crate::internal_ext::component_settings::{split_lines, Setting, Values, SCOPE_MEMBER};
 use crate::internal_ext::sandbox_api::{
     create_machine_request, Discovery, MachineView, SandboxApi, CAPABILITY_EGRESS,
@@ -53,10 +50,12 @@ use crate::internal_ext::sidecar_util::{cache_stem, home_env};
 use crate::internal_ext::Adapter;
 use crate::secret::Secret;
 
-/// The shared machine (`BNBLOC_SANDBOX_MACHINE`).
+/// The shared machine (`BNBLOC_SANDBOX_MACHINE`), of one account: its name is
+/// `MACHINE_NAME` and the account's short name (`Adapter::machine_name`), so
+/// two accounts' sandboxes never name one machine of the VM runtime.
 pub(super) const MACHINE_NAME: &str = "bnbloc";
 /// The member's own machine (`BNBLOC_SANDBOX_OWN_MACHINE`): only their own
-/// runs, egress opening their private hosts.
+/// runs, egress opening their private hosts (named like the shared one).
 pub(super) const OWN_MACHINE_NAME: &str = "bnbloc-own";
 /// The share carrying the workspaces root into the machine.
 const WORKSPACES_SHARE: &str = "workspaces";
@@ -633,10 +632,6 @@ impl Adapter {
             },
             None,
         );
-        let (root, keep) = (plan.root.clone(), plan.dir.clone());
-        tauri::async_runtime::spawn_blocking(move || {
-            sandbox_bundle::remove_stale_bundles(&root, Some(&keep))
-        });
         Ok(plan.exe())
     }
 
@@ -647,63 +642,11 @@ impl Adapter {
         &self,
         spec: &SidecarSpec,
     ) -> Result<crate::internal_ext::sidecar_util::RuntimeListener, String> {
-        use crate::internal_ext::loopback;
-        self.replace_sandbox_orphan(spec).await;
-        let listener =
-            loopback::bind_ephemeral().map_err(|e| format!("reserve sandbox port: {e}"))?;
-        let addr = listener
-            .local_addr()
-            .map_err(|e| format!("reserve sandbox port: {e}"))?;
-        Ok(crate::internal_ext::sidecar_util::RuntimeListener {
-            url: loopback::LoopbackHttp::of_addr(addr),
-            listener: Some(listener),
-        })
-    }
-
-    async fn replace_sandbox_orphan(&self, spec: &SidecarSpec) {
-        let (Some(record_dir), Ok(base)) = (
-            self.spawn_record_dir(),
-            self.dirs().map(crate::dirs::Dirs::sandbox_bundles),
-        ) else {
-            return;
-        };
-        let id = spec.id();
-        let root = base.join(cache_stem(&spec.name));
-        let orphan = tauri::async_runtime::spawn_blocking(move || {
-            use crate::internal_ext::sidecar_orphan::{
-                owned_orphan, process_exe, read_spawn_record,
-            };
-            let record = read_spawn_record(&record_dir, &id)?;
-            owned_orphan(
-                record.pid,
-                Some(&record),
-                process_exe(record.pid).as_deref(),
-                &root,
-                std::process::id(),
-            )
-        })
-        .await
-        .ok()
-        .flatten();
-        let Some(pid) = orphan.map(|o| o.pid) else {
-            return;
-        };
-        if !crate::internal_ext::sidecar_orphan::CAN_TERMINATE {
-            return;
+        if let Ok(base) = self.dirs().map(crate::dirs::Dirs::sandbox_bundles) {
+            self.replace_recorded_orphan(spec, base.join(cache_stem(&spec.name)), "sandbox")
+                .await;
         }
-        eprintln!(
-            "[sandbox] stopping {} left running by an earlier session (pid {pid})",
-            spec.name
-        );
-        let stopped = tauri::async_runtime::spawn_blocking(move || {
-            crate::internal_ext::sidecar_orphan::terminate_orphan(pid, STOP_GRACE)
-        })
-        .await
-        .unwrap_or_else(|e| Err(format!("stop task: {e}")));
-        match stopped {
-            Ok(()) => self.forget_spawn(&spec.id(), pid),
-            Err(e) => eprintln!("[sandbox] could not stop pid {pid}: {e}"),
-        }
+        crate::internal_ext::sidecar_util::ephemeral_listener("sandbox")
     }
 
     /// Record a spawned sandbox sidecar as the current launch and start its
@@ -794,6 +737,26 @@ impl Adapter {
             (true, None) => BridgeMode::Known(SandboxMode::Off),
             (true, Some(_)) => BridgeMode::Known(state.settings.mode),
         }
+    }
+
+    /// What the bridge running with `settings` is told about the sandbox:
+    /// this account's mode, forwarded names and handoff (the machine's
+    /// launch, with its bearer) only when that bridge runs for this adapter's
+    /// own account. Any other bridge is handed no sandbox and a mode that is
+    /// still `pending`, so a drive the mode might sandbox waits and never runs
+    /// on the host (one account's sandbox is never lent to another's bridge).
+    pub(super) fn sandbox_for_bridge(
+        &self,
+        settings: &crate::settings::Settings,
+    ) -> (BridgeMode, Vec<String>, Option<BridgeHandoff>) {
+        if self.bridge_member_dir_for(settings).is_none() {
+            return (BridgeMode::Pending, Vec::new(), None);
+        }
+        (
+            self.sandbox_bridge_mode(),
+            self.sandbox_env(),
+            self.sandbox_handoff(),
+        )
     }
 
     /// The names the member lets into their own sandboxed runs.
@@ -894,6 +857,17 @@ impl Adapter {
         if changed {
             self.sandbox_settings_changed();
         }
+    }
+
+    /// This account's shared machine (`MACHINE_NAME` and the account's short
+    /// name).
+    pub(super) fn machine_name(&self) -> String {
+        machine_named(MACHINE_NAME, &self.scope)
+    }
+
+    /// This account's own machine.
+    pub(super) fn own_machine_name(&self) -> String {
+        machine_named(OWN_MACHINE_NAME, &self.scope)
     }
 
     async fn sandbox_bring_up(&self, seq: u64) {
@@ -1027,7 +1001,7 @@ impl Adapter {
             // turn runs there.
             self.with_launch(seq, |l| l.own.handoff = false);
         }
-        let observed = match api.machine(OWN_MACHINE_NAME).await {
+        let observed = match api.machine(&self.own_machine_name()).await {
             Ok(observed) => observed,
             Err(e) => {
                 self.with_launch(seq, |l| {
@@ -1059,8 +1033,11 @@ impl Adapter {
                 });
             }
             OwnPlan::Delete => {
-                let result = api.delete_machine(OWN_MACHINE_NAME).await;
-                eprintln!("[sandbox] own VM {OWN_MACHINE_NAME} deleted (no private hosts wanted)");
+                let result = api.delete_machine(&self.own_machine_name()).await;
+                eprintln!(
+                    "[sandbox] own VM {} deleted (no private hosts wanted)",
+                    self.own_machine_name()
+                );
                 self.with_launch(seq, |l| {
                     l.own.machine = None;
                     l.own.error = result
@@ -1081,19 +1058,15 @@ impl Adapter {
                 let started = Instant::now();
                 let result = async {
                     if plan == OwnPlan::Recreate {
-                        api.delete_machine(OWN_MACHINE_NAME)
+                        api.delete_machine(&self.own_machine_name())
                             .await
                             .map_err(|e| e.to_string())?;
                     }
                     let root =
                         workspaces_root().ok_or("no home directory for the sandbox workspaces")?;
-                    let owner = self
-                        .app
-                        .try_state::<crate::AppState>()
-                        .map(|s| s.settings.lock().owner.clone())
-                        .unwrap_or_default();
+                    let owner = self.session_subject();
                     let req = create_machine_request(
-                        OWN_MACHINE_NAME,
+                        &self.own_machine_name(),
                         &guest,
                         &root,
                         WORKSPACES_SHARE,
@@ -1107,7 +1080,8 @@ impl Adapter {
                 match result {
                     Ok(machine) if machine.state == "running" => {
                         eprintln!(
-                            "[sandbox] own VM {OWN_MACHINE_NAME} running with {} ({} ms)",
+                            "[sandbox] own VM {} running with {} ({} ms)",
+                            self.own_machine_name(),
                             hosts.join(", "),
                             started.elapsed().as_millis()
                         );
@@ -1122,7 +1096,10 @@ impl Adapter {
                             Ok(m) => format!("it is {}", m.state),
                             Err(e) => e,
                         };
-                        eprintln!("[sandbox] own VM {OWN_MACHINE_NAME} not started: {why}");
+                        eprintln!(
+                            "[sandbox] own VM {} not started: {why}",
+                            self.own_machine_name()
+                        );
                         self.with_launch(seq, |l| {
                             l.own.handoff = false;
                             l.own.error = Some(format!(
@@ -1151,7 +1128,7 @@ impl Adapter {
         let Some(api) = self.sandbox_api(seq) else {
             return;
         };
-        let result = api.delete_machine(MACHINE_NAME).await;
+        let result = api.delete_machine(&self.machine_name()).await;
         self.with_launch(seq, |launch| {
             launch.handoff = false;
             launch.machine = None;
@@ -1187,25 +1164,28 @@ impl Adapter {
             let root = workspaces_root().ok_or("no home directory for the sandbox workspaces")?;
             create_private_dir(&root)?;
             // A machine that survived (a reused launch) is reused.
-            let existing = api.machine(MACHINE_NAME).await.map_err(|e| e.to_string())?;
+            let existing = api
+                .machine(&self.machine_name())
+                .await
+                .map_err(|e| e.to_string())?;
             let machine = match existing {
                 Some(m) if m.state == "running" => m,
                 Some(m) if m.state == "paused" => {
                     self.with_launch(seq, |l| l.phase = Phase::StartingMachine);
-                    api.lifecycle(MACHINE_NAME, "resume")
+                    api.lifecycle(&self.machine_name(), "resume")
                         .await
                         .map_err(|e| e.to_string())?
                 }
                 Some(m) if m.state == "stopped" => {
                     self.with_launch(seq, |l| l.phase = Phase::StartingMachine);
-                    api.lifecycle(MACHINE_NAME, "start")
+                    api.lifecycle(&self.machine_name(), "start")
                         .await
                         .map_err(|e| e.to_string())?
                 }
                 existing => {
                     if existing.is_some() {
                         // failed / creating leftovers: start clean.
-                        api.delete_machine(MACHINE_NAME)
+                        api.delete_machine(&self.machine_name())
                             .await
                             .map_err(|e| e.to_string())?;
                     }
@@ -1214,13 +1194,9 @@ impl Adapter {
                         format!("Could not prepare the VM image {}: {e}", guest.image)
                     })?;
                     self.with_launch(seq, |l| l.phase = Phase::StartingMachine);
-                    let owner = self
-                        .app
-                        .try_state::<crate::AppState>()
-                        .map(|s| s.settings.lock().owner.clone())
-                        .unwrap_or_default();
+                    let owner = self.session_subject();
                     let req = create_machine_request(
-                        MACHINE_NAME,
+                        &self.machine_name(),
                         &guest,
                         &root,
                         WORKSPACES_SHARE,
@@ -1242,7 +1218,8 @@ impl Adapter {
             Ok(machine) if machine.state == "running" => {
                 let elapsed = started.elapsed().as_millis() as u64;
                 eprintln!(
-                    "[sandbox] VM {MACHINE_NAME} running (prewarm {elapsed} ms, boot {} ms)",
+                    "[sandbox] VM {} running (prewarm {elapsed} ms, boot {} ms)",
+                    self.machine_name(),
                     machine.boot_ms.unwrap_or_default()
                 );
                 self.with_launch(seq, |launch| {
@@ -1279,7 +1256,7 @@ impl Adapter {
             return;
         }
         let mode = self.sandbox_mode();
-        let observed = api.machine(MACHINE_NAME).await;
+        let observed = api.machine(&self.machine_name()).await;
         let want_machine = mode != SandboxMode::Off;
         let retry_due = self
             .with_launch(seq, |launch| {
@@ -1368,8 +1345,8 @@ impl Adapter {
             .ok_or("The sandbox runtime is not running")?;
         let started = Instant::now();
         let restarted = async {
-            api.lifecycle(MACHINE_NAME, "stop").await?;
-            api.lifecycle(MACHINE_NAME, "start").await
+            api.lifecycle(&self.machine_name(), "stop").await?;
+            api.lifecycle(&self.machine_name(), "start").await
         }
         .await;
         match restarted {
@@ -1389,7 +1366,7 @@ impl Adapter {
                 if let Err(e) = &other {
                     eprintln!("[sandbox] restart failed ({e}); recreating the VM");
                 }
-                if let Err(e) = api.delete_machine(MACHINE_NAME).await {
+                if let Err(e) = api.delete_machine(&self.machine_name()).await {
                     eprintln!("[sandbox] could not delete the VM before recreating: {e}");
                 }
                 self.sandbox_prewarm(seq).await;
@@ -1417,9 +1394,12 @@ impl Adapter {
             url: launch.api.url.clone(),
             token: launch.api.token.clone(),
             vmexec: launch.vmexec.clone()?,
-            machine: MACHINE_NAME.to_string(),
+            machine: self.machine_name().to_string(),
             workspaces_root: workspaces_root()?,
-            own_machine: launch.own.handoff.then(|| OWN_MACHINE_NAME.to_string()),
+            own_machine: launch
+                .own
+                .handoff
+                .then(|| self.own_machine_name().to_string()),
         })
     }
 
@@ -1581,6 +1561,19 @@ fn private_hosts_status(
     status.message = message;
 }
 
+/// The name of a machine of the account named `scope`: `base`, then the first
+/// characters of the scope (the account directory's name), so two accounts'
+/// sandbox sidecars never name one machine of the VM runtime, which may keep
+/// its machines beyond any one sidecar's data dir.
+pub(super) fn machine_named(base: &str, scope: &str) -> String {
+    let short: String = scope.chars().take(8).collect();
+    if short.is_empty() {
+        base.to_string()
+    } else {
+        format!("{base}-{short}")
+    }
+}
+
 /// `<home>/bnbloc-workspaces`: the one host directory the machine shares.
 pub(crate) fn workspaces_root() -> Option<PathBuf> {
     home_env().map(|(_, home)| PathBuf::from(home).join(WORKSPACES_DIR))
@@ -1600,16 +1593,12 @@ fn create_private_dir(dir: &std::path::Path) -> Result<(), String> {
 /// Extend the bridge env with the sandbox's mode, forwarded names and
 /// handoff (bridge::env_for); without the manager, off.
 pub(crate) fn extend_bridge_env(
-    app: Option<&tauri::AppHandle>,
+    adapter: Option<&Adapter>,
     env: &mut std::collections::HashMap<String, String>,
+    settings: &crate::settings::Settings,
 ) {
-    let adapter = app.and_then(|app| app.try_state::<Adapter>());
     let (mode, forward, handoff) = match adapter {
-        Some(a) => (
-            a.sandbox_bridge_mode(),
-            a.sandbox_env(),
-            a.sandbox_handoff(),
-        ),
+        Some(a) => a.sandbox_for_bridge(settings),
         // No sandbox manager: no sandbox can run.
         None => (BridgeMode::Known(SandboxMode::Off), Vec::new(), None),
     };
@@ -1619,24 +1608,24 @@ pub(crate) fn extend_bridge_env(
 // ------------------------------------------------------------------ commands
 
 #[tauri::command]
-pub(crate) fn sandbox_status(adapter: tauri::State<'_, Adapter>) -> SandboxStatus {
-    adapter.sandbox_status()
+pub(crate) fn sandbox_status(account: crate::runtime::Account) -> SandboxStatus {
+    account.adapter.sandbox_status()
 }
 
 /// Recreate the own machine with the private hosts (their addresses are
 /// resolved again), when no own turn runs there.
 #[tauri::command]
-pub(crate) fn sandbox_private_hosts_apply(adapter: tauri::State<'_, Adapter>) -> SandboxStatus {
-    adapter.sandbox_private_hosts_apply();
-    adapter.sandbox_status()
+pub(crate) fn sandbox_private_hosts_apply(account: crate::runtime::Account) -> SandboxStatus {
+    account.adapter.sandbox_private_hosts_apply();
+    account.adapter.sandbox_status()
 }
 
 #[tauri::command]
 pub(crate) async fn sandbox_restart_vm(
-    adapter: tauri::State<'_, Adapter>,
+    account: crate::runtime::Account,
 ) -> Result<SandboxStatus, String> {
-    adapter.sandbox_restart_vm().await?;
-    Ok(adapter.sandbox_status())
+    account.adapter.sandbox_restart_vm().await?;
+    Ok(account.adapter.sandbox_status())
 }
 
 #[cfg(test)]
@@ -1653,6 +1642,30 @@ mod tests {
             workspaces_root: PathBuf::from("/Users/me/bnbloc-workspaces"),
             own_machine: None,
         }
+    }
+
+    /// Two accounts' sandboxes never name one machine of the VM runtime, and
+    /// the own machine never shares the shared one's name.
+    #[test]
+    fn machine_names_are_per_account() {
+        let (maya, jack) = (
+            "0123456789abcdef0123456789abcdef",
+            "fedcba9876543210fedcba9876543210",
+        );
+        assert_eq!(machine_named(MACHINE_NAME, maya), "bnbloc-01234567");
+        assert_ne!(
+            machine_named(MACHINE_NAME, maya),
+            machine_named(MACHINE_NAME, jack)
+        );
+        assert_ne!(
+            machine_named(MACHINE_NAME, maya),
+            machine_named(OWN_MACHINE_NAME, maya)
+        );
+        assert_eq!(
+            machine_named(MACHINE_NAME, ""),
+            MACHINE_NAME,
+            "no account: the plain name"
+        );
     }
 
     #[test]

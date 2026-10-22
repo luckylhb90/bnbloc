@@ -3,7 +3,7 @@ import { downloadReleaseFile as fetchReleaseFile } from "./releaseDownload.ts";
 import { saveBlob } from "./saveBlob.ts";
 import { tapOnboarding } from "./onboardingEvents.ts";
 import { splitAgentHosts } from "./platformAgents.ts";
-import { apiUrl } from "./config.ts";
+import { apiUrl, apiUrlOn } from "./config.ts";
 import { ApiError } from "./errors.ts";
 import {
   MaxUnreadRooms,
@@ -31,7 +31,7 @@ import {
   type RoomWelcomeRequest,
   type UnreadReply,
 } from "./wire.gen.ts";
-import { authedFetch, errorBody } from "./session.ts";
+import { anonymousFetch, authedFetch, errorBody } from "./session.ts";
 import { downloadFilename, type RoomHandoffInfo, type RoomImportResult } from "./handoff.ts";
 import type { Grant } from "./sessionGrant.ts";
 import type { TenantPolicy } from "./shares.ts";
@@ -107,11 +107,21 @@ export type ReqAs = "json" | "none" | "text" | "blob" | "response";
 // an ApiError carrying the server's message (and the field it names). A
 // string body is JSON unless a Content-Type says otherwise; a FormData or
 // Blob body keeps the type the browser or the caller sets.
-export async function req<T>(path: string, opts: RequestInit & { as?: ReqAs } = {}): Promise<T> {
-  const { as = "json", ...init } = opts;
+//
+// `gateway` names the gateway of an account that is not this window's (the
+// vault keeps every account signed in, whichever gateway); `anonymous` sends
+// no session headers at all: a call that is its own credential (a refresh
+// token, an API token) must never carry this window's bearer to a gateway it
+// may not belong to.
+export async function req<T>(
+  path: string,
+  opts: RequestInit & { as?: ReqAs; gateway?: string; anonymous?: boolean } = {},
+): Promise<T> {
+  const { as = "json", gateway, anonymous = false, ...init } = opts;
   const headers = new Headers(init.headers);
   if (typeof init.body === "string" && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-  const res = await authedFetch(apiUrl(path), { ...init, headers });
+  const url = gateway === undefined ? apiUrl(path) : apiUrlOn(gateway, path);
+  const res = await (anonymous ? anonymousFetch : authedFetch)(url, { ...init, headers });
   if (!res.ok) {
     const body = await errorBody(res);
     throw new ApiError(res.status, body.message, body.field);
@@ -176,17 +186,21 @@ export const api = {
     }),
   // Renew a session from a refresh token (no bearer). The grant carries a
   // rotated refresh token that replaces the stored one; 401 = sign in again.
-  refresh: (refreshToken: string) =>
+  refresh: (refreshToken: string, gateway?: string) =>
     req<Grant>("/v1/auth/refresh", {
       method: "POST",
       body: JSON.stringify({ refreshToken }),
+      gateway,
+      anonymous: true,
     }),
   // Exchange a test account's API token for a session of its subject (no
   // bearer; the grant has no refresh token).
-  exchangeApiToken: (token: string) =>
+  exchangeApiToken: (token: string, gateway?: string) =>
     req<Grant>("/v1/auth/api-token", {
       method: "POST",
       body: JSON.stringify({ token }),
+      gateway,
+      anonymous: true,
     }),
   // Super admin: the API tokens, issue one (shown once), revoke one.
   apiTokens: () => req<APITokensReply>("/v1/platform/api-tokens"),
@@ -195,11 +209,13 @@ export const api = {
   revokeApiToken: (id: string) =>
     req<void>(`/v1/platform/api-tokens/${encodeURIComponent(id)}`, { method: "DELETE", as: "none" }),
   // Revoke the refresh token's sign-in server-side (idempotent, 204).
-  logout: (refreshToken: string) =>
+  logout: (refreshToken: string, gateway?: string) =>
     req<void>("/v1/auth/logout", {
       method: "POST",
       body: JSON.stringify({ refreshToken }),
       as: "none",
+      gateway,
+      anonymous: true,
     }),
   // Any member of multiple tenants: re-issue the session scoped to another
   // tenant they belong to. The whole session (rooms, agents, role) follows.

@@ -27,12 +27,17 @@ stored owner.
   (`services/gateway/session.go`), so a logout also ends the bridge's fork.
   Test: `TestLogoutRevokesTheForkedBridgeToo` (fails with the forks left,
   another sign-in's bridge untouched).
-- Shell: the web's sign-out (an empty session handed to
-  `internal_adapter_session`) now stops the bridge and forgets the owner and
-  tenant it ran for (`Settings::forget_member`; test
-  `signing_out_forgets_the_member_and_nothing_else`). A session bearer the
-  bridge already holds lives at most one session TTL, so stopping it at
-  once matters even with the fork revoked.
+- Shell: an account's runtime lives exactly as long as the account is in the
+  vault the web hands over (`accounts_sync`). The web's sign-out removes it from
+  the vault, and the shell then stops the runtime (its bridge, its sidecars)
+  and only after that revokes the account's own sign-in
+  (`AccountRuntime::shutdown`, `runtime.rs`; test
+  `a_session_after_the_shutdown_starts_nothing`: a session the keeper makes
+  while the account leaves starts nothing). This replaced the first fix (an
+  empty `internal_adapter_session` stopping the one bridge and forgetting its
+  owner), which could not follow several accounts. A session bearer the bridge
+  already holds lives at most one session TTL, so stopping it at once matters
+  even with the fork revoked.
 
 ## Still to confirm on a desktop app
 

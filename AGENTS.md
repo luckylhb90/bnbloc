@@ -1167,11 +1167,66 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `Secret`/`ct_eq` (random values and their comparison), `Dirs` (every
   app path), `files::atomic_write`/`read_json` (the one state-file writer;
   an unreadable file is moved aside and reported, never reset),
-  `AppState::update_settings` (the one settings writer; the web's form
-  never reverts the shell-owned sandbox mode), `GatewayAccess::send`
-  (every call as the member; 401 is `SessionExpired`, never a refusal or a
-  retry-forever; the manager has no session until the web hands one and
-  loses it at sign-out), `settings::gateway_url` (the one gateway URL).
+  `Registry::apply_settings` and `AccountRuntime::set_serving` (the writers
+  of the machine's settings and of each account's own), `GatewayAccess::send`
+  and `gateway_client::post_json` (every call as the member, and every
+  sign-in call; 401 is `SessionExpired`, never a refusal or a retry-forever;
+  an adapter has no session until its account's keeper makes one and loses it
+  at sign-out), `AccountKey` (an account's gateway origin, its directory and
+  the hash a member directory is named by).
+- **Every signed-in account is live in the desktop** (docs/prd/2026-10-22-
+  multi-account.md, slice 2). The web hands the shell the accounts it holds
+  (`accounts_sync`); the registry (`runtime.rs`) makes its **account
+  runtimes** match: each has its own session keeper (`keeper.rs`: forks a
+  refresh family of its own from the handed token once and never presents the
+  web's token again, because a rotated-away token is a reuse that ends the
+  whole family; renews hourly; revokes at removal and exit; a test account
+  exchanges its API token and has no bridge), adapter, bridge supervisor,
+  member directory and account settings (`accounts/<hash>/settings.json`: the
+  default agent, disabled providers, sync secret, gateway token and the serve
+  switch; the machine's `settings.json` holds only the cores and the
+  single-host flag). An account that leaves the snapshot stops first and is
+  revoked after. A window is bound to one account (`window_bind`; a pop-out
+  inherits its opener's); a command takes `Account` (resolved from the
+  calling window, `NOT_BOUND` otherwise), a scheme handler resolves by the
+  request's webview label. Never reach an adapter or a supervisor through
+  app state: there is none. **What is shared and what is per account**
+  (slice 3): a **core** is one daemon per computer on its fixed `localUrl`,
+  run and supervised by the core host (`internal_ext/core_host.rs`), held by
+  every account whose catalog pins that build (`KindRuntime::shared`); the
+  last holder's release stops it, an account leaving never does, another
+  build of a running core is the explicit `Hold::Differs` state (a holder
+  that is alone may replace the build), and the update gate waits for every
+  account's turns (`CoreHost::running_turns`). A **plugin** and the **sandbox**
+  run once per account on a port the desktop picks (`ephemeral_listener`,
+  told in `listenEnv`, which a plugin must declare: `pkgmeta` refuses a
+  plugin without it, the shell leaves one that slipped in waiting with the
+  reason). Machine-wide caches are judged by the union of every account's
+  catalog **by build** (`Live::binaries` are `(stem, sha256)`, bundles are
+  directory names), never deleted when a newer one arrives; an account's
+  copies for the sandbox's mounts and its spawn records are in a folder of its
+  own; an account that does not serve agents (a test account) runs no
+  component, only what a window shows (previewers).
+- **The web holds every account in a vault and a window shows one**
+  (`web/src/lib/vault.ts`, `windowBinding.ts`, `renewal.ts`, `auth.tsx`).
+  The vault (`bnbloc.vault`, localStorage) is the one list and the source of
+  truth: each account with its session record, `lastUsed`, `lastView`,
+  `signedOut` (a refused credential keeps the account, marked "sign in
+  again"; it is never dropped silently) and a revision the desktop shell
+  uses to drop a stale snapshot. A window is bound to one account by
+  sessionStorage; a new window binds to the account used last, one opened
+  for a purpose says which in its hash (`#!account=…`, `#!add-account`,
+  read once at module load). Switching re-binds THIS window and reloads it;
+  adding opens a window (a tab, or a shell window) and leaves the window it
+  came from alone; two accounts side by side are two windows. Every renewal
+  of an account (the 401 recovery, the proactive timer, the keep-alive of the
+  accounts no window shows, a switch) is `renewAccount` under that account's
+  Web Lock: a window that finds the record renewed by a sibling adopts it,
+  and the refresh token is rotated once. Session-minting calls go to the
+  account's own gateway with no session headers (`req`'s `gateway` and
+  `anonymous`: a refresh token must never carry this window's bearer to a
+  gateway it does not belong to). `web/e2e/multi-account.mjs` runs all of it
+  in a real browser against a mocked gateway.
 - **The desktop owns the sandbox VM, the bridge only uses it.** At most one
   sandbox component (`bnbloc.sandbox.package/v1`) runs per desktop. Its
   executable and declared files live in one sha256-verified per-version

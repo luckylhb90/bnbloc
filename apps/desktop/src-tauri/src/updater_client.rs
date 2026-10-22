@@ -1,11 +1,11 @@
 use std::time::Duration;
 
 use serde::Serialize;
-use tauri::{Emitter, State};
+use tauri::Emitter;
 use tauri_plugin_updater::UpdaterExt;
 
-use crate::settings::{gateway_url, Settings};
-use crate::{child_process, AppState};
+use crate::child_process;
+use crate::runtime::Account;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -31,8 +31,8 @@ struct UpdateProgress {
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const READ_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 
-fn update_endpoint(settings: &Settings) -> Result<String, String> {
-    let gateway = gateway_url(settings);
+fn update_endpoint(gateway: &str) -> Result<String, String> {
+    let gateway = crate::settings::normalize_gateway_url(gateway);
     if gateway.is_empty() {
         return Err("no gateway configured".into());
     }
@@ -51,11 +51,11 @@ fn bearer_header(session_token: &str) -> Result<String, String> {
 
 fn updater_for(
     app: &tauri::AppHandle,
-    settings: &Settings,
+    gateway: &str,
     session_token: &str,
 ) -> Result<tauri_plugin_updater::Updater, String> {
     app.updater_builder()
-        .endpoints(vec![update_endpoint(settings)?
+        .endpoints(vec![update_endpoint(gateway)?
             .parse()
             .map_err(|e| format!("invalid update endpoint: {e}"))?])
         .map_err(|e| e.to_string())?
@@ -79,11 +79,10 @@ fn forced_from_raw(raw: &serde_json::Value) -> bool {
 #[tauri::command]
 pub async fn check_update(
     app: tauri::AppHandle,
-    state: State<'_, AppState>,
+    account: Account,
     session_token: String,
 ) -> Result<UpdateCheckResult, String> {
-    let settings = state.settings.lock().clone();
-    let updater = updater_for(&app, &settings, &session_token)?;
+    let updater = updater_for(&app, account.key().gateway(), &session_token)?;
     match updater.check().await.map_err(|e| e.to_string())? {
         Some(update) => Ok(UpdateCheckResult {
             available: true,
@@ -103,11 +102,10 @@ pub async fn check_update(
 #[tauri::command]
 pub async fn install_update(
     app: tauri::AppHandle,
-    state: State<'_, AppState>,
+    account: Account,
     session_token: String,
 ) -> Result<bool, String> {
-    let settings = state.settings.lock().clone();
-    let updater = updater_for(&app, &settings, &session_token)?;
+    let updater = updater_for(&app, account.key().gateway(), &session_token)?;
     let Some(update) = updater.check().await.map_err(|e| e.to_string())? else {
         return Ok(false);
     };
@@ -150,23 +148,17 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn update_endpoint_uses_configured_gateway_without_trailing_slash() {
-        let settings = Settings {
-            gateway_url: "https://bnbloc.example.test/".into(),
-            ..Default::default()
-        };
-
+    fn update_endpoint_uses_the_accounts_gateway_without_trailing_slash() {
         assert_eq!(
-            update_endpoint(&settings).unwrap(),
+            update_endpoint("https://bnbloc.example.test/").unwrap(),
             "https://bnbloc.example.test/v1/app/update/{{target}}-{{arch}}/{{current_version}}"
         );
     }
 
     #[test]
-    fn unconfigured_gateway_fails_closed_without_a_build_default() {
-        if gateway_url(&Settings::default()).is_empty() {
-            assert!(update_endpoint(&Settings::default()).is_err());
-        }
+    fn no_gateway_fails_closed() {
+        assert!(update_endpoint("").is_err());
+        assert!(update_endpoint(" / ").is_err());
     }
 
     #[test]

@@ -9,7 +9,8 @@ import { CONTENT_KINDS, contentKindWord, contentLabel, type ContentComponent, ty
 import { defaultPlatformChoice, type OwnAgent } from "./onboarding.ts";
 import type { PlatformAgent, PlatformChoice } from "./platformAgents.ts";
 import { isOwner } from "./roomRoles.ts";
-import { StorageKey, keyFor } from "./storageKeys.ts";
+import { gatewayBase } from "./config.ts";
+import { StorageKey, memberKey } from "./storageKeys.ts";
 
 export const WORKSHOP_ROOM_NAME = "Expert workshop";
 
@@ -151,7 +152,7 @@ export function workshopRoomId(random: () => number = Math.random): string {
 // The workshop room id is cached per member in local storage (a fast path;
 // the server state — an owned private room pinning the builder — decides).
 export function workshopStorageKey(subject: string): string {
-  return keyFor(StorageKey.workshopRoom, subject);
+  return memberKey(StorageKey.workshopRoom, { gateway: gatewayBase(), subject });
 }
 
 export function cachedWorkshop(storage: Pick<Storage, "getItem"> | null, subject: string | null): string | null {

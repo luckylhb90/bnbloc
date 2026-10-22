@@ -44,28 +44,34 @@ pub(crate) fn setup(app: &tauri::AppHandle) {
     app.deep_link().on_open_url(move |event| {
         for url in event.urls() {
             if is_open_link(url.as_str()) {
-                if let Some(win) = handle.get_webview_window("main") {
-                    let _ = win.show();
-                    let _ = win.set_focus();
-                }
+                crate::windows::focus_app_window(&handle);
                 continue;
             }
-            match handle.get_webview_window("main") {
-                Some(webview) if MAIN_PAGE_READY.load(Ordering::Acquire) => {
-                    apply(webview.as_ref(), url.as_str())
+            if !MAIN_PAGE_READY.load(Ordering::Acquire) {
+                stash(Some(url.to_string()));
+                continue;
+            }
+            // Every app window gets it; only the one that started the sign-in
+            // (it holds the nonce) takes it.
+            crate::windows::focus_app_window(&handle);
+            for (label, webview) in handle.webview_windows() {
+                if crate::windows::is_app_window(&label) {
+                    apply(webview.as_ref(), url.as_str(), true);
                 }
-                _ => stash(Some(url.to_string())),
             }
         }
     });
 }
 
-// Called by lib.rs only for the main window's PageLoadEvent::Finished (DT-18).
+// Called by lib.rs only for an app window's PageLoadEvent::Finished (DT-18).
+// A link that came before any page could take it belongs to whoever started
+// the sign-in in an earlier run: this window takes it, and its page finds the
+// nonce the app kept for that (the web's localStorage copy).
 pub(crate) fn on_page_load(webview: &tauri::Webview) {
     MAIN_PAGE_READY.store(true, Ordering::Release);
     let pending = PENDING.lock().unwrap().take();
     if let Some(url) = pending {
-        apply(webview, &url);
+        apply(webview, &url, false);
     }
 }
 
@@ -101,25 +107,58 @@ fn sso_query(url: &str) -> Option<String> {
         .filter(|c| !c.is_empty())
 }
 
+/// The key under which the web keeps the nonce of the sign-in this window
+/// started (web/src/lib/storageKeys.ts `ssoNonce`, in sessionStorage: a window
+/// never takes the code of a sign-in another window started).
+const NONCE_KEY: &str = "bnbloc.ssoNonce";
+
 // apply loads the SPA with the hand-off code fragment and reloads. The reload
 // matters on a warm start: the running SPA booted before this link arrived,
 // so only a fresh boot re-runs the session read (which redeems the code).
-fn apply(webview: &tauri::Webview, url: &str) {
+// `only_waiting`: only a window that holds the nonce of a sign-in it started
+// does.
+fn apply(webview: &tauri::Webview, url: &str, only_waiting: bool) {
     let Some(code) = sso_query(url) else {
         return;
     };
-    let payload = serde_json::json!({ "code": code });
-    let _ = webview.eval(format!(
-        "(function(){{var p={p};\
+    let _ = webview.eval(apply_script(&code, only_waiting));
+}
+
+fn apply_script(code: &str, only_waiting: bool) -> String {
+    let payload = serde_json::json!({ "code": code, "key": NONCE_KEY });
+    let waiting = if only_waiting {
+        "if(!window.sessionStorage.getItem(p.key)){return;}"
+    } else {
+        ""
+    };
+    format!(
+        "(function(){{var p={payload};{waiting}\
 window.location.hash='ssoCode='+encodeURIComponent(p.code);\
-window.location.reload();}})();",
-        p = payload
-    ));
+window.location.reload();}})();"
+    )
 }
 
 #[cfg(test)]
 mod tests {
-    use super::sso_query;
+    use super::{apply_script, sso_query, NONCE_KEY};
+
+    /// The page takes the code only when it holds the nonce of the sign-in it
+    /// started, under the key the web writes it at.
+    #[test]
+    fn only_a_window_that_started_the_sign_in_takes_the_code() {
+        let waiting = apply_script("abc", true);
+        assert!(waiting.contains("sessionStorage.getItem(p.key)") && waiting.contains(NONCE_KEY));
+        assert!(waiting.contains("ssoCode='+encodeURIComponent(p.code)"));
+        assert!(
+            !apply_script("abc", false).contains("sessionStorage"),
+            "a cold start takes it unconditionally"
+        );
+        let web = include_str!("../../../../web/src/lib/storageKeys.ts");
+        assert!(
+            web.contains(&format!("ssoNonce: \"{NONCE_KEY}\"")),
+            "the web's nonce key"
+        );
+    }
 
     #[test]
     fn sso_query_accepts_only_a_code() {

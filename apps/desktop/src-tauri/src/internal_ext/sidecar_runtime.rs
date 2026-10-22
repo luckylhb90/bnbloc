@@ -2,18 +2,21 @@ use std::path::Path;
 use std::time::Instant;
 
 use crate::child_process::{self, ChildEvent, RestartPolicy, STOP_GRACE};
+use crate::internal_ext::core_host::{Hold, Phase};
 use crate::internal_ext::kind_runtime::runtime;
 use crate::internal_ext::loopback::LoopbackHttp;
 use crate::internal_ext::pin::Sha256Pin;
 use crate::internal_ext::sidecar_fetch::FetchError;
 use crate::internal_ext::sidecar_model::SidecarSpec;
 use crate::internal_ext::sidecar_orphan::{
-    listener_port, listening_pid, owned_orphan, plan_occupied_listener, process_exe,
-    read_spawn_record, remove_spawn_record, terminate_orphan, write_spawn_record, ListenerPlan,
-    OccupiedListener, Orphan, SpawnRecord, CAN_TERMINATE,
+    owned_orphan, process_alive, process_exe, read_spawn_record, remove_spawn_record,
+    terminate_orphan, write_spawn_record, SpawnRecord, CAN_TERMINATE,
 };
-use crate::internal_ext::sidecar_util::probe_core_protocol_listener;
 use crate::internal_ext::Adapter;
+
+/// How often a sidecar that follows the core host looks again when nothing
+/// nudged it.
+const SHARED_RECHECK: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Consecutive checksum mismatches tolerated (a truncated or proxied
 /// transfer) before the artifact is refused for this spec.
@@ -75,10 +78,14 @@ impl Adapter {
             let started = Instant::now();
             let prepared = runtime(spec.kind).prepare(self, &spec).await;
             match prepared {
+                Ok(path) if runtime(spec.kind).shared() => {
+                    verify_failures = 0;
+                    self.follow_shared(&spec, path, manager_generation, sidecar_generation)
+                        .await;
+                }
                 Ok(path) => {
                     verify_failures = 0;
-                    // Never overlap the run this one replaces (a fixed port,
-                    // a data dir).
+                    // Never overlap the run this one replaces (a data dir).
                     self.stopping.stopped(&id).await;
                     if !self.current(&id, manager_generation, sidecar_generation) {
                         return;
@@ -135,8 +142,100 @@ impl Adapter {
         }
     }
 
-    /// Run the verified binary once (or reuse/replace whatever already
-    /// listens on its fixed port) and return when it exits.
+    /// A shared sidecar (one process for every account, run by the core host)
+    /// is held for this account: it follows what the host says of it until
+    /// this sidecar is replaced, removed or stopped, then lets go. Another
+    /// build of it running for other accounts is told as such, and this
+    /// account waits for it.
+    async fn follow_shared(
+        &self,
+        spec: &SidecarSpec,
+        path: std::path::PathBuf,
+        manager_generation: u64,
+        sidecar_generation: u64,
+    ) {
+        let id = spec.id();
+        let mut changes = self.cores.subscribe();
+        if !self.current(&id, manager_generation, sidecar_generation) {
+            return;
+        }
+        let hold = self.cores.hold(self.holder, sidecar_generation, spec, path);
+        if let Hold::Differs { running } = hold {
+            self.set_status(
+                &id,
+                "waiting",
+                format!(
+                    "{name} {running} is running on this computer for another account; {name} {version} starts when that one stops",
+                    name = spec.name,
+                    version = spec.version
+                ),
+                None,
+            );
+            self.lost_shared_endpoint(&id, sidecar_generation);
+            // Look again when anything changes, and at least this often.
+            let _ = tokio::time::timeout(SHARED_RECHECK, changes.changed()).await;
+            return;
+        }
+        loop {
+            if !self.current(&id, manager_generation, sidecar_generation) {
+                self.cores
+                    .release(self.holder, &id, Some(sidecar_generation));
+                self.lost_shared_endpoint(&id, sidecar_generation);
+                return;
+            }
+            let Some(view) = self.cores.view(self.holder, &id) else {
+                // The host let go of it (it was stopped for an update or an
+                // exit): hold it again from the top.
+                self.lost_shared_endpoint(&id, sidecar_generation);
+                return;
+            };
+            self.show_shared(&id, sidecar_generation, spec, &view);
+            let _ = tokio::time::timeout(SHARED_RECHECK, changes.changed()).await;
+        }
+    }
+
+    /// What the host says of a shared sidecar is what this account shows.
+    fn show_shared(
+        &self,
+        id: &str,
+        sidecar_generation: u64,
+        spec: &SidecarSpec,
+        view: &crate::internal_ext::core_host::RunView,
+    ) {
+        let mut inner = self.inner.lock();
+        if let Some(sidecar) = inner
+            .sidecars
+            .get_mut(id)
+            .filter(|s| s.generation == sidecar_generation)
+        {
+            sidecar.runtime_url = view.url.clone();
+            sidecar.status.state = match view.phase {
+                Phase::Starting => "starting",
+                Phase::Running => "running",
+                Phase::Waiting => "waiting",
+            }
+            .into();
+            sidecar.status.message = view.message.clone();
+            sidecar.status.pid = view.pid;
+            sidecar.status.version = Some(spec.version.clone());
+        }
+    }
+
+    /// A shared sidecar this account no longer holds answers nowhere for it.
+    fn lost_shared_endpoint(&self, id: &str, sidecar_generation: u64) {
+        let mut inner = self.inner.lock();
+        if let Some(sidecar) = inner
+            .sidecars
+            .get_mut(id)
+            .filter(|s| s.generation == sidecar_generation)
+        {
+            sidecar.runtime_url = None;
+            sidecar.status.pid = None;
+        }
+    }
+
+    /// Run the verified binary once and return when it exits (a sidecar of
+    /// this account's own: on a port the desktop picks).
     async fn run_binary(
         &self,
         spec: &SidecarSpec,
@@ -168,10 +267,6 @@ impl Adapter {
                     );
                 }
             }
-            Err(error) if error.contains("already in use") => {
-                self.handle_occupied(spec, &error, manager_generation, sidecar_generation)
-                    .await
-            }
             Err(error) => self.set_status(
                 &id,
                 "waiting",
@@ -181,129 +276,63 @@ impl Adapter {
         }
     }
 
-    /// The fixed port is taken: replace an orphan this app spawned in an
-    /// earlier session, reuse a compatible foreign Core Protocol listener, or
-    /// wait (see sidecar_orphan). A replaced orphan's port frees up for the
-    /// supervise loop's next attempt.
-    async fn handle_occupied(
+    /// Stop the process of `spec` an earlier app session left running (its
+    /// spawn record names it, that session's app is gone, and its executable
+    /// is under `root`): it would hold the sidecar's data dir. Best-effort.
+    pub(super) async fn replace_recorded_orphan(
         &self,
         spec: &SidecarSpec,
-        bind_error: &str,
-        manager_generation: u64,
-        sidecar_generation: u64,
+        root: std::path::PathBuf,
+        what: &'static str,
     ) {
-        let id = spec.id();
-        let Some(pin) = spec.pin() else {
+        let Some(record_dir) = self.spawn_record_dir() else {
             return;
         };
-        let orphan = self.find_orphan(spec).await;
-        let probe = if runtime(spec.kind).reuses_listener(spec) {
-            Some(probe_core_protocol_listener(&spec.local_url, &spec.name).await)
-        } else {
-            None
-        };
-        let plan = plan_occupied_listener(OccupiedListener {
-            name: &spec.name,
-            spec_version: &spec.version,
-            spec_sha256: pin,
-            url: &spec.local_url,
-            bind_error,
-            orphan,
-            probe,
-            can_terminate: CAN_TERMINATE,
-        });
-        match plan {
-            ListenerPlan::Reuse => {
-                let mut inner = self.inner.lock();
-                if inner.generation == manager_generation {
-                    if let Some(sidecar) = inner.sidecars.get_mut(&id) {
-                        if sidecar.generation == sidecar_generation {
-                            sidecar.status.state = "running".into();
-                            sidecar.status.message = format!(
-                                "{} is already responding at {}",
-                                spec.name, spec.local_url
-                            );
-                            sidecar.status.pid = None;
-                            sidecar.runtime_url = Some(spec.local_url.clone());
-                        }
-                    }
-                }
-                eprintln!(
-                    "[sidecar-manager:{}] reusing existing Core Protocol listener",
-                    spec.name
-                );
-            }
-            ListenerPlan::Wait(message) => {
-                self.lost_endpoint(&id, sidecar_generation);
-                self.set_status(&id, "waiting", message, None)
-            }
-            ListenerPlan::Replace { pid, message } => {
-                eprintln!("[sidecar-manager:{}] {message} (pid {pid})", spec.name);
-                self.lost_endpoint(&id, sidecar_generation);
-                self.set_status(&id, "waiting", message, None);
-                let stopped =
-                    tauri::async_runtime::spawn_blocking(move || terminate_orphan(pid, STOP_GRACE))
-                        .await
-                        .unwrap_or_else(|e| Err(format!("stop task: {e}")));
-                match stopped {
-                    Ok(()) => self.forget_spawn(&id, pid),
-                    Err(error) => {
-                        eprintln!(
-                            "[sidecar-manager:{}] could not stop pid {pid}: {error}",
-                            spec.name
-                        );
-                        self.set_status(
-                            &id,
-                            "waiting",
-                            format!(
-                                "{} from an earlier session is still running on {} (pid {pid}: {error}); quit it to start {} {}",
-                                spec.name, spec.local_url, spec.name, spec.version
-                            ),
-                            None,
-                        );
-                    }
-                }
-            }
-        }
-    }
-
-    /// A listener reused in place stopped answering as the sidecar: it is no
-    /// longer the sidecar's endpoint.
-    fn lost_endpoint(&self, id: &str, sidecar_generation: u64) {
-        let mut inner = self.inner.lock();
-        if let Some(sidecar) = inner
-            .sidecars
-            .get_mut(id)
-            .filter(|s| s.generation == sidecar_generation)
-        {
-            sidecar.runtime_url = None;
-        }
-    }
-
-    /// The orphan from an earlier session listening on `spec`'s port, if
-    /// this app spawned it. Best-effort: lsof/ps run off the async runtime.
-    async fn find_orphan(&self, spec: &SidecarSpec) -> Option<Orphan> {
-        let port = listener_port(&spec.local_url)?;
-        let cache_dir = self.dirs().ok()?.binaries();
-        let record_dir = self.spawn_record_dir()?;
         let id = spec.id();
-        tauri::async_runtime::spawn_blocking(move || {
-            let pid = listening_pid(port)?;
-            owned_orphan(
-                pid,
-                read_spawn_record(&record_dir, &id).as_ref(),
-                process_exe(pid).as_deref(),
-                &cache_dir,
-                std::process::id(),
-            )
-        })
-        .await
-        .ok()
-        .flatten()
+        let orphan = {
+            let id = id.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                let record = read_spawn_record(&record_dir, &id)?;
+                owned_orphan(
+                    record.pid,
+                    Some(&record),
+                    process_exe(record.pid).as_deref(),
+                    &root,
+                    std::process::id(),
+                    process_alive,
+                )
+            })
+            .await
+            .ok()
+            .flatten()
+        };
+        let Some(pid) = orphan.map(|o| o.pid) else {
+            return;
+        };
+        if !CAN_TERMINATE {
+            return;
+        }
+        eprintln!(
+            "[{what}] stopping {} left running by an earlier session (pid {pid})",
+            spec.name
+        );
+        let stopped =
+            tauri::async_runtime::spawn_blocking(move || terminate_orphan(pid, STOP_GRACE))
+                .await
+                .unwrap_or_else(|e| Err(format!("stop task: {e}")));
+        match stopped {
+            Ok(()) => self.forget_spawn(&id, pid),
+            Err(e) => eprintln!("[{what}] could not stop pid {pid}: {e}"),
+        }
     }
 
+    /// The spawn records of this account's own sidecars: each account has a
+    /// directory of its own, so two accounts' plugins never share a record
+    /// (the cores' are the core host's).
     pub(super) fn spawn_record_dir(&self) -> Option<std::path::PathBuf> {
-        self.dirs().ok().map(crate::dirs::Dirs::spawn_records)
+        self.dirs()
+            .ok()
+            .map(|dirs| dirs.spawn_records().join(&self.scope))
     }
 
     fn record_spawn(&self, id: &str, pid: u32, sha256: Option<&Sha256Pin>) {

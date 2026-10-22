@@ -3,11 +3,12 @@
 // Pure logic, node-tested; the views live in views/WelcomeCard.tsx and
 // views/composer/StarterPrompts.tsx.
 import { platformChoices, type PlatformAgent, type PlatformChoice } from "./platformAgents.ts";
-import { StorageKey, keyFor } from "./storageKeys.ts";
+import { gatewayBase } from "./config.ts";
+import { StorageKey, memberKey } from "./storageKeys.ts";
 
 type Storage = Pick<globalThis.Storage, "getItem" | "setItem">;
 
-const dismissKey = (subject: string) => keyFor(StorageKey.welcomeDismissed, subject);
+const dismissKey = (subject: string) => memberKey(StorageKey.welcomeDismissed, { gateway: gatewayBase(), subject });
 
 export function welcomeDismissed(storage: Storage | null, subject: string | null): boolean {
   if (!storage || !subject) return false;

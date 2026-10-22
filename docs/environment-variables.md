@@ -311,6 +311,15 @@ These are code behaviors, not variables — recorded here because operators ask:
   sha256-verified like the executable, path passed in `env`). Every
   `<platform>/<name>` key must be a declared file of a platform that has a main
   artifact, and env names must be unique upper-case identifiers.
+  **Where a sidecar listens.** A **core** is one daemon per computer, on the
+  package's fixed `sidecar.localUrl`, shared by every signed-in account whose
+  catalog pins that build (another build of a running core waits until it
+  stops; the account is told so). A **plugin** and a **sandbox** run once per
+  account on a loopback port the desktop picks and hands to the process in
+  `sidecar.listenEnv`, which a plugin must therefore declare (its `localUrl`
+  is only the declared shape, never an address it may bind; the desktop
+  reaches the plugin at the address it handed out). `docs/prd/2026-10-22-
+  multi-account.md` §2.4.
 
 ## Relay
 
