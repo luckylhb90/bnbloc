@@ -94,6 +94,17 @@ const (
 // daemon's own capability_missing envelope.
 var ErrCapabilityMissing = errors.New("capability_missing")
 
+// ErrSessionContinuable matches (errors.Is) a core's answer that the session a
+// request named cannot be served as it was but its conversation is held and a
+// new session of the same workspace can take it over (SessionRequest.Continues).
+// The core's own restart is the case: it keeps the conversation, not the session.
+var ErrSessionContinuable = errors.New("session_continuable")
+
+// ErrContinuationLost matches a create that named a session to continue
+// (SessionRequest.Continues) which the core cannot hand over: nothing was
+// created and no turn ran, so the create may be repeated without Continues.
+var ErrContinuationLost = errors.New("continuation_lost")
+
 // CapabilityMissingError is the one error a provider returns when it refuses
 // a request locally because the core does not offer Capability: manifest
 // cores and the Core Protocol client report it identically.
@@ -335,14 +346,20 @@ type SessionRequest struct {
 	// own configuration only. The bridge sets it only for a core that
 	// advertises agentProfile; its secrets are never logged or persisted.
 	Profile *AgentProfile
+	// Continues is the session this one takes over: the core adopts exactly its
+	// conversation (never another's) or refuses with ErrContinuationLost. Set only
+	// after the core answered ErrSessionContinuable for that session.
+	Continues string
 }
 
 // SessionResult is the neutral result of creating a session. TurnID and Phase
 // are best-effort: a core that does not surface them leaves them empty.
+// Continued says the session took over SessionRequest.Continues's conversation.
 type SessionResult struct {
 	SessionID string
 	TurnID    string
 	Phase     string
+	Continued bool
 }
 
 // Message is one assistant reply produced in a session, in the neutral shape the

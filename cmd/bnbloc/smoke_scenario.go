@@ -154,8 +154,14 @@ func smokeLongTask(ctx context.Context, c *client, w *smokeWaiter, roomID, subje
 		fmt.Fprintf(run.out, "INFO session: the replies named no agent session (not checked)\n")
 	} else {
 		run.step("session", func() (string, error) {
-			if len(sessions) > 1 {
+			agent := rcpt.OwnerID + "/" + rcpt.Provider
+			if n := w.conversations(agent); n > 1 {
 				return "", fmt.Errorf("the agent answered from %d sessions (%s): its conversation was not continued between turns", len(sessions), strings.Join(sessions, ", "))
+			}
+			if len(sessions) > 1 {
+				// One conversation in several sessions: the core restarted and kept it,
+				// and the bridge named each session's predecessor.
+				return strings.Join(sessions, " -> ") + " (the core kept the conversation across the change)", nil
 			}
 			return sessions[0], nil
 		})
@@ -288,7 +294,7 @@ func smokeScenarioTurn(ctx context.Context, c *client, w *smokeWaiter, roomID st
 				return false, fmt.Errorf("agent job failed: %s", fail)
 			}
 			if len(texts) > 0 {
-				w.noteSession(handle, agentSessionOf(ev))
+				w.noteSession(handle, agentSessionOf(ev), agentContinuesOf(ev))
 			}
 			got = append(got, texts...)
 			return len(texts) > 0, nil
@@ -326,6 +332,27 @@ func agentSessionOf(ev smokeEvent) string {
 	}
 	_ = json.Unmarshal(ev.Payload, &batch)
 	return batch.AgentSessionID
+}
+
+// agentContinuesOf is the session an agent_messages event's session says it took
+// over ("" for none): the bridge adds it to the replies of a continued session.
+func agentContinuesOf(ev smokeEvent) string {
+	var batch struct {
+		Messages []struct {
+			Payload struct {
+				Continues string `json:"continues"`
+			} `json:"payload"`
+		} `json:"messages"`
+	}
+	if json.Unmarshal(ev.Payload, &batch) != nil {
+		return ""
+	}
+	for _, m := range batch.Messages {
+		if m.Payload.Continues != "" {
+			return m.Payload.Continues
+		}
+	}
+	return ""
 }
 
 // agentReplies reads an agent_messages event: the assistant texts of rcpt's

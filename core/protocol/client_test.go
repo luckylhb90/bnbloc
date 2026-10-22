@@ -588,3 +588,73 @@ func TestClient_RefreshExecution(t *testing.T) {
 		t.Fatal("a nil execution was sent")
 	}
 }
+
+// A session the core can continue is a 404 that a caller can tell from "unknown":
+// the sentinel matches, and so does NotFound (an older caller's rule).
+func TestClient_SessionContinuable_matchesItsSentinelAndStaysANotFound(t *testing.T) {
+	srv, _ := protocolServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == PathDiscover {
+			writeDiscover(w)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(ErrorEnvelope{Error: ProtocolError{Code: ErrorSessionContinuable, Message: "restarted"}})
+	})
+	client := NewClient("proto", srv.Client())
+
+	_, err := client.PollTurn(context.Background(), core.Endpoint{BaseURL: srv.URL}, "ws-1", "s-1")
+
+	if !errors.Is(err, core.ErrSessionContinuable) {
+		t.Fatalf("err = %v, want session_continuable", err)
+	}
+	if !core.NotFound(err) {
+		t.Fatalf("a continuable session must still read as not found to a caller that does not know the code: %v", err)
+	}
+	if errors.Is(err, core.ErrContinuationLost) {
+		t.Fatal("continuable matched continuation_lost")
+	}
+}
+
+// A create names the session it continues; the core says whether it did, or
+// refuses before anything runs (409, not retried).
+func TestClient_CreateSession_continuesAndLost(t *testing.T) {
+	var calls *[]requestCapture
+	sent := func() string { // what the last create carried (the helper keeps the decoded body)
+		v, _ := (*calls)[len(*calls)-1].body["continues"].(string)
+		return v
+	}
+	lost := false
+	var srv *httptest.Server
+	srv, calls = protocolServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == PathDiscover {
+			writeDiscover(w)
+			return
+		}
+		if lost {
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(ErrorEnvelope{Error: ProtocolError{Code: ErrorContinuationLost, Message: "taken"}})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(CreateSessionResponse{SessionID: "s-2", Continued: sent() != ""})
+	})
+	client := NewClient("proto", srv.Client())
+	ep := core.Endpoint{BaseURL: srv.URL}
+
+	res, err := client.CreateSession(context.Background(), ep, core.SessionRequest{WorkspaceID: "ws-1", Prompt: "hi", Continues: "s-1"})
+	if err != nil || sent() != "s-1" || !res.Continued || res.SessionID != "s-2" {
+		t.Fatalf("continue = %+v, %v (sent continues %q)", res, err, sent())
+	}
+	res, err = client.CreateSession(context.Background(), ep, core.SessionRequest{WorkspaceID: "ws-1", Prompt: "hi"})
+	if err != nil || res.Continued || sent() != "" {
+		t.Fatalf("a create that continues nothing = %+v, %v (sent %q)", res, err, sent())
+	}
+	lost = true
+	before := len(*calls)
+	_, err = client.CreateSession(context.Background(), ep, core.SessionRequest{WorkspaceID: "ws-1", Prompt: "hi", Continues: "s-1"})
+	if !errors.Is(err, core.ErrContinuationLost) || core.Retryable(err, false) {
+		t.Fatalf("err = %v (retryable %v), want continuation_lost, not retried", err, core.Retryable(err, false))
+	}
+	if n := len(*calls) - before; n != 1 {
+		t.Fatalf("a refused continuation was asked %d times, want 1", n)
+	}
+}

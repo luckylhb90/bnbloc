@@ -239,6 +239,20 @@ context-window overflow (`contextOverflow`, services/bridge/job_failure.go)
 workspace (the session guidance again, the room's history in `.room/`),
 with one notice to the room; a second overflow fails the job.
 
+**A core that restarts may keep the conversation** (additive in Core Protocol
+v1; [`docs/prd/2026-10-22-session-continuation.md`](../prd/2026-10-22-session-continuation.md)).
+A core that keeps an agent's conversation across its own restart but cannot bring
+the session back whole (the session wore secrets it never stores) answers a request
+for that session `404` with code `session_continuable` (`core.ErrSessionContinuable`;
+still a 404 to a caller that does not know the code). The bridge then creates a
+session with `CreateSessionRequest.continues` set to that id; the core adopts
+**exactly that** conversation and answers `continued: true`, or answers `409`
+`continuation_lost` (`core.ErrContinuationLost`) before anything runs, and the
+bridge falls back to a new session with the notice and the handover. The bridge
+tells the room nothing and hands nothing over when the conversation is continued,
+and tags the session's replies `continues: <id>` so `bnbloc smoke` counts one
+conversation. A core that never answers `session_continuable` is unchanged.
+
 **A sandboxed turn's command access renews itself** (capability
 `executionRefresh`). A sandboxed turn's exec token is short-lived (1 hour);
 while the turn runs the bridge mints a fresh one every 30 minutes and hands

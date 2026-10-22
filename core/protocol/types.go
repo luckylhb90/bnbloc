@@ -93,6 +93,14 @@ const (
 	ErrorTimeout            ErrorCode = "timeout"
 	ErrorCoreUnavailable    ErrorCode = "core_unavailable"
 	ErrorInternal           ErrorCode = "internal"
+	// ErrorSessionContinuable (404): the session cannot be served as it was but its
+	// conversation is held: create a session with CreateSessionRequest.Continues.
+	// A 404 is what every caller already reads as "not reachable, start another".
+	ErrorSessionContinuable ErrorCode = "session_continuable"
+	// ErrorContinuationLost (409): a create's Continues cannot be handed over (the
+	// conversation is gone, belongs to another workspace or harness, or is taken).
+	// Nothing was created and no turn ran: the create may be repeated without it.
+	ErrorContinuationLost ErrorCode = "continuation_lost"
 	// ErrorFileNotFound (404): a file read named no regular file inside the
 	// workspace — missing, a directory, or resolving outside it.
 	ErrorFileNotFound ErrorCode = "file_not_found"
@@ -113,10 +121,22 @@ type ProtocolError struct {
 	Retryable *bool     `json:"retryable,omitempty"`
 }
 
-// Is makes a daemon's capability_missing match core.ErrCapabilityMissing,
-// like the client's own local refusal.
+// Is makes a daemon's capability_missing, session_continuable and
+// continuation_lost match their core sentinels, like the client's own local
+// refusal.
 func (e *ProtocolError) Is(target error) bool {
-	return target == core.ErrCapabilityMissing && e != nil && e.Code == ErrorCapabilityMissing
+	if e == nil {
+		return false
+	}
+	switch target {
+	case core.ErrCapabilityMissing:
+		return e.Code == ErrorCapabilityMissing
+	case core.ErrSessionContinuable:
+		return e.Code == ErrorSessionContinuable
+	case core.ErrContinuationLost:
+		return e.Code == ErrorContinuationLost
+	}
+	return false
 }
 
 // RetryHint implements core.RetryHinter.
@@ -198,6 +218,10 @@ type CreateSessionRequest struct {
 	// caller owns a turn's length: a core fails a turn still running then
 	// (FailCodeDeadline) and never ends one earlier for time reasons.
 	DeadlineMs int64 `json:"deadlineMs,omitempty"`
+	// Continues is the session this one takes over, named after the core answered
+	// session_continuable for it: the core adopts exactly that conversation or
+	// answers continuation_lost before anything runs. Absent = a new conversation.
+	Continues string `json:"continues,omitempty"`
 }
 
 // AgentProfile is the role a session wears (capability agentProfile). The
@@ -263,6 +287,8 @@ type CreateSessionResponse struct {
 	SessionID string `json:"sessionId"`
 	TurnID    string `json:"turnId,omitempty"`
 	Phase     string `json:"phase,omitempty"`
+	// Continued is true when the session took over CreateSessionRequest.Continues.
+	Continued bool `json:"continued,omitempty"`
 }
 
 type SendInputRequest struct {
@@ -487,7 +513,7 @@ func (o SessionOptions) Core() core.SessionOptions {
 }
 
 func WireCreateSession(r core.SessionRequest) CreateSessionRequest {
-	return CreateSessionRequest{TargetID: r.TargetID, Prompt: r.Prompt, Options: WireOptions(r.Options), Execution: WireExecution(r.Options.Execution), Profile: WireProfile(r.Profile), DeadlineMs: r.Options.DeadlineMs}
+	return CreateSessionRequest{TargetID: r.TargetID, Prompt: r.Prompt, Options: WireOptions(r.Options), Execution: WireExecution(r.Options.Execution), Profile: WireProfile(r.Profile), DeadlineMs: r.Options.DeadlineMs, Continues: r.Continues}
 }
 
 // Core maps the request onto core.SessionRequest for the workspace named in
@@ -505,7 +531,7 @@ func (r CreateSessionRequest) Core(workspaceID string) (core.SessionRequest, err
 		return core.SessionRequest{}, err
 	}
 	opts.DeadlineMs = r.DeadlineMs
-	return core.SessionRequest{WorkspaceID: workspaceID, TargetID: r.TargetID, Prompt: r.Prompt, Options: opts, Profile: profile}, nil
+	return core.SessionRequest{WorkspaceID: workspaceID, TargetID: r.TargetID, Prompt: r.Prompt, Options: opts, Profile: profile, Continues: r.Continues}, nil
 }
 
 // WireProfile maps the neutral profile onto the wire (nil stays nil). A file
@@ -696,11 +722,11 @@ func (r SendInputRequest) CoreOptions() (core.SessionOptions, error) {
 }
 
 func WireSessionResult(r core.SessionResult) CreateSessionResponse {
-	return CreateSessionResponse{SessionID: r.SessionID, TurnID: r.TurnID, Phase: r.Phase}
+	return CreateSessionResponse{SessionID: r.SessionID, TurnID: r.TurnID, Phase: r.Phase, Continued: r.Continued}
 }
 
 func (r CreateSessionResponse) Core() core.SessionResult {
-	return core.SessionResult{SessionID: r.SessionID, TurnID: r.TurnID, Phase: r.Phase}
+	return core.SessionResult{SessionID: r.SessionID, TurnID: r.TurnID, Phase: r.Phase, Continued: r.Continued}
 }
 
 func WireTargets(ts []core.Target) []Target {

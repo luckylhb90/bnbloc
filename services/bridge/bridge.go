@@ -301,6 +301,9 @@ type roomSession struct {
 	core        string // core name this session is bound to
 	workspaceID string
 	sessionID   string
+	// continued is the session this one took over when the core kept its
+	// conversation across a restart ("" = a new conversation).
+	continued   string
 	lastVersion int64 // last reflowed message cursor
 	// ws is what the session shares with the other sessions of its
 	// workspace (workspaceShared: the .room/ pull state, the publish
@@ -805,7 +808,10 @@ func (b *Bridge) interruptTurn(coreName string, rs *roomSession) {
 type driveResult struct {
 	workspaceID string
 	sessionID   string
-	replied     bool
+	// continues is the session this turn's session took over (a core that
+	// kept its conversation across a restart); the job's diagnostics name it.
+	continues string
+	replied   bool
 	// acted: the core reported a step of the turn (a tool call), so it may
 	// have changed something.
 	acted bool
@@ -1527,8 +1533,8 @@ func (b *Bridge) runTurn(ctx context.Context, d *drive, key driveKey, opts corep
 	// ensureSession (workspace exists, session does not yet); a reused session
 	// materializes there too and returns the written descriptors so the
 	// follow-up prompt below can name them.
-	promptFn := func(workspaceID string, st *roomlog.CtxState, atts turnAttachments, g roomlog.Guidance) string {
-		return b.drivePrompt(ctx, d, workspaceID, atts, st, g, true)
+	promptFn := func(workspaceID string, st *roomlog.CtxState, atts turnAttachments, g roomlog.Guidance, fresh bool) string {
+		return b.drivePrompt(ctx, d, workspaceID, atts, st, g, fresh)
 	}
 	// The turn's start (the session bound or created, the .room/ pass, the
 	// input sent) holds the workspace's gate, unless the drive holds it.
@@ -1567,7 +1573,7 @@ func (b *Bridge) runTurn(ctx context.Context, d *drive, key driveKey, opts corep
 		// read this turn's .room/ refresh as a guest's write.
 		rs.roomSession.fenceBaseline()
 		if err != nil {
-			return driveResult{workspaceID: rs.workspaceID, sessionID: rs.sessionID}, rs.roomSession, atStage(stageStart, err)
+			return driveResult{workspaceID: rs.workspaceID, sessionID: rs.sessionID, continues: rs.continues}, rs.roomSession, atStage(stageStart, err)
 		}
 	}
 	rs.roomSession.markTurn(deliverableTurn{StartMs: time.Now().UnixMilli(), JobID: d.job.JobID, SourceSeq: d.job.MessageSeq, edit: d.edit})
@@ -1595,7 +1601,7 @@ func (b *Bridge) runTurn(ctx context.Context, d *drive, key driveKey, opts corep
 	if bound {
 		b.persistSession(sk, rs.roomSession)
 	}
-	return driveResult{workspaceID: rs.workspaceID, sessionID: rs.sessionID, replied: replied, acted: acted}, rs.roomSession, atStage(stageRun, err)
+	return driveResult{workspaceID: rs.workspaceID, sessionID: rs.sessionID, continues: rs.continues, replied: replied, acted: acted}, rs.roomSession, atStage(stageRun, err)
 }
 
 // dropSession unbinds the drive's channel session when it is still rs, so
@@ -1714,6 +1720,8 @@ func (b *Bridge) turnInfo(d *drive, rs *roomSession) TurnInfo {
 type ensureResult struct {
 	*roomSession
 	freshlyCreated bool
+	// continues is the session this one took over ("" = a new conversation).
+	continues string
 	// atts are the turn's attachments, written into the workspace or not,
 	// so a follow-up (reused-session) prompt can name them.
 	atts turnAttachments
@@ -1723,8 +1731,10 @@ type ensureResult struct {
 // exists AND the turn's attachments are materialized: pull-capable cores
 // materialize .room/ context first (its README written with the session's
 // guidance facts g), so the prompt may depend on the workspace id, reports
-// the materialized state through st, and names the written attachments.
-type promptFn func(workspaceID string, st *roomlog.CtxState, atts turnAttachments, g roomlog.Guidance) string
+// the materialized state through st, and names the written attachments. fresh
+// is false for a session that takes over a conversation the core kept
+// (continues): it is composed as a reused session's turn, from st.
+type promptFn func(workspaceID string, st *roomlog.CtxState, atts turnAttachments, g roomlog.Guidance, fresh bool) string
 
 // ensureSession binds a drive slot to a local workspace+session, creating
 // them on the first message for that slot and reusing them afterward. Each
@@ -1799,17 +1809,32 @@ func (b *Bridge) ensureSession(ctx context.Context, d *drive, key driveKey, prom
 		existing = nil
 		b.noticeNewSession(ctx, d, "a message of this conversation was deleted")
 	}
+	var continuing *continuation
 	if existing != nil {
 		if err := b.sessionReachable(ctx, entry, existing.workspaceID, existing.sessionID); err != nil {
-			slog.Warn("bnbloc bridge rebinding stale session",
-				"event", "bnbloc.bridge.session_rebind", "room", room, "core", d.core,
-				"provider", provider, "session", existing.sessionID, "error", err)
+			if errors.Is(err, corepkg.ErrSessionContinuable) {
+				// The core restarted and holds the conversation: the new session
+				// takes it over, so the agent remembers and the room is told
+				// nothing (docs/prd/2026-10-22-session-continuation.md).
+				slog.Info("bnbloc bridge continuing a session the core kept",
+					"event", "bnbloc.bridge.session_continuing", "room", room, "core", d.core,
+					"provider", provider, "session", existing.sessionID)
+				existing.mu.Lock()
+				continuing = &continuation{id: existing.sessionID, ctx: existing.ctx}
+				existing.mu.Unlock()
+			} else {
+				slog.Warn("bnbloc bridge rebinding stale session",
+					"event", "bnbloc.bridge.session_rebind", "room", room, "core", d.core,
+					"provider", provider, "session", existing.sessionID, "error", err)
+			}
 			b.mu.Lock()
 			if b.sessions[sk] == existing {
 				b.unbindLocked(sk)
 			}
 			b.mu.Unlock()
-			b.noticeNewSession(ctx, d, "its previous session could not be continued")
+			if continuing == nil {
+				b.noticeNewSession(ctx, d, "its previous session could not be continued")
+			}
 		} else {
 			if movedFrom != "" {
 				b.noticeMoved(ctx, d, movedFrom, key.place(), false)
@@ -1849,7 +1874,7 @@ func (b *Bridge) ensureSession(ctx context.Context, d *drive, key driveKey, prom
 		workspaceID = created
 		b.workspaces.bind(key, workspaceID)
 	}
-	rs, atts, err := b.startSession(ctx, d, key, entry, workspaceID, prompt, opts)
+	rs, atts, err := b.startSession(ctx, d, key, entry, workspaceID, prompt, opts, continuing)
 	if err != nil && reused && corepkg.NotFound(err) {
 		// The core no longer holds the workspace (it was deleted, or the
 		// core lost its state): a new one, the agent's files gone with the
@@ -1864,7 +1889,7 @@ func (b *Bridge) ensureSession(ctx context.Context, d *drive, key driveKey, prom
 		old := workspaceID
 		workspaceID, reused = created, false
 		b.workspaces.bind(key, workspaceID)
-		if rs, atts, err = b.startSession(ctx, d, key, entry, workspaceID, prompt, opts); err != nil {
+		if rs, atts, err = b.startSession(ctx, d, key, entry, workspaceID, prompt, opts, continuing); err != nil {
 			// Not the workspace after all (the 404 named something else,
 			// a target): the agent keeps the one it had.
 			b.workspaces.bind(key, old)
@@ -1887,7 +1912,7 @@ func (b *Bridge) ensureSession(ctx context.Context, d *drive, key driveKey, prom
 	b.persistSession(sk, rs)
 	slog.Info("bnbloc bridge bound room to session",
 		"event", "bnbloc.bridge.session_bound", "room", room, "channel", sk.channel, "core", d.core, "provider", provider, "workspace", workspaceID, "reused", reused, "session", rs.sessionID)
-	return &ensureResult{roomSession: rs, freshlyCreated: true, atts: atts}, nil
+	return &ensureResult{roomSession: rs, freshlyCreated: true, atts: atts, continues: rs.continued}, nil
 }
 
 // startSession creates a session in workspace workspaceID: the turn's
@@ -1895,7 +1920,7 @@ func (b *Bridge) ensureSession(ctx context.Context, d *drive, key driveKey, prom
 // then the session created with its initial prompt (the turn's start). It
 // returns the session, not yet bound to a slot, and the attachments
 // written.
-func (b *Bridge) startSession(ctx context.Context, d *drive, key driveKey, entry coreEntry, workspaceID string, prompt promptFn, opts corepkg.SessionOptions) (*roomSession, turnAttachments, error) {
+func (b *Bridge) startSession(ctx context.Context, d *drive, key driveKey, entry coreEntry, workspaceID string, prompt promptFn, opts corepkg.SessionOptions, continuing *continuation) (*roomSession, turnAttachments, error) {
 	room, provider := d.job.RoomID, d.job.Provider
 	// Materialize attachments into the workspace BEFORE the initial prompt
 	// runs (createSession below executes it), so the agent's very first
@@ -1905,28 +1930,70 @@ func (b *Bridge) startSession(ctx context.Context, d *drive, key driveKey, entry
 	// What the session is told once (the guidance, the content, the session
 	// contributors' servers): its profile or its first prompt's head.
 	profile, prefix, hooks, facts := b.sessionGuidance(ctx, d, entry.endpoint, workspaceID, b.sessionInfo(d, opts))
+	// A session that takes over a kept conversation starts from the state the
+	// one it replaces had (what the room told it so far, when it began) and is
+	// composed as a reused session's turn: the agent remembers, so it is not
+	// handed the conversation again.
 	var st roomlog.CtxState
-	initialPrompt := prefix + prompt(workspaceID, &st, atts, facts)
+	fresh := continuing == nil
+	if continuing != nil {
+		st = continuing.ctx
+	}
+	initialPrompt := prefix + prompt(workspaceID, &st, atts, facts, fresh)
 	rs := &roomSession{owner: d.owner, seat: key, provider: provider, core: d.core, workspaceID: workspaceID, ws: b.workspaces.shared(key, workspaceID), ctx: st, hooks: hooks, profileSum: d.content.bindingSum(), guidance: facts}
 	if opts.Execution != nil {
 		rs.workdir = opts.Execution.Sandbox.Workdir
 	}
 	rs.startTurn(b.turnInfo(d, rs))
-	sessionID, err := b.createSession(ctx, entry, workspaceID, d.target, initialPrompt, opts, profile)
+	continues := ""
+	if continuing != nil {
+		continues = continuing.id
+	}
+	res, err := b.createSession(ctx, entry, workspaceID, d.target, initialPrompt, opts, profile, continues)
 	if err != nil {
 		rs.release()
+		if continuing != nil && errors.Is(err, corepkg.ErrContinuationLost) {
+			// Nothing was created and no turn ran: the conversation could not be
+			// handed over, so this is the new session it would have been without
+			// the core's help, with the room told and the conversation handed over.
+			slog.Warn("bnbloc bridge a kept conversation could not be continued",
+				"event", "bnbloc.bridge.continuation_lost", "room", room, "core", d.core, "provider", provider, "session", continuing.id, "error", err)
+			b.noticeNewSession(ctx, d, "its previous conversation could not be continued")
+			return b.startSession(ctx, d, key, entry, workspaceID, prompt, opts, nil)
+		}
 		// The session create carries the initial prompt: the turn's start.
 		return nil, turnAttachments{}, atStage(stageStart, fmt.Errorf("create session: %w", err))
+	}
+	if continuing != nil {
+		if res.Continued {
+			rs.continued = continuing.id
+			slog.Info("bnbloc bridge session continued",
+				"event", "bnbloc.bridge.session_continued", "room", room, "core", d.core, "provider", provider, "from", continuing.id, "session", res.SessionID)
+		} else {
+			// The core answered continuable and then created a session that took
+			// nothing over (a contract violation): the agent may remember none of
+			// it, so the room is told, never silently.
+			slog.Error("bnbloc bridge core did not continue the conversation it said it kept",
+				"event", "bnbloc.bridge.continuation_violated", "room", room, "core", d.core, "provider", provider, "session", continuing.id)
+			go b.noticeNewSession(context.WithoutCancel(ctx), d, "its previous conversation could not be continued")
+		}
 	}
 	// Under mu: the session's workspace reader (a room tool call during
 	// this first turn) reads it concurrently.
 	rs.mu.Lock()
-	rs.sessionID = sessionID
+	rs.sessionID = res.SessionID
 	rs.mu.Unlock()
 	// The fence baseline: everything there is what bnbloc and the core
 	// wrote for this session.
 	rs.fenceBaseline()
 	return rs, atts, nil
+}
+
+// continuation is a session the core kept the conversation of: the id to name on
+// the create that takes it over, and the room-context state it had.
+type continuation struct {
+	id  string
+	ctx roomlog.CtxState
 }
 
 // sessionInfo is what the session contributors are told about a drive's
@@ -2121,8 +2188,8 @@ func (b *Bridge) deleteWorkspace(ctx context.Context, entry coreEntry, workspace
 	}
 }
 
-func (b *Bridge) createSession(ctx context.Context, entry coreEntry, workspaceID, target, prompt string, opts corepkg.SessionOptions, profile *corepkg.AgentProfile) (string, error) {
-	var sessionID string
+func (b *Bridge) createSession(ctx context.Context, entry coreEntry, workspaceID, target, prompt string, opts corepkg.SessionOptions, profile *corepkg.AgentProfile, continues string) (corepkg.SessionResult, error) {
+	var out corepkg.SessionResult
 	err := retryCore(ctx, false, func() error {
 		res, e := entry.provider.CreateSession(ctx, entry.endpoint, corepkg.SessionRequest{
 			WorkspaceID: workspaceID,
@@ -2130,14 +2197,15 @@ func (b *Bridge) createSession(ctx context.Context, entry coreEntry, workspaceID
 			Prompt:      prompt,
 			Options:     opts,
 			Profile:     profile,
+			Continues:   continues,
 		})
 		if e != nil {
 			return e
 		}
-		sessionID = res.SessionID
+		out = res
 		return nil
 	})
-	return sessionID, err
+	return out, err
 }
 
 func (b *Bridge) sendInput(ctx context.Context, entry coreEntry, workspaceID, sessionID, text string, opts corepkg.SessionOptions) error {
@@ -2436,6 +2504,11 @@ func (b *Bridge) postRoomMessage(ctx context.Context, room string, rs *roomSessi
 	// under the request that dispatched it (payload chain, no lookups).
 	turn := rs.lastTurn()
 	tagJob(payload, turn.JobID, turn.SourceSeq)
+	// A session that took over a conversation the core kept says whose: the
+	// release gate follows the chain instead of reading a new id as a lost one.
+	if rs.continued != "" {
+		payload["continues"] = rs.continued
+	}
 	body := map[string]any{
 		"workspaceId":    room,
 		"agentSessionId": rs.sessionID,

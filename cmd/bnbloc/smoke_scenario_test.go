@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -29,8 +30,13 @@ type fakeScenarioAgent struct {
 	// newSessions makes every reply come from a new agent session that
 	// still recalls the codeword (it reads the room's history).
 	newSessions bool
-	replies     int
-	betweenRan  int
+	// continueSession makes the replies after --between come from a new session
+	// that says it continues the first (a core that kept the conversation across
+	// its restart); continueFrom is the session it names (default the first).
+	continueSession bool
+	continueFrom    string
+	replies         int
+	betweenRan      int
 }
 
 var (
@@ -86,15 +92,20 @@ func (g *fakeSmokeGateway) publishAgent(room, text string) {
 	var evs []smokeEvent
 	g.mu.Lock()
 	g.fakeAgent.replies++
-	session := "sess-1"
+	session, continues := "sess-1", ""
 	if g.fakeAgent.newSessions {
 		session = fmt.Sprintf("sess-%d", g.fakeAgent.replies)
 	}
+	if g.fakeAgent.continueSession && g.fakeAgent.betweenRan > 0 {
+		session, continues = "sess-2", cmp.Or(g.fakeAgent.continueFrom, "sess-1")
+	}
 	g.mu.Unlock()
 	for _, part := range strings.Split(text, "\x00") {
-		raw, _ := json.Marshal(map[string]any{"agentSessionId": session, "messages": []any{map[string]any{"payload": map[string]any{
-			"role": "assistant", "text": part, "ownerUserId": "alice", "provider": "claude",
-		}}}})
+		payload := map[string]any{"role": "assistant", "text": part, "ownerUserId": "alice", "provider": "claude"}
+		if continues != "" {
+			payload["continues"] = continues
+		}
+		raw, _ := json.Marshal(map[string]any{"agentSessionId": session, "messages": []any{map[string]any{"payload": payload}}})
 		g.mu.Lock()
 		g.seq++
 		evs = append(evs, smokeEvent{Sequence: g.seq, Kind: wire.KindAgentMessages, Payload: raw})
@@ -256,6 +267,31 @@ func TestSmokeLongTaskSkipsRoomToolsForAnAgentWithout(t *testing.T) {
 	g.fakeAgent.noTools = true
 	out, err := runFakeSmoke(t, g, scenarioOptions(g, "restart"))
 	if err != nil || !strings.Contains(out, "INFO room tools: the agent had none before the change (not checked)") || strings.Contains(out, "PASS room tools") {
+		t.Fatalf("err = %v\n%s", err, out)
+	}
+}
+
+// A core that kept the conversation across its restart gives the agent a new
+// session id; the bridge says whose conversation it took over, and that is one
+// conversation, not a lost one.
+func TestSmokeLongTaskFollowsAContinuedSession(t *testing.T) {
+	g := newScenarioGateway(t)
+	g.fakeAgent.continueSession = true
+	out, err := runFakeSmoke(t, g, scenarioOptions(g, "restart"))
+	if err != nil || !strings.Contains(out, "PASS session (") || !strings.Contains(out, "sess-1 -> sess-2 (the core kept the conversation across the change)") {
+		t.Fatalf("err = %v\n%s", err, out)
+	}
+}
+
+// A session that names a predecessor the scenario never saw continued nothing.
+func TestSmokeLongTaskDoesNotTrustAContinuationOfNothing(t *testing.T) {
+	g := newScenarioGateway(t)
+	g.fakeAgent.continueSession = true
+	g.fakeAgent.continueFrom = "sess-9"
+	opts := scenarioOptions(g, "restart")
+	opts.AgentTimeout = 300 * time.Millisecond
+	out, err := runFakeSmoke(t, g, opts)
+	if !errors.Is(err, errSmokeFailed) || !strings.Contains(out, "FAIL session: the agent answered from 2 sessions") {
 		t.Fatalf("err = %v\n%s", err, out)
 	}
 }

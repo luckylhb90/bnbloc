@@ -399,6 +399,9 @@ func (b *Bridge) settle(ctx context.Context, d *drive, res driveResult, err erro
 	}
 	if res.sessionID != "" {
 		diag["workspaceId"], diag["sessionId"] = res.workspaceID, res.sessionID
+		if res.continues != "" {
+			diag["continues"] = res.continues // the session whose conversation this one took over
+		}
 	}
 	if res.replied && !agentFailed(err) {
 		if err != nil {

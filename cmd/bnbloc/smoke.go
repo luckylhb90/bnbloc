@@ -436,12 +436,23 @@ type smokeWaiter struct {
 	// sessions are the agent sessions each agent ("owner/provider")
 	// answered from, in the order first seen (smokeScenarioTurn notes them).
 	sessions map[string][]string
+	// continues maps a session to the one whose conversation it took over (a core
+	// that kept the conversation across its restart: the bridge says so on the
+	// session's replies).
+	continues map[string]string
 }
 
-// noteSession records that agent answered from session (once per session).
-func (w *smokeWaiter) noteSession(agent, session string) {
+// noteSession records that agent answered from session (once per session), and
+// the session it continues when it says so.
+func (w *smokeWaiter) noteSession(agent, session, continues string) {
 	if session == "" {
 		return
+	}
+	if continues != "" {
+		if w.continues == nil {
+			w.continues = map[string]string{}
+		}
+		w.continues[session] = continues
 	}
 	for _, s := range w.sessions[agent] {
 		if s == session {
@@ -452,6 +463,20 @@ func (w *smokeWaiter) noteSession(agent, session string) {
 		w.sessions = map[string][]string{}
 	}
 	w.sessions[agent] = append(w.sessions[agent], session)
+}
+
+// conversations counts the conversations agent's sessions make: a session that
+// continues one already seen belongs to it, any other starts one.
+func (w *smokeWaiter) conversations(agent string) int {
+	seen := map[string]bool{}
+	n := 0
+	for _, s := range w.sessions[agent] {
+		if from := w.continues[s]; from == "" || !seen[from] {
+			n++
+		}
+		seen[s] = true
+	}
+	return n
 }
 
 // wait returns the first event match accepts; match may also fail the wait.

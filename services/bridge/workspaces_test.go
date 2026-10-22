@@ -38,6 +38,15 @@ type fsCore struct {
 	// gone: workspaces the core no longer holds; stale: sessions it lost.
 	gone  map[string]bool
 	stale map[string]bool
+	// continuable: sessions a restart took but whose conversation it keeps
+	// (the probe answers session_continuable); lostContinuation refuses a create
+	// that names one (continuation_lost); noContinued makes it create a session
+	// that takes nothing over while saying it did not (a contract violation);
+	// taken are the sessions already continued.
+	continuable      map[string]bool
+	lostContinuation bool
+	noContinued      bool
+	taken            map[string]bool
 	// unknown fails the capability read (a daemon whose discovery fails).
 	unknown error
 	// turnFiles are what the agent writes during its next turn.
@@ -75,6 +84,8 @@ type fsSession struct {
 	// turns are the messages the session received: its initial prompt and
 	// every input (its conversation).
 	turns []string
+	// continues is the session it took over ("" = a new conversation).
+	continues string
 }
 
 func newFSCore(t *testing.T) *fsCore {
@@ -112,10 +123,21 @@ func (c *fsCore) CreateSession(_ context.Context, _ corepkg.Endpoint, req corepk
 	if !c.held(req.WorkspaceID) {
 		return corepkg.SessionResult{}, notFound("/workspaces/" + req.WorkspaceID + "/sessions")
 	}
-	s := fsSession{id: fmt.Sprintf("s%d", len(c.sessions)+1), workspace: req.WorkspaceID, profile: req.Profile, files: c.listLocked(req.WorkspaceID), turns: []string{req.Prompt}}
+	continued := false
+	if req.Continues != "" {
+		if c.lostContinuation || c.taken[req.Continues] || !c.continuable[req.Continues] {
+			return corepkg.SessionResult{}, fmt.Errorf("create session: %w", corepkg.ErrContinuationLost)
+		}
+		if c.taken == nil {
+			c.taken = map[string]bool{}
+		}
+		c.taken[req.Continues] = true
+		continued = !c.noContinued
+	}
+	s := fsSession{id: fmt.Sprintf("s%d", len(c.sessions)+1), workspace: req.WorkspaceID, profile: req.Profile, files: c.listLocked(req.WorkspaceID), turns: []string{req.Prompt}, continues: req.Continues}
 	c.sessions = append(c.sessions, s)
 	c.workLocked(req.WorkspaceID)
-	return corepkg.SessionResult{SessionID: s.id}, nil
+	return corepkg.SessionResult{SessionID: s.id, Continued: continued}, nil
 }
 
 func (c *fsCore) SendInput(_ context.Context, _ corepkg.Endpoint, ws, sess, text string, _ corepkg.SessionOptions) error {
@@ -178,6 +200,9 @@ func (c *fsCore) Messages(context.Context, corepkg.Endpoint, string, string, int
 func (c *fsCore) PollTurn(_ context.Context, _ corepkg.Endpoint, _, sess string) (corepkg.TurnStatus, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.continuable[sess] {
+		return corepkg.TurnStatus{}, fmt.Errorf("poll turn: %w", corepkg.ErrSessionContinuable)
+	}
 	if c.stale[sess] {
 		return corepkg.TurnStatus{}, errors.New("session_not_found")
 	}
