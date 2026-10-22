@@ -11,7 +11,7 @@ import { api } from "@/lib/api";
 import { openAccountWindow } from "@/lib/accountWindow";
 import { bindGatewayBase, gatewayBase } from "@/lib/config";
 import { isAuxWindow } from "@/lib/previewRoute";
-import { renewAccount, withAccountLock, type RenewIo } from "@/lib/renewal";
+import { renewUnderLock } from "@/lib/accountRenewal";
 import { visiblePoll } from "@/lib/useVisiblePoll";
 import { bindActingTenant, clearActingTenant, getToken, refreshSession, setReauthHandler, setToken } from "@/lib/session";
 import {
@@ -31,7 +31,6 @@ import {
   accountKind,
   find,
   keyOf,
-  markSignedOut,
   put,
   readVault,
   remove,
@@ -103,29 +102,6 @@ export const useAuth = () => useContext(AuthCtx);
 // one it is bound to (lib/windowBinding.ts). The 1h session bearer is renewed
 // from the account's refresh token (or a test account's API token); Sign Out
 // forgets the account and revokes that sign-in.
-
-// renewIo is the renewal's view of one account in the vault: its record, and
-// the credential calls on ITS gateway (not the window's) with no session
-// headers of the window's.
-function renewIo(key: string): RenewIo {
-  const gateway = find(readVault(), key)?.gateway ?? gatewayBase();
-  return {
-    read: () => find(readVault(), key)?.record ?? null,
-    write: (record) => void updateVault((list) => withRecord(list, key, record)),
-    markSignedOut: () => void updateVault((list) => markSignedOut(list, key)),
-    now: Date.now,
-    mintDeps: {
-      refresh: (refreshToken) => api.refresh(refreshToken, gateway),
-      exchangeApiToken: (apiToken) => api.exchangeApiToken(apiToken, gateway),
-    },
-  };
-}
-
-// renewUnderLock is the ONE renewal of an account: under its lock, from the
-// vault's record, adopting a sibling window's renewal instead of minting again.
-function renewUnderLock(key: string, have: string | null) {
-  return withAccountLock(key, () => renewAccount(renewIo(key), have));
-}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [subject, setSubject] = useState<string | null>(null);

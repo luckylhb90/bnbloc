@@ -12,10 +12,12 @@ import {
   UserCircleIcon,
   UsersThreeIcon,
 } from "@phosphor-icons/react";
+import { anyUnread, unreadBadge } from "@/lib/accountUnread";
+import { useAccountsUnread } from "@/lib/useAccountsUnread";
 import { accountKind, keyOf } from "@/lib/vault";
 import { useAuth } from "@/lib/auth";
 import { errorText } from "@/lib/errors";
-import { AccountsDialog, TestBadge } from "@/views/accounts/AccountsDialog";
+import { AccountsDialog, TestBadge, UnreadBadge } from "@/views/accounts/AccountsDialog";
 import { useToast } from "@/ui/Toast";
 import { cn } from "@/lib/cn";
 import { usePrivacyMode } from "@/lib/privacyMode";
@@ -58,6 +60,10 @@ export function AccountMenu({
   const active = MENU_VIEWS.has(view);
   // The accounts of this browser (docs/prd/2026-10-22-multi-account.md).
   const { kind, accounts, current, switchAccount } = useAuth();
+  // Unread rooms of the accounts this window does not show (one request each
+  // a minute while visible, only with more than one account).
+  const unread = useAccountsUnread(accounts, current);
+  const elsewhere = anyUnread(unread);
   const toast = useToast();
   const [managing, setManaging] = useState(false);
   // The member's display name, never their id (PRD 2026-10-10 §1); the id is
@@ -93,11 +99,18 @@ export function AccountMenu({
           <span
             aria-hidden
             className={cn(
-              "grid size-8 shrink-0 place-items-center rounded-full bg-[var(--color-accent-soft)] text-sm font-semibold text-[var(--color-accent)]",
+              "relative grid size-8 shrink-0 place-items-center rounded-full bg-[var(--color-accent-soft)] text-sm font-semibold text-[var(--color-accent)]",
               active && "ring-2 ring-[var(--color-accent)]/70",
             )}
           >
             {(name[0] || "?").toUpperCase()}
+            {elsewhere && (
+              <span
+                data-unread-elsewhere
+                title="Another account has unread messages"
+                className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full border-2 border-[var(--color-bg)] bg-[var(--color-accent)]"
+              />
+            )}
           </span>
           {!collapsed && (
             <>
@@ -138,6 +151,7 @@ export function AccountMenu({
                 <span className="truncate">{a.record.subject}</span>
                 {accountKind(a.record) === "test" && <TestBadge />}
                 {a.signedOut && <span className="shrink-0 text-xs text-[var(--color-fg-subtle)]">sign in again</span>}
+                {unreadBadge(unread.get(keyOf(a))) && <UnreadBadge text={unreadBadge(unread.get(keyOf(a)))} />}
               </span>
             </MenuItem>
           ))}
@@ -170,7 +184,7 @@ export function AccountMenu({
         <BuildVersion />
       </div>
     </Menu>
-    <AccountsDialog open={managing} onClose={() => setManaging(false)} />
+    <AccountsDialog open={managing} onClose={() => setManaging(false)} unread={unread} />
     </>
   );
 }

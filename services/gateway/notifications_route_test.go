@@ -19,6 +19,8 @@ func TestNotificationRoutes(t *testing.T) {
 		"/v1/my/notifiers/corp/test":                "rt",
 		"/v1/my/notifiers/corp/other":               "",
 		"/v1/my/agents":                             "act",
+		"/v1/my/unread":                             "rt",
+		"/v1/my/unread/extra":                       "",
 		"/v1/my/other":                              "",
 		"/v1/tenant/notification-webhook":           "share",
 		"/v1/tenant/settings":                       "share",

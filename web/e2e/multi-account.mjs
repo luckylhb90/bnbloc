@@ -17,7 +17,7 @@ const KEY = (sub) => `\n${sub}`; // same-origin gateway "" + subject
 let failures = 0;
 const ok = (c, m) => { if (!c) { failures++; console.log("FAIL:", m); } else console.log("ok:", m); };
 
-const calls = { refresh: [], logout: [] };
+const calls = { refresh: [], logout: [], unread: [] };
 async function mockGateway(ctx, opts = {}) {
   await ctx.route("**/v1/**", async (route) => {
     const u = new URL(route.request().url());
@@ -31,6 +31,12 @@ async function mockGateway(ctx, opts = {}) {
       if (opts.refuse?.has(sub)) return json({ error: "refresh token rejected" }, 401);
       const n = calls.refresh.length;
       return json({ sessionToken: bearer(sub, `r${n}`), refreshToken: `r-${sub}-${n + 1}`, subject: sub, tenant: "default", role: "member" });
+    }
+    if (p === "/v1/my/unread") {
+      const auth = route.request().headers()["authorization"] || "";
+      const sub = JSON.parse(Buffer.from(auth.replace("Bearer ", "").split(".")[0], "base64url").toString()).sub;
+      calls.unread.push(sub);
+      return json({ rooms: sub === "maya" ? 3 : 0, more: false });
     }
     if (p === "/v1/auth/logout") { calls.logout.push(JSON.parse(route.request().postData() || "{}").refreshToken); return route.fulfill({ status: 204 }); }
     if (p === "/v1/cores") return json({ cores: [] });
@@ -181,6 +187,39 @@ const browser = await chromium.launch();
   ok(v.accounts.length === 1 && v.accounts[0].record.subject === "ada" && v.rev >= 1, "9: it is in the vault");
   ok((await a.evaluate(() => sessionStorage.getItem("bnbloc.window.account"))) === KEY("ada"), "9: and bound");
   await ctx.close();
+}
+
+// ---- 10. the unread of the accounts no window shows: one request each, as that account
+{
+  calls.unread.length = 0;
+  const ctx = await browser.newContext({ viewport: { width: 1300, height: 800 } });
+  await mockGateway(ctx);
+  await ctx.addInitScript((v) => { if (!localStorage.getItem("bnbloc.vault")) localStorage.setItem("bnbloc.vault", v); }, vault([entry("maya", 100), entry("jack", 200)]));
+  const a = await ctx.newPage();
+  await a.goto(B + "/");
+  await who(a);
+  await a.waitForSelector("[data-unread-elsewhere]", { timeout: 8000 }).catch(() => {});
+  ok((await a.locator("[data-unread-elsewhere]").count()) === 1, "10: a dot on the account button says another account has unread");
+  ok(calls.unread.length >= 1 && calls.unread.every((s) => s === "maya"), `10: only the other account was asked, as itself (${calls.unread})`);
+  await a.getByRole("button", { name: /Account menu/ }).first().click();
+  const item = a.getByRole("menuitem", { name: /maya/ });
+  ok((await item.locator("[data-unread-badge]").innerText()) === "3", "10: the switcher shows maya's 3 unread rooms");
+  await a.keyboard.press("Escape");
+  const asked = calls.unread.length;
+  await a.waitForTimeout(1500);
+  ok(calls.unread.length === asked, "10: no polling storm (reopening and waiting asked nothing more)");
+  await ctx.close();
+  // one account: nobody to ask
+  calls.unread.length = 0;
+  const solo = await browser.newContext({ viewport: { width: 1300, height: 800 } });
+  await mockGateway(solo);
+  await solo.addInitScript((v) => { if (!localStorage.getItem("bnbloc.vault")) localStorage.setItem("bnbloc.vault", v); }, vault([entry("jack", 200)]));
+  const s = await solo.newPage();
+  await s.goto(B + "/");
+  await who(s);
+  await s.waitForTimeout(1500);
+  ok(calls.unread.length === 0 && (await s.locator("[data-unread-elsewhere]").count()) === 0, "10: with one account nothing is asked and nothing is shown");
+  await solo.close();
 }
 
 await browser.close();

@@ -247,6 +247,11 @@ func (s *Service) route(p apiPath) string {
 		if p.is("v1", "my", "apps") {
 			return s.Backends.Room
 		}
+		// How many of the member's rooms have unread messages (the account
+		// switcher): realtime owns the read cursors.
+		if p.is("v1", "my", "unread") {
+			return s.Backends.Realtime
+		}
 		// Which rooms were deleted (a member's bridge removes their agent
 		// workspaces on it): the room service owns the rooms.
 		if p.is("v1", "my", "deleted-rooms") {

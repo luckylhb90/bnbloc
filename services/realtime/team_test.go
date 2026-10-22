@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
@@ -264,5 +265,63 @@ func TestSearchFindsVisiblePrompts(t *testing.T) {
 	code, body = f.do(t, "alice", http.MethodGet, "/v1/search?q=deploy&rooms=room-1", nil)
 	if code != http.StatusOK || strings.Contains(string(body), `"kind":"prompt"`) {
 		t.Fatalf("room-filtered search = %d %s", code, body)
+	}
+}
+
+// GET /v1/my/unread counts the caller's rooms with unread messages: rooms of
+// the member only, rooms not messages, cleared by reading, and a repeated ask
+// within the cache window is answered without a second query.
+func TestMyUnreadSummaryCountsMemberRooms(t *testing.T) {
+	f := newTeamFixture(t)
+	f.chatAs(t, "alice", "room-1", "one")
+	f.chatAs(t, "alice", "room-1", "two")
+	f.chatAs(t, "carol", "room-2", "elsewhere")
+	summary := func(user string) wire.UnreadSummary {
+		t.Helper()
+		code, body := f.do(t, user, http.MethodGet, "/v1/my/unread", nil)
+		if code != http.StatusOK {
+			t.Fatalf("unread as %s = %d (%s)", user, code, body)
+		}
+		var out wire.UnreadSummary
+		_ = json.Unmarshal(body, &out)
+		return out
+	}
+	if got := summary("bob"); got.Rooms != 1 || got.More {
+		t.Fatalf("bob (in room-1 only) = %+v, want 1 room", got)
+	}
+	// Carol is in room-2 only: room-1's messages are not hers to count (her
+	// own message there is unread until she reads it, as UnreadCount says).
+	if got := summary("carol"); got.Rooms != 1 {
+		t.Fatalf("carol (in room-2 only) = %+v, want 1 room", got)
+	}
+	// Nobody in no room has none.
+	if got := summary("dave"); got.Rooms != 0 || got.More {
+		t.Fatalf("a member of no room = %+v", got)
+	}
+	if code, _ := f.do(t, "", http.MethodGet, "/v1/my/unread", nil); code != http.StatusUnauthorized && code != http.StatusForbidden {
+		t.Fatalf("no subject = %d, want a refusal", code)
+	}
+}
+
+// The summary cache answers the same member within its window and forgets
+// after it, and never grows past its bound.
+func TestUnreadSummaryCache(t *testing.T) {
+	var c unreadSummaryCache
+	now := time.Unix(1000, 0)
+	if _, ok := c.get("k", now); ok {
+		t.Fatal("an empty cache answered")
+	}
+	c.put("k", wire.UnreadSummary{Rooms: 3}, now)
+	if got, ok := c.get("k", now.Add(unreadSummaryTTL-time.Second)); !ok || got.Rooms != 3 {
+		t.Fatalf("within the window = %+v %v", got, ok)
+	}
+	if _, ok := c.get("k", now.Add(unreadSummaryTTL)); ok {
+		t.Fatal("an expired answer was served")
+	}
+	for i := 0; i < unreadSummaryMax+10; i++ {
+		c.put(strconv.Itoa(i), wire.UnreadSummary{}, now)
+	}
+	if len(c.m) > unreadSummaryMax {
+		t.Fatalf("the cache grew to %d, past its bound %d", len(c.m), unreadSummaryMax)
 	}
 }

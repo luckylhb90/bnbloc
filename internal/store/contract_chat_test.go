@@ -333,6 +333,85 @@ func TestContractChatStoreUnread(t *testing.T) {
 	})
 }
 
+// UnreadRooms counts rooms, not messages, with a live unread message in a live
+// channel: the same notion as UnreadCount, over many rooms in one query.
+func TestContractChatStoreUnreadRooms(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) {
+		tid := uniq("t-unread-rooms-")
+		ctx := tenantCtx(tid)
+		s := b.Chat
+		a, bb, c, quiet := uniq("room-a-"), uniq("room-b-"), uniq("room-c-"), uniq("room-q-")
+		for _, room := range []string{a, bb, c, quiet} {
+			for _, ch := range []string{"ch_1", "ch_2"} {
+				if err := b.Channel.PutChannel(ctx, RoomChannel{ChannelID: room + ch, RoomID: room, Name: ch, CreatedBy: "maya", CreatedAtMs: 1}); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		put := func(room, ch string, seq int64) RoomMessage { return chatRow(tid, room, room+ch, seq, "x") }
+		// A batch is one room's.
+		for room, rows := range map[string][]RoomMessage{
+			a:  {put(a, "ch_1", 1), put(a, "ch_1", 2), put(a, "ch_2", 3)}, // two channels with news
+			bb: {put(bb, "ch_2", 1)},                                      // one message
+			c:  {put(c, "ch_1", 1)},                                       // one message, deleted below
+		} {
+			if err := b.Chat.AppendRoomMessages(ctx, rows); err != nil {
+				t.Fatalf("append %s: %v", room, err)
+			}
+		}
+		if ok, err := s.DeleteRoomMessage(ctx, c, 1, "maya", 9); err != nil || !ok {
+			t.Fatalf("delete = %v %v", ok, err)
+		}
+		rooms := []string{a, bb, c, quiet}
+		count := func(user string, ids []string, max int) int { return must(s.UnreadRooms(ctx, user, ids, max))(t) }
+		// Rooms, not messages and not channels: a has three messages in two channels.
+		if n := count("jack", rooms, 100); n != 2 {
+			t.Fatalf("unread rooms = %d, want 2 (a and b; c's only message is deleted, quiet has none)", n)
+		}
+		// Reading a room's channels clears it, one channel at a time.
+		if err := s.MarkRead(ctx, a, a+"ch_1", "jack", 2, 1); err != nil {
+			t.Fatal(err)
+		}
+		if n := count("jack", rooms, 100); n != 2 {
+			t.Fatalf("after reading one of a's channels = %d, want 2 (ch_2 is still unread)", n)
+		}
+		if err := s.MarkRead(ctx, a, a+"ch_2", "jack", 3, 2); err != nil {
+			t.Fatal(err)
+		}
+		if n := count("jack", rooms, 100); n != 1 {
+			t.Fatalf("after reading all of a = %d, want 1", n)
+		}
+		// Each user has their own cursor; only the asked-for rooms count; the cap stops the count.
+		if n := count("maya", rooms, 100); n != 2 {
+			t.Fatalf("another user's unread rooms = %d, want 2", n)
+		}
+		if n := count("maya", []string{bb}, 100); n != 1 {
+			t.Fatalf("one asked-for room = %d, want 1", n)
+		}
+		if n := count("maya", rooms, 1); n != 1 {
+			t.Fatalf("capped at 1 = %d", n)
+		}
+		if n := count("maya", nil, 100); n != 0 {
+			t.Fatalf("no rooms = %d", n)
+		}
+		// Another tenant sees none of it.
+		if n := must(s.UnreadRooms(tenantCtx(uniq("t-other-")), "maya", rooms, 100))(t); n != 0 {
+			t.Fatalf("cross-tenant unread rooms = %d", n)
+		}
+		// Agrees with UnreadCount, room by room.
+		for _, room := range rooms {
+			per := 0
+			for _, ch := range []string{"ch_1", "ch_2"} {
+				per += must(s.UnreadCount(ctx, room, room+ch, "jack"))(t)
+			}
+			one := count("jack", []string{room}, 100)
+			if (per > 0) != (one == 1) {
+				t.Fatalf("room %s: UnreadCount says %d, UnreadRooms says %d", room, per, one)
+			}
+		}
+	})
+}
+
 // Message search, one filter at a time: the caller's rooms only, the text
 // as a case-insensitive substring, live rows of the ctx tenant, the
 // created_at cursor, the page size and the newest-first order.

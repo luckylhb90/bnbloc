@@ -37,6 +37,9 @@ const (
 // authority). Global search reads only rooms it returns.
 type RoomDirectory interface {
 	MemberRooms(ctx context.Context, userID, tenantID string) ([]membership.RoomRef, error)
+	// MemberRoomIDs is MemberRooms without the names: one query of ids, for a
+	// reader that does not show the rooms (the unread summary).
+	MemberRoomIDs(ctx context.Context, userID, tenantID string) ([]string, error)
 }
 
 func (s *Service) registerTeamRoutes(mux *http.ServeMux) {

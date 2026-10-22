@@ -130,6 +130,18 @@ type UnreadReply struct {
 	Channels map[string][]ChannelUnread `json:"channels"`
 }
 
+// UnreadSummary is GET /v1/my/unread: how many of the caller's rooms (in the
+// tenant the request is signed for) have unread messages, at most
+// MaxUnreadSummaryRooms rooms looked at and UnreadSummaryCap counted. More is
+// true when the number is a floor: the cap was reached or the member has more
+// rooms than were looked at. It is what an account switcher shows beside an
+// account no window shows, so it costs a few index seeks, never a per-room
+// request.
+type UnreadSummary struct {
+	Rooms int  `json:"rooms"`
+	More  bool `json:"more"`
+}
+
 // DeletedRooms is GET /v1/my/deleted-rooms?ids= (at most 100): the asked-for
 // rooms that were deleted. A live, unknown or never-created id is absent:
 // only a deletion is evidence (docs/bugs/2026-10-22-deleted-room-workspaces-never-removed.md).

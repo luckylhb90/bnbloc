@@ -10,6 +10,14 @@ const (
 	// is refused (400), never cut, so a client never reads "no unread" into
 	// a truncated answer.
 	MaxUnreadRooms = 200
+	// MaxUnreadSummaryRooms bounds the rooms GET /v1/my/unread looks at: each
+	// costs one index seek per channel in a single query. A member with more
+	// rooms gets a floor (UnreadSummary.More), never a cut answer read as exact.
+	MaxUnreadSummaryRooms = 500
+	// UnreadSummaryCap is the most rooms with unread messages GET
+	// /v1/my/unread counts: a switcher shows "99+" beyond it, so the query
+	// stops there.
+	UnreadSummaryCap = 100
 	// MaxAttachmentBytes bounds one chat attachment upload.
 	MaxAttachmentBytes = 25 << 20
 	// MaxBlobBytes bounds one object in the blob store: realtime's blob put,

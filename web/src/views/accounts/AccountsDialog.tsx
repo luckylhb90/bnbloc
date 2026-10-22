@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { AppWindowIcon, PlusIcon, TrashIcon } from "@phosphor-icons/react";
 import { describeStatus, shellKey } from "@/lib/accountStatus";
+import { unreadBadge } from "@/lib/accountUnread";
+import type { UnreadSummary } from "@/lib/wire.gen";
 import { accountKind, keyOf, type VaultAccount } from "@/lib/vault";
 import { desktop } from "@/lib/desktop";
 import { useAccountsStatus } from "@/lib/useAccountsStatus";
@@ -24,10 +26,33 @@ export function TestBadge() {
   );
 }
 
+// UnreadBadge is how many rooms of an account have unread messages ("3", or
+// "99+" when the count is a floor).
+export function UnreadBadge({ text }: { readonly text: string }) {
+  return (
+    <span
+      data-unread-badge
+      title="Rooms with unread messages"
+      className="shrink-0 rounded-full bg-[var(--color-accent)] px-1.5 text-[10px] font-semibold leading-4 text-white tabular"
+    >
+      {text}
+    </span>
+  );
+}
+
 // AccountsDialog manages the accounts of this app: show one in this window or
 // in a window of its own, remove one, sign in another, add a test account by
 // its API token (docs/prd/2026-10-22-multi-account.md).
-export function AccountsDialog({ open, onClose }: { readonly open: boolean; readonly onClose: () => void }) {
+export function AccountsDialog({
+  open,
+  onClose,
+  unread,
+}: {
+  readonly open: boolean;
+  readonly onClose: () => void;
+  /** Unread rooms of the accounts this window does not show, by account key. */
+  readonly unread: ReadonlyMap<string, UnreadSummary>;
+}) {
   const { accounts, current, switchAccount, openAccount, addAccount, addTestAccount, removeAccount } = useAuth();
   const toast = useToast();
   const [busy, setBusy] = useState<string | null>(null);
@@ -65,6 +90,7 @@ export function AccountsDialog({ open, onClose }: { readonly open: boolean; read
               busy={busy === keyOf(a)}
               onSwitch={() => void run(keyOf(a), () => switchAccount(keyOf(a)))}
               onOpen={() => void run(keyOf(a), () => openAccount(keyOf(a)))}
+              unread={unreadBadge(unread.get(keyOf(a)))}
               state={describeStatus(statuses.get(shellKey(a.gateway, a.record.subject ?? "")))}
               gateway={gateways.size > 1 ? hostOf(a.gateway) : ""}
               onRemove={() => {
@@ -154,6 +180,7 @@ function AccountRow({
   account,
   shown,
   busy,
+  unread,
   state,
   gateway,
   onSwitch,
@@ -163,6 +190,8 @@ function AccountRow({
   readonly account: VaultAccount;
   readonly shown: boolean;
   readonly busy: boolean;
+  /** Its unread badge ("3", "99+"), or "". */
+  readonly unread: string;
   /** What the shell says of it ("agents online"), or "". */
   readonly state: string;
   /** Its gateway's host, when the vault holds accounts of several. */
@@ -192,6 +221,7 @@ function AccountRow({
         )}
       </span>
       {accountKind(account.record) === "test" && <TestBadge />}
+      {unread && <UnreadBadge text={unread} />}
       {!shown && (
         <Button variant="outline" size="sm" disabled={busy} onClick={onSwitch}>
           {busy ? "Switching…" : "Switch"}

@@ -1092,7 +1092,16 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
 - **Unread = messages with seq > the user's last-read seq** (`room_read_state`).
   `POST .../read` advances it (monotonic); `GET /v1/rooms-unread?rooms=` returns
   per-room counts (membership-checked). The client marks read as the feed's
-  latest seq advances.
+  latest seq advances. `GET /v1/my/unread` is the cheap form for an account no
+  window shows (the switcher's badge): how many of the member's rooms have
+  unread, resolved server-side, one store query (`ChatStore.UnreadRooms`) whose
+  shape is fixed by measurement (an `EXISTS` was a 2.7 s semijoin over the
+  tenant's messages; a MAX candidate test plus a `LIMIT 1` scalar subquery with
+  the channel index forced is 0.01-0.13 s at 500 rooms x 3 channels x 400
+  messages, `store/chat.go`), capped at `wire.UnreadSummaryCap` rooms and
+  `MaxUnreadSummaryRooms` looked at, answered from a 10 s per-member cache. The
+  web asks it only for other accounts, one a minute while visible
+  (`useAccountsUnread`), never for the account in front (Shell's poll).
 - **Transient events are NOT persisted.** `presence_typing` (POST .../typing) and
   presence events publish through the hub but are excluded from `persist()` (only
   chat/agent_messages persist), so they never enter history.

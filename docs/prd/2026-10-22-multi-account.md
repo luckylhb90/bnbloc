@@ -9,7 +9,8 @@ components (shared cores, per-account plugins and sandbox, union sweeps); the
 web's vault with per-account renewal locks, keep-alive, window binding and last
 view; shell windows per account; the switcher's status, removal with optional
 local-data deletion and "Continue as". Not built: the sandbox VM's start on
-demand and idle stop (§2.4). Unverified here, to run on a real desktop: the
+demand and idle stop (§2.4). Unread rooms of the other accounts: built, with
+the query shaped by measurement. Unverified here, to run on a real desktop: the
 shell windows, the SSO deep link across windows, the VM runtime's machine
 naming, a shared core's behavior across two accounts. Owner: the account vault and window binding
 (`web/src/lib/accounts.ts`, `auth.tsx`), the platform console
@@ -230,8 +231,15 @@ Checked in the code (`sidecar_sweep.rs`, `mcp_tools.rs`, `sidecar_status.rs`,
 - Sign-in offers "Continue as" for the vault's accounts; the first run of a
   desktop build without a default gateway asks which gateway.
 - Notifications and sounds come from the visible account of a window;
-  background accounts show an unread count and agent status on the switcher
-  (their runtime polls its own unread, so the count is live). Native
+  background accounts show how many of their rooms have unread messages and
+  their agent status on the switcher, and a dot on the account button. The
+  count is one bounded request per account (`GET /v1/my/unread`: rooms of the
+  member resolved on the server, one indexed query that stops at 100, a
+  10 s server cache), asked by the web as that account once a minute while a
+  window is visible and only when there is another account; the account in
+  front keeps its own per-room poll. Rooms with unread, not messages: the
+  switcher answers "is there something there", and the number is cheap and
+  bounded. Native
   notifications for background accounts are not part of this design: they need
   a message stream per account that nothing else uses.
 - Test accounts (§ below) are accounts like any other in the vault; the
@@ -332,10 +340,9 @@ one account.
    session, parked list and cross-window reload.
 5. **(built)** **Desktop windows per account**: window label to account, pop-outs inheriting
    the opener's account, "Open in new window", per-window gateway.
-6. **(built, except unread counts)** **The experience**: status on the switcher
-   (session, agents online and running turns from the shell's own state;
-   **not built: unread counts**, which need a message poll per account that
-   nothing else uses), remove with optional local-data deletion, Continue as (an
+6. **(built)** **The experience**: status on the switcher
+   (session, agents online and running turns from the shell's own state; the
+   unread rooms of every other account, §2.5), remove with optional local-data deletion, Continue as (an
    account that needs a sign-in says so), and the add-account dialog's vault
    note (the gateway of a new sign-in is chosen where it always was, the gateway
    switcher of the sign-in window). Account events are the shell log's

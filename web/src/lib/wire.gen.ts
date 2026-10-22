@@ -3641,6 +3641,14 @@ export interface JobProgressInput {
 // is refused (400), never cut, so a client never reads "no unread" into
 // a truncated answer.
 export const MaxUnreadRooms = 200;
+// MaxUnreadSummaryRooms bounds the rooms GET /v1/my/unread looks at: each
+// costs one index seek per channel in a single query. A member with more
+// rooms gets a floor (UnreadSummary.More), never a cut answer read as exact.
+export const MaxUnreadSummaryRooms = 500;
+// UnreadSummaryCap is the most rooms with unread messages GET
+// /v1/my/unread counts: a switcher shows "99+" beyond it, so the query
+// stops there.
+export const UnreadSummaryCap = 100;
 // MaxAttachmentBytes bounds one chat attachment upload.
 export const MaxAttachmentBytes = 26214400;
 // MaxBlobBytes bounds one object in the blob store: realtime's blob put,
@@ -5254,6 +5262,18 @@ export interface ChannelUnread {
 export interface UnreadReply {
   unread: Record<string, number>;
   channels: Record<string, ChannelUnread[]>;
+}
+
+// UnreadSummary is GET /v1/my/unread: how many of the caller's rooms (in the
+// tenant the request is signed for) have unread messages, at most
+// MaxUnreadSummaryRooms rooms looked at and UnreadSummaryCap counted. More is
+// true when the number is a floor: the cap was reached or the member has more
+// rooms than were looked at. It is what an account switcher shows beside an
+// account no window shows, so it costs a few index seeks, never a per-room
+// request.
+export interface UnreadSummary {
+  rooms: number;
+  more: boolean;
 }
 
 // DeletedRooms is GET /v1/my/deleted-rooms?ids= (at most 100): the asked-for

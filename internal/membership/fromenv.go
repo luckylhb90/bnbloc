@@ -17,6 +17,7 @@ import (
 type Service interface {
 	Directory
 	MemberRooms(ctx context.Context, userID, tenantID string) ([]RoomRef, error)
+	MemberRoomIDs(ctx context.Context, userID, tenantID string) ([]string, error)
 	PutAgentHost(ctx context.Context, tenantID, roomID, userID string) error
 	DeleteAgentHost(ctx context.Context, tenantID, roomID, userID string) error
 }

@@ -60,6 +60,12 @@ Existing endpoints gained an optional channel selector:
 
 ## Read cursors and unread
 
+`GET /v1/my/unread` answers `{ "rooms": n, "more": bool }`: how many of the
+caller's rooms (in the tenant the request is signed for) have a live unread
+message in a live channel, counted to 100 and over at most 500 rooms (`more`
+says the number is a floor). It is the cheap read for an account no window
+shows; `/v1/rooms-unread` below is the per-room, per-channel detail.
+
 `room_read_state` is keyed `(room_id, channel_id, user_id)` — one cursor per
 channel. `/v1/rooms-unread` is additive:
 

@@ -30,6 +30,7 @@ import {
   type RoomsReply,
   type RoomWelcomeRequest,
   type UnreadReply,
+  type UnreadSummary,
 } from "./wire.gen.ts";
 import { anonymousFetch, authedFetch, errorBody } from "./session.ts";
 import { downloadFilename, type RoomHandoffInfo, type RoomImportResult } from "./handoff.ts";
@@ -502,6 +503,11 @@ export const api = {
     }
     return merged;
   },
+  // How many of the caller's rooms have unread messages, as another account
+  // of the vault (`gateway` and its own bearer: a read of an account no window
+  // shows). One request, a bounded query on the server.
+  unreadSummaryOf: (gateway: string, bearer: string) =>
+    req<UnreadSummary>("/v1/my/unread", { gateway, anonymous: true, headers: { Authorization: `Bearer ${bearer}` } }),
   // Advance the caller's last-read sequence in a room (clears its unread).
   // channelId scopes the cursor to one channel; absent = the room default.
   markRead: (id: string, seq: number, channelId?: string) =>

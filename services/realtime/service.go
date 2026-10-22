@@ -65,9 +65,12 @@ var errAgentInPeopleChat = errors.New("agents cannot be addressed in the people 
 
 // Service holds the realtime handler dependencies.
 type Service struct {
-	Hub        *realtime.Hub
-	Membership membership.Directory
-	Presence   *realtime.Presence
+	// unreadSummaries holds each member's latest GET /v1/my/unread answer for
+	// a few seconds (unread_summary.go).
+	unreadSummaries unreadSummaryCache
+	Hub             *realtime.Hub
+	Membership      membership.Directory
+	Presence        *realtime.Presence
 	// Roster tracks which agents each member's bridge advertises as reachable in
 	// a room, so the composer picker offers real drivable agents without the
 	// gateway reaching any user's machine (remote-safe). Lazily created in
@@ -183,6 +186,7 @@ type ChatStore interface {
 	RoomFeed(ctx context.Context, roomID string, after int64, limit int) ([]store.RoomMessage, error)
 	MarkRead(ctx context.Context, roomID, channelID, userID string, seq, atMs int64) error
 	UnreadCount(ctx context.Context, roomID, channelID, userID string) (int, error)
+	UnreadRooms(ctx context.Context, userID string, roomIDs []string, max int) (int, error)
 	MaxRoomSeq(ctx context.Context, roomID string) (int64, error)
 	LookupClientMsg(ctx context.Context, roomID, clientMsgID string) (int64, bool, error)
 	DeleteRoomMessage(ctx context.Context, roomID string, seq int64, requester string, atMs int64) (bool, error)
@@ -246,6 +250,7 @@ func (s *Service) Handler() http.Handler {
 	mux.HandleFunc("DELETE /v1/rooms/{roomId}/messages/{seq}", s.handleDeleteMessage)
 	mux.HandleFunc("PATCH /v1/rooms/{roomId}/messages/{seq}", s.handleEditMessage)
 	mux.HandleFunc("GET /v1/rooms-unread", s.handleUnread)
+	mux.HandleFunc("GET /v1/my/unread", s.handleMyUnread)
 	// A job's live view (job_live.go).
 	mux.HandleFunc("GET /v1/rooms/{roomId}/jobs/{jobId}/live/frame", s.handleLiveFrame)
 	mux.HandleFunc("POST /v1/rooms/{roomId}/jobs/{jobId}/live/control", s.handleLiveControl)
@@ -1189,6 +1194,52 @@ func (s *Service) handleUnread(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(reply)
+}
+
+// handleMyUnread answers how many of the caller's rooms have unread messages
+// (wire.UnreadSummary): what an account switcher shows beside an account no
+// window shows. The caller names no rooms: they are the member's, resolved
+// server-side (ids only, one listing), and the count is one store query that
+// seeks once per channel and stops at wire.UnreadSummaryCap, so a member with
+// many rooms costs a bounded number of seeks and a client polling it
+// costs the same as one reading it once.
+func (s *Service) handleMyUnread(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireSubject(w, r)
+	if !ok {
+		return
+	}
+	if s.Chat == nil || s.Rooms == nil {
+		httpx.WriteJSON(w, http.StatusOK, wire.UnreadSummary{})
+		return
+	}
+	ctx := r.Context()
+	// Answered from the last summary of the same member in the same tenant
+	// when it is a few seconds old: many windows and tabs asking at once cost
+	// one query.
+	key := tenant.FromContext(ctx) + "\x00" + userID
+	if cached, ok := s.unreadSummaries.get(key, time.Now()); ok {
+		httpx.WriteJSON(w, http.StatusOK, cached)
+		return
+	}
+	rooms, err := s.Rooms.MemberRoomIDs(ctx, userID, tenant.FromContext(ctx))
+	if err != nil {
+		obs.ServerError(w, "room directory unavailable", err)
+		httpx.Error(w, "room directory unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	more := len(rooms) > wire.MaxUnreadSummaryRooms
+	if more {
+		rooms = rooms[:wire.MaxUnreadSummaryRooms]
+	}
+	n, err := s.Chat.UnreadRooms(ctx, userID, rooms, wire.UnreadSummaryCap)
+	if err != nil {
+		obs.ServerError(w, "unread summary failed", err)
+		httpx.Error(w, "unread summary failed", http.StatusInternalServerError)
+		return
+	}
+	summary := wire.UnreadSummary{Rooms: n, More: more || n >= wire.UnreadSummaryCap}
+	s.unreadSummaries.put(key, summary, time.Now())
+	httpx.WriteJSON(w, http.StatusOK, summary)
 }
 
 // handleTyping publishes a transient "presence_typing" event to the room so

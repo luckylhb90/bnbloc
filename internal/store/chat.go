@@ -97,6 +97,13 @@ type ChatStore interface {
 	// backlog in full on every room-list refresh would scan it all). channelID
 	// "" addresses the empty/default channel.
 	UnreadCount(ctx context.Context, roomID, channelID, userID string) (int, error)
+	// UnreadRooms counts the rooms among roomIDs (of the context's tenant)
+	// where the user has an unread message in some live channel, stopping at
+	// max. It answers "how many rooms have something new" in one query, a
+	// seek per channel, instead of a count per room and channel
+	// (UnreadCount); the answer agrees with it: a channel is unread when it
+	// has a live message past the user's last-read sequence.
+	UnreadRooms(ctx context.Context, userID string, roomIDs []string, max int) (int, error)
 	// MaxRoomSeq returns the highest stored sequence for a room (across every
 	// channel: sequences are one room-scoped counter, soft-deleted rows
 	// included), or 0 if none. It is keyed on the room alone (room ids are
@@ -451,6 +458,32 @@ func (s *MemoryChat) MarkRead(ctx context.Context, roomID, channelID, userID str
 // shows before "99+".
 const MaxUnreadCount = 100
 
+// UnreadRooms counts the rooms among roomIDs with an unread message in some
+// channel, up to max. The memory store has no channel table: a channel is any
+// channel that holds a message of the room.
+func (s *MemoryChat) UnreadRooms(ctx context.Context, userID string, roomIDs []string, max int) (int, error) {
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return 0, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for _, roomID := range roomIDs {
+		if n >= max {
+			break
+		}
+		rk := tid + "\x00" + roomID
+		for _, m := range s.msgs[rk] {
+			if m.Seq > s.read[rk+"\x00"+m.ChannelID+"\x00"+userID] && !s.isDeleted(rk, m.Seq) {
+				n++
+				break
+			}
+		}
+	}
+	return n, nil
+}
+
 // UnreadCount counts stored messages in one channel with seq greater than the
 // user's last-read sequence for that channel, excluding soft-deleted messages,
 // up to MaxUnreadCount.
@@ -695,6 +728,51 @@ func (s *MySQLChat) UnreadCount(ctx context.Context, roomID, channelID, userID s
 		return 0, err
 	}
 	return n, nil
+}
+
+// UnreadRooms counts, in one query, the rooms among roomIDs with a live
+// message past the user's last-read sequence in some live channel, stopping at
+// max rooms. It is shaped by what MySQL does with it (measured on 500 rooms x
+// 3 channels x 400 messages: 0.01-0.13 s; the obvious EXISTS form took 2.7 s):
+//   - the read cursor joins on its primary key (one probe per channel);
+//   - a cheap candidate test first: the channel's newest message of any kind is
+//     past the cursor (an index seek), which most read channels fail;
+//   - then the exact test, a live message past the cursor, as a scalar
+//     subquery with LIMIT 1 and the channel index forced. An EXISTS would be
+//     flattened into a semijoin that scans the tenant's messages by the
+//     retention index, and without the forced index the primary key is read
+//     for the whole room.
+//
+// Both subqueries run only for the channels that pass the one before.
+func (s *MySQLChat) UnreadRooms(ctx context.Context, userID string, roomIDs []string, max int) (int, error) {
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return 0, err
+	}
+	if len(roomIDs) == 0 || max <= 0 {
+		return 0, nil
+	}
+	marks := strings.TrimSuffix(strings.Repeat("?,", len(roomIDs)), ",")
+	args := make([]any, 0, len(roomIDs)+4)
+	args = append(args, userID, tid)
+	for _, id := range roomIDs {
+		args = append(args, id)
+	}
+	args = append(args, max)
+	var n int
+	err = s.DB.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM (
+		   SELECT c.room_id FROM room_channels c
+		   LEFT JOIN room_read_state rs ON rs.tenant_id = c.tenant_id AND rs.room_id = c.room_id
+		        AND rs.channel_id = c.channel_id AND rs.user_id = ?
+		   WHERE c.tenant_id = ? AND c.room_id IN (`+marks+`) AND c.`+sqlNotDeleted+`
+		     AND (SELECT MAX(m.seq) FROM room_messages m
+		          WHERE m.room_id = c.room_id AND m.channel_id = c.channel_id) > COALESCE(rs.last_read_seq, 0)
+		     AND (SELECT 1 FROM room_messages m FORCE INDEX (idx_room_channel_seq)
+		          WHERE m.room_id = c.room_id AND m.channel_id = c.channel_id
+		            AND m.seq > COALESCE(rs.last_read_seq, 0) AND m.`+sqlNotDeleted+` LIMIT 1) IS NOT NULL
+		   GROUP BY c.room_id LIMIT ?) unread`, args...).Scan(&n)
+	return n, err
 }
 
 // MaxRoomSeq returns the highest stored sequence for a room, or 0 if none
