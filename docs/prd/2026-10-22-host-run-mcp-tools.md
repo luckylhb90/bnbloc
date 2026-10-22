@@ -128,6 +128,14 @@ never an agent-supplied value. A core that does not confine receives nothing:
 there is nothing to enforce, and the host placement still keeps the tool's
 environment and process out of the agent's tree.
 
+A core must pass the paths to `confine` as `--deny-read` flags, not only through
+`BNBLOC_CONFINE_DENY_READ`: the helper a sandbox package ships can be older than
+the variable, and the flag it has always had. A core that keeps its own copy of the
+descriptor must carry the field too. Both were found on 2026-10-22 by asking a real
+sandboxed agent to read a file in a tool's private directory: it could, through a
+core whose descriptor copy lacked the field and then through a helper that did not
+know the variable; with both fixed it gets `EPERM`.
+
 ### 2.5 What does not change
 
 - A tool placed `"agent"` is exactly as before, sandboxed or not.
