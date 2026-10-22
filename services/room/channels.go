@@ -28,7 +28,8 @@ func toChannelView(c store.RoomChannel) channelView {
 }
 
 // handleListChannels returns a room's live ordinary channels (default first).
-// The caller must be a member; this backs the channel sidebar AND the
+// The caller is a member, or reads a shared room before joining it
+// (preview.go); this backs the channel sidebar AND the
 // bridge's room-context materialization (it pages history for exactly these
 // channels), so the people chat is never listed: agents must not see it, and
 // the web reaches it through POST .../people-chat instead.

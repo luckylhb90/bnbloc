@@ -103,6 +103,13 @@ export function artifactLinkUrl(base: string, roomId: string, artifactId: string
   return appRoot(base) + routeHash({ kind: "room", roomId, artifactId, artifactVersion: version });
 }
 
+// roomLinkUrl is the absolute link to a room itself: the app's base plus the
+// room route. Who it opens for is the room's own setting (roomLinkAudience);
+// the gateway still decides what a person who opens it may read.
+export function roomLinkUrl(base: string, roomId: string): string {
+  return appRoot(base) + routeHash({ kind: "room", roomId });
+}
+
 // appRoot is the app's document URL without query or fragment. A directory
 // base gains its trailing slash; a document base (".../index.html") is kept.
 export function appRoot(base: string): string {

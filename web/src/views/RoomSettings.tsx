@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { roomLinkAudience } from "@/lib/roomAccess";
 import { CopyIcon, TrashIcon } from "@phosphor-icons/react";
 import { api, type RoomDetail } from "@/lib/api";
 import { canInvite, isOwner, type RoomMembership } from "@/lib/roomRoles";
@@ -48,13 +49,14 @@ export function RoomSettings({
   const owner = isOwner(me);
   const [name, setName] = useState(room.name || "");
   const [desc, setDesc] = useState(room.description || "");
+  const [previewable, setPreviewable] = useState<"on" | "off">(room.previewable ? "on" : "off");
   const [vis, setVis] = useState<"private" | "shared">(
     room.visibility === "shared" ? "shared" : "private",
   );
   const [sync, setSync] = useState<"git" | "mutagen" | "none">(room.syncMode || "git");
   const [invite, setInvite] = useState("");
   const [inviteRole, setInviteRole] = useState<"admin" | "member" | "visitor">("member");
-  const [inviteTtl, setInviteTtl] = useState<"1d" | "7d" | "30d">("7d");
+  const [inviteTtl, setInviteTtl] = useState<"1d" | "7d">("1d");
   const [inviteCap, setInviteCap] = useState<"1" | "5" | "25" | "0">("1");
   const [newMember, setNewMember] = useState("");
   const [newMemberRole, setNewMemberRole] = useState<"admin" | "member" | "visitor">("member");
@@ -72,6 +74,7 @@ export function RoomSettings({
         name: name.trim(),
         description: desc.trim(),
         visibility: vis,
+        previewable: previewable === "on",
         syncMode: sync,
       });
       toast.success("Room updated");
@@ -86,7 +89,7 @@ export function RoomSettings({
   const makeInvite = async () => {
     // Translate the coarse TTL choice into an absolute expiry; capacity "0"
     // means unlimited, which the backend accepts as a large number.
-    const ttlDays = { "1d": 1, "7d": 7, "30d": 30 }[inviteTtl];
+    const ttlDays = { "1d": 1, "7d": 7 }[inviteTtl];
     const expiresAtMs = Date.now() + ttlDays * 24 * 60 * 60 * 1000;
     const capacity = inviteCap === "0" ? 1_000_000 : Number(inviteCap);
     try {
@@ -176,6 +179,20 @@ export function RoomSettings({
           />
         </Field>
 
+        <Field label="Readable before joining">
+          <Segment
+            value={previewable}
+            onChange={setPreviewable}
+            options={[
+              { value: "on", label: "On", hint: "read-only for your organization" },
+              { value: "off", label: "Off", hint: "members only" },
+            ]}
+          />
+        </Field>
+        <p className="-mt-2 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2 text-xs text-[var(--color-fg-muted)] leading-relaxed">
+          {roomLinkAudience(vis, previewable === "on")}
+        </p>
+
         <Field label="Code sync">
           <Segment value={sync} onChange={setSync} options={syncOptions} />
         </Field>
@@ -223,7 +240,6 @@ export function RoomSettings({
                 options={[
                   { value: "1d", label: "1 day" },
                   { value: "7d", label: "7 days" },
-                  { value: "30d", label: "30 days" },
                 ]}
               />
             </Field>
@@ -242,7 +258,7 @@ export function RoomSettings({
           </div>
           {invite && (
             <div className="mt-3 flex items-center gap-2">
-              <code className="tabular flex-1 rounded-[var(--radius)] bg-[var(--color-surface-2)] px-3 py-2 text-sm">
+              <code className="tabular flex-1 rounded-[var(--radius)] bg-[var(--color-surface-2)] px-3 py-2 text-lg tracking-widest">
                 {invite}
               </code>
               <Button

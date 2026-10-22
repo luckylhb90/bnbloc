@@ -42,6 +42,9 @@ func (m *replyMembers) Fresh(roomID, userID string) (membership.Member, bool) {
 
 func (*replyMembers) Forget(string, string) {}
 
+// Preview: this fake has no shared rooms.
+func (*replyMembers) Preview(string, string) (string, bool) { return "", false }
+
 func (m *replyMembers) set(roomID, userID string, member bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

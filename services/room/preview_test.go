@@ -12,6 +12,7 @@ import (
 // "priv", each owned by alice with one markdown deliverable; "jack" is in
 // neither (docs/prd/2026-10-22-shared-room-preview.md).
 type previewEnv struct {
+	mem       *store.MemoryRoom
 	srv       *httptest.Server
 	artifacts map[string]string // room -> artifact id
 }
@@ -23,7 +24,7 @@ func newPreviewEnv(t *testing.T) *previewEnv {
 	svc.Artifacts = store.NewMemoryArtifacts()
 	srv := httptest.NewServer(svc.Handler())
 	t.Cleanup(srv.Close)
-	e := &previewEnv{srv: srv, artifacts: map[string]string{}}
+	e := &previewEnv{mem: mem, srv: srv, artifacts: map[string]string{}}
 	for room, visibility := range map[string]string{"pub": "shared", "priv": "private"} {
 		resp := artifactRequest(t, srv, http.MethodPost, "/v1/rooms", "alice", map[string]any{"roomId": room, "name": room, "visibility": visibility})
 		resp.Body.Close()
@@ -53,8 +54,10 @@ func TestSharedRoomIsReadableByANonMember(t *testing.T) {
 		"/v1/rooms/pub/artifacts",
 		"/v1/rooms/pub/artifacts/" + art,
 		"/v1/rooms/pub/artifacts/" + art + "/versions/1",
+		"/v1/rooms/pub/artifact-anchors?from=1&to=9",
+		"/v1/rooms/pub/artifacts/" + art + "/state",
 	} {
-		if got := e.status(t, http.MethodGet, path, "jack"); got != http.StatusOK {
+		if got := e.status(t, http.MethodGet, path, "jack"); got != http.StatusOK && got != http.StatusNoContent {
 			t.Errorf("GET %s by a non-member of a shared room = %d, want 200", path, got)
 		}
 	}
@@ -70,6 +73,8 @@ func TestSharedRoomIsReadableByANonMember(t *testing.T) {
 		"/v1/rooms/priv/artifacts/" + priv,
 		"/v1/rooms/priv/artifacts/" + priv + "/versions/1",
 		"/v1/rooms/priv/artifacts/" + priv + "/versions/1/content",
+		"/v1/rooms/priv/artifact-anchors?from=1&to=9",
+		"/v1/rooms/priv/artifacts/" + priv + "/state",
 	} {
 		if got := e.status(t, http.MethodGet, path, "jack"); got != http.StatusForbidden {
 			t.Errorf("GET %s by a non-member of a private room = %d, want 403", path, got)
@@ -98,7 +103,7 @@ func TestSharedRoomWritesStayMembers(t *testing.T) {
 		{http.MethodPost, "/v1/rooms/pub/people-chat"},
 		{http.MethodGet, "/v1/rooms/pub/people-chat"},
 		{http.MethodGet, "/v1/rooms/pub/handoff"},
-		{http.MethodGet, "/v1/rooms/pub/artifacts/" + art + "/state"},
+		{http.MethodPost, "/v1/rooms/pub/artifacts/" + art + "/state"},
 	} {
 		if got := e.status(t, c.method, c.path, "jack"); got != http.StatusForbidden {
 			t.Errorf("%s %s by a non-member = %d, want 403", c.method, c.path, got)
@@ -111,7 +116,7 @@ func TestSharedRoomWritesStayMembers(t *testing.T) {
 func TestMembershipProbeAnswersPreview(t *testing.T) {
 	e := newPreviewEnv(t)
 	probe := func(room, user string) map[string]any {
-		return decodeJSON(t, artifactRequest(t, e.srv, http.MethodGet, "/v1/rooms/"+room+"/membership/"+user, user, nil))
+		return decodeJSON(t, artifactRequest(t, e.srv, http.MethodGet, "/v1/rooms/"+room+"/membership/"+user+"?preview=1", user, nil))
 	}
 	if got := probe("pub", "jack"); got["member"] != false || got["preview"] != true || got["tenantId"] == "" || got["tenantId"] == nil {
 		t.Fatalf("probe of a shared room by a non-member = %v, want preview with a tenant", got)
@@ -124,5 +129,116 @@ func TestMembershipProbeAnswersPreview(t *testing.T) {
 	}
 	if got := probe("missing", "jack"); got["member"] != false || got["preview"] != nil {
 		t.Fatalf("probe of a missing room = %v, want no preview", got)
+	}
+	// Every other lookup of a non-member stays the one membership read: no
+	// preview answer unless it asks.
+	plain := decodeJSON(t, artifactRequest(t, e.srv, http.MethodGet, "/v1/rooms/pub/membership/jack", "jack", nil))
+	if plain["member"] != false || plain["preview"] != nil {
+		t.Fatalf("probe without ?preview=1 = %v, want a plain non-member", plain)
+	}
+}
+
+// A non-member reading a shared room sees its people, not the hosts of its
+// platform agents; a member sees both.
+func TestSharedRoomMembersListHidesAgentHostsFromANonMember(t *testing.T) {
+	e := newPreviewEnv(t)
+	if err := e.mem.AddAgentHost(testCtx(t), "pub", "host-1", 1); err != nil {
+		t.Fatal(err)
+	}
+	listed := func(user string) map[string]bool {
+		body := decodeJSON(t, artifactRequest(t, e.srv, http.MethodGet, "/v1/rooms/pub/members", user, nil))
+		out := map[string]bool{}
+		for _, m := range body["members"].([]any) {
+			out[m.(map[string]any)["userId"].(string)] = true
+		}
+		return out
+	}
+	if got := listed("jack"); got["host-1"] || !got["alice"] {
+		t.Fatalf("a non-member sees %v, want alice and no agent host", got)
+	}
+	if got := listed("alice"); !got["host-1"] || !got["alice"] {
+		t.Fatalf("a member sees %v, want alice and the agent host", got)
+	}
+}
+
+// Readable before joining is the owner's switch, apart from how the room is
+// joined: a shared room starts previewable and a private one not, either can
+// be set, and a non-member sees the room card of a shared room, or of a
+// private room only when it is previewable.
+func TestPreviewableIsTheOwnersSwitchApartFromVisibility(t *testing.T) {
+	e := newPreviewEnv(t)
+	create := func(room, visibility string, previewable *bool) {
+		body := map[string]any{"roomId": room, "name": room, "visibility": visibility}
+		if previewable != nil {
+			body["previewable"] = *previewable
+		}
+		artifactRequest(t, e.srv, http.MethodPost, "/v1/rooms", "alice", body).Body.Close()
+	}
+	yes, no := true, false
+	create("open", "private", &yes) // private, but readable
+	create("closed", "shared", &no) // shared, but not readable
+
+	card := func(room string) (int, map[string]any) {
+		resp := artifactRequest(t, e.srv, http.MethodGet, "/v1/rooms/"+room, "jack", nil)
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			return resp.StatusCode, nil
+		}
+		return resp.StatusCode, decodeJSON(t, resp)
+	}
+	for room, want := range map[string]struct {
+		status      int
+		previewable bool
+	}{
+		"pub":    {http.StatusOK, true},        // shared: previewable by default
+		"open":   {http.StatusOK, true},        // private with the switch on
+		"closed": {http.StatusOK, false},       // shared: a card to join, not to read
+		"priv":   {http.StatusNotFound, false}, // private by default: nothing confirmed
+	} {
+		status, got := card(room)
+		if status != want.status || (got != nil && got["previewable"] != want.previewable) {
+			t.Errorf("card of %s for a non-member = %d %v, want %d previewable=%v", room, status, got, want.status, want.previewable)
+		}
+		reads := e.status(t, http.MethodGet, "/v1/rooms/"+room+"/channels", "jack")
+		if (reads == http.StatusOK) != want.previewable {
+			t.Errorf("channels of %s for a non-member = %d, want readable=%v", room, reads, want.previewable)
+		}
+	}
+
+	// Only the owner flips it, and it takes effect at once.
+	patch := func(user string, on bool) int {
+		resp := artifactRequest(t, e.srv, http.MethodPatch, "/v1/rooms/closed", user, map[string]any{"previewable": on})
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if got := patch("jack", true); got != http.StatusForbidden {
+		t.Fatalf("a non-member's patch = %d, want 403", got)
+	}
+	if got := patch("alice", true); got != http.StatusOK {
+		t.Fatalf("the owner's patch = %d, want 200", got)
+	}
+	if got := e.status(t, http.MethodGet, "/v1/rooms/closed/channels", "jack"); got != http.StatusOK {
+		t.Fatalf("channels after the switch went on = %d, want 200", got)
+	}
+	if got := patch("alice", false); got != http.StatusOK || e.status(t, http.MethodGet, "/v1/rooms/closed/channels", "jack") != http.StatusForbidden {
+		t.Fatalf("the switch off did not close the room (patch %d)", got)
+	}
+
+	// The plaza lists a previewable private room (locked: it is joined with a
+	// code) and keeps any other private room redacted.
+	plaza := decodeJSON(t, artifactRequest(t, e.srv, http.MethodGet, "/v1/rooms", "jack", nil))
+	rows := map[string]map[string]any{}
+	for _, r := range plaza["rooms"].([]any) {
+		row := r.(map[string]any)
+		rows[row["roomId"].(string)] = row
+	}
+	if r := rows["open"]; r == nil || r["locked"] != true || r["previewable"] != true || r["memberCount"] == nil {
+		t.Errorf("plaza row of a previewable private room = %v, want locked, previewable, with its member count", r)
+	}
+	if r := rows["priv"]; r == nil || r["locked"] != true || r["previewable"] != false || r["memberCount"] != nil {
+		t.Errorf("plaza row of a private room = %v, want locked, redacted", r)
+	}
+	if r := rows["pub"]; r == nil || r["locked"] != false || r["previewable"] != true {
+		t.Errorf("plaza row of a shared room = %v, want open and previewable", r)
 	}
 }

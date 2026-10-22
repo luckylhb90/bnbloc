@@ -29,10 +29,13 @@ type RoomsReply struct {
 // and QuickPrompts are what an empty room shows every member
 // (docs/prd/2026-10-20-room-setup-by-conversation.md §2.1).
 type RoomDetail struct {
-	RoomID       string            `json:"roomId"`
-	Name         string            `json:"name"`
-	Description  string            `json:"description"`
-	Visibility   string            `json:"visibility" tstype:"RoomVisibility"`
+	RoomID      string `json:"roomId"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Visibility  string `json:"visibility" tstype:"RoomVisibility"`
+	// Previewable: anyone signed in to the room's organization may read the
+	// room without joining it (read-only). Independent of Visibility.
+	Previewable  bool              `json:"previewable"`
 	SyncMode     string            `json:"syncMode" tstype:"RoomSyncMode"`
 	CreatedBy    string            `json:"createdBy"`
 	CreatedAtMs  int64             `json:"createdAtMs"`
@@ -66,6 +69,10 @@ type RoomPreview struct {
 	Visibility  string `json:"visibility" tstype:"RoomVisibility"`
 	MemberCount int    `json:"memberCount"`
 	Preview     bool   `json:"preview"`
+	// Previewable: the room may be read before joining it, so the room view
+	// opens read-only; otherwise this card (and a join) is all a non-member
+	// sees.
+	Previewable bool `json:"previewable"`
 }
 
 // RoomMember is one membership of a room. AgentHost marks a platform
@@ -91,6 +98,9 @@ type PlazaRoom struct {
 	Description string `json:"description"`
 	Visibility  string `json:"visibility" tstype:"RoomVisibility"`
 	Locked      bool   `json:"locked"`
+	// Previewable: the room may be read before joining it (a private one
+	// still needs an invite code to join).
+	Previewable bool   `json:"previewable"`
 	SyncMode    string `json:"syncMode,omitempty" tstype:"RoomSyncMode"`
 	CreatedBy   string `json:"createdBy,omitempty"`
 	CreatedAtMs int64  `json:"createdAtMs,omitempty"`

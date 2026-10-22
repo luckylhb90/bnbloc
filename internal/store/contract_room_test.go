@@ -70,6 +70,28 @@ func TestContractRoomStoreCreateGetUpdate(t *testing.T) {
 		if got, _ := s.GetRoom(ctx, id); got.Visibility != shared || got.SyncMode != mutagen || got.Description != "d" || got.Name != "n" {
 			t.Fatalf("patched room = %+v", got)
 		}
+		// Readable-before-joining is its own switch, off unless set, apart
+		// from visibility; the plaza row carries it.
+		if got, _ := s.GetRoom(ctx, id); got.Previewable {
+			t.Fatal("a room is not previewable until it is set")
+		}
+		on := true
+		if err := s.UpdateRoom(ctx, id, RoomPatch{Previewable: &on}); err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := s.GetRoom(ctx, id); !got.Previewable || got.Visibility != shared || got.Description != "d" {
+			t.Fatalf("after the switch went on = %+v, want previewable and the rest unchanged", got)
+		}
+		if rooms, _, err := s.SearchRooms(ctx, "n", 0, 0); err != nil || len(rooms) == 0 || !rooms[0].Previewable {
+			t.Fatalf("plaza row = %+v, %v; want previewable", rooms, err)
+		}
+		off := false
+		if err := s.UpdateRoom(ctx, id, RoomPatch{Previewable: &off}); err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := s.GetRoom(ctx, id); got.Previewable {
+			t.Fatal("the switch did not go off")
+		}
 		// An empty patch is a no-op on a live room and a miss elsewhere.
 		if err := s.UpdateRoom(ctx, id, RoomPatch{}); err != nil {
 			t.Fatalf("empty patch = %v", err)
@@ -337,6 +359,40 @@ func TestContractRoomStoreInvites(t *testing.T) {
 		}
 		if _, err := s.RedeemInvite(ctx, code, "bea", 1); !errors.Is(err, ErrInviteNotFound) {
 			t.Fatalf("redeem after the room's delete = %v, want ErrInviteNotFound (the delete removes its invites)", err)
+		}
+	})
+}
+
+// Dead invites (expired, or used to their capacity) are deleted in every
+// tenant and free their code; a live one keeps it. A short code is a scarce
+// one, and the code is one namespace.
+func TestContractRoomStorePurgeDeadInvites(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) {
+		tid := uniq("t-purge-")
+		ctx := tenantCtx(tid)
+		s := b.Room
+		room := uniq("room-")
+		createRoomAt(t, b, tid, room, "r", "", "maya", 1)
+		live, expired, full := uniq("LIVE-"), uniq("OLD-"), uniq("FULL-")
+		for code, inv := range map[string]Invite{
+			live:    {ExpiresAtMs: 1000, Capacity: 5},
+			expired: {ExpiresAtMs: 100, Capacity: 5},
+			full:    {ExpiresAtMs: 1000, Capacity: 1, RedeemedCount: 1},
+		} {
+			inv.Code, inv.RoomID, inv.Role, inv.CreatedBy = code, room, RoleMember, "maya"
+			if err := s.CreateInvite(ctx, inv); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := s.PurgeDeadInvites(tenantCtx(uniq("t-other-")), 500); err != nil {
+			t.Fatal(err)
+		}
+		other := tenantCtx(uniq("t-other-"))
+		for code, freed := range map[string]bool{live: false, expired: true, full: true} {
+			err := s.CreateInvite(other, Invite{Code: code, RoomID: room, Role: RoleMember, ExpiresAtMs: 2000, Capacity: 1, CreatedBy: "jack"})
+			if freed != (err == nil) {
+				t.Errorf("code %s after a purge by another tenant: create = %v, want freed=%v", code, err, freed)
+			}
 		}
 	})
 }

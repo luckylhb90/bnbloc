@@ -51,9 +51,9 @@ func insertRoom(ctx context.Context, q interface {
 		return err
 	}
 	_, err = q.ExecContext(ctx,
-		`INSERT INTO rooms (tenant_id, room_id, name, description, visibility, sync_mode, created_by, created_at_ms, welcome, quick_prompts_json)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		tid, r.RoomID, r.Name, r.Description, string(r.Visibility), string(r.SyncMode), r.CreatedBy, r.CreatedAtMs, r.Welcome, prompts)
+		`INSERT INTO rooms (tenant_id, room_id, name, description, visibility, previewable, sync_mode, created_by, created_at_ms, welcome, quick_prompts_json)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		tid, r.RoomID, r.Name, r.Description, string(r.Visibility), r.Previewable, string(r.SyncMode), r.CreatedBy, r.CreatedAtMs, r.Welcome, prompts)
 	return dupAs(err, ErrRoomExists)
 }
 
@@ -196,9 +196,9 @@ func (s *MySQLRoom) GetRoom(ctx context.Context, roomID string) (Room, error) {
 	var visibility, syncMode string
 	var welcome, prompts sql.NullString
 	err = s.DB.QueryRowContext(ctx,
-		`SELECT tenant_id, room_id, name, description, visibility, sync_mode, created_by, created_at_ms, welcome, quick_prompts_json
+		`SELECT tenant_id, room_id, name, description, visibility, previewable, sync_mode, created_by, created_at_ms, welcome, quick_prompts_json
 		 FROM rooms WHERE tenant_id = ? AND room_id = ? AND `+sqlNotDeleted,
-		tid, roomID).Scan(&r.TenantID, &r.RoomID, &r.Name, &r.Description, &visibility, &syncMode, &r.CreatedBy, &r.CreatedAtMs, &welcome, &prompts)
+		tid, roomID).Scan(&r.TenantID, &r.RoomID, &r.Name, &r.Description, &visibility, &r.Previewable, &syncMode, &r.CreatedBy, &r.CreatedAtMs, &welcome, &prompts)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Room{}, ErrRoomNotFound
 	}
@@ -411,6 +411,15 @@ func (s *MySQLRoom) CreateInvite(ctx context.Context, inv Invite) error {
 	return dupAs(err, ErrInviteExists)
 }
 
+// PurgeDeadInvites deletes the invites that can no longer be redeemed, in
+// every tenant (invite codes are one namespace).
+func (s *MySQLRoom) PurgeDeadInvites(ctx context.Context, nowMs int64) error {
+	// cross-tenant: the code is the primary key, so a dead code of any tenant
+	// blocks a new one.
+	_, err := s.DB.ExecContext(ctx, `DELETE FROM room_invites WHERE expires_at_ms <= ? OR redeemed_count >= capacity`, nowMs)
+	return err
+}
+
 // RedeemInvite atomically validates and consumes an invite for a user.
 func (s *MySQLRoom) RedeemInvite(ctx context.Context, code, userID string, nowMs int64) (Membership, error) {
 	tid, err := tenant.Require(ctx)
@@ -517,7 +526,7 @@ func (s *MySQLRoom) SearchRooms(ctx context.Context, query string, limit, offset
 		return nil, 0, err
 	}
 	rooms, err := queryAll(ctx, s.DB,
-		`SELECT r.tenant_id, r.room_id, r.name, r.description, r.visibility, r.sync_mode, r.created_by, r.created_at_ms,
+		`SELECT r.tenant_id, r.room_id, r.name, r.description, r.visibility, r.previewable, r.sync_mode, r.created_by, r.created_at_ms,
 		        (SELECT COUNT(*) FROM room_members m WHERE m.tenant_id = r.tenant_id AND m.room_id = r.room_id AND m.`+sqlHumanMember+`)
 		 FROM rooms r
 		 WHERE `+where+`
@@ -525,7 +534,7 @@ func (s *MySQLRoom) SearchRooms(ctx context.Context, query string, limit, offset
 		 LIMIT ? OFFSET ?`, func(row rowScanner) (RoomWithCount, error) {
 			var rc RoomWithCount
 			var visibility, syncMode string
-			if err := row.Scan(&rc.TenantID, &rc.RoomID, &rc.Name, &rc.Description, &visibility, &syncMode, &rc.CreatedBy, &rc.CreatedAtMs, &rc.MemberCount); err != nil {
+			if err := row.Scan(&rc.TenantID, &rc.RoomID, &rc.Name, &rc.Description, &visibility, &rc.Previewable, &syncMode, &rc.CreatedBy, &rc.CreatedAtMs, &rc.MemberCount); err != nil {
 				return rc, err
 			}
 			rc.Visibility = NormalizeVisibility(visibility)
@@ -535,7 +544,7 @@ func (s *MySQLRoom) SearchRooms(ctx context.Context, query string, limit, offset
 	return rooms, total, err
 }
 
-// UpdateRoom applies a partial patch (name/description/visibility).
+// UpdateRoom applies a partial patch (name/description/visibility/previewable).
 func (s *MySQLRoom) UpdateRoom(ctx context.Context, roomID string, patch RoomPatch) error {
 	tid, err := tenant.Require(ctx)
 	if err != nil {
@@ -554,6 +563,10 @@ func (s *MySQLRoom) UpdateRoom(ctx context.Context, roomID string, patch RoomPat
 	if patch.Visibility != nil {
 		sets = append(sets, "visibility = ?")
 		args = append(args, string(*patch.Visibility))
+	}
+	if patch.Previewable != nil {
+		sets = append(sets, "previewable = ?")
+		args = append(args, *patch.Previewable)
 	}
 	if patch.SyncMode != nil {
 		sets = append(sets, "sync_mode = ?")

@@ -42,6 +42,9 @@ func (m roomStoreMembership) Fresh(roomID, userID string) (membership.Member, bo
 
 func (roomStoreMembership) Forget(string, string) {}
 
+// Preview: this fake has no shared rooms.
+func (roomStoreMembership) Preview(string, string) (string, bool) { return "", false }
+
 // handoffEnv runs the real room and realtime services in-process over HTTP,
 // wired exactly like production (room -> realtime via the handoff client).
 type handoffEnv struct {

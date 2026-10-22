@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
+import { isPreviewRoom } from "@/lib/apiModels";
 import { ApiError, errorText } from "@/lib/errors";
 import { gatewayBase } from "@/lib/config";
 import { localFiles, type LocalOpened } from "@/lib/localFiles";
@@ -31,7 +32,7 @@ function liveDeps(gateway: string, tenant: string, subject: string): OpenDeps {
       const id = await myFilesRoomId(tenant, subject);
       try {
         const room = await api.getRoom(id);
-        if (!("preview" in room)) return id;
+        if (!isPreviewRoom(room)) return id;
         throw new Error("Your My files room is not available");
       } catch (e) {
         if (!(e instanceof ApiError && e.status === 404)) throw e;

@@ -195,6 +195,13 @@ func (s *Service) memberTicket(ctx context.Context, ticket string) (auth.Claims,
 	s.bundleCaches()
 	sv, ok := s.siteAuth.get(claims.Subject + "\x00" + claims.ID)
 	if !ok {
+		// The ticket is a member's: the room's own read of the version no
+		// longer says so (a shared room is readable by a non-member), so a
+		// member who left or was removed stops here, not at the room read.
+		roomID, _, _, _ := parseSiteTicketScope(claims.ID)
+		if _, member := s.roomMember(claims.Subject, roomID); !member {
+			return auth.Claims{}, siteVersion{}, errSiteNotFound
+		}
 		if sv, err = s.memberSiteVersion(ctx, claims.Subject, claims.Tenant, claims.ID); err != nil {
 			return auth.Claims{}, siteVersion{}, err
 		}

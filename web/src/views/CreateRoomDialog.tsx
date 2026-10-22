@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { roomLinkAudience } from "@/lib/roomAccess";
 import { XIcon } from "@phosphor-icons/react";
 import { api, ApiError } from "@/lib/api";
 import { runJSONAssist, useAssistTask } from "@/lib/assist";
@@ -41,6 +42,9 @@ export function CreateRoomDialog({
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
   const [vis, setVis] = useState<"private" | "shared">("private");
+  // null: not chosen, so the visibility's default holds (a shared room is
+  // readable before joining, a private one is not: store.DefaultPreviewable).
+  const [previewable, setPreviewable] = useState<"on" | "off" | null>(null);
   const [goal, setGoal] = useState("");
   const [planning, setPlanning] = useState<AssistRunState>("idle");
   const [expert, setExpert] = useState<ContentComponent | null>(null);
@@ -57,6 +61,7 @@ export function CreateRoomDialog({
     setName("");
     setDesc("");
     setVis("private");
+    setPreviewable(null);
     setGoal("");
     setExpert(null);
     setSkills([]);
@@ -113,6 +118,8 @@ export function CreateRoomDialog({
         name: name.trim() || roomId,
         description: desc.trim(),
         visibility: vis,
+        // Untouched, the server's default for the visibility applies.
+        ...(previewable === null ? {} : { previewable: previewable === "on" }),
       });
       // Refresh room-scope so the new room is immediately reachable.
       await reauth().catch(() => {});
@@ -218,11 +225,22 @@ export function CreateRoomDialog({
             value={vis}
             onChange={setVis}
             options={[
-              { value: "private", label: "Private", hint: "invite only" },
+              { value: "private", label: "Private", hint: "invite code" },
               { value: "shared", label: "Shared", hint: "anyone joins" },
             ]}
           />
         </Field>
+        <Field label="Readable before joining">
+          <Segment
+            value={previewable ?? (vis === "shared" ? "on" : "off")}
+            onChange={setPreviewable}
+            options={[
+              { value: "on", label: "On", hint: "read-only for your organization" },
+              { value: "off", label: "Off", hint: "members only" },
+            ]}
+          />
+        </Field>
+        <p className="-mt-2 text-xs text-[var(--color-fg-subtle)]">{roomLinkAudience(vis, (previewable ?? (vis === "shared" ? "on" : "off")) === "on")}</p>
       </div>
     </Dialog>
   );

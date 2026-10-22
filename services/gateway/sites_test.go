@@ -43,6 +43,7 @@ type siteEnv struct {
 	rt          *realtimehttp.Service
 	mu          sync.Mutex
 	members     map[string]bool                  // "room/user"
+	shared      map[string]bool                  // room -> any caller may read its versions, as the room service does for a shared room
 	versions    map[string]store.ArtifactVersion // "room/artifact/version"
 	shares      map[string]map[string]any        // token -> resolution
 	views       map[string]int                   // share id -> views counted
@@ -52,7 +53,7 @@ type siteEnv struct {
 
 func newSiteEnv(t *testing.T) *siteEnv {
 	t.Helper()
-	e := &siteEnv{t: t, members: map[string]bool{}, versions: map[string]store.ArtifactVersion{}, shares: map[string]map[string]any{}, views: map[string]int{}}
+	e := &siteEnv{t: t, members: map[string]bool{}, shared: map[string]bool{}, versions: map[string]store.ArtifactVersion{}, shares: map[string]map[string]any{}, views: map[string]int{}}
 	disk, err := blobstore.NewDiskStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -67,7 +68,7 @@ func newSiteEnv(t *testing.T) *siteEnv {
 		e.versionGets.Add(1)
 		e.mu.Lock()
 		defer e.mu.Unlock()
-		if !e.members[r.PathValue("roomId")+"/"+r.Header.Get(svcauth.HeaderUser)] {
+		if !e.members[r.PathValue("roomId")+"/"+r.Header.Get(svcauth.HeaderUser)] && !e.shared[r.PathValue("roomId")] {
 			http.Error(w, "not a member", http.StatusForbidden)
 			return
 		}
@@ -301,6 +302,27 @@ func TestMemberSite_rechecks_room_read_after_the_auth_cache(t *testing.T) {
 	e.svc.siteAuth.mu.Unlock()
 	if resp, _ := e.do(http.MethodGet, siteURL, ""); resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("after leave status %d", resp.StatusCode)
+	}
+}
+
+// A shared room's versions are readable by a non-member (a preview), so the
+// room's own read no longer says a ticket's member left: the ticket stops at
+// the gateway's own membership check, once the authorization cache expires.
+func TestMemberSite_ticket_of_a_member_who_left_a_shared_room_stops(t *testing.T) {
+	e := newSiteEnv(t)
+	e.join("room-1", "alice")
+	e.shared["room-1"] = true
+	e.putSite("room-1", "art_site", testSiteFiles)
+	_, siteURL := e.ticket("alice", "room-1", "art_site")
+	if resp, _ := e.do(http.MethodGet, siteURL, ""); resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	e.leave("room-1", "alice")
+	e.svc.siteAuth.mu.Lock()
+	e.svc.siteAuth.now = func() time.Time { return time.Now().Add(siteAuthTTL + time.Second) }
+	e.svc.siteAuth.mu.Unlock()
+	if resp, _ := e.do(http.MethodGet, siteURL, ""); resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("a member who left a shared room still reads the site: status %d", resp.StatusCode)
 	}
 }
 

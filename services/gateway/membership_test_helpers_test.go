@@ -33,6 +33,9 @@ func (f roleMembership) Fresh(room, subject string) (membership.Member, bool) {
 
 func (roleMembership) Forget(string, string) {}
 
+// Preview: this fake has no shared rooms.
+func (roleMembership) Preview(string, string) (string, bool) { return "", false }
+
 // memberOf is a roleMembership where every member is a human "member".
 func memberOf(in func(subject, room string) bool) roleMembership {
 	return func(subject, room string) (string, bool) {

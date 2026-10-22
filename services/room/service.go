@@ -5,7 +5,6 @@ package room
 import (
 	"context"
 	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
@@ -19,6 +18,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/appdata"
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
+	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
@@ -31,8 +31,8 @@ import (
 // Invite time-to-live bounds: default when the caller omits an expiry, and a
 // hard cap on any caller-supplied expiry.
 const (
-	defaultInviteTTLMs = 7 * 24 * 3600 * 1000
-	maxInviteTTLMs     = 30 * 24 * 3600 * 1000
+	defaultInviteTTLMs = 24 * 3600 * 1000
+	maxInviteTTLMs     = 7 * 24 * 3600 * 1000
 )
 
 // Service holds the room handler dependencies.
@@ -216,6 +216,7 @@ func (s *Service) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
 		Name         string                 `json:"name"`
 		Description  string                 `json:"description"`
 		Visibility   string                 `json:"visibility"`
+		Previewable  *bool                  `json:"previewable"`
 		SyncMode     string                 `json:"syncMode"`
 		Welcome      string                 `json:"welcome"`
 		QuickPrompts []wire.RoomQuickPrompt `json:"quickPrompts"`
@@ -242,11 +243,17 @@ func (s *Service) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, "invalid room id: 1-64 bytes, no whitespace edges, control characters, or / \\ ? # %", http.StatusBadRequest)
 		return
 	}
+	visibility := store.NormalizeVisibility(body.Visibility)
+	previewable := store.DefaultPreviewable(visibility)
+	if body.Previewable != nil {
+		previewable = *body.Previewable
+	}
 	room := store.Room{
 		RoomID:       roomID,
 		Name:         body.Name,
 		Description:  body.Description,
-		Visibility:   store.NormalizeVisibility(body.Visibility),
+		Visibility:   visibility,
+		Previewable:  previewable,
 		SyncMode:     store.NormalizeSyncMode(body.SyncMode),
 		CreatedAtMs:  s.Now(),
 		Welcome:      welcome,
@@ -275,8 +282,9 @@ func (s *Service) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleGetRoom returns full detail to members. To a non-member it returns a
-// minimal preview for a shared room (so a join card can render) and 404 for a
-// private room (do not confirm existence beyond the plaza's locked row).
+// minimal card for a shared room (so a join card can render) or a previewable
+// room (read before joining), and 404 for any other private room (do not
+// confirm existence beyond the plaza's locked row).
 func (s *Service) handleGetRoom(w http.ResponseWriter, r *http.Request) {
 	roomID := r.PathValue("roomId")
 	rm, err := s.Store.GetRoom(r.Context(), roomID)
@@ -297,14 +305,16 @@ func (s *Service) handleGetRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !isMember {
-		if rm.Visibility != store.VisibilityShared {
+		// A shared room shows its card (to join); a private room only when
+		// its owner lets it be read (an invite code still joins it).
+		if rm.Visibility != store.VisibilityShared && !rm.Previewable {
 			httpx.Error(w, "room not found", http.StatusNotFound)
 			return
 		}
 		httpx.WriteJSON(w, http.StatusOK, wire.RoomPreview{
 			RoomID: rm.RoomID, Name: rm.Name, Description: rm.Description,
 			Visibility: string(rm.Visibility), MemberCount: memberCount,
-			Preview: true,
+			Preview: true, Previewable: rm.Previewable,
 		})
 
 		return
@@ -330,7 +340,7 @@ func roomDetailOf(rm store.Room, memberCount int) wire.RoomDetail {
 	}
 	return wire.RoomDetail{
 		RoomID: rm.RoomID, Name: rm.Name, Description: rm.Description,
-		Visibility: string(rm.Visibility), SyncMode: string(rm.SyncMode), CreatedBy: rm.CreatedBy,
+		Visibility: string(rm.Visibility), Previewable: rm.Previewable, SyncMode: string(rm.SyncMode), CreatedBy: rm.CreatedBy,
 		CreatedAtMs: rm.CreatedAtMs, MemberCount: memberCount, Welcome: rm.Welcome, QuickPrompts: prompts,
 	}
 }
@@ -361,12 +371,14 @@ func (s *Service) handleAddMember(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// handleListMembers returns every membership in a room. The caller must itself
-// be a member. This backs the members panel, presence roster, @-mention list,
-// and the borrow owner picker.
+// handleListMembers returns every membership in a room. The caller is a
+// member, or reads a shared room before joining it (preview.go); a non-member
+// is not shown the agent hosts. This backs the members panel, presence
+// roster, @-mention list, and the borrow owner picker.
 func (s *Service) handleListMembers(w http.ResponseWriter, r *http.Request) {
 	roomID := r.PathValue("roomId")
-	if !s.requireRead(w, r, roomID) {
+	member, ok := s.requireReadAs(w, r, roomID)
+	if !ok {
 		return
 	}
 	memberships, err := s.Store.Members(r.Context(), roomID)
@@ -380,6 +392,9 @@ func (s *Service) handleListMembers(w http.ResponseWriter, r *http.Request) {
 		// An agent host (a platform agent's host, docs/prd/2026-10-10-zero-
 		// install-onboarding.md §2) is listed only with its flag: clients
 		// keep it out of people lists.
+		if m.AgentHost && !member {
+			continue
+		}
 		reply.Members = append(reply.Members, wire.RoomMember{UserID: m.UserID, Role: string(m.Role), AgentHost: m.AgentHost})
 	}
 	httpx.WriteJSON(w, http.StatusOK, reply)
@@ -477,8 +492,9 @@ func (s *Service) handleGetMember(w http.ResponseWriter, r *http.Request) {
 // is a member (the host's bridge reads the room) that every human-only
 // surface refuses (membership.Member.IsHuman), and tenantId is the room's
 // own tenant, which a backend compares with the tenant a request is signed
-// for (membership.RoomScope). For a non-member of a live shared room it
-// answers {member:false, preview:true, tenantId} (membership.Previewer).
+// for (membership.RoomScope). For a non-member of a live previewable room it
+// answers {member:false, preview:true, tenantId} (membership.Previewer) when
+// asked with ?preview=1.
 func (s *Service) handleMembershipProbe(w http.ResponseWriter, r *http.Request) {
 	m, member, err := s.Store.MembershipAnyTenant(r.Context(), r.PathValue("roomId"), r.PathValue("userId"))
 	if err != nil {
@@ -487,22 +503,26 @@ func (s *Service) handleMembershipProbe(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if !member {
-		// A live shared room is readable by a non-member (preview.go): say
-		// so, with the room's tenant, for the directory's Previewer.
-		shared, tid, err := s.sharedRoomAnyTenant(r.Context(), r.PathValue("roomId"))
-		if err != nil {
-			obs.ServerError(w, "read room failed", err)
-			httpx.Error(w, err.Error(), http.StatusInternalServerError)
-			return
+		// Asked for (?preview=1, membership.PreviewQuery): a live previewable room
+		// is readable by a non-member (preview.go). Say so, with the room's
+		// tenant, for the directory's Previewer. The other lookups of a
+		// non-member do not pay for it.
+		if r.URL.Query().Get(membership.PreviewQuery) == "1" {
+			previewable, tid, err := s.previewableRoomAnyTenant(r.Context(), r.PathValue("roomId"))
+			if err != nil {
+				obs.ServerError(w, "read room failed", err)
+				httpx.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			if previewable {
+				httpx.WriteJSON(w, http.StatusOK, membership.ProbeAnswer{Preview: true, TenantID: tid})
+				return
+			}
 		}
-		if shared {
-			httpx.WriteJSON(w, http.StatusOK, map[string]any{"member": false, "preview": true, "tenantId": tid})
-			return
-		}
-		httpx.WriteJSON(w, http.StatusOK, map[string]any{"member": false})
+		httpx.WriteJSON(w, http.StatusOK, membership.ProbeAnswer{})
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"member": true, "role": string(m.Role), "agentHost": m.AgentHost, "tenantId": m.TenantID})
+	httpx.WriteJSON(w, http.StatusOK, membership.ProbeAnswer{Member: true, Role: string(m.Role), AgentHost: m.AgentHost, TenantID: m.TenantID})
 }
 
 // isHumanMember reports whether user is a member of the room whose
@@ -668,13 +688,25 @@ func (s *Service) handleCreateInvite(w http.ResponseWriter, r *http.Request) {
 	} else if body.ExpiresAtMs > now+maxInviteTTLMs {
 		body.ExpiresAtMs = now + maxInviteTTLMs
 	}
-	code := randomCode()
-	inv := store.Invite{Code: code, RoomID: roomID, Role: normalizeInviteRole(body.Role), ExpiresAtMs: body.ExpiresAtMs, Capacity: body.Capacity, CreatedBy: caller(r)}
-	if err := s.Store.CreateInvite(r.Context(), inv); err != nil {
+	// Codes are short and one namespace: free the dead ones first.
+	if err := s.Store.PurgeDeadInvites(r.Context(), now); err != nil {
+		obs.ServerError(w, "purge dead invites failed", err)
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	var inv store.Invite
+	for draw := 0; draw < maxInviteCodeDraws; draw++ {
+		inv = store.Invite{Code: randomInviteCode(), RoomID: roomID, Role: normalizeInviteRole(body.Role), ExpiresAtMs: body.ExpiresAtMs, Capacity: body.Capacity, CreatedBy: caller(r)}
+		if err = s.Store.CreateInvite(r.Context(), inv); !errors.Is(err, store.ErrInviteExists) {
+			break
+		}
+	}
+	if err != nil {
 		obs.ServerError(w, "create invite failed", err)
 		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	code := inv.Code
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"code": code, "roomId": roomID, "role": string(inv.Role), "expiresAtMs": inv.ExpiresAtMs, "capacity": inv.Capacity})
 }
 
@@ -718,15 +750,19 @@ func (s *Service) handlePlaza(w http.ResponseWriter, r *http.Request) {
 	}
 	reply := wire.PlazaReply{Rooms: make([]wire.PlazaRoom, 0, len(rooms)), Total: total, Limit: limit, Offset: offset}
 	for _, rc := range rooms {
-		if rc.Visibility == store.VisibilityShared {
+		// A shared room is listed in full; a private room that its owner lets
+		// be read is too, but stays locked (joined with an invite code).
+		if rc.Visibility == store.VisibilityShared || rc.Previewable {
 			reply.Rooms = append(reply.Rooms, wire.PlazaRoom{
 				RoomID: rc.RoomID, Name: rc.Name, Description: rc.Description,
-				Visibility: string(store.VisibilityShared), SyncMode: string(rc.SyncMode), CreatedBy: rc.CreatedBy, CreatedAtMs: rc.CreatedAtMs,
+				Visibility: string(rc.Visibility), Locked: rc.Visibility != store.VisibilityShared, Previewable: rc.Previewable,
+				SyncMode: string(rc.SyncMode), CreatedBy: rc.CreatedBy, CreatedAtMs: rc.CreatedAtMs,
 				MemberCount: rc.MemberCount,
 			})
 			continue
 		}
-		// Private: redact everything but the existence + name/description.
+		// Any other private room: redact everything but the existence +
+		// name/description.
 		reply.Rooms = append(reply.Rooms, wire.PlazaRoom{
 			RoomID: rc.RoomID, Name: rc.Name, Description: rc.Description,
 			Visibility: string(store.VisibilityPrivate), Locked: true,
@@ -851,6 +887,7 @@ func (s *Service) handlePatchRoom(w http.ResponseWriter, r *http.Request) {
 		Name        *string `json:"name"`
 		Description *string `json:"description"`
 		Visibility  *string `json:"visibility"`
+		Previewable *bool   `json:"previewable"`
 		SyncMode    *string `json:"syncMode"`
 	}
 	if !httpx.DecodeJSON(w, r, maxJSONBodyBytes, &body) {
@@ -862,7 +899,7 @@ func (s *Service) handlePatchRoom(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	patch := store.RoomPatch{Name: body.Name, Description: body.Description}
+	patch := store.RoomPatch{Name: body.Name, Description: body.Description, Previewable: body.Previewable}
 	if body.Visibility != nil {
 		v := store.NormalizeVisibility(*body.Visibility)
 		patch.Visibility = &v
@@ -954,10 +991,27 @@ func normalizeInviteRole(v string) store.Role {
 	return store.RoleMember
 }
 
-func randomCode() string {
-	buf := make([]byte, 16)
-	_, _ = rand.Read(buf)
-	return hex.EncodeToString(buf)
+// maxInviteCodeDraws bounds the redraws when a drawn code is already taken
+// (the code is four characters, wire.InviteCodeLen: a collision is likely at
+// some point and costs one more draw).
+const maxInviteCodeDraws = 16
+
+// randomInviteCode draws a code uniformly (rejection sampling, so no symbol
+// is likelier than another).
+func randomInviteCode() string {
+	const alphabet = wire.InviteCodeAlphabet
+	const limit = 256 - 256%len(alphabet) // bytes at or above it would bias the draw
+	code := make([]byte, 0, wire.InviteCodeLen)
+	buf := make([]byte, wire.InviteCodeLen*2)
+	for len(code) < wire.InviteCodeLen {
+		_, _ = rand.Read(buf)
+		for _, b := range buf {
+			if int(b) < limit && len(code) < wire.InviteCodeLen {
+				code = append(code, alphabet[int(b)%len(alphabet)])
+			}
+		}
+	}
+	return string(code)
 }
 
 func caller(r *http.Request) string { return svcauth.Subject(r) }

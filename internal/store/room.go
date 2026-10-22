@@ -58,6 +58,13 @@ const (
 	VisibilityPrivate Visibility = "private"
 )
 
+// DefaultPreviewable is whether a new room is readable before joining when
+// its creator says nothing: a shared room is (anyone could join and read it
+// one click later), a private one is not. Visibility says how a room is
+// joined; Previewable, who may read it first, is the owner's own switch from
+// then on (docs/prd/2026-10-22-shared-room-preview.md).
+func DefaultPreviewable(v Visibility) bool { return v == VisibilityShared }
+
 // NormalizeVisibility maps arbitrary input to a known visibility, defaulting to
 // private (the safe default for a newly created room).
 func NormalizeVisibility(v string) Visibility {
@@ -99,11 +106,15 @@ func NormalizeSyncMode(v string) SyncMode {
 // QuickPrompts are what the empty room shows its members; GetRoom reads
 // them, the listings do not.
 type Room struct {
-	TenantID     string
-	RoomID       string
-	Name         string
-	Description  string
-	Visibility   Visibility
+	TenantID    string
+	RoomID      string
+	Name        string
+	Description string
+	Visibility  Visibility
+	// Previewable lets any signed-in member of the room's organization read
+	// the room without joining it, read-only (membership.Previewer). It is
+	// independent of Visibility, which only says how the room is joined.
+	Previewable  bool
 	SyncMode     SyncMode
 	CreatedBy    string
 	CreatedAtMs  int64
@@ -122,6 +133,7 @@ type RoomPatch struct {
 	Name         *string
 	Description  *string
 	Visibility   *Visibility
+	Previewable  *bool
 	SyncMode     *SyncMode
 	Welcome      *string
 	QuickPrompts *[]wire.RoomQuickPrompt
@@ -238,6 +250,11 @@ type RoomStore interface {
 	// CreateInvite stores a new invite code; ErrInviteExists when the code is
 	// taken in any tenant (it is never rewritten).
 	CreateInvite(ctx context.Context, inv Invite) error
+	// PurgeDeadInvites deletes the invites no one can redeem any more (expired
+	// at nowMs, or used to their capacity), in every tenant: invite codes are
+	// one namespace and a short code is a scarce one, so a creator frees the
+	// dead ones before drawing.
+	PurgeDeadInvites(ctx context.Context, nowMs int64) error
 	// RedeemInvite atomically validates and consumes an invite for a user,
 	// returning the created membership. Redeeming for an already-member user is
 	// idempotent and does not increment the redeemed count. An invite is
@@ -701,6 +718,18 @@ func (s *MemoryRoom) CreateInvite(ctx context.Context, inv Invite) error {
 	return nil
 }
 
+// PurgeDeadInvites deletes the invites that can no longer be redeemed.
+func (s *MemoryRoom) PurgeDeadInvites(_ context.Context, nowMs int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for k, inv := range s.invites {
+		if !liveAt(inv.ExpiresAtMs, nowMs) || inv.RedeemedCount >= inv.Capacity {
+			delete(s.invites, k)
+		}
+	}
+	return nil
+}
+
 // RedeemInvite atomically validates and consumes an invite.
 func (s *MemoryRoom) RedeemInvite(ctx context.Context, code, userID string, nowMs int64) (Membership, error) {
 	tid, err := tenant.Require(ctx)
@@ -815,6 +844,9 @@ func (s *MemoryRoom) UpdateRoom(ctx context.Context, roomID string, patch RoomPa
 	}
 	if patch.Description != nil {
 		r.Description = *patch.Description
+	}
+	if patch.Previewable != nil {
+		r.Previewable = *patch.Previewable
 	}
 	if patch.Visibility != nil {
 		r.Visibility = *patch.Visibility

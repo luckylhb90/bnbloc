@@ -216,14 +216,7 @@ func (s *Service) handleListArtifacts(w http.ResponseWriter, r *http.Request) {
 // under exactly the messages it has loaded, however old.
 func (s *Service) handleArtifactAnchors(w http.ResponseWriter, r *http.Request) {
 	roomID := r.PathValue("roomId")
-	isMember, err := s.Store.IsMember(r.Context(), roomID, caller(r))
-	if err != nil {
-		obs.ServerError(w, "read membership failed", err)
-		httpx.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if !isMember {
-		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
+	if !s.requireRead(w, r, roomID) {
 		return
 	}
 	from, errFrom := strconv.ParseInt(r.URL.Query().Get("from"), 10, 64)
@@ -572,19 +565,12 @@ func (s *Service) handleArtifactState(w http.ResponseWriter, r *http.Request) {
 // handleGetArtifactState returns the artifact's last relayed live state — the
 // join snapshot for a member starting or refreshing a preview. Live state is
 // session data, not document history: there is no backlog, only "where the
-// board is right now". Authorization mirrors the relay (room membership, and
-// the artifact must live in that room).
+// board is right now". Authorization is the room's read gate (preview.go: a
+// member, or anyone in a shared room), and the artifact must live in that
+// room.
 func (s *Service) handleGetArtifactState(w http.ResponseWriter, r *http.Request) {
 	roomID := r.PathValue("roomId")
-	userID := caller(r)
-	isMember, err := s.Store.IsMember(r.Context(), roomID, userID)
-	if err != nil {
-		obs.ServerError(w, "read membership failed", err)
-		httpx.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if !isMember {
-		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
+	if !s.requireRead(w, r, roomID) {
 		return
 	}
 	artifactID := strings.TrimSpace(r.PathValue("artifactId"))

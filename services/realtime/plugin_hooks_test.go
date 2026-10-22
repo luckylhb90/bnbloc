@@ -138,6 +138,9 @@ func (s *scopedMembers) Fresh(roomID, userID string) (membership.Member, bool) {
 
 func (s *scopedMembers) Forget(string, string) {}
 
+// Preview: this fake has no shared rooms.
+func (*scopedMembers) Preview(string, string) (string, bool) { return "", false }
+
 func chatEvent(room, author, text string) wire.Event {
 	return wire.Event{RoomID: room, Kind: "chat_message", Payload: map[string]any{"userId": author, "text": text}}
 }

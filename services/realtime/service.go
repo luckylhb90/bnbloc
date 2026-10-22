@@ -434,6 +434,13 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 	// person's: never present, never advertising a roster, and never shown
 	// the people chat.
 	human := m.IsHuman()
+	// The re-check below is the one this stream opened under: a member's
+	// stream ends when the membership does (a shared room's preview is not
+	// a membership), a preview's when the room stops being readable.
+	recheck := membership.AnyMember
+	if m.Preview {
+		recheck = membership.Read
+	}
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		obs.ServerError(w, "streaming unsupported", nil)
@@ -482,7 +489,10 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 	// bridge inflates presence and its reconnects churn the roster.
 	countPresence := r.URL.Query().Get("presence") != "0" && human
 	sseKind := realtime.SSEKindBridge
-	if countPresence {
+	switch {
+	case m.Preview:
+		sseKind = realtime.SSEKindPreview
+	case countPresence:
 		sseKind = realtime.SSEKindMember
 	}
 	defer realtime.TrackSSE(s.Hub.Metrics, sseKind)()
@@ -526,6 +536,11 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 		if people != nil && people.skip(ev) {
 			return false
 		}
+		// A preview reads the feed and the deliverables, not the room's agent
+		// runs, tasks, live views or rosters (wire.PreviewedKind).
+		if m.Preview && !wire.PreviewedKind(ev.Kind) {
+			return false
+		}
 		data, err := json.Marshal(ev)
 		if err != nil {
 			return false
@@ -546,7 +561,7 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 			// The revocation event is live-only and may never reach this
 			// replica (an ownership move, a failed ingest): the stream
 			// re-checks the membership it opened on, and ends once it is gone.
-			if _, err := membership.RoomScope(ctx, s.Membership, roomID, userID, membership.Read); err != nil {
+			if _, err := membership.RoomScope(ctx, s.Membership, roomID, userID, recheck); err != nil {
 				return
 			}
 			fmt.Fprint(w, ": keep-alive\n\n")

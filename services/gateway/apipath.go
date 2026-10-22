@@ -467,7 +467,8 @@ func (p apiPath) isEventStream(method string) bool {
 // they have not joined (docs/prd/2026-10-22-shared-room-preview.md): the
 // ONE list of what a preview reads, GET only. The room's public channels
 // and members, its history and live stream, and its deliverables (the list,
-// one, a version, its content and thumbnail). The backends serve these
+// the anchors that place them under messages, one, a version, its content
+// and thumbnail, and an interactive one's live snapshot). The backends serve these
 // routes to a non-member only where they opt in (membership.Read; the room
 // service's requireRead); every other room route stays members'.
 func (p apiPath) isPreviewRead(method string) bool {
@@ -477,11 +478,13 @@ func (p apiPath) isPreviewRead(method string) bool {
 	switch len(p.segs) {
 	case 4:
 		switch p.RoomSub {
-		case "channels", "members", "history", "events", "artifacts":
+		case "channels", "members", "history", "events", "artifacts", "artifact-anchors":
 			return true
 		}
 	case 5:
 		return p.RoomSub == "artifacts"
+	case 6:
+		return p.RoomSub == "artifacts" && p.segs[5] == "state"
 	case 7:
 		return p.RoomSub == "artifacts" && p.segs[5] == "versions"
 	case 8:

@@ -2881,12 +2881,18 @@ export interface EventKindSpec {
   // ChannelScoped kinds carry the channelId of the message or channel they
   // concern; a single-channel stream receives them only for its channel.
   channelScoped?: boolean;
+  // Preview kinds reach a preview's stream (a person reading a shared room
+  // they have not joined, docs/prd/2026-10-22-shared-room-preview.md): the
+  // kinds that match what a preview may read over REST, the feed and the
+  // deliverables. Every other kind (agent runs and their progress, live
+  // views, tasks, rosters, presence, content and app changes) is members'.
+  preview?: boolean;
 }
 
 // RoomEventKinds is the registry of room event kinds. The web's
 // RoomEventKind union (and RoomEventKindValues) is generated from the Name
 // of each row: a kind registered here is a kind the web listens for.
-export const RoomEventKinds: readonly EventKindSpec[] = [{ name: "chat_message", durable: true, replay: true, channelScoped: true }, { name: "agent_messages", durable: true, replay: true, channelScoped: true }, { name: "agent_job_created", channelScoped: true }, { name: "agent_job_updated", channelScoped: true }, { name: "agent_job_progress", channelScoped: true }, { name: "job_live_frame", channelScoped: true }, { name: "agent_session_state" }, { name: "agent_roster" }, { name: "presence_join" }, { name: "presence_leave" }, { name: "presence_snapshot" }, { name: "presence_typing", channelScoped: true }, { name: "message_deleted", channelScoped: true }, { name: "message_edited", channelScoped: true }, { name: "task_updated", channelScoped: true }, { name: "artifact_updated" }, { name: "artifact_state" }, { name: "member_joined" }, { name: "member_removed", revocation: true }, { name: "room_deleted", revocation: true }, { name: "content_saved" }, { name: "content_uses_changed" }, { name: "app_changed" }];
+export const RoomEventKinds: readonly EventKindSpec[] = [{ name: "chat_message", durable: true, replay: true, channelScoped: true, preview: true }, { name: "agent_messages", durable: true, replay: true, channelScoped: true, preview: true }, { name: "agent_job_created", channelScoped: true }, { name: "agent_job_updated", channelScoped: true }, { name: "agent_job_progress", channelScoped: true }, { name: "job_live_frame", channelScoped: true }, { name: "agent_session_state" }, { name: "agent_roster" }, { name: "presence_join" }, { name: "presence_leave" }, { name: "presence_snapshot" }, { name: "presence_typing", channelScoped: true }, { name: "message_deleted", channelScoped: true, preview: true }, { name: "message_edited", channelScoped: true, preview: true }, { name: "task_updated", channelScoped: true }, { name: "artifact_updated", preview: true }, { name: "artifact_state", preview: true }, { name: "member_joined", preview: true }, { name: "member_removed", revocation: true, preview: true }, { name: "room_deleted", revocation: true, preview: true }, { name: "content_saved" }, { name: "content_uses_changed" }, { name: "app_changed" }];
 
 // ---- wire/events.go ----
 
@@ -3346,6 +3352,18 @@ export interface RoomImportResult {
   skippedAttachments: string[];
   handoff: RoomHandoffInfo;
 }
+
+// ---- wire/invites.go ----
+
+// A room's invite code is short enough to read out and type: InviteCodeLen
+// characters of InviteCodeAlphabet (31 symbols; no 0, O, 1, I or L, which
+// read alike). That is under a million codes, so it is safe only with the
+// rest of the policy: a short life, a throttled redemption and codes found
+// per tenant (services/room invite policy, docs/prd/2026-10-22-short-invite-
+// codes.md). The room service draws codes from this alphabet; the web types
+// and normalizes them by it.
+export const InviteCodeLen = 4;
+export const InviteCodeAlphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 
 // ---- wire/job_live.go ----
 
@@ -5086,6 +5104,9 @@ export interface RoomDetail {
   name: string;
   description: string;
   visibility: RoomVisibility;
+  // Previewable: anyone signed in to the room's organization may read the
+  // room without joining it (read-only). Independent of Visibility.
+  previewable: boolean;
   syncMode: RoomSyncMode;
   createdBy: string;
   createdAtMs: number;
@@ -5119,6 +5140,10 @@ export interface RoomPreview {
   visibility: RoomVisibility;
   memberCount: number;
   preview: boolean;
+  // Previewable: the room may be read before joining it, so the room view
+  // opens read-only; otherwise this card (and a join) is all a non-member
+  // sees.
+  previewable: boolean;
 }
 
 // RoomMember is one membership of a room. AgentHost marks a platform
@@ -5144,6 +5169,9 @@ export interface PlazaRoom {
   description: string;
   visibility: RoomVisibility;
   locked: boolean;
+  // Previewable: the room may be read before joining it (a private one
+  // still needs an invite code to join).
+  previewable: boolean;
   syncMode?: RoomSyncMode;
   createdBy?: string;
   createdAtMs?: number;

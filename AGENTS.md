@@ -537,22 +537,36 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `TestNoMembershipFailOpen`
   forbids fail-open guards, direct directory reads in handlers and visitor
   comparisons outside the owners.
-- **A shared room is readable by a non-member of its organization (a
-  preview, `docs/prd/2026-10-22-shared-room-preview.md`), read-only.** What a
-  preview is lives in `internal/membership`: `Member.Preview` (not a person:
-  `IsHuman` false, so no people chat, presence or roster, exactly as for an
-  agent host), the optional `Previewer` directory (the room probe's
-  `preview:true`) and the `Read` need, which is the only one a preview
-  passes (`AnyMember`/`Human`/`Chat` stay members'). A route reads for a
-  non-member only by naming `Read` (realtime's history, event stream and its
-  heartbeat re-check) or, in the room service, by `requireRead` (channels,
-  members, artifact reads; writes use `requireMember`); the gateway admits a
-  non-member only to the GET routes of `apiPath.isPreviewRead` and only when
-  the room's tenant is the session's (`roomPreviewable`: the backends act in
-  the room's tenant, so the organization boundary is the edge's). A new
-  route a preview should read is added in both lists and to
-  `TestPreviewReadsASharedRoomThroughTheListOnly`; `TestNoMembershipFailOpen`
-  holds `membership.Read` to the files that serve one.
+- **A previewable room is readable by a member of its organization who has
+  not joined it (a preview, `docs/prd/2026-10-22-shared-room-preview.md`),
+  read-only.** `Room.Previewable` is the owner's switch, apart from
+  visibility (how a room is joined: a click, or a four-character invite code);
+  a new shared room starts on, a private one off (`store.DefaultPreviewable`).
+  What a preview is lives in `internal/membership`: `Member.Preview` (not a
+  person: `IsHuman` false, so no people chat, presence or roster, exactly as
+  for an agent host), `Directory.Preview` (the room probe's `preview:true`,
+  asked with `?preview=1`), `PreviewOf` (the one place that builds the
+  member) and the `Read` need, the only one a preview passes (`AnyMember`,
+  `Human`, `Chat` stay members'). A route reads for a non-member only by
+  naming `Read` (realtime's history, event stream and its heartbeat re-check,
+  which a member's stream keeps at `AnyMember`) or, in the room service, by
+  `requireRead` (channels, members, artifact reads, anchors and live state; a
+  write keeps its member check); a preview's stream carries only the kinds
+  marked `Preview` in `wire.RoomEventKinds` (a test decides every kind). The
+  gateway admits a non-member only to the GET routes of
+  `apiPath.isPreviewRead` and only when the room's tenant is the session's
+  (`roomPreviewable`: the backends act in the room's tenant, so the
+  organization boundary is the edge's). A new route a preview should read is
+  added in both lists and to `TestPreviewReadsASharedRoomThroughTheListOnly`
+  and `TestE2EPreviewOfAPreviewableRoomAcrossTheServices`;
+  `TestNoMembershipFailOpen` holds `membership.Read` to the files that serve
+  one. The web reads the discriminator in one place (`isPreviewRoom`).
+- **A room's invite code is four characters** (`wire.InviteCodeLen`,
+  `wire.InviteCodeAlphabet`: 31 symbols, no `0 O 1 I L`), safe only with its
+  policy (`docs/prd/2026-10-22-short-invite-codes.md`): at most 7 days, the
+  gateway's own redemption budget (`inviteAllow`: 10 an hour, burst 5), the
+  per-tenant lookup, and dead codes freed before a draw
+  (`PurgeDeadInvites`). A change to any of them changes that bound.
 - **A removed member keeps no access.** realtime calls `Directory.Forget`
   when it ingests `member_removed`/`room_deleted` (before delivering it), a
   stream opens on an uncached lookup (`FreshRoomScope`) and re-checks at

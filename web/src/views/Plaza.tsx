@@ -229,6 +229,11 @@ function RoomCard({
           {shared ? "Shared" : "Private"}
         </Badge>
       </div>
+      {room.previewable && (
+        <p className="mt-2 text-xs text-[var(--color-fg-subtle)]">
+          {shared ? "Open to read before joining" : "Open to read; joining needs an invite code"}
+        </p>
+      )}
       <div className="mt-4 flex items-center justify-between gap-3 text-xs text-[var(--color-fg-subtle)]">
         <div className="flex items-center gap-3">
           <span className="inline-flex items-center gap-1 tabular">

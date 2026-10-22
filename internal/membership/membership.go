@@ -19,7 +19,7 @@ import (
 // AgentHost marks a platform agent host's hidden membership (store.Membership):
 // it reads the room for the host's bridge but is not a human membership.
 // Preview marks a reader who is no member: a signed-in caller reading a
-// shared room before joining it (Previewer); it exists only in the answer of
+// previewable room before joining it; it exists only in the answer of
 // RoomScope with Read, never in a directory's Lookup. Tenant is the room's
 // own tenant (rooms.tenant_id); "" only in a Static set that was given none
 // (single-tenant tests and dev).
@@ -43,28 +43,20 @@ func (m Member) IsHuman() bool { return !m.AgentHost && !m.Preview }
 // D1). The web mirrors it in lib/roomRoles.ts.
 func (m Member) MayChat() bool { return m.IsHuman() && m.Role != store.RoleVisitor }
 
-// Previewer is a Directory that can also say a room is readable by a
-// non-member: the room is shared and live (docs/prd/2026-10-22-shared-room-
-// preview.md). The answer is the room's own tenant and a visitor's
-// read-only role; it is no membership (Lookup never returns it) and says
-// nothing about the caller's own organization, which the edge checks.
-type Previewer interface {
-	Preview(roomID, userID string) (Member, bool)
-}
-
-// PreviewOf asks d whether roomID is readable by userID as a preview. A
-// directory that is no Previewer has none: fail closed.
+// PreviewOf asks d whether roomID is readable by userID as a preview: the
+// room is live and its owner lets non-members read it (docs/prd/2026-10-22-shared-room-preview.md). The
+// answer is a visitor's read-only Member in the room's own tenant, built
+// here and nowhere else; it is no membership (Lookup never returns it) and
+// says nothing about the caller's own organization, which the edge checks.
 func PreviewOf(d Directory, roomID, userID string) (Member, bool) {
-	p, ok := d.(Previewer)
-	if !ok || roomID == "" || userID == "" {
+	if d == nil || roomID == "" || userID == "" {
 		return Member{}, false
 	}
-	m, ok := p.Preview(roomID, userID)
+	tenantID, ok := d.Preview(roomID, userID)
 	if !ok {
 		return Member{}, false
 	}
-	m.Preview = true
-	return m, true
+	return Member{Role: store.RoleVisitor, Preview: true, Tenant: tenantID}, true
 }
 
 // Reader is the read side a background consumer needs (notify, plugin
@@ -77,11 +69,14 @@ type Reader interface {
 // Directory answers room membership for request handlers. Fresh always asks
 // the authority (a stream open); Forget drops the cached answers for (room,
 // user), or for the whole room when userID is "" (a member removed, a room
-// deleted).
+// deleted). Preview says whether a user who is no member may read the room
+// anyway, because the room is live and previewable, and the room's tenant (PreviewOf
+// builds the Member; a directory with no previews answers false).
 type Directory interface {
 	Reader
 	Fresh(roomID, userID string) (Member, bool)
 	Forget(roomID, userID string)
+	Preview(roomID, userID string) (tenantID string, ok bool)
 }
 
 // The refusals of RoomScope; every one is a 403 to a client (IsRefusal).
@@ -116,7 +111,7 @@ const (
 	Human
 	// Chat admits a member who may act in the conversation (Member.MayChat).
 	Chat
-	// Read admits a member or a preview (a shared room read before joining).
+	// Read admits a member or a preview (a previewable room read before joining).
 	// It is the only Need a preview passes, so a route reads for a
 	// non-member only by naming Read: realtime's history and event stream.
 	// The caller it admits is read as an agent host is: no people chat, no
@@ -137,7 +132,7 @@ func (n Need) check(m Member) error {
 // RoomScope is the ONE membership check of a room-scoped request: userID's
 // membership of roomID (fail closed on a nil directory), in the tenant the
 // request is signed for (tenant.FromContext), with the ability need. A
-// non-member passes only with Read, as a preview of a shared room.
+// non-member passes only with Read, as a preview of a previewable room.
 func RoomScope(ctx context.Context, d Directory, roomID, userID string, need Need) (Member, error) {
 	return scope(ctx, d, roomID, userID, need, false)
 }
@@ -185,15 +180,15 @@ func HumanMember(d Reader, roomID, userID string) bool {
 
 // Static is an in-memory membership set for dev and tests.
 type Static struct {
-	mu      sync.RWMutex
-	members map[string]map[string]Member // roomID -> userID -> membership
-	tenants map[string]string            // roomID -> the room's tenant
-	shared  map[string]bool              // roomID -> readable by a non-member
+	mu          sync.RWMutex
+	members     map[string]map[string]Member // roomID -> userID -> membership
+	tenants     map[string]string            // roomID -> the room's tenant
+	previewable map[string]bool              // roomID -> readable by a non-member
 }
 
 // NewStatic constructs an empty static membership set.
 func NewStatic() *Static {
-	return &Static{members: map[string]map[string]Member{}, tenants: map[string]string{}, shared: map[string]bool{}}
+	return &Static{members: map[string]map[string]Member{}, tenants: map[string]string{}, previewable: map[string]bool{}}
 }
 
 // Add records a (human) member in a room.
@@ -212,22 +207,22 @@ func (s *Static) SetRoomTenant(roomID, tenantID string) {
 	s.tenants[roomID] = tenantID
 }
 
-// SetShared marks a room readable by a non-member (a shared room), or not.
-func (s *Static) SetShared(roomID string, shared bool) {
+// SetPreviewable marks a room readable by a non-member, or not.
+func (s *Static) SetPreviewable(roomID string, previewable bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.shared[roomID] = shared
+	s.previewable[roomID] = previewable
 }
 
-// Preview mirrors the room service's probe: a shared room is readable by a
-// user who is not its member.
-func (s *Static) Preview(roomID, userID string) (Member, bool) {
+// Preview mirrors the room service's probe: a previewable room is readable by
+// a user who is not its member.
+func (s *Static) Preview(roomID, userID string) (string, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if _, member := s.members[roomID][userID]; member || !s.shared[roomID] {
-		return Member{}, false
+	if _, member := s.members[roomID][userID]; member || !s.previewable[roomID] {
+		return "", false
 	}
-	return Member{Role: store.RoleVisitor, Preview: true, Tenant: s.tenants[roomID]}, true
+	return s.tenants[roomID], true
 }
 
 // Remove deletes a membership (any kind).

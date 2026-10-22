@@ -57,6 +57,12 @@ type EventKindSpec struct {
 	// ChannelScoped kinds carry the channelId of the message or channel they
 	// concern; a single-channel stream receives them only for its channel.
 	ChannelScoped bool `json:"channelScoped,omitempty"`
+	// Preview kinds reach a preview's stream (a person reading a shared room
+	// they have not joined, docs/prd/2026-10-22-shared-room-preview.md): the
+	// kinds that match what a preview may read over REST, the feed and the
+	// deliverables. Every other kind (agent runs and their progress, live
+	// views, tasks, rosters, presence, content and app changes) is members'.
+	Preview bool `json:"preview,omitempty"`
 }
 
 // RoomEventKinds is the registry of room event kinds. The web's
@@ -65,8 +71,8 @@ type EventKindSpec struct {
 //
 //wire:union RoomEventKind Name
 var RoomEventKinds = []EventKindSpec{
-	{Name: KindChatMessage, Durable: true, Replay: true, ChannelScoped: true},
-	{Name: KindAgentMessages, Durable: true, Replay: true, ChannelScoped: true},
+	{Name: KindChatMessage, Durable: true, Replay: true, ChannelScoped: true, Preview: true},
+	{Name: KindAgentMessages, Durable: true, Replay: true, ChannelScoped: true, Preview: true},
 	{Name: EventAgentJobCreated, ChannelScoped: true},
 	{Name: EventAgentJobUpdated, ChannelScoped: true},
 	{Name: EventAgentJobProgress, ChannelScoped: true},
@@ -77,14 +83,14 @@ var RoomEventKinds = []EventKindSpec{
 	{Name: EventPresenceLeave},
 	{Name: EventPresenceSnapshot},
 	{Name: EventPresenceTyping, ChannelScoped: true},
-	{Name: EventMessageDeleted, ChannelScoped: true},
-	{Name: EventMessageEdited, ChannelScoped: true},
+	{Name: EventMessageDeleted, ChannelScoped: true, Preview: true},
+	{Name: EventMessageEdited, ChannelScoped: true, Preview: true},
 	{Name: EventTaskUpdated, ChannelScoped: true},
-	{Name: EventArtifactUpdated},
-	{Name: EventArtifactState},
-	{Name: EventMemberJoined},
-	{Name: EventMemberRemoved, Revocation: true},
-	{Name: EventRoomDeleted, Revocation: true},
+	{Name: EventArtifactUpdated, Preview: true},
+	{Name: EventArtifactState, Preview: true},
+	{Name: EventMemberJoined, Preview: true},
+	{Name: EventMemberRemoved, Revocation: true, Preview: true},
+	{Name: EventRoomDeleted, Revocation: true, Preview: true},
 	{Name: EventContentSaved},
 	{Name: EventContentUsesChanged},
 	{Name: EventAppChanged},
@@ -106,6 +112,9 @@ func LookupEventKind(name string) (EventKindSpec, bool) {
 
 // PersistedFeedKind reports whether kind is a durable room-feed kind.
 func PersistedFeedKind(kind string) bool { return eventKinds[kind].Durable }
+
+// PreviewedKind reports whether a preview's stream carries kind.
+func PreviewedKind(kind string) bool { return eventKinds[kind].Preview }
 
 // ReplayedKind reports whether a stream reconnecting to the room is sent
 // kind again from the hub's replay buffer.

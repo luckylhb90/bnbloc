@@ -1754,6 +1754,32 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 				"ADD UNIQUE KEY uq_room_schedules_hook (hook_id)")
 		},
 	},
+	{
+		// A room's own switch for being readable before joining
+		// (docs/prd/2026-10-22-shared-room-preview.md). Additive: a defaulted
+		// column the previous release never reads. A shared room was readable
+		// by every member of its organization in the release that came first,
+		// so the existing shared rooms keep that (new rooms take their
+		// visibility's default, store.DefaultPreviewable).
+		id: "2026_10_rooms_previewable",
+		run: func(ctx context.Context, db sqlConn) error {
+			// Only a database that lacks the column is backfilled: a rerun
+			// (a dropped ledger) must not reopen a room its owner closed.
+			var have int
+			if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.columns
+    WHERE table_schema = DATABASE() AND table_name = 'rooms' AND column_name = 'previewable'`).Scan(&have); err != nil {
+				return fmt.Errorf("inspect column rooms.previewable: %w", err)
+			}
+			if err := addColumnIfMissing(ctx, db, "rooms", "previewable", "TINYINT(1) NOT NULL DEFAULT 0 AFTER visibility"); err != nil {
+				return err
+			}
+			if have > 0 {
+				return nil
+			}
+			_, err := db.ExecContext(ctx, `UPDATE rooms SET previewable = 1 WHERE visibility = 'shared'`)
+			return err
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

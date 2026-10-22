@@ -16,11 +16,13 @@ const (
 
 // SSE connection kinds: a presence-counting subscriber (a member's web or
 // desktop client), a non-presence observer (?presence=0: a bridge, or the
-// smoke check) or an interactive app's change feed (the gateway's).
+// smoke check), an interactive app's change feed (the gateway's) or a
+// person reading a shared room they have not joined (a preview).
 const (
-	SSEKindMember = "member"
-	SSEKindBridge = "bridge"
-	SSEKindApp    = "app"
+	SSEKindMember  = "member"
+	SSEKindBridge  = "bridge"
+	SSEKindApp     = "app"
+	SSEKindPreview = "preview"
 )
 
 // EventKindLabel maps an event kind onto the bounded metric label set: the
@@ -44,8 +46,8 @@ func RegisterMetrics(m *obs.Metrics) {
 	m.Describe(metricFeedCommits, "Room feed group commits (one multi-row insert each) by result.")
 	m.Describe(metricFeedCommitEvents, "Durable events stored by successful group commits; divided by the ok commits it is the mean batch size.")
 	m.Describe(metricSSEOverflows, "Room streams closed because the client fell a whole buffer behind; the client reconnects and catches up from history.")
-	m.Describe(metricSSEConnections, "Open room event streams by kind (member: presence-counting client; bridge: ?presence=0 observer; app: an interactive app's change feed).")
-	for _, kind := range []string{SSEKindMember, SSEKindBridge, SSEKindApp} {
+	m.Describe(metricSSEConnections, "Open room event streams by kind (member: presence-counting client; bridge: ?presence=0 observer; app: an interactive app's change feed; preview: a person reading a shared room they have not joined).")
+	for _, kind := range []string{SSEKindMember, SSEKindBridge, SSEKindApp, SSEKindPreview} {
 		m.GaugeSet(metricSSEConnections, 0, obs.L("kind", kind))
 	}
 }
@@ -53,7 +55,7 @@ func RegisterMetrics(m *obs.Metrics) {
 // TrackSSE counts one open room event stream of kind until the returned
 // func is called (defer it).
 func TrackSSE(m *obs.Metrics, kind string) (done func()) {
-	if kind != SSEKindBridge && kind != SSEKindApp {
+	if kind != SSEKindBridge && kind != SSEKindApp && kind != SSEKindPreview {
 		kind = SSEKindMember
 	}
 	m.GaugeAdd(metricSSEConnections, 1, obs.L("kind", kind))

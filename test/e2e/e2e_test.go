@@ -51,6 +51,23 @@ func (s staticMembers) Fresh(roomID, userID string) (membership.Member, bool) {
 
 func (staticMembers) Forget(string, string) {}
 
+// Preview mirrors the room service's probe: a user who is no member reads a
+// live previewable room (membership.Directory.Preview), in the room's tenant.
+func (s staticMembers) Preview(roomID, userID string) (string, bool) {
+	if _, member := s.Lookup(roomID, userID); member {
+		return "", false
+	}
+	tid, ok, err := s.MemoryRoom.RoomTenant(tctx(), roomID)
+	if err != nil || !ok {
+		return "", false
+	}
+	rm, err := s.MemoryRoom.GetRoom(tenant.NewContext(context.Background(), tid), roomID)
+	if err != nil || !rm.Previewable {
+		return "", false
+	}
+	return tid, true
+}
+
 // harness holds the composed control-plane for the test.
 type harness struct {
 	gateway *httptest.Server
@@ -81,8 +98,9 @@ func newHarness(t *testing.T) *harness {
 	t.Cleanup(roomSrv.Close)
 
 	gw := &gatewaysvc.Service{
-		Verifier: devVerifier{},
-		Signer:   auth.NewSigner([]byte("e2e-key")),
+		Membership: members,
+		Verifier:   devVerifier{},
+		Signer:     auth.NewSigner([]byte("e2e-key")),
 		Backends: gatewaysvc.Backends{
 			Room: roomSrv.URL, Activity: activitySrv.URL,
 			Realtime: realtimeSrv.URL, ShareAgent: shareSrv.URL,

@@ -1,4 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
+import { isPreviewRoom, joinNeedsInviteCode } from "@/lib/apiModels";
 import type { LocalAgent } from "@/lib/useLocalAgent";
 import { fileAskRequests } from "@/lib/team";
 import type { SendOptions } from "@/views/room/useRoomMessageActions";
@@ -55,7 +56,7 @@ export function useRoomFileAsk(i: RoomFileAskInputs): {
       composer: (ref, options): ReactNode => (
         <RoomComposer
           key={`file:${ref.artifactId}`}
-          roomPreview={!!room && "preview" in room}
+          join={isPreviewRoom(room) ? { needsCode: joinNeedsInviteCode(room), joining: data.joining, onJoin: (code) => void data.join(code) } : undefined}
           readOnly={readOnly}
           agent={agent}
           subject={subject}
@@ -66,12 +67,10 @@ export function useRoomFileAsk(i: RoomFileAskInputs): {
           roomMembers={data.members}
           online={online}
           feed={feed}
-          joining={data.joining}
           onSend={async (text, opts) => {
             const fileRef = options.prepare ? await options.prepare(ref) : ref;
             return fileRef ? send(text, { ...opts, fileRef }) : false;
           }}
-          onJoin={() => void data.join()}
           platformAgents={data.platform}
           modelCatalogs={data.modelCatalogs}
           variant="file"

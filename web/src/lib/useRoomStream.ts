@@ -30,6 +30,8 @@ interface UseRoomStreamParams {
   // True once the channel's latest history page has loaded: the unread
   // baseline is computed against it.
   readonly historyLoaded: boolean;
+  // The reader has not joined the room (a preview): no read cursor to move.
+  readonly preview?: boolean;
   // Delegate for every event kind the room owns (feed, jobs, artifacts,
   // working state, roster). The stream only intercepts typing, presence, and
   // the cross-channel unread guard.
@@ -90,7 +92,7 @@ function useAttentive(): boolean {
 // useRoomStream owns the room's realtime unit: the SSE subscription lifecycle,
 // connection status, presence, typing, and the unread/read cursors.
 export function useRoomStream(params: UseRoomStreamParams): UseRoomStream {
-  const { roomId, subject, joinedGen, channelId, feed, historyLoaded } = params;
+  const { roomId, subject, joinedGen, channelId, feed, historyLoaded, preview = false } = params;
   const includePeople = params.scope?.includePeople ?? false;
   const channelOnly = params.scope?.channelOnly ?? false;
   const scope = channelId ?? "";
@@ -172,12 +174,12 @@ export function useRoomStream(params: UseRoomStreamParams): UseRoomStream {
   // Becoming attentive again (tab shown, window focused) flushes it.
   const latest = maxSequence(feed);
   useEffect(() => {
-    if (!channelId || baseline === null || !attentive || latest <= 0) return;
+    if (preview || !channelId || baseline === null || !attentive || latest <= 0) return;
     const t = window.setTimeout(() => {
       void api.markRead(roomId, latest, channelId).catch(() => {});
     }, 400);
     return () => window.clearTimeout(t);
-  }, [roomId, channelId, baseline, attentive, latest]);
+  }, [roomId, channelId, baseline, attentive, latest, preview]);
 
   // Prune expired typing entries so the hint disappears when they stop.
   useEffect(() => {

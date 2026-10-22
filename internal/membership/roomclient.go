@@ -62,41 +62,52 @@ func (c *RoomClient) Lookup(roomID, userID string) (Member, bool) {
 	return c.Fresh(roomID, userID)
 }
 
-// probeAnswer is bnbloc-room's membership probe answer: Member for a
-// membership, Preview for a non-member of a live shared room, TenantID the
-// room's own tenant in both.
-type probeAnswer struct {
+// PreviewQuery is the probe's query parameter that asks for the room's
+// preview answer too (services/room handleMembershipProbe): "1" asks.
+const PreviewQuery = "preview"
+
+// ProbeAnswer is bnbloc-room's membership probe answer, the one wire shape
+// of both sides: Member for a membership, Preview for a non-member of a live
+// previewable room (only when asked, PreviewQuery), TenantID the room's own
+// tenant in both.
+type ProbeAnswer struct {
 	Member    bool   `json:"member"`
-	Role      string `json:"role"`
-	AgentHost bool   `json:"agentHost"`
-	Preview   bool   `json:"preview"`
-	TenantID  string `json:"tenantId"`
+	Role      string `json:"role,omitempty"`
+	AgentHost bool   `json:"agentHost,omitempty"`
+	Preview   bool   `json:"preview,omitempty"`
+	TenantID  string `json:"tenantId,omitempty"`
 }
 
 // probe asks the room service's tenant-agnostic membership probe. ok is
 // false on any error and on an answer without the room's tenant (fail
 // closed).
-func (c *RoomClient) probe(roomID, userID string) (probeAnswer, bool) {
+func (c *RoomClient) probe(roomID, userID string, preview bool) (ProbeAnswer, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	endpoint := c.BaseURL + "/v1/rooms/" + url.PathEscape(roomID) + "/membership/" + url.PathEscape(userID)
+	if preview {
+		// Only a preview asks whether the room is previewable: every other
+		// lookup of a non-member (fan-outs, the edge's fallback) stays the
+		// one membership read it was.
+		endpoint += "?" + PreviewQuery + "=1"
+	}
 	// The membership probe authorizes on the queried subject itself; it is
 	// tenant-agnostic (the answer names the room's tenant).
 	req, err := svcauth.NewRequest(ctx, http.MethodGet, endpoint, nil, userID, "")
 	if err != nil {
-		return probeAnswer{}, false
+		return ProbeAnswer{}, false
 	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return probeAnswer{}, false
+		return ProbeAnswer{}, false
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return probeAnswer{}, false
+		return ProbeAnswer{}, false
 	}
-	var out probeAnswer
+	var out ProbeAnswer
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil || out.TenantID == "" {
-		return probeAnswer{}, false
+		return ProbeAnswer{}, false
 	}
 	return out, true
 }
@@ -119,7 +130,7 @@ func (c *RoomClient) remember(cache map[string]cachedMember, roomID, userID stri
 // cache, and caches a positive answer. Fails closed on any error, and on an
 // answer without the room's tenant.
 func (c *RoomClient) Fresh(roomID, userID string) (Member, bool) {
-	out, ok := c.probe(roomID, userID)
+	out, ok := c.probe(roomID, userID, false)
 	if !ok || !out.Member {
 		return Member{}, false
 	}
@@ -130,26 +141,26 @@ func (c *RoomClient) Fresh(roomID, userID string) (Member, bool) {
 	return m, true
 }
 
-// Preview implements Previewer from the probe: userID is no member and the
-// room is live and shared. A positive answer is cached like a membership's
-// (and dropped by Forget). The probe's answer is the room's, not the
-// caller's: whether the caller's organization may read it is the edge's.
-func (c *RoomClient) Preview(roomID, userID string) (Member, bool) {
+// Preview implements Directory.Preview from the probe: userID is no member
+// and the room is live and previewable; the answer is the room's tenant. A
+// positive answer is cached like a membership's (and dropped by Forget). The
+// probe's answer is the room's, not the caller's: whether the caller's
+// organization may read it is the edge's.
+func (c *RoomClient) Preview(roomID, userID string) (string, bool) {
 	c.mu.Lock()
 	if hit, ok := c.previews[memberKey(roomID, userID)]; ok && c.Now().Before(hit.exp) {
 		c.mu.Unlock()
-		return hit.m, true
+		return hit.m.Tenant, true
 	}
 	c.mu.Unlock()
-	out, ok := c.probe(roomID, userID)
+	out, ok := c.probe(roomID, userID, true)
 	if !ok || out.Member || !out.Preview {
-		return Member{}, false
+		return "", false
 	}
-	m := Member{Role: store.RoleVisitor, Preview: true, Tenant: out.TenantID}
 	c.mu.Lock()
-	c.remember(c.previews, roomID, userID, m)
+	c.remember(c.previews, roomID, userID, Member{Tenant: out.TenantID})
 	c.mu.Unlock()
-	return m, true
+	return out.TenantID, true
 }
 
 // Forget drops the cached answer for (room, user), or every cached answer of

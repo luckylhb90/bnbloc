@@ -35,7 +35,7 @@ func TestInviteRedeemThrottleIsPerSubject(t *testing.T) {
 		return resp.StatusCode
 	}
 
-	for i := 0; i < int(defaultGuessBurst); i++ {
+	for i := 0; i < int(defaultInviteGuessBurst); i++ {
 		if got := redeem("alice"); got != http.StatusOK {
 			t.Fatalf("alice redeem #%d = %d, want 200", i+1, got)
 		}

@@ -21,6 +21,7 @@ import { Dot } from "@/ui/Card";
 import { formatBytes } from "@/lib/format";
 import { canInvite, isOwner, type RoomMembership } from "@/lib/roomRoles";
 import { OnlineStrip } from "@/views/room/RoomNav";
+import { RoomLinkButton } from "@/views/room/RoomLinkButton";
 import { RoomMuteButton } from "@/views/room/RoomMuteButton";
 import type { RailSurface } from "@/views/room/RoomLayout";
 import { PlatformAgentsIndicator } from "@/views/room/PlatformAgentsIndicator";
@@ -175,6 +176,8 @@ export function RoomHeader({
           )}
         </Button>
       )}
+      {room && <RoomLinkButton roomId={roomId} visibility={room.visibility} previewable={room.previewable} />}
+      {me && (
       <Button
         variant="ghost"
         size="icon"
@@ -190,6 +193,7 @@ export function RoomHeader({
           </span>
         )}
       </Button>
+      )}
       {onExportHandoff && (
         <Button
           variant="ghost"

@@ -10,6 +10,8 @@ import {
 } from "@phosphor-icons/react";
 import { api, type RoomSummary } from "@/lib/api";
 import { isSubmitEnter } from "@/lib/keys";
+import { inviteCodeComplete, normalizeInviteCode } from "@/lib/inviteCode";
+import { InviteCodeLen } from "@/lib/wire.gen";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/ui/Button";
 import { Input, Field } from "@/ui/Input";
@@ -312,11 +314,11 @@ function RedeemDialog({
   const { reauth } = useAuth();
 
   const submit = async () => {
-    if (!code.trim()) return;
+    if (!inviteCodeComplete(code)) return;
     setBusy(true);
     setErr("");
     try {
-      const r = await api.redeemInvite(code.trim());
+      const r = await api.redeemInvite(code);
       await reauth().catch(() => {});
       setCode("");
       onRedeemed(r?.roomId || "");
@@ -339,7 +341,7 @@ function RedeemDialog({
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button variant="primary" onClick={submit} disabled={busy || !code.trim()}>
+          <Button variant="primary" onClick={submit} disabled={busy || !inviteCodeComplete(code)}>
             {busy ? "Joining…" : "Join room"}
           </Button>
         </>
@@ -348,9 +350,14 @@ function RedeemDialog({
       <Field label="Invite code" error={err}>
         <Input
           autoFocus
-          placeholder="XXXX-XXXX"
+          placeholder={"X".repeat(InviteCodeLen)}
           value={code}
-          onChange={(e) => setCode(e.target.value)}
+          maxLength={InviteCodeLen}
+          autoCapitalize="characters"
+          autoComplete="off"
+          spellCheck={false}
+          className="tabular tracking-widest uppercase"
+          onChange={(e) => setCode(normalizeInviteCode(e.target.value))}
           onKeyDown={(e) => isSubmitEnter(e) && submit()}
         />
       </Field>

@@ -23,8 +23,17 @@ export type { UpdatePlatform as UpdatePlatformArtifact } from "./wire.gen.ts";
 export type { ReleaseEntry, ReleaseFile, ReleaseHub, ReleaseHubMeta, UpdateConfig, UpdatePolicy } from "./wire.gen.ts";
 
 // Room is GET /v1/rooms/{id}: a member's detail, or a non-member's preview
-// of a shared room (`"preview" in room` tells them apart).
+// of a shared room, which they read before joining (isPreviewRoom tells them
+// apart: the ONE place that reads the discriminator).
 export type Room = RoomDetail | RoomPreview;
+export function isPreviewRoom(room: Room | null | undefined): room is RoomPreview {
+  return !!room && "preview" in room;
+}
+// joinNeedsInviteCode: a person who is no member of a private room joins it
+// with an invite code (a shared room joins with a click).
+export function joinNeedsInviteCode(room: Room | null | undefined): boolean {
+  return isPreviewRoom(room) && room.visibility === "private";
+}
 // One channel of a room: a topic-scoped message stream. Members, agent
 // borrows, and files are room-level and shared across channels.
 export interface Channel {

@@ -125,13 +125,15 @@ export function useRoomData({
   }, [roomId, joinedGen, catalogKey]);
   const modelCatalogs: RoomModelCatalogs = useMemo(() => ({ catalogs, grants: shared }), [catalogs, shared]);
 
-  // join adds the user to a shared room they are previewing, refreshes the
+  // join adds the user to a room they are reading before joining (a click
+  // for a shared room, an invite code for a private one), refreshes the
   // session token so it carries the new room scope, reloads the room detail
   // (the composer replaces the join panel) and re-subscribes the stream.
-  const join = useCallback(async () => {
+  const join = useCallback(async (inviteCode?: string) => {
     setJoining(true);
     try {
-      await api.joinRoom(roomId);
+      if (inviteCode) await api.redeemInvite(inviteCode);
+      else await api.joinRoom(roomId);
       await reauth();
       setRoom(await api.getRoom(roomId));
       setJoinedGen((g) => g + 1);

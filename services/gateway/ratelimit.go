@@ -26,6 +26,16 @@ const (
 	defaultGuessBurst = 10.0
 )
 
+// defaultInviteGuessRate / defaultInviteGuessBurst bound invite redemption
+// per subject: a room's invite code is short (four characters, so it can be
+// read out and typed), which only holds while guessing is slow. 10 an hour
+// sustained with a burst of 5 is a few typos and a few rooms joined in a row,
+// and about 240 guesses a day for anyone trying every code.
+const (
+	defaultInviteGuessRate  = 10.0 / 3600
+	defaultInviteGuessBurst = 5.0
+)
+
 // defaultPublicRate / defaultPublicBurst bound the unauthenticated public
 // share reads per client IP: a page load fetches the metadata, the content
 // and a site's files, so the burst covers one load of a typical static app.

@@ -17,7 +17,7 @@ func TestPreviewPassesOnlyRead(t *testing.T) {
 	s := NewStatic()
 	s.SetRoomTenant("r1", "org-a")
 	s.Add("r1", "maya")
-	s.SetShared("r1", true)
+	s.SetPreviewable("r1", true)
 	ctx := tenant.NewContext(context.Background(), "org-a")
 
 	m, err := RoomScope(ctx, s, "r1", "jack", Read)
@@ -45,7 +45,7 @@ func TestPreviewNeedsASharedRoomInTheRequestsTenant(t *testing.T) {
 	if _, err := RoomScope(ctx, s, "r1", "jack", Read); !errors.Is(err, ErrNotMember) {
 		t.Fatalf("a room that is not shared: err = %v, want ErrNotMember", err)
 	}
-	s.SetShared("r1", true)
+	s.SetPreviewable("r1", true)
 	other := tenant.NewContext(context.Background(), "org-b")
 	if _, err := RoomScope(other, s, "r1", "jack", Read); !errors.Is(err, ErrOtherTenant) {
 		t.Fatalf("a request signed for another tenant: err = %v, want ErrOtherTenant", err)
@@ -55,38 +55,35 @@ func TestPreviewNeedsASharedRoomInTheRequestsTenant(t *testing.T) {
 	}
 }
 
-// A directory that is no Previewer has no previews: fail closed.
-func TestPreviewOfADirectoryThatCannotPreview(t *testing.T) {
-	var d Directory = noPreview{NewStatic()}
-	if _, ok := PreviewOf(d, "r1", "jack"); ok {
-		t.Fatal("a directory without Previewer answered a preview")
-	}
-}
-
-// noPreview hides Static's Preview: only Directory's methods remain.
-type noPreview struct{ s *Static }
-
-func (n noPreview) Lookup(r, u string) (Member, bool) { return n.s.Lookup(r, u) }
-func (n noPreview) Fresh(r, u string) (Member, bool)  { return n.s.Fresh(r, u) }
-func (n noPreview) Forget(r, u string)                { n.s.Forget(r, u) }
-
 // The room client reads a preview from the probe's {"preview":true}, caches
 // it like a membership, drops it on Forget, and never takes one for a
 // membership.
 func TestRoomClientPreview(t *testing.T) {
 	var calls int
-	var body string
+	var body, query string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
+		query = r.URL.RawQuery
 		_, _ = w.Write([]byte(body))
 	}))
 	defer srv.Close()
 	c := NewRoomClient(srv.URL)
 
 	body = `{"member":false,"preview":true,"tenantId":"org-a"}`
-	m, ok := c.Preview("r1", "jack")
-	if !ok || !m.Preview || m.Tenant != "org-a" || m.Role != store.RoleVisitor {
-		t.Fatalf("preview = %+v %v", m, ok)
+	tenantID, ok := c.Preview("r1", "jack")
+	if !ok || tenantID != "org-a" {
+		t.Fatalf("preview = %q %v, want the room's tenant", tenantID, ok)
+	}
+	if m, ok := PreviewOf(c, "r1", "jack"); !ok || !m.Preview || m.Role != store.RoleVisitor || m.Tenant != "org-a" {
+		t.Fatalf("PreviewOf = %+v %v", m, ok)
+	}
+	if query != PreviewQuery+"=1" {
+		t.Fatalf("a preview asks the probe with ?%s=1, got %q", PreviewQuery, query)
+	}
+	// A membership lookup does not ask for the room's preview answer.
+	c.Fresh("r1", "jack")
+	if query != "" {
+		t.Fatalf("Fresh asked the probe for a preview: %q", query)
 	}
 	if _, ok := c.Lookup("r1", "jack"); ok {
 		t.Fatal("a preview is no membership: Lookup answered one")

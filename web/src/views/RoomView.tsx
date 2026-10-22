@@ -3,6 +3,7 @@ import { onboardingEvents } from "@/lib/onboardingEvents";
 import { feedSeqRange } from "@/lib/feedSeqRange";
 import { XIcon } from "@phosphor-icons/react";
 import { api, type AgentJob } from "@/lib/api";
+import { isPreviewRoom, joinNeedsInviteCode } from "@/lib/apiModels";
 import { useAuth } from "@/lib/auth";
 import { useCoarsePointer, useStage } from "@/lib/capability";
 import { useDock } from "@/lib/useDock";
@@ -21,6 +22,7 @@ import type { ChatRecipient, FeedItem } from "@/views/room/types";
 import { DismissibleLayer, PreviewDock, RoomRail, type RailSurface } from "@/views/room/RoomLayout";
 import { useRoomChannels } from "@/views/room/useRoomChannels";
 import { MyMessagesNav } from "@/views/room/RoomNav";
+import { RoomJoinCard } from "@/views/room/RoomJoinCard";
 import { RoomHeader, RoomSearchBar } from "@/views/room/RoomHeader";
 import { MessageFeed } from "@/views/room/MessageFeed";
 import { FeedLayoutSwitch } from "@/views/room/FeedLayoutSwitch";
@@ -134,7 +136,10 @@ export function RoomView({
   );
   const data = useRoomData({ roomId, subject, reauth, onGone: () => leaveGoneRoom("missing") });
   const { room, setRoom, roomAgents, joinedGen } = data;
-  const roomStart = roomStartOf(room && !("preview" in room) ? room : null);
+  // A shared room the person has not joined: they read it (a preview). They
+  // have no read cursor and the room's agent runs are not theirs to see.
+  const preview = isPreviewRoom(room);
+  const roomStart = roomStartOf(room && !isPreviewRoom(room) ? room : null);
   const handoff = useDesktopHandoff(roomId, subject, data.setRoster);
   // Owner/admin act on the room as a whole: export its handoff package, and
   // add the suggested members of an imported room.
@@ -196,6 +201,7 @@ export function RoomView({
     channelId,
     feed,
     historyLoaded: conversation.history.loaded,
+    preview,
     onMessageEvent: (e) => dispatch.current(e),
     onReconnect: () => activityRef.current?.bumpFiles(),
     onRevoked: leaveGoneRoom,
@@ -399,9 +405,7 @@ export function RoomView({
   // The people chat: a human-only side conversation agents never see. Docked
   // beside the timeline on a wide room, a full-screen sheet otherwise, its
   // own window in the desktop shell.
-  const member = !!room && !("preview" in room);
-  // A shared room the person has not joined: they read it (a preview).
-  const preview = !!room && "preview" in room;
+  const member = !!room && !preview;
   const automate = useMemo<AutomateApp | null>(
     () =>
       member
@@ -516,6 +520,11 @@ export function RoomView({
     />
   );
 
+  // A room its owner did not open for reading: the card and the way to join.
+  if (isPreviewRoom(room) && !room.previewable) {
+    return <RoomJoinCard room={room} needsCode={joinNeedsInviteCode(room)} joining={data.joining} onJoin={(code) => void data.join(code)} onBack={onBack} />;
+  }
+
   return (
     <DeliverableOwner.Provider value={!!me && mayChat(me)}>
     <div className="coarse-targets relative flex h-full min-h-0 flex-col" data-room-stage={roomStage} data-pointer={isCoarsePointer ? "coarse" : "fine"}>
@@ -548,13 +557,15 @@ export function RoomView({
         peopleChatUnread={peopleUnread}
         platformAgents={platformInRoom}
       />
-      <ActivityRail
-        working={activity.working}
-        agentJobs={activity.agentJobs}
-        recentArtifactChanges={activity.recentArtifactChanges}
-        onCancelJob={cancelJob}
-        queueAhead={queueAhead}
-      />
+      {!preview && (
+        <ActivityRail
+          working={activity.working}
+          agentJobs={activity.agentJobs}
+          recentArtifactChanges={activity.recentArtifactChanges}
+          onCancelJob={cancelJob}
+          queueAhead={queueAhead}
+        />
+      )}
       {showSearch && (
         <RoomSearchBar search={search} query={q} matchCount={visibleFeed.length} onSearchChange={setSearch} onClose={closeSearch} />
       )}
@@ -648,7 +659,7 @@ export function RoomView({
                 per-channel preference), or the join panel for a preview. */}
             <RoomComposer
               key={channelId ?? ""}
-              roomPreview={!!room && "preview" in room}
+              join={preview ? { needsCode: joinNeedsInviteCode(room), joining: data.joining, onJoin: (code) => void data.join(code) } : undefined}
               readOnly={readOnly}
               agent={agent}
               subject={subject}
@@ -659,9 +670,7 @@ export function RoomView({
               roomMembers={data.members}
               online={online}
               feed={feed}
-              joining={data.joining}
               onSend={send}
-              onJoin={() => void data.join()}
               platformAgents={data.platform}
               modelCatalogs={data.modelCatalogs}
               working={activity.working.size}

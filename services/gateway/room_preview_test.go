@@ -25,8 +25,8 @@ func previewGateway(t *testing.T) (*httptest.Server, string) {
 		dir.SetRoomTenant(room, tenantID)
 		dir.Add(room, "maya")
 	}
-	dir.SetShared("pub", true)
-	dir.SetShared("pub-other", true)
+	dir.SetPreviewable("pub", true)
+	dir.SetPreviewable("pub-other", true)
 	gw := newGateway(t, backend.URL)
 	gw.Backends = Backends{Room: backend.URL, Realtime: backend.URL, Activity: backend.URL, ShareAgent: backend.URL}
 	gw.Rooms = func(string, string) []string { return nil }
@@ -59,7 +59,9 @@ func TestPreviewReadsASharedRoomThroughTheListOnly(t *testing.T) {
 		"/v1/rooms/pub/members",
 		"/v1/rooms/pub/history?channelId=c1",
 		"/v1/rooms/pub/artifacts",
+		"/v1/rooms/pub/artifact-anchors?from=1&to=9",
 		"/v1/rooms/pub/artifacts/a1",
+		"/v1/rooms/pub/artifacts/a1/state",
 		"/v1/rooms/pub/artifacts/a1/versions/1",
 		"/v1/rooms/pub/artifacts/a1/versions/1/content",
 		"/v1/rooms/pub/artifacts/a1/versions/1/thumbnail",
@@ -85,7 +87,7 @@ func TestPreviewReadsASharedRoomThroughTheListOnly(t *testing.T) {
 		{http.MethodGet, "/v1/rooms/pub/attachments/x"},
 		{http.MethodGet, "/v1/rooms/pub/members/maya"},
 		{http.MethodGet, "/v1/rooms/pub/membership/maya"},
-		{http.MethodGet, "/v1/rooms/pub/artifacts/a1/state"},
+		{http.MethodPost, "/v1/rooms/pub/artifacts/a1/state"},
 		{http.MethodGet, "/v1/rooms/pub/artifacts/a1/versions/1/files/index.html"},
 		{http.MethodPost, "/v1/rooms/pub/chat"},
 		{http.MethodPost, "/v1/rooms/pub/typing"},

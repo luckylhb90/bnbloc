@@ -117,3 +117,37 @@ func TestEventKindAttributes(t *testing.T) {
 		}
 	}
 }
+
+// TestPreviewEventKinds: what a preview's stream carries is decided kind by
+// kind. The two lists below are the decision; a registered kind in neither
+// fails, so a new kind cannot reach a person who has not joined the room
+// without someone choosing it (the preview reads what REST lets it read:
+// the feed and the deliverables, docs/prd/2026-10-22-shared-room-preview.md).
+func TestPreviewEventKinds(t *testing.T) {
+	previewed := map[string]bool{
+		KindChatMessage: true, KindAgentMessages: true, EventMessageDeleted: true, EventMessageEdited: true,
+		EventArtifactUpdated: true, EventArtifactState: true, EventMemberJoined: true, EventMemberRemoved: true, EventRoomDeleted: true,
+	}
+	members := map[string]bool{
+		EventAgentJobCreated: true, EventAgentJobUpdated: true, EventAgentJobProgress: true, EventJobLiveFrame: true,
+		EventAgentSessionState: true, EventAgentRoster: true, EventPresenceJoin: true, EventPresenceLeave: true,
+		EventPresenceSnapshot: true, EventPresenceTyping: true, EventTaskUpdated: true, EventContentSaved: true,
+		EventContentUsesChanged: true, EventAppChanged: true,
+	}
+	for _, k := range RoomEventKinds {
+		switch {
+		case previewed[k.Name] && members[k.Name]:
+			t.Errorf("%s is listed for both", k.Name)
+		case previewed[k.Name]:
+			if !k.Preview {
+				t.Errorf("%s: a previewed kind is not marked Preview", k.Name)
+			}
+		case members[k.Name]:
+			if k.Preview {
+				t.Errorf("%s: a members' kind is marked Preview", k.Name)
+			}
+		default:
+			t.Errorf("%s is not decided: add it to the previewed or the members' list", k.Name)
+		}
+	}
+}

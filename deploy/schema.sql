@@ -216,6 +216,7 @@ CREATE TABLE IF NOT EXISTS rooms (
   name           VARCHAR(255) NOT NULL,
   description    VARCHAR(500) NOT NULL DEFAULT '',
   visibility     ENUM('shared','private') NOT NULL DEFAULT 'private',
+  previewable    TINYINT(1) NOT NULL DEFAULT 0,
   sync_mode      ENUM('git','mutagen','none') NOT NULL DEFAULT 'git',
   created_by     VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   created_at_ms  BIGINT NOT NULL,

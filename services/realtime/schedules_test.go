@@ -45,6 +45,9 @@ func (s *schedMembers) Fresh(room, user string) (membership.Member, bool) {
 
 func (s *schedMembers) Forget(string, string) {}
 
+// Preview: this fake has no shared rooms.
+func (*schedMembers) Preview(string, string) (string, bool) { return "", false }
+
 // schedRoles answers room roles; a room absent from rooms reads as deleted.
 type schedRoles struct {
 	roles map[string]store.Role

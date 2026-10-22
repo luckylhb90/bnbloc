@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import type { Room } from "@/lib/api";
+import { isPreviewRoom } from "@/lib/apiModels";
 import type { RoomMembership } from "@/lib/roomRoles";
 import { ConfirmDialog } from "@/ui/Dialog";
 import { RoomSettings } from "@/views/RoomSettings";
@@ -52,7 +53,7 @@ export function RoomDialogs({
   );
   return (
     <>
-      {dialog === "settings" && room && !("preview" in room) && me && (
+      {dialog === "settings" && room && !isPreviewRoom(room) && me && (
         <RoomSettings room={room} me={me} onClose={onCloseDialog} onChanged={onRoomChanged} onDeleted={onRoomDeleted} />
       )}
       {dialog === "members" && (

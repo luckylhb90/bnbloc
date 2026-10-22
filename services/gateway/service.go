@@ -167,11 +167,13 @@ type Service struct {
 	AllowedOrigins []string
 	// limiter throttles cost-bearing writes per authenticated subject;
 	// guessLimiter throttles brute-forceable attempts (login per client IP,
-	// invite redemption per subject, public share token misses per client
-	// IP); publicLimiter throttles public share reads per client IP.
+	// public share token misses per client IP); publicLimiter throttles public share reads per client IP.
 	limiter       ratelimit.Lazy
 	guessLimiter  ratelimit.Lazy
 	publicLimiter ratelimit.Lazy
+	// inviteLimiter throttles invite redemption per subject, apart from the
+	// other guesses: a four-character code needs a budget of its own.
+	inviteLimiter ratelimit.Lazy
 	// visitorLimiter throttles visitor-token mints per client IP;
 	// appLimiters an interactive app's data calls per IP, link and
 	// participant, reads and writes apart (appRates).
@@ -604,7 +606,7 @@ func (s *Service) edgeGate(w http.ResponseWriter, r *http.Request, p apiPath, cl
 	// Invite redemption is authenticated, so the code-guessing throttle is keyed
 	// on the subject: one account cannot brute-force invite codes, and users
 	// behind a shared proxy/NAT never share a bucket.
-	if isInviteRedeem(r.Method, p) && !s.guessAllow("subject:"+claims.Subject) {
+	if isInviteRedeem(r.Method, p) && !s.inviteAllow(claims.Subject) {
 		httpx.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 		return false
 	}
@@ -650,10 +652,14 @@ func (s *Service) rateAllow(subject string) bool {
 // guessAllow lazily builds the slow guess limiter and consumes one token for
 // key. It bounds brute-forceable attempts: "ip:<addr>" for unauthenticated
 // login and the API-token exchange (no trusted subject yet; one shared
-// bucket), "subject:<id>" for authenticated invite
-// redemption, "share-ip:<addr>" for public share token misses.
+// bucket), "share-ip:<addr>" for public share token misses.
 func (s *Service) guessAllow(key string) bool {
 	return s.guessLimiter.Get(defaultGuessRate, defaultGuessBurst, s.Peers.Size).Allow(key)
+}
+
+// inviteAllow consumes one invite-redemption token for subject.
+func (s *Service) inviteAllow(subject string) bool {
+	return s.inviteLimiter.Get(defaultInviteGuessRate, defaultInviteGuessBurst, s.Peers.Size).Allow("subject:" + subject)
 }
 
 // guessBlocked reports, without consuming, whether key's guess budget is

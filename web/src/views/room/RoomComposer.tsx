@@ -1,6 +1,6 @@
 import { useCallback, useMemo } from "react";
+import { JoinPanel } from "@/views/room/JoinPanel";
 import { api } from "@/lib/api";
-import { Button } from "@/ui/Button";
 import { dedupeMembers } from "@/lib/format";
 import { Composer, type ComposerFileContext } from "@/views/Composer";
 import type { PromptChoice } from "@/lib/promptPacks";
@@ -20,7 +20,7 @@ import { useDisplayNames } from "@/lib/useDisplayName";
 // flat and full-bleed at every width: one top rule, no outer gutter, no card;
 // only the safe-area insets (home indicator, landscape notch) pad it.
 export function RoomComposer({
-  roomPreview,
+  join,
   readOnly = false,
   agent,
   subject,
@@ -31,9 +31,7 @@ export function RoomComposer({
   roomMembers,
   online,
   feed,
-  joining,
   onSend,
-  onJoin,
   platformAgents,
   modelCatalogs,
   working = 0,
@@ -42,7 +40,8 @@ export function RoomComposer({
   pick,
   threadLength,
 }: {
-  readonly roomPreview: boolean;
+  // Set while the person is only reading the room (a preview): how they join.
+  readonly join?: { readonly needsCode: boolean; readonly joining: boolean; readonly onJoin: (code?: string) => void };
   // The member may follow the room but not post (a visitor).
   readonly readOnly?: boolean;
   readonly agent: LocalAgent;
@@ -54,9 +53,7 @@ export function RoomComposer({
   readonly roomMembers: string[];
   readonly online: string[];
   readonly feed: FeedItem[];
-  readonly joining: boolean;
   readonly onSend: (text: string, opts: SendOptions) => Promise<boolean>;
-  readonly onJoin: () => void;
   readonly platformAgents?: Pick<RoomPlatformAgents, "choices" | "add" | "route" | "commit">;
   // The room's owner-keyed model catalogs (the model picker's source).
   readonly modelCatalogs?: RoomModelCatalogs;
@@ -102,14 +99,12 @@ export function RoomComposer({
   );
   return (
     <div data-tour={variant === "room" ? "composer" : undefined} className="pad-safe pad-safe-b w-full border-t border-[var(--color-border)] focus-within:border-[var(--color-border-strong)]">
-      {roomPreview ? (
-        <div className="flex items-center justify-between gap-4 px-4 py-3">
+      {join ? (
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3">
           <p className="text-sm text-[var(--color-fg-muted)]">
-            You are viewing a shared room. Join to chat and collaborate.
+            You are reading this room before joining it. {join.needsCode ? "Enter its invite code to chat and collaborate." : "Join to chat and collaborate."}
           </p>
-          <Button variant="primary" onClick={onJoin} disabled={joining}>
-            {joining ? "Joining…" : "Join room"}
-          </Button>
+          <JoinPanel needsCode={join.needsCode} joining={join.joining} onJoin={join.onJoin} />
         </div>
       ) : readOnly ? (
         <p className="px-4 py-3 text-sm text-[var(--color-fg-muted)]">

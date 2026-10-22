@@ -22,10 +22,8 @@ type Service interface {
 }
 
 var (
-	_ Service   = (*RoomClient)(nil)
-	_ Service   = (*Static)(nil)
-	_ Previewer = (*RoomClient)(nil)
-	_ Previewer = (*Static)(nil)
+	_ Service = (*RoomClient)(nil)
+	_ Service = (*Static)(nil)
 )
 
 // RoomBaseURLEnv names bnbloc-room's base URL, the membership authority.

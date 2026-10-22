@@ -133,7 +133,7 @@ export function MessageFeed({
     return (
       <div className="mx-auto mt-10 flex max-w-md flex-col items-center gap-1 text-center text-sm text-[var(--color-fg-muted)]">
         <p className="font-medium text-[var(--color-fg)]">No messages yet</p>
-        <p>You are reading this shared room before joining it. Join to start the conversation.</p>
+        <p>You are reading this room before joining it. Join to start the conversation.</p>
       </div>
     );
   }

@@ -405,6 +405,8 @@ export const api = {
     name?: string;
     description?: string;
     visibility: string;
+    // Readable before joining; absent, the visibility's default.
+    previewable?: boolean;
   }) => req<RoomDetail>("/v1/rooms", { method: "POST", body: JSON.stringify(body) }),
   updateRoom: (
     id: string,
@@ -412,6 +414,7 @@ export const api = {
       name?: string;
       description?: string;
       visibility?: string;
+      previewable?: boolean;
       syncMode?: string;
     },
   ) =>

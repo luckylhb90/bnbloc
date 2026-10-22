@@ -186,7 +186,6 @@ export function PeopleChatPanel({
       </div>
       <RoomComposer
         variant="people"
-        roomPreview={false}
         agent={agent}
         subject={subject}
         roomId={roomId}
@@ -196,9 +195,7 @@ export function PeopleChatPanel({
         roomMembers={members}
         online={online}
         feed={feed}
-        joining={false}
         onSend={send}
-        onJoin={noop}
       />
       <ConfirmDialog
         open={confirmDelete !== null}
