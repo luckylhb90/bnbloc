@@ -2,8 +2,9 @@
 
 Status: proposed. Owner: the gateway (the connection store, the proxy, the
 consent bookkeeping, the audit), the connector and connection-provider
-contracts (`core/pkgmeta`), the `connections` MCP tool (its own
-repository), connector samples (their own repository).
+contracts (`core/pkgmeta`), the bridge's forwarding proxy and the Sandbox
+Protocol's host proxy capability, connector samples (their own
+repository).
 
 A member connects the systems their agents should reach in their name: the
 company wiki and issue tracker through the organization's single sign-on, a
@@ -154,9 +155,10 @@ Three concerns, three owners:
 
 - `POST /v1/connections/{connector}/request`
   `{method, path, query, headers, body}` answers
-  `{status, headers, body, truncated}`. It is admitted with a job grant
-  (`?room=&job=`) and joins `wire.RoomRelayRoutes`, so it acts as **the
-  requester of the turn being driven**.
+  `{status, headers, body, truncated}`. Only the bridge calls it, for the
+  turn it drives (§2.5), with that job's grant (`?room=&job=`), so it acts
+  as **the requester of the turn being driven** and only while the job
+  runs.
 - Whose connection: the requester's, and only on a drive where the
   requester's data stays with the requester. That means **their own agent**
   (the agent's owner is the requester) or a schedule they created. On a
@@ -176,33 +178,61 @@ Three concerns, three owners:
   The proxy then adds the credential (the provider's headers and cookies),
   strips any credential the agent sent, and drops `Set-Cookie` and the
   provider's auth headers from the answer.
-- Bounds: request body 1 MiB, answer body 4 MiB; over that, `truncated`.
-  The answer is the system's data; the tool fences it as such.
+- Bounds: request body 1 MiB, answer body 4 MiB (the bridge's proxy
+  answers an over-cap body with a 502 naming the cap).
 - **Every call is recorded**: who, which agent, room, job, connector,
   method, path (query values left out), policy class, status, bytes. The
   member sees their own (Connections → activity) and an organization admin
   sees the organization's (the audit log).
 
-### 2.5 The agent's side: one MCP tool, from its own repository
+### 2.5 The agent's side: nothing new, its usual HTTP just works
 
-- `connections`: a stdio MCP tool component (`mcp.credentials: "room"`).
-  It reaches the gateway only through the room relay, so it holds nothing.
-  Two actions:
-  - `list`: the requester's connectors in effect, each with its state,
-    whether changes are allowed, its hosts and the skill that explains it;
-  - `request`: `{connector, method, path, query?, body?}`. An answer over
-    the tool's cap is written to a workspace file, and the tool returns the
-    path with a preview.
-- It is attached the way every tool is (`mcptool.Resolve`): when a
-  member's content requires it, or when they installed it. It answers only
-  for connectors that are in effect. No session guidance or tool text names
-  a system: the skill packs do.
-- CLIs that want their own token are not driven through this tool. An
-  agent calls the API through `request`, following the connector's skill.
+The agent gets no tool and no rule. It calls a connected system the way it
+calls anything: `curl`, a script's HTTP client, a CLI that takes an API
+base. The platform authenticates the call on its way out, where the agent
+cannot see it.
+
+- **The bridge's forwarding proxy.** Each bridge runs one HTTP proxy on
+  loopback. A turn of the member's own drive with connections in effect
+  gets `HTTPS_PROXY` and `HTTP_PROXY` in its commands' environment (host
+  commands, and the space's for a sandboxed turn), carrying a bearer bound
+  to that turn's job, as the room tools bearer is. A `CONNECT` to one of
+  the requester's connector hosts is answered with a certificate from the
+  bridge's own local CA (generated per member, its key 0600 in the member
+  directory, never leaving the computer). The proxy reads the request and
+  sends it as `POST /v1/connections/{connector}/request` through the
+  bridge's own client, so the gateway applies the credential, the policy
+  and the audit (§2.4). It then answers with the system's response. Every
+  other `CONNECT` is tunnelled untouched and never decrypted.
+- **Trusting the local CA, for the agent's commands only.** Its
+  certificate is added to the bundle those commands read (`SSL_CERT_FILE`,
+  `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, `GIT_SSL_CAINFO`). The
+  member's own system trust store is never changed.
+- **Sandboxed turns.** The Sandbox Protocol gains `hostProxy`: a space may
+  reach one host loopback port the bridge names (the proxy), and nothing
+  else on the host. The reference implementation maps it through the
+  runtime's host alias, enforced outside the guest.
+- **Turn-bound and own drives only.** The bearer works while its job runs
+  and is revoked with the turn. A borrowed or platform drive gets no proxy
+  environment, so its calls go out unauthenticated, as without connections.
+- **What the agent knows** is data, not a rule. The session's room facts
+  (`.room/README.md`) list the requester's connections in effect, one line
+  each: "wiki.acme.example: as maya, read; changes are asked first". The
+  connector's skill explains its API with ordinary `curl` examples.
+- **Refusals are ordinary HTTP.** `not_connected` and `needs_changes`
+  answer `403` with a JSON body naming the reason and saying that the
+  person was asked in the room (the card, §2.6). A held write answers
+  `202` with `{"held": true, "card": …}`. An agent reads these like any
+  API error. It does not retry or ask for a token, since the body tells it
+  the person decides.
+- A CLI that refuses to run before its own login (it checks for a token
+  locally) is given a placeholder through the connector's `cliEnv`
+  (`{"GH_TOKEN": "connected"}`). The proxy replaces every credential on a
+  connector host, so the placeholder is never sent anywhere.
 
 ### 2.6 AI first
 
-- **The agent finds out and the member decides.** `request` answering
+- **The agent finds out and the member decides.** A call answered
   `not_connected` or `needs_changes` posts a card to the requester in the
   room (shown to them only, like a publish proposal). It names the system,
   what the agent tried ("read page 123", "create an issue") and the reach
@@ -246,15 +276,15 @@ settings: they configure a tool, they are not a grant to a system.
 | Scale and cost | One store row per member and connector; an in-memory cache per live credential; a call costs one upstream request. A per-member, per-connector rate and the body caps bound a runaway agent. |
 | Failure and recovery | Provider down: the call answers `provider_unavailable` (retryable by the agent); a grant the provider refuses: `expired`, with a reconnect card. An upstream 401, or an answer matching the connector's `expiredWhen`, triggers one re-authorize and one retry, then `expired`. Nothing fails silently: each refusal names the system and the fix. |
 | Boundaries and privacy | Grants sealed with the platform key; never in an answer, a log, a workspace, a sandbox or a room. The proxy reaches only a connector's hosts. Answers flow to the requester's own agent only. Audit rows hold paths, not bodies or query values. |
-| Abuse and untrusted input | A page the agent read cannot widen its reach: writes need the member's allow, per call by default. Requests cannot pick a host, scheme or port; the proxy strips agent-sent credentials; redirects outside the hosts stop. Answer bodies are fenced as data by the tool. |
+| Abuse and untrusted input | A page the agent read cannot widen its reach: writes need the member's allow, per call by default. Requests cannot pick a host, scheme or port; the proxy strips agent-sent credentials; redirects outside the hosts stop. A system's answer is data the agent's command printed, like any `curl` output: what limits a hostile page is that its suggestions cannot change anything without the member's click. |
 | One owner | The proxy and its checks are one route; the policy classes are one function in `core/pkgmeta`, used by the validator and the proxy; the grant store is one package; providers own only their protocol. §2.7 removes the second store of member grants. |
 | Defaults and fallbacks | A new connection is read-only; changes are asked per call; no connector is in effect until an organization admin enables it; without a connector's client values it shows "needs setup" to admins and is hidden from members. |
 | External contracts | OAuth 2.0 with PKCE, RFC 8414/OIDC discovery, RFC 9207, refresh rotation; each provider component's three calls with a conformance probe; each system's API as the connector's skill describes it. A provider's refusal ("this platform may not reach the host yet") is kept distinct from "you lack access". |
-| Load on users and agents | One card when a system is not connected or a change is proposed; one dialog to connect. One tool with two actions; no rule in session guidance; per-system knowledge in skill packs, read only where the connector is in effect. |
-| Release and compatibility | New kinds, routes and tables (additive). §2.7 replaces the desktop's MCP sign-ins without migration (pre-launch). The `connections` tool and connector samples release on their own. |
+| Load on users and agents | One card when a system is not connected or a change is proposed; one dialog to connect. No tool and no rule for agents: their ordinary HTTP is authenticated on the way out; one fact line per connection in `.room/README.md`; per-system knowledge in skill packs, attached only for the requester's connected connectors. |
+| Release and compatibility | New kinds, routes and tables (additive). §2.7 replaces the desktop's MCP sign-ins without migration (pre-launch). The bridge's proxy ships with the desktop; `hostProxy` is an optional capability (without it a sandboxed turn's calls are not authenticated and the facts say so); connector samples release on their own. |
 | Observability | Every call is an audit row and a structured log event (connector, class, status, latency); providers' failures are logged with their reason; the member's activity view and its summary. |
-| AI capability | The agent notices a missing connection or a needed change and proposes it; the agent drafts connectors; an assist explains activity (§2.6). |
-| Component or platform | Platform: the store, the proxy, the policy enforcement, consent bookkeeping, the cards, the audit (only the platform can hold members' secrets and enforce a boundary between them). Components: provider protocols other than OAuth 2.0 and API keys, the `connections` tool, every connector and its skill. Built-in providers are the two open standards, not a vendor. |
+| AI capability | The agent notices a missing connection or a needed change and proposes it; the agent drafts connectors; an assist explains activity (§2.6). No model sits in the request path: read or write is the connector's declared policy, and a change is the person's click, never a model's call. |
+| Component or platform | Platform: the store, the proxy, the policy enforcement, consent bookkeeping, the cards, the audit (only the platform can hold members' secrets and enforce a boundary between them). Components: provider protocols other than OAuth 2.0 and API keys, every connector and its skill. The forwarding proxy is the bridge's (it holds the turn's grant, as the room tools do). Built-in providers are the two open standards, not a vendor. |
 
 **Pre-mortem.**
 1. *A fetched page talks the agent into deleting things.* Changes are
@@ -275,6 +305,15 @@ settings: they configure a tool, they are not a grant to a system.
    an operator item shown to admins, not a member error.
 6. *A schedule's write waits forever.* A schedule cannot be asked; without
    changes allowed in advance the run ends with the card and says so.
+7. *The local CA is turned against the member.* Only the agent's command
+   environment trusts it; the proxy mints leaf certificates only for the
+   requester's connector hosts, for the turn; its key never leaves the
+   member directory (0600), and a new one is made when the member signs
+   out.
+8. *The agent stops using the system because it does not know it can.*
+   The facts line names each connection and its reach; the agent task
+   suite checks that an agent asked for a wiki page reads it through a
+   plain `curl` with no tool and no prompt rule.
 
 ## 4. Build order (slices of §2)
 
@@ -282,8 +321,9 @@ settings: they configure a tool, they are not a grant to a system.
    validator (policy classes), the store, the proxy and its checks, the
    audit, `GET /v1/my/connections` (job-grant admitted, for `list`),
    Connections in Components (connect, allow changes, disconnect,
-   activity), the `oauth2` and `api-key` providers. The `connections` tool
-   (new repository). The cards for not connected, needs changes and held
+   activity), the `oauth2` and `api-key` providers. The bridge's forwarding
+   proxy, its local CA and the facts line; the Sandbox Protocol's
+   `hostProxy` with its conformance step and the reference implementation. The cards for not connected, needs changes and held
    writes, with Ask again, plus the agent's connector drafting
    (`components` kind `connector`) and the activity assist. First
    connectors as samples in their own repository: a public code host (API
@@ -295,9 +335,8 @@ settings: they configure a tool, they are not a grant to a system.
 3. **One owner of grants** (§2.7): endpoint MCP tools' OAuth through
    connections; the desktop's MCP sign-ins go.
 
-Not in this round: a CLI path into the sandbox (a local forwarder a CLI
-could use as its API base, held to the same checks). It waits for a CLI
-that has no API to call instead.
+Not in this round: non-HTTP protocols (a database wire protocol, SSH);
+a connector for one waits for a system that has no HTTP API.
 
 ## 5. Open questions
 
