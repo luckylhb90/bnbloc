@@ -65,7 +65,7 @@ Three concerns, three owners:
 
 | Concern | Owner | Shape |
 |---|---|---|
-| Which system, where, what may be done | **Connector** (a package) | its hosts, how one connects, the default policy, the skill that explains its API |
+| Which system, where, what may be done | **Connector** (a package) | its hosts, how one connects, the default policy, the guide that explains its API |
 | How a member's access is obtained and kept fresh | **Connection provider** | OAuth 2.0 and API keys built into the platform; anything else (an organization's SSO app consent) is an endpoint component |
 | Where the credential lives and how it is used | **The platform** | the connection store (sealed, per member), the proxy, the policy, the audit |
 
@@ -87,7 +87,7 @@ Three concerns, three owners:
       "read":  [{"methods": ["GET", "HEAD"]}, {"methods": ["POST"], "paths": ["/rest/api/search"]}],
       "write": [{"methods": ["POST", "PUT", "PATCH", "DELETE"]}]
     },
-    "requires": { "skills": ["acme-wiki-api@^1"] },
+    "guide": "GUIDE.md",
     "settings": [ {"key": "clientId", "scope": "platform", "type": "text"},
                   {"key": "clientSecret", "scope": "platform", "type": "secret"} ]
   }
@@ -99,9 +99,11 @@ Three concerns, three owners:
   login page, a 200 carrying its login form):
   `[{"status": 302, "locationPrefix": "/login"}, {"status": 200, "bodyContains": "id=\"login-link\""}]`. `policy` sorts requests into **read** and **write** (a
   search that is a POST is a read). Anything matching neither is refused.
-- What the API looks like lives in a **skill pack** the connector
-  requires: ordinary content the member's agent reads when the connector is
-  in effect. A connector never holds prompt text.
+- What the API looks like is the connector's **guide** (`GUIDE.md` in the
+  package, within the content limits): how to call it with `curl`, its
+  common reads and writes. It is a file the agent reads when a task needs
+  that system (§2.5), never text in its session: a connector holds no
+  prompt.
 - The provider's own values (an OAuth client id and secret, an SSO app id)
   are the connector's **settings**, set where every component's settings
   are set (Components → Settings). The platform holds no provider names or
@@ -217,15 +219,23 @@ cannot see it.
 - **Turn-bound and own drives only.** The bearer works while its job runs
   and is revoked with the turn. A borrowed or platform drive gets no proxy
   environment, so its calls go out unauthenticated, as without connections.
-- **What the agent knows** is data, not a rule. The session's room facts
-  (`.room/README.md`) list the connectors in effect for the requester, one
-  line each with its state: "calendar (www.googleapis.com): as maya,
-  read; changes are asked first", or "wiki (wiki.acme.example): not
-  connected". The connector's skill explains its API with ordinary `curl`
-  examples.
+- **What the agent knows** is data, not a rule, and it does not grow with
+  the number of connections. The room facts (`.room/README.md`) carry **one
+  line** naming them: "Systems you can reach as maya: calendar, drive,
+  wiki, issues (see .room/connections/)". The details sit in files the
+  agent reads only when a task needs that system, as it reads the room's
+  history:
+  - `.room/connections/INDEX.md`: per connector its hosts, its state
+    (connected, not connected, changes asked or allowed) and its guide;
+  - `.room/connections/<name>.md`: the connector's guide.
+
+  The connectors a room declares (below) are named first in the line. The
+  files are rewritten each turn from the requester's connections, as the
+  room records are, so connecting or disconnecting mid-conversation never
+  changes the session's content and never starts a new session. A turn with
+  no connector in effect has no line and no files.
 - **A room can say what it uses.** A room's setup may name connectors
-  (`requires.connectors`, beside `requires.skills`, in the room and in a
-  room package). Each member who has not connected one sees it on the room's
+  (`requires.connectors`, in the room and in a room package). Each member who has not connected one sees it on the room's
   start card ("this room uses your calendar: Connect"). Installing a room
   package asks the same. Nothing connects for them, and nothing is shared:
   each member's agent uses that member's own connection.
@@ -256,7 +266,7 @@ cannot see it.
   so its writes need changes allowed in advance; otherwise it ends with the
   card left for the member.
 - **The agent drafts connectors.** Given a system's API description or
-  docs, an agent drafts a connector package and its skill pack (the
+  docs, an agent drafts a connector package and its guide (the
   `components` room tool, kind `connector`, `try` validating it). An admin
   saves and publishes it: the agent proposes, a person publishes.
 - **Explained activity.** Connections → activity has an assist that
@@ -289,12 +299,12 @@ settings: they configure a tool, they are not a grant to a system.
 | Abuse and untrusted input | A page the agent read cannot widen its reach: writes need the member's allow, per call by default. Requests cannot pick a host, scheme or port; the proxy strips agent-sent credentials; redirects outside the hosts stop. A system's answer is data the agent's command printed, like any `curl` output: what limits a hostile page is that its suggestions cannot change anything without the member's click. |
 | One owner | The proxy and its checks are one route; the policy classes are one function in `core/pkgmeta`, used by the validator and the proxy; the grant store is one package; providers own only their protocol. §2.7 removes the second store of member grants. |
 | Defaults and fallbacks | A new connection is read-only; changes are asked per call; no connector is in effect until an organization admin enables it; without a connector's client values it shows "needs setup" to admins and is hidden from members. |
-| External contracts | OAuth 2.0 with PKCE, RFC 8414/OIDC discovery, RFC 9207, refresh rotation; each provider component's three calls with a conformance probe; each system's API as the connector's skill describes it. A provider's refusal ("this platform may not reach the host yet") is kept distinct from "you lack access". |
-| Load on users and agents | One card when a system is not connected or a change is proposed; one dialog to connect. No tool and no rule for agents: their ordinary HTTP is authenticated on the way out; one fact line per connection in `.room/README.md`; per-system knowledge in skill packs, attached only for the requester's connected connectors. |
+| External contracts | OAuth 2.0 with PKCE, RFC 8414/OIDC discovery, RFC 9207, refresh rotation; each provider component's three calls with a conformance probe; each system's API as the connector's guide describes it. A provider's refusal ("this platform may not reach the host yet") is kept distinct from "you lack access". |
+| Load on users and agents | One card when a system is not connected or a change is proposed; one dialog to connect. No tool and no rule for agents: their ordinary HTTP is authenticated on the way out. The session carries one line whatever the number of connections; each system's details are a `.room/connections/` file read on demand; connecting or disconnecting never starts a new session. |
 | Release and compatibility | New kinds, routes and tables (additive). §2.7 replaces the desktop's MCP sign-ins without migration (pre-launch). The bridge's proxy ships with the desktop; `hostProxy` is an optional capability (without it a sandboxed turn's calls are not authenticated and the facts say so); connector samples release on their own. |
 | Observability | Every call is an audit row and a structured log event (connector, class, status, latency); providers' failures are logged with their reason; the member's activity view and its summary. |
 | AI capability | The agent notices a missing connection or a needed change and proposes it; the agent drafts connectors; an assist explains activity (§2.6). No model sits in the request path: read or write is the connector's declared policy, and a change is the person's click, never a model's call. |
-| Component or platform | Platform: the store, the proxy, the policy enforcement, consent bookkeeping, the cards, the audit (only the platform can hold members' secrets and enforce a boundary between them). Components: provider protocols other than OAuth 2.0 and API keys, every connector and its skill. The forwarding proxy is the bridge's (it holds the turn's grant, as the room tools do). Built-in providers are the two open standards, not a vendor. |
+| Component or platform | Platform: the store, the proxy, the policy enforcement, consent bookkeeping, the cards, the audit (only the platform can hold members' secrets and enforce a boundary between them). Components: provider protocols other than OAuth 2.0 and API keys, every connector and its guide. The forwarding proxy is the bridge's (it holds the turn's grant, as the room tools do). Built-in providers are the two open standards, not a vendor. |
 
 **Pre-mortem.**
 1. *A fetched page talks the agent into deleting things.* Changes are
@@ -320,7 +330,11 @@ settings: they configure a tool, they are not a grant to a system.
    requester's connector hosts, for the turn; its key never leaves the
    member directory (0600), and a new one is made when the member signs
    out.
-8. *The agent stops using the system because it does not know it can.*
+8. *Twenty connections crowd the agent.* The session holds one line of
+   names, not twenty descriptions; guides are files; the budget test holds
+   the session prefix with twenty connectors to the same budget as with
+   none plus that line. The proxy, not the agent, knows the hosts.
+9. *The agent stops using the system because it does not know it can.*
    The facts line names each connection and its reach; the agent task
    suite checks that an agent asked for a wiki page reads it through a
    plain `curl` with no tool and no prompt rule.
