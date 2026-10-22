@@ -1,11 +1,12 @@
 # ACP core in the agent sandbox: confined, with its commands routed into the space (2026-10-22)
 
-Status: slices 1-4 built 2026-10-22 in the ACP core (not released: its go.mod
-takes the bnbloc version that carries `denyRead` once this repository's change is
-on `main`); verified with the real helper and the installed opencode (1.18.35):
-the agent starts confined with the routing plugin loaded, and a bash command it
-is asked to run is routed to the helper (it fails there for want of a sandbox
-service) and leaves no file on the host. Owner: the ACP core (`github.com/luckylhb90/bnbloc-acp`), with
+Status: built 2026-10-22 and released (ACP core 0.2.x): opencode and the Claude
+agent (through npx) are recognised from their command and run confined with their
+shell commands routed; verified with the real helper and the installed agents
+(opencode 1.18.35, the Claude ACP agent): each starts confined, answers a turn, and
+a bash command it is asked to run is routed to the helper (it fails there for want
+of a sandbox service) and leaves no file on the host. Codex is recognised and not
+built (§2.1). Owner: the ACP core (`github.com/luckylhb90/bnbloc-acp`), with
 the bridge's sandbox decision (`services/bridge/sandbox.go`) and the Sandbox
 contract's host confinement (`cmd/bnbloc-vmexec`) unchanged. Supersedes the
 "Sandbox integration" section of
@@ -43,20 +44,28 @@ ACP agents that can honour it, and refuses the rest.
 
 ### 2.1 Which agents
 
-An ACP agent is configured with the routing seam its CLI has:
+Nothing is configured: the core **recognises the routing from the agent's
+command**, as `vmexec` already derives a harness from the executable. Today:
 
-```json
-{"name": "opencode", "command": "opencode", "args": ["acp"], "sandbox": "opencode"}
-```
+| Agent (command) | Routing | State |
+|---|---|---|
+| `opencode` | a `tool.execute.before` plugin through `OPENCODE_CONFIG_DIR` (`vmexec hook opencode`) | built |
+| `@agentclientprotocol/claude-agent-acp` (also by an `npx` or another path) | Claude Code's `CLAUDE_CODE_SHELL_PREFIX` router (a link to `vmexec`) | built |
+| `@agentclientprotocol/codex-acp` | Codex's `CODEX_EXEC_SERVER_URL` and a bridge to `codex exec-server` in the space | recognised, **not built** |
 
-`sandbox` names a **routing** the core implements; there is one today,
-`"opencode"` (the plugin hook). An agent with no `sandbox` setting, or whose CLI
-has no seam we implement, **cannot run sandboxed**: the core answers
-`bad_request` ("the agent <name> cannot run sandboxed: …") to a create or an
-input that carries an `execution`, and the drive fails visibly. A sandboxed turn
-never runs its commands on the host. Agents with no seam are not made to work
-here (a seam per CLI is the work, and is added when one is worth it); the config
-is data like everything else in it, never a built-in default for a command name.
+The earlier version of this record asked the operator to set a `sandbox` field per
+agent; that made a member edit a file, and was dropped. The field remains as an
+optional **override** (`opencode`, `claude`) and `off`.
+
+An agent with no routing, or `off`, **cannot run sandboxed**: the core answers
+`bad_request` ("the agent <name>: …", with why) to a create or an input that
+carries an `execution`, and the drive fails visibly. A sandboxed turn never runs
+its commands on the host.
+
+Codex is not built because it needs three things this core does not have: a
+WebSocket bridge to the exec server (about 190 lines and a dependency), a Linux
+`codex` in the sandbox guest image, and a check that the ACP adapter honours
+`CODEX_EXEC_SERVER_URL` (not verified).
 
 The core advertises `sandboxExec` (and offers workdir workspaces) whenever the
 helper `bnbloc-vmexec` can confine on this machine. The capability is the core's;
@@ -89,6 +98,17 @@ the sibling core does).
   token to a file in a directory of its own (0600; the agent may read the
   directory and never write it), at session create and at every input, and
   `vmexec` reads it at each command. The process never holds a stale token.
+- **npx-launched agents.** A launcher such as npx installs the agent's package
+  into npm's cache, which the confinement keeps read-only (without a cache of its
+  own `npx -y` fails with EPERM, checked). A confined agent gets one (`npm-<agent>`
+  in the core's state: read-write to it, used by confined runs only). The
+  exposure is that a prompt-injected agent could plant a package there that a
+  later confined run executes: still confined, never the core's own starts. The
+  first start downloads the package (about 0.5 GB for the Claude agent).
+- **claude routing.** `CLAUDE_CODE_SHELL_PREFIX` is a link named for the router
+  to `vmexec`, in the token directory (readable, never writable by the agent):
+  Claude Code quotes a prefix without a " -" as one word and routes only an
+  absolute path.
 - **opencode routing.** A config directory of the core's own holds the plugin and
   is passed as `OPENCODE_CONFIG_DIR` (additive to the user's config); it is
   write-denied to the agent, so it cannot plant a plugin that undoes the routing.
@@ -140,9 +160,9 @@ shim every ACP agent accepts). This record is what makes that apply to ACP agent
 | Boundaries and privacy | The token never reaches a log or the agent's environment beyond the file path; the file's directory is read-only to the agent. The agent's reads follow the confinement profile (credentials, other projects, the desktop's data denied), plus `denyRead` for host tools' state. The agent's own state directories are the harness's. |
 | Abuse and untrusted input | The agent cannot rewrite its routing (plugin directory, config, token file are write-denied; the workspace's protected paths are the bridge's list), cannot reach the VM beyond its space (the token is space-scoped), and cannot run a command around the plugin: opencode's other command paths are covered by the confinement, not the routing, and are the known limit of this seam (§5). |
 | One owner | The confine invocation, the environment and the plugin text are the sibling core's today; the ACP core must not grow a second diverging copy. The plan is to move the descriptor-to-process mapping into a shared helper in `core/protocol` (the environment already is: `VMExecEnv`) and keep only per-core parts (plugin directory, state paths) in each core. |
-| Defaults and fallbacks | No default sandbox for any command name. An agent without the setting is refused when asked to sandbox: there is no fallback to the host, in any mode. No timeouts are invented beyond the warm-up's existing bound. |
+| Defaults and fallbacks | The routing is recognised from the command (a table in the core, like vmexec's harness list); an unknown agent has none and is refused when asked to sandbox: there is no fallback to the host, in any mode. No timeouts are invented beyond the warm-up's existing bound. |
 | External contracts | Core Protocol `sandboxExec` (`execution` on create and every input, `workdir` on workspace create, `executionRefresh` not needed: the token file is renewed at each input and a long turn is covered by the bridge's renewal, see §5); `bnbloc-vmexec confine` and `hook opencode`; opencode's `OPENCODE_CONFIG_DIR` plugin loading and its `tool.execute.before` hook (checked against opencode 1.18). A new opencode that changes either breaks the routing visibly (the plugin throws or does not load). |
-| Load on users and agents | None for agents beyond what the sandbox already is. For operators: one setting per agent. |
+| Load on users and agents | None for agents beyond what the sandbox already is. For operators and members: nothing to configure. |
 | Release and compatibility | Additive. A core that advertises `sandboxExec` receives `execution` from the bridge for own drives in mode `all` and for borrowed drives per policy: members who set mode `all` and use an ACP agent that is not configured see a refusal where there was silent host execution; that is the point, and release notes say so. Mode `off` and `borrowed` for own drives are unchanged. |
 | Observability | The core logs each sandboxed start (agent, harness, space; never the token) and each refusal with its reason; `bnbloc-acp check` reports per agent whether it can run sandboxed and why not; the agents status route carries the same. |
 | AI capability | None added. |
@@ -162,7 +182,7 @@ shim every ACP agent accepts). This record is what makes that apply to ACP agent
 3. *The routing plugin was not loaded after an opencode upgrade.* The warm-up is
    keyed by opencode's version, and an opt-in test runs the installed opencode
    and checks that a bash command is routed and leaves nothing on the host
-   (`ACP_REAL_OPENCODE=1`). A runtime check, at a session's first turn, that its
+   (`ACP_REAL_OPENCODE=1`, and `ACP_REAL_CLAUDE=1` for the Claude agent through npx). A runtime check, at a session's first turn, that its
    plugin took the call is **not built** (§5): until it is, a version that stops
    loading the plugin leaves bash confined but un-routed, and the test above is
    what catches it.
@@ -175,7 +195,7 @@ shim every ACP agent accepts). This record is what makes that apply to ACP agent
 
 ## 4. Build order (slices of §2)
 
-1. Config and capability (done): `sandbox` on the agent (validated against the routings
+1. Config and capability (done): the routing recognised from the command, an optional `sandbox` override (validated against the routings
    the core implements), `sandboxExec` advertised when `vmexec` can confine,
    the per-agent refusal for create and input, `check` reporting.
 2. Workdir workspaces (done): create at a directory, the record, delete that forgets only
