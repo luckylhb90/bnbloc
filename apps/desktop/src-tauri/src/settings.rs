@@ -113,6 +113,14 @@ pub fn normalize_gateway_url(raw: &str) -> String {
 }
 
 impl Settings {
+    /// Forget the member this client acted for (sign-out): no owner or tenant
+    /// is left, so nothing restarts the bridge as them. The gateway, cores and
+    /// machine-level choices stay: they are not the member's.
+    pub fn forget_member(&mut self) {
+        self.owner.clear();
+        self.tenant.clear();
+    }
+
     /// True when the minimum fields to run the bridge are present. The bridge
     /// itself only requires a gateway and an owner (`services/bridge/cmd`);
     /// with no configured core it runs idle until cores are installed or
@@ -271,6 +279,23 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(gateway_url(&s), "https://gw.example.com");
+    }
+
+    #[test]
+    fn signing_out_forgets_the_member_and_nothing_else() {
+        let mut s = Settings {
+            gateway_url: "https://gw.example.com".into(),
+            owner: "maya".into(),
+            tenant: "org-a".into(),
+            disabled_providers: vec!["acme/codex".into()],
+            ..Default::default()
+        };
+        assert!(s.is_runnable());
+        s.forget_member();
+        assert!(!s.is_runnable(), "no owner: the bridge is not runnable as anyone");
+        assert_eq!((s.owner.as_str(), s.tenant.as_str()), ("", ""));
+        assert_eq!(s.gateway_url, "https://gw.example.com");
+        assert_eq!(s.disabled_providers, vec!["acme/codex".to_string()]);
     }
 
     #[test]

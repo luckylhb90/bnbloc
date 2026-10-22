@@ -183,3 +183,29 @@ func TestRefreshWithoutFamilyRefused(t *testing.T) {
 		t.Fatalf("family-less refresh token = %d, want 401", c)
 	}
 }
+
+// A sign-in ends with everything it opened: logging out revokes the family
+// and the bridge session forked from it, so a signed-out member's bridge can
+// no longer renew (docs/bugs/2026-10-22-desktop-sign-out-leaves-the-bridge-
+// serving.md). The sessions of another sign-in are untouched.
+func TestLogoutRevokesTheForkedBridgeToo(t *testing.T) {
+	_, srv, now := refreshGateway(t)
+	web := loginGrant(t, srv.URL)
+	other := loginGrant(t, srv.URL)
+	_, bridge := refreshWith(t, srv.URL, "/v1/auth/refresh/fork", web.RefreshToken)
+	_, otherBridge := refreshWith(t, srv.URL, "/v1/auth/refresh/fork", other.RefreshToken)
+	if resp, _ := postJSON(t, srv.URL+"/v1/auth/logout", map[string]string{"refreshToken": web.RefreshToken}); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("logout = %d", resp.StatusCode)
+	}
+	*now = now.Add(2 * time.Minute)
+	if c, _ := refreshWith(t, srv.URL, "/v1/auth/refresh", bridge.RefreshToken); c != http.StatusUnauthorized {
+		t.Fatalf("the signed-out member's bridge renewed after logout = %d, want 401", c)
+	}
+	if c, _ := refreshWith(t, srv.URL, "/v1/auth/refresh", otherBridge.RefreshToken); c != http.StatusOK {
+		t.Fatalf("another sign-in's bridge after this logout = %d, want 200", c)
+	}
+	// A repeated logout (the family already revoked) is still a no-op success.
+	if resp, _ := postJSON(t, srv.URL+"/v1/auth/logout", map[string]string{"refreshToken": web.RefreshToken}); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("repeated logout = %d", resp.StatusCode)
+	}
+}

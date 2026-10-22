@@ -433,10 +433,12 @@ func (s *Service) handleRefreshFork(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, grant)
 }
 
-// handleLogout revokes the presented refresh token's family. Idempotent and
-// unauthenticated by bearer (the refresh token is the credential): an
-// invalid, expired or already-revoked token is a successful no-op, so a
-// client can always complete its local sign-out.
+// handleLogout revokes the presented refresh token's family and the sessions
+// forked from it (the device's agent bridge): the end of a sign-in is the end
+// of everything it opened, or a signed-out member's bridge would keep
+// serving their rooms. Idempotent and unauthenticated by bearer (the refresh
+// token is the credential): an invalid, expired or already-revoked token is a
+// successful no-op, so a client can always complete its local sign-out.
 func (s *Service) handleLogout(w http.ResponseWriter, r *http.Request) {
 	body, ok := decodeRefreshBody(w, r)
 	if !ok {
@@ -444,14 +446,10 @@ func (s *Service) handleLogout(w http.ResponseWriter, r *http.Request) {
 	}
 	claims, err := s.Signer.VerifyRefresh(strings.TrimSpace(body.RefreshToken))
 	if err == nil && claims.Family != "" {
-		revoked, err := s.refreshTokens().RevokeRefreshFamily(r.Context(), claims.Subject, claims.Family, s.nowTime().UnixMilli())
-		if err != nil {
+		if _, err := s.revokeFamilyAndForks(r.Context(), claims.Subject, claims.Family, "logout"); err != nil {
 			obs.ServerError(w, "logout failed", err)
 			httpx.Error(w, "logout failed", http.StatusInternalServerError)
 			return
-		}
-		if revoked {
-			s.auditSessionRevokeByID(r.Context(), claims.Family, "logout", claims.Subject)
 		}
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -498,8 +496,7 @@ func (s *Service) handleMySessions(w http.ResponseWriter, r *http.Request, claim
 // stay valid until they expire (at most SessionTTL); it can no longer be
 // refreshed.
 func (s *Service) handleRevokeMySession(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
-	id := r.PathValue("id")
-	revoked, err := s.refreshTokens().RevokeRefreshFamily(r.Context(), claims.Subject, id, s.nowTime().UnixMilli())
+	revoked, err := s.revokeFamilyAndForks(r.Context(), claims.Subject, r.PathValue("id"), "revoke")
 	if err != nil {
 		obs.ServerError(w, "revoke session failed", err)
 		httpx.Error(w, "revoke session failed", http.StatusInternalServerError)
@@ -509,15 +506,27 @@ func (s *Service) handleRevokeMySession(w http.ResponseWriter, r *http.Request, 
 		httpx.Error(w, "session not found", http.StatusNotFound)
 		return
 	}
-	s.auditSessionRevokeByID(r.Context(), id, "revoke", claims.Subject)
-	if _, err := s.revokeMySessionsWhere(r.Context(), claims.Subject, func(f store.RefreshFamily) bool {
-		return f.ParentFamilyID == id
-	}); err != nil {
-		obs.ServerError(w, "revoke session failed", err)
-		httpx.Error(w, "revoke session failed", http.StatusInternalServerError)
-		return
-	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// revokeFamilyAndForks is the ONE way a sign-in ends: the family and the
+// sessions forked from it (the device's agent bridge), audited as action. It
+// reports whether the family itself was active; the forks go either way (a
+// logout that finds its family already revoked still ends what it opened).
+func (s *Service) revokeFamilyAndForks(ctx context.Context, subject, familyID, action string) (bool, error) {
+	revoked, err := s.refreshTokens().RevokeRefreshFamily(ctx, subject, familyID, s.nowTime().UnixMilli())
+	if err != nil {
+		return false, err
+	}
+	if revoked {
+		s.auditSessionRevokeByID(ctx, familyID, action, subject)
+	}
+	if _, err := s.revokeMySessionsWhere(ctx, subject, func(f store.RefreshFamily) bool {
+		return f.ParentFamilyID == familyID
+	}); err != nil {
+		return revoked, err
+	}
+	return revoked, nil
 }
 
 // handleRevokeOtherSessions is DELETE /v1/my/sessions?others=1: it revokes

@@ -53,6 +53,10 @@ a turn matched by message text.
 - A result that lands long after its request (a failure, a late reply):
   is it shown with the request it is about and does it name it, or as the
   newest event, beside newer work it will be read as being about?
+- What is still running as this identity after a sign-out, a revocation or
+  a switch (a forked session, a bridge, a stream, a sidecar), and who stops
+  it? An identity's end must end everything it opened, server side (the
+  fork's family) and where it runs.
 
 *Test:* run it long; restart each process in the middle; upgrade across
 it; edit or delete its inputs afterwards; let a result land after newer
@@ -60,7 +64,8 @@ requests.
 *Seen:* a queued job's failure notice, posted minutes later, shown under
 the newest request, which was running fine;
 every release of a tool silently restarting the conversations
-that used it; a fixed 5-minute turn cap killing real work; a 4-hour token under
+that used it; a signed-out member's bridge still claiming their jobs (the
+logout revoked the sign-in, not the session forked from it); a fixed 5-minute turn cap killing real work; a 4-hour token under
 an unbounded turn; sessions lost on every restart; a deleted message still
 in an agent's memory; updates killing running tasks.
 

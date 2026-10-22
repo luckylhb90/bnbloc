@@ -103,7 +103,10 @@ fn set_settings(state: State<'_, AppState>, settings: Settings) -> Result<(), St
 /// (memory only), which the bridge renews its own session from — the
 /// supervisor restarts the bridge only when it is running without one. An
 /// empty session token is the web's sign-out: the refresh token and the
-/// manager's session are cleared. Returns immediately: the
+/// manager's session are cleared, the bridge is stopped and the owner it ran
+/// for is forgotten (nothing may keep serving a member who signed out,
+/// docs/bugs/2026-10-22-desktop-sign-out-leaves-the-bridge-serving.md).
+/// Returns immediately: the
 /// catalog refresh runs in the background (a gateway outage must not stall
 /// the UI's boot).
 #[tauri::command]
@@ -119,6 +122,10 @@ fn internal_adapter_session(
         // fetches, downloads, member stream or plugin chat with the old
         // session).
         state.supervisor.set_refresh_token(None);
+        state.supervisor.stop();
+        // Best effort: a settings file that cannot be written must not keep
+        // the bridge from stopping (it is stopped above).
+        let _ = state.update_settings(Settings::forget_member);
         adapter.update_gateway(&gateway_url, String::new());
         return;
     }
