@@ -1,20 +1,24 @@
 # Connections: agents act as the person who asked, in the systems that person connected (2026-10-22)
 
-Status: proposed. Owner: the gateway (the connection store, the proxy, the
-consent bookkeeping, the audit), the connector and connection-provider
-contracts (`core/pkgmeta`), the bridge's forwarding proxy and the Sandbox
-Protocol's host proxy capability, connector samples (their own
-repository).
+Status: proposed, ready to build. Owner: the **connections component**
+(`bnbloc-connections`, its own repository: connectors, connecting,
+grants, policy, activity) and its provider components (an organization's
+SSO in the internal repository). The platform adds only generic primitives
+that any component may use: an attested turn, egress through a component,
+room facts from a component, component cards, component pages, a sealed
+per-member store, component audit (§2.4), and the Sandbox Protocol's
+`hostProxy`.
 
 A member connects the systems their agents should reach in their name: the
 company wiki and issue tracker through the organization's single sign-on, a
 calendar or a drive through the provider's OAuth, a service through an API
-key. Their own agent then reads and works in those systems **as them**:
-what the member can see there is what the agent can see. The credential is
-never shown to the agent, never written into its workspace or sandbox, and
-never typed into a room. The agent only says what it wants done. The
-platform makes the call with the member's credential, within what the
-member allowed, and records it.
+key. Their own agent then works in those systems **as them**: what the
+member can see there is what the agent can see. The agent gets nothing new.
+It calls the system the way it calls anything, with `curl`, a script or a
+CLI, and the call is authenticated on its way out, where the agent cannot
+see it. The credential is never in the agent's context, workspace,
+sandbox or room. Reads are allowed; every change is the member's click
+unless they allowed changes for that system; every call is recorded.
 
 ## 1. Why
 
@@ -24,348 +28,330 @@ member allowed, and records it.
   every later command, and anyone reading the workspace, could use them.
   When the agent moved into her sandbox, the tokens and the CLIs stayed
   behind.
-- A host-substituted secret (the sandbox's `secrets`) was checked live and
-  set aside (docs/prd/2026-10-21-durable-sandbox-homes.md §2.2). It covers
-  a token sent as-is in a header and fails on everything else: a local
-  format check, a token exchange whose result lands in the sandbox,
-  encoded or signed credentials.
-- What exists, checked against the code:
-  - MCP tool components get settings (platform, organization or member
-    values; secrets sealed), and an endpoint tool may sign each member in
-    with OAuth on their desktop (`mcp.http.auth: oauth`, tokens 0600 in
-    `<member>/mcp-sign-ins/`). Both bind a credential to **one tool**, both
-    keep member values on one desktop, and neither is used on a drive the
-    member did not ask for.
-  - The room relay lets a stdio tool reach a short list of gateway routes
-    as the requester of the turn being driven (`mcp.credentials: "room"`,
-    `wire.RoomRelayRoutes`). The gateway session never leaves the bridge.
-  - Sign-in through the organization's SSO is an auth-provider endpoint
-    component. Nothing obtains a member's access to another system.
+- A host-substituted sandbox secret was checked live and set aside
+  (docs/prd/2026-10-21-durable-sandbox-homes.md §2.2). It covers a token
+  sent as-is in a header and fails on local format checks, token exchanges
+  (the token they return lands in the sandbox), and encoded or signed
+  credentials.
 - Two designs we studied:
   - **An internal assistant service** reaches about thirty internal
-    systems as the chatting user. A bot sends the user a consent card for
-    each system's SSO app, and an HTTPS interceptor injected into each
-    skill's Node process turns the consent into the system's session
-    cookies. It works, and it proves the consent path. But the session
-    cookies and the bot's own key sit in the sandbox the agent's commands
-    run in; only Node gets credentials (Python needed a patch, curl and
-    git get none); consent is triggered by a deliberately failing command;
-    the token comes back as a chat message recognized by its shape; the
-    agent holds the system's whole web session, with no read-only and no
-    record of its calls.
+    systems as the chatting user. A bot sends a consent card for each
+    system's SSO app, and an HTTPS interceptor injected into each skill's
+    Node process turns the consent into the system's session cookies. It
+    proves the consent path. But the session cookies and the bot's key sit
+    in the sandbox the agent's commands run in; only Node gets credentials;
+    consent is triggered by a deliberately failing command; the token comes
+    back as a chat message recognized by its shape; the agent holds the
+    system's whole web session, with no read-only mode and no record of its
+    calls.
   - **An open-source desktop assistant** connects about 120 SaaS toolkits
-    through a managed connector platform. The agent calls tools and sees
-    results, never credentials. The boundary is right, but the tokens live
-    with a third party, which an organization will not accept for its own
-    systems, and internal systems are not reachable at all.
+    through a managed connector platform. The agent calls tools and never
+    sees credentials. The boundary is right, but the tokens live with a
+    third party, internal systems are out of reach, and each system is a
+    tool the agent must learn.
+- What bnbloc has, checked against the code: MCP tool settings and the
+  desktop's MCP OAuth bind a credential to one tool and one desktop, and
+  host-run MCP tools (docs/prd/2026-10-22-host-run-mcp-tools.md) keep a
+  tool's own sign-in outside the sandbox; neither gives an agent's own HTTP
+  a member's access. `jobGrant` (services/gateway/content_requester.go) is
+  the one admission of "this call acts for the requester of the turn being
+  driven". Endpoint components hold one sealed credential and sign their
+  calls. Share targets serve a component's page to a member through a
+  ticket. Nothing lets a component act for a turn.
 
 ## 2. What it is (the end state)
 
-Three concerns, three owners:
+### 2.1 The parts
 
-| Concern | Owner | Shape |
+| Part | Where | What it owns |
 |---|---|---|
-| Which system, where, what may be done | **Connector** (a package) | its hosts, how one connects, the default policy, the guide that explains its API |
-| How a member's access is obtained and kept fresh | **Connection provider** | OAuth 2.0 and API keys built into the platform; anything else (an organization's SSO app consent) is an endpoint component |
-| Where the credential lives and how it is used | **The platform** | the connection store (sealed, per member), the proxy, the policy, the audit |
+| **Connections** component | `bnbloc-connections` (an endpoint component in its own repository) | connectors, connecting (OAuth 2.0, API keys, provider components), the grants, the policy, held changes, activity, its pages, its facts |
+| **Provider** components | their own repositories (the organization's SSO: the internal repository) | one protocol each for obtaining and refreshing a member's access, under the connections component's provider contract |
+| **Connectors** | content the connections component holds (samples in their own repository) | one system: its hosts, how one connects, read/write policy, its guide |
+| **Platform primitives** | the main repository | generic, for any component (§2.4); no connection nouns |
 
-### 2.1 Connectors
+### 2.2 What a member does
 
-- A component kind `bnbloc.connector.package/v1`, declarative (no
-  runtime). It is published, rolled out and scoped to organizations like
-  any component.
+1. An admin adds a connector (from a sample, or drafted by an agent, §2.6)
+   and sets its client values on the connections component's admin page.
+   Each organization enables the ones it wants.
+2. The member connects a system when they need it. Either from the
+   connections page (Components → Connections → Open), or from the card
+   that appears the first time their agent tries to use it. Connecting runs
+   the system's sign-in: the provider's OAuth page, the SSO consent card,
+   or a field for an API key. There the member picks the reach: read, or
+   read and changes.
+3. In any room, their own agent uses it. A read just works. A change the
+   member did not allow for that system shows a card first: "your agent
+   wants to create an event on Friday 15:00 in your calendar: Allow". On
+   Allow, the change is made and the card shows its result. Each member's
+   agent uses that member's connections. Someone borrowing an agent never
+   uses the owner's.
+4. The connections page shows each connection's state and its activity,
+   and disconnects it. Disconnecting revokes the access at the provider.
 
-  ```json
-  {
-    "kind": "bnbloc.connector.package/v1",
-    "name": "acme-wiki",
-    "displayName": "Acme Wiki",
-    "description": "Search, read and write wiki pages as yourself.",
-    "hosts": ["wiki.acme.example"],
-    "connect": { "provider": "oauth2", "scopes": ["read", "write"] },
-    "policy": {
-      "read":  [{"methods": ["GET", "HEAD"]}, {"methods": ["POST"], "paths": ["/rest/api/search"]}],
-      "write": [{"methods": ["POST", "PUT", "PATCH", "DELETE"]}]
-    },
-    "guide": "GUIDE.md",
-    "settings": [ {"key": "clientId", "scope": "platform", "type": "text"},
-                  {"key": "clientSecret", "scope": "platform", "type": "secret"} ]
-  }
-  ```
+### 2.3 What the agent sees: nothing new
 
-- `hosts` are exact names: the only places a request through the
-  connector can go. `connect.expiredWhen` says how the system answers a
-  credential it no longer accepts when that is not a 401 (a 302 to its
-  login page, a 200 carrying its login form):
-  `[{"status": 302, "locationPrefix": "/login"}, {"status": 200, "bodyContains": "id=\"login-link\""}]`. `policy` sorts requests into **read** and **write** (a
-  search that is a POST is a read). Anything matching neither is refused.
-- What the API looks like is the connector's **guide** (`GUIDE.md` in the
-  package, within the content limits): how to call it with `curl`, its
-  common reads and writes. It is a file the agent reads when a task needs
-  that system (§2.5), never text in its session: a connector holds no
-  prompt.
-- The provider's own values (an OAuth client id and secret, an SSO app id)
-  are the connector's **settings**, set where every component's settings
-  are set (Components → Settings). The platform holds no provider names or
-  endpoints in code.
+- **Its ordinary HTTP works.** A turn of the member's own drive with
+  connections in effect runs its commands with `HTTPS_PROXY` set to the
+  bridge's egress proxy (§2.4.2). A request to a connector's host goes out
+  through the connections component with the member's access. Every other
+  request goes out as before, never decrypted.
+- **What it knows is one line and some files.** The room facts
+  (`.room/README.md`) carry one line from the component, whatever the
+  number of connections: "Systems you can reach as maya: calendar, drive,
+  wiki, issues (see .room/connections/)". The details are files the agent
+  reads when a task needs them, as it reads the room's history:
+  `.room/connections/INDEX.md` (each system: its hosts, what it is for,
+  connected or not, changes asked or allowed) and
+  `.room/connections/<system>.md` (the connector's guide, with `curl`
+  examples). They are rewritten each turn, so connecting mid-conversation
+  never changes the session's content and never starts a new session.
+- **Refusals are ordinary HTTP.** A request to a system not yet connected
+  answers `403` with a JSON body: not connected, and the person was asked
+  in the room. A change awaiting the member answers `202` with a JSON
+  body: held, and the person was asked. The agent reports either like any
+  API error and does not ask for a token, since the body says the person
+  decides.
+- A CLI that will not run before its own login gets a placeholder from the
+  connector (`cliEnv`, e.g. `{"GH_TOKEN": "connected"}`). Every credential
+  sent to a connector host is replaced, so the placeholder goes nowhere.
 
-### 2.2 Connection providers
+### 2.4 The platform primitives
 
-- **`oauth2`** (platform): the authorization code flow with PKCE, the
-  gateway as the client. Endpoints come from the connector's issuer
-  metadata (RFC 8414, else OIDC discovery) or its settings. The redirect
-  goes to the gateway (`/v1/connections/oauth/callback`), with `state`
-  bound to the member and the connector, RFC 9207 `iss` checked, and the
-  scopes the member picked. Tokens are refreshed before expiry, rotating
-  the refresh token.
-- **`api-key`** (platform): the member types the key once in the connect
-  dialog. The connector says how a request carries it (`bearer`,
-  `header:<name>`, `query:<name>`, `basic:<user>`). The proxy builds the
-  header itself, so encoding is never the agent's problem.
-- **A provider component** (`bnbloc.connection-provider.package/v1`,
-  runtime `endpoint`, one sealed credential like every endpoint component)
-  for everything else. The organization's SSO, where a bot asks the member
-  to consent to each system's app, is one. The contract is three signed
-  calls from the gateway:
+Each is generic, named by what it does and not by connections, and usable
+by other components. A component gets one only by declaring it in its
+package.
 
-  | Call | Answer |
-  |---|---|
-  | `POST /v1/connect` `{member, connector, settings}` | `{url}` the member opens, or `{card: true}` (the component reached the member itself), or a refusal with a reason |
-  | `POST /v1/authorize` `{member, connector, settings, grant}` | `{headers, cookies, expiresAtMs, grant?}`: what one request carries until `expiresAtMs`, and an updated grant to store |
-  | `POST /v1/revoke` `{member, connector, grant}` | 2xx |
+#### 2.4.1 An attested turn (`turnProxy`)
 
-  A consent the component receives (a token its bot was sent) reaches the
-  gateway through a signed `POST /v1/connections/grants`. The component
-  stores nothing: the **grant** is the platform's, sealed, handed to the
-  component only for the call that needs it.
+- An endpoint component that declares `turnProxy` gets
+  `ANY /v1/turn-proxy/{component}/{path...}`. Only a bridge calls it, for a
+  job it drives, with `?room=&job=`. Admission is `jobGrant`: the job is
+  live, leased by the caller's bridge, and its requester may still post in
+  the room.
+- The gateway forwards the request to the component, held to its
+  `permissions.network`, signed like every call to an endpoint component.
+  It adds `X-Bnbloc-Turn`: `{org, room, channel, job, requester,
+  agentOwner, drive}`. `drive` is `own` when the requester owns the agent,
+  `borrowed` when they do not, and `platform` for a platform agent. The
+  component decides what that permits; the platform only attests it.
+- Bounds: request and answer bodies 8 MiB; no redirects followed.
 
-### 2.3 The connection store
+#### 2.4.2 Egress through a component (`egress`)
 
-- One connection per (member, connector, organization): its state (`none`,
-  `awaiting`, `connected`, `expiring`, `expired`, `refused`), the scopes
-  granted, whether **changes** are allowed, when it was connected and last
-  used. Its grant (a refresh token, an API key, a provider's grant) is
-  sealed with the platform key (`internal/sealbox`). Derived request
-  credentials (an access token, a session cookie) are held in memory until
-  they expire, never stored.
-- Disconnecting deletes the grant and asks the provider to revoke it. An
-  organization admin can disconnect a connector for everyone. A member
-  removed from the organization (org sync deprovisioning) loses every
-  connection.
+- A component that declares `egress` answers `GET /egress/hosts` through
+  its turn proxy: the hosts it handles for this turn (none for a drive it
+  will not serve).
+- The **bridge's egress proxy** (one per bridge, on loopback) is set as
+  `HTTPS_PROXY`/`HTTP_PROXY` in the commands of a turn whose components
+  claim hosts. It authenticates with a bearer bound to that job and
+  revoked with the turn, like the room tools bearer. A `CONNECT` to a
+  claimed host is answered with a certificate from the member's local CA.
+  The proxy reads the request, sends it to the component's turn proxy
+  (`POST /egress/request`, the HTTP request as an envelope), and answers
+  with the component's response. Every other `CONNECT` is tunnelled.
+- **The local CA**: one per member. Its key is 0600 in the member
+  directory, never leaves the computer and is replaced on sign-out. It
+  issues leaf certificates only for claimed hosts. Only the turn's
+  commands trust it: `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`,
+  `REQUESTS_CA_BUNDLE` and `GIT_SSL_CAINFO` point at a bundle that adds it.
+  The member's own system trust store is never touched.
+- **Sandboxed turns**: the Sandbox Protocol gains `hostProxy`. A space may
+  reach one host loopback port the bridge names, and nothing else on the
+  host, enforced outside the guest. The reference implementation maps it
+  through the runtime's host alias. Without the capability a sandboxed
+  turn gets no egress proxy, and the component's facts say so.
 
-### 2.4 The proxy
+#### 2.4.3 Room facts from a component (`roomFacts`)
 
-- `POST /v1/connections/{connector}/request`
-  `{method, path, query, headers, body}` answers
-  `{status, headers, body, truncated}`. Only the bridge calls it, for the
-  turn it drives (§2.5), with that job's grant (`?room=&job=`), so it acts
-  as **the requester of the turn being driven** and only while the job
-  runs.
-- Whose connection: the requester's, and only on a drive where the
-  requester's data stays with the requester. That means **their own agent**
-  (the agent's owner is the requester) or a schedule they created. On a
-  borrowed drive (Bob asks Alice's agent) the call is refused with a line
-  saying why: Bob's systems' data would otherwise land in Alice's agent's
-  workspace and transcripts on Alice's computer. A platform agent counts as
-  borrowed.
-- Checks, in order:
-  1. the connector is in effect for the organization;
-  2. the requester's connection is connected (else `not_connected`, below);
-  3. the request's host is the connector's (paths only; no host, scheme or
-     port override; redirects followed only within its hosts);
-  4. the policy class is read, or write with changes allowed (else
-     `needs_changes`, below);
-  5. a rate per member and connector.
+- A component that declares `roomFacts` answers `GET /facts` through its
+  turn proxy: `{line, files}`. `line` is at most 200 characters and is
+  added to `.room/README.md`. `files` (at most 64 KiB in all) are written
+  under `.room/<component>/`. The bridge asks once per turn, with the
+  `.room/` refresh. When the component cannot be read, it writes no files
+  and the line says so.
+- The session prefix budget test covers the line. The files are read by
+  the agent when it needs them, and are not part of the prompt.
 
-  The proxy then adds the credential (the provider's headers and cookies),
-  strips any credential the agent sent, and drops `Set-Cookie` and the
-  provider's auth headers from the answer.
-- Bounds: request body 1 MiB, answer body 4 MiB (the bridge's proxy
-  answers an over-cap body with a 502 naming the cap).
-- **Every call is recorded**: who, which agent, room, job, connector,
-  method, path (query values left out), policy class, status, bytes. The
-  member sees their own (Connections → activity) and an organization admin
-  sees the organization's (the audit log).
+#### 2.4.4 Component cards
 
-### 2.5 The agent's side: nothing new, its usual HTTP just works
+- A signed `POST /v1/component-cards` from an endpoint component:
+  `{turn, title, text, actions}`, where `turn` is the `X-Bnbloc-Turn` it
+  was given. The card is a notice in that room, shown **only to the turn's
+  requester** (like a publish proposal). Actions are `open` (one of the
+  component's pages, §2.4.5) and `ask-again` (the web sends the turn's
+  request again to the same agent).
+- Text is plain; the platform renders it and never puts component HTML in
+  the feed.
 
-The agent gets no tool and no rule. It calls a connected system the way it
-calls anything: `curl`, a script's HTTP client, a CLI that takes an API
-base. The platform authenticates the call on its way out, where the agent
-cannot see it.
+#### 2.4.5 Component pages and callbacks
 
-- **The bridge's forwarding proxy.** Each bridge runs one HTTP proxy on
-  loopback. A turn of the member's own drive with connections in effect
-  gets `HTTPS_PROXY` and `HTTP_PROXY` in its commands' environment (host
-  commands, and the space's for a sandboxed turn), carrying a bearer bound
-  to that turn's job, as the room tools bearer is. A `CONNECT` to a host of
-  a connector in effect for the requester (connected or not, so a call to
-  one not yet connected answers `not_connected` and the person is asked)
-  is answered with a certificate from the
-  bridge's own local CA (generated per member, its key 0600 in the member
-  directory, never leaving the computer). The proxy reads the request and
-  sends it as `POST /v1/connections/{connector}/request` through the
-  bridge's own client, so the gateway applies the credential, the policy
-  and the audit (§2.4). It then answers with the system's response. Every
-  other `CONNECT` is tunnelled untouched and never decrypted.
-- **Trusting the local CA, for the agent's commands only.** Its
-  certificate is added to the bundle those commands read (`SSL_CERT_FILE`,
-  `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`, `GIT_SSL_CAINFO`). The
-  member's own system trust store is never changed.
-- **Sandboxed turns.** The Sandbox Protocol gains `hostProxy`: a space may
-  reach one host loopback port the bridge names (the proxy), and nothing
-  else on the host. The reference implementation maps it through the
-  runtime's host alias, enforced outside the guest.
-- **Turn-bound and own drives only.** The bearer works while its job runs
-  and is revoked with the turn. A borrowed or platform drive gets no proxy
-  environment, so its calls go out unauthenticated, as without connections.
-- **What the agent knows** is data, not a rule, and it does not grow with
-  the number of connections. The room facts (`.room/README.md`) carry **one
-  line** naming them: "Systems you can reach as maya: calendar, drive,
-  wiki, issues (see .room/connections/)". The details sit in files the
-  agent reads only when a task needs that system, as it reads the room's
-  history:
-  - `.room/connections/INDEX.md`: per connector its hosts, its state
-    (connected, not connected, changes asked or allowed) and its guide;
-  - `.room/connections/<name>.md`: the connector's guide.
+- `POST /v1/my/component-pages/{component}/{page}` (a member route)
+  issues a ticket naming the member, their organization and the page. The
+  page is served from the component at the ticket's address, sandboxed by
+  CSP, the way a share target's page is today. Share targets move onto
+  this one mechanism: their `/v1/share-targets/{name}/pages/…` routes go
+  (pre-launch).
+- `GET|POST /v1/component-callbacks/{component}/{path...}` is open and
+  forwarded signed to the component, so an OAuth provider can redirect to a
+  stable URL. The component checks its own `state`.
 
-  The connectors a room declares (below) are named first in the line. The
-  files are rewritten each turn from the requester's connections, as the
-  room records are, so connecting or disconnecting mid-conversation never
-  changes the session's content and never starts a new session. A turn with
-  no connector in effect has no line and no files.
-- **A room can say what it uses.** A room's setup may name connectors
-  (`requires.connectors`, in the room and in a room package). Each member who has not connected one sees it on the room's
-  start card ("this room uses your calendar: Connect"). Installing a room
-  package asks the same. Nothing connects for them, and nothing is shared:
-  each member's agent uses that member's own connection.
-- **Refusals are ordinary HTTP.** `not_connected` and `needs_changes`
-  answer `403` with a JSON body naming the reason and saying that the
-  person was asked in the room (the card, §2.6). A held write answers
-  `202` with `{"held": true, "card": …}`. An agent reads these like any
-  API error. It does not retry or ask for a token, since the body tells it
-  the person decides.
-- A CLI that refuses to run before its own login (it checks for a token
-  locally) is given a placeholder through the connector's `cliEnv`
-  (`{"GH_TOKEN": "connected"}`). The proxy replaces every credential on a
-  connector host, so the placeholder is never sent anywhere.
+#### 2.4.6 A sealed store per member and component
+
+- Signed `GET|PUT|DELETE /v1/component-store/{member}/{key}`. A value is
+  at most 64 KiB, sealed with the platform key (`internal/sealbox`) and
+  readable only by the component that wrote it. A member's values go when
+  the member is deprovisioned; all of a component's values go when it is
+  uninstalled.
+
+#### 2.4.7 Component audit
+
+- Signed `POST /v1/component-audit`: `{turn?, member, action, target,
+  outcome}`. It becomes a row in the organization's audit log, attributed
+  to the component.
+
+### 2.5 The connections component
+
+- **Connectors** are its content: `{name, displayName, purpose, hosts,
+  connect: {provider, scopes, expiredWhen}, policy: {read, write},
+  cliEnv, guide}`.
+  - `hosts` are exact names.
+  - `policy` sorts each request into read or write (a search that is a
+    POST can be a read); anything matching neither is refused.
+  - `expiredWhen` says how the system answers an access it no longer
+    accepts when that is not a 401 (a 302 to its login page, a 200
+    carrying its login form).
+
+  Admins manage connectors on its admin page; each organization enables
+  its own.
+- **Connecting**:
+  - `oauth2`: authorization code with PKCE, issuer discovery, `state`,
+    RFC 9207 and refresh rotation, redirecting to its component callback;
+  - `api-key`: how a request carries the key (bearer, a header, a query
+    parameter, basic);
+  - **provider components** for anything else, through the component's
+    own provider contract: `connect`; `authorize`, which answers the
+    headers and cookies one request carries until a given time; `revoke`.
+- **Grants** go in the platform store (§2.4.6). Derived credentials (an
+  access token, a session cookie) are held in memory until they expire.
+- **Serving a request** (`POST /egress/request`):
+  1. The turn must be `drive: own`: the member's own agent, or a schedule
+     they created. A borrowed drive would put the requester's data on the
+     agent owner's computer.
+  2. The host must be an enabled connector's.
+  3. The connection must be connected; otherwise `403` and a card.
+  4. The policy class must be read or an allowed write; a write not
+     allowed is held (`202` and a card).
+
+  The component re-authorizes once on a 401 or an `expiredWhen` match.
+  It strips every credential the agent sent and adds the member's, drops
+  `Set-Cookie` from the answer, records an audit row, and enforces a rate
+  per member and connector.
+- **Held changes** run on the card's Allow (its page) with the member's
+  grant; the card then shows the outcome. A schedule cannot be asked, so
+  its change needs changes allowed in advance, or it is held for the
+  member like any other.
+- **Facts**: the one line and the `.room/connections/` files (§2.3),
+  including `ACTIVITY.md`, the requester's recent calls through this
+  room's agent.
 
 ### 2.6 AI first
 
-- **The agent finds out and the member decides.** A call answered
-  `not_connected` or `needs_changes` posts a card to the requester in the
-  room (shown to them only, like a publish proposal). It names the system,
-  what the agent tried ("read page 123", "create an issue") and the reach
-  the member grants ("read as you", "make changes as you"). Connect or
-  Allow runs the provider's flow; the card then offers **Ask again** (the
-  same request to the same agent). Nothing is connected or widened without
-  that click.
-- **Writes are proposed.** A write the member did not mark "don't ask for
-  this connector" is held: the card shows the method, the path and the
-  body's summary, and the call runs on Allow. A schedule's run cannot ask,
-  so its writes need changes allowed in advance; otherwise it ends with the
-  card left for the member.
-- **The agent drafts connectors.** Given a system's API description or
-  docs, an agent drafts a connector package and its guide (the
-  `components` room tool, kind `connector`, `try` validating it). An admin
-  saves and publishes it: the agent proposes, a person publishes.
-- **Explained activity.** Connections → activity has an assist that
-  summarizes what agents did with a connection over a period (the assist
-  seam, `connection-activity`), so a member can read "this week your agent
-  read 40 wiki pages and created 2 issues" instead of a call list.
-- With the model off, everything above still works by hand: connect from
-  Components, allow changes in the connection's settings, read the raw
-  activity.
+The AI capability is how the component is used; the pages are its
+fallback with the model off.
 
-### 2.7 One owner of a member's grants
-
-A member's grants to other systems live in one place. An endpoint MCP
-tool's OAuth (`mcp.http.auth: oauth`, today on the desktop) becomes a
-connection to the tool's server. The tool names a connector, and the
-bridge gets the access token for the member's own drives from the gateway.
-The desktop's `mcp-sign-ins/` store and its flow go (pre-launch, no
-migration; members sign in once more). Member-scoped secret settings stay
-settings: they configure a tool, they are not a grant to a system.
+- **The agent finds the need; the member decides.** A request to a system
+  not yet connected, or a change not yet allowed, puts a card in front of
+  the member at that moment. The card names the system, what the agent
+  tried and the reach asked for. After Connect or Allow, Ask again resends
+  the request.
+- **The agent drafts connectors.** Asked "connect us to <system>", the
+  agent reads the system's API description and writes a connector draft
+  and its guide. It posts the draft to the connections component's own API
+  (a claimed host, through egress like any call). An admin sees it on the
+  admin page with a card, and enables it or not.
+- **The agent explains activity.** "What did my agents do in the wiki
+  this week" is answered from `.room/connections/ACTIVITY.md`. No model
+  runs inside the component.
+- No model sits in the request path: read or write is the connector's
+  declared policy, and a change is the person's click.
 
 ## 3. Design review
 
 | Lens | Answer |
 |---|---|
-| Actors | The member connects and decides changes; an organization admin enables connectors and can disconnect them; the platform admin publishes connectors and providers and sets their client values. Agents act only for the requester of their own drives; a borrowed or platform drive never uses the requester's connections (§2.4). |
-| Time and lifecycle | A grant lives until disconnected, revoked by the provider, or the member deprovisioned. Derived credentials live in memory until expiry. A consent wait has no fixed bound; a turn does not pause for it (it ends with the card). A refresh refused mid-run ends that call with `not_connected` and a card. |
-| Scale and cost | One store row per member and connector; an in-memory cache per live credential; a call costs one upstream request. A per-member, per-connector rate and the body caps bound a runaway agent. |
-| Failure and recovery | Provider down: the call answers `provider_unavailable` (retryable by the agent); a grant the provider refuses: `expired`, with a reconnect card. An upstream 401, or an answer matching the connector's `expiredWhen`, triggers one re-authorize and one retry, then `expired`. Nothing fails silently: each refusal names the system and the fix. |
-| Boundaries and privacy | Grants sealed with the platform key; never in an answer, a log, a workspace, a sandbox or a room. The proxy reaches only a connector's hosts. Answers flow to the requester's own agent only. Audit rows hold paths, not bodies or query values. |
-| Abuse and untrusted input | A page the agent read cannot widen its reach: writes need the member's allow, per call by default. Requests cannot pick a host, scheme or port; the proxy strips agent-sent credentials; redirects outside the hosts stop. A system's answer is data the agent's command printed, like any `curl` output: what limits a hostile page is that its suggestions cannot change anything without the member's click. |
-| One owner | The proxy and its checks are one route; the policy classes are one function in `core/pkgmeta`, used by the validator and the proxy; the grant store is one package; providers own only their protocol. §2.7 removes the second store of member grants. |
-| Defaults and fallbacks | A new connection is read-only; changes are asked per call; no connector is in effect until an organization admin enables it; without a connector's client values it shows "needs setup" to admins and is hidden from members. |
-| External contracts | OAuth 2.0 with PKCE, RFC 8414/OIDC discovery, RFC 9207, refresh rotation; each provider component's three calls with a conformance probe; each system's API as the connector's guide describes it. A provider's refusal ("this platform may not reach the host yet") is kept distinct from "you lack access". |
-| Load on users and agents | One card when a system is not connected or a change is proposed; one dialog to connect. No tool and no rule for agents: their ordinary HTTP is authenticated on the way out. The session carries one line whatever the number of connections; each system's details are a `.room/connections/` file read on demand; connecting or disconnecting never starts a new session. |
-| Release and compatibility | New kinds, routes and tables (additive). §2.7 replaces the desktop's MCP sign-ins without migration (pre-launch). The bridge's proxy ships with the desktop; `hostProxy` is an optional capability (without it a sandboxed turn's calls are not authenticated and the facts say so); connector samples release on their own. |
-| Observability | Every call is an audit row and a structured log event (connector, class, status, latency); providers' failures are logged with their reason; the member's activity view and its summary. |
-| AI capability | The agent notices a missing connection or a needed change and proposes it; the agent drafts connectors; an assist explains activity (§2.6). No model sits in the request path: read or write is the connector's declared policy, and a change is the person's click, never a model's call. |
-| Component or platform | Platform: the store, the proxy, the policy enforcement, consent bookkeeping, the cards, the audit (only the platform can hold members' secrets and enforce a boundary between them). Components: provider protocols other than OAuth 2.0 and API keys, every connector and its guide. The forwarding proxy is the bridge's (it holds the turn's grant, as the room tools do). Built-in providers are the two open standards, not a vendor. |
+| Actors | The member connects and decides changes; an organization admin enables connectors; a platform admin adds them and sets client values. A connection serves only its owner's own drives and schedules (`drive: own`, attested by the platform). |
+| Time and lifecycle | A grant lives until disconnected, revoked upstream, the member deprovisioned or the component uninstalled. Derived credentials live in memory until expiry. A turn never waits for a click: it ends with the card, and Ask again continues. A refresh refused mid-run answers that call `403` with a card. |
+| Scale and cost | One sealed value per member and connector; one upstream call per request plus a gateway hop; the facts call once per turn; caps on bodies and a rate per member and connector. |
+| Failure and recovery | The component down: claimed hosts answer `502` naming it, the facts line says it could not be read, nothing falls back to an unauthenticated call. An upstream refusal is reported as the system's own error; an expired grant asks to reconnect. |
+| Boundaries and privacy | Grants are sealed with the platform key and readable only by the component; never in an answer, a log, a workspace, a sandbox or a room. The local CA is trusted only by the turn's commands, and only claimed hosts are decrypted. Audit rows hold paths, never bodies or query values. |
+| Abuse and untrusted input | A page the agent read cannot change anything without the member's click. A request names a path on a claimed host only; agent-sent credentials are stripped; the component refuses loopback, link-local and metadata addresses and redirects off its hosts. Card text is plain text the platform renders. |
+| One owner | `jobGrant` admits every turn call; one egress proxy in the bridge; one page mechanism (share targets move onto it); one store; connections' policy is one function in its repository. |
+| Defaults and fallbacks | No connector until an admin adds one; each is enabled per organization; a new connection is read-only; changes are asked per call; a component that does not declare a primitive gets none of it. |
+| External contracts | OAuth 2.0 (PKCE, RFC 8414/OIDC discovery, RFC 9207, refresh rotation); the Sandbox Protocol's `hostProxy` with a conformance step; each primitive's wire types in `internal/wire` and `component/`; the connections provider contract with its probe. |
+| Load on users and agents | Agents: no tool, no rule, one line of facts, files read on demand, no session restarts. Members: one card when something is needed, one page to manage. |
+| Release and compatibility | All primitives are additive; share targets' page routes are replaced by the generic one (pre-launch, no compatibility). The component releases on its own; the bridge's proxy and facts ship with the desktop; `hostProxy` is optional. |
+| Observability | An audit row for every call; the component logs each refusal with its reason; the bridge logs claimed-host routing per turn; the turn proxy logs status and latency per component. |
+| AI capability | The agent notices a need and the member decides; the agent drafts connectors; the agent explains activity from a file (§2.6). |
+| Component or platform | The platform adds what only it can: attesting a turn, routing an agent's egress, writing room facts, posting a card to one member, serving pages, a store sealed with its key, audit rows. Everything about connections, providers and systems is a component or its content. |
 
 **Pre-mortem.**
 1. *A fetched page talks the agent into deleting things.* Changes are
-   proposed per call by default and run only on the member's click; the
-   card shows the exact method, path and body summary.
-2. *The proxy becomes an internal scanner.* A request names a path, never
-   a host; the connector's hosts are exact names an admin published; a
-   redirect elsewhere stops; the resolved address must not be loopback,
-   link-local or metadata.
-3. *Someone borrows an agent to act as its owner.* A connection is the
-   requester's, never the agent owner's; and on a borrowed drive the
-   requester's connections are refused too (§2.4).
-4. *The store leaks.* Grants are sealed with a key the store does not
-   hold; derived credentials are never written; disconnect and deprovision
-   delete; a key rotation re-seals.
-5. *The SSO path fails as "you have no access".* A provider maps its
+   held per call by default and run only on the member's click; the card
+   shows the method, path and body summary.
+2. *The egress path becomes an internal scanner.* Only claimed hosts are
+   intercepted, and the component claims only its connectors' exact
+   hosts. It refuses loopback, link-local and metadata addresses and
+   redirects elsewhere.
+3. *Someone borrows an agent to act as its owner.* The platform attests
+   `drive`, and the component serves `own` only.
+4. *The store leaks.* Values are sealed with a key the store does not
+   hold and readable only by the component that wrote them; derived
+   credentials are never written; disconnect, deprovision and uninstall
+   delete.
+5. *The local CA is turned against the member.* Only the turn's commands
+   trust it; it issues certificates only for claimed hosts; its key never
+   leaves the member directory.
+6. *Twenty connections crowd the agent.* The session gets one line of
+   names; details are in files; the budget test holds the session prefix
+   with twenty connectors to the same budget plus that line.
+7. *The agent does not use a system because it does not know it can.*
+   The facts line names it and INDEX.md says what each one is for. The
+   agent task suite checks that a plain `curl` to a connected wiki page
+   works with no tool and no prompt rule.
+8. *The SSO path fails as "you have no access".* A provider maps its
    upstream reasons: the platform's bot not yet allowed to reach a host is
-   an operator item shown to admins, not a member error.
-6. *A schedule's write waits forever.* A schedule cannot be asked; without
-   changes allowed in advance the run ends with the card and says so.
-7. *The local CA is turned against the member.* Only the agent's command
-   environment trusts it; the proxy mints leaf certificates only for the
-   requester's connector hosts, for the turn; its key never leaves the
-   member directory (0600), and a new one is made when the member signs
-   out.
-8. *Twenty connections crowd the agent.* The session holds one line of
-   names, not twenty descriptions; guides are files; the budget test holds
-   the session prefix with twenty connectors to the same budget as with
-   none plus that line. The proxy, not the agent, knows the hosts.
-9. *The agent stops using the system because it does not know it can.*
-   The facts line names each connection and its reach; the agent task
-   suite checks that an agent asked for a wiki page reads it through a
-   plain `curl` with no tool and no prompt rule.
+   an admin item, not a member error.
 
 ## 4. Build order (slices of §2)
 
-1. **The platform and the open standards.** The connector kind and
-   validator (policy classes), the store, the proxy and its checks, the
-   audit, `GET /v1/my/connections` (job-grant admitted, for `list`),
-   Connections in Components (connect, allow changes, disconnect,
-   activity), the `oauth2` and `api-key` providers. The bridge's forwarding
-   proxy, its local CA and the facts line; the Sandbox Protocol's
-   `hostProxy` with its conformance step and the reference implementation. The cards for not connected, needs changes and held
-   writes, with Ask again, plus the agent's connector drafting
-   (`components` kind `connector`) and the activity assist. First
-   connectors as samples in their own repository: a public code host (API
-   key and OAuth) and a calendar (OAuth).
-2. **Provider components.** The `bnbloc.connection-provider.package/v1`
-   contract with its probe, then the organization's SSO app-consent
-   provider (internal; operator provisioning per system starts in
-   parallel) and the internal wiki and issue tracker connectors.
-3. **One owner of grants** (§2.7): endpoint MCP tools' OAuth through
-   connections; the desktop's MCP sign-ins go.
+Each slice ships end to end. The platform primitives come first, then the
+component that uses them.
 
-Not in this round: non-HTTP protocols (a database wire protocol, SSH);
-a connector for one waits for a system that has no HTTP API.
+1. **Platform primitives**: `turnProxy`, `egress` (the bridge's proxy and
+   local CA), `roomFacts`, component cards, component pages and callbacks
+   (share targets moved onto them), the component store, component audit;
+   the Sandbox Protocol's `hostProxy` with its conformance step and the
+   reference implementation.
+2. **The connections component** (`bnbloc-connections`): connectors,
+   `oauth2` and `api-key`, serving, held changes, the pages, the facts, and
+   the AI paths of §2.6. Samples in their own repository: a public code
+   host (API key and OAuth) and a calendar (OAuth).
+3. **The organization's SSO provider** (internal repository) and the
+   internal wiki and issue tracker connectors. Operator provisioning per
+   system runs in parallel.
+
+Not in this round:
+- Non-HTTP protocols (a database protocol, SSH). Each waits for a system
+  that has no HTTP API.
+- Moving the desktop's MCP OAuth (`mcp.http.auth: oauth`) into
+  connections. It needs its own design.
 
 ## 5. Open questions
 
 - The organization's SSO: the consent bot's type and permissions, the
-  per-system gateway allowlist for the platform's bot, the token's
-  lifetime and refresh (operator items, recorded in the internal addendum).
-- Which external OAuth clients the organization will register, and which
-  sensitive scopes need provider review.
+  per-system gateway allowlist for the platform's bot, and the token's
+  lifetime and refresh (operator items, in the internal addendum).
+- Which external OAuth clients the organization registers, and which
+  sensitive scopes need the provider's review.
