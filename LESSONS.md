@@ -441,6 +441,33 @@ Evidence: docs/bugs/2026-10-21-sandboxed-sessions-reset-every-turn.md
 (design review lenses 4, 9 and 12 now ask; the smoke's `session` line).
 Seen 1× (2026-10-21).
 
+### Prove a protection by asking the real agent to cross it, through every consumer of the field
+
+A new field of a descriptor several cores read (`hostConfine.denyRead`) was built,
+unit-tested and checked with the real OS sandbox, and a confined agent still read
+the protected directory: one core kept its own copy of the descriptor's structure
+and dropped the field. Only a real agent, asked to read a file in that directory,
+showed it. Before calling a protection done, make a real agent through the real
+path try what it forbids, and when the field crosses repositories, search every
+consumer for its own copy of the shape.
+
+Evidence: docs/prd/2026-10-22-host-run-mcp-tools.md; the descriptor copy in an
+internal core (fixed in its repository).
+Seen 1× (2026-10-22).
+
+### Run the real-agent tests on the member's defaults, not on the options that make them pass
+
+Tests that ran real agents through the sandbox set the permission list to "allow
+everything", so they passed while the member's own configuration, which has no
+list, refused every command the agent tried (the default policy refuses command
+execution, and the sandbox is for running commands). A test of a feature in use
+takes the configuration a member has, and a second one shows the refusal a
+setting would have caused.
+
+Evidence: docs/prd/2026-10-22-acp-sandbox.md; the ACP core's
+`TestSandboxedSessionApprovesCommandsByDefault`.
+Seen 1× (2026-10-22).
+
 ## Done right
 
 ### Replay a member's long task across a release, not just a smoke reply

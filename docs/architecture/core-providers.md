@@ -291,6 +291,13 @@ code-syncs (either direction) or packs them into a component, and both are
 write-denied in sandboxed runs (`hostConfine.denyWrite`) and cleared from a
 sandbox workdir before a fresh session.
 
+`hostConfine.denyRead` lists paths whose content the confined CLI and everything
+it spawns may not read: where an MCP tool the bridge runs on the host keeps its
+sign-in (`docs/prd/2026-10-22-host-run-mcp-tools.md`). A core reaches `confine`
+with it through `BNBLOC_CONFINE_DENY_READ` (`protocol.VMExecEnv`). A core that
+keeps its own copy of the descriptor must carry it: a copy without the field
+drops the protection silently (found 2026-10-22, in a core with its own struct).
+
 Vocabulary note: the codebase overloads "provider". **Core** = the daemon
 backend (an installed manifest or adapter core such as `acme`), carried on the wire as `core`. **Harness** = the
 agent kind inside a core (`codex`, `claude`), carried in `core.Target.Provider`
