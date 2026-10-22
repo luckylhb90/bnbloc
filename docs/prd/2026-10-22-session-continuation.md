@@ -1,6 +1,8 @@
 # Session continuation: a core that restarts says its conversation goes on (2026-10-22)
 
-Status: design, 2026-10-22. Owner: Core Protocol v1 (additive), the bridge
+Status: built 2026-10-22, not released. Protocol, bridge, `bnbloc smoke` and the
+core that keeps conversations are done with tests (each mutation-checked); not yet
+observed in a real restart: the release gate in §4 step 6 is that observation. Owner: Core Protocol v1 (additive), the bridge
 (`services/bridge`), `bnbloc smoke`. A core that keeps conversations across its own
 restart implements the core side.
 
