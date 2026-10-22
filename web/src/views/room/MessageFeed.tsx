@@ -10,6 +10,7 @@ import { AgentJobStatus } from "@/views/AgentJobStatus";
 import { WaitingLive } from "@/views/room/JobProgressStrip";
 import { MessageDeliverables } from "@/views/workbench/MessageDeliverables";
 import { placeDeliverables } from "@/lib/deliverablePlacement";
+import { feedEmptyKind } from "@/lib/feedEmpty";
 import { AgentWorking } from "@/views/room/AgentWorking";
 import { Message, sameSender } from "@/views/room/Message";
 import type { FeedItem } from "@/views/room/types";
@@ -60,6 +61,7 @@ export function MessageFeed({
   people = false,
   onAskAgent,
   agentReady = false,
+  preview = false,
   layout = FeedLayoutTime,
 }: {
   readonly loaded: boolean;
@@ -98,6 +100,9 @@ export function MessageFeed({
   // empty state points at the composer and its example prompts instead of
   // agent setup.
   readonly agentReady?: boolean;
+  // The reader has not joined this shared room (a preview): an empty feed
+  // says so instead of calling the room quiet.
+  readonly preview?: boolean;
   // How the member reads the feed (useFeedLayout): By time or By request.
   readonly layout?: FeedLayout;
 }) {
@@ -115,6 +120,7 @@ export function MessageFeed({
       </div>
     );
   }
+  const empty = feed.length === 0 && working.size === 0 ? feedEmptyKind({ people, preview, agentReady }) : null;
   if (people && feed.length === 0) {
     return (
       <div className="mx-auto mt-10 flex max-w-xs flex-col items-center gap-1 text-center text-sm text-[var(--color-fg-muted)]">
@@ -123,7 +129,15 @@ export function MessageFeed({
       </div>
     );
   }
-  if (feed.length === 0 && working.size === 0 && agentReady) {
+  if (empty === "preview") {
+    return (
+      <div className="mx-auto mt-10 flex max-w-md flex-col items-center gap-1 text-center text-sm text-[var(--color-fg-muted)]">
+        <p className="font-medium text-[var(--color-fg)]">No messages yet</p>
+        <p>You are reading this shared room before joining it. Join to start the conversation.</p>
+      </div>
+    );
+  }
+  if (empty === "ready") {
     return (
       <div className="mx-auto mt-10 flex max-w-md flex-col items-center gap-1 text-center text-sm text-[var(--color-fg-muted)]">
         <p className="font-medium text-[var(--color-fg)]">This room is ready</p>
@@ -131,7 +145,7 @@ export function MessageFeed({
       </div>
     );
   }
-  if (feed.length === 0 && working.size === 0) {
+  if (empty === "quiet") {
     return (
       <div className="mx-auto mt-10 flex max-w-md flex-col items-center gap-4 text-center text-sm text-[var(--color-fg-muted)]">
         <div>

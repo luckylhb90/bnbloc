@@ -190,14 +190,7 @@ func (s *Service) handleCreateArtifact(w http.ResponseWriter, r *http.Request) {
 // is the blob version cap, so publishers skip files the room would refuse.
 func (s *Service) handleListArtifacts(w http.ResponseWriter, r *http.Request) {
 	roomID := r.PathValue("roomId")
-	isMember, err := s.Store.IsMember(r.Context(), roomID, caller(r))
-	if err != nil {
-		obs.ServerError(w, "read membership failed", err)
-		httpx.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if !isMember {
-		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
+	if !s.requireRead(w, r, roomID) {
 		return
 	}
 	q, ok := parseArtifactQuery(w, r, roomID)
@@ -441,17 +434,11 @@ func (s *Service) commitVersion(w http.ResponseWriter, r *http.Request, art stor
 	httpx.WriteJSON(w, http.StatusOK, wire.ArtifactReply{Artifact: art.View(), Version: &view})
 }
 
-// authorizeArtifactRead checks room membership and that the artifact belongs to
+// authorizeArtifactRead checks the caller may read the room (a member, or
+// anyone in a shared room) and that the artifact belongs to
 // the room in the path, so an id leaked across rooms cannot be probed.
 func (s *Service) authorizeArtifactRead(w http.ResponseWriter, r *http.Request, roomID string) bool {
-	isMember, err := s.Store.IsMember(r.Context(), roomID, caller(r))
-	if err != nil {
-		obs.ServerError(w, "read membership failed", err)
-		httpx.Error(w, err.Error(), http.StatusInternalServerError)
-		return false
-	}
-	if !isMember {
-		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
+	if !s.requireRead(w, r, roomID) {
 		return false
 	}
 	art, err := s.Artifacts.GetArtifact(r.Context(), r.PathValue("artifactId"))

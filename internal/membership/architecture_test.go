@@ -20,6 +20,11 @@ import (
 //     `.Fresh(`) instead of RoomScope, outside the reads listed below;
 //   - the visitor role compared outside the owners (MayChat is the rule;
 //     the store and the room service, which writes roles, own the role);
+//   - `membership.Read` outside the routes that read a room for a non-member
+//     (a preview of a shared room, docs/prd/2026-10-22-shared-room-preview.md):
+//     a route reads for a preview only by naming Read, so the list is the
+//     one below and the gateway's preview list (apipath.go isPreviewRead)
+//     is its edge;
 //   - a directory built outside FromEnv (`NewRoomClient(` / `NewStatic()`
 //     in a service): each service used to pick its own, and production
 //     fell back to an empty set that silently refused every member.
@@ -28,6 +33,11 @@ func TestNoMembershipFailOpen(t *testing.T) {
 	failOpen := regexp.MustCompile(`Membership\s*!=\s*nil\s*&&`)
 	directRead := regexp.MustCompile(`\.Membership\.(Lookup|Fresh)\(`)
 	visitor := regexp.MustCompile(`\bRoleVisitor\b`)
+	readNeed := regexp.MustCompile(`membership\.Read\b`)
+	// The files whose routes serve a preview: realtime's history and event
+	// stream (with its heartbeat re-check). The room service's reads go
+	// through its own requireRead.
+	readNeedAllowed := map[string]bool{"services/realtime/service.go": true}
 	// A directory read that is not a request's membership check, with why.
 	directReadAllowed := map[string]string{
 		// A read across rooms the caller names: each room in its own tenant.
@@ -52,6 +62,9 @@ func TestNoMembershipFailOpen(t *testing.T) {
 			}
 			if directRead.MatchString(line) && directReadAllowed[rel] == "" {
 				problems = append(problems, at+": direct membership read (use membership.RoomScope)")
+			}
+			if readNeed.MatchString(line) && !readNeedAllowed[rel] {
+				problems = append(problems, at+": membership.Read outside the preview routes (a route reads for a non-member only where listed here and in the gateway's isPreviewRead)")
 			}
 			if ownDirectory.MatchString(line) {
 				problems = append(problems, at+": membership directory built by hand (use membership.FromEnv)")

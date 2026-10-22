@@ -24,8 +24,9 @@ type RoomClient struct {
 	TTL     time.Duration
 	Now     func() time.Time
 
-	mu    sync.Mutex
-	cache map[string]cachedMember // memberKey(room, user) -> membership
+	mu       sync.Mutex
+	cache    map[string]cachedMember // memberKey(room, user) -> membership
+	previews map[string]cachedMember // memberKey(room, user) -> preview
 }
 
 type cachedMember struct {
@@ -36,11 +37,12 @@ type cachedMember struct {
 // NewRoomClient constructs a RoomClient with sensible defaults.
 func NewRoomClient(baseURL string) *RoomClient {
 	return &RoomClient{
-		BaseURL: baseURL,
-		HTTP:    &http.Client{Timeout: 5 * time.Second},
-		TTL:     10 * time.Second,
-		Now:     time.Now,
-		cache:   map[string]cachedMember{},
+		BaseURL:  baseURL,
+		HTTP:     &http.Client{Timeout: 5 * time.Second},
+		TTL:      10 * time.Second,
+		Now:      time.Now,
+		cache:    map[string]cachedMember{},
+		previews: map[string]cachedMember{},
 	}
 }
 
@@ -60,10 +62,21 @@ func (c *RoomClient) Lookup(roomID, userID string) (Member, bool) {
 	return c.Fresh(roomID, userID)
 }
 
-// Fresh asks bnbloc-room's tenant-agnostic membership probe, bypassing the
-// cache, and caches a positive answer. Fails closed on any error, and on an
-// answer without the room's tenant.
-func (c *RoomClient) Fresh(roomID, userID string) (Member, bool) {
+// probeAnswer is bnbloc-room's membership probe answer: Member for a
+// membership, Preview for a non-member of a live shared room, TenantID the
+// room's own tenant in both.
+type probeAnswer struct {
+	Member    bool   `json:"member"`
+	Role      string `json:"role"`
+	AgentHost bool   `json:"agentHost"`
+	Preview   bool   `json:"preview"`
+	TenantID  string `json:"tenantId"`
+}
+
+// probe asks the room service's tenant-agnostic membership probe. ok is
+// false on any error and on an answer without the room's tenant (fail
+// closed).
+func (c *RoomClient) probe(roomID, userID string) (probeAnswer, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	endpoint := c.BaseURL + "/v1/rooms/" + url.PathEscape(roomID) + "/membership/" + url.PathEscape(userID)
@@ -71,37 +84,70 @@ func (c *RoomClient) Fresh(roomID, userID string) (Member, bool) {
 	// tenant-agnostic (the answer names the room's tenant).
 	req, err := svcauth.NewRequest(ctx, http.MethodGet, endpoint, nil, userID, "")
 	if err != nil {
-		return Member{}, false
+		return probeAnswer{}, false
 	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return Member{}, false
+		return probeAnswer{}, false
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return Member{}, false
+		return probeAnswer{}, false
 	}
-	var out struct {
-		Member    bool   `json:"member"`
-		Role      string `json:"role"`
-		AgentHost bool   `json:"agentHost"`
-		TenantID  string `json:"tenantId"`
+	var out probeAnswer
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil || out.TenantID == "" {
+		return probeAnswer{}, false
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil || !out.Member || out.TenantID == "" {
+	return out, true
+}
+
+// remember caches m for (room, user) in cache (c.mu held), first evicting
+// expired entries so the cache cannot grow unbounded with ephemeral rooms /
+// churning users. TTL is short (seconds), so the map stays small and this
+// scan is cheap.
+func (c *RoomClient) remember(cache map[string]cachedMember, roomID, userID string, m Member) {
+	now := c.Now()
+	for k, hit := range cache {
+		if now.After(hit.exp) {
+			delete(cache, k)
+		}
+	}
+	cache[memberKey(roomID, userID)] = cachedMember{m: m, exp: now.Add(c.TTL)}
+}
+
+// Fresh asks bnbloc-room's tenant-agnostic membership probe, bypassing the
+// cache, and caches a positive answer. Fails closed on any error, and on an
+// answer without the room's tenant.
+func (c *RoomClient) Fresh(roomID, userID string) (Member, bool) {
+	out, ok := c.probe(roomID, userID)
+	if !ok || !out.Member {
 		return Member{}, false
 	}
 	m := Member{Role: store.Role(out.Role), AgentHost: out.AgentHost, Tenant: out.TenantID}
 	c.mu.Lock()
-	now := c.Now()
-	// Opportunistically evict expired entries so the cache cannot grow unbounded
-	// with ephemeral rooms / churning users. TTL is short (seconds), so the map
-	// stays small and this scan is cheap.
-	for k, hit := range c.cache {
-		if now.After(hit.exp) {
-			delete(c.cache, k)
-		}
+	c.remember(c.cache, roomID, userID, m)
+	c.mu.Unlock()
+	return m, true
+}
+
+// Preview implements Previewer from the probe: userID is no member and the
+// room is live and shared. A positive answer is cached like a membership's
+// (and dropped by Forget). The probe's answer is the room's, not the
+// caller's: whether the caller's organization may read it is the edge's.
+func (c *RoomClient) Preview(roomID, userID string) (Member, bool) {
+	c.mu.Lock()
+	if hit, ok := c.previews[memberKey(roomID, userID)]; ok && c.Now().Before(hit.exp) {
+		c.mu.Unlock()
+		return hit.m, true
 	}
-	c.cache[memberKey(roomID, userID)] = cachedMember{m: m, exp: now.Add(c.TTL)}
+	c.mu.Unlock()
+	out, ok := c.probe(roomID, userID)
+	if !ok || out.Member || !out.Preview {
+		return Member{}, false
+	}
+	m := Member{Role: store.RoleVisitor, Preview: true, Tenant: out.TenantID}
+	c.mu.Lock()
+	c.remember(c.previews, roomID, userID, m)
 	c.mu.Unlock()
 	return m, true
 }
@@ -115,11 +161,14 @@ func (c *RoomClient) Forget(roomID, userID string) {
 	defer c.mu.Unlock()
 	if userID != "" {
 		delete(c.cache, memberKey(roomID, userID))
+		delete(c.previews, memberKey(roomID, userID))
 		return
 	}
-	for k := range c.cache {
-		if strings.HasPrefix(k, roomID+"\x00") {
-			delete(c.cache, k)
+	for _, cache := range []map[string]cachedMember{c.cache, c.previews} {
+		for k := range cache {
+			if strings.HasPrefix(k, roomID+"\x00") {
+				delete(cache, k)
+			}
 		}
 	}
 }

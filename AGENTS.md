@@ -537,6 +537,22 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `TestNoMembershipFailOpen`
   forbids fail-open guards, direct directory reads in handlers and visitor
   comparisons outside the owners.
+- **A shared room is readable by a non-member of its organization (a
+  preview, `docs/prd/2026-10-22-shared-room-preview.md`), read-only.** What a
+  preview is lives in `internal/membership`: `Member.Preview` (not a person:
+  `IsHuman` false, so no people chat, presence or roster, exactly as for an
+  agent host), the optional `Previewer` directory (the room probe's
+  `preview:true`) and the `Read` need, which is the only one a preview
+  passes (`AnyMember`/`Human`/`Chat` stay members'). A route reads for a
+  non-member only by naming `Read` (realtime's history, event stream and its
+  heartbeat re-check) or, in the room service, by `requireRead` (channels,
+  members, artifact reads; writes use `requireMember`); the gateway admits a
+  non-member only to the GET routes of `apiPath.isPreviewRead` and only when
+  the room's tenant is the session's (`roomPreviewable`: the backends act in
+  the room's tenant, so the organization boundary is the edge's). A new
+  route a preview should read is added in both lists and to
+  `TestPreviewReadsASharedRoomThroughTheListOnly`; `TestNoMembershipFailOpen`
+  holds `membership.Read` to the files that serve one.
 - **A removed member keeps no access.** realtime calls `Directory.Forget`
   when it ingests `member_removed`/`room_deleted` (before delivering it), a
   stream opens on an uncached lookup (`FreshRoomScope`) and re-checks at

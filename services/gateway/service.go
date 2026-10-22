@@ -540,7 +540,10 @@ func (s *Service) handleProxy(w http.ResponseWriter, r *http.Request) {
 		// joined after login is not in it, so on a miss fall back to a live
 		// membership lookup instead of forcing re-login (the stale-scope desync).
 		// The fallback only fires on the miss path, so the common case stays free.
-		if !isJoin && !isAdminRevoke && !s.roomReachable(claims, p.RoomID) {
+		// A shared room of the caller's organization may be read, and only
+		// read (isPreviewRead), before joining it.
+		if !isJoin && !isAdminRevoke && !s.roomReachable(claims, p.RoomID) &&
+			!(p.isPreviewRead(r.Method) && s.roomPreviewable(claims, p.RoomID)) {
 			httpx.Error(w, "room scope not authorized", http.StatusForbidden)
 			return
 		}

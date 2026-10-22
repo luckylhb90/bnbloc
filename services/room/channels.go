@@ -34,14 +34,7 @@ func toChannelView(c store.RoomChannel) channelView {
 // the web reaches it through POST .../people-chat instead.
 func (s *Service) handleListChannels(w http.ResponseWriter, r *http.Request) {
 	roomID := r.PathValue("roomId")
-	isMember, err := s.Store.IsMember(r.Context(), roomID, caller(r))
-	if err != nil {
-		obs.ServerError(w, "read membership failed", err)
-		httpx.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if !isMember {
-		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
+	if !s.requireRead(w, r, roomID) {
 		return
 	}
 	// A room is created with its default channel in one transaction

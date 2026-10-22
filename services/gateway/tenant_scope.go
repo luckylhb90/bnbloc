@@ -80,6 +80,20 @@ func (s *Service) roomReachable(claims auth.Claims, roomID string) bool {
 	return ok
 }
 
+// roomPreviewable reports whether a caller who cannot reach roomID may read
+// it anyway as a preview: the room is live and shared, and it is in the
+// organization the caller acts in. The backends know the room is shared
+// (membership.Previewer) but not the caller's organization (they act in the
+// room's tenant on every path that names a room), so the organization
+// boundary of a preview is this edge's.
+func (s *Service) roomPreviewable(claims auth.Claims, roomID string) bool {
+	if s.Membership == nil {
+		return false
+	}
+	m, ok := membership.PreviewOf(s.Membership, roomID, claims.Subject)
+	return ok && m.Tenant == claims.Tenant
+}
+
 // roomMember is subject's live membership of a room in any tenant (role,
 // human or agent host), the membership owner's Member: its IsHuman /
 // MayChat are the rules the backends apply. Fails closed without a

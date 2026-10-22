@@ -324,18 +324,22 @@ func firstNonEmptyString(vals ...string) string {
 	return ""
 }
 
-// artifactVersionForRead resolves the path's artifact + version for a member
-// read; it writes the refusal and returns ok=false otherwise.
+// artifactVersionForRead resolves the path's artifact + version for a read
+// (a member, or anyone in a shared room: requireRead); it writes the refusal
+// and returns ok=false otherwise.
 func (s *Service) artifactVersionForRead(w http.ResponseWriter, r *http.Request) (store.Artifact, store.ArtifactVersion, bool) {
+	return s.artifactVersion(w, r, s.requireRead)
+}
+
+// artifactVersionForMember is artifactVersionForRead for a write: a member
+// only (a thumbnail is stored by the room's own members).
+func (s *Service) artifactVersionForMember(w http.ResponseWriter, r *http.Request) (store.Artifact, store.ArtifactVersion, bool) {
+	return s.artifactVersion(w, r, s.requireMember)
+}
+
+func (s *Service) artifactVersion(w http.ResponseWriter, r *http.Request, allow func(http.ResponseWriter, *http.Request, string) bool) (store.Artifact, store.ArtifactVersion, bool) {
 	roomID := r.PathValue("roomId")
-	isMember, err := s.Store.IsMember(r.Context(), roomID, caller(r))
-	if err != nil {
-		obs.ServerError(w, "read membership failed", err)
-		httpx.Error(w, err.Error(), http.StatusInternalServerError)
-		return store.Artifact{}, store.ArtifactVersion{}, false
-	}
-	if !isMember {
-		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
+	if !allow(w, r, roomID) {
 		return store.Artifact{}, store.ArtifactVersion{}, false
 	}
 	art, err := s.Artifacts.GetArtifact(r.Context(), r.PathValue("artifactId"))
@@ -453,7 +457,7 @@ func writeArtifactBytesHeaders(h http.Header, mimeType, fileName string) {
 // replaces it only from a higher-ranked source; a refused write answers 200
 // with stored=false and the kept thumbnail.
 func (s *Service) handlePutArtifactThumbnail(w http.ResponseWriter, r *http.Request) {
-	art, v, ok := s.artifactVersionForRead(w, r)
+	art, v, ok := s.artifactVersionForMember(w, r)
 	if !ok {
 		return
 	}

@@ -400,6 +400,8 @@ export function RoomView({
   // beside the timeline on a wide room, a full-screen sheet otherwise, its
   // own window in the desktop shell.
   const member = !!room && !("preview" in room);
+  // A shared room the person has not joined: they read it (a preview).
+  const preview = !!room && "preview" in room;
   const automate = useMemo<AutomateApp | null>(
     () =>
       member
@@ -557,7 +559,7 @@ export function RoomView({
         <RoomSearchBar search={search} query={q} matchCount={visibleFeed.length} onSearchChange={setSearch} onClose={closeSearch} />
       )}
       {/* The empty-room card already carries the same guidance. */}
-      {!(handoff.show && feed.length === 0 && activity.working.size === 0) && <DesktopConnectBanner subject={subject} hasPlatformAgent={platformInRoom.length > 0} />}
+      {!preview && !(handoff.show && feed.length === 0 && activity.working.size === 0) && <DesktopConnectBanner subject={subject} hasPlatformAgent={platformInRoom.length > 0} />}
       <HandoffBanner roomId={roomId} canInvite={canManageRoom} members={data.members} />
       {/* An empty room shows its welcome and quick prompts to every member. */}
       {roomStart && feed.length === 0 && activity.working.size === 0 && <RoomStartCard roomId={roomId} start={roomStart} />}
@@ -620,6 +622,7 @@ export function RoomView({
                   loadingHistory={conversation.history.loading}
                   unreadFromSeq={unreadFromSeq}
                   showDesktopHandoff={handoff.show}
+                  preview={preview}
                   agentJobs={activity.agentJobs}
                   artifactsBySeq={activity.artifactsBySeq}
                   onStartAgent={() => void startAgent()}

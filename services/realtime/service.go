@@ -425,13 +425,14 @@ func accessRevoked(ev wire.Event, subject string) bool {
 func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 	// A stream outlives any cache entry: it opens on the room service's
 	// current answer and re-checks at every heartbeat below.
-	roomID, userID, m, ok := s.streamRoom(w, r, membership.AnyMember)
+	roomID, userID, m, ok := s.streamRoom(w, r, membership.Read)
 	if !ok {
 		return
 	}
 	// A platform agent host's stream (its bridge driving the hosted agent)
-	// is an agent's: never present, never advertising a roster, and never
-	// shown the people chat.
+	// and a preview's (a shared room read before joining) are not a
+	// person's: never present, never advertising a roster, and never shown
+	// the people chat.
 	human := m.IsHuman()
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -545,7 +546,7 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 			// The revocation event is live-only and may never reach this
 			// replica (an ownership move, a failed ingest): the stream
 			// re-checks the membership it opened on, and ends once it is gone.
-			if _, err := membership.RoomScope(ctx, s.Membership, roomID, userID, membership.AnyMember); err != nil {
+			if _, err := membership.RoomScope(ctx, s.Membership, roomID, userID, membership.Read); err != nil {
 				return
 			}
 			fmt.Fprint(w, ": keep-alive\n\n")
@@ -835,7 +836,7 @@ func (s *Service) durable(ctx context.Context, ev wire.Event, author, clientMsgI
 // to the room's default channel when omitted.
 // Rows are wire.FeedMessage, the internal feed read's row (writeFeedPage).
 func (s *Service) handleHistory(w http.ResponseWriter, r *http.Request) {
-	roomID, _, m, ok := s.room(w, r, membership.AnyMember)
+	roomID, _, m, ok := s.room(w, r, membership.Read)
 	if !ok {
 		return
 	}

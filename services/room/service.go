@@ -366,14 +366,7 @@ func (s *Service) handleAddMember(w http.ResponseWriter, r *http.Request) {
 // and the borrow owner picker.
 func (s *Service) handleListMembers(w http.ResponseWriter, r *http.Request) {
 	roomID := r.PathValue("roomId")
-	isMember, err := s.Store.IsMember(r.Context(), roomID, caller(r))
-	if err != nil {
-		obs.ServerError(w, "read membership failed", err)
-		httpx.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if !isMember {
-		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
+	if !s.requireRead(w, r, roomID) {
 		return
 	}
 	memberships, err := s.Store.Members(r.Context(), roomID)
@@ -484,7 +477,8 @@ func (s *Service) handleGetMember(w http.ResponseWriter, r *http.Request) {
 // is a member (the host's bridge reads the room) that every human-only
 // surface refuses (membership.Member.IsHuman), and tenantId is the room's
 // own tenant, which a backend compares with the tenant a request is signed
-// for (membership.RoomScope).
+// for (membership.RoomScope). For a non-member of a live shared room it
+// answers {member:false, preview:true, tenantId} (membership.Previewer).
 func (s *Service) handleMembershipProbe(w http.ResponseWriter, r *http.Request) {
 	m, member, err := s.Store.MembershipAnyTenant(r.Context(), r.PathValue("roomId"), r.PathValue("userId"))
 	if err != nil {
@@ -493,6 +487,18 @@ func (s *Service) handleMembershipProbe(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if !member {
+		// A live shared room is readable by a non-member (preview.go): say
+		// so, with the room's tenant, for the directory's Previewer.
+		shared, tid, err := s.sharedRoomAnyTenant(r.Context(), r.PathValue("roomId"))
+		if err != nil {
+			obs.ServerError(w, "read room failed", err)
+			httpx.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if shared {
+			httpx.WriteJSON(w, http.StatusOK, map[string]any{"member": false, "preview": true, "tenantId": tid})
+			return
+		}
 		httpx.WriteJSON(w, http.StatusOK, map[string]any{"member": false})
 		return
 	}

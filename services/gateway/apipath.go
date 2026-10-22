@@ -463,6 +463,33 @@ func (p apiPath) isEventStream(method string) bool {
 	return method == http.MethodGet && len(p.segs) == 4 && p.RoomSub == "events"
 }
 
+// isPreviewRead reports a request a non-member may make of a shared room
+// they have not joined (docs/prd/2026-10-22-shared-room-preview.md): the
+// ONE list of what a preview reads, GET only. The room's public channels
+// and members, its history and live stream, and its deliverables (the list,
+// one, a version, its content and thumbnail). The backends serve these
+// routes to a non-member only where they opt in (membership.Read; the room
+// service's requireRead); every other room route stays members'.
+func (p apiPath) isPreviewRead(method string) bool {
+	if method != http.MethodGet || p.RoomID == "" {
+		return false
+	}
+	switch len(p.segs) {
+	case 4:
+		switch p.RoomSub {
+		case "channels", "members", "history", "events", "artifacts":
+			return true
+		}
+	case 5:
+		return p.RoomSub == "artifacts"
+	case 7:
+		return p.RoomSub == "artifacts" && p.segs[5] == "versions"
+	case 8:
+		return p.RoomSub == "artifacts" && p.segs[5] == "versions" && (p.segs[7] == "content" || p.segs[7] == "thumbnail")
+	}
+	return false
+}
+
 // isAttachmentDownload reports GET /v1/rooms/{id}/attachments/{attachmentId}.
 func (p apiPath) isAttachmentDownload(method string) bool {
 	return method == http.MethodGet && len(p.segs) == 5 && p.RoomSub == "attachments"
