@@ -15,15 +15,21 @@ export const SESSION_KEY = StorageKey.session;
 export interface Grant {
   sessionToken: string;
   refreshToken?: string;
+  // A test account's long-lived credential (an API token): its sessions are
+  // minted from it, so a grant minted that way carries it on.
+  apiToken?: string;
   subject: string;
   tenant?: string;
   role?: string;
 }
 
-// SessionRecord is the persisted session (localStorage SESSION_KEY).
+// SessionRecord is the persisted session (localStorage SESSION_KEY). It
+// renews from its refresh token (a person who signed in) or, for a test
+// account (docs/prd/2026-10-22-multi-account.md), from its API token.
 export interface SessionRecord {
   token: string;
   refreshToken: string | null;
+  apiToken: string | null;
   subject: string | null;
   tenant: string | null;
   role: string | null;
@@ -33,6 +39,7 @@ export function recordFromGrant(g: Grant): SessionRecord {
   return {
     token: g.sessionToken,
     refreshToken: g.refreshToken || null,
+    apiToken: g.apiToken || null,
     subject: g.subject,
     tenant: g.tenant || null,
     role: g.role || null,
@@ -49,6 +56,7 @@ export function parseSessionRecord(raw: string | null | undefined): SessionRecor
     return {
       token,
       refreshToken: str(p.refreshToken),
+      apiToken: str(p.apiToken),
       subject: str(p.subject),
       tenant: str(p.tenant),
       role: str(p.role),
@@ -126,6 +134,8 @@ export interface RenewDeps {
   subject: string | null;
   directLoginAvailable: boolean;
   refresh: (refreshToken: string) => Promise<Grant>;
+  // Exchanges a test account's API token for a session (no refresh token).
+  exchangeApiToken: (apiToken: string) => Promise<Grant>;
   login: (subject: string) => Promise<Grant>;
   // Installs and persists the minted grant. It already is in the tenant the
   // member chose: a tenant switch persists on the sign-in's refresh family,
@@ -134,19 +144,33 @@ export interface RenewDeps {
   logout: () => void;
 }
 
+// credentialMint is how a record mints its next grant from the credential it
+// holds: its refresh token, or a test account's API token (the grant keeps the
+// API token, so the next renewal has it). null when it holds neither. The
+// renewal and the switch to another account both mint through it.
+export function credentialMint(
+  record: SessionRecord | null,
+  d: Pick<RenewDeps, "refresh" | "exchangeApiToken">,
+): (() => Promise<Grant>) | null {
+  const refreshToken = record?.refreshToken ?? null;
+  if (refreshToken) return () => d.refresh(refreshToken);
+  const apiToken = record?.apiToken ?? null;
+  if (apiToken) return () => d.exchangeApiToken(apiToken).then((g) => ({ ...g, apiToken }));
+  return null;
+}
+
 // renewSession is the ONE silent re-auth decision. A stored refresh token
-// mints the new grant; without one, only a gateway that still offers direct
-// login can re-mint (dev verifier); otherwise the session is over. A refusal
+// mints the new grant; a test account's API token mints a session of its own
+// (and is kept on the grant); without either, only a gateway that still
+// offers direct login can re-mint (dev verifier); otherwise the session is
+// over. A refusal
 // (401/403) signs out so the app shows the sign-in screen instead of
 // rendering empty views with a dead token; a network failure keeps the
 // session so a later request retries.
 export async function renewSession(d: RenewDeps): Promise<boolean> {
-  const refreshToken = d.stored?.refreshToken ?? null;
   const subject = d.subject || d.stored?.subject || null;
-  let mint: () => Promise<Grant>;
-  if (refreshToken) mint = () => d.refresh(refreshToken);
-  else if (subject && d.directLoginAvailable) mint = () => d.login(subject);
-  else {
+  const mint = credentialMint(d.stored, d) ?? (subject && d.directLoginAvailable ? () => d.login(subject) : null);
+  if (!mint) {
     d.logout();
     return false;
   }
@@ -174,7 +198,7 @@ export function renewDelayMs(token: string, nowMs: number): number | null {
 
 // errorStatus reads the HTTP status off an ApiError (duck-typed so this
 // module stays free of the api client); 0 means no response (network).
-function errorStatus(e: unknown): number {
+export function errorStatus(e: unknown): number {
   if (e && typeof e === "object" && "status" in e && typeof e.status === "number") return e.status;
   return 0;
 }

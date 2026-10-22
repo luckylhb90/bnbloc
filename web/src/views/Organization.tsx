@@ -26,6 +26,7 @@ import { OrgAssistModel } from "@/views/org/OrgAssistModel";
 import { OrgMediaProviders } from "@/views/org/OrgMediaProviders";
 import { TenantsTab } from "@/views/org/TenantsTab";
 import { OrgSyncTab } from "@/views/org/OrgSyncTab";
+import { TestAccountsTab } from "@/views/org/TestAccountsTab";
 import { DeploymentCard } from "@/views/org/DeploymentCard";
 import { PlatformAgentsCard } from "@/views/org/PlatformAgentsCard";
 import { PlatformRetentionCard, TenantRetentionSection } from "@/views/org/RetentionCard";
@@ -60,6 +61,7 @@ type Tab =
   | "audit"
   | "tenants"
   | "orgsync"
+  | "testAccounts"
   | "components"
   | "platformContent"
   | "updates"
@@ -79,6 +81,7 @@ const TABS: { id: Tab; label: string; superOnly?: boolean }[] = [
   { id: "audit", label: "Audit log" },
   { id: "tenants", label: "Tenants", superOnly: true },
   { id: "orgsync", label: "Org sync", superOnly: true },
+  { id: "testAccounts", label: "Test accounts", superOnly: true },
   { id: "components", label: "Components", superOnly: true },
   { id: "platformContent", label: "Platform content", superOnly: true },
   { id: "updates", label: "Updates", superOnly: true },
@@ -179,6 +182,7 @@ export function Organization() {
       )}
       {tab === "tenants" && isSuper && <TenantsTab />}
       {tab === "orgsync" && isSuper && <OrgSyncTab />}
+      {tab === "testAccounts" && isSuper && <TestAccountsTab key={activeTenant} />}
       {tab === "updates" && isSuper && <PlatformUpdateConfig />}
       {tab === "assist" && isSuper && (
         <>

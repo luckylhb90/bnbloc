@@ -28,7 +28,7 @@ function token(claims: Record<string, unknown>): string {
   return `${b64}.sig`;
 }
 
-const stored: SessionRecord = { token: "old", refreshToken: "rt-1", subject: "ann@corp", tenant: "t2", role: "member" };
+const stored: SessionRecord = { token: "old", refreshToken: "rt-1", apiToken: null, subject: "ann@corp", tenant: "t2", role: "member" };
 
 // A harness wiring renewSession the way auth.tsx does: the minted grant is
 // installed and persisted as the gateway answered it.
@@ -43,6 +43,9 @@ function harness(over: Partial<RenewDeps>) {
       // The gateway refreshes into the tenant the member switched to (the
       // refresh family's tenant hint): t2.
       return { sessionToken: "fresh", refreshToken: "rt-2", subject: "ann@corp", tenant: "t2", role: "member" };
+    },
+    exchangeApiToken: async () => {
+      throw new Error("an API token must not be exchanged");
     },
     login: async () => {
       throw new Error("direct login must not run");
@@ -112,6 +115,46 @@ async function testNoRefreshTokenFallsBack(): Promise<void> {
   assert(dev.state.refreshedWith.length === 0, "no refresh without a refresh token");
 }
 
+// A test account renews from its API token: the exchange mints a session with
+// no refresh token, and the grant keeps the API token for the next renewal.
+async function testApiTokenAccountRenews(): Promise<void> {
+  const testAccount: SessionRecord = { token: "old", refreshToken: null, apiToken: "bnbloc_at_x", subject: "svc:qa-viewer", tenant: "t2", role: "viewer" };
+  const spent: string[] = [];
+  const ok = harness({
+    stored: testAccount,
+    subject: "svc:qa-viewer",
+    exchangeApiToken: async (t) => {
+      spent.push(t);
+      return { sessionToken: "fresh", subject: "svc:qa-viewer", tenant: "t2", role: "viewer" };
+    },
+  });
+  assert((await renewSession(ok.deps)) === true, "an API token renews the session");
+  assert(spent.join() === "bnbloc_at_x" && ok.state.refreshedWith.length === 0, "the API token is exchanged, no refresh");
+  assert(ok.state.persisted?.apiToken === "bnbloc_at_x" && ok.state.persisted?.refreshToken === null, "the API token is kept for the next renewal");
+  assert(ok.state.token === "fresh" && !ok.state.loggedOut, "the new bearer is installed");
+
+  // A revoked token signs the test account out; a network failure keeps it.
+  const revoked = harness({
+    stored: testAccount,
+    exchangeApiToken: async () => {
+      throw new HttpError(401);
+    },
+  });
+  assert((await renewSession(revoked.deps)) === false && revoked.state.loggedOut, "a revoked API token signs out");
+  const offline = harness({
+    stored: testAccount,
+    exchangeApiToken: async () => {
+      throw new TypeError("Failed to fetch");
+    },
+  });
+  assert((await renewSession(offline.deps)) === false && !offline.state.loggedOut, "a network failure keeps the test account");
+
+  // A record holding both renews from the refresh token (a person's sign-in
+  // outranks nothing else: the order is fixed and stated).
+  const both = harness({ stored: { ...testAccount, refreshToken: "rt-1" } });
+  assert((await renewSession(both.deps)) === true && both.state.refreshedWith.join() === "rt-1", "the refresh token is used first");
+}
+
 function testFragmentAdoption(): void {
   const t = token({ sub: "ann@corp", tenant: "t1", role: "super_admin", exp: 1 });
   const f = parseSsoFragment(`#sessionToken=${t}&refreshToken=rt-9&subject=ann%40corp`);
@@ -129,7 +172,8 @@ function testFragmentAdoption(): void {
 
 function testSessionRecordParsing(): void {
   const rec = parseSessionRecord(JSON.stringify({ token: "a", refreshToken: "r", subject: "s", tenant: null }));
-  assert(rec?.refreshToken === "r" && rec.tenant === null && rec.role === null, "record round-trips");
+  assert(rec?.refreshToken === "r" && rec.tenant === null && rec.role === null && rec.apiToken === null, "record round-trips");
+  assert(parseSessionRecord(JSON.stringify({ token: "a", apiToken: "bnbloc_at_y", subject: "svc:q" }))?.apiToken === "bnbloc_at_y", "an API token round-trips");
   assert(parseSessionRecord(JSON.stringify({ token: "a" }))?.refreshToken === null, "pre-refresh record has none");
   assert(parseSessionRecord("{bad") === null && parseSessionRecord(null) === null, "corrupt/missing → null");
   assert(parseSessionRecord(JSON.stringify({ refreshToken: "r" })) === null, "no bearer → no session");
@@ -147,6 +191,7 @@ await testRefreshSuccessRotates();
 await testRefreshRefusedSignsOut();
 await testRefreshNetworkErrorKeepsSession();
 await testNoRefreshTokenFallsBack();
+await testApiTokenAccountRenews();
 testFragmentAdoption();
 testSessionRecordParsing();
 testRenewDelay();

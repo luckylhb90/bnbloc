@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   BuildingsIcon,
   CaretUpDownIcon,
@@ -7,8 +8,15 @@ import {
   GlobeIcon,
   PackageIcon,
   SignOutIcon,
+  SwapIcon,
+  UserCircleIcon,
   UsersThreeIcon,
 } from "@phosphor-icons/react";
+import { accountKind, keyOf } from "@/lib/accounts";
+import { useAuth } from "@/lib/auth";
+import { errorText } from "@/lib/errors";
+import { AccountsDialog, TestBadge } from "@/views/accounts/AccountsDialog";
+import { useToast } from "@/ui/Toast";
 import { cn } from "@/lib/cn";
 import { usePrivacyMode } from "@/lib/privacyMode";
 import { useDisplayName } from "@/lib/useDisplayName";
@@ -48,6 +56,10 @@ export function AccountMenu({
   readonly onSignOut: () => void;
 }) {
   const active = MENU_VIEWS.has(view);
+  // The accounts of this browser (docs/prd/2026-10-22-multi-account.md).
+  const { multiAccount, kind, accounts, switchAccount } = useAuth();
+  const toast = useToast();
+  const [managing, setManaging] = useState(false);
   // The member's display name, never their id (PRD 2026-10-10 §1); the id is
   // shown as "Signed in as" only outside privacy mode.
   const name = useDisplayName(subject);
@@ -59,6 +71,7 @@ export function AccountMenu({
     </MenuItem>
   );
   return (
+    <>
     <Menu
       label="Account"
       className={collapsed ? "self-center" : undefined}
@@ -100,6 +113,7 @@ export function AccountMenu({
           <span className="min-w-0 flex-1 truncate">
             Signed in as <span className="text-[var(--color-fg-muted)]">{privacy ? name : subject}</span>
           </span>
+          {kind === "test" && <TestBadge />}
           {privacy && (
             <span
               data-privacy-badge
@@ -110,6 +124,25 @@ export function AccountMenu({
             </span>
           )}
         </div>
+      )}
+      {multiAccount && (
+        <MenuGroup label="Accounts">
+          {accounts.map((a) => (
+            <MenuItem
+              key={keyOf(a)}
+              icon={UserCircleIcon}
+              onSelect={() => void switchAccount(keyOf(a)).catch((e: unknown) => toast.error(errorText(e, "Could not switch account")))}
+            >
+              <span className="flex min-w-0 items-center gap-2">
+                <span className="truncate">{a.record.subject}</span>
+                {accountKind(a.record) === "test" && <TestBadge />}
+              </span>
+            </MenuItem>
+          ))}
+          <MenuItem icon={SwapIcon} onSelect={() => setManaging(true)}>
+            {accounts.length ? "Manage accounts…" : "Add or switch account…"}
+          </MenuItem>
+        </MenuGroup>
       )}
       <MenuGroup label="Work">
         {item("agents", "Agents", CpuIcon)}
@@ -136,5 +169,7 @@ export function AccountMenu({
         <BuildVersion />
       </div>
     </Menu>
+    {multiAccount && <AccountsDialog open={managing} onClose={() => setManaging(false)} />}
+    </>
   );
 }

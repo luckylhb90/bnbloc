@@ -8,6 +8,8 @@
 export const StorageKey = {
   // The signed-in session (lib/sessionGrant.ts) and the gateway override.
   session: "bnbloc.session",
+  // The other accounts of this browser, parked (lib/accounts.ts).
+  accounts: "bnbloc.accounts",
   gatewayOverride: "bnbloc.gatewayOverride",
   // The desktop sign-in nonce (lib/desktop.ts).
   ssoNonce: "bnbloc.ssoNonce",

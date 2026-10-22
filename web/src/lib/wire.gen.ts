@@ -541,6 +541,61 @@ export interface AgentRunsReply {
   nextBefore?: string;
 }
 
+// ---- wire/api_tokens.go ----
+
+// ServiceSubjectPrefix is the reserved namespace of service identities (an API
+// token's subject, a test account): svc:<name>, lowercase letters, digits and
+// . _ - (the gateway enforces the rest).
+export const ServiceSubjectPrefix = "svc:";
+
+// APITokenCreateRequest is POST /v1/platform/api-tokens.
+export interface APITokenCreateRequest {
+  // Subject defaults to the caller; otherwise a svc:<name> service subject.
+  subject?: string;
+  label: string;
+  ttlDays?: number;
+  // TenantID is the tenant hint the exchanged session resolves in (default
+  // the caller's session tenant).
+  tenantId?: string;
+}
+
+// APITokenView is one token as listed (never the secret or its hash).
+export interface APITokenView {
+  id: string;
+  subject: string;
+  label: string;
+  tenant?: string;
+  createdBy: string;
+  createdAtMs: number;
+  expiresAtMs: number;
+  lastUsedAtMs?: number;
+  revokedAtMs?: number;
+  revokedBy?: string;
+  active: boolean;
+}
+
+// APITokensReply is GET /v1/platform/api-tokens.
+export interface APITokensReply {
+  tokens: APITokenView[];
+}
+
+// APITokenGrant is POST /v1/auth/api-token: a session only (no refresh
+// token), so its holder keeps the API token to renew it.
+export interface APITokenGrant {
+  sessionToken: string;
+  subject: string;
+  tenant: string;
+  role: string;
+  rooms: string[];
+  expiresAtMs: number;
+}
+
+// APITokenCreated answers a create: the token's view and the token itself,
+// shown once.
+export interface APITokenCreated extends APITokenView {
+  token: string;
+}
+
 // ---- wire/apps.go ----
 
 // AppDocWrite is an insert (POST) or a replace (PUT). Doc is the document's

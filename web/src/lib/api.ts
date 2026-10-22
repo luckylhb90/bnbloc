@@ -8,6 +8,9 @@ import { ApiError } from "./errors.ts";
 import {
   MaxUnreadRooms,
   type AgentJobsReply,
+  type APITokenCreated,
+  type APITokenCreateRequest,
+  type APITokensReply,
   type AgentTargetsReply,
   type ArtifactDetail,
   type ArtifactList,
@@ -178,6 +181,19 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ refreshToken }),
     }),
+  // Exchange a test account's API token for a session of its subject (no
+  // bearer; the grant has no refresh token).
+  exchangeApiToken: (token: string) =>
+    req<Grant>("/v1/auth/api-token", {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    }),
+  // Super admin: the API tokens, issue one (shown once), revoke one.
+  apiTokens: () => req<APITokensReply>("/v1/platform/api-tokens"),
+  createApiToken: (body: APITokenCreateRequest) =>
+    req<APITokenCreated>("/v1/platform/api-tokens", { method: "POST", body: JSON.stringify(body) }),
+  revokeApiToken: (id: string) =>
+    req<void>(`/v1/platform/api-tokens/${encodeURIComponent(id)}`, { method: "DELETE", as: "none" }),
   // Revoke the refresh token's sign-in server-side (idempotent, 204).
   logout: (refreshToken: string) =>
     req<void>("/v1/auth/logout", {

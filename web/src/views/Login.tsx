@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { ArrowRightIcon, WaveformIcon } from "@phosphor-icons/react";
 import { useAuth } from "@/lib/auth";
+import { accountKind, keyOf } from "@/lib/accounts";
+import { TestBadge } from "@/views/accounts/AccountsDialog";
 import { Button } from "@/ui/Button";
 import { Input } from "@/ui/Input";
 import { Mascot } from "@/ui/Mascot";
@@ -41,7 +43,7 @@ function Pitch({ compact }: { compact?: boolean }) {
 }
 
 export function Login() {
-  const { login, ssoAvailable, directLoginAvailable, ssoStartPath } = useAuth();
+  const { login, ssoAvailable, directLoginAvailable, ssoStartPath, multiAccount, accounts, switchAccount } = useAuth();
   const [who, setWho] = useState("");
   const [busy, setBusy] = useState(false);
   // A desktop build without a default gateway has nothing to sign in to: the
@@ -121,6 +123,22 @@ export function Login() {
           <p className="mt-1 text-sm text-[var(--color-fg-muted)]">
             Sign in to enter your workspace.
           </p>
+          {multiAccount && accounts.length > 0 && (
+            <div className="mt-6 flex flex-col gap-2">
+              <span className="text-xs font-medium uppercase tracking-wide text-[var(--color-fg-muted)]">Accounts on this browser</span>
+              {accounts.map((a) => (
+                <Button
+                  key={keyOf(a)}
+                  variant="outline"
+                  className="justify-between"
+                  onClick={() => void switchAccount(keyOf(a)).catch(() => toast.error("That account can no longer sign in"))}
+                >
+                  <span className="truncate">Continue as {a.record.subject}</span>
+                  {accountKind(a.record) === "test" && <TestBadge />}
+                </Button>
+              ))}
+            </div>
+          )}
 
           {directLoginAvailable && (
           <form onSubmit={submit} className="mt-8 flex flex-col gap-4">

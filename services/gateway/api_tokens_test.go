@@ -103,7 +103,7 @@ func TestAPITokenLifecycle(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("exchange = %d %s", code, raw)
 	}
-	var grant apiTokenGrant
+	var grant wire.APITokenGrant
 	_ = json.Unmarshal(raw, &grant)
 	claims, err := gw.Signer.Verify(grant.Token)
 	if err != nil || claims.Subject != "svc:smoke" || claims.Role != string(rbac.RoleSuperAdmin) || grant.Tenant != "home" {

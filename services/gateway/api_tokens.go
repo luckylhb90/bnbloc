@@ -40,8 +40,6 @@ import (
 var apiTokenFormat = secrettoken.Format{Prefix: "bnbloc_at_", IDLen: 32}
 
 const (
-	// ServiceSubjectPrefix is the reserved namespace of service identities.
-	ServiceSubjectPrefix   = "svc:"
 	defaultAPITokenTTLDays = 90
 	maxAPITokenTTLDays     = 365
 	maxAPITokenLabelRunes  = 128
@@ -64,33 +62,8 @@ func (s *Service) apiTokens() store.APITokenStore {
 	return s.APITokens
 }
 
-type createAPITokenBody struct {
-	// Subject defaults to the caller; otherwise a svc:<name> service subject.
-	Subject string `json:"subject,omitempty"`
-	Label   string `json:"label"`
-	TTLDays int    `json:"ttlDays,omitempty"`
-	// TenantID is the tenant hint the exchanged session resolves in (default
-	// the caller's session tenant).
-	TenantID string `json:"tenantId,omitempty"`
-}
-
-// apiTokenView is one token as listed (never the secret or its hash).
-type apiTokenView struct {
-	ID           string `json:"id"`
-	Subject      string `json:"subject"`
-	Label        string `json:"label"`
-	Tenant       string `json:"tenant,omitempty"`
-	CreatedBy    string `json:"createdBy"`
-	CreatedAtMs  int64  `json:"createdAtMs"`
-	ExpiresAtMs  int64  `json:"expiresAtMs"`
-	LastUsedAtMs int64  `json:"lastUsedAtMs,omitempty"`
-	RevokedAtMs  int64  `json:"revokedAtMs,omitempty"`
-	RevokedBy    string `json:"revokedBy,omitempty"`
-	Active       bool   `json:"active"`
-}
-
-func viewAPIToken(t store.APIToken, nowMs int64) apiTokenView {
-	return apiTokenView{
+func viewAPIToken(t store.APIToken, nowMs int64) wire.APITokenView {
+	return wire.APITokenView{
 		ID: t.TokenID, Subject: t.Subject, Label: t.Label, Tenant: t.TenantHint, CreatedBy: t.CreatedBy,
 		CreatedAtMs: t.CreatedAtMs, ExpiresAtMs: t.ExpiresAtMs, LastUsedAtMs: t.LastUsedAtMs,
 		RevokedAtMs: t.RevokedAtMs, RevokedBy: t.RevokedBy, Active: t.Active(nowMs),
@@ -99,7 +72,7 @@ func viewAPIToken(t store.APIToken, nowMs int64) apiTokenView {
 
 // handleCreateAPIToken issues a token (super-admin) and returns it ONCE.
 func (s *Service) handleCreateAPIToken(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
-	var body createAPITokenBody
+	var body wire.APITokenCreateRequest
 	if !httpx.DecodeJSON(w, r, maxAuthBodyBytes, &body) {
 		return
 	}
@@ -151,10 +124,7 @@ func (s *Service) handleCreateAPIToken(w http.ResponseWriter, r *http.Request, c
 		return
 	}
 	s.auditAPIToken(r.Context(), claims.Tenant, id, "issue", wire.AuditOutcomeAllow, claims.Subject, "subject="+subject+" label="+label)
-	httpx.WriteJSON(w, http.StatusCreated, struct {
-		apiTokenView
-		Token string `json:"token"`
-	}{viewAPIToken(rec, now.UnixMilli()), token})
+	httpx.WriteJSON(w, http.StatusCreated, wire.APITokenCreated{APITokenView: viewAPIToken(rec, now.UnixMilli()), Token: token})
 
 }
 
@@ -180,11 +150,11 @@ func (s *Service) handleListAPITokens(w http.ResponseWriter, r *http.Request, cl
 		return
 	}
 	now := s.nowTime().UnixMilli()
-	out := make([]apiTokenView, 0, len(rows))
+	out := make([]wire.APITokenView, 0, len(rows))
 	for _, t := range rows {
 		out = append(out, viewAPIToken(t, now))
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"tokens": out})
+	httpx.WriteJSON(w, http.StatusOK, wire.APITokensReply{Tokens: out})
 }
 
 func (s *Service) handleRevokeAPIToken(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
@@ -201,16 +171,6 @@ func (s *Service) handleRevokeAPIToken(w http.ResponseWriter, r *http.Request, c
 	}
 	s.auditAPIToken(r.Context(), claims.Tenant, id, "revoke", wire.AuditOutcomeAllow, claims.Subject, "")
 	w.WriteHeader(http.StatusNoContent)
-}
-
-// apiTokenGrant answers an exchange: a session only (no refresh token).
-type apiTokenGrant struct {
-	Token       string   `json:"sessionToken"`
-	Subject     string   `json:"subject"`
-	Tenant      string   `json:"tenant"`
-	Role        string   `json:"role"`
-	Rooms       []string `json:"rooms"`
-	ExpiresAtMs int64    `json:"expiresAtMs"`
 }
 
 var errAPITokenRejected = errors.New("invalid, expired or revoked api token")
@@ -266,7 +226,7 @@ func (s *Service) handleAPITokenExchange(w http.ResponseWriter, r *http.Request)
 	expires := now.Add(s.SessionTTL)
 	session := mintSession(s.Signer, tok.Subject, "", scope, expires)
 	s.auditAPIToken(r.Context(), scope.Tenant, id, "exchange", wire.AuditOutcomeAllow, tok.Subject, "")
-	httpx.WriteJSON(w, http.StatusOK, apiTokenGrant{
+	httpx.WriteJSON(w, http.StatusOK, wire.APITokenGrant{
 		Token: session, Subject: tok.Subject, Tenant: scope.Tenant, Role: scope.Role, Rooms: scope.Rooms, ExpiresAtMs: expires.UnixMilli(),
 	})
 
