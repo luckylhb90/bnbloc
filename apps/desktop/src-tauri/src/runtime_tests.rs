@@ -527,3 +527,45 @@ async fn forgetting_an_accounts_data_waits_for_its_runtime_and_touches_only_its_
     // Nothing to forget is fine.
     f.registry.forget_local_data_within(&maya, 2).await.unwrap();
 }
+
+/// The app keeps one window per account: a window finds the other app window
+/// that shows an account, never itself, never a pop-out, never one of another
+/// account.
+#[test]
+fn an_account_already_open_in_another_app_window_is_found() {
+    let f = fixture("one-window");
+    f.registry
+        .reconcile(next_revision(), vec![person("maya"), person("jack")]);
+    f.registry.bind("main", &key("maya")).unwrap();
+    f.registry.bind("app-x-1", &key("jack")).unwrap();
+    assert_eq!(
+        f.registry.app_window_of(&key("maya"), "app-x-1").as_deref(),
+        Some("main")
+    );
+    assert_eq!(
+        f.registry.app_window_of(&key("maya"), "main"),
+        None,
+        "never the asking window"
+    );
+    assert_eq!(
+        f.registry.app_window_of(&key("jack"), "main").as_deref(),
+        Some("app-x-1")
+    );
+    // A pop-out of maya's does not count as maya's window.
+    f.registry.inherit("preview-ab12cd34-x", "main").unwrap();
+    assert_eq!(
+        f.registry.app_window_of(&key("maya"), "app-x-1").as_deref(),
+        Some("main")
+    );
+    f.registry.unbind("main");
+    assert_eq!(
+        f.registry.app_window_of(&key("maya"), "app-x-1"),
+        None,
+        "a pop-out is not an app window"
+    );
+    f.registry.bind("app-y-2", &key("maya")).unwrap();
+    assert_eq!(
+        f.registry.app_window_of(&key("maya"), "app-x-1").as_deref(),
+        Some("app-y-2")
+    );
+}

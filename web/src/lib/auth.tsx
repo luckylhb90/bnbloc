@@ -148,9 +148,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   // adopt makes a freshly signed-in account the one this window shows: into
-  // the vault (used now, signed in again), then bound.
+  // the vault (used now, signed in again), then bound. On the desktop, an
+  // account another app window already shows is not shown twice: that window
+  // comes forward and this one (opened to sign in) closes.
   const adopt = useCallback(
-    (record: SessionRecord) => {
+    async (record: SessionRecord) => {
       if (!record.subject || !(record.refreshToken || record.apiToken)) {
         throw new Error("The gateway issued a session that cannot be renewed");
       }
@@ -158,7 +160,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const list = updateVault((l) => put(l, gateway, record, Date.now()));
       setAccounts(list);
       const account = find(list, accountKey(gateway, record.subject));
-      if (account) bind(account);
+      if (!account) return;
+      if (await desktop.focusAccountElsewhere(gateway, record.subject)) {
+        await desktop.closeThisWindow();
+        return;
+      }
+      bind(account);
     },
     [bind],
   );
@@ -196,12 +203,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       .catch(() => {});
     // Every sign-in path lands through signedIn() with its refresh token.
     const signedIn = (g: Grant) => {
-      try {
-        adopt(recordFromGrant(g));
-      } catch {
-        /* a session that cannot be kept: stay on the sign-in */
-      }
-      setReady(true);
+      adopt(recordFromGrant(g))
+        .catch(() => {
+          /* a session that cannot be kept: stay on the sign-in */
+        })
+        .finally(() => setReady(true));
     };
     const fragment = parseSsoFragment(window.location.hash);
     // Desktop SSO hand-off: the bnbloc://sso deep link delivers only a
@@ -243,7 +249,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // once and must read the CURRENT account, not a stale closure.
   const login = useCallback(
     async (idpToken: string) => {
-      adopt(recordFromGrant(await api.login(idpToken)));
+      await adopt(recordFromGrant(await api.login(idpToken)));
     },
     [adopt],
   );
@@ -307,7 +313,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // way to be sure nothing of the old account shows in the new one.
   const switchAccount = useCallback(
     async (key: string) => {
-      if (!find(readVault(), key)) throw new Error("That account is not in this app any more");
+      const wanted = find(readVault(), key);
+      if (!wanted) throw new Error("That account is not in this app any more");
+      // Already open in another window of the app: that one comes forward.
+      if (await desktop.focusAccountElsewhere(wanted.gateway, wanted.record.subject ?? "")) return;
       const result = await renewUnderLock(key, null);
       syncAccounts();
       if (result.outcome === "refused") throw new Error("That account can no longer sign in: sign in again");

@@ -100,6 +100,13 @@ account out ends everything it opened, server side and on the machine.
   is bound to the new account. A desktop SSO deep link is delivered to every
   window and redeemed only by the window holding the pending nonce (kept in
   that window's own storage).
+- **On the desktop, one app window per account.** A second window of one
+  account shows what the first does and doubles its renewals and streams, so
+  a switch to an account that is already open, "open in a new window", and a
+  sign-in that lands on an account that is already open all bring the window
+  that shows it forward instead (a sign-in window then closes itself).
+  Pop-outs are views and may be many. In a browser, two tabs of one account
+  stay allowed: they share the vault and the renewal lock.
 - **Removing or signing out** an account sends every window bound to it to the
   sign-in (the one cross-window event that remains: the vault no longer has
   the account).

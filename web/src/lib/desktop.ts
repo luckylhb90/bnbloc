@@ -279,6 +279,20 @@ export const desktop = {
     });
   },
 
+  // Bring forward the app window that already shows an account, when it is
+  // not this one: the app keeps one window per account. True when there is
+  // one. Always false outside the shell.
+  async focusAccountElsewhere(gatewayUrl: string, subject: string): Promise<boolean> {
+    const t = tauri();
+    if (!t) return false;
+    return ((await t.invoke("account_focus_elsewhere", { gatewayUrl, subject }).catch(() => false)) as boolean) === true;
+  },
+
+  // Close this window (a sign-in that found its account open elsewhere).
+  async closeThisWindow(): Promise<void> {
+    await tauri()?.invoke("window_close").catch(() => {});
+  },
+
   // Every account's state beside its name (the switcher): session, whether
   // it serves agents from this computer, its bridge and running turns.
   async accountsStatus(): Promise<AccountStatus[]> {

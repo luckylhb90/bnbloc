@@ -88,6 +88,41 @@ fn accounts_status(registry: State<'_, Registry>) -> Vec<runtime::AccountStatus>
     registry.statuses()
 }
 
+/// Bring forward the app window that already shows an account, when it is
+/// not the calling window: the app keeps one window per account (a second
+/// window of one account shows the same thing and doubles its own work). True
+/// when there is one (it is now in front), false when this window may show
+/// the account itself.
+#[tauri::command]
+fn account_focus_elsewhere(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    registry: State<'_, Registry>,
+    gateway_url: String,
+    subject: String,
+) -> bool {
+    let Some(key) = account::AccountKey::new(&gateway_url, &subject) else {
+        return false;
+    };
+    let Some(other) = registry
+        .app_window_of(&key, window.label())
+        .and_then(|label| app.get_webview_window(&label))
+    else {
+        return false;
+    };
+    let _ = other.unminimize();
+    let _ = other.show();
+    let _ = other.set_focus();
+    true
+}
+
+/// Close the calling window (a sign-in that found its account already open
+/// elsewhere has nothing left to show).
+#[tauri::command]
+fn window_close(window: tauri::WebviewWindow) {
+    let _ = window.close();
+}
+
 /// Forget what this computer keeps of an account that is no longer in the
 /// vault (the web asks it after the account's removal, when the person chose to
 /// delete its data). An account that is still live is refused.
@@ -432,6 +467,8 @@ pub fn run() {
             accounts_sync,
             accounts_status,
             account_forget_data,
+            account_focus_elsewhere,
+            window_close,
             window_bind,
             internal_adapter_status,
             internal_adapter_apply_updates,

@@ -619,6 +619,21 @@ impl Registry {
         Ok(())
     }
 
+    /// An app window other than `except` that shows `key` (the first by label):
+    /// the app keeps one window per account, so a second sign-in or a switch to
+    /// an account that is already open brings that window forward instead.
+    pub(crate) fn app_window_of(&self, key: &AccountKey, except: &str) -> Option<String> {
+        self.inner
+            .lock()
+            .windows
+            .iter()
+            .filter(|(label, bound)| {
+                *bound == key && label.as_str() != except && crate::windows::is_app_window(label)
+            })
+            .map(|(label, _)| label.clone())
+            .min()
+    }
+
     /// The account a window shows.
     pub(crate) fn account_of_window(&self, label: &str) -> Option<AccountKey> {
         let inner = self.inner.lock();
