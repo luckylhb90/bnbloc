@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"errors"
+	"github.com/luckylhb90/bnbloc/component"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -57,6 +58,12 @@ func (s *Service) afterEndpointUninstall(ctx context.Context, rec extpipe.Record
 	if err := s.componentCredentials().Delete(ctx, rec.Kind, rec.Name); err != nil {
 		slog.Warn("bnbloc-gateway: delete component credential failed", "kind", rec.Kind, "component", rec.Name, "error", err)
 	}
+	// A service's values go with it.
+	if rec.Kind == string(extreg.KindService) && s.ComponentValues != nil {
+		if err := s.ComponentValues.DeleteComponentValues(ctx, rec.Kind+"/"+rec.Name); err != nil {
+			slog.Warn("bnbloc-gateway: delete service values failed", "service", rec.Name, "error", err)
+		}
+	}
 	// A notifier's reply tokens die with it: a later install under the same
 	// name must not answer notifications delivered before.
 	if isNotifier(rec) && s.NotifierReplies != nil {
@@ -105,7 +112,7 @@ func (s *Service) handleRotateComponentSecret(w http.ResponseWriter, r *http.Req
 func (s *Service) verifyComponentCall(w http.ResponseWriter, r *http.Request, kind extreg.Kind, name string, signed []byte) (extpipe.Record, bool) {
 	ctx := r.Context()
 	if name == "" || !componentcred.Holds(string(kind)) {
-		httpx.Error(w, wire.ComponentHeader+" required (the component's kind and name)", http.StatusUnauthorized)
+		httpx.Error(w, component.ComponentHeader+" required (the component's kind and name)", http.StatusUnauthorized)
 		return extpipe.Record{}, false
 	}
 	rec, found, err := s.findComponentRecord(ctx, kind, name)
@@ -144,7 +151,7 @@ func componentCallSigned(r *http.Request) []byte {
 // componentCaller reads X-Bnbloc-Component as "<kind>/<name>" (the
 // endpoint routes any endpoint kind calls).
 func componentCaller(r *http.Request) (extreg.Kind, string) {
-	kind, name, _ := strings.Cut(strings.TrimSpace(r.Header.Get(wire.ComponentHeader)), "/")
+	kind, name, _ := strings.Cut(strings.TrimSpace(r.Header.Get(component.ComponentHeader)), "/")
 	return extreg.Kind(kind), name
 }
 

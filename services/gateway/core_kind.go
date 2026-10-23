@@ -19,6 +19,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/mcptool"
 	"github.com/luckylhb90/bnbloc/internal/pluginruntime"
 	"github.com/luckylhb90/bnbloc/internal/sandboxruntime"
+	"github.com/luckylhb90/bnbloc/internal/servicecomp"
 	"github.com/luckylhb90/bnbloc/internal/sharetarget"
 	"github.com/luckylhb90/bnbloc/internal/store"
 )
@@ -38,6 +39,7 @@ func NewCorePipeline(s *Service, audit store.ExtensionAuditStore) *extpipe.Pipel
 			extreg.KindAuthProvider: authprovider.Installer(),
 			extreg.KindNotifier:     notifierInstaller(),
 			extreg.KindShareTarget:  sharetarget.Installer(),
+			extreg.KindService:      servicecomp.Installer(),
 			pkgmeta.KindPlugin:      s.pluginInstaller(),
 			extreg.KindSandbox:      sandboxruntime.Installer(),
 			extreg.KindPreviewer:    s.previewerInstaller(),

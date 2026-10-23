@@ -109,6 +109,7 @@ conforming, advertising one and failing it is not:
 | `execTokens` | space-scoped exec tokens (required by bnbloc's hybrid execution) |
 | `readOnlyMounts` | a shared space mount with `readOnly:true` is enforced: writes, creates and deletes fail in the guest, the host folder is never touched (a component's mounts are applied only where this is advertised) |
 | `durableHomes` | a space's home outlives its machine: the same on every machine created from an image that the space name is ensured on, removed only by a delete with `purge=1`; its commands find tools installed there by name (`PATH` starts with `~/.local/bin`, `~/.bun/bin`, `~/.cargo/bin`, `~/go/bin`; npm's global prefix is `~/.local` unless the run sets `NPM_CONFIG_PREFIX`) |
+| `hostProxy` | a machine created with `hostPorts` (at most 4) reaches those host loopback ports, and nothing else of the host, at `Discovery.hostAlias:<port>`, whatever its egress mode; the machine reports them. The bridge's egress proxy listens on one for the guests' commands (service-components.md) |
 
 ## Endpoints
 

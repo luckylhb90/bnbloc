@@ -10,6 +10,7 @@ import { PageHeader } from "@/ui/Page";
 import { useToast } from "@/ui/Toast";
 import { ComponentCard } from "@/views/ComponentCard";
 import { ErrorBox } from "@/ui/ErrorBox";
+import { ServicePages } from "@/views/ServicePages";
 import { errorText } from "@/lib/errors";
 
 // MemberComponents is where a member adds components and sets them up: a
@@ -102,6 +103,7 @@ export function MemberComponents() {
       <div className="p-6">
         <div className="mx-auto flex w-full max-w-[720px] flex-col gap-3">
           {error && <ErrorBox>{error}</ErrorBox>}
+          <ServicePages />
           <ComponentSection title="Your components" loading={components === null} emptyTitle="No components installed." emptyHint="Add an opt-in component below, or ask your admin to auto-install one.">
             {groups.yours.map((component) => (
               <ComponentCard

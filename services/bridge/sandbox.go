@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -117,6 +118,25 @@ type SandboxConfig struct {
 	// a space or its workspace folder. Empty keeps the names an agent had
 	// before (a bridge that serves no account of a desktop's).
 	Account string
+	// HostProxy is where the guests reach this bridge's egress proxy
+	// (BNBLOC_SANDBOX_HOST_PROXY, "<host alias>:<port>": the sandbox's
+	// hostProxy, the machine opening only that host loopback port); ""
+	// gives sandboxed commands no egress proxy.
+	HostProxy string
+	// PrivateHosts are the hosts the member opened for their own machine
+	// (BNBLOC_SANDBOX_PRIVATE_HOSTS): sandboxed commands reach them
+	// directly, never through the egress proxy, which tunnels only to
+	// public addresses.
+	PrivateHosts []string
+}
+
+// hostProxyPort is HostProxy's port ("" when it has none).
+func (c SandboxConfig) hostProxyPort() string {
+	_, port, err := net.SplitHostPort(c.HostProxy)
+	if err != nil {
+		return ""
+	}
+	return port
 }
 
 // BridgeAccount is SandboxConfig.Account for the bridge that serves owner on
@@ -166,6 +186,9 @@ type sandboxRuntime struct {
 	cfg    SandboxConfig
 	client *sandbox.Client
 	now    func() time.Time
+	// spaceEnv, when set, is the default environment of an own drive's
+	// space for its workdir: the egress proxy (roomtools_contrib.go).
+	spaceEnv func(ctx context.Context, workdir string) map[string]string
 
 	mu        sync.Mutex
 	ready     bool
@@ -344,9 +367,17 @@ func (s *sandboxRuntime) prepare(ctx context.Context, k driveKey, owner string, 
 	// allows) is the guest's alone: the core's path mapping is the workspace.
 	space0 := len(mounts)
 	mounts = append(mounts, s.contributedMounts(workdir, borrowed)...)
+	// An own drive's commands reach the services' hosts through the
+	// bridge's egress proxy (never someone else's prompt in the owner's
+	// name: a borrowed drive's space converges back to none).
+	var spaceEnv map[string]string
+	if !borrowed && s.spaceEnv != nil {
+		spaceEnv = s.spaceEnv(ctx, workdir)
+	}
 	if _, err := s.client.EnsureSpace(ctx, s.endpoint(), machine, space, sandbox.SpaceRequest{
 		Workdir:      workdir,
 		Mounts:       mounts,
+		Env:          spaceEnv,
 		EnvAllowlist: coreprotocol.ForwardEnvAllowlist(env),
 		Labels:       sandbox.Labels{Room: room, Core: core, Provider: provider, Owner: owner},
 	}); err != nil {

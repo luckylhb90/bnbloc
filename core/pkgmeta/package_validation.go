@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/luckylhb90/bnbloc/component"
 	"github.com/luckylhb90/bnbloc/internal/extreg"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
@@ -28,6 +29,13 @@ const KindNotifierPackageV1 = "bnbloc.notifier.package/v1"
 // (docs/architecture/share-targets.md).
 const KindShareTargetPackageV1 = "bnbloc.share-target.package/v1"
 
+// KindServicePackageV1 is the package-envelope kind for a service
+// component: an externally supervised endpoint (runtime "endpoint") that
+// acts for members and their agents' turns through the primitives it
+// declares in capabilities (component.ServiceCapabilities,
+// docs/architecture/service-components.md).
+const KindServicePackageV1 = "bnbloc.service.package/v1"
+
 // PluginContractV1 is the only typed plugin wire-contract version. The sidecar
 // receives a versioned delivery envelope ({event, version, tenantId, roomId,
 // payload}) at POST /events; the contract version pins that envelope shape so a
@@ -46,6 +54,10 @@ const NotifierContractV1 = "bnbloc.notifier.contract/v1"
 // receives one signed share, GET {baseUrl}/v1/share/frame answers the
 // client half's document.
 const ShareTargetContractV1 = "bnbloc.share-target.contract/v1"
+
+// ServiceContractV1 pins the service component contract
+// (component.ServiceContractV1).
+const ServiceContractV1 = component.ServiceContractV1
 
 // NotifierCapabilityGroups: the notifier delivers a notification addressed
 // to a named group (NotificationPayload.Group) as well as to members; the
@@ -223,6 +235,30 @@ func validateShareTargetPackage(pkg Package) error {
 	return validateEndpointPackage(pkg, "share-target", ShareTargetContractV1)
 }
 
+// validateServicePackage: a service declares at least one primitive, each
+// known and once, with the primitive it needs (component.ServiceNeeds).
+func validateServicePackage(pkg Package) error {
+	if len(pkg.Capabilities) == 0 {
+		return fmt.Errorf("a service declares the primitives it uses in capabilities (%s)", strings.Join(component.ServiceCapabilities, ", "))
+	}
+	seen := map[string]bool{}
+	for _, c := range pkg.Capabilities {
+		if !slices.Contains(component.ServiceCapabilities, c) {
+			return fmt.Errorf("unknown service capability %q", c)
+		}
+		if seen[c] {
+			return fmt.Errorf("duplicate service capability %q", c)
+		}
+		seen[c] = true
+	}
+	for c, need := range component.ServiceNeeds {
+		if seen[c] && !seen[need] {
+			return fmt.Errorf("service capability %q needs %q", c, need)
+		}
+	}
+	return validateEndpointPackage(pkg, "service", ServiceContractV1)
+}
+
 func validatePluginCapabilities(caps []string) error {
 	for _, cap := range caps {
 		if !pluginCapabilities[cap] {
@@ -237,6 +273,7 @@ func init() {
 	RegisterKindValidator(KindAuthProviderPackageV1, validateAuthProviderPackage)
 	RegisterKindValidator(KindNotifierPackageV1, validateNotifierPackage)
 	RegisterKindValidator(KindShareTargetPackageV1, validateShareTargetPackage)
+	RegisterKindValidator(KindServicePackageV1, validateServicePackage)
 	extreg.RegisterKind(extreg.KindDescriptor{
 		Kind:  KindPlugin,
 		Hosts: []extreg.Service{extreg.ServiceRealtime},

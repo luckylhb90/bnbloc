@@ -58,7 +58,8 @@ type Claims struct {
 	Family string `json:"fam,omitempty"`
 	ID     string `json:"jti,omitempty"`
 	// Data is the signed payload of a kind that carries one: a share
-	// ticket's card (KindShareTarget). Empty on every other kind.
+	// ticket's card (KindShareTarget), a page ticket's page
+	// (KindComponentPage). Empty on every other kind.
 	Data string `json:"data,omitempty"`
 }
 
@@ -113,6 +114,13 @@ const (
 	// in the host app's client and cannot hold a session) and authorizes only
 	// that page's routes: reading the card and sending it, once per delivery.
 	KindShareTarget = "share-target"
+	// KindComponentPage is an opened service page's ticket
+	// (docs/architecture/service-components.md): Subject is the member,
+	// Tenant and Role their organization and role there, ID the service and
+	// Data the page with its query. It rides in the page's URL path (the
+	// page is sandboxed and holds no session) and authorizes only that
+	// page's calls to its service.
+	KindComponentPage = "component-page"
 )
 
 // HasRoom reports whether the claims authorize the given room scope.

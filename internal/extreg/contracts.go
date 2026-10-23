@@ -12,6 +12,10 @@ const (
 	// KindShareTarget takes one shared item, as a card, to a conversation of
 	// another app: an endpoint component beside the gateway.
 	KindShareTarget Kind = "share-target"
+	// KindService acts for members and their agents' turns through the
+	// primitives it declares: an endpoint component beside the gateway
+	// (docs/architecture/service-components.md).
+	KindService Kind = "service"
 	// KindSandbox is a Sandbox Protocol v1 runtime (local microVM sidecar or
 	// remote endpoint).
 	KindSandbox Kind = "sandbox"
@@ -35,6 +39,7 @@ const (
 	KindContractNotifierV1     KindContract = "bnbloc.notifier.contract/v1"
 	KindContractWebhookV1      KindContract = "bnbloc.webhook.contract/v1"
 	KindContractShareTargetV1  KindContract = "bnbloc.share-target.contract/v1"
+	KindContractServiceV1      KindContract = "bnbloc.service.contract/v1"
 	KindContractSandboxV1      KindContract = "bnbloc.sandbox.contract/v1"
 	KindContractPreviewerV1    KindContract = "bnbloc.previewer.contract/v1"
 	KindContractMCPV1          KindContract = "bnbloc.mcp.contract/v1"
@@ -111,6 +116,9 @@ func init() {
 	// Share targets: the gateway builds the card and calls the target on a
 	// member's send (docs/architecture/share-targets.md).
 	RegisterKind(KindDescriptor{Kind: KindShareTarget, Contract: KindContractShareTargetV1, Hosts: []Service{ServiceGateway}})
+	// Services: the gateway attests their turns, forwards their pages and
+	// callbacks and keeps their values (docs/architecture/service-components.md).
+	RegisterKind(KindDescriptor{Kind: KindService, Contract: KindContractServiceV1, Hosts: []Service{ServiceGateway}})
 	// Sandboxes: the gateway owns the install record and the member catalog;
 	// the desktop supervises local sidecars from that catalog, and the bridge
 	// will drive the Sandbox Protocol in the next phase. Nothing runs in the

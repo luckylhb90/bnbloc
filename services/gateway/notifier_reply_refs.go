@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/luckylhb90/bnbloc/component"
 	"io"
 	"net/http"
 	"strings"
@@ -47,7 +48,7 @@ func (s *Service) verifyNotifierCall(w http.ResponseWriter, r *http.Request) (ex
 		httpx.Error(w, "notifier replies are not available", http.StatusServiceUnavailable)
 		return extpipe.Record{}, nil, false
 	}
-	rec, ok := s.verifyComponentCall(w, r, extreg.KindNotifier, strings.TrimSpace(r.Header.Get(wire.ComponentHeader)), body)
+	rec, ok := s.verifyComponentCall(w, r, extreg.KindNotifier, strings.TrimSpace(r.Header.Get(component.ComponentHeader)), body)
 	return rec, body, ok
 }
 

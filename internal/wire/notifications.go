@@ -159,11 +159,6 @@ type NotificationReplyRecipient struct {
 const (
 	// NotifierRepliesPath is the gateway route a notifier posts replies to.
 	NotifierRepliesPath = "/v1/notifier/replies"
-	// ComponentHeader names the endpoint component that signed a call to
-	// the gateway (X-Bnbloc-Signature uses that component's credential): a
-	// notifier's reply routes take its name, GET /v1/component-settings
-	// "<kind>/<name>".
-	ComponentHeader = "X-Bnbloc-Component"
 )
 
 // NotifierReplyRequest is the signed body of POST /v1/notifier/replies.

@@ -1780,6 +1780,14 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return err
 		},
 	},
+	{
+		// Service components' sealed values
+		// (docs/architecture/service-components.md). Additive: a new table.
+		id: "2026_10_component_values",
+		run: func(ctx context.Context, db sqlConn) error {
+			return createSchemaTable(ctx, db, "component_values")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

@@ -56,6 +56,10 @@ export function buildComponentPackage(draft: ComponentPackageDraft): ComponentPa
     if (draft.runtime !== "endpoint") return failure("Share-target packages use endpoint runtime.");
     if (draft.contract !== "bnbloc.share-target.contract/v1") return failure("Share-target contract is required.");
   }
+  if (draft.kind === "bnbloc.service.package/v1") {
+    if (draft.runtime !== "endpoint") return failure("Service packages use endpoint runtime.");
+    if (draft.contract !== "bnbloc.service.contract/v1") return failure("Service contract is required.");
+  }
   if (draft.kind === "bnbloc.mcp.package/v1") {
     if (draft.runtime !== "stdio" && draft.runtime !== "endpoint") return failure("MCP tool packages use stdio or endpoint runtime.");
     if (!draft.mcp) return failure("MCP tool packages need their mcp block (import the package JSON).");

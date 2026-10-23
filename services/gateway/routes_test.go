@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"github.com/luckylhb90/bnbloc/component"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -33,13 +34,14 @@ var readerWrites = map[string]string{
 	"POST /v1/content-components/{id}/versions/{version}/demo": "mints a read ticket for an app's demo the member may read (it spends the cost budget)",
 	"DELETE /v1/content-components/{id}/favorite":              "takes a member's own star back (it spends the cost budget)",
 	"POST /v1/my/share-targets/{name}/sessions":                "starts sharing an item the member may read, as a card to a person of their choice, which copying its link already allows (it spends the cost budget)",
+	"POST /v1/my/component-pages/{component}/{page}":           "opens a page of a service of the member's organization for the member themself (a ticket to their own view)",
 	"PUT /v1/content-components/{id}/versions/{version}/cover": "stores a picture of a work version the member may read, kept only while the version has no cover",
 }
 
 // publicPrefixes are where a route may take no session: sign-in, the IdP's
 // SSO endpoints, and routes whose credential travels in the request (a
 // share token, a ticket, a component signature; a share link's own path).
-var publicPrefixes = []string{"/v1/auth/", "/api/auth/", "/v1/public/", "/v1/sites/", "/v1/previewers/", "/v1/settings-pages/", "/v1/notifier/", "/v1/component-settings", "/v1/hooks/", "/v1/local-agent/discover", shareTargetsPrefix, sharelink.Prefix}
+var publicPrefixes = []string{"/v1/auth/", "/api/auth/", "/v1/public/", "/v1/sites/", "/v1/previewers/", "/v1/settings-pages/", "/v1/notifier/", "/v1/component-settings", "/v1/hooks/", "/v1/local-agent/discover", shareTargetsPrefix, sharelink.Prefix, component.ComponentPagePath, component.ComponentCallbackPath, component.ComponentStorePath}
 
 // TestEveryGatewayRouteGated: every route the gateway serves itself is a
 // row of the route table with its edge policy, and the policy holds. The

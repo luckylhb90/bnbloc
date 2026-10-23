@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/luckylhb90/bnbloc/component"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -133,7 +134,7 @@ func (f *replyFixture) reply(t *testing.T, name, secret string, req wire.Notifie
 	body, _ := json.Marshal(req)
 	r, _ := http.NewRequest(http.MethodPost, f.srv.URL+wire.NotifierRepliesPath, bytes.NewReader(body))
 	if name != "" {
-		r.Header.Set(wire.ComponentHeader, name)
+		r.Header.Set(component.ComponentHeader, name)
 	}
 	r.Header.Set(wire.NotificationSignatureHeader, notify.Sign(secret, time.Now(), body))
 	resp, err := http.DefaultClient.Do(r)
@@ -228,7 +229,7 @@ func TestNotifierReplyRejections(t *testing.T) {
 	// A stale signature timestamp is refused (replay window).
 	body, _ := json.Marshal(ok)
 	r, _ := http.NewRequest(http.MethodPost, f.srv.URL+wire.NotifierRepliesPath, bytes.NewReader(body))
-	r.Header.Set(wire.ComponentHeader, "corp")
+	r.Header.Set(component.ComponentHeader, "corp")
 	r.Header.Set(wire.NotificationSignatureHeader, notify.Sign(f.secret, time.Now().Add(-10*time.Minute), body))
 	if resp, err := http.DefaultClient.Do(r); err != nil || resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("stale signature = %v %v", resp, err)
@@ -276,7 +277,7 @@ func TestNotifierReplyExpiryMembershipAndRollout(t *testing.T) {
 	// with the same skewed clock the gateway now runs on.
 	body, _ := json.Marshal(wire.NotifierReplyRequest{ReplyToken: tok, Text: "late", IdempotencyKey: "k4"})
 	r, _ := http.NewRequest(http.MethodPost, f.srv.URL+wire.NotifierRepliesPath, bytes.NewReader(body))
-	r.Header.Set(wire.ComponentHeader, "corp")
+	r.Header.Set(component.ComponentHeader, "corp")
 	r.Header.Set(wire.NotificationSignatureHeader, notify.Sign(f.secret, expiredAt, body))
 	resp, err := http.DefaultClient.Do(r)
 	if err != nil || resp.StatusCode != http.StatusGone {

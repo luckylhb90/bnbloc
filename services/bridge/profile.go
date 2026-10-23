@@ -439,6 +439,7 @@ func (b *Bridge) sessionGuidance(ctx context.Context, d *drive, ep corepkg.Endpo
 	facts.HasRoomFiles = pull && d.caps.writer != nil
 	if facts.HasRoomFiles {
 		facts.Channel = b.guidanceChannel(ctx, d.job.RoomID, d.job.ChannelID)
+		facts.Services = serviceFactLines(b.jobFacts(ctx, d.job.RoomID, d.job.JobID))
 	}
 	facts.TeamLead = d.content.teamRoster() != nil
 	if d.caps.profile {

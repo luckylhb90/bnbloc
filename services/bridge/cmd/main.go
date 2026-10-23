@@ -113,6 +113,8 @@ func main() {
 		MountsDir:       mountsDir,
 		MountGuestRoots: mountRoots,
 		Account:         bridge.BridgeAccount(gateway, owner),
+		HostProxy:       strings.TrimSpace(config.FromEnvRaw("BNBLOC_SANDBOX_HOST_PROXY")),
+		PrivateHosts:    strings.FieldsFunc(config.FromEnvRaw("BNBLOC_SANDBOX_PRIVATE_HOSTS"), func(r rune) bool { return r == ',' || r == ' ' }),
 	}
 	// Memory only from here on: nothing this process spawns inherits the
 	// sandbox admin bearer.

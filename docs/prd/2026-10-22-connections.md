@@ -1,6 +1,7 @@
 # Connections: agents act as the person who asked, in the systems that person connected (2026-10-22)
 
-Status: proposed, ready to build. Owner: the **connections component**
+Status: building (slice 1 landed: docs/architecture/service-components.md;
+§6 lists where the build departs from the text below). Owner: the **connections component**
 (`bnbloc-connections`, its own repository: connectors, connecting,
 grants, policy, activity) and its provider components (an organization's
 SSO in the internal repository). The platform adds only generic primitives
@@ -355,3 +356,33 @@ Not in this round:
   lifetime and refresh (operator items, in the internal addendum).
 - Which external OAuth clients the organization registers, and which
   sensitive scopes need the provider's review.
+
+## 6. As built (2026-10-23)
+
+Where the build departs from §2, and why:
+
+- **One component kind, `service`** (`bnbloc.service.package/v1`): the
+  primitives are its declared `capabilities` (`turnProxy`, `egress`,
+  `roomFacts`, `pages`, `callbacks`, `store`), each reaching only its own
+  prefix of the service (`/turn/`, `/pages/`, `/callbacks/`).
+- **Cards ride the egress answer** (`EgressResponse.Card`) and the bridge
+  posts them under the job, shown to the requester only: the service needs
+  no route to the room, and a card is never posted for a turn the bridge
+  is not driving. No `POST /v1/component-cards`.
+- **Audit rides the answer** too (`X-Bnbloc-Audit` on any forwarded call):
+  the gateway records it for the person the call was attested for. No
+  `POST /v1/component-audit`.
+- **Share targets keep their page routes.** Moving them onto component
+  pages is a separate change with nothing to gain for connections now.
+- **Pages are listed by the service** (`GET /pages`, each with an
+  audience); a page not listed (a held change's) is still opened by a
+  card's action.
+- **The store has three scopes**: `members/<subject>`, `orgs/<org>`,
+  `shared`. Connectors are organization content (each organization adds
+  and enables its own, an org admin on the admin page), so a connector's
+  hosts and client values never cross organizations.
+- **`hostProxy` is host ports, not a space's one port**: a machine created
+  with `hostPorts` reaches them at `Discovery.hostAlias`; the desktop picks
+  the port per sandbox launch. A sandboxed own drive's space gets the
+  proxy with an egress alias bearer; its tunnels reach only public
+  addresses, the member's private hosts bypass it.

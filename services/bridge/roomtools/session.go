@@ -43,6 +43,14 @@ type Config struct {
 	// Names resolves people's display names (id → name) the way the
 	// bridge's records do (nil = ids only).
 	Names func(ctx context.Context, ids []string) map[string]string
+	// EgressDir holds the egress proxy's local CA (egress_ca.go): the
+	// member's directory. "" keeps it for this run only.
+	EgressDir string
+	// NoEgress turns the egress proxy off.
+	NoEgress bool
+	// ProxyAddr is a loopback address the proxy alone also listens on: the
+	// host port a sandbox opens to its guests (BNBLOC_SANDBOX_HOST_PROXY).
+	ProxyAddr string
 }
 
 // Default waits: ask_agent runs inside the dispatching agent's own turn,
@@ -122,6 +130,11 @@ type Session struct {
 	notes jobNotes
 	// host are the host tools this session fronts (hosttools.go).
 	host map[string]HostTool
+	// egress are the hosts services claim for the session, and the cards
+	// posted for the bound job (egress.go).
+	egress   egressHosts
+	cards    map[[2]string]bool
+	cardsJob string
 }
 
 // dispatched is one dispatch this session made.

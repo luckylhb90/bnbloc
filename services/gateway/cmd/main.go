@@ -114,6 +114,8 @@ type tenantWiring struct {
 	ContentJobs       gateway.ContentJobs
 	// NotifierReplies resolves notification reply tokens (N1).
 	NotifierReplies store.NotificationReplyTokenStore
+	// ComponentValues keeps service components' sealed values.
+	ComponentValues store.ComponentValueStore
 	// SSOHandoffs and RefreshTokens are the shared auth state every gateway
 	// replica reads (SSO hand-offs, refresh-token families).
 	SSOHandoffs   store.SSOHandoffStore
@@ -231,7 +233,7 @@ func resolveTenantWiring() tenantWiring {
 		}
 		return out, nil
 	}
-	return tenantWiring{Resolve: res.Resolve, RoomMembers: roomMembers, OrgAdmins: orgAdmins, TenantSettings: tenants.GetTenant, Suspended: suspended, MemberRole: memberRole, Settings: backends.Settings, ExtAudit: backends.ExtAudit, ComponentInstalls: backends.ComponentInstalls, NotifierReplies: backends.ReplyTokens, SSOHandoffs: backends.SSOHandoffs, RefreshTokens: backends.RefreshTokens, Profiles: backends.Profiles, MemberCount: memberCount, Health: backends.HealthCheck(),
+	return tenantWiring{Resolve: res.Resolve, RoomMembers: roomMembers, OrgAdmins: orgAdmins, TenantSettings: tenants.GetTenant, Suspended: suspended, MemberRole: memberRole, Settings: backends.Settings, ExtAudit: backends.ExtAudit, ComponentInstalls: backends.ComponentInstalls, NotifierReplies: backends.ReplyTokens, ComponentValues: backends.ComponentValues, SSOHandoffs: backends.SSOHandoffs, RefreshTokens: backends.RefreshTokens, Profiles: backends.Profiles, MemberCount: memberCount, Health: backends.HealthCheck(),
 		APITokens:   backends.APITokens,
 		RoomSources: backends.RoomSources, RoomInfo: backends.Room.GetRoom, AgentRuns: backends.AgentRuns(),
 		ContentComponents: backends.ContentComponents,
@@ -318,6 +320,7 @@ func main() {
 		ContentComponents: tw.ContentComponents,
 		ContentJobs:       tw.ContentJobs,
 		NotifierReplies:   tw.NotifierReplies,
+		ComponentValues:   tw.ComponentValues,
 		MemberCount:       tw.MemberCount,
 		RoomMembers:       tw.RoomMembers,
 		OrgAdmins:         tw.OrgAdmins,

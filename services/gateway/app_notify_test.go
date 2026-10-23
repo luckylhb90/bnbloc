@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/luckylhb90/bnbloc/component"
 	"net/http"
 	"slices"
 	"strings"
@@ -160,7 +161,7 @@ func (e *appGW) connectGroup(notifier, name, address string) int {
 	// The code as a person types it in the chat: any case.
 	body, _ := json.Marshal(wire.NotifierGroupBindRequest{Code: strings.ToLower(code.Code), Address: address})
 	req, _ := http.NewRequest(http.MethodPost, e.srv.URL+"/v1/notifier/group-binds", bytes.NewReader(body))
-	req.Header.Set(wire.ComponentHeader, notifier)
+	req.Header.Set(component.ComponentHeader, notifier)
 	req.Header.Set(wire.NotificationSignatureHeader, notify.Sign(secret, time.Now(), body))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

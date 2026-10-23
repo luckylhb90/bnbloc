@@ -26,7 +26,7 @@ export const EMPTY_AUDIT_FILTER: AuditLogFilter = { kind: "", actor: "", outcome
 // Kind filter groups: the server filters by a comma list of record kinds.
 export const AUDIT_KIND_GROUPS: readonly { readonly id: string; readonly label: string; readonly kinds: string }[] = [
   { id: "", label: "All kinds", kinds: "" },
-  { id: "components", label: "Components", kinds: "core,plugin,notifier,auth-provider,share-target,webhook" },
+  { id: "components", label: "Components", kinds: "core,plugin,notifier,auth-provider,share-target,service,webhook" },
   { id: "borrow", label: "Borrow decisions", kinds: "borrow" },
   { id: "agent_dispatch", label: "Agent dispatches", kinds: "agent_dispatch" },
   { id: "session", label: "Sessions", kinds: "session" },

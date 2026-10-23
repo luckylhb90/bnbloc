@@ -39,8 +39,8 @@ use std::time::{Duration, Instant};
 
 use crate::internal_ext::component_settings::{split_lines, Setting, Values, SCOPE_MEMBER};
 use crate::internal_ext::sandbox_api::{
-    create_machine_request, Discovery, MachineView, SandboxApi, CAPABILITY_EGRESS,
-    CAPABILITY_EGRESS_HOSTS,
+    create_machine_request, free_loopback_port, host_proxy_address, Discovery, MachineView,
+    SandboxApi, CAPABILITY_EGRESS, CAPABILITY_EGRESS_HOSTS,
 };
 use crate::internal_ext::sandbox_bundle;
 use crate::internal_ext::sidecar_model::{
@@ -72,6 +72,11 @@ pub(super) const ENV_WORKSPACES_ROOT: &str = "BNBLOC_SANDBOX_WORKSPACES_ROOT";
 pub(super) const ENV_OWN_MACHINE: &str = "BNBLOC_SANDBOX_OWN_MACHINE";
 /// The names the member lets into their own sandboxed runs (comma list).
 pub(super) const ENV_FORWARD: &str = "BNBLOC_SANDBOX_ENV";
+/// Where the guests reach the bridge's egress proxy (`<alias>:<port>`).
+pub(super) const ENV_HOST_PROXY: &str = "BNBLOC_SANDBOX_HOST_PROXY";
+/// The member's private hosts (comma list): their own runs reach them
+/// directly, never through the egress proxy.
+pub(super) const ENV_PRIVATE_HOSTS: &str = "BNBLOC_SANDBOX_PRIVATE_HOSTS";
 /// The bridge-stabilizing watcher's key for the sandbox handoff (a slash
 /// never appears in a core name, so it cannot collide with one).
 pub(super) const BRIDGE_KEY: &str = "sandbox/handoff";
@@ -125,6 +130,9 @@ pub(super) struct Launch {
     pub(super) busy: bool,
     pub(super) last_prewarm_attempt: Option<Instant>,
     pub(super) own: OwnLaunch,
+    /// The host port this launch's machines reach the bridge's egress proxy
+    /// at (hostProxy), picked once per launch.
+    pub(super) host_port: Option<u16>,
 }
 
 /// The member's own machine within a launch.
@@ -395,6 +403,10 @@ pub(crate) struct BridgeHandoff {
     pub(crate) workspaces_root: PathBuf,
     /// The member's own machine, while it runs with their private hosts.
     pub(crate) own_machine: Option<String>,
+    /// Where the guests reach the bridge's egress proxy (hostProxy).
+    pub(crate) host_proxy: Option<String>,
+    /// The private hosts the own machine opens.
+    pub(crate) private_hosts: Vec<String>,
 }
 
 /// The bridge env for `mode`, the member's forwarded names and the current
@@ -417,6 +429,12 @@ pub(crate) fn bridge_env(
         ));
         if let Some(own) = &h.own_machine {
             env.push((ENV_OWN_MACHINE.into(), own.clone()));
+            if !h.private_hosts.is_empty() {
+                env.push((ENV_PRIVATE_HOSTS.into(), h.private_hosts.join(",")));
+            }
+        }
+        if let Some(proxy) = &h.host_proxy {
+            env.push((ENV_HOST_PROXY.into(), proxy.clone()));
         }
         if !forward.is_empty() {
             env.push((ENV_FORWARD.into(), forward.join(",")));
@@ -438,14 +456,16 @@ pub(super) fn bridge_fingerprint(
         return mode.as_str().to_string();
     };
     format!(
-        "{}|{}|{}|{}|{}|{}|{}",
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}",
         mode.as_str(),
         h.seq,
         h.url,
         h.machine,
         h.own_machine.as_deref().unwrap_or_default(),
         h.vmexec.display(),
-        forward.join(",")
+        forward.join(","),
+        h.host_proxy.as_deref().unwrap_or_default(),
+        h.private_hosts.join(",")
     )
 }
 
@@ -681,6 +701,7 @@ impl Adapter {
                 busy: false,
                 last_prewarm_attempt: None,
                 own: OwnLaunch::default(),
+                host_port: free_loopback_port(),
             });
             state.seq
         };
@@ -1073,6 +1094,7 @@ impl Adapter {
                         &discovery,
                         &owner,
                         &hosts,
+                        self.with_launch(seq, |l| l.host_port).flatten(),
                     );
                     api.create_machine(req).await.map_err(|e| e.to_string())
                 }
@@ -1205,6 +1227,7 @@ impl Adapter {
                         // Never a private host: borrowed and platform runs
                         // execute here.
                         &[],
+                        self.with_launch(seq, |l| l.host_port).flatten(),
                     );
                     api.create_machine(req)
                         .await
@@ -1400,6 +1423,16 @@ impl Adapter {
                 .own
                 .handoff
                 .then(|| self.own_machine_name().to_string()),
+            host_proxy: launch
+                .discovery
+                .as_ref()
+                .and_then(|d| host_proxy_address(d, launch.host_port)),
+            private_hosts: launch
+                .own
+                .handoff
+                .then(|| launch.own.machine.as_ref().map(|m| m.egress_hosts.clone()))
+                .flatten()
+                .unwrap_or_default(),
         })
     }
 
@@ -1641,6 +1674,8 @@ mod tests {
             machine: MACHINE_NAME.into(),
             workspaces_root: PathBuf::from("/Users/me/bnbloc-workspaces"),
             own_machine: None,
+            host_proxy: None,
+            private_hosts: Vec::new(),
         }
     }
 
@@ -1699,6 +1734,19 @@ mod tests {
                 .into_iter()
                 .collect();
         assert_eq!(env[ENV_OWN_MACHINE], "bnbloc-own");
+        assert!(!env.contains_key(ENV_HOST_PROXY) && !env.contains_key(ENV_PRIVATE_HOSTS));
+        let proxied = BridgeHandoff {
+            own_machine: Some(OWN_MACHINE_NAME.into()),
+            host_proxy: Some("host.vm.internal:41234".into()),
+            private_hosts: vec!["npm.internal.example".into()],
+            ..h.clone()
+        };
+        let env: std::collections::HashMap<_, _> =
+            bridge_env(BridgeMode::Known(SandboxMode::All), none, Some(&proxied))
+                .into_iter()
+                .collect();
+        assert_eq!(env[ENV_HOST_PROXY], "host.vm.internal:41234");
+        assert_eq!(env[ENV_PRIVATE_HOSTS], "npm.internal.example");
 
         let forward = vec!["EXAMPLE_API_KEY".to_string(), "EXAMPLE_*".to_string()];
         let env: std::collections::HashMap<_, _> =

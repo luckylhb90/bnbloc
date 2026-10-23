@@ -154,6 +154,7 @@ func Run(t *testing.T, cfg Config) {
 		{"warmPool", s.warmPool, false},
 		{"spaceRestart", s.spaceRestart, false},
 		{"durableHomes", s.durableHomes, false},
+		{"hostProxy", s.hostProxy, false},
 		{"deleteSpace", s.deleteSpace, false},
 		{"deleteMachine", s.deleteMachine, false},
 	}
@@ -1526,6 +1527,59 @@ func (s *suite) durableHomes(t *testing.T) {
 		t.Fatalf("after a purge the home holds %q; want it empty", got)
 	}
 	_ = s.c.DeleteSpace(s.ctx, s.ep, second.ID, name, true)
+}
+
+// hostProxy: a machine created with HostPorts reaches that host loopback
+// port at Discovery.HostAlias, under the default (deny) egress, and no other
+// host port; a request for HostPorts without the capability is refused.
+func (s *suite) hostProxy(t *testing.T) {
+	serve := func() (net.Listener, int) {
+		t.Helper()
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		go func() {
+			for {
+				c, err := ln.Accept()
+				if err != nil {
+					return
+				}
+				_, _ = c.Write([]byte("HTTP/1.0 200 OK\r\nContent-Length: 8\r\n\r\nhost-ok\n"))
+				_ = c.Close()
+			}
+		}()
+		return ln, ln.Addr().(*net.TCPAddr).Port
+	}
+	open, openPort := serve()
+	defer open.Close()
+	closed, closedPort := serve()
+	defer closed.Close()
+	req := protocol.CreateMachineRequest{Image: s.cfg.Image, MemoryMiB: 256, HostPorts: []int{openPort}}
+	if !s.has(protocol.CapabilityHostProxy) {
+		if _, err := s.c.CreateMachine(s.ctx, s.ep, req); protocol.ErrorCodeOf(err) != protocol.ErrorCapabilityMissing {
+			t.Fatalf("hostPorts without hostProxy: %v, want capability_missing", err)
+		}
+		return
+	}
+	if s.disc.HostAlias == "" {
+		t.Fatal("hostProxy without a hostAlias in discovery")
+	}
+	m, err := s.c.CreateMachine(s.ctx, s.ep, req)
+	if err != nil {
+		t.Fatalf("create machine with a host port: %v", err)
+	}
+	s.track(m)
+	if len(m.HostPorts) != 1 || m.HostPorts[0] != openPort {
+		t.Fatalf("machine host ports = %v, want [%d]", m.HostPorts, openPort)
+	}
+	if got := s.probe(t, m.ID, "http://"+net.JoinHostPort(s.disc.HostAlias, strconv.Itoa(openPort))+"/"); got != "REACHED" {
+		t.Fatalf("the host port is not reachable at %s (%s)", s.disc.HostAlias, got)
+	}
+	if got := s.probe(t, m.ID, "http://"+net.JoinHostPort(s.disc.HostAlias, strconv.Itoa(closedPort))+"/"); got != "BLOCKED" {
+		t.Fatalf("another host port is reachable (%s)", got)
+	}
+	_ = s.c.DeleteMachine(s.ctx, s.ep, m.ID)
 }
 
 func (s *suite) deleteSpace(t *testing.T) {

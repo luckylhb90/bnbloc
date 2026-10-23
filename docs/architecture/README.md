@@ -37,6 +37,15 @@ extend it" references.
   installed share-target component (`bnbloc.share-target.package/v1`): the
   contract, who builds the card, what the gateway checks and audits.
 
+## Service components
+
+- [Service components](service-components.md) — an endpoint component that
+  acts for members and their agents' turns through primitives it declares
+  (`bnbloc.service.package/v1`): the attested turn, egress through the
+  service (the bridge's proxy and local CA, sandboxed commands through
+  `hostProxy`), room facts, cards, pages, callbacks, the sealed store and
+  the audit header.
+
 ## Rooms and Agents
 
 - [Room agent roster and remote deployment](room-agent-roster.md) — how members

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/luckylhb90/bnbloc/component"
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
 	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
@@ -155,6 +156,19 @@ func (s *Service) routes() []route {
 		// The member component surface: the rollout-filtered catalog and
 		// opt-in installs.
 		member("GET /v1/components", s.handleComponents),
+		// Service components (service_components.go, component_store.go).
+		member("GET /v1/my/turn-services", s.handleTurnServices),
+		gated("GET "+component.TurnProxyPath+"{component}/{path...}", drive, s.handleTurnProxy),
+		gated("POST "+component.TurnProxyPath+"{component}/{path...}", drive, s.handleTurnProxy),
+		member("GET /v1/my/component-pages", s.handleComponentPages),
+		member("POST /v1/my/component-pages/{component}/{page}", s.handleOpenComponentPage),
+		open("GET "+component.ComponentPagePath+"{ticket}/{path...}", "a page ticket in the path", s.handleComponentPage),
+		open("POST "+component.ComponentPagePath+"{ticket}/{path...}", "a page ticket in the path", s.handleComponentPage),
+		open("GET "+component.ComponentCallbackPath+"{component}/{path...}", "another system's redirect: the service checks its own state", s.handleComponentCallback).spends(publicBudget),
+		open("POST "+component.ComponentCallbackPath+"{component}/{path...}", "another system's redirect: the service checks its own state", s.handleComponentCallback).spends(publicBudget),
+		open("GET "+component.ComponentStorePath+"{path...}", "the service's signature", s.handleComponentStore),
+		open("PUT "+component.ComponentStorePath+"{path...}", "the service's signature", s.handleComponentStore),
+		open("DELETE "+component.ComponentStorePath+"{path...}", "the service's signature", s.handleComponentStore),
 		member("GET /v1/my/share-targets", s.handleShareTargets),
 		member("POST /v1/my/share-targets/{name}/sessions", s.handleShareSession).spends(costBudget),
 		open("GET "+shareTargetsPrefix+"{name}/pages/{ticket}/", "a share ticket in the path", s.handleSharePage).spends(publicBudget),

@@ -225,6 +225,259 @@ export interface RelaySession {
   byRequester: boolean;
 }
 
+// ---- component/service.go ----
+
+// ServiceContractV1 pins the service component contract.
+export const ServiceContractV1 = "bnbloc.service.contract/v1";
+
+// The primitives a service component declares (package capabilities). It
+// gets none it does not declare.
+// ServiceTurnProxy: a bridge may call the component for a turn it
+// drives (TurnProxyPath), the turn attested in TurnHeader.
+export const ServiceTurnProxy = "turnProxy";
+// ServiceEgress: the turn's HTTPS to the hosts the component claims
+// (ServiceEgressHostsPath) goes through it (ServiceEgressRequestPath).
+// Needs ServiceTurnProxy.
+export const ServiceEgress = "egress";
+// ServiceRoomFacts: the component adds a line and files to the room's
+// records for the turn (ServiceFactsPath). Needs ServiceTurnProxy.
+export const ServiceRoomFacts = "roomFacts";
+// ServicePages: members open the component's pages (ServicePagesPath).
+export const ServicePages = "pages";
+// ServiceCallbacks: another system redirects a browser to the
+// component's stable callback address (ComponentCallbackPath).
+export const ServiceCallbacks = "callbacks";
+// ServiceStore: the component keeps sealed values in the platform
+// (ComponentStorePath).
+export const ServiceStore = "store";
+
+// ServiceCapabilities is every primitive a service component may declare.
+export const ServiceCapabilities: readonly string[] = ["turnProxy", "egress", "roomFacts", "pages", "callbacks", "store"];
+
+// ServiceNeeds is the primitive another one needs.
+export const ServiceNeeds: Readonly<Record<string, string>> = { egress: "turnProxy", roomFacts: "turnProxy" };
+
+// Paths the component serves, appended to its endpoint base URL. Each
+// primitive reaches only its own prefix: a turn's call never reaches a
+// page, a callback never reaches a turn's route.
+// ServiceDiscoverPath answers {name, contract}.
+export const ServiceDiscoverPath = "/discover";
+// ServiceTurnPrefix: TurnProxyPath/{component}/{path} reaches
+// ServiceTurnPrefix + path.
+export const ServiceTurnPrefix = "/turn/";
+// ServiceEgressHostsPath answers EgressHosts for the turn.
+export const ServiceEgressHostsPath = "/turn/egress/hosts";
+// ServiceEgressRequestPath takes an EgressRequest and answers an
+// EgressResponse.
+export const ServiceEgressRequestPath = "/turn/egress/request";
+// ServiceFactsPath answers Facts for the turn.
+export const ServiceFactsPath = "/turn/facts";
+// ServicePagesPath answers PageList; ServicePagesPath + "/{page}[/...]"
+// serves a page to a member (MemberHeader).
+export const ServicePagesPath = "/pages";
+// ServiceCallbackPrefix: ComponentCallbackPath/{component}/{path}
+// reaches ServiceCallbackPrefix + path.
+export const ServiceCallbackPrefix = "/callbacks/";
+
+// Platform routes, on the gateway.
+// TurnProxyPath + "{component}/{path}?room=&job=": a bridge's call for
+// a job it drives.
+export const TurnProxyPath = "/v1/turn-proxy/";
+// ComponentStorePath + "{scope}/{key}": a component's sealed values
+// (StoreScope), signed by the component.
+export const ComponentStorePath = "/v1/component-store/";
+// ComponentCallbackPath + "{component}/{path}": open; forwarded signed.
+export const ComponentCallbackPath = "/v1/component-callbacks/";
+// ComponentPagePath + "{ticket}/{path}": a page a member opened.
+export const ComponentPagePath = "/v1/component-pages/";
+
+// Headers of the contract.
+// TurnHeader carries the attested Turn (EncodeHeader) on a turn call.
+export const TurnHeader = "X-Bnbloc-Turn";
+// MemberHeader carries the Member a page is served to.
+export const MemberHeader = "X-Bnbloc-Member";
+// CallbackHeader carries the Callback facts on a callback.
+export const CallbackHeader = "X-Bnbloc-Callback";
+// ComponentHeader names the endpoint component that signed a call to
+// the platform (SignatureHeader with that component's credential):
+// "<kind>/<name>" ("service/<name>" for a service; a notifier's reply
+// routes take its name alone).
+export const ComponentHeader = "X-Bnbloc-Component";
+// AuditHeader, on a component's answer to a forwarded call, is one
+// Audit row the platform records in the organization's audit log,
+// attributed to the component.
+export const AuditHeader = "X-Bnbloc-Audit";
+
+// Drives: whose agent runs the turn, as the platform attests it.
+// DriveOwn: the requester's own agent (or a schedule they created).
+export const DriveOwn = "own";
+// DriveBorrowed: another member's agent the requester borrowed.
+export const DriveBorrowed = "borrowed";
+// DrivePlatform: a platform agent.
+export const DrivePlatform = "platform";
+
+// Turn is the turn a turn call is for: the organization, room, channel and
+// job, the person whose request it runs (Requester), the agent's owner
+// (AgentOwner), the drive, whether its commands run in a sandbox, and the
+// platform's public origin (for links the component hands out).
+export interface Turn {
+  org: string;
+  room: string;
+  channel?: string;
+  job: string;
+  requester: string;
+  agentOwner: string;
+  drive: string;
+  origin: string;
+}
+
+// Member is who a page is served to: their subject, organization and role
+// there, the page, the page's own address (PageURL: what its forms and
+// scripts call, ending in "/") and the platform's public origin.
+export interface Member {
+  subject: string;
+  org: string;
+  role: string;
+  page: string;
+  pageUrl: string;
+  origin: string;
+}
+
+// Callback is what a callback carries: the platform's public origin and
+// the callback's own address.
+export interface Callback {
+  origin: string;
+  url: string;
+}
+
+// Audit is one audit row a component records with its answer.
+export interface Audit {
+  action: string;
+  target?: string;
+  outcome: string;
+  detail?: string;
+}
+
+// Facts are a component's part of the room's records for a turn: Line
+// joins the records' list in the session guidance (at most MaxFactsLine
+// characters, one line), Files are written under .room/<component>/ (paths
+// relative to it, at most MaxFactsFiles and MaxFactsBytes in all).
+export interface Facts {
+  line: string;
+  files?: Record<string, string>;
+}
+
+// Facts bounds.
+export const MaxFactsLine = 200;
+export const MaxFactsFiles = 32;
+export const MaxFactsBytes = 65536;
+
+// EgressHosts are the hosts a component handles for the turn (exact names,
+// lower case; none for a turn it will not serve), and the environment the
+// session's commands get beside them (placeholders a CLI needs before it
+// runs; never a credential, since every credential sent to a claimed host
+// is replaced).
+export interface EgressHosts {
+  hosts: string[];
+  env?: Record<string, string>;
+}
+
+// MaxEgressHosts bounds the hosts one component claims.
+export const MaxEgressHosts = 256;
+
+// EgressRequest is one HTTPS request a turn's command sent to a claimed
+// host, as the bridge read it: URL is absolute (https://host/path?query).
+export interface EgressRequest {
+  method: string;
+  url: string;
+  header?: Record<string, string[]>;
+  body?: string;
+}
+
+// EgressResponse is the answer the command gets, and a card for the
+// requester when the component needs them (a connection to make, a change
+// to allow): the bridge posts it in the room, shown only to them.
+export interface EgressResponse {
+  status: number;
+  header?: Record<string, string[]>;
+  body?: string;
+  card?: Card;
+}
+
+// MaxEgressBody bounds an egress request's and answer's body.
+export const MaxEgressBody = 8388608;
+
+// Card is a component's card for one member: plain text the platform
+// renders, and at most MaxCardActions actions.
+export interface Card {
+  title: string;
+  text?: string;
+  actions?: CardAction[];
+}
+
+// Card actions.
+// CardOpen opens one of the component's pages (Page, with Query).
+export const CardOpen = "open";
+// CardAskAgain sends the turn's request to the same agent again.
+export const CardAskAgain = "ask-again";
+
+// CardAction is one button of a card.
+export interface CardAction {
+  kind: string;
+  label: string;
+  page?: string;
+  query?: string;
+}
+
+// Card bounds.
+export const MaxCardTitle = 120;
+export const MaxCardText = 1000;
+export const MaxCardActions = 3;
+
+// Page audiences.
+export const AudienceMember = "member";
+export const AudienceAdmin = "admin";
+
+// Page is one page a component serves: its name (ValidPageName), the label
+// members see and who it is for. An admin page is listed only to an
+// organization admin; the component still checks Member.Role itself.
+export interface Page {
+  name: string;
+  label: string;
+  audience: string;
+}
+
+// PageList is the answer of ServicePagesPath.
+export interface PageList {
+  pages: Page[];
+}
+
+// Store scopes: whose a value is. A member's values go when the member
+// leaves the organization; every value goes when the component is
+// uninstalled.
+// StoreMembers + "/<subject>": one member's.
+export const StoreMembers = "members";
+// StoreOrgs + "/<org>": one organization's.
+export const StoreOrgs = "orgs";
+// StoreShared: the component's own, for every organization.
+export const StoreShared = "shared";
+
+// MaxStoreValue bounds one stored value; MaxStoreKey one key.
+export const MaxStoreValue = 65536;
+export const MaxStoreKey = 128;
+
+// ---- component/signature.go ----
+
+// SignatureHeader carries the signature of a call between the platform and
+// an endpoint component, in either direction:
+// "t=<unix seconds>,v1=<hex HMAC-SHA256(secret, "<unix>." + signed)>".
+// signed is the call's body, or what a call without one signs in its place
+// (SignedRequest). The secret is the component's credential.
+export const SignatureHeader = "X-Bnbloc-Signature";
+
+// SignatureTolerance is the receiver-side timestamp window.
+export const SignatureTolerance = 300000000000;
+
 // ---- component unions (//wire:union) ----
 export type LiveDialogKind = "alert" | "confirm" | "prompt" | "beforeunload";
 export const LiveDialogKindValues: readonly LiveDialogKind[] = ["alert", "confirm", "prompt", "beforeunload"];
@@ -1310,7 +1563,7 @@ export const AttachmentTypes: readonly AttachmentType[] = [{ mime: "image/png", 
 export const TruncatedHeader = "X-Bnbloc-Truncated";
 
 // Audit log entry kinds written by the platform itself. Component kinds
-// (core, plugin, notifier, auth-provider, share-target, webhook) are the extension kinds
+// (core, plugin, notifier, auth-provider, share-target, service, webhook) are the extension kinds
 // recorded by the component lifecycle and their deliveries.
 export const AuditKindBorrow = "borrow";
 export const AuditKindSession = "session";
@@ -4255,15 +4508,8 @@ export interface NotificationReplyRecipient {
   core?: string;
 }
 
-// Notifier reply seam (N1): a notifier component posts a member's reply to a
-// notification back into bnbloc.
 // NotifierRepliesPath is the gateway route a notifier posts replies to.
 export const NotifierRepliesPath = "/v1/notifier/replies";
-// ComponentHeader names the endpoint component that signed a call to
-// the gateway (X-Bnbloc-Signature uses that component's credential): a
-// notifier's reply routes take its name, GET /v1/component-settings
-// "<kind>/<name>".
-export const ComponentHeader = "X-Bnbloc-Component";
 
 // NotifierReplyRequest is the signed body of POST /v1/notifier/replies.
 // IdempotencyKey is the receiving system's id of the reply message: a retry
@@ -5505,6 +5751,72 @@ export interface SearchUpdateStats {
   applied: number;
   failed: number;
   dropped: number;
+}
+
+// ---- wire/service_components.go ----
+
+// TurnService is one service a bridge may call for its turns
+// (GET /v1/my/turn-services): its name and the primitives it declared.
+export interface TurnService {
+  name: string;
+  capabilities: string[];
+}
+
+// TurnServiceList answers GET /v1/my/turn-services.
+export interface TurnServiceList {
+  services: TurnService[];
+}
+
+// ComponentPageInfo is one page a member may open
+// (GET /v1/my/component-pages): the component, the page's name, label and
+// audience.
+export interface ComponentPageInfo {
+  component: string;
+  name: string;
+  label: string;
+  audience: string;
+}
+
+// ComponentPageList answers GET /v1/my/component-pages. Unreadable names
+// the services whose pages could not be read.
+export interface ComponentPageList {
+  pages: ComponentPageInfo[];
+  unreadable?: string[];
+}
+
+// ComponentPageOpen opens a page (POST /v1/my/component-pages/{component}/{page}):
+// Query is passed to the page.
+export interface ComponentPageOpen {
+  query?: string;
+}
+
+// ComponentPageSession is the opened page's address: it carries the
+// member's ticket.
+export interface ComponentPageSession {
+  url: string;
+}
+
+// NoticeComponentCard is a service component's card for the turn's
+// requester (payload.card: a ComponentCard), shown to them only.
+export const NoticeComponentCard = "component-card";
+
+// ComponentCard is a service component's card as the feed shows it: the
+// component, the person it is for, and the card itself (plain text and
+// actions, component.Card's shape).
+export interface ComponentCard {
+  component: string;
+  for: string;
+  title: string;
+  text?: string;
+  actions?: ComponentCardAction[];
+}
+
+// ComponentCardAction is one button of a ComponentCard.
+export interface ComponentCardAction {
+  kind: string;
+  label: string;
+  page?: string;
+  query?: string;
 }
 
 // ---- wire/share_targets.go ----

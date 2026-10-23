@@ -96,6 +96,13 @@ type Server struct {
 	// calls are the tool calls made for each job, until its outcome takes
 	// them (calls.go).
 	calls callRecord
+	// ca is the egress proxy's local CA (nil: no egress proxy).
+	ca *egressCA
+	// aliases are egress-only bearers of sessions (AliasEgress); proxyLn
+	// the extra proxy listener sandboxed commands reach (Config.ProxyAddr).
+	aliases  map[[sha256.Size]byte]egressAlias
+	proxyLn  net.Listener
+	proxySrv *http.Server
 }
 
 // retiredSession is a revoked session's live-view remainder: the jobs it
@@ -122,18 +129,46 @@ func Start(cfg Config) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("roomtools: listen: %w", err)
 	}
-	s := &Server{cfg: cfg, ln: ln, sessions: map[[sha256.Size]byte]*Session{}, retired: map[[sha256.Size]byte]*retiredSession{}}
+	s := &Server{cfg: cfg, ln: ln, sessions: map[[sha256.Size]byte]*Session{}, retired: map[[sha256.Size]byte]*retiredSession{}, aliases: map[[sha256.Size]byte]egressAlias{}}
 	s.tools = DefaultRegistry()
+	if !cfg.NoEgress {
+		if s.ca, err = loadEgressCA(cfg.EgressDir); err != nil {
+			slog.Warn("bnbloc bridge egress proxy off: its CA could not be loaded", "event", "bnbloc.bridge.egress_ca_failed", "error", err)
+		}
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc(Endpoint, s.handle)
 	mux.HandleFunc(RelayPath+"/", s.handleRelay)
 	mux.HandleFunc(ToolsPath+"/", s.handleHostTool)
-	s.srv = &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	s.srv = &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodConnect {
+			s.handleConnect(w, r)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	}), ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		if err := s.srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Warn("bnbloc bridge room tools server stopped", "event", "bnbloc.bridge.roomtools_stopped", "error", err)
 		}
 	}()
+	if cfg.ProxyAddr != "" && s.ca != nil {
+		// The proxy alone, on the port the sandbox opens to its guests
+		// (the machine reaches only this host port).
+		if pln, err := net.Listen("tcp", cfg.ProxyAddr); err != nil {
+			slog.Warn("bnbloc bridge egress proxy for sandboxed commands off: its address is taken", "event", "bnbloc.bridge.egress_proxy_listen_failed", "addr", cfg.ProxyAddr, "error", err)
+		} else {
+			s.proxyLn = pln
+			s.proxySrv = &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodConnect {
+					http.Error(w, "this address is an HTTPS proxy only", http.StatusMethodNotAllowed)
+					return
+				}
+				s.handleConnect(w, r)
+			}), ReadHeaderTimeout: 10 * time.Second}
+			go func() { _ = s.proxySrv.Serve(pln) }()
+		}
+	}
 	return s, nil
 }
 
@@ -164,9 +199,13 @@ func (s *Server) Close() error {
 		delete(s.sessions, k)
 	}
 	clear(s.retired)
+	clear(s.aliases)
 	s.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
+	if s.proxySrv != nil {
+		_ = s.proxySrv.Shutdown(ctx)
+	}
 	return s.srv.Shutdown(ctx)
 }
 
@@ -212,6 +251,7 @@ func (s *Server) Revoke(sess *Session) {
 	jobs := sess.droveJobs()
 	s.mu.Lock()
 	k := sha256.Sum256([]byte(sess.token))
+	s.dropAliasesLocked(sess)
 	if s.sessions[k] == sess {
 		delete(s.sessions, k)
 		if len(jobs) > 0 {

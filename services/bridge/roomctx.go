@@ -188,6 +188,8 @@ func (b *Bridge) roomRecordFiles(ctx context.Context, room, jobID string, self r
 	if lerr != nil {
 		slog.Debug("bnbloc bridge library unreadable", "event", "bnbloc.bridge.roomctx_library_failed", "room", room, "job", jobID, "error", lerr)
 	}
+	// The service components' files for this turn (turn_services.go).
+	files = append(files, serviceFactFiles(b.jobFacts(ctx, room, jobID))...)
 	files = append(files,
 		roomlog.DeliverablesFile(deliverables, derr, self, copies),
 		roomlog.LibraryFile(library, lerr),

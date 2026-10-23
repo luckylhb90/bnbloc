@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"context"
+	"reflect"
 	"regexp"
 	"strings"
 	"sync"
@@ -183,7 +184,7 @@ func TestSessionContributorReachesProfileCore(t *testing.T) {
 	// The room tools' usage is session guidance (HasTools), worded by
 	// roomlog alone: the contributor adds none of its own.
 	if facts, _, _ := cutGuidance(p.Instructions); len(p.MCPServers) != 1 || p.MCPServers[0].Name != "room" || profileContent(t, p) != "" ||
-		facts != (roomlog.Guidance{Self: "maya/agent-a", HasTools: true, HasRoomFiles: true, Channel: roomlog.GuidanceChannel("ch")}) {
+		!reflect.DeepEqual(facts, roomlog.Guidance{Self: "maya/agent-a", HasTools: true, HasRoomFiles: true, Channel: roomlog.GuidanceChannel("ch")}) {
 		t.Fatalf("profile = %+v", p)
 	}
 	mu.Lock()

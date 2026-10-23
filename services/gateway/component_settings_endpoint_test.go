@@ -3,6 +3,7 @@ package gateway
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/luckylhb90/bnbloc/component"
 	"io"
 	"net/http"
 	"reflect"
@@ -60,11 +61,11 @@ func installAskingAuthProvider(t *testing.T, svc *Service, srvURL, token string,
 }
 
 // askSettings is an endpoint component's ask, signed with secret at at.
-func askSettings(t *testing.T, srvURL, component, secret string, at time.Time) (int, []byte) {
+func askSettings(t *testing.T, srvURL, comp, secret string, at time.Time) (int, []byte) {
 	t.Helper()
 	req, _ := http.NewRequest(http.MethodGet, srvURL+wire.ComponentSettingsPath, nil)
-	if component != "" {
-		req.Header.Set(wire.ComponentHeader, component)
+	if comp != "" {
+		req.Header.Set(component.ComponentHeader, comp)
 	}
 	if secret != "" {
 		req.Header.Set(wire.NotificationSignatureHeader, notify.Sign(secret, at, []byte("GET "+wire.ComponentSettingsPath)))
@@ -203,7 +204,7 @@ func TestEndpointSettingsAskRefusals(t *testing.T) {
 	}
 	// A signature over another path does not verify here.
 	req, _ := http.NewRequest(http.MethodGet, srv.URL+wire.ComponentSettingsPath, nil)
-	req.Header.Set(wire.ComponentHeader, "auth-provider/sso-other")
+	req.Header.Set(component.ComponentHeader, "auth-provider/sso-other")
 	req.Header.Set(wire.NotificationSignatureHeader, notify.Sign(other, now, []byte("GET /v1/notifier/replies")))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -267,7 +268,7 @@ func TestLegacyNotifierSecretStillVerifies(t *testing.T) {
 	}
 	body := []byte(`{"replyToken":"rt_unknown","text":"hi","idempotencyKey":"k1"}`)
 	req, _ := http.NewRequest(http.MethodPost, e.srv.URL+wire.NotifierRepliesPath, bytes.NewReader(body))
-	req.Header.Set(wire.ComponentHeader, "n1")
+	req.Header.Set(component.ComponentHeader, "n1")
 	req.Header.Set(wire.NotificationSignatureHeader, notify.Sign(legacy, time.Now(), body))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

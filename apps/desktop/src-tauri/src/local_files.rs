@@ -115,19 +115,27 @@ impl LocalFiles {
     }
 
     fn with<T>(&self, f: impl FnOnce(&mut State) -> Result<T, String>) -> Result<T, String> {
-        let mut st = self.inner.lock().map_err(|_| "local files state poisoned".to_string())?;
+        let mut st = self
+            .inner
+            .lock()
+            .map_err(|_| "local files state poisoned".to_string())?;
         f(&mut st)
     }
 
     /// Records an opened path (a new token, or the path's existing one).
     pub(crate) fn open(&self, path: &Path) -> Result<Opened, String> {
-        let path = std::fs::canonicalize(path).map_err(|e| format!("open {}: {e}", path.display()))?;
+        let path =
+            std::fs::canonicalize(path).map_err(|e| format!("open {}: {e}", path.display()))?;
         let meta = std::fs::metadata(&path).map_err(|e| format!("open {}: {e}", path.display()))?;
         if !meta.is_file() {
             return Err(format!("{} is not a file", path.display()));
         }
         if meta.len() > MAX_BYTES {
-            return Err(format!("{} is larger than {} MiB", file_name(&path), MAX_BYTES >> 20));
+            return Err(format!(
+                "{} is larger than {} MiB",
+                file_name(&path),
+                MAX_BYTES >> 20
+            ));
         }
         let hash = hash_file(&path)?;
         self.with(|st| {
@@ -209,7 +217,9 @@ impl State {
     }
 
     fn persist(&self) -> Result<(), String> {
-        let Some(file) = &self.file else { return Ok(()) };
+        let Some(file) = &self.file else {
+            return Ok(());
+        };
         let raw = serde_json::to_vec_pretty(&self.entries).map_err(|e| e.to_string())?;
         files::atomic_write(file, &raw)
     }
@@ -237,7 +247,10 @@ pub(crate) fn hand(app: &tauri::AppHandle, paths: Vec<PathBuf>) {
 
 /// The paths handed over before setup (see EARLY).
 pub(crate) fn take_early() -> Vec<PathBuf> {
-    EARLY.lock().map(|mut e| std::mem::take(&mut *e)).unwrap_or_default()
+    EARLY
+        .lock()
+        .map(|mut e| std::mem::take(&mut *e))
+        .unwrap_or_default()
 }
 
 /// The paths among a launch's arguments (argv[0] excluded): a shell's
@@ -263,12 +276,22 @@ pub(crate) fn paths_in_urls(urls: &[tauri::Url]) -> Vec<PathBuf> {
 /// A sibling name for a copy that never replaces an existing file:
 /// `deck (bnbloc v5).pptx`, then `deck (bnbloc v5) 2.pptx`, …
 pub(crate) fn copy_path(path: &Path, version: u32) -> PathBuf {
-    let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-    let ext = path.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+    let stem = path
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let ext = path
+        .extension()
+        .map(|e| format!(".{}", e.to_string_lossy()))
+        .unwrap_or_default();
     let base = format!("{stem} (bnbloc v{version})");
     let mut n = 1;
     loop {
-        let name = if n == 1 { format!("{base}{ext}") } else { format!("{base} {n}{ext}") };
+        let name = if n == 1 {
+            format!("{base}{ext}")
+        } else {
+            format!("{base} {n}{ext}")
+        };
         let candidate = path.with_file_name(name);
         if !candidate.exists() {
             return candidate;
@@ -278,11 +301,16 @@ pub(crate) fn copy_path(path: &Path, version: u32) -> PathBuf {
 }
 
 fn file_name(path: &Path) -> String {
-    path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+    path.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }
 
 fn hash_bytes(raw: &[u8]) -> String {
-    Sha256::digest(raw).iter().map(|b| format!("{b:02x}")).collect()
+    Sha256::digest(raw)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 fn hash_file(path: &Path) -> Result<String, String> {
@@ -291,7 +319,10 @@ fn hash_file(path: &Path) -> Result<String, String> {
 }
 
 fn new_token() -> Result<String, String> {
-    Ok(crate::secret::random_bytes(16)?.iter().map(|b| format!("{b:02x}")).collect())
+    Ok(crate::secret::random_bytes(16)?
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect())
 }
 
 fn now_ms() -> u64 {
@@ -316,7 +347,11 @@ fn header<'a>(request: &'a tauri::ipc::Request<'_>, name: &str) -> Result<&'a st
 pub(crate) async fn local_file_pick(app: tauri::AppHandle) -> Result<Option<Opened>, String> {
     use tauri_plugin_dialog::DialogExt;
     let picked = tauri::async_runtime::spawn_blocking(move || {
-        let path = app.dialog().file().set_title("Open a file").blocking_pick_file();
+        let path = app
+            .dialog()
+            .file()
+            .set_title("Open a file")
+            .blocking_pick_file();
         (app, path)
     })
     .await
@@ -329,13 +364,18 @@ pub(crate) async fn local_file_pick(app: tauri::AppHandle) -> Result<Option<Open
 
 /// The opens the OS handed the app since the web last asked.
 #[tauri::command]
-pub(crate) fn local_file_take_pending(state: tauri::State<'_, LocalFiles>) -> Result<Vec<Opened>, String> {
+pub(crate) fn local_file_take_pending(
+    state: tauri::State<'_, LocalFiles>,
+) -> Result<Vec<Opened>, String> {
     state.with(|st| Ok(std::mem::take(&mut st.pending)))
 }
 
 /// An opened file's bytes, as they are on disk now.
 #[tauri::command]
-pub(crate) fn local_file_read(state: tauri::State<'_, LocalFiles>, token: String) -> Result<tauri::ipc::Response, String> {
+pub(crate) fn local_file_read(
+    state: tauri::State<'_, LocalFiles>,
+    token: String,
+) -> Result<tauri::ipc::Response, String> {
     let path = state.entry_path(&token)?;
     let raw = std::fs::read(&path).map_err(|e| format!("read {}: {e}", file_name(&path)))?;
     let hash = hash_bytes(&raw);
@@ -348,7 +388,11 @@ pub(crate) fn local_file_read(state: tauri::State<'_, LocalFiles>, token: String
 
 /// Records the room file the bytes last read became.
 #[tauri::command]
-pub(crate) fn local_file_bind(state: tauri::State<'_, LocalFiles>, token: String, binding: Binding) -> Result<(), String> {
+pub(crate) fn local_file_bind(
+    state: tauri::State<'_, LocalFiles>,
+    token: String,
+    binding: Binding,
+) -> Result<(), String> {
     state.with(|st| {
         let e = st.entry(&token)?;
         if let Some(h) = e.read_hash.take() {
@@ -371,7 +415,11 @@ pub(crate) fn local_file_for_artifact(
         Ok(st
             .entries
             .iter()
-            .find(|e| e.binding.as_ref().is_some_and(|b| b.gateway == gateway && b.artifact_id == artifact_id))
+            .find(|e| {
+                e.binding
+                    .as_ref()
+                    .is_some_and(|b| b.gateway == gateway && b.artifact_id == artifact_id)
+            })
             .map(|e| serde_json::json!({ "token": e.token, "name": file_name(&e.path) })))
     })
 }
@@ -381,15 +429,26 @@ pub(crate) fn local_file_for_artifact(
 /// (`x-bnbloc-mode`): `check` writes only over the bytes last synced,
 /// `overwrite` writes regardless, `copy` writes beside the file.
 #[tauri::command]
-pub(crate) fn local_file_save(state: tauri::State<'_, LocalFiles>, request: tauri::ipc::Request<'_>) -> Result<Saved, String> {
+pub(crate) fn local_file_save(
+    state: tauri::State<'_, LocalFiles>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<Saved, String> {
     let tauri::ipc::InvokeBody::Raw(raw) = request.body() else {
         return Err("the bytes must be the raw body".into());
     };
     let token = header(&request, "x-bnbloc-token")?;
     let mode = header(&request, "x-bnbloc-mode")?;
-    let version: u32 = header(&request, "x-bnbloc-version")?.parse().map_err(|_| "bad version".to_string())?;
+    let version: u32 = header(&request, "x-bnbloc-version")?
+        .parse()
+        .map_err(|_| "bad version".to_string())?;
     let path = state.entry_path(token)?;
-    let saved = save(&path, raw, version, mode, &state.with(|st| Ok(st.entry(token)?.hash.clone()))?)?;
+    let saved = save(
+        &path,
+        raw,
+        version,
+        mode,
+        &state.with(|st| Ok(st.entry(token)?.hash.clone()))?,
+    )?;
     if saved == Saved::Written {
         let hash = hash_bytes(raw);
         state.with(|st| {
@@ -411,7 +470,9 @@ fn save(path: &Path, raw: &[u8], version: u32, mode: &str, synced: &str) -> Resu
         "copy" => {
             let to = copy_path(path, version);
             files::write_document(&to, raw)?;
-            Ok(Saved::Copied { name: file_name(&to) })
+            Ok(Saved::Copied {
+                name: file_name(&to),
+            })
         }
         "check" | "overwrite" => {
             if !path.exists() {
@@ -432,7 +493,8 @@ mod tests {
     use super::*;
 
     fn temp_dir(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("bnbloc-local-files-{tag}-{}", new_token().unwrap()));
+        let dir =
+            std::env::temp_dir().join(format!("bnbloc-local-files-{tag}-{}", new_token().unwrap()));
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -462,7 +524,10 @@ mod tests {
         let lf = LocalFiles::load(Some(dir.join("state.json")));
         let again = lf.open(&doc).unwrap();
         assert_eq!(again.token, first.token);
-        assert!(again.changed, "bytes other than the synced ones are a new version");
+        assert!(
+            again.changed,
+            "bytes other than the synced ones are a new version"
+        );
         assert_eq!(again.binding.unwrap().artifact_id, "art_1");
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -474,20 +539,39 @@ mod tests {
         std::fs::write(&doc, b"v1").unwrap();
         let synced = hash_bytes(b"v1");
 
-        assert_eq!(save(&doc, b"v2", 2, "check", &synced).unwrap(), Saved::Written);
+        assert_eq!(
+            save(&doc, b"v2", 2, "check", &synced).unwrap(),
+            Saved::Written
+        );
         assert_eq!(std::fs::read(&doc).unwrap(), b"v2");
 
         // The member changed the file since: a check writes nothing.
         std::fs::write(&doc, b"mine").unwrap();
-        assert_eq!(save(&doc, b"v3", 3, "check", &hash_bytes(b"v2")).unwrap(), Saved::Changed);
+        assert_eq!(
+            save(&doc, b"v3", 3, "check", &hash_bytes(b"v2")).unwrap(),
+            Saved::Changed
+        );
         assert_eq!(std::fs::read(&doc).unwrap(), b"mine");
 
         // A copy goes beside it and never replaces another file.
-        assert_eq!(save(&doc, b"v3", 3, "copy", "").unwrap(), Saved::Copied { name: "deck (bnbloc v3).pptx".into() });
-        assert_eq!(save(&doc, b"v3", 3, "copy", "").unwrap(), Saved::Copied { name: "deck (bnbloc v3) 2.pptx".into() });
+        assert_eq!(
+            save(&doc, b"v3", 3, "copy", "").unwrap(),
+            Saved::Copied {
+                name: "deck (bnbloc v3).pptx".into()
+            }
+        );
+        assert_eq!(
+            save(&doc, b"v3", 3, "copy", "").unwrap(),
+            Saved::Copied {
+                name: "deck (bnbloc v3) 2.pptx".into()
+            }
+        );
         assert_eq!(std::fs::read(&doc).unwrap(), b"mine");
 
-        assert_eq!(save(&doc, b"v3", 3, "overwrite", "").unwrap(), Saved::Written);
+        assert_eq!(
+            save(&doc, b"v3", 3, "overwrite", "").unwrap(),
+            Saved::Written
+        );
         assert_eq!(std::fs::read(&doc).unwrap(), b"v3");
 
         std::fs::remove_file(&doc).unwrap();
@@ -510,7 +594,10 @@ mod tests {
         ];
         assert_eq!(paths_in_args(&args), vec![doc.clone()]);
         let url = tauri::Url::from_file_path(&doc).unwrap();
-        assert_eq!(paths_in_urls(&[url, tauri::Url::parse("https://x.example").unwrap()]), vec![doc]);
+        assert_eq!(
+            paths_in_urls(&[url, tauri::Url::parse("https://x.example").unwrap()]),
+            vec![doc]
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

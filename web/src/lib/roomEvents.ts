@@ -5,8 +5,9 @@
 // unit-tested; sse.ts owns the live subscription.
 import type { ChatAttachment, TurnMetrics } from "./api";
 import type { TaskUpdate } from "./teamModels";
-import { NoticePublishProposal, type FileRef, type RoomEventKind } from "./wire.gen.ts";
+import { NoticeComponentCard, NoticePublishProposal, type FileRef, type RoomEventKind } from "./wire.gen.ts";
 import { publishProposalOf, type PublishProposal } from "./publishProposal.ts";
+import { componentCardOf, type ComponentCard } from "./componentCard.ts";
 import { importedEditedAtMs, importedFrom } from "./handoff.ts";
 import { scheduledMarker } from "./schedules.ts";
 import { dispatchAttribution, type DispatchAttribution } from "./dispatch.ts";
@@ -88,6 +89,9 @@ export interface RoomEvent {
   // For a publish-proposal notice: what the agent proposes to share
   // (payload.proposal), a card only its requester is shown.
   proposal?: PublishProposal;
+  // For a component-card notice: a service's card (payload.card), only for
+  // the person the turn ran for.
+  card?: ComponentCard;
   // For agent_messages a job wrote (replies and notices): the job and the
   // room sequence of its request (payload.jobId, payload.sourceSeq), so the
   // feed nests delegated work under the request that started it.
@@ -175,6 +179,7 @@ export function normalizeRoomEvent(ev: RoomEvent, emit: (e: RoomEvent) => void):
       const notice = typeof mp.notice === "string" && mp.notice ? mp.notice : undefined;
       const noticeDetail = notice && typeof mp.detail === "string" && mp.detail.trim() ? mp.detail : undefined;
       const proposal = notice === NoticePublishProposal ? publishProposalOf(mp.proposal) : undefined;
+      const card = notice === NoticeComponentCard ? componentCardOf(mp.card) : undefined;
       const jobId = typeof mp.jobId === "string" && mp.jobId ? mp.jobId : undefined;
       const sourceSeq = typeof mp.sourceSeq === "number" && mp.sourceSeq > 0 ? mp.sourceSeq : undefined;
       emit({
@@ -195,6 +200,7 @@ export function normalizeRoomEvent(ev: RoomEvent, emit: (e: RoomEvent) => void):
         ...(notice ? { notice } : {}),
         ...(noticeDetail ? { noticeDetail } : {}),
         ...(proposal ? { proposal } : {}),
+        ...(card ? { card } : {}),
         ...(jobId ? { jobId } : {}),
         ...(sourceSeq ? { sourceSeq } : {}),
         importedFrom: importedFrom(p),

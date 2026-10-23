@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"errors"
+	"github.com/luckylhb90/bnbloc/component"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -143,6 +144,14 @@ func (s *Service) handleOrgSyncDeprovision(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		orgSyncFailed(w, "deprovision", err)
 		return
+	}
+	// A departed member's values in every service go with them.
+	if s.ComponentValues != nil {
+		for _, id := range body.UserIDs {
+			if err := s.ComponentValues.DeleteScopeValues(r.Context(), component.StoreMembers+"/"+id); err != nil {
+				slog.Warn("bnbloc-gateway: delete a departed member's service values failed", "user", id, "error", err)
+			}
+		}
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"results": results})
 }

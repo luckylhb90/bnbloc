@@ -102,13 +102,19 @@ const (
 	// ~/.local/bin, ~/.bun/bin, ~/.cargo/bin and ~/go/bin, and npm's global
 	// prefix is ~/.local unless the run sets NPM_CONFIG_PREFIX.
 	CapabilityDurableHomes = "durableHomes"
+	// CapabilityHostProxy: a machine created with HostPorts reaches those
+	// host loopback ports, and nothing else of the host, at
+	// Discovery.HostAlias:<port>, whatever its egress mode. The bridge's
+	// egress proxy listens there for the guests' commands
+	// (docs/architecture/service-components.md).
+	CapabilityHostProxy = "hostProxy"
 )
 
 // Capabilities lists every v1 capability name (validation registry).
 var Capabilities = []string{
 	CapabilityExec, CapabilityTTY, CapabilitySpaces, CapabilityShares, CapabilityPorts, CapabilityDisks,
 	CapabilitySnapshots, CapabilityPause, CapabilityEgressPolicy, CapabilitySpaceEgress, CapabilityEgressHosts, CapabilitySecrets,
-	CapabilityFork, CapabilityWarmPool, CapabilityExecTokens, CapabilityReadOnlyMounts, CapabilityDurableHomes,
+	CapabilityFork, CapabilityWarmPool, CapabilityExecTokens, CapabilityReadOnlyMounts, CapabilityDurableHomes, CapabilityHostProxy,
 }
 
 // KnownCapability reports whether name is a v1 capability.
@@ -241,6 +247,9 @@ type Discovery struct {
 	Capabilities []string      `json:"capabilities"`
 	Backend      Backend       `json:"backend"`
 	Limits       Limits        `json:"limits,omitempty"`
+	// HostAlias is the name a guest reaches the host's HostPorts at
+	// (hostProxy; "" without it).
+	HostAlias string `json:"hostAlias,omitempty"`
 }
 
 // HasCapability reports whether discovery advertises capability.
@@ -411,6 +420,9 @@ type CreateMachineRequest struct {
 	Egress    *Egress           `json:"egress,omitempty"`
 	Secrets   []SecretRequest   `json:"secrets,omitempty"`
 	Labels    Labels            `json:"labels,omitempty"`
+	// HostPorts are host loopback ports the guest reaches at
+	// Discovery.HostAlias (requires hostProxy; at most 4).
+	HostPorts []int `json:"hostPorts,omitempty"`
 }
 
 type SourceKind string
@@ -461,6 +473,7 @@ type Machine struct {
 	Egress      Egress        `json:"egress"`
 	Secrets     []Secret      `json:"secrets,omitempty"`
 	Labels      Labels        `json:"labels,omitempty"`
+	HostPorts   []int         `json:"hostPorts,omitempty"`
 	Source      Source        `json:"source"`
 	Spaces      int           `json:"spaces"`
 	CreatedAtMs int64         `json:"createdAtMs"`

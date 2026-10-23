@@ -24,6 +24,7 @@ const FILTERS = [
   { value: "auth-provider", label: "Auth" },
   { value: "notifier", label: "Notifiers" },
   { value: "share-target", label: "Share targets" },
+  { value: "service", label: "Services" },
   { value: "sandbox", label: "Sandboxes" },
   { value: "previewer", label: "Previewers" },
   { value: "mcp", label: "MCP tools" },
@@ -141,7 +142,7 @@ export function PlatformComponents() {
           <div className="min-w-[14rem] flex-1">
             <h2 className="text-base font-semibold text-[var(--color-fg)]">Components Workbench</h2>
             <p className="mt-1 text-sm leading-relaxed text-[var(--color-fg-muted)]">
-              Publish signed core, plugin, auth-provider, notifier, share-target, sandbox, previewer and MCP tool packages, review trust and runtime facts, and choose who receives each component.
+              Publish signed core, plugin, auth-provider, notifier, share-target, service, sandbox, previewer and MCP tool packages, review trust and runtime facts, and choose who receives each component.
             </p>
           </div>
           <div className="flex shrink-0 gap-6 max-sm:basis-full max-sm:pl-[3.25rem]">
@@ -264,6 +265,7 @@ function summarizeComponents(components: readonly PlatformComponent[]) {
     "auth-provider": ofKind("auth-provider"),
     notifier: ofKind("notifier"),
     "share-target": ofKind("share-target"),
+    service: ofKind("service"),
     sandbox: ofKind("sandbox"),
     previewer: ofKind("previewer"),
     mcp: ofKind("mcp"),

@@ -13,11 +13,16 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"maps"
+	"time"
+
+	"github.com/luckylhb90/bnbloc/component"
 	corepkg "github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/core/pkgmeta"
 	"github.com/luckylhb90/bnbloc/services/bridge/hosttool"
@@ -35,13 +40,21 @@ import (
 // before Run.
 func (b *Bridge) EnableRoomTools(shimCommand string) (stop func(), err error) {
 	st := loadRoomToolsState(b.cfg.StateDir)
-	srv, err := roomtools.Start(roomtools.Config{Gateway: roomToolsGateway{b}, GatewayBaseURL: b.cfg.GatewayBaseURL, Addr: st.Addr, Names: b.displayNames})
+	proxyAddr := ""
+	if port := b.cfg.Sandbox.hostProxyPort(); port != "" {
+		proxyAddr = net.JoinHostPort("127.0.0.1", port)
+	}
+	srv, err := roomtools.Start(roomtools.Config{Gateway: roomToolsGateway{b}, GatewayBaseURL: b.cfg.GatewayBaseURL, Addr: st.Addr, Names: b.displayNames, EgressDir: b.cfg.StateDir, ProxyAddr: proxyAddr})
 	if err != nil {
 		return nil, err
 	}
 	st.Addr = srv.Addr()
 	st.save(b.cfg.StateDir)
-	b.AddSessionContributor(&roomToolsContributor{srv: srv, shimCommand: shimCommand, key: st.key})
+	c := &roomToolsContributor{b: b, srv: srv, shimCommand: shimCommand, key: st.key}
+	b.AddSessionContributor(c)
+	if b.sandbox != nil && srv.ProxyListening() {
+		b.sandbox.spaceEnv = c.sandboxEgressEnv
+	}
 	b.roomCalls = srv.TakeCalls
 	return func() { _ = srv.Close() }, nil
 }
@@ -187,6 +200,7 @@ func (c *roomToolsContributor) hostToolServer(info SessionInfo, name, token stri
 
 // roomToolsContributor attaches the server to one session.
 type roomToolsContributor struct {
+	b           *Bridge
 	srv         *roomtools.Server
 	shimCommand string
 	// key derives each session's bearer from the nonce its State keeps.
@@ -198,6 +212,9 @@ type roomToolsContributor struct {
 type roomToolsGrant struct {
 	URL   string `json:"url"`
 	Nonce string `json:"nonce"`
+	// Egress: the session's commands go through the server's egress proxy
+	// (the hosts are asked again at every turn).
+	Egress bool `json:"egress,omitempty"`
 }
 
 // bearer is the session bearer a nonce derives.
@@ -207,10 +224,17 @@ func (c *roomToolsContributor) bearer(nonce string) string {
 	return base64.RawURLEncoding.EncodeToString(m.Sum(nil))
 }
 
-// hooks are a session's turn and release callbacks.
-func (c *roomToolsContributor) hooks(sess *roomtools.Session) (turn, turnEnd func(TurnInfo), release func()) {
+// hooks are a session's turn and release callbacks. With egress, each turn
+// asks the services again which hosts they handle for its job.
+func (c *roomToolsContributor) hooks(sess *roomtools.Session, egress bool) (turn, turnEnd func(TurnInfo), release func()) {
 	return func(t TurnInfo) {
 			sess.Bind(roomtools.Job{JobID: t.JobID, RequesterUserID: t.RequesterUserID, ChannelID: t.ChannelID, MessageSeq: t.MessageSeq, ByRequester: t.ByRequester, Workspace: t.Workspace, Team: t.Team})
+			if egress {
+				ctx, cancel := context.WithTimeout(context.Background(), egressAskTimeout)
+				hosts, _ := c.b.egressFor(ctx, sess.Scope().RoomID, t.JobID, sess.EgressHosts())
+				cancel()
+				sess.SetEgressHosts(hosts)
+			}
 		}, func(t TurnInfo) {
 			sess.Unbind(t.JobID)
 		}, func() {
@@ -229,7 +253,10 @@ func (c *roomToolsContributor) RestoreSession(_ context.Context, info SessionInf
 	if err != nil {
 		return SessionContribution{}, false
 	}
-	turn, turnEnd, release := c.hooks(sess)
+	if g.Egress && info.Sandboxed && info.Workdir != "" {
+		_ = c.srv.AliasEgress(c.egressAlias(info.Workdir), sess)
+	}
+	turn, turnEnd, release := c.hooks(sess, g.Egress)
 	// The session keeps its host tools' endpoints in its profile; the tools
 	// themselves ended with the bridge, so they are fronted again (and start
 	// on their next call).
@@ -246,7 +273,7 @@ func roomToolsScope(info SessionInfo) roomtools.Scope {
 // stdio shim (every agent accepts stdio). The bearer is bound to each
 // turn's job as the turn starts and revoked when the session binding is
 // dropped.
-func (c *roomToolsContributor) ContributeSession(_ context.Context, info SessionInfo) (SessionContribution, error) {
+func (c *roomToolsContributor) ContributeSession(ctx context.Context, info SessionInfo) (SessionContribution, error) {
 	server := corepkg.MCPServer{Name: roomtools.ServerName}
 	switch {
 	case (corepkg.Target{MCPTransports: info.MCPTransports}).TransportSupported(corepkg.MCPHTTP):
@@ -269,7 +296,8 @@ func (c *roomToolsContributor) ContributeSession(_ context.Context, info Session
 	if err != nil {
 		return SessionContribution{}, err
 	}
-	state, _ := json.Marshal(roomToolsGrant{URL: c.srv.URL(), Nonce: nonce})
+	egressEnv, egress := c.egressEnv(ctx, info, sess, token)
+	state, _ := json.Marshal(roomToolsGrant{URL: c.srv.URL(), Nonce: nonce, Egress: egress})
 	var hostServers []corepkg.MCPServer
 	for _, tool := range info.HostTools {
 		hs, err := c.hostToolServer(info, tool.Server.Name, token)
@@ -285,8 +313,8 @@ func (c *roomToolsContributor) ContributeSession(_ context.Context, info Session
 	} else {
 		server.Env = []corepkg.NameValue{{Name: roomtools.TokenEnv, Value: token}}
 	}
-	turn, turnEnd, release := c.hooks(sess)
-	part := SessionContribution{MCPServers: append([]corepkg.MCPServer{server}, hostServers...), RoomTools: true, Turn: turn, TurnEnd: turnEnd, Release: release, State: state}
+	turn, turnEnd, release := c.hooks(sess, egress)
+	part := SessionContribution{MCPServers: append([]corepkg.MCPServer{server}, hostServers...), RoomTools: true, Turn: turn, TurnEnd: turnEnd, Release: release, State: state, Env: egressEnv}
 	if len(info.RoomRelayServers) > 0 {
 		// The session's room-credential tools reach the gateway through
 		// this server's relay with the same bearer: bound to each turn's
@@ -297,4 +325,82 @@ func (c *roomToolsContributor) ContributeSession(_ context.Context, info Session
 		}
 	}
 	return part, nil
+}
+
+// egressAskTimeout bounds asking the services for a turn's hosts.
+const egressAskTimeout = 10 * time.Second
+
+// egressEnv is the session's egress environment when a service of the
+// organization declares egress and the server runs its proxy: the proxy
+// and CA variables, and the placeholders the services give the session's
+// commands (never over the proxy's own). The hosts are claimed for the
+// session's first job here and asked again at every turn. A sandboxed
+// session's commands get theirs from their space (sandboxEgressEnv): its
+// alias bearer is bound to the session here, and the agent's own process
+// gets nothing. on: the session has egress.
+func (c *roomToolsContributor) egressEnv(ctx context.Context, info SessionInfo, sess *roomtools.Session, token string) (env map[string]string, on bool) {
+	if c.b == nil {
+		return nil, false
+	}
+	proxy := c.srv.EgressEnv(token, "")
+	if proxy == nil || len(c.b.servicesWith(ctx, component.ServiceEgress)) == 0 {
+		return nil, false
+	}
+	if info.Sandboxed && (!c.srv.ProxyListening() || info.Workdir == "" || c.srv.AliasEgress(c.egressAlias(info.Workdir), sess) != nil) {
+		return nil, false
+	}
+	actx, cancel := context.WithTimeout(ctx, egressAskTimeout)
+	hosts, env := c.b.egressFor(actx, info.RoomID, info.JobID, nil)
+	cancel()
+	sess.SetEgressHosts(hosts)
+	if info.Sandboxed {
+		return nil, true
+	}
+	maps.Copy(env, proxy)
+	return env, true
+}
+
+// egressAlias is the egress bearer of the sandboxed session working in
+// workdir (derived, so the space's environment can carry it before the
+// session exists).
+func (c *roomToolsContributor) egressAlias(workdir string) string {
+	return c.bearer("egress:" + workdir)
+}
+
+// sandboxEgressDir is where a sandboxed workspace keeps the proxy's CA
+// for its commands (the workspace is mounted at its own path in the
+// guest).
+const sandboxEgressDir = ".room/egress"
+
+// sandboxEgressEnv is the default environment of an own drive's space when
+// a service declares egress: the proxy at the address the guests reach it
+// (SandboxConfig.HostProxy) with the workspace's alias bearer, and the CA
+// files, copied into the workspace. nil: none.
+func (c *roomToolsContributor) sandboxEgressEnv(ctx context.Context, workdir string) map[string]string {
+	if len(c.b.servicesWith(ctx, component.ServiceEgress)) == 0 {
+		return nil
+	}
+	caPEM, bundle := c.srv.EgressCA()
+	dir := filepath.Join(workdir, filepath.FromSlash(sandboxEgressDir))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		slog.Warn("bnbloc bridge sandbox egress off: no CA folder", "event", "bnbloc.bridge.sandbox_egress_failed", "error", err)
+		return nil
+	}
+	caFile, bundleFile := filepath.Join(dir, "ca.pem"), filepath.Join(dir, "bundle.pem")
+	if err := os.WriteFile(caFile, caPEM, 0o644); err != nil {
+		slog.Warn("bnbloc bridge sandbox egress off: CA not written", "event", "bnbloc.bridge.sandbox_egress_failed", "error", err)
+		return nil
+	}
+	env := c.srv.EgressEnv(c.egressAlias(workdir), c.b.cfg.Sandbox.HostProxy)
+	env["NODE_EXTRA_CA_CERTS"] = caFile
+	if hosts := c.b.cfg.Sandbox.PrivateHosts; len(hosts) > 0 {
+		direct := env["NO_PROXY"] + "," + strings.Join(hosts, ",")
+		env["NO_PROXY"], env["no_proxy"] = direct, direct
+	}
+	if len(bundle) > 0 && os.WriteFile(bundleFile, bundle, 0o644) == nil {
+		for _, k := range []string{"SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "GIT_SSL_CAINFO"} {
+			env[k] = bundleFile
+		}
+	}
+	return env
 }

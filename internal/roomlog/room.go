@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	_ "embed"
 	"encoding/hex"
+	"slices"
 	"strings"
 	"text/template"
 
@@ -45,6 +46,30 @@ type Guidance struct {
 	// TeamLead: the session wears a team expert (its default rule for
 	// leading; the team's SOP may override it).
 	TeamLead bool
+	// Services are the service components' lines for the records' list
+	// (their files under .room/<service>/), only with HasRoomFiles.
+	Services []ServiceLine
+}
+
+// ServiceLine is one service component's line in the records' list
+// (component.Facts.Line); Unreadable when the service could not be asked.
+type ServiceLine struct {
+	Service    string
+	Line       string
+	Unreadable bool
+}
+
+// reservedRoomNames are the names of bnbloc's own records under .room/: a
+// service of one of these names gets no directory there.
+var reservedRoomNames = []string{"INDEX.md", "README.md", "apps", "app-sdk", "artifacts", "attachments", "channels", "content-limits", "deliverables", "edits", "library", "live", "recent"}
+
+// ServiceDir is a service's directory under .room/ ("" and false when its
+// name is one of the records' own).
+func ServiceDir(name string) (string, bool) {
+	if name == "" || strings.ContainsAny(name, "/.\\") || slices.Contains(reservedRoomNames, name) {
+		return "", false
+	}
+	return ".room/" + name + "/", true
 }
 
 // guidanceData is what the template reads: the facts, the limits and the

@@ -225,6 +225,9 @@ type Backends struct {
 	// RoomSources holds rooms' asks to read organization records, their
 	// grants and the rooms' opt-ins (room_sources.go).
 	RoomSources RoomSourceStore
+	// ComponentValues holds service components' sealed values
+	// (component_values.go).
+	ComponentValues ComponentValueStore
 }
 
 // NewBackends builds the store set. If dsn is empty, everything is in-memory.
@@ -278,6 +281,7 @@ func NewBackends(dsn string) (*Backends, error) {
 			AppDocs:           appDocs,
 			RoomGroups:        NewMemoryRoomGroups(),
 			RoomSources:       NewMemoryRoomSources(),
+			ComponentValues:   NewMemoryComponentValues(),
 		}
 		// DeleteRoom clears every memory store holding room-owned rows, as
 		// the MySQL DeleteRoom clears roomOwnedTables.
@@ -329,6 +333,7 @@ func newMySQLBackends(db *sql.DB) *Backends {
 		AppDocs:           NewMySQLAppDocs(db),
 		RoomGroups:        NewMySQLRoomGroups(db),
 		RoomSources:       NewMySQLRoomSources(db),
+		ComponentValues:   NewMySQLComponentValues(db),
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/luckylhb90/bnbloc/component"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -155,6 +156,9 @@ type Service struct {
 	// for POST /v1/notifier/replies (N1); uninstalling a notifier deletes
 	// its tokens. nil answers the route 503.
 	NotifierReplies store.NotificationReplyTokenStore
+	// ComponentValues keeps service components' sealed values
+	// (component_store.go); nil answers the store routes 503.
+	ComponentValues store.ComponentValueStore
 	// MemberCount returns the instance's total distinct members (adoption
 	// denominators). nil or 0 renders counts without percentages.
 	MemberCount func() (int, error)
@@ -376,11 +380,12 @@ func (s *Service) withCORS(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if shareTicketPath(r.URL.Path) {
+		if shareTicketPath(r.URL.Path) || strings.HasPrefix(r.URL.Path, component.ComponentPagePath) {
 			// A share page has an opaque origin ("null": it is sandboxed), so
 			// its two calls are cross-origin. They carry no credentials (the
 			// ticket in the path is the capability): any origin may make
-			// them, never with cookies (share_target.go).
+			// them, never with cookies (share_target.go). A service's page
+			// is the same (service_components.go).
 			h := w.Header()
 			h.Set("Access-Control-Allow-Origin", "*")
 			h.Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")

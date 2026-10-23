@@ -18,6 +18,10 @@ pub(super) const CAPABILITY_EGRESS: &str = "egressPolicy";
 /// Advertised when `public` egress may carry rules: hosts reachable beside
 /// the public internet, private ones included.
 pub(super) const CAPABILITY_EGRESS_HOSTS: &str = "egressHosts";
+/// Advertised when a machine may reach host loopback ports it was created
+/// with (`hostPorts`) at the discovery's `hostAlias`: the bridge's egress
+/// proxy listens on one for the guests' commands.
+pub(super) const CAPABILITY_HOST_PROXY: &str = "hostProxy";
 
 const DISCOVER_TIMEOUT: Duration = Duration::from_secs(2);
 const LIFECYCLE_TIMEOUT: Duration = Duration::from_secs(120);
@@ -33,6 +37,8 @@ pub(super) struct Discovery {
     pub(super) version: String,
     pub(super) isolation: String,
     pub(super) capabilities: Vec<String>,
+    /// Where a guest reaches the host's `hostPorts` (hostProxy).
+    pub(super) host_alias: String,
 }
 
 impl Discovery {
@@ -86,6 +92,7 @@ pub(super) fn parse_discovery(raw: &[u8]) -> Result<Discovery, String> {
         version: text("/version").to_string(),
         isolation: text("/backend/isolation").to_string(),
         capabilities,
+        host_alias: text("/hostAlias").to_string(),
     };
     let missing: Vec<&str> = REQUIRED_CAPABILITIES
         .iter()
@@ -161,7 +168,8 @@ pub(super) fn parse_machine(raw: &[u8]) -> Result<MachineView, String> {
 /// A machine the desktop creates: the package's guest profile, the one
 /// workspaces root shared at the identical guest path, public-internet
 /// egress when offered (private ranges, host loopback and link-local stay
-/// blocked, but for `hosts` when the runtime can open them), labelled with
+/// blocked, but for `hosts` when the runtime can open them, and the one
+/// host loopback port `host_port` when it offers hostProxy), labelled with
 /// the member.
 pub(super) fn create_machine_request(
     name: &str,
@@ -171,6 +179,7 @@ pub(super) fn create_machine_request(
     discovery: &Discovery,
     owner: &str,
     hosts: &[String],
+    host_port: Option<u16>,
 ) -> Value {
     let root = workspaces_root.to_string_lossy();
     let mut req = json!({
@@ -190,10 +199,30 @@ pub(super) fn create_machine_request(
             req["egress"]["rules"] = hosts.iter().map(|h| json!({"host": h})).collect();
         }
     }
+    if let Some(port) = host_port.filter(|_| discovery.has(CAPABILITY_HOST_PROXY)) {
+        req["hostPorts"] = json!([port]);
+    }
     if !owner.trim().is_empty() {
         req["labels"] = json!({"owner": owner.trim()});
     }
     req
+}
+
+/// The guests' address of the host port (`<hostAlias>:<port>`), when the
+/// runtime offers hostProxy.
+pub(super) fn host_proxy_address(discovery: &Discovery, host_port: Option<u16>) -> Option<String> {
+    let port = host_port?;
+    (discovery.has(CAPABILITY_HOST_PROXY) && !discovery.host_alias.is_empty())
+        .then(|| format!("{}:{port}", discovery.host_alias))
+}
+
+/// A free loopback port for the bridge's egress proxy (None when none can
+/// be taken: the guests then get no egress proxy).
+pub(super) fn free_loopback_port() -> Option<u16> {
+    std::net::TcpListener::bind("127.0.0.1:0")
+        .and_then(|l| l.local_addr())
+        .map(|a| a.port())
+        .ok()
 }
 
 /// A protocol error: the envelope's code (empty for transport errors) and a
@@ -417,6 +446,7 @@ mod tests {
             &d,
             "me@example",
             &[],
+            Some(41234),
         );
         assert_eq!(
             req,
@@ -445,10 +475,45 @@ mod tests {
             &no_egress,
             "",
             &["npm.internal.example".to_string()],
+            None,
         );
         assert!(
             req.get("egress").is_none() && req.get("cpus").is_none() && req.get("labels").is_none()
         );
+    }
+
+    /// The bridge's egress proxy port goes in as a host port only when the
+    /// runtime offers hostProxy, and the guests' address names its alias.
+    #[test]
+    fn create_request_opens_the_host_port_only_with_host_proxy() {
+        let mut d = parse_discovery(DISCOVERY.as_bytes()).unwrap();
+        let guest = GuestProfile {
+            image: "img:1".into(),
+            cpus: 0,
+            memory_mib: 0,
+        };
+        let req = |d: &Discovery| {
+            create_machine_request(
+                "bnbloc",
+                &guest,
+                std::path::Path::new("/w"),
+                "workspaces",
+                d,
+                "",
+                &[],
+                Some(41234),
+            )
+        };
+        assert!(req(&d).get("hostPorts").is_none());
+        assert_eq!(host_proxy_address(&d, Some(41234)), None);
+        d.capabilities.push(CAPABILITY_HOST_PROXY.into());
+        d.host_alias = "host.vm.internal".into();
+        assert_eq!(req(&d)["hostPorts"], json!([41234]));
+        assert_eq!(
+            host_proxy_address(&d, Some(41234)).as_deref(),
+            Some("host.vm.internal:41234")
+        );
+        assert_eq!(host_proxy_address(&d, None), None);
     }
 
     /// The own machine's hosts go in as public egress rules, only when the
@@ -471,6 +536,7 @@ mod tests {
                 d,
                 "",
                 &hosts,
+                None,
             )
         };
         assert_eq!(req(&d)["egress"], json!({"mode": "public"}));

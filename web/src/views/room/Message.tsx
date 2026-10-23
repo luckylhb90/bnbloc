@@ -30,6 +30,7 @@ import { dispatchLine, type DispatchAttribution } from "@/lib/dispatch";
 import { ExpertTag } from "@/views/room/ExpertTag";
 import { FileRefTag } from "@/views/room/FileRefTag";
 import { DeadEndCard } from "@/views/room/DeadEndCard";
+import { ComponentCardView } from "@/views/room/ComponentCardView";
 import { PublishProposalCard } from "@/views/room/PublishProposalCard";
 import { NoticeRoomSetup } from "@/lib/wire.gen";
 import { isSubmitEnter } from "@/lib/keys";
@@ -207,6 +208,13 @@ export const Message = memo(function Message({
     return (
       <div id={`msg-${item.id}`} data-notice={item.notice}>
         <PublishProposalCard proposal={item.proposal} />
+      </div>
+    );
+  }
+  if (isAgent && item.card) {
+    return (
+      <div id={`msg-${item.id}`} data-notice={item.notice}>
+        <ComponentCardView roomId={roomId} card={item.card} />
       </div>
     );
   }

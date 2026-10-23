@@ -9,78 +9,30 @@
 package notify
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
-	"errors"
-	"strconv"
-	"strings"
 	"time"
+
+	"github.com/luckylhb90/bnbloc/component"
 )
 
 // SignatureTolerance is the receiver-side timestamp window the contract
 // recommends (docs/notifications.md).
-const SignatureTolerance = 5 * time.Minute
+const SignatureTolerance = component.SignatureTolerance
 
 // Sign returns the X-Bnbloc-Signature value for body at time t:
-// "t=<unix>,v1=<hex(HMAC-SHA256(secret, "<unix>." + body))>".
+// "t=<unix>,v1=<hex(HMAC-SHA256(secret, "<unix>." + body))>". The scheme
+// is the component contract's (component.Sign).
 func Sign(secret string, t time.Time, body []byte) string {
-	ts := strconv.FormatInt(t.Unix(), 10)
-	return "t=" + ts + ",v1=" + hex.EncodeToString(mac(secret, ts, body))
-}
-
-func mac(secret, ts string, body []byte) []byte {
-	h := hmac.New(sha256.New, []byte(secret))
-	h.Write([]byte(ts))
-	h.Write([]byte("."))
-	h.Write(body)
-	return h.Sum(nil)
+	return component.Sign(secret, t, body)
 }
 
 // Signature verification errors.
 var (
-	ErrSignatureMalformed = errors.New("notify: malformed signature header")
-	ErrSignatureMismatch  = errors.New("notify: signature mismatch")
-	ErrSignatureExpired   = errors.New("notify: signature timestamp outside tolerance")
+	ErrSignatureMalformed = component.ErrSignatureMalformed
+	ErrSignatureMismatch  = component.ErrSignatureMismatch
+	ErrSignatureExpired   = component.ErrSignatureExpired
 )
 
-// Verify checks a signature header against body: the HMAC must match (any of
-// several v1 values, so a receiver tolerates a future multi-signature header)
-// and the timestamp must be within tolerance of now. It is the reference
-// implementation of the receiver side of the contract.
+// Verify checks a signature header against body (component.Verify).
 func Verify(header, secret string, body []byte, now time.Time, tolerance time.Duration) error {
-	var ts string
-	var sigs [][]byte
-	for _, part := range strings.Split(header, ",") {
-		k, v, ok := strings.Cut(strings.TrimSpace(part), "=")
-		if !ok {
-			continue
-		}
-		switch k {
-		case "t":
-			ts = v
-		case "v1":
-			if raw, err := hex.DecodeString(v); err == nil {
-				sigs = append(sigs, raw)
-			}
-		}
-	}
-	unix, err := strconv.ParseInt(ts, 10, 64)
-	if err != nil || len(sigs) == 0 {
-		return ErrSignatureMalformed
-	}
-	want := mac(secret, ts, body)
-	matched := false
-	for _, s := range sigs {
-		if hmac.Equal(s, want) {
-			matched = true
-		}
-	}
-	if !matched {
-		return ErrSignatureMismatch
-	}
-	if d := now.Sub(time.Unix(unix, 0)); d > tolerance || d < -tolerance {
-		return ErrSignatureExpired
-	}
-	return nil
+	return component.Verify(header, secret, body, now, tolerance)
 }

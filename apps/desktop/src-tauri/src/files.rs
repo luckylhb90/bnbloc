@@ -55,7 +55,10 @@ pub(crate) fn write_document(path: &Path, raw: &[u8]) -> Result<(), String> {
     let tmp = temp_path(path, "tmp")?;
     let keep = std::fs::metadata(path).ok().map(|m| m.permissions());
     let written = (|| {
-        let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)?;
         file.write_all(raw)?;
         if let Some(perm) = keep {
             file.set_permissions(perm)?;

@@ -4,6 +4,7 @@ import type { DispatchAttribution } from "@/lib/dispatch";
 import type { ChatExpert, ExpertMarker } from "@/lib/contentComponents";
 import type { FileRef } from "@/lib/wire.gen";
 import type { PublishProposal } from "@/lib/publishProposal";
+import type { ComponentCard } from "@/lib/componentCard";
 import { sameUser } from "../../lib/format.ts";
 
 // The routing of one chat send, exactly as it went (or will go) on the wire.
@@ -86,6 +87,9 @@ export interface FeedItem {
   // A publish-proposal notice's card (payload.proposal): only the person
   // the agent asked for is shown it (feedItemFromEvent drops it for others).
   proposal?: PublishProposal;
+  // A component-card notice's card (payload.card): only the person the
+  // turn ran for is shown it (feedItemFromEvent drops it for others).
+  card?: ComponentCard;
   // An agent row's job and the room sequence of that job's request
   // (payload.jobId / payload.sourceSeq): delegated work nests under the
   // request that started it (feedTurns.ts).

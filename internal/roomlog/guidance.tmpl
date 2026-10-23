@@ -23,6 +23,9 @@ You are {{if .Self}}the agent "{{.Self}}"{{else}}an agent{{end}} in a bnbloc roo
 - artifacts.md: the deliverables, who produced each, and their ids.
 - library.md: the Library of the person who asked you.
 - live.md: what members did in running deliverables.
+{{- range .Services}}
+- {{.Service}}/: {{if .Unreadable}}could not be read this time.{{else}}{{.Line}}{{end}}
+{{- end}}
 {{- end}}
 {{- if .HasTools}}
 
