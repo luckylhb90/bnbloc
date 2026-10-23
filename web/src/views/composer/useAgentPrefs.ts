@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { api } from "@/lib/api";
 import { restoreAgent, savedAgent } from "@/lib/agentPrefs";
-import { defaultPlatformRecipient } from "@/lib/platformAgents";
+import { defaultPlatformRecipient, type PlatformChoice } from "@/lib/platformAgents";
 import { agentIdentity } from "@/lib/roomAgents";
 import type { LocalAgent } from "@/lib/useLocalAgent";
 import type { RoomAgent } from "@/views/composer/types";
@@ -38,6 +38,7 @@ export function useAgentPrefs({
   agent: localAgent,
   roomAgents,
   subject,
+  offered,
 }: {
   readonly roomId: string;
   readonly channelId: string | null | undefined;
@@ -46,6 +47,9 @@ export function useAgentPrefs({
   readonly agent: LocalAgent;
   readonly roomAgents: readonly RoomAgent[];
   readonly subject: string | null;
+  // The platform agents the organization offers (in the room or not): the
+  // default of a member with no agent of their own when the room has none.
+  readonly offered?: readonly PlatformChoice[];
 }): AgentPrefs {
   const [recipient, setRecipient] = useState<RoomAgent | null>(null);
   const [peopleOnly, setPeopleOnly] = useState(false);
@@ -105,9 +109,9 @@ export function useAgentPrefs({
   // agent", so returning to a room still has an agent to talk to.
   useEffect(() => {
     if (!enabled || !settled || recipient || peopleOnly) return;
-    const fallback = defaultPlatformRecipient(roomAgents, targets.length > 0 || !!target);
+    const fallback = defaultPlatformRecipient(roomAgents, targets.length > 0 || !!target, offered);
     if (fallback) setRecipient(fallback);
-  }, [enabled, settled, recipient, peopleOnly, roomAgents, targets.length, target]);
+  }, [enabled, settled, recipient, peopleOnly, roomAgents, offered, targets.length, target]);
 
   // Save the pick (debounced; best-effort, never blocks sending) once the
   // stored one was read, so a default never overwrites it. A change pending

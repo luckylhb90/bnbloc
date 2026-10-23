@@ -9,8 +9,8 @@ import {
   } from "@phosphor-icons/react";
 import { cn } from "@/lib/cn";
 import { useDismissOnOutside } from "@/ui/useDismissOnOutside";
-import { hostsLabel, samePlatformAgent, type PlatformChoice } from "@/lib/platformAgents";
-import { agentDisplayLabel, defaultDisplayName } from "@/lib/displayNames";
+import { hostsLabel, platformAddQuestion, samePlatformAgent, type PlatformChoice } from "@/lib/platformAgents";
+import { agentDisplayLabel } from "@/lib/displayNames";
 import { useDisplayNames } from "@/lib/useDisplayName";
 import type { LocalAgent } from "@/lib/useLocalAgent";
 import { Button } from "@/ui/Button";
@@ -249,11 +249,6 @@ export function AgentPicker({
       )}
     </div>
   );
-}
-
-function platformAddQuestion(c: PlatformChoice, nameOf: (id: string) => string = defaultDisplayName): string {
-  const hosts = c.hosts.map((h) => nameOf(h.hostUserId)).join(", ");
-  return `Add ${c.agent.provider} (hosted by ${hosts}) to this room? It will read this room's conversation to answer, and runs in the host's sandbox.`;
 }
 
 // OnlineDot is a platform agent's availability: its host's desktop (bridge,

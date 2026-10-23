@@ -319,11 +319,25 @@ export function defaultModelOptions(models: readonly string[], saved: string | u
 }
 
 // defaultPlatformRecipient is the composer's fallback recipient for a member
-// who has no agent of their own here: the room's first platform agent. A
-// member with a local agent keeps their own default (null).
-export function defaultPlatformRecipient(roomAgents: readonly RoomAgent[], hasOwnAgent: boolean): RoomAgent | null {
+// who has no agent of their own here: the room's first platform agent, else
+// (the room has none yet) the first online one the organization offers. An
+// offered one is added to the room, after the member's confirmation, by the
+// send that first uses it (Composer). A member with a local agent keeps their
+// own default (null).
+export function defaultPlatformRecipient(
+  roomAgents: readonly RoomAgent[],
+  hasOwnAgent: boolean,
+  offered: readonly PlatformChoice[] = [],
+): RoomAgent | null {
   if (hasOwnAgent) return null;
-  return roomAgents.find((a) => a.platform && !a.self) ?? null;
+  return roomAgents.find((a) => a.platform && !a.self) ?? offered.find((c) => c.online)?.agent ?? null;
+}
+
+// platformAddQuestion is what the member agrees to when a platform agent joins
+// a room: asked by the picker and by a send that would add one.
+export function platformAddQuestion(c: PlatformChoice, nameOf: (id: string) => string = defaultDisplayName): string {
+  const hosts = c.hosts.map((h) => nameOf(h.hostUserId)).join(", ");
+  return `Add ${c.agent.provider} (hosted by ${hosts}) to this room? It will read this room's conversation to answer, and runs in the host's sandbox.`;
 }
 
 // SendRoute is where a send to a picked recipient goes now: a platform

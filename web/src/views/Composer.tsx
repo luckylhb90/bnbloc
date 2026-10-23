@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useInjectedAgent, useInjectedAttachments, useInjectedDraft, useInjectedFilePick, useInjectedReferences } from "@/views/composer/useInjectedDraft";
 import {
   PaperPlaneRightIcon,
@@ -16,11 +17,12 @@ import { cn } from "@/lib/cn";
 import type { LocalAgent } from "@/lib/useLocalAgent";
 import { offeredChoice } from "@/lib/agentPrefs";
 import { NO_ROOM_CATALOGS, resolveModelCatalog, type RoomModelCatalogs } from "@/lib/agentCatalogs";
-import { PLATFORM_OFFLINE_MESSAGE, routeSend } from "@/lib/platformAgents";
+import { PLATFORM_OFFLINE_MESSAGE, platformAddQuestion, routeSend, samePlatformAgent, type PlatformChoice } from "@/lib/platformAgents";
 import { useAgentPrefs } from "@/views/composer/useAgentPrefs";
 import { isImeKey, isSubmitEnter } from "@/lib/keys";
 import { useDismissOnOutside } from "@/ui/useDismissOnOutside";
 import { Button } from "@/ui/Button";
+import { ConfirmDialog } from "@/ui/Dialog";
 import { useToast } from "@/ui/Toast";
 import { AttachmentChips } from "@/views/AttachmentChips";
 import { ATTACHMENT_ACCEPT, useComposerAttachments } from "@/views/useComposerAttachments";
@@ -135,7 +137,7 @@ export function Composer({
   // model + reasoning tuning ("" = the provider default; changed only by the
   // member's own pick, see offeredChoice).
   const { agent, recipient, setRecipient, peopleOnly: peopleOnlyPref, setPeopleOnly, model, setModel, reasoning, setReasoning } =
-    useAgentPrefs({ roomId, channelId, enabled: !people, agent: localAgent, roomAgents, subject: subject ?? null });
+    useAgentPrefs({ roomId, channelId, enabled: !people, agent: localAgent, roomAgents, subject: subject ?? null, offered: platformAgents?.choices });
   // A file panel always asks an agent (its sends name the file to change).
   const peopleOnly = variant === "file" ? false : peopleOnlyPref;
   // The welcome card's new room opens with its platform agent selected.
@@ -152,6 +154,9 @@ export function Composer({
   const [refs, setRefs] = useState<Referenceable[]>([]);
   useInjectedReferences(roomId, channelId, main, setRefs, taRef);
   const [sending, setSending] = useState(false);
+  // A send that would add a platform agent to the room asks first; its answer.
+  const [addAsk, setAddAsk] = useState<{ choice: PlatformChoice; done: (ok: boolean) => void } | null>(null);
+  const askAdd = (choice: PlatformChoice) => new Promise<boolean>((done) => setAddAsk({ choice, done }));
   // Bumped to open the agent picker (a send that has no agent to drive).
   const [pickAgent, setPickAgent] = useState(0);
   const [showRefPicker, setShowRefPicker] = useState(false);
@@ -397,6 +402,15 @@ export function Composer({
     const routed = routeSend(toPeople ? null : picked, platformAgents?.route, subject ?? null);
     if (routed.offline) {
       toast.error(PLATFORM_OFFLINE_MESSAGE);
+      setSending(false);
+      return;
+    }
+    // A platform agent the room does not have yet is added by the first send
+    // that uses it, once the member agrees (the same question the picker asks).
+    const toAdd = picked?.platform
+      ? platformAgents?.choices.find((c) => !c.inRoom && samePlatformAgent({ core: c.agent.core ?? "", provider: c.agent.provider }, { core: picked.core ?? "", provider: picked.provider }))
+      : undefined;
+    if (toAdd && !(await askAdd(toAdd))) {
       setSending(false);
       return;
     }
@@ -875,6 +889,26 @@ export function Composer({
       </div>
       <ExpertPermissionDialog expert={exp.confirming} onAnswer={exp.resolveConfirm} />
       <PromptVariablesDialog choice={prompts.filling} onCancel={prompts.cancelFill} onInsert={prompts.submitFill} />
+      {/* Portalled like the picker's own: the chat column is a CSS container. */}
+      {createPortal(
+        <ConfirmDialog
+          open={addAsk !== null}
+          // Cancel (and the close after a confirm, which has answered already).
+          onClose={() => {
+            addAsk?.done(false);
+            setAddAsk(null);
+          }}
+          onConfirm={() => {
+            const ask = addAsk;
+            if (!ask || !platformAgents) return;
+            return platformAgents.add(ask.choice).then(ask.done);
+          }}
+          title="Add a platform agent?"
+          description={addAsk ? platformAddQuestion(addAsk.choice, nameOf) : undefined}
+          confirmLabel="Add to room and send"
+        />,
+        document.body,
+      )}
     </div>
   );
 }

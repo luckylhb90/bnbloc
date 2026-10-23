@@ -221,6 +221,14 @@ testConsoleRows();
   if (defaultPlatformRecipient([borrowed, plat], false) !== plat) throw new Error("a member without agents lands on the platform agent");
   if (defaultPlatformRecipient([borrowed, plat], true) !== null) throw new Error("a member with an own agent keeps their default");
   if (defaultPlatformRecipient([own, borrowed], false) !== null) throw new Error("no platform agent, no fallback");
+  // The room has none yet: the first online one the organization offers (the
+  // send that uses it adds it after the member agrees); an offline one is not.
+  const off = { agent: { ownerId: "admin", provider: "codex", platform: true, self: false }, hosts: [], online: false, inRoom: false };
+  const on = { agent: { ownerId: "admin", provider: "claude-code", platform: true, self: false }, hosts: [], online: true, inRoom: false };
+  if (defaultPlatformRecipient([borrowed], false, [off, on]) !== on.agent) throw new Error("the first online offered agent is the default");
+  if (defaultPlatformRecipient([borrowed], false, [off]) !== null) throw new Error("an offline offered agent is not a default");
+  if (defaultPlatformRecipient([borrowed], true, [on]) !== null) throw new Error("a member with an own agent keeps their default");
+  if (defaultPlatformRecipient([borrowed, plat], false, [on]) !== plat) throw new Error("the room's own platform agent comes first");
 }
 
 {
