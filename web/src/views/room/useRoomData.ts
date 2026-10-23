@@ -5,10 +5,15 @@ import { isRoomGoneStatus } from "@/lib/roomGone";
 import { composeRoomAgents } from "@/lib/platformAgents";
 import { catalogRefreshKey, type RoomAgentCatalog, type RoomModelCatalogs } from "@/lib/agentCatalogs";
 import type { RosterAgent, SharedAgent } from "@/lib/roomAgents";
+import { useVisiblePoll } from "@/lib/useVisiblePoll";
 import { useToast } from "@/ui/Toast";
 import type { RoomAgent } from "@/views/composer/types";
 import { useRoomPlatformAgents } from "@/views/room/useRoomPlatformAgents";
 import { errorText } from "@/lib/errors";
+
+// How often, and for how long, an empty roster is read again (see useRoomData).
+const ROSTER_POLL_MS = 3_000;
+const ROSTER_WAIT_MS = 120_000;
 
 // useRoomData owns the room-level server state: the room detail, its members
 // (and so the signed-in member's own membership, `me`: the one role source),
@@ -95,6 +100,28 @@ export function useRoomData({
     };
   }, [roomId, joinedGen, membersGen]);
   const reloadMembers = useCallback(() => setMembersGen((g) => g + 1), []);
+
+  // A new room has no roster for a few seconds: the member's bridge learns
+  // of the room on its next sweep (up to ~10s) and advertises then, and the
+  // live event announcing it is missed when it lands before the stream opens.
+  // While the roster is empty it is read again (visible tab only), for
+  // ROSTER_WAIT_MS of this visit; the event still wins when it arrives.
+  const [rosterWaiting, setRosterWaiting] = useState(true);
+  useEffect(() => {
+    setRosterWaiting(true);
+    const t = window.setTimeout(() => setRosterWaiting(false), ROSTER_WAIT_MS);
+    return () => window.clearTimeout(t);
+  }, [roomId, joinedGen]);
+  useVisiblePoll(
+    () => {
+      void api
+        .roomAgents(roomId)
+        .then((res) => setRoster((cur) => (cur.length === 0 ? (res.agents ?? []) : cur)))
+        .catch(() => {});
+    },
+    ROSTER_POLL_MS,
+    rosterWaiting && roster.length === 0,
+  );
   const members = useMemo(() => dedupeMembers((people ?? []).map((x) => x.userId)), [people]);
   // The signed-in member's membership: undefined while loading, null when
   // not a member (a preview, or just removed).

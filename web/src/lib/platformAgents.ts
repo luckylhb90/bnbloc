@@ -318,19 +318,26 @@ export function defaultModelOptions(models: readonly string[], saved: string | u
   return saved && !models.includes(saved) ? [...models, saved] : [...models];
 }
 
-// defaultPlatformRecipient is the composer's fallback recipient for a member
-// who has no agent of their own here: the room's first platform agent, else
-// (the room has none yet) the first online one the organization offers. An
-// offered one is added to the room, after the member's confirmation, by the
-// send that first uses it (Composer). A member with a local agent keeps their
-// own default (null).
-export function defaultPlatformRecipient(
+// defaultRoomRecipient is the composer's default for a member who has no local
+// agent selected here (a browser-only member, or a desktop whose local agents
+// have not been read): their own agent the room's roster lists, else the room's
+// first platform agent, else (the room has none yet) the first online one the
+// organization offers. An offered one is added to the room, after the member's
+// confirmation, by the send that first uses it (Composer). Another member's
+// agent is never a default: using it is a borrow the member chooses. A member
+// with a local agent keeps their own default (null).
+export function defaultRoomRecipient(
   roomAgents: readonly RoomAgent[],
   hasOwnAgent: boolean,
   offered: readonly PlatformChoice[] = [],
 ): RoomAgent | null {
   if (hasOwnAgent) return null;
-  return roomAgents.find((a) => a.platform && !a.self) ?? offered.find((c) => c.online)?.agent ?? null;
+  return (
+    roomAgents.find((a) => a.self && !a.platform) ??
+    roomAgents.find((a) => a.platform && !a.self) ??
+    offered.find((c) => c.online)?.agent ??
+    null
+  );
 }
 
 // platformAddQuestion is what the member agrees to when a platform agent joins

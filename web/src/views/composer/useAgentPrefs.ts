@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { api } from "@/lib/api";
 import { restoreAgent, savedAgent } from "@/lib/agentPrefs";
-import { defaultPlatformRecipient, type PlatformChoice } from "@/lib/platformAgents";
+import { defaultRoomRecipient, type PlatformChoice } from "@/lib/platformAgents";
 import { agentIdentity } from "@/lib/roomAgents";
 import type { LocalAgent } from "@/lib/useLocalAgent";
 import type { RoomAgent } from "@/views/composer/types";
@@ -67,6 +67,8 @@ export function useAgentPrefs({
   // (nothing to match against yet), stops once restored, and never clobbers
   // a selection the user made. Best-effort: a failed read leaves defaults.
   const restored = useRef(false);
+  // The recipient was chosen as a default (not by the member).
+  const defaulted = useRef(false);
   const [settled, setSettled] = useState(false);
   useEffect(() => {
     if (!enabled || restored.current || roomAgents.length === 0) return;
@@ -85,7 +87,9 @@ export function useAgentPrefs({
           setRecipient(null);
           setPeopleOnly(false);
         } else if (r) {
-          setRecipient((cur) => cur ?? r.recipient);
+          // The stored pick replaces a default this hook chose before it was read.
+          setRecipient((cur) => (cur && !defaulted.current ? cur : r.recipient));
+          defaulted.current = false;
           setPeopleOnly(false);
         }
         // The stored tuning, unless the member already picked their own
@@ -104,14 +108,20 @@ export function useAgentPrefs({
     };
   }, [enabled, roomId, channelId, roomAgents, targets, subject]);
 
-  // A member with no agent of their own (browser-only, nothing stored for
-  // this room) lands on the room's platform agent instead of "No local
-  // agent", so returning to a room still has an agent to talk to.
+  // A member with no agent of their own here (browser-only, nothing stored for
+  // this room) lands on a default instead of "No local agent": their own
+  // advertised agent, else a platform agent. It does not wait for the roster:
+  // a new room's is empty for a few seconds, and a stored pick read later
+  // replaces the default (restore, above).
+  const rosterEmpty = roomAgents.length === 0;
   useEffect(() => {
-    if (!enabled || !settled || recipient || peopleOnly) return;
-    const fallback = defaultPlatformRecipient(roomAgents, targets.length > 0 || !!target, offered);
-    if (fallback) setRecipient(fallback);
-  }, [enabled, settled, recipient, peopleOnly, roomAgents, offered, targets.length, target]);
+    if (!enabled || recipient || peopleOnly || !(settled || rosterEmpty)) return;
+    const fallback = defaultRoomRecipient(roomAgents, targets.length > 0 || !!target, offered);
+    if (fallback) {
+      defaulted.current = !settled;
+      setRecipient(fallback);
+    }
+  }, [enabled, settled, rosterEmpty, recipient, peopleOnly, roomAgents, offered, targets.length, target]);
 
   // Save the pick (debounced; best-effort, never blocks sending) once the
   // stored one was read, so a default never overwrites it. A change pending
