@@ -29,8 +29,8 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 	sandbox "github.com/luckylhb90/bnbloc/sandbox/protocol"
-	"github.com/luckylhb90/bnbloc/services/bridge/roomtools"
 	activitysvc "github.com/luckylhb90/bnbloc/services/activity"
+	"github.com/luckylhb90/bnbloc/services/bridge/roomtools"
 	gatewaysvc "github.com/luckylhb90/bnbloc/services/gateway"
 	realtimesvc "github.com/luckylhb90/bnbloc/services/realtime"
 )
@@ -139,8 +139,8 @@ func TestE2EConnections(t *testing.T) {
 	for _, c := range []map[string]any{
 		{"name": "httpbin", "displayName": "HTTPBin", "purpose": "An echo of the request", "hosts": []string{"httpbin.org"},
 			"connect": map[string]any{"kind": "apiKey", "apiKey": map[string]string{"in": "bearer"}},
-			"policy": map[string]any{"read": []map[string]any{{"paths": []string{"/**"}}}, "write": []map[string]any{{"methods": []string{"POST"}, "paths": []string{"/post"}}}},
-			"guide":  "curl https://httpbin.org/bearer"},
+			"policy":  map[string]any{"read": []map[string]any{{"paths": []string{"/**"}}}, "write": []map[string]any{{"methods": []string{"POST"}, "paths": []string{"/post"}}}},
+			"guide":   "curl https://httpbin.org/bearer"},
 		{"name": "echo", "displayName": "Echo", "purpose": "Another echo", "hosts": []string{"postman-echo.com"},
 			"connect": map[string]any{"kind": "apiKey", "apiKey": map[string]string{"in": "bearer"}},
 			"policy":  map[string]any{"read": []map[string]any{{"paths": []string{"/**"}}}}},
@@ -249,7 +249,9 @@ func TestE2EConnections(t *testing.T) {
 		t.Fatalf("facts = %+v", facts)
 	}
 	if sb := os.Getenv("BNBLOC_E2E_SANDBOX_URL"); sb != "" {
-		t.Run("sandboxed", func(t *testing.T) { e2eSandboxed(t, gwc, claimed, core.Endpoint{BaseURL: sb, Token: os.Getenv("BNBLOC_E2E_SANDBOX_TOKEN")}) })
+		t.Run("sandboxed", func(t *testing.T) {
+			e2eSandboxed(t, gwc, claimed, core.Endpoint{BaseURL: sb, Token: os.Getenv("BNBLOC_E2E_SANDBOX_TOKEN")})
+		})
 	}
 }
 
