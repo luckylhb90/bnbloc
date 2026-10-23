@@ -1,7 +1,13 @@
 # Connections: agents act as the person who asked, in the systems that person connected (2026-10-22)
 
-Status: building (slice 1 landed: docs/architecture/service-components.md;
-§6 lists where the build departs from the text below). Owner: the **connections component**
+Status: built (2026-10-23). Slice 1, the platform primitives:
+docs/architecture/service-components.md. Slice 2, the connections
+component: github.com/luckylhb90/bnbloc-connections v0.1.0, samples in
+github.com/luckylhb90/bnbloc-connectors. Slice 3, the organization's SSO
+provider: the internal repository. Verified end to end by `test/e2e`
+`TestE2EConnections` (on the host and in the sandbox); live use waits for
+the services' deploy and the operator items of §5. §6 lists where the build
+departs from the text below. Owner: the **connections component**
 (`bnbloc-connections`, its own repository: connectors, connecting,
 grants, policy, activity) and its provider components (an organization's
 SSO in the internal repository). The platform adds only generic primitives
