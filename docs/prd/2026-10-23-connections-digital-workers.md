@@ -31,14 +31,19 @@ follow:
     as).
   An admin adds one, names its owners and sets its audience.
 - **A worker's connection** is a grant like a member's, kept in the
-  organization's scope (`grant:<worker>:<connector>`). An owner makes it:
-  - pasting the worker's key (`apiKey`);
-  - signing in as the worker (`oauth2`);
-  - asking the SSO provider to authorize the worker's account
-    (`provider`): its consent goes to the worker's owners, not to the
-    requester.
+  organization's scope (`grant:<worker>:<connector>`). It is made through
+  the connector's provider, which signs in as the worker's account:
+  - A directory that grants bot accounts directly (the organization's SSO
+    has such a grant for its digital workers) needs no consent. The
+    provider holds the worker's own credentials, set by an admin in the
+    provider's settings. On Connect it obtains the worker's tokens, and
+    when a refresh fails it obtains them again, with no card for anyone.
+  - A directory that asks for consent sends it to the worker's owners, not
+    to the requester.
 
-  It has its own reach: reading only, or changes too.
+  A worker's key pasted by an owner (`apiKey`) and signing in as the
+  worker (`oauth2`) are extensions, for systems that issue keys to bot
+  accounts. It has its own reach: reading only, or changes too.
 - **Who an agent acts as** is decided per request by the component, from
   the attested turn, never by the agent:
   1. The requester's own drive, and the requester connected the system:
@@ -95,7 +100,10 @@ The turn already attests the requester, the agent's owner and the drive;
 pages already attest the member and whether they are an admin. Workers,
 owners, audiences and choices are the component's. The SSO provider's
 contract (`provider.Call`) names a principal instead of only a member:
-`{kind: "member" | "worker", id, account}`.
+`{kind: "member" | "worker", id, account}`. A provider answers a worker's
+connect `connected` at once when its directory grants the account
+directly, and keeps a worker's tokens apart from any person's: a token is
+checked to be the worker's own before it is used.
 
 ## 4. Design review
 
@@ -130,10 +138,13 @@ contract (`provider.Call`) names a principal instead of only a member:
 
 ## 5. Build order
 
-1. Workers, audiences, a worker's grants (`apiKey`, `oauth2`), `actingAs`
-   in serving, cards and facts; borrowed and platform drives as workers.
-2. The provider principal and the SSO provider's worker sign-in.
-3. `onBehalfOf`, and the AI checks of §4.
+1. Workers, audiences, `actingAs` in serving, cards and facts; borrowed
+   and platform drives as workers; the provider principal and the SSO
+   provider's direct grant for bot accounts.
+2. `onBehalfOf`, and the AI checks of §4.
+3. Extensions: a worker's pasted key, an OAuth sign-in as the worker, and
+   group-scoped consent (a person authorizes for a group's shared use),
+   which a room's shared grant could build on.
 
 ## 6. Open questions
 
