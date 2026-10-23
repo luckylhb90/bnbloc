@@ -87,7 +87,7 @@ const (
 	// (StoreScope), signed by the component.
 	ComponentStorePath = "/v1/component-store/"
 	// ComponentAssistPath + "{task}": one run of the component's own AI
-	// task (AssistRequest, AssistReply), signed by the component.
+	// task (ServiceAssistRequest, ServiceAssistReply), signed by the component.
 	ComponentAssistPath = "/v1/component-assist/"
 	// ComponentCallbackPath + "{component}/{path}": open; forwarded signed.
 	ComponentCallbackPath = "/v1/component-callbacks/"
@@ -153,23 +153,23 @@ type Member struct {
 	Origin  string `json:"origin"`
 }
 
-// AssistRequest is one run of a service's own AI task for an
+// ServiceAssistRequest is one run of a service's own AI task for an
 // organization: the text the task works from (the service builds it; the
 // platform hands it to the model fenced as data) and, when the run is for
 // someone, who (the service's word, recorded in the audit row).
-type AssistRequest struct {
+type ServiceAssistRequest struct {
 	Org    string `json:"org"`
 	Member string `json:"member,omitempty"`
 	Text   string `json:"text"`
 }
 
-// MaxAssistText bounds AssistRequest.Text, in characters.
-const MaxAssistText = 16000
+// MaxServiceAssistText bounds ServiceAssistRequest.Text, in characters.
+const MaxServiceAssistText = 16000
 
-// AssistReply is the task's declared fields in their shapes: a text
+// ServiceAssistReply is the task's declared fields in their shapes: a text
 // field a string, a list field a list of strings, an items field a list
 // of objects of strings.
-type AssistReply struct {
+type ServiceAssistReply struct {
 	Fields map[string]any `json:"fields"`
 }
 

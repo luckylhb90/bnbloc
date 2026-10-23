@@ -66,12 +66,12 @@ tasks for an organization, as follows.
 
 - **Request.** `POST /v1/component-assist/{task}`, signed by the service
   over `component.SignedRequest` like its store calls. The body is
-  `component.AssistRequest`:
+  `component.ServiceAssistRequest`:
   - `org`, the organization the task runs for;
   - `member`, optional: who the run is for, as the service says;
   - `text`, the input the service builds, at most 16,000 characters. The
     platform fences it as data.
-- **Answer.** `component.AssistReply`, the task's declared fields in their
+- **Answer.** `component.ServiceAssistReply`, the task's declared fields in their
   shapes (`assist.Fields`).
 - **Which tasks.** A service runs only tasks named after it
   (`<service>-…`, `component.ServiceAssistTask`), and never a task the
@@ -148,7 +148,7 @@ decision; the conditions above are the bar it must meet.
 | Abuse and untrusted input | An agent's draft is untrusted: its review is fenced as data and the instructions say so. A draft built to fool the review still needs an admin to enable it, and it shows the raw JSON beside the review. A suggested rule is validated and must match a recorded signal. |
 | One owner | The model is reached only through the gateway's assist seam (no model client in the component); the policy's classification stays `connector.Classify`; reviews and signals live in the component's store. |
 | Defaults and fallbacks | On when the capability, a model and the task are present; otherwise the old page. |
-| External contracts | `component.AssistRequest` / `AssistReply`, the `assist` capability, `ServiceAssistTask`. |
+| External contracts | `component.ServiceAssistRequest` / `AssistReply`, the `assist` capability, `ServiceAssistTask`. |
 | Load on users and agents | Agents: none. Admins: a summary and ranked findings instead of raw JSON. |
 | Release and compatibility | Additive: a gateway with the primitive, the component with the capability (an upgrade the admin consents to), and the two tasks published as content. Each part degrades without the others. |
 | Observability | An audit row for every run; the component logs each failed run with its reason. |

@@ -165,9 +165,9 @@ member's, in every service, with their deprovisioning
 ## AI tasks
 
 docs/prd/2026-10-23-connections-ai.md §2. A service runs one of its own
-JSON assist tasks for an organization with `component.AssistRequest`
+JSON assist tasks for an organization with `component.ServiceAssistRequest`
 `{org, member?, text}` (text at most 16,000 characters) and gets
-`component.AssistReply` `{fields}`, the task's declared fields in their
+`component.ServiceAssistReply` `{fields}`, the task's declared fields in their
 shapes (`assist.Fields`). `component.ServiceClient.Assist` is the client.
 
 - **Its own tasks only**: named `<service>-<task>`

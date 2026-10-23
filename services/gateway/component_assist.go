@@ -44,13 +44,13 @@ func (s *Service) handleComponentAssist(w http.ResponseWriter, r *http.Request) 
 	if _, ok := s.verifyComponentCall(w, r, kind, name, component.SignedRequest(r.Method, r.URL.EscapedPath(), "", body)); !ok {
 		return
 	}
-	var req component.AssistRequest
+	var req component.ServiceAssistRequest
 	if err := json.Unmarshal(body, &req); err != nil || req.Org == "" {
 		httpx.Error(w, "the body is an AssistRequest naming its org", http.StatusBadRequest)
 		return
 	}
-	if !utf8.ValidString(req.Text) || strings.TrimSpace(req.Text) == "" || utf8.RuneCountInString(req.Text) > component.MaxAssistText {
-		httpx.Error(w, fmt.Sprintf("text must be 1 to %d characters", component.MaxAssistText), http.StatusBadRequest)
+	if !utf8.ValidString(req.Text) || strings.TrimSpace(req.Text) == "" || utf8.RuneCountInString(req.Text) > component.MaxServiceAssistText {
+		httpx.Error(w, fmt.Sprintf("text must be 1 to %d characters", component.MaxServiceAssistText), http.StatusBadRequest)
 		return
 	}
 	taskName := r.PathValue("task")
@@ -108,5 +108,5 @@ func (s *Service) handleComponentAssist(w http.ResponseWriter, r *http.Request) 
 		writeAssistModelErr(w, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, component.AssistReply{Fields: fields})
+	httpx.WriteJSON(w, http.StatusOK, component.ServiceAssistReply{Fields: fields})
 }

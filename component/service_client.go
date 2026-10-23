@@ -155,7 +155,7 @@ const assistTimeout = 75 * time.Second
 // Assist runs the component's own task (ServiceAssistTask) and answers
 // its fields. A refusal that is no fault of the call (ErrAssistUnavailable)
 // is wrapped with the platform's reason.
-func (c *ServiceClient) Assist(ctx context.Context, task string, req AssistRequest) (map[string]any, error) {
+func (c *ServiceClient) Assist(ctx context.Context, task string, req ServiceAssistRequest) (map[string]any, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, err
@@ -171,7 +171,7 @@ func (c *ServiceClient) Assist(ctx context.Context, task string, req AssistReque
 	default:
 		return nil, fmt.Errorf("bnbloc assist answered %d: %s", code, errorText(raw))
 	}
-	var out AssistReply
+	var out ServiceAssistReply
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return nil, err
 	}
