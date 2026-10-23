@@ -3,6 +3,10 @@ package bridge
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net"
+	"os"
+	"path/filepath"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -102,5 +106,44 @@ func TestServiceFactsLineAndFiles(t *testing.T) {
 	unreadable := roomlog.SessionGuidance(roomlog.Guidance{HasRoomFiles: true, Services: []roomlog.ServiceLine{{Service: "conn", Unreadable: true}}})
 	if !strings.Contains(unreadable, "- conn/: could not be read this time.") {
 		t.Fatalf("unreadable = %s", unreadable)
+	}
+}
+
+// A sandboxed session's CA files are in its workspace when the session
+// starts and at every turn: a fresh session resets the workspace's
+// bnbloc-owned paths (.room/ included) after the space was prepared, so
+// the files the space's commands are pointed at are written again.
+func TestSandboxedSessionKeepsItsCAFiles(t *testing.T) {
+	gw, _ := serviceGateway(t)
+	ln, _ := net.Listen("tcp", "127.0.0.1:0")
+	port := ln.Addr().(*net.TCPAddr).Port
+	_ = ln.Close()
+	b := New(Config{GatewayBaseURL: gw.URL, GatewayToken: "t", OwnerSubject: "maya", StateDir: t.TempDir(),
+		Sandbox: SandboxConfig{HostProxy: fmt.Sprintf("host.vm.internal:%d", port)}})
+	stop, err := b.EnableRoomTools("/opt/bnbloc/bnbloc-bridge")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	workdir := t.TempDir()
+	ca := filepath.Join(workdir, ".room", "egress", "ca.pem")
+	if env := b.sandbox.spaceEnv(context.Background(), workdir); env["HTTPS_PROXY"] == "" || env["NODE_EXTRA_CA_CERTS"] != ca {
+		t.Fatalf("space env = %v", env)
+	}
+	resetProtectedPaths(workdir)
+	if _, err := os.Stat(ca); err == nil {
+		t.Fatal("the reset kept .room/ (the test needs it gone)")
+	}
+	part, err := b.sessionContributors()[0].ContributeSession(context.Background(), SessionInfo{RoomID: "room-1", Owner: "maya", JobID: "job-1", RequesterUserID: "maya", Sandboxed: true, Workdir: workdir})
+	if err != nil || part.Env != nil {
+		t.Fatalf("contribution = %v %v (a sandboxed agent's own process gets nothing)", part.Env, err)
+	}
+	if _, err := os.Stat(ca); err != nil {
+		t.Fatalf("the CA is not back at the session's start: %v", err)
+	}
+	_ = os.RemoveAll(filepath.Join(workdir, ".room"))
+	part.Turn(TurnInfo{JobID: "job-2", RequesterUserID: "maya"})
+	if _, err := os.Stat(ca); err != nil {
+		t.Fatalf("the CA is not back at the turn: %v", err)
 	}
 }

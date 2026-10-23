@@ -226,9 +226,12 @@ func (c *roomToolsContributor) bearer(nonce string) string {
 
 // hooks are a session's turn and release callbacks. With egress, each turn
 // asks the services again which hosts they handle for its job.
-func (c *roomToolsContributor) hooks(sess *roomtools.Session, egress bool) (turn, turnEnd func(TurnInfo), release func()) {
+func (c *roomToolsContributor) hooks(sess *roomtools.Session, egress bool, sandboxWorkdir string) (turn, turnEnd func(TurnInfo), release func()) {
 	return func(t TurnInfo) {
 			sess.Bind(roomtools.Job{JobID: t.JobID, RequesterUserID: t.RequesterUserID, ChannelID: t.ChannelID, MessageSeq: t.MessageSeq, ByRequester: t.ByRequester, Workspace: t.Workspace, Team: t.Team})
+			if egress && sandboxWorkdir != "" {
+				c.writeSandboxCA(sandboxWorkdir)
+			}
 			if egress {
 				ctx, cancel := context.WithTimeout(context.Background(), egressAskTimeout)
 				hosts, _ := c.b.egressFor(ctx, sess.Scope().RoomID, t.JobID, sess.EgressHosts())
@@ -256,7 +259,7 @@ func (c *roomToolsContributor) RestoreSession(_ context.Context, info SessionInf
 	if g.Egress && info.Sandboxed && info.Workdir != "" {
 		_ = c.srv.AliasEgress(c.egressAlias(info.Workdir), sess)
 	}
-	turn, turnEnd, release := c.hooks(sess, g.Egress)
+	turn, turnEnd, release := c.hooks(sess, g.Egress, sandboxWorkdir(info))
 	// The session keeps its host tools' endpoints in its profile; the tools
 	// themselves ended with the bridge, so they are fronted again (and start
 	// on their next call).
@@ -313,7 +316,7 @@ func (c *roomToolsContributor) ContributeSession(ctx context.Context, info Sessi
 	} else {
 		server.Env = []corepkg.NameValue{{Name: roomtools.TokenEnv, Value: token}}
 	}
-	turn, turnEnd, release := c.hooks(sess, egress)
+	turn, turnEnd, release := c.hooks(sess, egress, sandboxWorkdir(info))
 	part := SessionContribution{MCPServers: append([]corepkg.MCPServer{server}, hostServers...), RoomTools: true, Turn: turn, TurnEnd: turnEnd, Release: release, State: state, Env: egressEnv}
 	if len(info.RoomRelayServers) > 0 {
 		// The session's room-credential tools reach the gateway through
@@ -354,10 +357,19 @@ func (c *roomToolsContributor) egressEnv(ctx context.Context, info SessionInfo, 
 	cancel()
 	sess.SetEgressHosts(hosts)
 	if info.Sandboxed {
+		c.writeSandboxCA(info.Workdir)
 		return nil, true
 	}
 	maps.Copy(env, proxy)
 	return env, true
+}
+
+// sandboxWorkdir is a sandboxed session's workspace ("" on the host).
+func sandboxWorkdir(info SessionInfo) string {
+	if info.Sandboxed {
+		return info.Workdir
+	}
+	return ""
 }
 
 // egressAlias is the egress bearer of the sandboxed session working in
@@ -380,15 +392,8 @@ func (c *roomToolsContributor) sandboxEgressEnv(ctx context.Context, workdir str
 	if len(c.b.servicesWith(ctx, component.ServiceEgress)) == 0 {
 		return nil
 	}
-	caPEM, bundle := c.srv.EgressCA()
-	dir := filepath.Join(workdir, filepath.FromSlash(sandboxEgressDir))
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		slog.Warn("bnbloc bridge sandbox egress off: no CA folder", "event", "bnbloc.bridge.sandbox_egress_failed", "error", err)
-		return nil
-	}
-	caFile, bundleFile := filepath.Join(dir, "ca.pem"), filepath.Join(dir, "bundle.pem")
-	if err := os.WriteFile(caFile, caPEM, 0o644); err != nil {
-		slog.Warn("bnbloc bridge sandbox egress off: CA not written", "event", "bnbloc.bridge.sandbox_egress_failed", "error", err)
+	caFile, bundleFile, ok := c.writeSandboxCA(workdir)
+	if !ok {
 		return nil
 	}
 	env := c.srv.EgressEnv(c.egressAlias(workdir), c.b.cfg.Sandbox.HostProxy)
@@ -397,10 +402,35 @@ func (c *roomToolsContributor) sandboxEgressEnv(ctx context.Context, workdir str
 		direct := env["NO_PROXY"] + "," + strings.Join(hosts, ",")
 		env["NO_PROXY"], env["no_proxy"] = direct, direct
 	}
-	if len(bundle) > 0 && os.WriteFile(bundleFile, bundle, 0o644) == nil {
+	if bundleFile != "" {
 		for _, k := range []string{"SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "GIT_SSL_CAINFO"} {
 			env[k] = bundleFile
 		}
 	}
 	return env
+}
+
+// writeSandboxCA copies the proxy's CA (and the bundle with the system's
+// roots, "" when there is none) into a sandboxed workspace. It is written
+// when the space is prepared and again when a session starts and at each
+// turn: a fresh session resets the workspace's bnbloc-owned paths, .room/
+// included.
+func (c *roomToolsContributor) writeSandboxCA(workdir string) (caFile, bundleFile string, ok bool) {
+	caPEM, bundle := c.srv.EgressCA()
+	dir := filepath.Join(workdir, filepath.FromSlash(sandboxEgressDir))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		slog.Warn("bnbloc bridge sandbox egress off: no CA folder", "event", "bnbloc.bridge.sandbox_egress_failed", "error", err)
+		return "", "", false
+	}
+	caFile = filepath.Join(dir, "ca.pem")
+	if err := os.WriteFile(caFile, caPEM, 0o644); err != nil {
+		slog.Warn("bnbloc bridge sandbox egress off: CA not written", "event", "bnbloc.bridge.sandbox_egress_failed", "error", err)
+		return "", "", false
+	}
+	if len(bundle) > 0 {
+		if err := os.WriteFile(filepath.Join(dir, "bundle.pem"), bundle, 0o644); err == nil {
+			bundleFile = filepath.Join(dir, "bundle.pem")
+		}
+	}
+	return caFile, bundleFile, true
 }
