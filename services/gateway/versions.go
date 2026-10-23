@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/httptrace"
 	"strings"
 	"sync"
 	"time"
@@ -130,13 +131,18 @@ func sampleVersions(ctx context.Context, url string) ([]wire.ServiceVersion, err
 
 func fetchVersion(ctx context.Context, url string) (wire.ServiceVersion, error) {
 	var v wire.ServiceVersion
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	// Say which phase a failure was in and at which address: "timed out" alone
+	// cannot tell a replica that does not accept connections (a stale address
+	// the service registry still lists) from one that accepts and does not
+	// answer (a process that is stuck).
+	var trace probeTrace
+	req, err := http.NewRequestWithContext(httptrace.WithClientTrace(ctx, trace.hooks()), http.MethodGet, url, nil)
 	if err != nil {
 		return v, err
 	}
 	resp, err := versionClient.Do(req)
 	if err != nil {
-		return v, err
+		return v, trace.explain(err)
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
@@ -150,4 +156,40 @@ func fetchVersion(ctx context.Context, url string) (wire.ServiceVersion, error) 
 		return v, fmt.Errorf("GET /version: invalid response: %w", err)
 	}
 	return v, nil
+}
+
+// probeTrace records how far one /version request got: the address it tried
+// to connect to and whether the connection was made.
+type probeTrace struct {
+	mu        sync.Mutex
+	dialing   string
+	connected string
+}
+
+func (t *probeTrace) hooks() *httptrace.ClientTrace {
+	return &httptrace.ClientTrace{
+		ConnectStart: func(_, addr string) {
+			t.mu.Lock()
+			t.dialing = addr
+			t.mu.Unlock()
+		},
+		GotConn: func(info httptrace.GotConnInfo) {
+			t.mu.Lock()
+			t.connected = info.Conn.RemoteAddr().String()
+			t.mu.Unlock()
+		},
+	}
+}
+
+// explain names the phase a failed request was in.
+func (t *probeTrace) explain(err error) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	switch {
+	case t.connected != "":
+		return fmt.Errorf("connected to %s but it did not answer in time: %w", t.connected, err)
+	case t.dialing != "":
+		return fmt.Errorf("could not connect to %s: %w", t.dialing, err)
+	}
+	return err
 }

@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -118,5 +119,41 @@ func TestSampleVersionsKeepsSampleOrder(t *testing.T) {
 	// Distinct instances, each once, whatever order the replicas answered in.
 	if got[0].Instance == got[1].Instance {
 		t.Fatalf("an instance was listed twice: %+v", got)
+	}
+}
+
+// A failed probe says how far it got, so the Deployment card can tell a
+// replica that does not accept connections from one that accepts and does not
+// answer.
+func TestVersionProbeNamesThePhaseOfAFailure(t *testing.T) {
+	// Accepts the connection and never answers.
+	silent, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { silent.Close() })
+	go func() {
+		for {
+			c, err := silent.Accept()
+			if err != nil {
+				return
+			}
+			t.Cleanup(func() { c.Close() })
+		}
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	_, err = fetchVersion(ctx, "http://"+silent.Addr().String()+"/version")
+	if err == nil || !strings.Contains(err.Error(), "connected to "+silent.Addr().String()+" but it did not answer") {
+		t.Fatalf("a replica that accepts and does not answer: %v", err)
+	}
+
+	// Nothing listens: the connection is refused, at a named address.
+	gone, _ := net.Listen("tcp", "127.0.0.1:0")
+	addr := gone.Addr().String()
+	gone.Close()
+	_, err = fetchVersion(context.Background(), "http://"+addr+"/version")
+	if err == nil || !strings.Contains(err.Error(), "could not connect to "+addr) {
+		t.Fatalf("a replica that refuses: %v", err)
 	}
 }
