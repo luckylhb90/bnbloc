@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   CaretDownIcon,
@@ -33,6 +33,7 @@ export function AgentPicker({
   onPick,
   platform = [],
   onAddPlatform,
+  openNonce = 0,
 }: {
   agent: LocalAgent;
   roomAgents: RoomAgent[];
@@ -42,8 +43,13 @@ export function AgentPicker({
   platform?: readonly PlatformChoice[];
   // Resolves true once the agent is in the room.
   onAddPlatform?: (choice: PlatformChoice) => Promise<boolean>;
+  // A new value opens the list (a send that has no agent asks for one).
+  openNonce?: number;
 }) {
   const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (openNonce > 0) setOpen(true);
+  }, [openNonce]);
   const [confirmAdd, setConfirmAdd] = useState<PlatformChoice | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -94,7 +100,7 @@ export function AgentPicker({
         aria-haspopup="true"
         aria-expanded={open}
       >
-        {platformOffline || (!recipient && agent.detected === false) ? (
+        {platformOffline || (!recipient && !current) ? (
           <WarningCircleIcon size={15} className="text-[var(--color-warning)]" />
         ) : recipient?.platform ? (
           <CloudIcon size={15} weight="fill" className="text-[var(--color-accent)]" />

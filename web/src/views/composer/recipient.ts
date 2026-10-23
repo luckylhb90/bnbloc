@@ -37,3 +37,14 @@ export function resolveRecipient(input: {
   const t = input.localTarget;
   return t?.provider && input.subject ? { ownerId: input.subject, provider: t.provider, core: t.core || undefined, self: true } : null;
 }
+
+// The refusal of a send that would drive nobody: agent mode (not people-only)
+// with no agent resolved. Such a message used to go out as people-only without
+// a word, and the member waited for a reply that was never going to come.
+export const NO_AGENT_MESSAGE = "Choose an agent for this message, or switch to messaging people only";
+
+// needsAgent reports a send that must not go: it is meant for an agent
+// (toPeople false) and resolveRecipient found none.
+export function needsAgent(toPeople: boolean, picked: RoomAgent | null): boolean {
+  return !toPeople && picked === null;
+}

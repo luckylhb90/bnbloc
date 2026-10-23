@@ -43,7 +43,7 @@ import { ExpertBanner, ExpertPermissionDialog, ExpertPicker } from "@/views/comp
 import { TeamPlanCard, useTeamPlan } from "@/views/composer/TeamPlanCard";
 import { useComposerPrompts } from "@/views/composer/useComposerPrompts";
 import { PromptPickerButton, PromptVariablesDialog, SlashMenu } from "@/views/composer/PromptPicker";
-import { explicitRecipient, resolveRecipient } from "@/views/composer/recipient";
+import { explicitRecipient, needsAgent, NO_AGENT_MESSAGE, resolveRecipient } from "@/views/composer/recipient";
 import { useEnhancePrompt } from "@/views/composer/useEnhancePrompt";
 import { useVoiceInput } from "@/views/composer/useVoiceInput";
 import { useMediaCapability } from "@/lib/media";
@@ -152,6 +152,8 @@ export function Composer({
   const [refs, setRefs] = useState<Referenceable[]>([]);
   useInjectedReferences(roomId, channelId, main, setRefs, taRef);
   const [sending, setSending] = useState(false);
+  // Bumped to open the agent picker (a send that has no agent to drive).
+  const [pickAgent, setPickAgent] = useState(0);
   const [showRefPicker, setShowRefPicker] = useState(false);
   // The narrow toolbar's "+" menu (attach / reference).
   const [showMore, setShowMore] = useState(false);
@@ -369,6 +371,14 @@ export function Composer({
     const expertSend = !toPeople ? exp.sendField() : undefined;
     if (exp.expert && !toPeople && !picked) {
       toast.error(`Pick an agent for ${contentLabel(exp.expert.component)} to run on`);
+      setSending(false);
+      return;
+    }
+    if (needsAgent(toPeople, picked)) {
+      // Agent mode with nobody to drive: not sent as people-only without a word.
+      // The picker opens (its platform agents included); the draft stays.
+      toast.error(NO_AGENT_MESSAGE);
+      setPickAgent((n) => n + 1);
       setSending(false);
       return;
     }
@@ -821,6 +831,7 @@ export function Composer({
                 recipient={recipient}
                 subject={subject ?? null}
                 onPick={setRecipient}
+                openNonce={pickAgent}
                 platform={platformAgents?.choices}
                 onAddPlatform={platformAgents?.add}
               />

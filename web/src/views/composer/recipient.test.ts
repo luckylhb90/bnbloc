@@ -1,4 +1,4 @@
-import { explicitRecipient, mentionedAgent, resolveRecipient } from "./recipient.ts";
+import { explicitRecipient, mentionedAgent, needsAgent, resolveRecipient } from "./recipient.ts";
 import type { RoomAgent } from "./types.ts";
 
 function assert(condition: boolean, message: string): void {
@@ -25,3 +25,8 @@ assert(explicitRecipient("hi", agents, null) === null, "a local target is not ex
 // with an empty owner (no bridge claims one; the server refuses it).
 assert(resolveRecipient({ ...base, text: "hi", recipient: null, subject: null }) === null, "no subject: no own agent");
 assert(resolveRecipient({ ...base, text: "hi", recipient: null, subject: "" }) === null, "empty subject: no own agent");
+
+// Agent mode with nobody to drive is refused, never sent as people-only.
+assert(needsAgent(false, null), "agent mode without an agent is refused");
+assert(!needsAgent(true, null), "people-only needs no agent");
+assert(!needsAgent(false, rose), "an agent was resolved");
