@@ -127,7 +127,7 @@ is not reachable. With the Sandbox Protocol's `hostProxy`:
   (bnbloc-sandboxd: the runtime's host gateway, `allow_host` on that TCP
   port only), whatever its egress mode.
 - The bridge's proxy also listens on `127.0.0.1:<port>` (proxy only).
-- An own drive's space gets the proxy in its default environment
+- A sandboxed space gets the proxy in its default environment
   (`SpaceRequest.Env`, re-ensured every turn) with an **egress alias**: a
   bearer derived from the workspace, bound to the session when it is
   created; the CA files are copied into the workspace
@@ -139,7 +139,9 @@ is not reachable. With the Sandbox Protocol's `hostProxy`:
   link-local or unspecified ones. Private hosts go through the proxy like
   any other (they are not in `NO_PROXY`), so a connector's host that is
   also private is still served by its service.
-- A borrowed or platform drive's space converges back to no proxy.
+- A borrowed or platform drive's space gets the proxy too: each service
+  decides by the attested drive (the connections component serves one only
+  as a digital worker, never in the owner's or the requester's name).
 
 ## Room facts
 

@@ -187,8 +187,8 @@ type sandboxRuntime struct {
 	cfg    SandboxConfig
 	client *sandbox.Client
 	now    func() time.Time
-	// spaceEnv, when set, is the default environment of an own drive's
-	// space for its workdir: the egress proxy (roomtools_contrib.go).
+	// spaceEnv, when set, is the default environment of a space for its
+	// workdir: the egress proxy (roomtools_contrib.go).
 	spaceEnv func(ctx context.Context, workdir string) map[string]string
 
 	mu        sync.Mutex
@@ -368,11 +368,12 @@ func (s *sandboxRuntime) prepare(ctx context.Context, k driveKey, owner string, 
 	// allows) is the guest's alone: the core's path mapping is the workspace.
 	space0 := len(mounts)
 	mounts = append(mounts, s.contributedMounts(workdir, borrowed)...)
-	// An own drive's commands reach the services' hosts through the
-	// bridge's egress proxy (never someone else's prompt in the owner's
-	// name: a borrowed drive's space converges back to none).
+	// Every drive's commands reach the services' hosts through the
+	// bridge's egress proxy. Each service decides by the attested drive: a
+	// borrowed or platform drive is never served in the owner's name (the
+	// connections component serves one only as a digital worker).
 	var spaceEnv map[string]string
-	if !borrowed && s.spaceEnv != nil {
+	if s.spaceEnv != nil {
 		spaceEnv = s.spaceEnv(ctx, workdir)
 	}
 	if _, err := s.client.EnsureSpace(ctx, s.endpoint(), machine, space, sandbox.SpaceRequest{
