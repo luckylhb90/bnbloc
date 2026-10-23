@@ -279,8 +279,11 @@ fallback with the model off.
   (a claimed host, through egress like any call). An admin sees it on the
   admin page with a card, and enables it or not.
 - **The agent explains activity.** "What did my agents do in the wiki
-  this week" is answered from `.room/connections/ACTIVITY.md`. No model
-  runs inside the component.
+  this week" is answered from `.room/connections/ACTIVITY.md`.
+- **The component's own AI helps the admin decide**
+  (docs/prd/2026-10-23-connections-ai.md): a review of every connector
+  before it is enabled, and rules proposed from how a connector is used,
+  through the platform's `assist` primitive for services.
 - No model sits in the request path: read or write is the connector's
   declared policy, and a change is the person's click.
 
@@ -300,7 +303,7 @@ fallback with the model off.
 | Load on users and agents | Agents: no tool, no rule, one line of facts, files read on demand, no session restarts. Members: one card when something is needed, one page to manage. |
 | Release and compatibility | All primitives are additive; share targets' page routes are replaced by the generic one (pre-launch, no compatibility). The component releases on its own; the bridge's proxy and facts ship with the desktop; `hostProxy` is optional. |
 | Observability | An audit row for every call; the component logs each refusal with its reason; the bridge logs claimed-host routing per turn; the turn proxy logs status and latency per component. |
-| AI capability | The agent notices a need and the member decides; the agent drafts connectors; the agent explains activity from a file (§2.6). |
+| AI capability | The agent notices a need and the member decides; the agent drafts connectors; the agent explains activity from a file; the component reviews connectors and proposes rules for the admin (§2.6, docs/prd/2026-10-23-connections-ai.md). |
 | Component or platform | The platform adds what only it can: attesting a turn, routing an agent's egress, writing room facts, posting a card to one member, serving pages, a store sealed with its key, audit rows. Everything about connections, providers and systems is a component or its content. |
 
 **Pre-mortem.**

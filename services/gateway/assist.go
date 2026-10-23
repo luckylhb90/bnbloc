@@ -212,7 +212,7 @@ func (s *Service) handleAssist(w http.ResponseWriter, r *http.Request, claims au
 
 // assistJSON runs a JSON task and answers its fields.
 func (s *Service) assistJSON(w http.ResponseWriter, r *http.Request, claims auth.Claims, task assistTask, model assist.Model, msgs []assist.Message) {
-	fields, usage, err := s.completeJSONTask(r.Context(), claims, task, model, msgs)
+	fields, usage, err := s.completeJSONTask(r.Context(), claims, task, model, msgs, assistWhat(task))
 	if err != nil {
 		writeAssistModelErr(w, err)
 		return
@@ -221,15 +221,16 @@ func (s *Service) assistJSON(w http.ResponseWriter, r *http.Request, claims auth
 }
 
 // completeJSONTask is one run of a JSON task: the model's reply read as
-// the task's fields, audited (auditAssist). The assist route's runs and
-// the gateway's own (runConsentJSON) go through it.
-func (s *Service) completeJSONTask(ctx context.Context, claims auth.Claims, task assistTask, model assist.Model, msgs []assist.Message) (map[string]any, wire.AssistUsage, error) {
+// the task's fields, audited (auditModelRun, what it ran for). The assist
+// route's runs, the gateway's own (runConsentJSON) and a service's
+// (handleComponentAssist) go through it.
+func (s *Service) completeJSONTask(ctx context.Context, claims auth.Claims, task assistTask, model assist.Model, msgs []assist.Message, what string) (map[string]any, wire.AssistUsage, error) {
 	text, usage, err := s.assistClient().Complete(ctx, model, msgs, true)
 	var fields map[string]any
 	if err == nil {
 		fields, err = assist.Fields(text, task.Package.Manifest.Fields)
 	}
-	s.auditAssist(ctx, claims, task, model, usage, err)
+	s.auditModelRun(ctx, claims, assistName(task), what, model, usage, err)
 	return fields, usage, err
 }
 
@@ -265,7 +266,7 @@ func (s *Service) runConsentJSON(ctx context.Context, claims auth.Claims, name, 
 	if !s.assistLimiter.Get(assistRate, assistBurst, s.Peers.Size).Allow(claims.Tenant + "/" + claims.Subject) {
 		return nil, errors.New("too many AI assists: try again in a minute")
 	}
-	fields, _, err := s.completeJSONTask(ctx, claims, task, model, assist.Messages(task.Package.Instructions, text, assist.Context{}))
+	fields, _, err := s.completeJSONTask(ctx, claims, task, model, assist.Messages(task.Package.Instructions, text, assist.Context{}), assistWhat(task))
 	return fields, err
 }
 
@@ -318,8 +319,12 @@ func (s *Service) assistClient() *assist.Client {
 
 // auditAssist records a task's run (auditModelRun).
 func (s *Service) auditAssist(ctx context.Context, claims auth.Claims, task assistTask, model assist.Model, usage wire.AssistUsage, runErr error) {
-	s.auditModelRun(ctx, claims, task.Component.Name+"@"+task.Version.Version, "component "+task.Component.ID, model, usage, runErr)
+	s.auditModelRun(ctx, claims, assistName(task), assistWhat(task), model, usage, runErr)
 }
+
+// assistName is a task's audit name (name@version); assistWhat what ran.
+func assistName(task assistTask) string { return task.Component.Name + "@" + task.Version.Version }
+func assistWhat(task assistTask) string { return "component " + task.Component.ID }
 
 // auditModelRun records one assist model call: what ran (name, and what
 // it ran for), the model (and whether it is the organization's own), the

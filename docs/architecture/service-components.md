@@ -22,6 +22,7 @@ against them.
 | `pages` | Pages a member opens, the member attested | `GET /pages`; `/v1/component-pages/{ticket}/{path}` → service `/pages/{page}/{path}` |
 | `callbacks` | A stable address another system redirects a browser to | `/v1/component-callbacks/{service}/{path}` → service `/callbacks/{path}` |
 | `store` | Values sealed with the platform key | `GET\|PUT\|DELETE /v1/component-store/{scope}/{key}` |
+| `assist` | Its own AI tasks run on the organization's assist model | `POST /v1/component-assist/{task}` |
 
 A service gets none it does not declare (`pkgmeta.validateServicePackage`;
 `servicecomp.Declares` at every route). Each primitive reaches only its own
@@ -46,7 +47,7 @@ call can be replayed in another.
 | `X-Bnbloc-Member` | a page call | `component.Member`: subject, org, role and whether they manage the organization, page, the page's own address, the public origin |
 | `X-Bnbloc-Callback` | a callback | the public origin and the callback's address |
 | `X-Bnbloc-Audit` | the service's answer to any forwarded call | one `component.Audit` row the gateway records in the organization's audit log, attributed to the service, for the attested person |
-| `X-Bnbloc-Component` | a service's own call (the store) | `service/<name>` |
+| `X-Bnbloc-Component` | a service's own call (the store, its AI tasks) | `service/<name>` |
 
 Identities are base64url JSON (`component.EncodeHeader`).
 
@@ -159,13 +160,39 @@ no key lists its keys. A service's values go with its uninstall; a
 member's, in every service, with their deprovisioning
 (`POST /v1/platform/org-sync/deprovision`). Table: `component_values`.
 
+## AI tasks
+
+docs/prd/2026-10-23-connections-ai.md §2. A service runs one of its own
+JSON assist tasks for an organization with `component.AssistRequest`
+`{org, member?, text}` (text at most 16,000 characters) and gets
+`component.AssistReply` `{fields}`, the task's declared fields in their
+shapes (`assist.Fields`). `component.ServiceClient.Assist` is the client.
+
+- **Its own tasks only**: named `<service>-<task>`
+  (`component.ServiceAssistTask`), never a name of the platform's
+  (`wire.AssistContracts`): 403.
+- **The organization's version, else the platform's**
+  (`assist.ServiceTask`), never a member's own or a shared copy; a JSON
+  task (a text task: 400). Not installed: 404. Tasks are content a
+  service keeps in its own repository and publishes at platform scope.
+- **Admitted** like any service call (signature, distributed to the org,
+  declares `assist`), then the organization's assist model, else the
+  platform's; assists off or no model: 409. 20 runs a minute per service
+  and organization (429).
+- **No context**: the model gets the task's instructions and the text,
+  fenced as data (`assist.Messages`); the platform reads nothing for the
+  service.
+- **Audit**: an `assist` row, actor `service/<name>`, the task and its
+  version, `for <member>` when the request names one (the service's
+  word), the model and tokens, never the text.
+
 ## Code
 
 - `component/service.go`, `component/signature.go`: the contract.
 - `core/pkgmeta`: the kind, its capabilities and their needs.
 - `internal/servicecomp`: the installer and `Forward`.
-- `services/gateway/service_components.go`, `component_store.go`: the
-  routes.
+- `services/gateway/service_components.go`, `component_store.go`,
+  `component_assist.go`: the routes.
 - `services/bridge/turn_services.go`: the list, the facts, the egress hosts.
 - `services/bridge/roomtools/egress.go`, `egress_ca.go`: the proxy and CA.
 - `services/bridge/roomtools_contrib.go`: a session's egress environment,

@@ -54,6 +54,10 @@ func (c *ServiceClient) Verify(r *http.Request, prefix, identityHeader string, b
 }
 
 func (c *ServiceClient) do(ctx context.Context, method, path string, body []byte) (int, []byte, error) {
+	return c.doWith(ctx, 15*time.Second, method, path, body)
+}
+
+func (c *ServiceClient) doWith(ctx context.Context, timeout time.Duration, method, path string, body []byte) (int, []byte, error) {
 	req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(c.BaseURL, "/")+path, bytes.NewReader(body))
 	if err != nil {
 		return 0, nil, err
@@ -65,7 +69,7 @@ func (c *ServiceClient) do(ctx context.Context, method, path string, body []byte
 	}
 	client := c.HTTP
 	if client == nil {
-		client = &http.Client{Timeout: 15 * time.Second}
+		client = &http.Client{Timeout: timeout}
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -138,4 +142,49 @@ func (c *ServiceClient) StoreKeys(ctx context.Context, scope, owner string) ([]s
 		return nil, err
 	}
 	return out.Keys, nil
+}
+
+// ErrAssistUnavailable is a run the platform does not make: no assist
+// model, the organization turned assists off, the task is not installed,
+// or the component does not declare ServiceAssist.
+var ErrAssistUnavailable = errors.New("AI tasks are not available")
+
+// assistTimeout bounds one run: the model's own bound plus the hop.
+const assistTimeout = 75 * time.Second
+
+// Assist runs the component's own task (ServiceAssistTask) and answers
+// its fields. A refusal that is no fault of the call (ErrAssistUnavailable)
+// is wrapped with the platform's reason.
+func (c *ServiceClient) Assist(ctx context.Context, task string, req AssistRequest) (map[string]any, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+	code, raw, err := c.doWith(ctx, assistTimeout, http.MethodPost, ComponentAssistPath+task, body)
+	if err != nil {
+		return nil, err
+	}
+	switch code {
+	case http.StatusOK:
+	case http.StatusConflict, http.StatusNotFound, http.StatusForbidden:
+		return nil, fmt.Errorf("%w: %s", ErrAssistUnavailable, errorText(raw))
+	default:
+		return nil, fmt.Errorf("bnbloc assist answered %d: %s", code, errorText(raw))
+	}
+	var out AssistReply
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, err
+	}
+	return out.Fields, nil
+}
+
+// errorText is a platform error's message ({"error": …}), else the body.
+func errorText(raw []byte) string {
+	var e struct {
+		Error string `json:"error"`
+	}
+	if json.Unmarshal(raw, &e) == nil && e.Error != "" {
+		return e.Error
+	}
+	return strings.TrimSpace(string(raw))
 }

@@ -169,6 +169,7 @@ func (s *Service) routes() []route {
 		open("GET "+component.ComponentStorePath+"{path...}", "the service's signature", s.handleComponentStore),
 		open("PUT "+component.ComponentStorePath+"{path...}", "the service's signature", s.handleComponentStore),
 		open("DELETE "+component.ComponentStorePath+"{path...}", "the service's signature", s.handleComponentStore),
+		open("POST "+component.ComponentAssistPath+"{task}", "the service's signature", s.handleComponentAssist).with(needContent),
 		member("GET /v1/my/share-targets", s.handleShareTargets),
 		member("POST /v1/my/share-targets/{name}/sessions", s.handleShareSession).spends(costBudget),
 		open("GET "+shareTargetsPrefix+"{name}/pages/{ticket}/", "a share ticket in the path", s.handleSharePage).spends(publicBudget),

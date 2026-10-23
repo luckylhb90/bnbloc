@@ -158,6 +158,17 @@ task declares and relays the reply. Nothing else calls a model.
   `explain-source-use` is skipped, logged, and the change is still told
   to the admins without an explanation.
 
+## A service's own tasks
+
+A service component that declares `assist` runs its own JSON tasks
+(named `<service>-…`) for an organization through
+`POST /v1/component-assist/{task}`, signed: the organization's version of
+the task else the platform's, the organization's model, no context, the
+service's rate per organization, an audit row with the service as actor
+(docs/architecture/service-components.md "AI tasks";
+`services/gateway/component_assist.go`). The run is one
+`completeJSONTask`, like every JSON run.
+
 ## One run
 
 `POST /v1/assist/{task}` with `wire.AssistRequest`: the text (at most

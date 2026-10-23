@@ -34,7 +34,7 @@ var scopeRank = map[store.ContentScope]int{
 // grant (docs/prd/2026-10-20-no-built-in-content.md §2.3).
 func ConsentScope(c store.ContentComponent) bool {
 	if ct, ok := wire.AssistContractOf(c.Name); ok && ct.Consent {
-		return c.Scope == store.ContentScopeOrg || c.Scope == store.ContentScopePlatform
+		return orgScope(c)
 	}
 	return true
 }
@@ -42,7 +42,7 @@ func ConsentScope(c store.ContentComponent) bool {
 // Tasks lists the assists v may run, one per name (the nearest that
 // ConsentScope admits), by name.
 func Tasks(ctx context.Context, st store.ContentComponentStore, v extpipe.Viewer) ([]store.ContentComponent, error) {
-	out, err := usable(ctx, st, v, contentpkg.KindAssist)
+	out, err := usable(ctx, st, v, contentpkg.KindAssist, ConsentScope)
 	if err != nil {
 		return nil, err
 	}
@@ -50,16 +50,16 @@ func Tasks(ctx context.Context, st store.ContentComponentStore, v extpipe.Viewer
 	return out, nil
 }
 
-// usable lists the components of kind v may use, one per name (the
-// nearest), in no particular order.
-func usable(ctx context.Context, st store.ContentComponentStore, v extpipe.Viewer, kind string) ([]store.ContentComponent, error) {
+// usable lists the components of kind v may use that admit takes (nil:
+// all), one per name (the nearest), in no particular order.
+func usable(ctx context.Context, st store.ContentComponentStore, v extpipe.Viewer, kind string, admit func(store.ContentComponent) bool) ([]store.ContentComponent, error) {
 	list, err := contentuse.Visible(ctx, st, v, kind)
 	if err != nil {
 		return nil, err
 	}
 	nearest := map[string]store.ContentComponent{}
 	for _, c := range list {
-		if !extpipe.MemberVisibility(v, extpipe.GateForContent(c), 0).Installed || (kind == contentpkg.KindAssist && !ConsentScope(c)) {
+		if !extpipe.MemberVisibility(v, extpipe.GateForContent(c), 0).Installed || (admit != nil && !admit(c)) {
 			continue
 		}
 		if have, ok := nearest[c.Name]; ok && scopeRank[have.Scope] <= scopeRank[c.Scope] {
@@ -83,7 +83,7 @@ func LibraryOf(ctx context.Context, st store.ContentComponentStore, v extpipe.Vi
 		kind string
 		into *[]LibraryItem
 	}{{contentpkg.KindExpert, &out.Experts}, {contentpkg.KindSkill, &out.Skills}} {
-		list, err := usable(ctx, st, v, k.kind)
+		list, err := usable(ctx, st, v, k.kind, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -103,6 +103,28 @@ func LibraryOf(ctx context.Context, st store.ContentComponentStore, v extpipe.Vi
 // Task is the nearest assist named name v may run (ok false: none).
 func Task(ctx context.Context, st store.ContentComponentStore, v extpipe.Viewer, name string) (store.ContentComponent, bool, error) {
 	list, err := Tasks(ctx, st, v)
+	if err != nil {
+		return store.ContentComponent{}, false, err
+	}
+	for _, c := range list {
+		if c.Name == name {
+			return c, true, nil
+		}
+	}
+	return store.ContentComponent{}, false, nil
+}
+
+// orgScope admits the organization's and the platform's versions only.
+func orgScope(c store.ContentComponent) bool {
+	return c.Scope == store.ContentScopeOrg || c.Scope == store.ContentScopePlatform
+}
+
+// ServiceTask is the task named name a service runs for v's organization
+// (docs/prd/2026-10-23-connections-ai.md §2): the organization's version,
+// else the platform's, never a member's own or a shared copy, since what
+// it says is the service's word to the organization.
+func ServiceTask(ctx context.Context, st store.ContentComponentStore, v extpipe.Viewer, name string) (store.ContentComponent, bool, error) {
+	list, err := usable(ctx, st, v, contentpkg.KindAssist, orgScope)
 	if err != nil {
 		return store.ContentComponent{}, false, err
 	}
