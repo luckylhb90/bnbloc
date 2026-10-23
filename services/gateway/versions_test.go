@@ -1,12 +1,14 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/buildinfo"
 	"github.com/luckylhb90/bnbloc/internal/rbac"
@@ -69,5 +71,52 @@ func TestPlatformVersions(t *testing.T) {
 	all := strings.Join(got.Problems, "\n")
 	if got.Consistent || !strings.Contains(all, "bnbloc-room@room-b") || !strings.Contains(all, "bnbloc-relay unreachable") {
 		t.Fatalf("skew/unreachable not reported: %s", body)
+	}
+}
+
+// A backend that answers slowly costs one round trip, not one per sample: the
+// samples run together (the Deployment card of the platform console waits for
+// the slowest backend, and a backend 0.5 s away took 2.5 s to sample in turn).
+func TestSampleVersionsRunsTogether(t *testing.T) {
+	const delay = 300 * time.Millisecond
+	var inflight, peak atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		now := inflight.Add(1)
+		for {
+			p := peak.Load()
+			if now <= p || peak.CompareAndSwap(p, now) {
+				break
+			}
+		}
+		time.Sleep(delay)
+		inflight.Add(-1)
+		_ = json.NewEncoder(w).Encode(wire.ServiceVersion{Service: "bnbloc-room", Instance: "room-a", Commit: "abc1234def"})
+	}))
+	t.Cleanup(srv.Close)
+	start := time.Now()
+	got, err := sampleVersions(context.Background(), srv.URL+"/version")
+	took := time.Since(start)
+	if err != nil || len(got) != 1 {
+		t.Fatalf("sampled %+v, %v", got, err)
+	}
+	if took >= 3*delay {
+		t.Fatalf("sampling took %v for %d samples of %v each: they ran one after another", took, versionSamples, delay)
+	}
+	if peak.Load() < int64(versionSamples) {
+		t.Fatalf("at most %d of %d samples were in flight together", peak.Load(), versionSamples)
+	}
+}
+
+// Replicas are listed in the order the samples were taken, whichever answered
+// first, so a re-read of an unchanged deployment reads the same.
+func TestSampleVersionsKeepsSampleOrder(t *testing.T) {
+	srv := fakeVersionBackend(t, "bnbloc-room", [2]string{"room-a", "c1"}, [2]string{"room-b", "c1"})
+	got, err := sampleVersions(context.Background(), srv.URL+"/version")
+	if err != nil || len(got) != 2 {
+		t.Fatalf("sampled %+v, %v", got, err)
+	}
+	// Distinct instances, each once, whatever order the replicas answered in.
+	if got[0].Instance == got[1].Instance {
+		t.Fatalf("an instance was listed twice: %+v", got)
 	}
 }

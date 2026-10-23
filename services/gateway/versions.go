@@ -19,8 +19,8 @@ import (
 
 // GET /v1/platform/versions (super-admin): the deployment's build identity.
 // The gateway reports itself and its embedded web bundle in-process and
-// samples each addressed service's GET /version several times on fresh
-// connections, so replicas behind one Service DNS name (connection-level
+// samples each addressed service's GET /version several times at once on
+// fresh connections, so replicas behind one Service DNS name (connection-level
 // load balancing) each get a chance to answer. Instances are deduplicated;
 // buildinfo.Evaluate decides consistency.
 
@@ -29,6 +29,9 @@ const (
 	versionSamples = 5
 	// versionTimeout bounds one /version request.
 	versionTimeout = 3 * time.Second
+	// slowVersionProbe is how long sampling one backend may take before it
+	// is logged.
+	slowVersionProbe = time.Second
 )
 
 // versionClient never reuses a connection: a reused one always lands on the
@@ -67,7 +70,12 @@ func (s *Service) deploymentVersions(ctx context.Context) wire.DeploymentVersion
 		wg.Add(1)
 		go func(name, base string) {
 			defer wg.Done()
+			started := time.Now()
 			seen, err := sampleVersions(ctx, strings.TrimRight(base, "/")+"/version")
+			// A probe that is slow says so: the card waits for the slowest.
+			if took := time.Since(started); took > slowVersionProbe {
+				slog.Warn("bnbloc-gateway: version probe was slow", "event", "bnbloc.versions.slow", "service", name, "took", took.String())
+			}
 			mu.Lock()
 			defer mu.Unlock()
 			if len(seen) == 0 {
@@ -83,21 +91,38 @@ func (s *Service) deploymentVersions(ctx context.Context) wire.DeploymentVersion
 	return out
 }
 
-// sampleVersions GETs url versionSamples times and returns the distinct
-// instances that answered; err is the last failure (non-nil when none did).
+// sampleVersions GETs url versionSamples times, all at once, and returns the
+// distinct instances that answered in the order the samples were taken; err is
+// the last failure (non-nil when none did). Together, not in turn: the
+// Deployment card waits for the slowest backend, and taking the samples one
+// after another cost five round trips (and, for a backend that does not
+// answer, five timeouts) where one is enough.
 func sampleVersions(ctx context.Context, url string) ([]wire.ServiceVersion, error) {
+	type sample struct {
+		v   wire.ServiceVersion
+		err error
+	}
+	results := make([]sample, versionSamples)
+	var wg sync.WaitGroup
+	for i := range results {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			results[i].v, results[i].err = fetchVersion(ctx, url)
+		}(i)
+	}
+	wg.Wait()
 	var out []wire.ServiceVersion
 	seen := map[string]bool{}
 	var lastErr error
-	for i := 0; i < versionSamples; i++ {
-		v, err := fetchVersion(ctx, url)
-		if err != nil {
-			lastErr = err
+	for _, r := range results {
+		if r.err != nil {
+			lastErr = r.err
 			continue
 		}
-		if !seen[v.Instance] {
-			seen[v.Instance] = true
-			out = append(out, v)
+		if !seen[r.v.Instance] {
+			seen[r.v.Instance] = true
+			out = append(out, r.v)
 		}
 	}
 	return out, lastErr
