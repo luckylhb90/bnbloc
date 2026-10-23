@@ -1117,3 +1117,16 @@ CREATE TABLE IF NOT EXISTS room_source_opt_ins (
   PRIMARY KEY (tenant_id, room_id, source_name),
   KEY idx_room_source_opt_ins_source (tenant_id, source_name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Service components' sealed values (docs/architecture/service-components.md):
+-- one row per component, scope ("members/<subject>", "orgs/<org>",
+-- "shared") and key, sealed by the gateway.
+CREATE TABLE IF NOT EXISTS component_values (
+  component     VARCHAR(160) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  scope         VARCHAR(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  value_key     VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  sealed        MEDIUMTEXT NOT NULL,
+  updated_at_ms BIGINT NOT NULL,
+  PRIMARY KEY (component, scope, value_key),
+  KEY idx_component_values_scope (scope)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
