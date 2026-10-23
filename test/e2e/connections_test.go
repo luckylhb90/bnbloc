@@ -248,6 +248,14 @@ func TestE2EConnections(t *testing.T) {
 	if !strings.Contains(facts.Line, "httpbin") || !strings.Contains(facts.Files["INDEX.md"], "| HTTPBin") || !strings.Contains(facts.Files["ACTIVITY.md"], "httpbin POST /post") {
 		t.Fatalf("facts = %+v", facts)
 	}
+	// The admin switches HTTPBin to go out from the members' computers: the
+	// same read now leaves through this bridge, still with maya's key.
+	if code := postForm(t, adminPage+"sendfrom", url.Values{"name": {"httpbin"}, "sendFrom": {"member"}}); code != http.StatusSeeOther {
+		t.Fatalf("send from members = %d", code)
+	}
+	if status, body := curl("-H", "Authorization: Bearer agent-made-up", "https://httpbin.org/bearer"); status != 200 || !strings.Contains(body, `"maya-e2e-key"`) {
+		t.Fatalf("read from this computer = %d %s", status, body)
+	}
 	if sb := os.Getenv("BNBLOC_E2E_SANDBOX_URL"); sb != "" {
 		t.Run("sandboxed", func(t *testing.T) {
 			e2eSandboxed(t, gwc, claimed, core.Endpoint{BaseURL: sb, Token: os.Getenv("BNBLOC_E2E_SANDBOX_TOKEN")})
