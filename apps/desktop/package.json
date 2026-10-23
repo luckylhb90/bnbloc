@@ -1,7 +1,7 @@
 {
   "name": "@bnbloc/desktop",
   "private": true,
-  "version": "0.1.98",
+  "version": "0.1.99",
   "type": "module",
   "description": "bnbloc desktop client: the shared web UI plus a supervised, embedded bridge connector.",
   "scripts": {
