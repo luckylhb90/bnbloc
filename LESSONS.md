@@ -468,6 +468,17 @@ Evidence: docs/prd/2026-10-22-acp-sandbox.md; the ACP core's
 `TestSandboxedSessionApprovesCommandsByDefault`.
 Seen 1× (2026-10-22).
 
+### Build the web whenever `wire.gen.ts` changes, even for a Go-only contract
+
+A type added to `component/` (`AssistRequest`, `MaxAssistText`) was generated
+into `wire.gen.ts` beside wire's own of the same names. `wiregen -check` and
+every Go test passed, the web build did not, and the gateway image builds the
+web: three pushed commits would not have deployed. A contract change that
+regenerates `wire.gen.ts` runs `pnpm --dir web build` before it is pushed.
+
+Evidence: 4c4f9c70 (the collision), 8a3bada8 (the rename).
+Seen 1× (2026-10-23).
+
 ## Done right
 
 ### Replay a member's long task across a release, not just a smoke reply
