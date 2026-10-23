@@ -252,7 +252,7 @@ export const Message = memo(function Message({
         {/* The agent's own error output: fenced and verbatim, never
             Markdown and never a reply. */}
         {item.noticeDetail ? (
-          <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2 py-1 font-mono text-[0.7rem] [overflow-wrap:anywhere]">
+          <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2 py-1 font-mono text-[0.7rem] [overflow-wrap:anywhere]">
             {item.noticeDetail}
           </pre>
         ) : null}
@@ -322,14 +322,14 @@ export const Message = memo(function Message({
             {item.text && (
               <div
                 className={
-                  "min-w-0 rounded-2xl rounded-br-md px-4 py-2.5 text-sm whitespace-pre-wrap break-words leading-relaxed animate-in transition-shadow duration-500 data-[flash=true]:ring-2 data-[flash=true]:ring-[var(--color-accent)]/60 [overflow-wrap:anywhere] " +
+                  "min-w-0 rounded-2xl rounded-br-md px-4 py-2.5 text-sm whitespace-pre-wrap leading-relaxed animate-in transition-shadow duration-500 data-[flash=true]:ring-2 data-[flash=true]:ring-[var(--color-accent)]/60 [overflow-wrap:anywhere] " +
                   (failed
                     ? "bg-[var(--color-danger)]/20 text-[var(--color-fg)]"
                     : "bg-[var(--color-accent)] text-[var(--color-accent-fg)]") +
                   (pending ? " opacity-70" : "")
                 }
               >
-                {item.text}
+                <MessageBody text={item.text} onAccent={!failed} fadeClassName="to-[var(--color-danger)]/20" />
               </div>
             )}
             <MessageAttachments roomId={roomId} attachments={item.attachments} />

@@ -12,13 +12,18 @@ export function MessageBody({
   markdown,
   className,
   fadeClassName = "to-[var(--color-bg)]",
+  onAccent,
 }: {
   readonly text: string;
   readonly markdown?: boolean;
   readonly className?: string;
   readonly fadeClassName?: string;
+  /** The text sits on the accent colour (a member's own bubble): the fade
+   *  and the Show more button take that colour's pair. */
+  readonly onAccent?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const fade = onAccent ? "to-[var(--color-accent)]" : fadeClassName;
   const long = text.length > LONG_MESSAGE_CHARS || text.split("\n").length > 24;
   const plain = <div className="whitespace-pre-wrap leading-relaxed">{text}</div>;
   const content = markdown ? (
@@ -32,7 +37,8 @@ export function MessageBody({
     <div>
       <div
         className={cn(
-          "relative break-words text-sm text-[var(--color-fg)] [overflow-wrap:anywhere]",
+          "relative text-sm [overflow-wrap:anywhere]",
+          !onAccent && "text-[var(--color-fg)]",
           long && !expanded && "max-h-96 overflow-hidden",
           className,
         )}
@@ -42,7 +48,7 @@ export function MessageBody({
           <div
             className={cn(
               "pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-b from-transparent",
-              fadeClassName,
+              fade,
             )}
           />
         )}
@@ -52,7 +58,12 @@ export function MessageBody({
           type="button"
           aria-expanded={expanded}
           onClick={() => setExpanded((value) => !value)}
-          className="tactile mt-1.5 rounded-[var(--radius)] px-2 py-1 text-xs font-medium text-[var(--color-accent)] hover:bg-[var(--color-surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+          className={cn(
+            "tactile mt-1.5 rounded-[var(--radius)] px-2 py-1 text-xs font-medium focus-visible:outline-none focus-visible:ring-2",
+            onAccent
+              ? "bg-black/15 text-[var(--color-accent-fg)] hover:bg-black/25 focus-visible:ring-[var(--color-accent-fg)]/60"
+              : "text-[var(--color-accent)] hover:bg-[var(--color-surface-2)] focus-visible:ring-[var(--color-accent)]/60",
+          )}
         >
           {expanded ? "Show less" : "Show more"}
         </button>

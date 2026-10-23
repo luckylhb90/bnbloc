@@ -478,6 +478,20 @@ regenerates `wire.gen.ts` runs `pnpm --dir web build` before it is pushed.
 
 Evidence: 4c4f9c70 (the collision), 8a3bada8 (the rename).
 Seen 1× (2026-10-23).
+### Never write `break-words` and `[overflow-wrap:anywhere]` on one element: the first wins and a long token stops wrapping.
+
+A pasted token (one 300-character word) made a member's own message bubble
+as wide as the word, so its left half was clipped by the column and the
+bubble was a wall of green. `break-words` (`overflow-wrap: break-word`)
+does not shrink an element's min-content width, and it beat the
+`anywhere` beside it; only `anywhere` lets a flex or fit-content box
+narrow. Found by measuring the bubble (1630 px in a 784 px parent), not by
+reading the classes. Own bubbles also had no "Show more" while everyone
+else's text did.
+
+Evidence: `web/e2e/long-message.mjs`, `MessageBody.onAccent`.
+Seen 1× (2026-10-23).
+
 
 ## Done right
 
