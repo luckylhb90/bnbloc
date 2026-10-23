@@ -43,7 +43,7 @@ call can be replayed in another.
 | Header | On | Carries |
 |---|---|---|
 | `X-Bnbloc-Turn` | a turn call | `component.Turn`: org, room, channel, job, requester, agent owner, drive (`own`, `borrowed`, `platform`), the public origin |
-| `X-Bnbloc-Member` | a page call | `component.Member`: subject, org, role, page, the page's own address, the public origin |
+| `X-Bnbloc-Member` | a page call | `component.Member`: subject, org, role and whether they manage the organization, page, the page's own address, the public origin |
 | `X-Bnbloc-Callback` | a callback | the public origin and the callback's address |
 | `X-Bnbloc-Audit` | the service's answer to any forwarded call | one `component.Audit` row the gateway records in the organization's audit log, attributed to the service, for the attested person |
 | `X-Bnbloc-Component` | a service's own call (the store) | `service/<name>` |
@@ -60,7 +60,7 @@ Identities are base64url JSON (`component.EncodeHeader`).
   organization and role, the service and the page. The page's address
   carries it; every call under it is the member's. An admin page
   (`audience: admin`) is listed only to an organization admin; the service
-  still checks `Member.Role`.
+  still checks `Member.Admin`.
 
 Answers pass on with their status and a few headers
 (`servicecomp.passedHeaders`); a cookie never does. An HTML answer is

@@ -332,12 +332,14 @@ export interface Turn {
 }
 
 // Member is who a page is served to: their subject, organization and role
-// there, the page, the page's own address (PageURL: what its forms and
-// scripts call, ending in "/") and the platform's public origin.
+// there (Admin: they manage the organization), the page, the page's own
+// address (PageURL: what its forms and scripts call, ending in "/") and the
+// platform's public origin.
 export interface Member {
   subject: string;
   org: string;
   role: string;
+  admin?: boolean;
   page: string;
   pageUrl: string;
   origin: string;
@@ -440,7 +442,7 @@ export const AudienceAdmin = "admin";
 
 // Page is one page a component serves: its name (ValidPageName), the label
 // members see and who it is for. An admin page is listed only to an
-// organization admin; the component still checks Member.Role itself.
+// organization admin; the component still checks Member.Admin itself.
 export interface Page {
   name: string;
   label: string;

@@ -304,7 +304,7 @@ func (s *Service) servicePages(ctx context.Context, rec extpipe.Record, claims a
 	if err != nil || !ok {
 		return nil, errors.New("the service has no credential")
 	}
-	member := component.Member{Subject: claims.Subject, Org: claims.Tenant, Role: claims.Role, Origin: origin}
+	member := component.Member{Subject: claims.Subject, Org: claims.Tenant, Role: claims.Role, Admin: isOrgAdmin(claims), Origin: origin}
 	ans, err := servicecomp.Forward(ctx, ep, secret, servicecomp.Call{
 		Method: http.MethodGet, Path: component.ServicePagesPath,
 		IdentityHeader: component.MemberHeader, Identity: component.EncodeHeader(member), Accept: "application/json",
@@ -391,7 +391,7 @@ func (s *Service) handleComponentPage(w http.ResponseWriter, r *http.Request) {
 	}
 	origin := s.publicOrigin(r)
 	member := component.Member{
-		Subject: claims.Subject, Org: claims.Tenant, Role: claims.Role, Page: pt.Page,
+		Subject: claims.Subject, Org: claims.Tenant, Role: claims.Role, Admin: isOrgAdmin(claims), Page: pt.Page,
 		PageURL: origin + component.ComponentPagePath + ticket + "/", Origin: origin,
 	}
 	ans, ok := s.forwardToService(w, r, rec, servicecomp.Call{

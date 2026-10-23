@@ -134,12 +134,14 @@ type Turn struct {
 }
 
 // Member is who a page is served to: their subject, organization and role
-// there, the page, the page's own address (PageURL: what its forms and
-// scripts call, ending in "/") and the platform's public origin.
+// there (Admin: they manage the organization), the page, the page's own
+// address (PageURL: what its forms and scripts call, ending in "/") and the
+// platform's public origin.
 type Member struct {
 	Subject string `json:"subject"`
 	Org     string `json:"org"`
 	Role    string `json:"role"`
+	Admin   bool   `json:"admin,omitempty"`
 	Page    string `json:"page"`
 	PageURL string `json:"pageUrl"`
 	Origin  string `json:"origin"`
@@ -340,7 +342,7 @@ const (
 
 // Page is one page a component serves: its name (ValidPageName), the label
 // members see and who it is for. An admin page is listed only to an
-// organization admin; the component still checks Member.Role itself.
+// organization admin; the component still checks Member.Admin itself.
 type Page struct {
 	Name     string `json:"name"`
 	Label    string `json:"label"`
