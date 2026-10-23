@@ -124,9 +124,10 @@ type SandboxConfig struct {
 	// gives sandboxed commands no egress proxy.
 	HostProxy string
 	// PrivateHosts are the hosts the member opened for their own machine
-	// (BNBLOC_SANDBOX_PRIVATE_HOSTS): sandboxed commands reach them
-	// directly, never through the egress proxy, which tunnels only to
-	// public addresses.
+	// (BNBLOC_SANDBOX_PRIVATE_HOSTS): sandboxed commands reach them through
+	// the egress proxy like any host (a connector's host among them is
+	// served by its service), whose tunnels reach a private address only
+	// for these.
 	PrivateHosts []string
 }
 

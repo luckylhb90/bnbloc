@@ -394,4 +394,6 @@ Where the build departs from §2, and why:
   with `hostPorts` reaches them at `Discovery.hostAlias`; the desktop picks
   the port per sandbox launch. A sandboxed own drive's space gets the
   proxy with an egress alias bearer; its tunnels reach only public
-  addresses, the member's private hosts bypass it.
+  addresses, and private ones only for the member's private hosts, which
+  go through the proxy too (a connector's host among them is served by
+  its service).

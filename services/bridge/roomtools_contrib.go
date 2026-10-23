@@ -44,7 +44,7 @@ func (b *Bridge) EnableRoomTools(shimCommand string) (stop func(), err error) {
 	if port := b.cfg.Sandbox.hostProxyPort(); port != "" {
 		proxyAddr = net.JoinHostPort("127.0.0.1", port)
 	}
-	srv, err := roomtools.Start(roomtools.Config{Gateway: roomToolsGateway{b}, GatewayBaseURL: b.cfg.GatewayBaseURL, Addr: st.Addr, Names: b.displayNames, EgressDir: b.cfg.StateDir, ProxyAddr: proxyAddr})
+	srv, err := roomtools.Start(roomtools.Config{Gateway: roomToolsGateway{b}, GatewayBaseURL: b.cfg.GatewayBaseURL, Addr: st.Addr, Names: b.displayNames, EgressDir: b.cfg.StateDir, ProxyAddr: proxyAddr, PrivateHosts: b.cfg.Sandbox.PrivateHosts})
 	if err != nil {
 		return nil, err
 	}
@@ -398,10 +398,6 @@ func (c *roomToolsContributor) sandboxEgressEnv(ctx context.Context, workdir str
 	}
 	env := c.srv.EgressEnv(c.egressAlias(workdir), c.b.cfg.Sandbox.HostProxy)
 	env["NODE_EXTRA_CA_CERTS"] = caFile
-	if hosts := c.b.cfg.Sandbox.PrivateHosts; len(hosts) > 0 {
-		direct := env["NO_PROXY"] + "," + strings.Join(hosts, ",")
-		env["NO_PROXY"], env["no_proxy"] = direct, direct
-	}
 	if bundleFile != "" {
 		for _, k := range []string{"SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "GIT_SSL_CAINFO"} {
 			env[k] = bundleFile

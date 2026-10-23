@@ -51,6 +51,10 @@ type Config struct {
 	// ProxyAddr is a loopback address the proxy alone also listens on: the
 	// host port a sandbox opens to its guests (BNBLOC_SANDBOX_HOST_PROXY).
 	ProxyAddr string
+	// PrivateHosts are the hosts a sandboxed command's tunnel may reach at
+	// a private address (the member's own, BNBLOC_SANDBOX_PRIVATE_HOSTS);
+	// every other sandboxed tunnel reaches only public addresses.
+	PrivateHosts []string
 }
 
 // Default waits: ask_agent runs inside the dispatching agent's own turn,

@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -165,27 +166,41 @@ func (s *Server) authenticateProxy(r *http.Request) (sess *Session, sandboxed bo
 	return nil, false
 }
 
-// publicDial connects a sandboxed command's tunnel: only to a public
-// address (resolved here, and dialled by that address, so a second answer
-// cannot differ). The proxy never opens what the sandbox does not: loopback,
-// private, link-local and unspecified addresses stay closed to the guest.
-func publicDial(ctx context.Context, hostport string) (net.Conn, error) {
+// sandboxDial connects a sandboxed command's tunnel: to a public address,
+// or to a private one only for a host the member opened (PrivateHosts),
+// resolved here and dialled by that address, so a second answer cannot
+// differ. Loopback, link-local and unspecified addresses stay closed to
+// the guest. Private hosts go through the proxy like any other, so a
+// connector's host that is also private is still served by its service.
+func (s *Server) sandboxDial(ctx context.Context, hostport string) (net.Conn, error) {
 	host, port, err := net.SplitHostPort(hostport)
 	if err != nil {
 		return nil, err
 	}
+	name := strings.TrimSuffix(host, ".")
+	private := slices.ContainsFunc(s.cfg.PrivateHosts, func(h string) bool { return strings.EqualFold(h, name) })
 	addrs, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
 	if err != nil || len(addrs) == 0 {
 		return nil, fmt.Errorf("%s does not resolve", host)
 	}
 	for _, a := range addrs {
-		a = a.Unmap()
-		if !a.IsGlobalUnicast() || a.IsPrivate() || a.IsLoopback() || a.IsLinkLocalUnicast() || a.IsUnspecified() || cgnat(a) {
+		if !sandboxReaches(a, private) {
 			return nil, fmt.Errorf("%s is not a public address: the sandbox does not reach it", host)
 		}
 	}
 	d := net.Dialer{Timeout: egressDialTimeout}
 	return d.DialContext(ctx, "tcp", net.JoinHostPort(addrs[0].Unmap().String(), port))
+}
+
+// sandboxReaches reports whether a sandboxed tunnel may reach a: a public
+// address, or a private one for a host the member opened (private); never
+// loopback, link-local or unspecified.
+func sandboxReaches(a netip.Addr, private bool) bool {
+	a = a.Unmap()
+	if !a.IsGlobalUnicast() || a.IsLoopback() || a.IsLinkLocalUnicast() || a.IsUnspecified() {
+		return false
+	}
+	return private || !(a.IsPrivate() || cgnat(a))
 }
 
 // cgnat reports the shared address space (100.64.0.0/10), private in all
@@ -265,7 +280,7 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 	}
 	var up net.Conn
 	if sandboxed {
-		up, err = publicDial(r.Context(), r.Host)
+		up, err = s.sandboxDial(r.Context(), r.Host)
 	} else {
 		up, err = net.DialTimeout("tcp", r.Host, egressDialTimeout)
 	}
@@ -504,14 +519,26 @@ func egressError(status int, msg string) *http.Response {
 	}
 }
 
+// cardKey is what makes a card another one: its title and what its
+// actions open (two held changes of one system share a title, not the
+// change their Review opens).
+func cardKey(c component.Card) string {
+	key := c.Title
+	for _, a := range c.Actions {
+		key += "\n" + a.Page + "?" + a.Query
+	}
+	return key
+}
+
 // postCard puts a service's card in the room for the turn's requester (a
-// component-card notice under the job), once per job, service and title.
+// component-card notice under the job), once per job, service and card
+// (cardKey).
 func (s *Server) postCard(sess *Session, job Job, service string, c component.Card) {
 	if err := component.CheckCard(c); err != nil {
 		slog.Warn("bnbloc bridge service card refused", "event", "bnbloc.bridge.card_refused", "service", service, "error", err)
 		return
 	}
-	if !sess.cardOnce(job.JobID, [2]string{service, c.Title}) {
+	if !sess.cardOnce(job.JobID, [2]string{service, cardKey(c)}) {
 		return
 	}
 	card := wire.ComponentCard{Component: service, For: job.RequesterUserID, Title: c.Title, Text: c.Text}

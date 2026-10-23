@@ -134,9 +134,11 @@ is not reachable. With the Sandbox Protocol's `hostProxy`:
   (`.room/egress/`), which the guest sees at the same path. The agent's own
   process on the host gets none of it.
 - A tunnel for a sandboxed command reaches only public addresses (resolved
-  and dialled by address): the proxy never opens what the sandbox does
-  not. The member's private hosts (`BNBLOC_SANDBOX_PRIVATE_HOSTS`) bypass
-  the proxy (`NO_PROXY`).
+  and dialled by address), and a private address only for the member's
+  private hosts (`BNBLOC_SANDBOX_PRIVATE_HOSTS`); never loopback,
+  link-local or unspecified ones. Private hosts go through the proxy like
+  any other (they are not in `NO_PROXY`), so a connector's host that is
+  also private is still served by its service.
 - A borrowed or platform drive's space converges back to no proxy.
 
 ## Room facts

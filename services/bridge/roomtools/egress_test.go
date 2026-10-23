@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"strings"
 	"testing"
@@ -53,7 +54,7 @@ func TestEgressProxyRoutesClaimedHostsThroughTheService(t *testing.T) {
 			return http.StatusOK, component.EgressResponse{Status: http.StatusForbidden,
 				Header: map[string][]string{"Content-Type": {"application/json"}, "Set-Cookie": {"s=1"}},
 				Body:   []byte(`{"error":"not connected"}`),
-				Card:   &component.Card{Title: "Connect the wiki", Actions: []component.CardAction{{Kind: component.CardOpen, Label: "Connect", Page: "connections"}}}}
+				Card:   &component.Card{Title: "Connect the wiki", Actions: []component.CardAction{{Kind: component.CardOpen, Label: "Connect", Page: "connections", Query: cardQuery(len(envelopes))}}}}
 		case strings.Contains(path, "/agent-activity/messages"):
 			var n struct {
 				Messages []struct {
@@ -106,6 +107,13 @@ func TestEgressProxyRoutesClaimedHostsThroughTheService(t *testing.T) {
 	if len(posted) != 1 || posted[0].For != "maya" || posted[0].Component != "connections" || posted[0].Title != "Connect the wiki" || len(posted[0].Actions) != 1 {
 		t.Fatalf("cards = %+v (one, for the requester)", posted)
 	}
+	// A card that opens something else (another held change) is posted too.
+	if resp, err := client.Get("https://wiki.example.com/rest/api/space"); err == nil {
+		_ = resp.Body.Close()
+	}
+	if len(posted) != 2 || posted[1].Actions[0].Query != "id=h3" {
+		t.Fatalf("a card opening another change = %+v", posted)
+	}
 
 	resp, err = client.Get(direct.URL)
 	if err != nil {
@@ -113,7 +121,7 @@ func TestEgressProxyRoutesClaimedHostsThroughTheService(t *testing.T) {
 	}
 	raw, _ := io.ReadAll(resp.Body)
 	_ = resp.Body.Close()
-	if string(raw) != "direct" || len(envelopes) != 2 {
+	if string(raw) != "direct" || len(envelopes) != 3 {
 		t.Fatalf("tunnel = %s (sent %d)", raw, len(envelopes))
 	}
 
@@ -236,5 +244,32 @@ func TestEgressSendFromThisComputer(t *testing.T) {
 	}
 	if len(reports) != 2 || reports[0].Status != 401 || reports[1].Status != 200 || string(reports[1].Body) != "page for v" {
 		t.Fatalf("reports = %+v", reports)
+	}
+}
+
+// cardQuery is the fake service's card query for its n-th request: the
+// first two open the same thing, the third another.
+func cardQuery(n int) string {
+	if n >= 3 {
+		return "id=h3"
+	}
+	return "system=wiki"
+}
+
+// A sandboxed tunnel reaches public addresses, and private ones only for a
+// host the member opened; never loopback, link-local or unspecified.
+func TestSandboxReaches(t *testing.T) {
+	for _, tc := range []struct {
+		addr    string
+		private bool
+		want    bool
+	}{
+		{"93.184.216.34", false, true}, {"10.1.2.3", false, false}, {"10.1.2.3", true, true}, {"100.64.0.1", false, false},
+		{"100.64.0.1", true, true}, {"127.0.0.1", true, false}, {"169.254.169.254", true, false}, {"0.0.0.0", true, false},
+		{"::ffff:10.0.0.1", true, true}, {"fe80::1", true, false},
+	} {
+		if got := sandboxReaches(netip.MustParseAddr(tc.addr), tc.private); got != tc.want {
+			t.Errorf("%s (private %v) = %v", tc.addr, tc.private, got)
+		}
 	}
 }
