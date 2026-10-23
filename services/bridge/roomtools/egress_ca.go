@@ -12,7 +12,9 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"time"
 )
@@ -36,6 +38,33 @@ const (
 // systemRootBundles are where a system keeps its PEM root bundle: macOS and
 // the BSDs, Debian/Ubuntu/Alpine, Fedora/RHEL.
 var systemRootBundles = []string{"/etc/ssl/cert.pem", "/etc/ssl/certs/ca-certificates.crt", "/etc/pki/tls/certs/ca-bundle.crt"}
+
+// macKeychains hold macOS's roots: Apple's, and the ones an administrator
+// installed for the whole computer (an organization's inspecting proxy).
+// Their certificates come first in the bundle, so a command that trusts the
+// bundle trusts what the computer trusts.
+var macKeychains = []string{"/System/Library/Keychains/SystemRootCertificates.keychain", "/Library/Keychains/System.keychain"}
+
+// systemRoots are the computer's roots as PEM ("" when none are found).
+func systemRoots() []byte {
+	var out []byte
+	if runtime.GOOS == "darwin" {
+		for _, kc := range macKeychains {
+			if pemOut, err := exec.Command("/usr/bin/security", "find-certificate", "-a", "-p", kc).Output(); err == nil {
+				out = append(out, pemOut...)
+			}
+		}
+	}
+	if len(out) > 0 {
+		return out
+	}
+	for _, p := range systemRootBundles {
+		if roots, err := os.ReadFile(p); err == nil && len(roots) > 0 {
+			return roots
+		}
+	}
+	return nil
+}
 
 type egressCA struct {
 	cert    *x509.Certificate
@@ -72,17 +101,12 @@ func loadEgressCA(dir string) (*egressCA, error) {
 	}
 	ca.caFile = certPath
 	ca.leaves = map[string]*tls.Certificate{}
-	for _, p := range systemRootBundles {
-		roots, err := os.ReadFile(p)
-		if err != nil || len(roots) == 0 {
-			continue
-		}
+	if roots := systemRoots(); len(roots) > 0 {
 		bundle := append(append(append([]byte(nil), roots...), '\n'), ca.certPEM...)
 		path := filepath.Join(dir, egressBundleFile)
 		if err := os.WriteFile(path, bundle, 0o644); err == nil {
 			ca.bundleFile = path
 		}
-		break
 	}
 	return ca, nil
 }

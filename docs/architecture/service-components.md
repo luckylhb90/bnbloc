@@ -76,8 +76,9 @@ The bridge's room tools server is also the session's HTTPS proxy
 
 - A session on a computer whose organization has an `egress` service gets
   `HTTPS_PROXY` with its room tools bearer, `NO_PROXY` for loopback, and
-  the local CA in `NODE_EXTRA_CA_CERTS`, and a bundle of the system's roots
-  with it in `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`,
+  the local CA in `NODE_EXTRA_CA_CERTS`, and a bundle of the computer's
+  roots (on macOS its system and administrator keychains, so an
+  organization's inspecting proxy stays trusted) with it in `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE`,
   `GIT_SSL_CAINFO` (`Server.EgressEnv`). The services' `env` (placeholders a
   CLI needs before it runs) joins it.
 - At every turn the bridge asks each egress service which hosts it handles
@@ -96,7 +97,8 @@ The bridge's room tools server is also the session's HTTPS proxy
   commands trust it; the system's trust store is never touched. A tool
   that trusts only the system's roots (Go programs on macOS) fails its TLS
   check against a claimed host: its call never goes out unauthenticated.
-- **Cards**: an `EgressResponse.Card` (`component.CheckCard`: plain text,
+- **Cards**: (the room's events carry a card to every member; the clients
+  show it only to the requester, as a publish proposal) an `EgressResponse.Card` (`component.CheckCard`: plain text,
   at most three actions, `open` a page or `ask-again`) is posted by the
   bridge as a `component-card` notice under the job, shown only to the
   requester, once per job, service and title. The web renders it
