@@ -219,7 +219,7 @@ pub(super) fn host_proxy_address(discovery: &Discovery, host_port: Option<u16>) 
 /// A free loopback port for the bridge's egress proxy (None when none can
 /// be taken: the guests then get no egress proxy).
 pub(super) fn free_loopback_port() -> Option<u16> {
-    std::net::TcpListener::bind("127.0.0.1:0")
+    super::loopback::bind_ephemeral()
         .and_then(|l| l.local_addr())
         .map(|a| a.port())
         .ok()
