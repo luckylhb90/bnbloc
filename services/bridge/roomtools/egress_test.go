@@ -1,10 +1,12 @@
 package roomtools
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -175,5 +177,64 @@ func TestEgressAliasForSandboxedCommands(t *testing.T) {
 	client.CloseIdleConnections()
 	if _, err := client.Get("https://wiki.example.com/"); err == nil {
 		t.Fatal("the alias outlives its session")
+	}
+}
+
+// A service that answers Send has the bridge send the request itself, from
+// this computer, with the credentials it gives in place of the agent's;
+// the system's answer is reported back; a refused one is sent once more
+// with fresh credentials; Accept gives the command the system's answer.
+func TestEgressSendFromThisComputer(t *testing.T) {
+	var got []http.Header
+	sys := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = append(got, r.Header.Clone())
+		if r.Header.Get("Authorization") != "Bearer fresh" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		http.SetCookie(w, &http.Cookie{Name: "s", Value: "1"})
+		_, _ = io.WriteString(w, "page for "+r.URL.Query().Get("k"))
+	}))
+	defer sys.Close()
+	old := hereClient
+	hereClient = &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, network, sys.Listener.Addr().String())
+		}}}
+	defer func() { hereClient = old }()
+	var reports []component.EgressReport
+	gw := &fakeGateway{handle: func(method, path string, body []byte) (int, any) {
+		var in component.EgressRequest
+		_ = json.Unmarshal(body, &in)
+		switch {
+		case in.Report == nil:
+			return http.StatusOK, component.EgressResponse{Send: &component.EgressSend{Remove: []string{"Authorization"}, Header: map[string][]string{"Authorization": {"Bearer stale"}}, Query: map[string][]string{"k": {"v"}}}}
+		case in.Report.Attempt == 1:
+			reports = append(reports, *in.Report)
+			return http.StatusOK, component.EgressResponse{Send: &component.EgressSend{Remove: []string{"Authorization"}, Header: map[string][]string{"Authorization": {"Bearer fresh"}}, Query: map[string][]string{"k": {"v"}}}}
+		default:
+			reports = append(reports, *in.Report)
+			return http.StatusOK, component.EgressResponse{Accept: true}
+		}
+	}}
+	srv, token, sess := startServer(t, gw)
+	sess.SetEgressHosts(map[string]string{"wiki.example.com": "connections"})
+	sess.Bind(Job{JobID: "job-1", RequesterUserID: "maya"})
+	req, _ := http.NewRequest(http.MethodGet, "https://wiki.example.com/page", nil)
+	req.Header.Set("Authorization", "Bearer agent-made-up")
+	resp, err := proxyClient(t, srv, token, nil).Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != 200 || string(raw) != "page for v" || resp.Header.Get("Set-Cookie") != "" {
+		t.Fatalf("answer = %d %q %v", resp.StatusCode, raw, resp.Header)
+	}
+	if len(got) != 2 || got[0].Get("Authorization") != "Bearer stale" || got[1].Get("Authorization") != "Bearer fresh" {
+		t.Fatalf("the system got %v", got)
+	}
+	if len(reports) != 2 || reports[0].Status != 401 || reports[1].Status != 200 || string(reports[1].Body) != "page for v" {
+		t.Fatalf("reports = %+v", reports)
 	}
 }

@@ -17,13 +17,13 @@ import (
 // (the store). One install of the component at one platform.
 type ServiceClient struct {
 	// BaseURL is the gateway as the component reaches it.
-	BaseURL string
+	BaseURL string `json:"-"`
 	// Name is the component's install name; Secret its credential (a
 	// comma list during a rotation: every one verifies, the first signs).
-	Name   string
-	Secret string
-	HTTP   *http.Client
-	Now    func() time.Time
+	Name   string           `json:"-"`
+	Secret string           `json:"-"`
+	HTTP   *http.Client     `json:"-"`
+	Now    func() time.Time `json:"-"`
 }
 
 func (c *ServiceClient) now() time.Time {

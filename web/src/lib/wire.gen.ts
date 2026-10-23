@@ -394,17 +394,58 @@ export interface EgressRequest {
   url: string;
   header?: Record<string, string[]>;
   body?: string;
+  // Report is what the system answered a request the bridge sent itself
+  // (EgressResponse.Send), asked again with the same request: Attempt
+  // counts the sends (1 = the first).
+  report?: EgressReport;
 }
+
+// EgressReport is a system's answer to a request the bridge sent from the
+// member's computer: its status, its Location, and the start of its body
+// (at most MaxEgressReportBody), so the component can tell a refused
+// sign-in, record the call and audit it.
+export interface EgressReport {
+  attempt: number;
+  status: number;
+  location?: string;
+  body?: string;
+}
+
+// MaxEgressReportBody bounds the body a report carries.
+export const MaxEgressReportBody = 65536;
 
 // EgressResponse is the answer the command gets, and a card for the
 // requester when the component needs them (a connection to make, a change
 // to allow): the bridge posts it in the room, shown only to them.
+//
+// Send instead asks the bridge to send the request itself, from the
+// member's computer (a system the component's network does not reach),
+// with the credentials Send adds; the bridge then asks again with a
+// Report. To a report the component answers Accept (the system's answer is
+// the command's), another Send (once more, fresh credentials), or an answer
+// of its own (Status: a refusal and its card).
 export interface EgressResponse {
   status: number;
   header?: Record<string, string[]>;
   body?: string;
   card?: Card;
+  send?: EgressSend;
+  accept?: boolean;
 }
+
+// EgressSend is how the bridge sends a request itself: the request headers
+// it removes first (every credential the agent sent), then the headers it
+// sets and the query parameters it adds (the member's credentials for this
+// one request).
+export interface EgressSend {
+  remove?: string[];
+  header?: Record<string, string[]>;
+  query?: Record<string, string[]>;
+}
+
+// MaxEgressSends bounds the sends of one request (a refused sign-in is
+// retried once with fresh credentials).
+export const MaxEgressSends = 2;
 
 // MaxEgressBody bounds an egress request's and answer's body.
 export const MaxEgressBody = 8388608;
@@ -467,6 +508,13 @@ export const StoreShared = "shared";
 // MaxStoreValue bounds one stored value; MaxStoreKey one key.
 export const MaxStoreValue = 65536;
 export const MaxStoreKey = 128;
+
+// ---- component/service_client.go ----
+
+// ServiceClient is a service component's side of the contract: it checks
+// the platform's signed calls and makes the component's own signed calls
+// (the store). One install of the component at one platform.
+export interface ServiceClient {}
 
 // ---- component/signature.go ----
 

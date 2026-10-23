@@ -349,7 +349,10 @@ var hopHeaders = []string{"Connection", "Proxy-Connection", "Keep-Alive", "Proxy
 
 // egressRoundTrip sends one request to the service for the bound job and
 // turns its answer into the command's response; a card in the answer is
-// posted for the turn's requester.
+// posted for the turn's requester. When the service answers Send, the
+// bridge sends the request itself, from this computer, with the
+// credentials the service gives, and reports the system's answer back
+// (the service may ask once more with fresh credentials, or answer itself).
 func (s *Server) egressRoundTrip(sess *Session, host, service string, req *http.Request, body []byte) *http.Response {
 	_, job := sess.egressFor(host)
 	if job.JobID == "" {
@@ -363,40 +366,123 @@ func (s *Server) egressRoundTrip(sess *Session, host, service string, req *http.
 	in := component.EgressRequest{Method: req.Method, URL: "https://" + host + req.URL.RequestURI(), Header: header, Body: body}
 	scope := sess.Scope()
 	path := component.TurnProxyPath + url.PathEscape(service) + "/egress/request?room=" + url.QueryEscape(scope.RoomID) + "&job=" + url.QueryEscape(job.JobID)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	raw, err := s.cfg.Gateway.Do(ctx, http.MethodPost, path, in)
-	if err != nil {
-		var se *StatusError
-		msg := "the " + service + " service could not be reached"
-		if errors.As(err, &se) {
-			msg = fmt.Sprintf("the %s service refused the call (%s): %s", service, httpStatusText(se.Status), strings.TrimSpace(string(bytes.TrimSpace(se.Body))))
+	var sent *http.Response
+	for attempt := 0; ; attempt++ {
+		raw, err := s.cfg.Gateway.Do(ctx, http.MethodPost, path, in)
+		if err != nil {
+			var se *StatusError
+			msg := "the " + service + " service could not be reached"
+			if errors.As(err, &se) {
+				msg = fmt.Sprintf("the %s service refused the call (%s): %s", service, httpStatusText(se.Status), strings.TrimSpace(string(bytes.TrimSpace(se.Body))))
+			}
+			obs.ServerError(nil, "egress call failed: "+service+" "+host+" job "+job.JobID, err)
+			return egressError(http.StatusBadGateway, msg)
 		}
-		obs.ServerError(nil, "egress call failed: "+service+" "+host+" job "+job.JobID, err)
-		return egressError(http.StatusBadGateway, msg)
+		var out component.EgressResponse
+		valid := json.Unmarshal(raw, &out) == nil && (out.Send != nil || (out.Accept && sent != nil) || (out.Status >= 100 && out.Status <= 599))
+		if !valid {
+			obs.ServerError(nil, "egress answer invalid: "+service, err)
+			return egressError(http.StatusBadGateway, "the "+service+" service answered something that is not an egress response")
+		}
+		if out.Card != nil {
+			s.postCard(sess, job, service, *out.Card)
+		}
+		switch {
+		case out.Accept:
+			slog.Info("bnbloc bridge egress", "event", "bnbloc.bridge.egress", "service", service, "host", host, "method", req.Method, "status", sent.StatusCode, "job", job.JobID, "from", "this computer")
+			return sent
+		case out.Send != nil:
+			if attempt >= component.MaxEgressSends {
+				obs.ServerError(nil, "egress: the "+service+" service asked for one send too many", nil)
+				return egressError(http.StatusBadGateway, "the "+service+" service kept asking to send the request again")
+			}
+			resp, report, err := sendHere(ctx, in, out.Send)
+			if err != nil {
+				obs.ServerError(nil, "egress send from this computer: "+host, err)
+				return egressError(http.StatusBadGateway, "this computer could not reach "+host+": "+err.Error())
+			}
+			report.Attempt = attempt + 1
+			sent, in.Report = resp, report
+			continue
+		}
+		slog.Info("bnbloc bridge egress", "event", "bnbloc.bridge.egress", "service", service, "host", host, "method", req.Method, "status", out.Status, "job", job.JobID)
+		resp := &http.Response{StatusCode: out.Status, ProtoMajor: 1, ProtoMinor: 1, Header: http.Header{}}
+		for k, v := range out.Header {
+			resp.Header[http.CanonicalHeaderKey(k)] = v
+		}
+		for _, h := range append(hopHeaders, "Content-Length", "Set-Cookie") {
+			resp.Header.Del(h)
+		}
+		resp.Body = io.NopCloser(bytes.NewReader(out.Body))
+		resp.ContentLength = int64(len(out.Body))
+		if req.Method == http.MethodHead {
+			resp.Body, resp.ContentLength = http.NoBody, 0
+		}
+		return resp
 	}
-	var out component.EgressResponse
-	if err := json.Unmarshal(raw, &out); err != nil || out.Status < 100 || out.Status > 599 {
-		obs.ServerError(nil, "egress answer invalid: "+service, err)
-		return egressError(http.StatusBadGateway, "the "+service+" service answered something that is not an egress response")
+}
+
+// hereClient sends a request from this computer: to the claimed host only
+// (the request's own URL), redirects never followed, the answer as the
+// system sent it.
+var hereClient = &http.Client{
+	Timeout:       2 * time.Minute,
+	Transport:     &http.Transport{Proxy: http.ProxyFromEnvironment, DisableCompression: true, TLSHandshakeTimeout: 15 * time.Second},
+	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+}
+
+// sendHere sends the request with the service's credentials and returns
+// the command's response (without cookies) and the report for the service.
+func sendHere(ctx context.Context, in component.EgressRequest, send *component.EgressSend) (*http.Response, *component.EgressReport, error) {
+	u, err := url.Parse(in.URL)
+	if err != nil {
+		return nil, nil, err
 	}
-	if out.Card != nil {
-		s.postCard(sess, job, service, *out.Card)
+	if len(send.Query) > 0 {
+		q := u.Query()
+		for k, v := range send.Query {
+			q[k] = v
+		}
+		u.RawQuery = q.Encode()
 	}
-	slog.Info("bnbloc bridge egress", "event", "bnbloc.bridge.egress", "service", service, "host", host, "method", req.Method, "status", out.Status, "job", job.JobID)
-	resp := &http.Response{StatusCode: out.Status, ProtoMajor: 1, ProtoMinor: 1, Header: http.Header{}}
-	for k, v := range out.Header {
-		resp.Header[http.CanonicalHeaderKey(k)] = v
+	req, err := http.NewRequestWithContext(ctx, in.Method, u.String(), bytes.NewReader(in.Body))
+	if err != nil {
+		return nil, nil, err
 	}
+	for k, v := range in.Header {
+		req.Header[http.CanonicalHeaderKey(k)] = v
+	}
+	for _, h := range append(send.Remove, "Content-Length") {
+		req.Header.Del(h)
+	}
+	for k, v := range send.Header {
+		req.Header[http.CanonicalHeaderKey(k)] = v
+	}
+	resp, err := hereClient.Do(req)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, component.MaxEgressBody+1))
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(raw) > component.MaxEgressBody {
+		return nil, nil, errors.New("the answer is larger than 8 MiB")
+	}
+	out := &http.Response{StatusCode: resp.StatusCode, ProtoMajor: 1, ProtoMinor: 1, Header: resp.Header.Clone()}
 	for _, h := range append(hopHeaders, "Content-Length", "Set-Cookie") {
-		resp.Header.Del(h)
+		out.Header.Del(h)
 	}
-	resp.Body = io.NopCloser(bytes.NewReader(out.Body))
-	resp.ContentLength = int64(len(out.Body))
-	if req.Method == http.MethodHead {
-		resp.Body, resp.ContentLength = http.NoBody, 0
+	out.Body = io.NopCloser(bytes.NewReader(raw))
+	out.ContentLength = int64(len(raw))
+	if in.Method == http.MethodHead {
+		out.Body, out.ContentLength = http.NoBody, 0
 	}
-	return resp
+	report := &component.EgressReport{Status: resp.StatusCode, Location: resp.Header.Get("Location"), Body: raw[:min(len(raw), component.MaxEgressReportBody)]}
+	return out, report, nil
 }
 
 // egressError is the proxy's own answer: JSON naming what happened.

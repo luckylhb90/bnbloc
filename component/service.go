@@ -253,17 +253,58 @@ type EgressRequest struct {
 	URL    string              `json:"url"`
 	Header map[string][]string `json:"header,omitempty"`
 	Body   []byte              `json:"body,omitempty"`
+	// Report is what the system answered a request the bridge sent itself
+	// (EgressResponse.Send), asked again with the same request: Attempt
+	// counts the sends (1 = the first).
+	Report *EgressReport `json:"report,omitempty"`
 }
+
+// EgressReport is a system's answer to a request the bridge sent from the
+// member's computer: its status, its Location, and the start of its body
+// (at most MaxEgressReportBody), so the component can tell a refused
+// sign-in, record the call and audit it.
+type EgressReport struct {
+	Attempt  int    `json:"attempt"`
+	Status   int    `json:"status"`
+	Location string `json:"location,omitempty"`
+	Body     []byte `json:"body,omitempty"`
+}
+
+// MaxEgressReportBody bounds the body a report carries.
+const MaxEgressReportBody = 64 << 10
 
 // EgressResponse is the answer the command gets, and a card for the
 // requester when the component needs them (a connection to make, a change
 // to allow): the bridge posts it in the room, shown only to them.
+//
+// Send instead asks the bridge to send the request itself, from the
+// member's computer (a system the component's network does not reach),
+// with the credentials Send adds; the bridge then asks again with a
+// Report. To a report the component answers Accept (the system's answer is
+// the command's), another Send (once more, fresh credentials), or an answer
+// of its own (Status: a refusal and its card).
 type EgressResponse struct {
 	Status int                 `json:"status"`
 	Header map[string][]string `json:"header,omitempty"`
 	Body   []byte              `json:"body,omitempty"`
 	Card   *Card               `json:"card,omitempty"`
+	Send   *EgressSend         `json:"send,omitempty"`
+	Accept bool                `json:"accept,omitempty"`
 }
+
+// EgressSend is how the bridge sends a request itself: the request headers
+// it removes first (every credential the agent sent), then the headers it
+// sets and the query parameters it adds (the member's credentials for this
+// one request).
+type EgressSend struct {
+	Remove []string            `json:"remove,omitempty"`
+	Header map[string][]string `json:"header,omitempty"`
+	Query  map[string][]string `json:"query,omitempty"`
+}
+
+// MaxEgressSends bounds the sends of one request (a refused sign-in is
+// retried once with fresh credentials).
+const MaxEgressSends = 2
 
 // MaxEgressBody bounds an egress request's and answer's body.
 const MaxEgressBody = 8 << 20

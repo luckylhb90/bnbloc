@@ -91,6 +91,15 @@ The bridge's room tools server is also the session's HTTPS proxy
   `EgressResponse` is the command's answer. Between turns a claimed host
   answers 503 and nothing is sent. Every other `CONNECT` is tunnelled,
   never decrypted.
+- **Sent from the member's computer**: a service may answer `Send`
+  instead (a system its own network does not reach, an internal one the
+  member's computer does): the bridge removes the headers `Send` names,
+  sets its credentials for this one request and sends it itself, then asks
+  the service again with a `Report` (status, Location, the body's first
+  64 KiB). The service answers `Accept` (the system's answer is the
+  command's), another `Send` (fresh credentials, at most two sends), or a
+  refusal of its own with its card. Only that request's credentials reach
+  the bridge, in its memory; never the agent.
 - **The local CA** (`roomtools/egress_ca.go`): one per member directory
   (`egress-ca.pem`, its key `egress-ca.key` 0600), never sent anywhere,
   replaced 30 days before its end. Leaves last a day. Only the turn's
