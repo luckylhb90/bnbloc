@@ -10,7 +10,11 @@
 //   - content.go: the content name rule, SKILL.md frontmatter, the
 //     content bundle caps and the paths of the contract files a room's
 //     records hold (the app SDK, its declarations, the content limits);
-//   - mounts.go: the sandbox mounts descriptor a component writes.
+//   - mounts.go: the sandbox mounts descriptor a component writes;
+//   - service.go, signature.go, service_client.go: service components
+//     (docs/architecture/service-components.md): their primitives' shapes,
+//     the signature of every call, and a component's client of the
+//     platform (verifying its calls, the store).
 //
 // It imports only the standard library and core (TestComponentContractIsPublic).
 // Changes are additive, like the protocol packages': a component pinned to an

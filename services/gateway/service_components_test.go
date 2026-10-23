@@ -317,6 +317,17 @@ func TestComponentStoreSignedAndSealed(t *testing.T) {
 	if code, raw := call(http.MethodGet, component.ComponentStorePath+"members/maya/", nil, fx.secret); code != http.StatusOK || !strings.Contains(string(raw), "grant:wiki") {
 		t.Fatalf("list = %d %s", code, raw)
 	}
+	// The contract's own client reaches the same values.
+	client := &component.ServiceClient{BaseURL: fx.srv.URL, Name: "conn", Secret: fx.secret}
+	if v, ok, err := client.StoreGet(context.Background(), component.StoreMembers, "maya", "grant:wiki"); err != nil || !ok || string(v) != "refresh-SECRET" {
+		t.Fatalf("client get = %q %v %v", v, ok, err)
+	}
+	if err := client.StorePut(context.Background(), component.StoreShared, "", "state:x", []byte("s")); err != nil {
+		t.Fatal(err)
+	}
+	if keys, err := client.StoreKeys(context.Background(), component.StoreShared, ""); err != nil || len(keys) != 1 || keys[0] != "state:x" {
+		t.Fatalf("client keys = %v %v", keys, err)
+	}
 	if code, _ := call(http.MethodGet, key, nil, "wrong"); code != http.StatusUnauthorized {
 		t.Fatalf("bad signature = %d", code)
 	}
