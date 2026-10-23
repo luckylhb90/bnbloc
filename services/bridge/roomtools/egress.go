@@ -394,8 +394,8 @@ func (s *Server) egressRoundTrip(sess *Session, host, service string, req *http.
 			slog.Info("bnbloc bridge egress", "event", "bnbloc.bridge.egress", "service", service, "host", host, "method", req.Method, "status", sent.StatusCode, "job", job.JobID, "from", "this computer")
 			return sent
 		case out.Send != nil:
-			if attempt >= component.MaxEgressSends {
-				obs.ServerError(nil, "egress: the "+service+" service asked for one send too many", nil)
+			if err := sendsLeft(attempt); err != nil {
+				obs.ServerError(nil, "egress: the "+service+" service", err)
 				return egressError(http.StatusBadGateway, "the "+service+" service kept asking to send the request again")
 			}
 			resp, report, err := sendHere(ctx, in, out.Send)
@@ -422,6 +422,14 @@ func (s *Server) egressRoundTrip(sess *Session, host, service string, req *http.
 		}
 		return resp
 	}
+}
+
+// sendsLeft refuses a send past component.MaxEgressSends.
+func sendsLeft(attempt int) error {
+	if attempt >= component.MaxEgressSends {
+		return errors.New("asked for one send too many")
+	}
+	return nil
 }
 
 // hereClient sends a request from this computer: to the claimed host only
