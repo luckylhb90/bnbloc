@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // runComponents handles component operations that are not core-specific:
@@ -13,9 +15,11 @@ import (
 // file with its binaries.
 func runComponents(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("components: expected a subcommand (rotate-secret|test|publish-package)")
+		return fmt.Errorf("components: expected a subcommand (list|rotate-secret|test|publish-package)")
 	}
 	switch args[0] {
+	case "list":
+		return componentsList(args[1:])
 	case "rotate-secret":
 		return componentsRotateSecret(args[1:])
 	case "test":
@@ -25,6 +29,25 @@ func runComponents(args []string) error {
 	default:
 		return fmt.Errorf("components: unknown subcommand %q", args[0])
 	}
+}
+
+// componentsList prints every installed component: kind, name, version
+// and rollout (what a release reads before it publishes over one).
+func componentsList(args []string) error {
+	fs := flag.NewFlagSet("components list", flag.ContinueOnError)
+	gw := addGatewayFlags(fs)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	var out wire.PlatformComponentsReply
+	if err := gw.client().call(context.Background(), apiTimeout, http.MethodGet, "/v1/platform/components", nil, &out); err != nil {
+		return err
+	}
+	fmt.Printf("%-14s %-28s %-12s %s\n", "KIND", "NAME", "VERSION", "ROLLOUT")
+	for _, c := range out.Components {
+		fmt.Printf("%-14s %-28s %-12s %s\n", c.Kind, c.Name, c.Version, c.Rollout)
+	}
+	return nil
 }
 
 // kindComponentPath addresses a component by kind and name (?kind= pins
@@ -41,13 +64,13 @@ func notifierComponentPath(name, suffix string) string {
 func componentsRotateSecret(args []string) error {
 	fs := flag.NewFlagSet("components rotate-secret", flag.ContinueOnError)
 	gw := addGatewayFlags(fs)
-	kind := fs.String("kind", "notifier", "the endpoint component's kind: notifier, auth-provider or share-target")
+	kind := fs.String("kind", "notifier", "the endpoint component's kind: notifier, auth-provider, share-target or service")
 	name, err := parseNamed(fs, args)
 	if err != nil {
 		return err
 	}
 	if name == "" {
-		return fmt.Errorf("usage: components rotate-secret <name> [--kind notifier|auth-provider|share-target]")
+		return fmt.Errorf("usage: components rotate-secret <name> [--kind notifier|auth-provider|share-target|service]")
 	}
 	c := gw.client()
 	var out struct {

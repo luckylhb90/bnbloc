@@ -99,7 +99,9 @@ Components:
         [--rollout auto|optin|off] [--seckey f | --unsigned]
         a package file without artifacts (a plugin, a notifier sidecar): its binaries are uploaded and pinned,
         and a settingsPage's bundle (--settings-page) too
-  bnbloc components rotate-secret <name> [--kind auth-provider]  new endpoint component credential (printed once)
+  bnbloc components list                  every installed component: kind, name, version, rollout
+                                          (read it before publishing over one)
+  bnbloc components rotate-secret <name> [--kind auth-provider|share-target|service]  new endpoint component credential (printed once)
   bnbloc components test <name>           send a test notification through a notifier to you
   bnbloc content check [--json] (<dir>... | --all <root>)
         validate content package directories as a save would (an assist under a task's name meets its contract)

@@ -286,6 +286,7 @@ install prints the component's signing secret **once** — configure it on the
 notifier endpoint. Later:
 
 ```sh
+bnbloc components list                        # kind, name, version, rollout of every component
 bnbloc components rotate-secret corp-notify   # new secret, printed once
 bnbloc components test corp-notify            # test notification to you, with the notifier's answer
 ```
