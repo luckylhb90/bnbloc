@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { announceContentChange, changing, contentChanges, touches, type ContentChange } from "./contentChanges.ts";
 import { contentApi } from "./contentComponentsApi.ts";
 import { contentSharingApi } from "./contentSharingApi.ts";
@@ -8,6 +7,16 @@ import { workGalleryApi } from "./workGalleryApi.ts";
 import { emptyContentForm } from "./contentComponents.ts";
 import { emptyPromptPackForm } from "./promptPacks.ts";
 import type { ContentKind } from "./wire.gen.ts";
+
+// Reads a source file next to this test. The web tsconfig carries no node
+// types, so the built-in module is reached through the runtime, not an import.
+function readSource(file: string): string {
+  const proc = (globalThis as { process?: { getBuiltinModule?: (id: string) => unknown } }).process;
+  const fs = proc?.getBuiltinModule?.("node:fs") as { readFileSync(url: URL, enc: "utf8"): string } | undefined;
+  if (!fs) throw new Error("this test needs Node 22 or newer (process.getBuiltinModule)");
+  return fs.readFileSync(new URL(`./${file}`, import.meta.url), "utf8");
+}
+
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
@@ -143,7 +152,7 @@ async function heard(run: () => Promise<unknown>): Promise<ContentChange[]> {
   const files = ["contentComponentsApi.ts", "contentSharingApi.ts", "promptPacksApi.ts", "workGalleryApi.ts", "roomComponentsApi.ts"];
   let writes = 0;
   for (const file of files) {
-    const src = readFileSync(new URL(`./${file}`, import.meta.url), "utf8");
+    const src = readSource(file);
     const props = src.slice(src.indexOf("Api = {")).split(/\n {2}(?=\w+: )/).slice(1);
     for (const prop of props) {
       const name = prop.slice(0, prop.indexOf(":"));

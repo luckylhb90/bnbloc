@@ -36,7 +36,9 @@ ok(isFresh(1000, 1000 + UNREAD_FRESH_MS - 1) && !isFresh(1000, 1000 + UNREAD_FRE
 // The read: renewed first when the bearer is about to end, renewed and retried
 // once on a 401, and "unknown" (null) for anything else.
 const NOW = 1_000_000_000_000;
-const bearer = (secondsLeft: number) => `${Buffer.from(JSON.stringify({ exp: Math.floor(NOW / 1000) + secondsLeft })).toString("base64url")}.sig`;
+// base64url without Buffer: the web tsconfig carries no node types.
+const b64url = (s: string) => btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const bearer = (secondsLeft: number) => `${b64url(JSON.stringify({ exp: Math.floor(NOW / 1000) + secondsLeft }))}.sig`;
 interface Fx { io: UnreadReader; log: string[]; token: { v: string }; }
 function fixture(opts: { token: string; answers: Array<UnreadSummary | { status: number } | Error>; renews?: boolean; present?: boolean }): Fx {
   const log: string[] = [];

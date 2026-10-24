@@ -7,8 +7,10 @@ const ok = (cond: boolean, msg: string) => {
 
 // A session token that expires at `exp` (seconds): two segments, the first the claims.
 const token = (exp: number, tag = "a") =>
-  `${Buffer.from(JSON.stringify({ sub: "maya", exp, tag })).toString("base64url")}.sig`;
+  `${b64url(JSON.stringify({ sub: "maya", exp, tag }))}.sig`;
 const NOW = 1_000_000_000_000;
+// base64url without Buffer: the web tsconfig carries no node types.
+const b64url = (s: string) => btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 const sec = (ms: number) => Math.floor(ms / 1000);
 const fresh = token(sec(NOW) + 3600);
 const due = token(sec(NOW) + 60); // inside the 5 minute window: due
