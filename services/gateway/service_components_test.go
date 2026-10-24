@@ -272,6 +272,23 @@ func TestComponentPagesByTicket(t *testing.T) {
 	if resp, _ := fx.do("maya", http.MethodPost, "/v1/my/component-pages/conn/Bad", nil, nil); resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("bad page name = %d", resp.StatusCode)
 	}
+
+	// Opened for a room: the page is told the room and the member's role
+	// there; someone outside the room cannot open it for that room.
+	resp, raw = fx.do("maya", http.MethodPost, "/v1/my/component-pages/conn/connections", []byte(`{"roomId":"room-1"}`), http.Header{"Content-Type": {"application/json"}})
+	_ = json.Unmarshal(raw, &sess)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("open for a room = %d %s", resp.StatusCode, raw)
+	}
+	_, _ = fx.do("", http.MethodGet, strings.TrimPrefix(sess.URL, fx.srv.URL), nil, nil)
+	m = component.Member{}
+	_ = component.DecodeHeader(fx.last(t).identity, &m)
+	if m.Room != "room-1" || m.RoomRole != component.RoomOwner {
+		t.Fatalf("the member of a room page = %+v", m)
+	}
+	if resp, _ := fx.do("olga", http.MethodPost, "/v1/my/component-pages/conn/connections", []byte(`{"roomId":"room-1"}`), http.Header{"Content-Type": {"application/json"}}); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("outside the room = %d", resp.StatusCode)
+	}
 }
 
 // A callback is open and reaches the service's callback prefix signed; its

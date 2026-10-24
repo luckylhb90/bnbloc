@@ -24,6 +24,8 @@ type ComponentPageInfo struct {
 	Name      string `json:"name"`
 	Label     string `json:"label"`
 	Audience  string `json:"audience"`
+	// InRoom: the page is offered in a room too (opened with its roomId).
+	InRoom bool `json:"inRoom,omitempty"`
 }
 
 // ComponentPageList answers GET /v1/my/component-pages. Unreadable names
@@ -37,6 +39,9 @@ type ComponentPageList struct {
 // Query is passed to the page.
 type ComponentPageOpen struct {
 	Query string `json:"query,omitempty"`
+	// RoomID opens the page for a room the member is in: the page is told
+	// the room and their role there.
+	RoomID string `json:"roomId,omitempty"`
 }
 
 // ComponentPageSession is the opened page's address: it carries the

@@ -9,7 +9,8 @@ import { Button } from "@/ui/Button";
 // ComponentCardView is a service component's card for the person a turn ran
 // for (docs/architecture/service-components.md): only they see it
 // (feedItemFromEvent). Its text is plain. "Open" opens one of the
-// service's pages as them (a connection to make, a change to allow); "Ask
+// service's pages as them, for this room (a connection to make, a change
+// to allow, who their agents act as here); "Ask
 // again" puts the card in the composer, so the member asks the agent to
 // retry in the same conversation.
 export function ComponentCardView({ roomId, card }: { readonly roomId: string; readonly card: ComponentCard }) {
@@ -23,7 +24,7 @@ export function ComponentCardView({ roomId, card }: { readonly roomId: string; r
     }
     setState({ busy: true });
     try {
-      await openComponentPage(card.component, a.page ?? "", a.query);
+      await openComponentPage(card.component, a.page ?? "", a.query, roomId);
       setState({});
     } catch (e) {
       setState({ error: errorText(e, "Could not open the page") });

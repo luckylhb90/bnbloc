@@ -142,16 +142,23 @@ type Turn struct {
 // Member is who a page is served to: their subject, organization and role
 // there (Admin: they manage the organization), the page, the page's own
 // address (PageURL: what its forms and scripts call, ending in "/") and the
-// platform's public origin.
+// platform's public origin. A page opened for a room (a card in it, its
+// header) names the room and the member's role there (RoomRole: RoomOwner,
+// or another role of the room), checked on every call.
 type Member struct {
-	Subject string `json:"subject"`
-	Org     string `json:"org"`
-	Role    string `json:"role"`
-	Admin   bool   `json:"admin,omitempty"`
-	Page    string `json:"page"`
-	PageURL string `json:"pageUrl"`
-	Origin  string `json:"origin"`
+	Subject  string `json:"subject"`
+	Org      string `json:"org"`
+	Role     string `json:"role"`
+	Admin    bool   `json:"admin,omitempty"`
+	Page     string `json:"page"`
+	PageURL  string `json:"pageUrl"`
+	Origin   string `json:"origin"`
+	Room     string `json:"room,omitempty"`
+	RoomRole string `json:"roomRole,omitempty"`
 }
+
+// RoomOwner is the room role of its owner (Member.RoomRole).
+const RoomOwner = "owner"
 
 // ServiceAssistRequest is one run of a service's own AI task for an
 // organization: the text the task works from (the service builds it; the
@@ -418,10 +425,12 @@ const (
 // Page is one page a component serves: its name (ValidPageName), the label
 // members see and who it is for. An admin page is listed only to an
 // organization admin; the component still checks Member.Admin itself.
+// InRoom: also offered in a room, opened for that room (Member.Room).
 type Page struct {
 	Name     string `json:"name"`
 	Label    string `json:"label"`
 	Audience string `json:"audience"`
+	InRoom   bool   `json:"inRoom,omitempty"`
 }
 
 // PageList is the answer of ServicePagesPath.

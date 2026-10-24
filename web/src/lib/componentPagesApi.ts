@@ -8,12 +8,12 @@ import type { ComponentPageList, ComponentPageOpen, ComponentPageSession } from 
 export const componentPagesApi = {
   // The pages the member may open (an admin page only for an org admin).
   list: () => req<ComponentPageList>("/v1/my/component-pages"),
-  // Opens one page: the answer is its address, which the web opens in a
-  // new tab.
-  open: (component: string, page: string, query?: string) =>
+  // Opens one page (for a room the member is in, with roomId): the answer
+  // is its address, which the web opens in a new tab.
+  open: (component: string, page: string, query?: string, roomId?: string) =>
     req<ComponentPageSession>(`/v1/my/component-pages/${encodeURIComponent(component)}/${encodeURIComponent(page)}`, {
       method: "POST",
-      body: JSON.stringify({ query: query || undefined } satisfies ComponentPageOpen),
+      body: JSON.stringify({ query: query || undefined, roomId: roomId || undefined } satisfies ComponentPageOpen),
     }),
 };
 
@@ -22,15 +22,15 @@ export const componentPagesApi = {
 // the app with it); in a browser in a new tab, opened at once (inside the
 // click, so no popup blocker stops it) and pointed at the page when its
 // address is known.
-export async function openComponentPage(component: string, page: string, query?: string): Promise<void> {
+export async function openComponentPage(component: string, page: string, query?: string, roomId?: string): Promise<void> {
   if (desktop.available()) {
-    const { url } = await componentPagesApi.open(component, page, query);
+    const { url } = await componentPagesApi.open(component, page, query, roomId);
     await openExternal(url);
     return;
   }
   const tab = window.open("about:blank", "_blank");
   try {
-    const { url } = await componentPagesApi.open(component, page, query);
+    const { url } = await componentPagesApi.open(component, page, query, roomId);
     if (tab) tab.location.href = url;
     else await openExternal(url);
   } catch (e) {

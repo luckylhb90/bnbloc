@@ -340,7 +340,9 @@ export interface Turn {
 // Member is who a page is served to: their subject, organization and role
 // there (Admin: they manage the organization), the page, the page's own
 // address (PageURL: what its forms and scripts call, ending in "/") and the
-// platform's public origin.
+// platform's public origin. A page opened for a room (a card in it, its
+// header) names the room and the member's role there (RoomRole: RoomOwner,
+// or another role of the room), checked on every call.
 export interface Member {
   subject: string;
   org: string;
@@ -349,7 +351,12 @@ export interface Member {
   page: string;
   pageUrl: string;
   origin: string;
+  room?: string;
+  roomRole?: string;
 }
+
+// RoomOwner is the room role of its owner (Member.RoomRole).
+export const RoomOwner = "owner";
 
 // ServiceAssistRequest is one run of a service's own AI task for an
 // organization: the text the task works from (the service builds it; the
@@ -510,10 +517,12 @@ export const AudienceAdmin = "admin";
 // Page is one page a component serves: its name (ValidPageName), the label
 // members see and who it is for. An admin page is listed only to an
 // organization admin; the component still checks Member.Admin itself.
+// InRoom: also offered in a room, opened for that room (Member.Room).
 export interface Page {
   name: string;
   label: string;
   audience: string;
+  inRoom?: boolean;
 }
 
 // PageList is the answer of ServicePagesPath.
@@ -5851,6 +5860,8 @@ export interface ComponentPageInfo {
   name: string;
   label: string;
   audience: string;
+  // InRoom: the page is offered in a room too (opened with its roomId).
+  inRoom?: boolean;
 }
 
 // ComponentPageList answers GET /v1/my/component-pages. Unreadable names
@@ -5864,6 +5875,9 @@ export interface ComponentPageList {
 // Query is passed to the page.
 export interface ComponentPageOpen {
   query?: string;
+  // RoomID opens the page for a room the member is in: the page is told
+  // the room and their role there.
+  roomId?: string;
 }
 
 // ComponentPageSession is the opened page's address: it carries the

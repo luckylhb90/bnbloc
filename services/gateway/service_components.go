@@ -17,11 +17,13 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/extreg"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
+	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/rbac"
 	"github.com/luckylhb90/bnbloc/internal/servicecomp"
 	"github.com/luckylhb90/bnbloc/internal/shareagent"
 	"github.com/luckylhb90/bnbloc/internal/store"
+	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
@@ -258,10 +260,23 @@ func (s *Service) handleTurnProxy(w http.ResponseWriter, r *http.Request, caller
 type pageTicket struct {
 	Page  string `json:"page"`
 	Query string `json:"query,omitempty"`
+	Room  string `json:"room,omitempty"`
 }
 
 // isOrgAdmin reports a member who manages their organization.
 func isOrgAdmin(claims auth.Claims) bool { return rbac.Can(claims.Role, rbac.PermManageOrg) }
+
+// pageRoomRole is claims' role in a room a page is opened for: a person's
+// membership, in their organization (membership.RoomScope); a refusal is
+// answered here.
+func (s *Service) pageRoomRole(w http.ResponseWriter, ctx context.Context, claims auth.Claims, room string) (string, bool) {
+	m, err := membership.RoomScope(tenant.NewContext(ctx, claims.Tenant), s.Membership, room, claims.Subject, membership.Human)
+	if err != nil {
+		httpx.Error(w, "you are not a member of that room", http.StatusForbidden)
+		return "", false
+	}
+	return string(m.Role), true
+}
 
 // handleComponentPages lists the pages the member may open
 // (GET /v1/my/component-pages): each service's that declares pages; an
@@ -288,7 +303,7 @@ func (s *Service) handleComponentPages(w http.ResponseWriter, r *http.Request, c
 			if p.Audience == component.AudienceAdmin && !isOrgAdmin(claims) {
 				continue
 			}
-			out.Pages = append(out.Pages, wire.ComponentPageInfo{Component: rec.Name, Name: p.Name, Label: p.Label, Audience: p.Audience})
+			out.Pages = append(out.Pages, wire.ComponentPageInfo{Component: rec.Name, Name: p.Name, Label: p.Label, Audience: p.Audience, InRoom: p.InRoom})
 		}
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)
@@ -349,11 +364,16 @@ func (s *Service) handleOpenComponentPage(w http.ResponseWriter, r *http.Request
 		httpx.Error(w, "invalid page query", http.StatusBadRequest)
 		return
 	}
+	if req.RoomID != "" {
+		if _, ok := s.pageRoomRole(w, r.Context(), claims, req.RoomID); !ok {
+			return
+		}
+	}
 	rec, ok := s.serviceFor(w, r.Context(), claims.Tenant, r.PathValue("component"), component.ServicePages)
 	if !ok {
 		return
 	}
-	data, _ := json.Marshal(pageTicket{Page: page, Query: req.Query})
+	data, _ := json.Marshal(pageTicket{Page: page, Query: req.Query, Room: req.RoomID})
 	ticket := s.Signer.Issue(auth.Claims{
 		Subject: claims.Subject, Tenant: claims.Tenant, Role: claims.Role,
 		ExpiresAtUnix: s.nowTime().Add(servicePageTicketTTL).Unix(),
@@ -393,6 +413,15 @@ func (s *Service) handleComponentPage(w http.ResponseWriter, r *http.Request) {
 	member := component.Member{
 		Subject: claims.Subject, Org: claims.Tenant, Role: claims.Role, Admin: isOrgAdmin(claims), Page: pt.Page,
 		PageURL: origin + component.ComponentPagePath + ticket + "/", Origin: origin,
+	}
+	if pt.Room != "" {
+		// The room role is read on every call: a member who left, or an
+		// owner who handed the room over, no longer acts as one.
+		role, ok := s.pageRoomRole(w, r.Context(), claims, pt.Room)
+		if !ok {
+			return
+		}
+		member.Room, member.RoomRole = pt.Room, role
 	}
 	ans, ok := s.forwardToService(w, r, rec, servicecomp.Call{
 		Method: r.Method, Path: component.ServicePagesPath + "/" + pt.Page + "/" + forwardedPath(r, component.ComponentPagePath),

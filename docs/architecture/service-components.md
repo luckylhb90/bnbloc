@@ -62,6 +62,13 @@ Identities are base64url JSON (`component.EncodeHeader`).
   carries it; every call under it is the member's. An admin page
   (`audience: admin`) is listed only to an organization admin; the service
   still checks `Member.Admin`.
+- **A room's page**: opened with `roomId` (a card in the room, or the
+  room header for a page the service lists with `inRoom`), the ticket names
+  the room; every call under it reads the member's role there again
+  (`membership.RoomScope`) and carries `Member.Room` and `Member.RoomRole`
+  (`component.RoomOwner` for the owner). Someone who left the room, or an
+  owner who handed it over, no longer acts as one; a non-member cannot open
+  a page for the room.
 
 Answers pass on with their status and a few headers
 (`servicecomp.passedHeaders`); a cookie never does. An HTML answer is

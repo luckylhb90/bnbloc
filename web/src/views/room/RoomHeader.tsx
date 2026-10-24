@@ -23,6 +23,7 @@ import { canInvite, isOwner, type RoomMembership } from "@/lib/roomRoles";
 import { OnlineStrip } from "@/views/room/RoomNav";
 import { RoomLinkButton } from "@/views/room/RoomLinkButton";
 import { RoomMuteButton } from "@/views/room/RoomMuteButton";
+import { RoomServicePages } from "@/views/room/RoomServicePages";
 import type { RailSurface } from "@/views/room/RoomLayout";
 import { PlatformAgentsIndicator } from "@/views/room/PlatformAgentsIndicator";
 import { RoomSourcesIndicator } from "@/views/room/RoomSourcesIndicator";
@@ -222,6 +223,7 @@ export function RoomHeader({
           <SquaresFourIcon size={18} />
         </Button>
       )}
+      {me && <RoomServicePages roomId={roomId} />}
       <RoomMuteButton roomId={roomId} />
       <Button variant="ghost" size="icon" title="Members" aria-label="Members" onClick={onShowMembers} className="tap">
         <UsersIcon size={18} />
