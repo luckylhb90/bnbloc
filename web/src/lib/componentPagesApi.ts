@@ -1,6 +1,6 @@
 import { req } from "./api.ts";
 import { desktop, openExternal } from "./desktop.ts";
-import type { ComponentPageList, ComponentPageOpen, ComponentPageSession } from "./wire.gen.ts";
+import type { CardReply, ComponentCardCall, ComponentPageList, ComponentPageOpen, ComponentPageSession } from "./wire.gen.ts";
 
 // Service components' pages (docs/architecture/service-components.md): a
 // service of the organization serves a member its own pages (its settings,
@@ -14,6 +14,13 @@ export const componentPagesApi = {
     req<ComponentPageSession>(`/v1/my/component-pages/${encodeURIComponent(component)}/${encodeURIComponent(page)}`, {
       method: "POST",
       body: JSON.stringify({ query: query || undefined, roomId: roomId || undefined } satisfies ComponentPageOpen),
+    }),
+  // A card's action in place (kind "call"): the service answers what the
+  // card shows now, an address to open, and whether it is done.
+  callCard: (component: string, page: string, query?: string, roomId?: string) =>
+    req<CardReply>(`/v1/my/component-cards/${encodeURIComponent(component)}/${encodeURIComponent(page)}`, {
+      method: "POST",
+      body: JSON.stringify({ query: query || undefined, roomId: roomId || undefined } satisfies ComponentCardCall),
     }),
 };
 

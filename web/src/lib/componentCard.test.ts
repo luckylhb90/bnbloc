@@ -21,4 +21,14 @@ assert(!!card && card.actions?.length === 2 && card.actions[0].page === "connect
 assert(componentCardOf({ component: "c", title: "t" }) === undefined, "a card for nobody is none");
 assert(componentCardOf("x") === undefined, "a string is no card");
 assert(!!card && cardShownTo(card, "maya") && !cardShownTo(card, "jack"), "only its person sees it");
+const calls = componentCardOf({
+  component: "connections",
+  for: "maya",
+  title: "Allow a change?",
+  actions: [
+    { kind: "call", label: "Allow", page: "approve", query: "id=h1&decision=allow" },
+    { kind: "call", label: "Bad", page: "Not A Page" },
+  ],
+});
+assert(!!calls && calls.actions?.length === 1 && calls.actions[0].kind === "call" && calls.actions[0].query === "id=h1&decision=allow", "a call acts on a valid page");
 console.log("componentCard ok");

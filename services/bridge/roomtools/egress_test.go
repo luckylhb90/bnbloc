@@ -273,3 +273,41 @@ func TestSandboxReaches(t *testing.T) {
 		}
 	}
 }
+
+// A send that replaces the query string and the body goes out exactly so
+// (a request the service signed over its exact query and body).
+func TestEgressSendReplacesQueryAndBody(t *testing.T) {
+	var gotQuery, gotBody string
+	sys := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		gotQuery, gotBody = r.URL.RawQuery, string(raw)
+		_, _ = io.WriteString(w, "ok")
+	}))
+	defer sys.Close()
+	old := hereClient
+	hereClient = &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, network, sys.Listener.Addr().String())
+		}}}
+	defer func() { hereClient = old }()
+	gw := &fakeGateway{handle: func(method, path string, body []byte) (int, any) {
+		var in component.EgressRequest
+		_ = json.Unmarshal(body, &in)
+		if in.Report == nil {
+			return http.StatusOK, component.EgressResponse{Send: &component.EgressSend{RawQuery: "b=2&a=1&signature=abc", ReplaceBody: true, Body: []byte("x=1")}}
+		}
+		return http.StatusOK, component.EgressResponse{Accept: true}
+	}}
+	srv, token, sess := startServer(t, gw)
+	sess.SetEgressHosts(map[string]string{"wiki.example.com": "connections"})
+	sess.Bind(Job{JobID: "job-1", RequesterUserID: "maya"})
+	req, _ := http.NewRequest(http.MethodPost, "https://wiki.example.com/order?a=1&signature=fake", strings.NewReader("x=1&signature=fake"))
+	resp, err := proxyClient(t, srv, token, nil).Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if gotQuery != "b=2&a=1&signature=abc" || gotBody != "x=1" {
+		t.Fatalf("sent query %q body %q", gotQuery, gotBody)
+	}
+}

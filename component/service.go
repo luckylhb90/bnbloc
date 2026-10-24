@@ -341,6 +341,12 @@ type EgressSend struct {
 	Remove []string            `json:"remove,omitempty"`
 	Header map[string][]string `json:"header,omitempty"`
 	Query  map[string][]string `json:"query,omitempty"`
+	// RawQuery, when set, replaces the request's query string as it is
+	// (after Query): a request signed over its exact query. ReplaceBody
+	// replaces its body with Body.
+	RawQuery    string `json:"rawQuery,omitempty"`
+	Body        []byte `json:"body,omitempty"`
+	ReplaceBody bool   `json:"replaceBody,omitempty"`
 }
 
 // MaxEgressSends bounds the sends of one request (a refused sign-in is
@@ -364,7 +370,24 @@ const (
 	CardOpen = "open"
 	// CardAskAgain sends the turn's request to the same agent again.
 	CardAskAgain = "ask-again"
+	// CardCall acts in place: the platform calls the component's
+	// ServiceCardsPrefix + Page (with Query) as the member, for the card's
+	// room, and the card shows the CardReply. Nothing opens.
+	CardCall = "call"
 )
+
+// ServiceCardsPrefix: a card's call (CardCall) reaches
+// ServiceCardsPrefix + page, the member attested (MemberHeader).
+const ServiceCardsPrefix = "/cards/"
+
+// CardReply is a component's answer to a card's call: the text the card
+// shows now, an https address to open (a sign-in to start), and Done when
+// the card has nothing left to do (its actions go away).
+type CardReply struct {
+	Text string `json:"text"`
+	Open string `json:"open,omitempty"`
+	Done bool   `json:"done,omitempty"`
+}
 
 // CardAction is one button of a card.
 type CardAction struct {
@@ -398,7 +421,7 @@ func CheckCard(c Card) error {
 			return errors.New("a card action needs a label of at most 40 characters")
 		}
 		switch a.Kind {
-		case CardOpen:
+		case CardOpen, CardCall:
 			if !ValidPageName(a.Page) {
 				return fmt.Errorf("card action %q opens no valid page", a.Label)
 			}

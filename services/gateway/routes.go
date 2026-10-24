@@ -162,6 +162,7 @@ func (s *Service) routes() []route {
 		gated("POST "+component.TurnProxyPath+"{component}/{path...}", drive, s.handleTurnProxy),
 		member("GET /v1/my/component-pages", s.handleComponentPages),
 		member("POST /v1/my/component-pages/{component}/{page}", s.handleOpenComponentPage),
+		member("POST /v1/my/component-cards/{component}/{page}", s.handleComponentCardCall),
 		open("GET "+component.ComponentPagePath+"{ticket}/{path...}", "a page ticket in the path", s.handleComponentPage),
 		open("POST "+component.ComponentPagePath+"{ticket}/{path...}", "a page ticket in the path", s.handleComponentPage),
 		open("GET "+component.ComponentCallbackPath+"{component}/{path...}", "another system's redirect: the service checks its own state", s.handleComponentCallback).spends(publicBudget),

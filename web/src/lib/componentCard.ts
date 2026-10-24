@@ -1,7 +1,8 @@
 // A service component's card (docs/architecture/service-components.md): a
 // notice row of kind NoticeComponentCard carrying payload.card, shown only
 // to the person the turn ran for. Its text is plain; its actions open one of
-// the service's pages or ask the agent again. The helpers here are pure.
+// the service's pages, act in place (call), or ask the agent again. The
+// helpers here are pure.
 import { sameUser } from "./format.ts";
 import type { ComponentCard, ComponentCardAction } from "./wire.gen.ts";
 
@@ -21,8 +22,8 @@ export function componentCardOf(v: unknown): ComponentCard | undefined {
       const r = a as Record<string, unknown>;
       const kind = str(r.kind);
       const label = str(r.label);
-      if (!label || (kind !== "open" && kind !== "ask-again")) continue;
-      if (kind === "open" && !/^[a-z0-9-]{1,32}$/.test(str(r.page))) continue;
+      if (!label || (kind !== "open" && kind !== "call" && kind !== "ask-again")) continue;
+      if ((kind === "open" || kind === "call") && !/^[a-z0-9-]{1,32}$/.test(str(r.page))) continue;
       actions.push({ kind, label, page: str(r.page) || undefined, query: str(r.query) || undefined });
     }
   }

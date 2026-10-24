@@ -65,6 +65,14 @@ type ComponentCard struct {
 	Actions   []ComponentCardAction `json:"actions,omitempty"`
 }
 
+// ComponentCardCall is a card's call (component.CardCall): POST
+// /v1/my/component-cards/{component}/{page} with the action's query and
+// the card's room; the answer is the component's component.CardReply.
+type ComponentCardCall struct {
+	Query  string `json:"query,omitempty"`
+	RoomID string `json:"roomId,omitempty"`
+}
+
 // ComponentCardAction is one button of a ComponentCard.
 type ComponentCardAction struct {
 	Kind  string `json:"kind"`

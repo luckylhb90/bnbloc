@@ -474,6 +474,12 @@ export interface EgressSend {
   remove?: string[];
   header?: Record<string, string[]>;
   query?: Record<string, string[]>;
+  // RawQuery, when set, replaces the request's query string as it is
+  // (after Query): a request signed over its exact query. ReplaceBody
+  // replaces its body with Body.
+  rawQuery?: string;
+  body?: string;
+  replaceBody?: boolean;
 }
 
 // MaxEgressSends bounds the sends of one request (a refused sign-in is
@@ -496,6 +502,23 @@ export interface Card {
 export const CardOpen = "open";
 // CardAskAgain sends the turn's request to the same agent again.
 export const CardAskAgain = "ask-again";
+// CardCall acts in place: the platform calls the component's
+// ServiceCardsPrefix + Page (with Query) as the member, for the card's
+// room, and the card shows the CardReply. Nothing opens.
+export const CardCall = "call";
+
+// ServiceCardsPrefix: a card's call (CardCall) reaches
+// ServiceCardsPrefix + page, the member attested (MemberHeader).
+export const ServiceCardsPrefix = "/cards/";
+
+// CardReply is a component's answer to a card's call: the text the card
+// shows now, an https address to open (a sign-in to start), and Done when
+// the card has nothing left to do (its actions go away).
+export interface CardReply {
+  text: string;
+  open?: string;
+  done?: boolean;
+}
 
 // CardAction is one button of a card.
 export interface CardAction {
@@ -5904,6 +5927,14 @@ export interface ComponentCard {
   title: string;
   text?: string;
   actions?: ComponentCardAction[];
+}
+
+// ComponentCardCall is a card's call (component.CardCall): POST
+// /v1/my/component-cards/{component}/{page} with the action's query and
+// the card's room; the answer is the component's component.CardReply.
+export interface ComponentCardCall {
+  query?: string;
+  roomId?: string;
 }
 
 // ComponentCardAction is one button of a ComponentCard.

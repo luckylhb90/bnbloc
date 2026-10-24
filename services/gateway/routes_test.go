@@ -35,6 +35,7 @@ var readerWrites = map[string]string{
 	"DELETE /v1/content-components/{id}/favorite":              "takes a member's own star back (it spends the cost budget)",
 	"POST /v1/my/share-targets/{name}/sessions":                "starts sharing an item the member may read, as a card to a person of their choice, which copying its link already allows (it spends the cost budget)",
 	"POST /v1/my/component-pages/{component}/{page}":           "opens a page of a service of the member's organization for the member themself (a ticket to their own view)",
+	"POST /v1/my/component-cards/{component}/{page}":           "acts on a card a service of the member's organization showed the member themself, as them; the service decides what they may do",
 	"PUT /v1/content-components/{id}/versions/{version}/cover": "stores a picture of a work version the member may read, kept only while the version has no cover",
 }
 

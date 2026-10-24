@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -432,6 +433,64 @@ func (s *Service) handleComponentPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeServiceAnswer(w, ans)
+}
+
+// handleComponentCardCall forwards a card's call (component.CardCall,
+// POST /v1/my/component-cards/{component}/{page}) to the service's
+// ServiceCardsPrefix + page, as the member and for the card's room
+// (pageRoomRole), and answers the service's CardReply. An https address to
+// open is the only one passed on.
+func (s *Service) handleComponentCardCall(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
+	var req wire.ComponentCardCall
+	if r.ContentLength != 0 && !httpx.DecodeJSON(w, r, 4<<10, &req) {
+		return
+	}
+	page := r.PathValue("page")
+	if _, err := url.ParseQuery(req.Query); err != nil || len(req.Query) > 1024 || !component.ValidPageName(page) {
+		httpx.Error(w, "invalid card call", http.StatusBadRequest)
+		return
+	}
+	origin := s.publicOrigin(r)
+	member := component.Member{Subject: claims.Subject, Org: claims.Tenant, Role: claims.Role, Admin: isOrgAdmin(claims), Page: page, Origin: origin}
+	if req.RoomID != "" {
+		role, ok := s.pageRoomRole(w, r.Context(), claims, req.RoomID)
+		if !ok {
+			return
+		}
+		member.Room, member.RoomRole = req.RoomID, role
+	}
+	rec, ok := s.serviceFor(w, r.Context(), claims.Tenant, r.PathValue("component"), component.ServicePages)
+	if !ok {
+		return
+	}
+	path := component.ServiceCardsPrefix + page
+	if req.Query != "" {
+		path += "?" + req.Query
+	}
+	ans, ok := s.forwardToService(w, r, rec, servicecomp.Call{
+		Method: http.MethodPost, Path: path, IdentityHeader: component.MemberHeader, Identity: component.EncodeHeader(member), Accept: "application/json",
+	}, auth.Claims{Subject: claims.Subject, Tenant: claims.Tenant})
+	if !ok {
+		return
+	}
+	var reply component.CardReply
+	if err := cardReply(ans, &reply); err != nil {
+		obs.ServerError(w, "card call: "+rec.Name, err)
+		httpx.Error(w, "the service did not answer the card", http.StatusBadGateway)
+		return
+	}
+	if u, err := url.Parse(reply.Open); reply.Open != "" && (err != nil || u.Scheme != "https") {
+		reply.Open = ""
+	}
+	httpx.WriteJSON(w, http.StatusOK, reply)
+}
+
+// cardReply reads a service's answer to a card's call.
+func cardReply(ans servicecomp.Answer, reply *component.CardReply) error {
+	if ans.Status != http.StatusOK {
+		return fmt.Errorf("HTTP %d", ans.Status)
+	}
+	return json.Unmarshal(ans.Body, reply)
 }
 
 // handleComponentCallback forwards another system's redirect to a service

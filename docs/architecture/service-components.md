@@ -107,7 +107,9 @@ The bridge's room tools server is also the session's HTTPS proxy
   64 KiB). The service answers `Accept` (the system's answer is the
   command's), another `Send` (fresh credentials, at most two sends), or a
   refusal of its own with its card. Only that request's credentials reach
-  the bridge, in its memory; never the agent.
+  the bridge, in its memory; never the agent. `Send.RawQuery` replaces the
+  query string as it is and `ReplaceBody` the body (a request the service
+  signed over its exact query and body).
 - **The local CA** (`roomtools/egress_ca.go`): one per member directory
   (`egress-ca.pem`, its key `egress-ca.key` 0600), never sent anywhere,
   replaced 30 days before its end. Leaves last a day. Only the turn's
@@ -116,11 +118,17 @@ The bridge's room tools server is also the session's HTTPS proxy
   check against a claimed host: its call never goes out unauthenticated.
 - **Cards**: (the room's events carry a card to every member; the clients
   show it only to the requester, as a publish proposal) an `EgressResponse.Card` (`component.CheckCard`: plain text,
-  at most three actions, `open` a page or `ask-again`) is posted by the
-  bridge as a `component-card` notice under the job, shown only to the
-  requester, once per job, service and title. The web renders it
-  (`ComponentCardView`): Open opens the page as the member; Ask again puts
-  the card in the composer.
+  at most three actions: `open` a page, `call`, or `ask-again`) is posted
+  by the bridge as a `component-card` notice under the job, shown only to
+  the requester, once per job, service and card (`cardKey`). The web
+  renders it (`ComponentCardView`): Open opens the page as the member; Ask
+  again puts the card in the composer; **Call** acts in place:
+  `POST /v1/my/component-cards/{service}/{page}` (`wire.ComponentCardCall`:
+  the action's query, the card's room) reaches the service's
+  `/cards/{page}` as the member (`MemberHeader`, the room and role read
+  again), and the card shows the service's `component.CardReply` (its
+  text; `open`, an https address the client opens, such as a sign-in to
+  start; `done`: its actions go away).
 
 ### Sandboxed commands
 

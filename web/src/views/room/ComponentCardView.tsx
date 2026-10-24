@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { PlugsConnectedIcon } from "@phosphor-icons/react";
-import { openComponentPage } from "@/lib/componentPagesApi";
+import { componentPagesApi, openComponentPage } from "@/lib/componentPagesApi";
+import { openExternal } from "@/lib/desktop";
 import type { ComponentCard, ComponentCardAction } from "@/lib/componentCard";
 import { errorText } from "@/lib/errors";
 import { shareComposerRef } from "@/lib/team";
@@ -10,11 +11,12 @@ import { Button } from "@/ui/Button";
 // for (docs/architecture/service-components.md): only they see it
 // (feedItemFromEvent). Its text is plain. "Open" opens one of the
 // service's pages as them, for this room (a connection to make, a change
-// to allow, who their agents act as here); "Ask
+// to allow, who their agents act as here); a "call" acts in place (allow a
+// change, start a sign-in) and the card shows the service's answer; "Ask
 // again" puts the card in the composer, so the member asks the agent to
 // retry in the same conversation.
 export function ComponentCardView({ roomId, card }: { readonly roomId: string; readonly card: ComponentCard }) {
-  const [state, setState] = useState<{ busy?: boolean; error?: string; dismissed?: boolean; asked?: boolean }>({});
+  const [state, setState] = useState<{ busy?: boolean; error?: string; dismissed?: boolean; asked?: boolean; reply?: string; done?: boolean }>({});
   if (state.dismissed) return null;
   const act = async (a: ComponentCardAction) => {
     if (a.kind === "ask-again") {
@@ -22,8 +24,14 @@ export function ComponentCardView({ roomId, card }: { readonly roomId: string; r
       setState({ asked: true });
       return;
     }
-    setState({ busy: true });
+    setState((s) => ({ ...s, busy: true, error: undefined }));
     try {
+      if (a.kind === "call") {
+        const r = await componentPagesApi.callCard(card.component, a.page ?? "", a.query, roomId);
+        if (r.open) await openExternal(r.open);
+        setState({ reply: r.text, done: r.done });
+        return;
+      }
       await openComponentPage(card.component, a.page ?? "", a.query, roomId);
       setState({});
     } catch (e) {
@@ -40,14 +48,19 @@ export function ComponentCardView({ roomId, card }: { readonly roomId: string; r
           <p className="mt-1 text-xs text-[var(--color-fg-subtle)]">From {card.component}. Only you see this.</p>
         </div>
       </div>
+      {state.reply && (
+        <p role="status" className="whitespace-pre-wrap pl-6 text-[var(--color-fg)]">
+          {state.reply}
+        </p>
+      )}
       <div className="flex flex-wrap items-center gap-2 pl-6">
-        {(card.actions ?? []).map((a, i) => (
+        {!state.done && (card.actions ?? []).map((a, i) => (
           <Button key={`${a.kind}-${i}`} size="sm" variant={i === 0 ? "primary" : "secondary"} onClick={() => void act(a)} disabled={state.busy}>
             {a.label}
           </Button>
         ))}
         <Button size="sm" variant="ghost" onClick={() => setState({ dismissed: true })} disabled={state.busy}>
-          Not now
+          {state.done ? "Close" : "Not now"}
         </Button>
         {state.asked && (
           <span role="status" className="text-xs text-[var(--color-fg-muted)]">

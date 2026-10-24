@@ -470,7 +470,14 @@ func sendHere(ctx context.Context, in component.EgressRequest, send *component.E
 		}
 		u.RawQuery = q.Encode()
 	}
-	req, err := http.NewRequestWithContext(ctx, in.Method, u.String(), bytes.NewReader(in.Body))
+	if send.RawQuery != "" {
+		u.RawQuery = send.RawQuery
+	}
+	body := in.Body
+	if send.ReplaceBody {
+		body = send.Body
+	}
+	req, err := http.NewRequestWithContext(ctx, in.Method, u.String(), bytes.NewReader(body))
 	if err != nil {
 		return nil, nil, err
 	}

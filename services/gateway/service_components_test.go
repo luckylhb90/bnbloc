@@ -102,6 +102,8 @@ func newServiceFixture(t *testing.T) *serviceFixture {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.Header().Set("Set-Cookie", "s=1")
 			_, _ = w.Write([]byte("<!doctype html><title>connections</title>"))
+		case strings.HasPrefix(path, component.ServiceCardsPrefix):
+			_ = json.NewEncoder(w).Encode(component.CardReply{Text: "Allowed.", Done: true, Open: "http://plain.example.com/"})
 		case strings.HasPrefix(path, component.ServiceCallbackPrefix):
 			w.Header().Set("Location", "https://idp.example.com/done")
 			w.WriteHeader(http.StatusFound)
@@ -362,5 +364,28 @@ func TestComponentStoreSignedAndSealed(t *testing.T) {
 	fx.svc.afterEndpointUninstall(context.Background(), rec)
 	if keys, _ := fx.svc.ComponentValues.ListComponentValueKeys(context.Background(), "service/conn", "members/maya"); len(keys) != 0 {
 		t.Fatalf("an uninstalled service keeps %v", keys)
+	}
+}
+
+// A card's call reaches the service's cards prefix as the member, for the
+// card's room (their role read there), and answers the service's reply; an
+// address to open that is not https is dropped; a room the member is not
+// in is refused.
+func TestComponentCardCall(t *testing.T) {
+	fx := newServiceFixture(t)
+	resp, raw := fx.do("maya", http.MethodPost, "/v1/my/component-cards/conn/approve", []byte(`{"query":"id=h1&decision=allow","roomId":"room-1"}`), http.Header{"Content-Type": {"application/json"}})
+	var reply component.CardReply
+	_ = json.Unmarshal(raw, &reply)
+	if resp.StatusCode != http.StatusOK || reply.Text != "Allowed." || !reply.Done || reply.Open != "" {
+		t.Fatalf("call = %d %s", resp.StatusCode, raw)
+	}
+	call := fx.last(t)
+	var m component.Member
+	_ = component.DecodeHeader(call.identity, &m)
+	if !call.signed || call.method != http.MethodPost || call.path != "/cards/approve?id=h1&decision=allow" || m.Subject != "maya" || m.Room != "room-1" || m.RoomRole != component.RoomOwner {
+		t.Fatalf("forwarded = %+v %+v", call, m)
+	}
+	if resp, _ := fx.do("olga", http.MethodPost, "/v1/my/component-cards/conn/approve", []byte(`{"roomId":"room-1"}`), http.Header{"Content-Type": {"application/json"}}); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("outside the room = %d", resp.StatusCode)
 	}
 }
