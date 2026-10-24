@@ -243,3 +243,32 @@ shim every ACP agent accepts). This record is what makes that apply to ACP agent
 - **Other CLIs through ACP** (claude's `CLAUDE_CODE_SHELL_PREFIX`, codex's exec
   server) are routings to add when an operator needs them; each is its own
   slice with its own verification.
+
+## 6. Addendum (2026-10-24): an agent's environment from a provider; what a confined agent may not read
+
+Two additions in the ACP core, neither changing the sandbox contract.
+
+- **`envProvider`.** An agent entry may name a program the core runs for the agent
+  on the host and never confined, even for a sandboxed session. It prints
+  `NAME=VALUE` lines and `READY` and lives while the agent does; its variables join
+  the agent's environment after the agent's own `env` and before the sandbox
+  descriptor's (which wins). The agent keeps its own command, so the routing
+  recognised from it (§2.1) applies unchanged. The point is where a credential
+  lives: the confined agent's network is open, so what it can read it can send
+  away; the provider holds the credential and gives the agent an address and, at
+  most, a placeholder. Checked with the real helper and the installed opencode and
+  Claude agents: the confined agent's whole process tree holds the placeholder and
+  not the account's key, a shell command still does not run on the host.
+- **`denyRead`.** Paths a confined run may not read, per agent or, at the top of
+  `agents.json` or a drop-in, for every agent of the core. It joins the descriptor's
+  `denyRead` as the helper's flag and in its environment, and can only restrict.
+  Measured the same day: a credential store the helper's list does not name (a
+  tool's own login under the home directory) was readable by a confined agent; the
+  helper's list is this repository's and cannot name a product, so the component that
+  keeps the login declares its path. The real-helper test reads a file with and
+  without the setting.
+
+Open (in §5's spirit): other cores' confined agents are not covered by a core's own
+`denyRead`; a general answer is a path list the descriptor carries, filled from what
+installed components declare.
+
