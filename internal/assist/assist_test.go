@@ -304,6 +304,11 @@ func TestFieldsHoldItems(t *testing.T) {
 	if st := got["steps"].([]map[string]string); len(st) != 2 || st[0]["text"] != "one" || st[1]["text"] != "two" {
 		t.Fatalf("steps = %v", st)
 	}
+	// A text field given an object or a list keeps it as its JSON (a patch).
+	patched, err := Fields(`{"prompts":[{"title":"Fix","prompt":{"policy":{"write":[{"methods":["POST"]}]}}}]}`, fields)
+	if err != nil || patched["prompts"].([]map[string]string)[0]["prompt"] != `{"policy":{"write":[{"methods":["POST"]}]}}` {
+		t.Fatalf("an object in a text field = %v %v", patched, err)
+	}
 	many := `{"steps":[` + strings.TrimSuffix(strings.Repeat(`"s",`, wire.MaxAssistItems+5), ",") + `]}`
 	if got, _ := Fields(many, fields); len(got["steps"].([]map[string]string)) != wire.MaxAssistItems {
 		t.Fatalf("items past the bound = %d", len(got["steps"].([]map[string]string)))

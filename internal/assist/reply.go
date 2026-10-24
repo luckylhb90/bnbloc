@@ -90,12 +90,20 @@ func object(reply string) (map[string]any, bool) {
 	return obj, true
 }
 
+// scalar is a text field's value: a string, a number or a boolean as
+// written, and an object or a list as its JSON (a field that carries
+// structured data: a patch, a draft).
 func scalar(v any) string {
 	switch t := v.(type) {
 	case string:
 		return strings.TrimSpace(t)
 	case float64, bool:
 		return fmt.Sprint(t)
+	case map[string]any, []any:
+		raw, err := json.Marshal(t)
+		if err == nil {
+			return string(raw)
+		}
 	}
 	return ""
 }
