@@ -553,3 +553,32 @@ Where the build departs from the text above:
 - **`npm-global` means a global prefix** (`…/lib/node_modules/`,
   `…/npm/node_modules/`): a `node_modules` that is another tool's own copy is not
   one, and `npm install -g` would not update it.
+
+### 7b. More agents (2026-10-24, catalog 2026-10-24.4)
+
+Chosen from the ACP registry (`cdn.agentclientprotocol.com/registry/v1/latest/registry.json`,
+43 agents, each with the launch line its authors publish) and from what is common
+and installable with npm: **Qwen Code**, **GitHub Copilot CLI**, **Cline**, **Kilo
+Code**, **Augment (auggie)** and **pi's ACP adapter** (`pi-acp`, which the registry
+lists: pi does have ACP through it). Every one was installed by the manager (the
+install refuses a command that does not report the version asked for) and then
+started by the real ACP core over its registry line (`bnbloc-acp check`):
+
+| Agent | Result of the ACP handshake |
+|---|---|
+| Kilo Code | available |
+| Qwen Code, Cline, Augment | reached; waiting for the agent's own sign-in (as designed) |
+| GitHub Copilot CLI | reached `session/new`; the account tried has no Copilot access (403) |
+| pi (managed `pi-acp` + managed `pi`) | available, with pi's model list, once the adapter was told where pi is |
+
+- An adapter's register entry may name `commandEnv`, a variable that is given the
+  command of the agent it serves (the managed copy, else the one found): `pi-acp`
+  runs `pi` by name, which a managed copy off the PATH does not satisfy
+  (`PI_ACP_PI_COMMAND`). A catalog may not name a variable that changes how a
+  process runs.
+- Not added, because the facts could not be probed without installing a
+  non-npm program: the registry's binary agents (Cursor, Kimi, Goose, Amp, Junie,
+  Mistral Vibe, Devin, …). A member adds one as a line of configuration; the ones
+  worth a catalog entry follow, each probed.
+- Left out for being less common, not for being unfit: Factory Droid, Grok,
+  CodeBuddy, Qoder, Dirac, and the registry's smaller agents.
