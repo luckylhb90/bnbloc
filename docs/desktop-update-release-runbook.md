@@ -388,6 +388,14 @@ it is up to date):
 - **pubkey/private-key must match.** If the signing key is not the pair of the
   baked `plugins.updater.pubkey`, every client fails signature verification
   after download — looks like "updater broken."
+- **The universal build needs rustup's `rustc`, not Homebrew's.** With
+  `/opt/homebrew/bin` before `~/.cargo/bin` on the PATH, `pnpm build:universal`
+  fails on the x86_64 half with "can't find crate for `core`" even though
+  `rustup target list --installed` lists the target (the Homebrew compiler has
+  no x86_64 standard library). Build with `PATH="$HOME/.cargo/bin:$PATH"`
+  (2026-10-24, 0.1.107). Publish both targets from the one archive: `bnbloc
+  updates publish … ` once per `--target darwin-aarch64` and `darwin-x86_64`
+  (a new version clears the other target's artifact).
 - **Verify on the real client path.** The updater runs on a live desktop client
   with a session token against the running gateway; a one-shot curl without the
   Bearer token 401s and does not reflect the client experience.
