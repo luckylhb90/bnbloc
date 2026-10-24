@@ -124,13 +124,28 @@ the update itself.
 ### 2.3 The catalog: who is trusted to name what gets installed
 
 The catalog is data in the package (`catalog.json`), signed with the
-package, so only a super-admin's published component version can change what a
-member's computer may install. An organization **cannot add an entry through a
-setting**: that would let an org admin run a command on every member's computer,
-which no organization setting does today (installs and rollouts of components
-are super-admin acts). It can only narrow the catalog (`allowed`, `pinned`,
-`holdDays`). An organization that wants an agent the catalog lacks publishes its
-own build of the manager, signed with a key the platform trusts.
+package, so only a published component version changes what the catalog itself
+may install or run. Two settings add agents beside it without a new build, and
+they differ in whom they may make run a command (`manager/config.go`):
+
+- **A member's own** (`myAgents`, kept on their computer, never sent anywhere):
+  whatever their own computer can run: a command name or an absolute path, version
+  arguments, an updater and its arguments, an ACP launch line. They could run it
+  themselves, and the page shows an update's exact command before the click. A
+  line with the id of a catalog agent and only `command` and `versionArgs` points
+  that agent at another command or path.
+- **An organization's** (`orgAgents`): recognition only: a bare command name, one
+  version flag from `--version`, `-v`, `-V`, `version`, and words for the member.
+  **No update command, no ACP launch line, no change to a catalog entry**: a
+  setting must never make every member's computer run what an admin typed, which
+  no organization setting does today (installs and rollouts of components are
+  super-admin acts). An organization that needs entries that run commands makes its
+  own build of the manager (`Catalog.With`, the `app` package) and signs it as its
+  own package, which is a second manager beside the public one (the Replace test).
+  It can still narrow the catalog (`allowed`, `pinned`, `holdDays`), configured
+  agents included.
+
+A line that does not fit is named on the page and left out.
 
 An entry is typed, never a shell string:
 
@@ -531,3 +546,10 @@ Where the build departs from the text above:
   does not count).
 - An update entry may name **another bare command** (`update.command`), run with
   the entry's arguments (a package manager), shown before the click.
+- **Configurable agents** (above) replaced the idea of an internal build for each
+  organization's agents: an agent that lives in an unusual place, or an internal
+  command, is a line of configuration. Hardcoding it in the public catalog would
+  also put an internal name in a public repository.
+- **`npm-global` means a global prefix** (`…/lib/node_modules/`,
+  `…/npm/node_modules/`): a `node_modules` that is another tool's own copy is not
+  one, and `npm install -g` would not update it.
