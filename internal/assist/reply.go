@@ -65,20 +65,22 @@ func Object(reply string) (map[string]any, error) {
 	return obj, nil
 }
 
-// object finds the reply's JSON object: the whole text, a fenced block, or
-// the outermost braces.
+// object finds the reply's JSON object: the whole text, else a fenced
+// block, else the outermost braces. The whole text comes first: a reply
+// whose strings hold a fenced block of their own (a guide's examples) is
+// still one object.
 func object(reply string) (map[string]any, bool) {
 	s := strings.TrimSpace(reply)
-	if i := strings.Index(s, "```"); i >= 0 {
-		rest := s[i+3:]
-		rest = strings.TrimPrefix(strings.TrimPrefix(rest, "json"), "JSON")
-		if j := strings.Index(rest, "```"); j >= 0 {
-			s = strings.TrimSpace(rest[:j])
-		}
-	}
 	var obj map[string]any
 	if json.Unmarshal([]byte(s), &obj) == nil {
 		return obj, true
+	}
+	if i := strings.Index(s, "```"); i >= 0 {
+		rest := s[i+3:]
+		rest = strings.TrimPrefix(strings.TrimPrefix(rest, "json"), "JSON")
+		if j := strings.LastIndex(rest, "```"); j >= 0 && json.Unmarshal([]byte(strings.TrimSpace(rest[:j])), &obj) == nil {
+			return obj, true
+		}
 	}
 	i, j := strings.Index(s, "{"), strings.LastIndex(s, "}")
 	if i < 0 || j <= i {

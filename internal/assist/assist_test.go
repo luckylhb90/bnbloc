@@ -304,6 +304,14 @@ func TestFieldsHoldItems(t *testing.T) {
 	if st := got["steps"].([]map[string]string); len(st) != 2 || st[0]["text"] != "one" || st[1]["text"] != "two" {
 		t.Fatalf("steps = %v", st)
 	}
+	// A reply whose string holds a fenced block (a guide's examples) is one
+	// object, bare or fenced itself.
+	guide := `{"prompts":[{"title":"Guide","prompt":"Read it:\n` + "```" + `sh\ncurl -s https://x\n` + "```" + `\nDone."}]}`
+	for _, reply := range []string{guide, "Here it is:\n```json\n" + guide + "\n```"} {
+		if got, err := Fields(reply, fields); err != nil || !strings.Contains(got["prompts"].([]map[string]string)[0]["prompt"], "curl -s") {
+			t.Fatalf("a reply holding a fence = %v %v (%q)", got, err, reply)
+		}
+	}
 	// A text field given an object or a list keeps it as its JSON (a patch).
 	patched, err := Fields(`{"prompts":[{"title":"Fix","prompt":{"policy":{"write":[{"methods":["POST"]}]}}}]}`, fields)
 	if err != nil || patched["prompts"].([]map[string]string)[0]["prompt"] != `{"policy":{"write":[{"methods":["POST"]}]}}` {
