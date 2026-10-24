@@ -207,11 +207,12 @@ what each entry will be built from, not that it works.
 
 | Agent | Where found | Install by the manager | Update | ACP | Platforms and needs |
 |---|---|---|---|---|---|
-| Claude Code (through its ACP adapter) | the ACP README: `@agentclientprotocol/claude-agent-acp` | `npm` | `npm` | the adapter itself | Node; the adapter is large (≈0.5 GB) |
-| Codex (through its ACP adapter) | the ACP README: `@agentclientprotocol/codex-acp` | `npm` | `npm` | the adapter itself | Node |
+| Claude Code | the command the member installed (`claude`; npm `@anthropic-ai/claude-code` names the newest version) | its own installer (hint only) | by how it was found: the vendor installer's `claude update` | none itself; **its ACP adapter is its own row** (`@agentclientprotocol/claude-agent-acp`, `npm`, registered for rooms) | Node ≥ 22 for the adapter |
+| Codex | the command the member installed (`codex`, npm `@openai/codex`) | `npm` | `npm` | none itself; **its ACP adapter is its own row** (`@agentclientprotocol/codex-acp`) | Node |
 | Gemini CLI | the ACP README: `gemini --acp` | `npm` (to confirm) | `npm-global`, or its own | `--acp` | Node |
 | OpenCode | the ACP README: `opencode acp` | to probe (its channels) | its own, or `brew`/`npm-global` | `acp` subcommand | to probe |
 | **pi** | its docs page (`packages/coding-agent` of the pi repository) | `npm`: `@earendil-works/pi-coding-agent`, `ignoreScripts`; the docs name a script installer, a Windows one and Nix too | `pi update` for the installer's setup (`self`); `npm` for ours | none documented, so **listed and kept current, not registered** | macOS, Linux, Windows; Node ≥ 22.19 (its installers can set Node up; ours does not) |
+| **omp** | `omp --version` (omp.sh; the Homebrew formula `can1357/tap/omp`) | Homebrew (hint only: no `brew` install method) | a Homebrew install runs `brew upgrade can1357/tap/omp` on a click (an update entry may name another bare command); `omp update --check` reports a newer version than the formula carries, so no newer version is claimed | built in: `omp acp` | macOS, Linux |
 | **Hermes Agent** | its README and install and update docs (hermes-agent.nousresearch.com), read 2026-10-24 | **none typed.** Its channels are script installers (`install.sh`, and `install.ps1` for native Windows; no admin rights, user directories), signed desktop packages (a DMG on Apple Silicon, an MSIX on Windows) whose updater owns them, a Termux package repository, Docker and Nix (no longer supported). No package-index or release-asset install is documented | by how it was found: a **source install** (the scripts' managed checkout: `~/.hermes/hermes-agent`, `%LOCALAPPDATA%\hermes\hermes-agent`) runs `hermes update` (`self`), checked with `hermes update --check`; a desktop package, Docker, Nix or Termux install is **updated by its own owner**, and `hermes update` itself declines on those, so the row is read-only and names the owner | built in: `hermes acp` (also the `hermes-acp` script) | macOS, Linux, WSL2 and **native Windows** (the local checkout read earlier said otherwise: it was stale); the version is `hermes --version` |
 
 What the batch changes in the design, all of it already in §2.3 or above:
@@ -518,3 +519,15 @@ Where the build departs from the text above:
   two accounts on one computer (§6 item 1), a session resumed across an update
   (§6 item 2), `hermes update` and `pi update` on real installs, and the
   `release` driver and the assist (slices 4 and 5).
+
+### 7a. After the first trial (2026-10-24)
+
+- **An agent and its ACP adapter are two rows** (`for: <agent>` in the catalog):
+  the first batch looked for the adapters' commands, so the `claude` and `codex` a
+  member had installed showed as not installed. The agent is the command the
+  member knows; the adapter is its own entry under it.
+- **omp** (a separate agent, not pi) joined the catalog; **pi** stays "not
+  installed" where no `pi` command is on the PATH (a copy private to another tool
+  does not count).
+- An update entry may name **another bare command** (`update.command`), run with
+  the entry's arguments (a package manager), shown before the click.
