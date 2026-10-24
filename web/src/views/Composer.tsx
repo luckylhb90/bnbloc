@@ -29,6 +29,9 @@ import { ATTACHMENT_ACCEPT, useComposerAttachments } from "@/views/useComposerAt
 import { pastedFiles } from "@/views/composer/pastedFiles";
 import { AgentPicker } from "@/views/composer/AgentPicker";
 import { ModelPicker } from "@/views/composer/ModelPicker";
+import { ContextMeter } from "@/views/composer/ContextMeter";
+import { useContextUsage } from "@/views/composer/useContextUsage";
+import type { FeedItem } from "@/views/room/types";
 import { SendModeToggle } from "@/views/composer/SendModeToggle";
 import { StarterPrompts } from "@/views/composer/StarterPrompts";
 import { fileSuggestions, type PromptChoice } from "@/lib/promptPacks";
@@ -87,6 +90,7 @@ export function Composer({
   showStarters = false,
   variant = "room",
   fileContext,
+  feed,
   pick,
 }: {
   roomId: string;
@@ -115,6 +119,9 @@ export function Composer({
   // A prompt to insert (a suggestion handed over from the room); a new
   // nonce inserts it again.
   pick?: { readonly choice: PromptChoice; readonly nonce: number };
+  // The channel's rows: the context meter reads the addressed agent's newest
+  // reply that reports how full its conversation is.
+  feed?: readonly FeedItem[];
 }) {
   const people = variant === "people";
   // Drafts, agents, references and attachments handed to "the composer"
@@ -238,6 +245,7 @@ export function Composer({
     [text, roomAgents, recipient, subject, agent.targets, agent.target, modelCatalogs],
   );
   const modelChoices = useMemo(() => effTarget?.models ?? [], [effTarget]);
+  const contextUsage = useContextUsage({ feed, text, roomAgents, recipient, subject: subject ?? null, agent });
   // The stored model as used now (offeredChoice): as stored while the
   // catalog is unknown or empty, set aside only while a loaded catalog lacks
   // it. The stored pick itself changes only by the member's own pick, so a
@@ -865,6 +873,7 @@ export function Composer({
                 onPickReasoning={setReasoning}
               />
             )}
+            {!people && !peopleOnly && <ContextMeter usage={contextUsage} />}
             {!people && peopleOnly && (
               <span className="hidden truncate px-1 text-xs text-[var(--color-fg-subtle)] @md:inline">
                 The agent reads this but won't reply

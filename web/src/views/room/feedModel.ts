@@ -28,6 +28,7 @@ export function feedItemFromEvent(e: RoomEvent, subject: string | null, live: bo
     ...(e.part ? { part: e.part } : {}),
     author,
     agentLabel: e.agentLabel,
+    ...(e.agentKey ? { agentKey: e.agentKey } : {}),
     text,
     clientMsgId: e.clientMsgId,
     attachments: e.attachments,

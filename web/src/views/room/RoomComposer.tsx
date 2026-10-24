@@ -129,6 +129,7 @@ export function RoomComposer({
             variant={variant}
             fileContext={fileContext}
             pick={pick}
+            feed={feed}
           />
         </>
       )}

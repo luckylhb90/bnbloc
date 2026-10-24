@@ -317,6 +317,29 @@ backend (an installed manifest or adapter core such as `acme`), carried on the w
 agent kind inside a core (`codex`, `claude`), carried in `core.Target.Provider`
 and on the wire as `provider`.
 
+## Reply metrics
+
+A reply's free-form `metrics` map (`protocol.Message.Metrics`) travels whole from
+the core to the room: the bridge does not read it. Every key is optional; a core
+fills what its agent reports and leaves out the rest, and nothing is estimated.
+One reader per side: `wire.TurnUsageFromMetrics` (the bill: the first group) and
+`readTurnMetrics` in the web client (everything).
+
+| Key | Meaning |
+| --- | --- |
+| `model`, `reported` | The model in force; `reported: false` says the tokens and cost below are unknown (zero, not measured). |
+| `inputTokens`, `outputTokens`, `costUsd` | The turn's own usage and USD cost. Billing reads these. |
+| `cacheCreationTokens`, `cacheReadTokens`, `thinkingTokens`, `durationApiMs`, `ttftMs` | Shown on the reply, never billed. |
+| `contextTokens` | How full the agent's conversation is after this reply: the tokens the model read for the turn's **last request** (input plus cache read plus cache creation). Not the turn's sum: a turn of many requests re-reads the context each time, and the sum overstates it; and not a sub-agent's request (it has a context of its own). |
+| `contextWindow` | The model's context window in tokens, from the authority the core trusts (its model catalog), else the agent's own report. Never guessed from a model's name. |
+
+The two context keys are read even when `reported` is false: they describe the
+conversation, not the bill. The client shows a meter for the addressed agent
+only when the newest reply of that agent that carries them has both, and never
+as "0%" (`docs/prd/2026-10-24-context-usage-meter.md`). An ACP agent's
+`usage_update` (`used`, `size`) is exactly this pair. A core whose agent reports
+only a turn total (not the last request's) leaves the keys out.
+
 ## Two ways to add a core (no core is compiled in)
 
 No core ships inside the gateway/bridge binaries — neither manifest data nor

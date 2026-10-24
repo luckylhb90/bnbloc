@@ -137,6 +137,12 @@ export function readTurnMetrics(value: unknown): TurnMetrics | undefined {
     return reported && typeof v === "number" && v > 0 ? Math.trunc(v) : 0;
   };
   const cost = reported && typeof m.costUsd === "number" && m.costUsd >= 0 ? m.costUsd : undefined;
+  // The context numbers describe the conversation, not the bill: they are read
+  // even when the turn's tokens and cost are not reported.
+  const context = (k: string) => {
+    const v = m[k];
+    return typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.trunc(v) : 0;
+  };
   return {
     ...(model ? { model } : {}),
     reported,
@@ -147,6 +153,8 @@ export function readTurnMetrics(value: unknown): TurnMetrics | undefined {
     thinkingTokens: count("thinkingTokens"),
     durationApiMs: count("durationApiMs"),
     ttftMs: count("ttftMs"),
+    contextTokens: context("contextTokens"),
+    contextWindow: context("contextWindow"),
     ...(cost !== undefined ? { costUsd: cost } : {}),
   };
 }

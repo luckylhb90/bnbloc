@@ -55,6 +55,11 @@ export interface TurnMetrics {
   readonly thinkingTokens: number;
   readonly durationApiMs: number;
   readonly ttftMs: number;
+  // How full the agent's conversation is after this reply: the tokens the model
+  // read for the turn's last request, and the model's window. 0 = not reported;
+  // read whether or not the tokens and cost were (docs/architecture/core-providers.md).
+  readonly contextTokens: number;
+  readonly contextWindow: number;
   // Absent unless reported (an unreported cost is not $0).
   readonly costUsd?: number;
   readonly reported: boolean;

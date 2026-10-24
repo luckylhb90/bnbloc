@@ -42,6 +42,9 @@ export interface FeedItem {
   part?: number;
   author: string;
   agentLabel?: string;
+  // The replying agent's identity (agentIdentity) on an assistant reply; the
+  // context meter finds the addressed agent's newest reply by it.
+  agentKey?: string;
   text: string;
   attachments?: readonly ChatAttachment[];
   metrics?: TurnMetrics;
