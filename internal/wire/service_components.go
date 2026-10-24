@@ -26,6 +26,10 @@ type ComponentPageInfo struct {
 	Audience  string `json:"audience"`
 	// InRoom: the page is offered in a room too (opened with its roomId).
 	InRoom bool `json:"inRoom,omitempty"`
+	// Version is the installed package's; ServiceVersion the running
+	// service's own build, when it says.
+	Version        string `json:"version,omitempty"`
+	ServiceVersion string `json:"serviceVersion,omitempty"`
 }
 
 // ComponentPageList answers GET /v1/my/component-pages. Unreadable names

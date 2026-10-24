@@ -459,6 +459,9 @@ type Page struct {
 // PageList is the answer of ServicePagesPath.
 type PageList struct {
 	Pages []Page `json:"pages"`
+	// Version is the running service's own build (shown beside its pages,
+	// apart from the installed package's version).
+	Version string `json:"version,omitempty"`
 }
 
 // ValidPageName reports a page name: 1-32 of a-z, 0-9 and '-'.

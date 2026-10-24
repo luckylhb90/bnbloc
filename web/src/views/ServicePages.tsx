@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ArrowSquareOutIcon } from "@phosphor-icons/react";
 import { componentPagesApi, openComponentPage } from "@/lib/componentPagesApi";
 import { errorText } from "@/lib/errors";
+import { pageSource } from "@/lib/pageSource";
 import type { ComponentPageInfo } from "@/lib/wire.gen";
 import { Button } from "@/ui/Button";
 import { Card } from "@/ui/Card";
@@ -39,7 +40,7 @@ export function ServicePages() {
           <div className="min-w-0">
             <p className="text-sm font-medium">{p.label}</p>
             <p className="text-xs text-[var(--color-fg-muted)]">
-              {p.component}
+              {pageSource(p)}
               {p.audience === "admin" ? " · for admins" : ""}
             </p>
           </div>

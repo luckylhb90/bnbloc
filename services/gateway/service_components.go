@@ -294,7 +294,7 @@ func (s *Service) handleComponentPages(w http.ResponseWriter, r *http.Request, c
 		if !servicecomp.Declares(rec, component.ServicePages) {
 			continue
 		}
-		pages, err := s.servicePages(r.Context(), rec, claims, s.publicOrigin(r))
+		pages, running, err := s.servicePages(r.Context(), rec, claims, s.publicOrigin(r))
 		if err != nil {
 			slog.Warn("bnbloc-gateway: service pages unreadable", "service", rec.Name, "error", err)
 			out.Unreadable = append(out.Unreadable, rec.Name)
@@ -304,21 +304,23 @@ func (s *Service) handleComponentPages(w http.ResponseWriter, r *http.Request, c
 			if p.Audience == component.AudienceAdmin && !isOrgAdmin(claims) {
 				continue
 			}
-			out.Pages = append(out.Pages, wire.ComponentPageInfo{Component: rec.Name, Name: p.Name, Label: p.Label, Audience: p.Audience, InRoom: p.InRoom})
+			out.Pages = append(out.Pages, wire.ComponentPageInfo{Component: rec.Name, Name: p.Name, Label: p.Label, Audience: p.Audience, InRoom: p.InRoom,
+				Version: rec.Version, ServiceVersion: running})
 		}
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
-// servicePages reads a service's page list (GET /pages, as the member).
-func (s *Service) servicePages(ctx context.Context, rec extpipe.Record, claims auth.Claims, origin string) ([]component.Page, error) {
+// servicePages reads a service's page list (GET /pages, as the member) and
+// the version it says it runs (at most 40 printable characters).
+func (s *Service) servicePages(ctx context.Context, rec extpipe.Record, claims auth.Claims, origin string) ([]component.Page, string, error) {
 	ep, err := servicecomp.Kind.Endpoint(rec, extgov.Guard{Net: extgov.NewNetGuard(rec.Network)})
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	secret, ok, err := s.componentCredentials().Get(ctx, rec.Kind, rec.Name)
 	if err != nil || !ok {
-		return nil, errors.New("the service has no credential")
+		return nil, "", errors.New("the service has no credential")
 	}
 	member := component.Member{Subject: claims.Subject, Org: claims.Tenant, Role: claims.Role, Admin: isOrgAdmin(claims), Origin: origin}
 	ans, err := servicecomp.Forward(ctx, ep, secret, servicecomp.Call{
@@ -326,14 +328,14 @@ func (s *Service) servicePages(ctx context.Context, rec extpipe.Record, claims a
 		IdentityHeader: component.MemberHeader, Identity: component.EncodeHeader(member), Accept: "application/json",
 	}, s.nowTime())
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if ans.Status != http.StatusOK {
-		return nil, errors.New("the page list answered HTTP " + http.StatusText(ans.Status))
+		return nil, "", errors.New("the page list answered HTTP " + http.StatusText(ans.Status))
 	}
 	var list component.PageList
 	if err := json.Unmarshal(ans.Body, &list); err != nil {
-		return nil, errors.New("the page list is not valid JSON")
+		return nil, "", errors.New("the page list is not valid JSON")
 	}
 	out := list.Pages[:0:0]
 	for _, p := range list.Pages {
@@ -344,7 +346,11 @@ func (s *Service) servicePages(ctx context.Context, rec extpipe.Record, claims a
 			out = append(out, p)
 		}
 	}
-	return out, nil
+	running := strings.TrimSpace(list.Version)
+	if len(running) > 40 || strings.ContainsFunc(running, func(r rune) bool { return r < ' ' || r > '~' }) {
+		running = ""
+	}
+	return out, running, nil
 }
 
 // handleOpenComponentPage opens one of a service's pages for the member

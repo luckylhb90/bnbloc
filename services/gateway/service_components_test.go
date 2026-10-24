@@ -93,7 +93,7 @@ func newServiceFixture(t *testing.T) *serviceFixture {
 			w.Header().Set(component.AuditHeader, component.EncodeHeader(component.Audit{Action: "hosts", Target: "wiki.example.com", Outcome: "allow"}))
 			_ = json.NewEncoder(w).Encode(component.EgressHosts{Hosts: []string{"wiki.example.com"}})
 		case path == component.ServicePagesPath:
-			_ = json.NewEncoder(w).Encode(component.PageList{Pages: []component.Page{
+			_ = json.NewEncoder(w).Encode(component.PageList{Version: "v9", Pages: []component.Page{
 				{Name: "connections", Label: "Connections", Audience: component.AudienceMember},
 				{Name: "admin", Label: "Connectors", Audience: component.AudienceAdmin},
 				{Name: "Bad Name", Label: "x", Audience: component.AudienceMember},
@@ -246,7 +246,7 @@ func TestComponentPagesByTicket(t *testing.T) {
 		_, raw := fx.do(user, http.MethodGet, "/v1/my/component-pages", nil, nil)
 		var list wire.ComponentPageList
 		_ = json.Unmarshal(raw, &list)
-		if len(list.Pages) != want {
+		if len(list.Pages) != want || list.Pages[0].Version != "0.1.0" || list.Pages[0].ServiceVersion != "v9" {
 			t.Fatalf("%s pages = %s", user, raw)
 		}
 	}

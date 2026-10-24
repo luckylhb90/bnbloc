@@ -551,6 +551,9 @@ export interface Page {
 // PageList is the answer of ServicePagesPath.
 export interface PageList {
   pages: Page[];
+  // Version is the running service's own build (shown beside its pages,
+  // apart from the installed package's version).
+  version?: string;
 }
 
 // Store scopes: whose a value is. A member's values go when the member
@@ -5890,6 +5893,10 @@ export interface ComponentPageInfo {
   audience: string;
   // InRoom: the page is offered in a room too (opened with its roomId).
   inRoom?: boolean;
+  // Version is the installed package's; ServiceVersion the running
+  // service's own build, when it says.
+  version?: string;
+  serviceVersion?: string;
 }
 
 // ComponentPageList answers GET /v1/my/component-pages. Unreadable names
