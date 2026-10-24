@@ -32,6 +32,8 @@ type PackageConfig struct {
 	// SettingsPage its own page for them.
 	Settings     []pkgmeta.Setting     `json:"settings,omitempty"`
 	SettingsPage *pkgmeta.SettingsPage `json:"settingsPage,omitempty"`
+	// Panel is a plugin's own page for its sidecar.
+	Panel *pkgmeta.Page `json:"panel,omitempty"`
 	// Guest is a sandbox's machine profile (the image the desktop prewarms).
 	Guest *pkgmeta.Guest `json:"guest,omitempty"`
 	// Previewer is a previewer's match/entry/rank/capabilities/toolbar.
@@ -56,6 +58,7 @@ func ConfigFromPackage(pkg pkgmeta.Package) PackageConfig {
 		Description:  pkg.Description,
 		Settings:     append([]pkgmeta.Setting(nil), pkg.Settings...),
 		SettingsPage: pkg.SettingsPage,
+		Panel:        pkg.Panel,
 		Guest:        pkg.Guest,
 		Previewer:    pkg.Previewer,
 		MCP:          pkg.MCP,
@@ -101,6 +104,7 @@ func (c PackageConfig) Package(kind string, rec Record) pkgmeta.Package {
 		Hooks:        c.Hooks,
 		Settings:     c.Settings,
 		SettingsPage: c.SettingsPage,
+		Panel:        c.Panel,
 		Guest:        c.Guest,
 		Previewer:    c.Previewer,
 		MCP:          c.MCP,

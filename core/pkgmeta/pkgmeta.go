@@ -61,6 +61,9 @@ type Package struct {
 	// SettingsPage is the component's own page for its settings, shown
 	// instead of the one form (settings_page.go). Only beside Settings.
 	SettingsPage *SettingsPage `json:"settingsPage,omitempty"`
+	// Panel is a plugin's own page for its sidecar, shown from its card on
+	// the member's desktop (docs/architecture/plugin-panels.md).
+	Panel *Page `json:"panel,omitempty"`
 
 	// Sandbox-only payload: the guest profile of the one machine the desktop
 	// prepares (prewarms) on a member's computer. The image is the
@@ -192,7 +195,10 @@ func validatePackage(pkg Package) error {
 	if err := validateSettings(pkg); err != nil {
 		return err
 	}
-	return validateSettingsPage(pkg)
+	if err := validateSettingsPage(pkg); err != nil {
+		return err
+	}
+	return validatePanel(pkg)
 }
 
 func validatePackageShell(pkg Package) error {

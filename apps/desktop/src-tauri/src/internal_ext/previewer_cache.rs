@@ -13,7 +13,7 @@
 //! (bounded LRU). Every sidecar reconcile drops entries whose previewer left
 //! the catalog, so an uninstall or rollout change stops serving within one
 //! poll. A component's settings page bundle is the same format, named by
-//! its pin instead (settings_page_bundle) and kept in the same caches.
+//! its pin instead (page_bundle) and kept in the same caches.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
@@ -175,13 +175,13 @@ impl Adapter {
         self.verified_bundle(state, &pin).await
     }
 
-    /// The verified bundle of a component's settings page, by the pin of
-    /// the settings view or catalog naming it (src/previewer_scheme.rs):
+    /// The verified bundle of a component's page (settings page, panel), by
+    /// the pin of the settings view or catalog naming it (src/previewer_scheme.rs):
     /// downloaded from the gateway's artifact route with the member's
     /// session, which decides whether they may read it. Kept like a
     /// previewer's bundle; a reconcile drops it from memory and disk (the
     /// next frame downloads it again).
-    pub(crate) async fn settings_page_bundle(
+    pub(crate) async fn page_bundle(
         &self,
         sha256: &Sha256Pin,
     ) -> Result<Arc<Bundle>, PreviewerError> {

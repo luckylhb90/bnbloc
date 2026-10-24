@@ -225,10 +225,13 @@ func (s *Service) artifactEntitled(ctx context.Context, actor contentActor, key 
 		if err != nil {
 			return false, err
 		}
-		// A settings page is listed with the component, before the member
-		// installs it (an organization admin sets an opt-in tool up first).
-		if page := cfg.SettingsPage; page != nil && artifactKeyIs(page.Bundle.URL, key) {
-			return true, nil
+		// A page's bundle (settings page, panel) is listed with the
+		// component, before the member installs it (an organization admin
+		// sets an opt-in tool up first).
+		for _, page := range []*pkgmeta.Page{cfg.SettingsPage, cfg.Panel} {
+			if page != nil && artifactKeyIs(page.Bundle.URL, key) {
+				return true, nil
+			}
 		}
 		if !vis.Installed {
 			continue
@@ -328,7 +331,7 @@ func (s *Service) probeUploadedArtifacts(ctx context.Context, pkg pkgmeta.Packag
 			return fmt.Errorf("%s.url: %w", at, err)
 		}
 	}
-	return s.probeSettingsPage(ctx, pkg)
+	return s.probePages(ctx, pkg)
 }
 
 func (s *Service) probeUploadedArtifact(ctx context.Context, key, wantSHA string) error {

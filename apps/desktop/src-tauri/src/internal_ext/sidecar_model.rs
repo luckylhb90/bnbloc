@@ -189,7 +189,7 @@ pub(super) struct GuestProfile {
 /// organization; component_settings.rs hands it the values in its settings
 /// file and each `deliver.env`), and what its
 /// capabilities earn it (skills_provider.rs): a bearer for the
-/// `skills-provider` job, a data dir, and for `sandbox-mounts` the
+/// `skills-provider` job or a panel, a data dir, and for `sandbox-mounts` the
 /// descriptor file and mirror folder, each in the env var the package names.
 /// A change to any of it restarts the plugin (the spec differs).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -203,6 +203,9 @@ pub(super) struct PluginLaunch {
     pub(super) data_dir_env: String,
     pub(super) mounts_env: String,
     pub(super) mount_root_env: String,
+    /// The plugin declares a panel (docs/architecture/plugin-panels.md): it
+    /// gets a bearer, and the member's page for it may call its API.
+    pub(super) panel: bool,
 }
 
 impl PluginLaunch {
@@ -360,6 +363,10 @@ pub(super) struct ComponentEntry {
     pub(super) capabilities: Vec<String>,
     #[serde(default)]
     pub(super) guest: Option<GuestProfile>,
+    /// A plugin's own page for its sidecar. The web opens it by its bundle
+    /// pin; the desktop only needs to know it exists (the relay's gate).
+    #[serde(default)]
+    pub(super) panel: Option<serde_json::Value>,
     /// Present for an installed previewer: its bundle pin.
     #[serde(default)]
     pub(super) previewer: Option<PreviewerEntry>,
@@ -543,6 +550,7 @@ impl ComponentEntry {
             data_dir_env: sidecar.data_dir_env.clone().unwrap_or_default(),
             mounts_env: sidecar.mounts_env.clone().unwrap_or_default(),
             mount_root_env: sidecar.mount_root_env.clone().unwrap_or_default(),
+            panel: self.panel.is_some(),
             host: self
                 .permissions
                 .as_ref()

@@ -9,7 +9,7 @@ import {
   settingLabels,
   type ComponentSetting,
   type ComponentSettingScope,
-  type ComponentSettingsPage,
+  type ComponentPage,
   type ComponentSettingsView,
   type DesktopComponentSettings,
 } from "@/lib/componentSettings";
@@ -41,7 +41,7 @@ export interface SettingsTarget {
   readonly kind: string;
   readonly name: string;
   readonly settings?: readonly ComponentSetting[];
-  readonly settingsPage?: ComponentSettingsPage;
+  readonly settingsPage?: ComponentPage;
 }
 
 export function ComponentSettingsDialog({ target, onClose }: { readonly target: SettingsTarget | null; readonly onClose: () => void }) {
@@ -122,7 +122,7 @@ function MemberSection({
 }: {
   readonly item: DesktopComponentSettings | null | undefined;
   readonly reload: () => Promise<void>;
-  readonly page?: ComponentSettingsPage;
+  readonly page?: ComponentPage;
   readonly onClose: () => void;
 }) {
   // Bumped by a save: the sandbox's state is read again at once.

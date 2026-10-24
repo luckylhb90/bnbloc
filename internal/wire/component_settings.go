@@ -46,7 +46,7 @@ type ComponentSettingsView struct {
 }
 
 // ComponentSettingsPageFrame is where a component's own settings page
-// (ComponentSettingsPage) loads for one scope: the browser's frame base on
+// (ComponentPage) loads for one scope: the browser's frame base on
 // the gateway (a ticket for the caller, this scope and this version
 // included; the host appends Entry), and the bundle's pin, by which the
 // desktop shell serves the same files itself.
@@ -111,13 +111,13 @@ type EndpointSettingsMissing struct {
 // kind: a member's catalog lists only what runs for members, while an
 // endpoint component beside the gateway takes organization settings too.
 type OrgSettingsComponent struct {
-	Kind            string                 `json:"kind"`
-	Name            string                 `json:"name"`
-	Version         string                 `json:"version"`
-	Description     string                 `json:"description,omitempty"`
-	Settings        []ComponentSetting     `json:"settings"`
-	SettingsPage    *ComponentSettingsPage `json:"settingsPage,omitempty"`
-	SettingsMissing []string               `json:"settingsMissing"`
+	Kind            string             `json:"kind"`
+	Name            string             `json:"name"`
+	Version         string             `json:"version"`
+	Description     string             `json:"description,omitempty"`
+	Settings        []ComponentSetting `json:"settings"`
+	SettingsPage    *ComponentPage     `json:"settingsPage,omitempty"`
+	SettingsMissing []string           `json:"settingsMissing"`
 }
 
 // OrgSettingsComponentsReply answers GET /v1/tenant/component-settings.

@@ -248,3 +248,77 @@ async fn a_failure_is_the_providers_message_and_an_oversize_answer_is_refused() 
         "a provider is only ever called on this machine: {err}"
     );
 }
+
+#[test]
+fn a_panel_earns_a_bearer_and_a_data_dir_and_nothing_else() {
+    let root = temp("panel");
+    let member = root.join("member");
+    let mut s = spec("panelled", &[]);
+    s.plugin.panel = true;
+    let job = job_env(&s, &member, None).unwrap();
+    assert!(
+        job.env.iter().all(|(k, _)| k == "SK_DATA_DIR"),
+        "a panel gets no mounts: {job:?}"
+    );
+    let (env, token) = job.token.expect("a panel plugin gets a bearer");
+    assert_eq!(env, "SK_TOKEN");
+    assert!(token.expose().len() >= 32);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn a_panel_may_only_call_paths_under_v1_with_the_methods_it_is_given() {
+    for (method, path) in [
+        ("GET", "/v1/state"),
+        ("POST", "/v1/agents/gemini/install"),
+        ("PUT", "/v1/settings"),
+        ("DELETE", "/v1/things/1"),
+        ("GET", "/v1/pack?name=a%20b&x=1"),
+    ] {
+        assert!(panel_request(method, path).is_ok(), "{method} {path}");
+    }
+    for (method, path) in [
+        ("PATCH", "/v1/state"),
+        ("GET", "/state"),
+        ("GET", "/v1"),
+        ("GET", "/v1/"),
+        ("GET", "/v1/../admin"),
+        ("GET", "/v1/a/../b"),
+        ("GET", "/v1/./a"),
+        ("GET", "/v1//a"),
+        ("GET", "/v1/%2e%2e/a"),
+        ("GET", "/v1/a%2fb"),
+        ("GET", "/v1/a\\b"),
+        ("GET", "/v1/a#frag"),
+        ("GET", "/v1/a b"),
+        ("GET", "/v1/a\nb"),
+        ("GET", "/v1/state?next=../x"),
+        ("GET", "http://example.com/v1/state"),
+        ("GET", "//example.com/v1/state"),
+    ] {
+        assert!(panel_request(method, path).is_err(), "{method} {path}");
+    }
+    let long = format!("/v1/{}", "a".repeat(MAX_PANEL_PATH));
+    assert!(panel_request("GET", &long).is_err());
+}
+
+#[tokio::test]
+async fn a_panel_call_keeps_the_status_of_a_failure_for_the_page() {
+    let (url, _) = serve(
+        "409 Conflict",
+        "Content-Type: application/json\r\n",
+        br#"{"error":"another operation is running"}"#.to_vec(),
+    )
+    .await;
+    let (status, _, body) = call_raw(
+        &launch(&url),
+        reqwest::Method::POST,
+        "/v1/agents/x/install",
+        None,
+        1024,
+    )
+    .await
+    .unwrap();
+    assert_eq!(status.as_u16(), 409);
+    assert!(String::from_utf8_lossy(&body).contains("another operation"));
+}

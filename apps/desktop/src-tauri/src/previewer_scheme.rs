@@ -15,13 +15,14 @@
 //! internal_ext/previewer_bundle.rs). Bundles never get network access:
 //! `connect-src 'none'` and no network source anywhere in the policy.
 //!
-//! A component's own settings page (docs/architecture/settings-pages.md) is
-//! a bundle of the same format, served the same way under
-//! `/_settings/{sha256}/{path…}` (`_settings` is never a package name): by
-//! the pin of the settings view or catalog that names it, downloaded with
-//! the member's session (the gateway lets them download the page bundle of
-//! a component listed to them, and a super admin any), so an admin sets up
-//! a component the member catalog does not list yet.
+//! A component's own page (its settings page, docs/architecture/settings-pages.md;
+//! its panel, docs/architecture/plugin-panels.md) is a bundle of the same
+//! format, served the same way under `/_page/{sha256}/{path…}` (`_page` is
+//! never a package name): by the pin of the settings view or catalog that
+//! names it, downloaded with the member's session (the gateway lets them
+//! download the page bundle of a component listed to them, and a super admin
+//! any), so an admin sets up a component the member catalog does not list
+//! yet.
 //!
 //! Statuses: 404 bad path / not installed / unknown file, 405 non-read
 //! method, 502 refused artifact (sha256 mismatch, off-origin URL, malformed
@@ -65,22 +66,22 @@ pub(crate) struct PreviewerPath {
 }
 
 /// What a scheme request names: a file of an installed previewer, or a file
-/// of a component's settings page bundle by its pin.
+/// of a component's page bundle by its pin.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum SchemeTarget {
     Previewer(PreviewerPath),
-    SettingsPage { sha256: Sha256Pin, file: String },
+    PageBundle { sha256: Sha256Pin, file: String },
 }
 
-/// The first path segment of a settings page bundle's files.
-const SETTINGS_PAGE_SEGMENT: &str = "_settings";
+/// The first path segment of a page bundle's files.
+const PAGE_SEGMENT: &str = "_page";
 
 /// Parses a request path into its target; None for anything malformed. A
-/// settings page's pin is 64 lower-case hex digits exactly.
+/// page's pin is 64 lower-case hex digits exactly.
 pub(crate) fn parse_target(path: &str) -> Option<SchemeTarget> {
     let Some(rest) = path
         .strip_prefix('/')
-        .and_then(|p| p.strip_prefix(SETTINGS_PAGE_SEGMENT))
+        .and_then(|p| p.strip_prefix(PAGE_SEGMENT))
         .and_then(|p| p.strip_prefix('/'))
     else {
         return parse_path(path).map(SchemeTarget::Previewer);
@@ -89,7 +90,7 @@ pub(crate) fn parse_target(path: &str) -> Option<SchemeTarget> {
     let sha256 = Sha256Pin::parse(sha)
         .ok()
         .filter(|pin| pin.as_str() == sha)?;
-    valid_bundle_path(file).then(|| SchemeTarget::SettingsPage {
+    valid_bundle_path(file).then(|| SchemeTarget::PageBundle {
         sha256,
         file: file.to_string(),
     })
@@ -245,10 +246,10 @@ pub(crate) fn handle(
                 &p.file,
                 format!("previewer:{}@{}", p.name, p.version),
             ),
-            SchemeTarget::SettingsPage { sha256, file } => (
-                adapter.settings_page_bundle(sha256).await,
+            SchemeTarget::PageBundle { sha256, file } => (
+                adapter.page_bundle(sha256).await,
                 file,
-                format!("settings page:{sha256}"),
+                format!("page:{sha256}"),
             ),
         };
         let resp = match bundle {

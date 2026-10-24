@@ -1852,7 +1852,7 @@ export interface ComponentSettingsView {
 }
 
 // ComponentSettingsPageFrame is where a component's own settings page
-// (ComponentSettingsPage) loads for one scope: the browser's frame base on
+// (ComponentPage) loads for one scope: the browser's frame base on
 // the gateway (a ticket for the caller, this scope and this version
 // included; the host appends Entry), and the bundle's pin, by which the
 // desktop shell serves the same files itself.
@@ -1922,7 +1922,7 @@ export interface OrgSettingsComponent {
   version: string;
   description?: string;
   settings: ComponentSetting[];
-  settingsPage?: ComponentSettingsPage;
+  settingsPage?: ComponentPage;
   settingsMissing: string[];
 }
 
@@ -2004,14 +2004,16 @@ export interface ComponentSettingDeliver {
   bearer?: boolean;
 }
 
-// ComponentSettingsPage is part of a component package (core/pkgmeta): the
-// component's own settings page (docs/prd/2026-10-19-component-settings.md
-// §2.2a), an HTML file (Entry) of a static bundle the platform shows in a
-// sandboxed frame where the one settings form would be. The bundle is an
-// archive in the previewer bundle format, pinned here (a gateway artifact's
-// url and sha256) rather than in the package's artifacts, which are a
-// plugin's or a stdio tool's per-platform binaries (an http tool has none).
-export interface ComponentSettingsPage {
+// ComponentPage is part of a component package (core/pkgmeta): a page of the
+// component's own, an HTML file (Entry) of a static bundle the platform shows
+// in a sandboxed frame. The component's settings page
+// (docs/prd/2026-10-19-component-settings.md §2.2a) is one, where the one
+// settings form would be; its panel (docs/architecture/plugin-panels.md) is
+// another. The bundle is an archive in the previewer bundle format, pinned
+// here (a gateway artifact's url and sha256) rather than in the package's
+// artifacts, which are a plugin's or a stdio tool's per-platform binaries (an
+// http tool has none).
+export interface ComponentPage {
   entry: string;
   bundle: ComponentArtifact;
 }
@@ -2222,7 +2224,7 @@ export interface PlatformComponent {
   // console's "needs setup"). Organization and member scopes are their
   // owners' to set and are not counted here.
   settingsMissing?: string[];
-  settingsPage?: ComponentSettingsPage;
+  settingsPage?: ComponentPage;
   artifacts?: Record<string, ComponentArtifact>;
   endpoint?: ComponentEndpoint;
   sidecar?: ComponentSidecar;
@@ -2290,7 +2292,10 @@ export interface MemberComponent {
   settings?: ComponentSetting[];
   settingsSet?: string[];
   settingsMissing?: string[];
-  settingsPage?: ComponentSettingsPage;
+  settingsPage?: ComponentPage;
+  // Panel is the component's own page for its desktop sidecar, opened
+  // from its card (docs/architecture/plugin-panels.md).
+  panel?: ComponentPage;
   artifacts?: Record<string, ComponentArtifact>;
   endpoint?: ComponentEndpoint;
   sidecar?: ComponentSidecar;

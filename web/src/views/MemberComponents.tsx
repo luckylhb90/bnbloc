@@ -4,6 +4,7 @@ import { desktop } from "@/lib/desktop";
 import { needsSetupText, type DesktopComponentSettings } from "@/lib/componentSettings";
 import { providesSkills } from "@/lib/localSkills";
 import { ComponentSettingsDialog } from "@/views/settings/ComponentSettingsDialog";
+import { PanelDialog } from "@/views/panel/PanelDialog";
 import { SkillsDialog } from "@/views/skills/SkillsPanel";
 import { EmptyCard } from "@/ui/Card";
 import { PageHeader } from "@/ui/Page";
@@ -18,8 +19,9 @@ import { errorText } from "@/lib/errors";
 // and right after it is added when it needs setup, so nobody has to look
 // for them elsewhere (docs/prd/2026-10-19-component-settings.md §2.2). A
 // component that provides skills (the skills-provider capability) opens its
-// skills panel from its card ("Open", in the desktop app), and once by
-// itself right after it is added when nothing needs setting first.
+// skills panel from its card ("Open", in the desktop app), and so does a
+// plugin with a panel of its own (docs/architecture/plugin-panels.md); either
+// opens once by itself right after it is added when nothing needs setting first.
 export function MemberComponents() {
   const toast = useToast();
   const [components, setComponents] = useState<readonly MemberComponent[] | null>(null);
@@ -30,6 +32,7 @@ export function MemberComponents() {
   const [busy, setBusy] = useState<string | null>(null);
   const [settingsOf, setSettingsOf] = useState<MemberComponent | null>(null);
   const [skillsOf, setSkillsOf] = useState<string | null>(null);
+  const [panelOf, setPanelOf] = useState<MemberComponent | null>(null);
 
   const load = useCallback(async (): Promise<{ list: readonly MemberComponent[]; local: readonly DesktopComponentSettings[] }> => {
     setError(null);
@@ -72,6 +75,7 @@ export function MemberComponents() {
       // Set it up now when it needs anything, else open what it shows.
       const added = loaded.list.find((c) => c.kind === component.kind && c.name === component.name);
       if (added && setupOf(added, loaded.local)) setSettingsOf(added);
+      else if (added && opensPanel(added)) setPanelOf(added);
       else if (added && opensSkills(added)) setSkillsOf(added.name);
     } catch (caught: unknown) {
       setError(errorText(caught, `failed to install ${component.name}`));
@@ -114,7 +118,7 @@ export function MemberComponents() {
                 onRemove={(selected) => void remove(selected)}
                 onSettings={hasSettings(component) ? setSettingsOf : undefined}
                 setup={setupOf(component)}
-                onOpen={opensSkills(component) ? (c) => setSkillsOf(c.name) : undefined}
+                onOpen={opensPanel(component) ? setPanelOf : opensSkills(component) ? (c) => setSkillsOf(c.name) : undefined}
               />
             ))}
           </ComponentSection>
@@ -139,6 +143,7 @@ export function MemberComponents() {
         }}
       />
       <SkillsDialog plugin={skillsOf} onClose={() => setSkillsOf(null)} />
+      <PanelDialog component={panelOf} onClose={() => setPanelOf(null)} />
     </>
   );
 }
@@ -153,6 +158,12 @@ function hasSettings(component: MemberComponent): boolean {
 // (its panel talks to it on this computer).
 function opensSkills(component: MemberComponent): boolean {
   return component.installed && component.kind === "plugin" && providesSkills(component) && desktop.available();
+}
+
+// opensPanel: an installed plugin with a page of its own for its sidecar, in
+// the desktop app (the panel's calls reach the sidecar on this computer).
+function opensPanel(component: MemberComponent): boolean {
+  return component.installed && component.kind === "plugin" && !!component.panel && desktop.available();
 }
 
 function splitComponents(components: readonly MemberComponent[]) {

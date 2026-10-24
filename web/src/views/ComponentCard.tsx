@@ -37,7 +37,8 @@ type MemberCardProps = {
   // onSettings opens its settings; setup names what it still needs ("").
   readonly onSettings?: (component: MemberComponent) => void;
   readonly setup?: string;
-  // onOpen opens what the component shows its member (a skills panel).
+  // onOpen opens what the component shows its member (a skills panel, a
+  // plugin's own panel).
   readonly onOpen?: (component: MemberComponent) => void;
 };
 

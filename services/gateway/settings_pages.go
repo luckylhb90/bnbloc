@@ -128,12 +128,17 @@ func (s *Service) openableSettingsPage(ctx context.Context, claims auth.Claims, 
 	return cfg.SettingsPage, cfg.SettingsPage != nil, nil
 }
 
-// probeSettingsPage proves a package's settings page installable, like a
-// previewer's bundle (probeFrameBundle). The install's artifact probe runs
-// it for every kind.
-func (s *Service) probeSettingsPage(ctx context.Context, pkg pkgmeta.Package) error {
-	if pkg.SettingsPage == nil {
-		return nil
+// probePages proves a package's pages (its settings page, its panel)
+// installable, like a previewer's bundle (probeFrameBundle). The install's
+// artifact probe runs it for every kind.
+func (s *Service) probePages(ctx context.Context, pkg pkgmeta.Package) error {
+	for at, page := range map[string]*pkgmeta.Page{pkgmeta.SettingsPageBundle: pkg.SettingsPage, pkgmeta.PanelBundle: pkg.Panel} {
+		if page == nil {
+			continue
+		}
+		if err := s.probeFrameBundle(ctx, at, page.Bundle, page.Entry); err != nil {
+			return err
+		}
 	}
-	return s.probeFrameBundle(ctx, pkgmeta.SettingsPageBundle, pkg.SettingsPage.Bundle, pkg.SettingsPage.Entry)
+	return nil
 }

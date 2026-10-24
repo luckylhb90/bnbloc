@@ -10,7 +10,7 @@
 import { MaxComponentSettingLineBytes, MaxComponentSettingLines } from "./wire.gen.ts";
 import type { ComponentSetting, ComponentSettingField, ComponentSettingScope, ComponentSettingType, ComponentSettingsUpdate } from "./wire.gen.ts";
 
-export type { ComponentSetting, ComponentSettingField, ComponentSettingScope, ComponentSettingsPage, ComponentSettingsUpdate, ComponentSettingsView } from "./wire.gen.ts";
+export type { ComponentSetting, ComponentSettingField, ComponentSettingScope, ComponentPage, ComponentSettingsUpdate, ComponentSettingsView } from "./wire.gen.ts";
 
 // DesktopComponentSettings is one installed component as the desktop shell
 // reports it (`component_settings`, apps/desktop/src-tauri/src/internal_ext/

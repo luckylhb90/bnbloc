@@ -16,13 +16,23 @@ import (
 // an opaque origin). The declaration stays the contract: the page edits only
 // the settings the package declares, through the platform.
 
-// SettingsPage names the page for package authors (internal/wire owns its
-// JSON).
-type SettingsPage = wire.ComponentSettingsPage
+// Page names a bundle page of a component for package authors (internal/wire
+// owns its JSON): the settings page and the panel are both one, and have one
+// validation (validatePage) and one place among Pins each.
+type Page = wire.ComponentPage
 
-// SettingsPageBundle is where a package pins its settings page's bundle
-// (its place among Pins).
-const SettingsPageBundle = "settingsPage.bundle"
+// SettingsPage is the page for a component's settings.
+type SettingsPage = Page
+
+// The places a package pins a page's bundle (their place among Pins).
+const (
+	SettingsPageBundle = "settingsPage.bundle"
+	PanelBundle        = "panel.bundle"
+)
+
+// IsPagePin reports whether a Pins place is a page's bundle (not one of the
+// runtime's artifacts): a page is pinned whatever the runtime carries.
+func IsPagePin(at string) bool { return at == SettingsPageBundle || at == PanelBundle }
 
 // ValidBundleEntry is the rule for the document a bundle opens with (a
 // previewer's entry, a settings page's): a bundle-relative .html path.
@@ -42,15 +52,21 @@ func validateSettingsPage(pkg Package) error {
 	if len(pkg.Settings) == 0 {
 		return fmt.Errorf("settingsPage needs settings: the page edits the settings the package declares")
 	}
+	return validatePage("settingsPage", SettingsPageBundle, p)
+}
+
+// validatePage is the one rule of a page's declaration: an entry that is a
+// relative .html path inside the bundle, and a bundle pinned like an artifact.
+func validatePage(field, bundleAt string, p *Page) error {
 	if !ValidBundleEntry(p.Entry) {
-		return fmt.Errorf("settingsPage.entry must be a relative .html path inside the bundle")
+		return fmt.Errorf("%s.entry must be a relative .html path inside the bundle", field)
 	}
-	return validateArtifact(SettingsPageBundle, p.Bundle)
+	return validateArtifact(bundleAt, p.Bundle)
 }
 
 // Pins is every artifact a package pins, by the place it is declared at:
-// "artifacts.<key>" (a binary per platform, a previewer's bundle) and
-// SettingsPageBundle. The install gate checks each alike (complete,
+// "artifacts.<key>" (a binary per platform, a previewer's bundle), and the
+// bundles of its pages (SettingsPageBundle, PanelBundle). The install gate checks each alike (complete,
 // gateway-uploaded, present and matching), and a member may download each
 // of a component they may see.
 func (pkg Package) Pins() map[string]Artifact {
@@ -60,6 +76,9 @@ func (pkg Package) Pins() map[string]Artifact {
 	}
 	if pkg.SettingsPage != nil {
 		out[SettingsPageBundle] = pkg.SettingsPage.Bundle
+	}
+	if pkg.Panel != nil {
+		out[PanelBundle] = pkg.Panel.Bundle
 	}
 	return out
 }

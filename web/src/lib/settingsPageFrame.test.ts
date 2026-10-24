@@ -44,7 +44,7 @@ await test("the page loads from the desktop scheme by its pin, or the gateway's 
   const env = { apiUrl: (p: string) => `https://gw.example${p}`, baseURI: "https://app.example/", hostOrigin: HOST };
   eq(
     settingsPageSrc({ entry: "index.html", bundleSha256: SHA }, { ...env, convertFileSrc }),
-    `bnbloc-previewer://localhost/_settings/${SHA}/index.html#host=${encodeURIComponent(HOST)}`,
+    `bnbloc-previewer://localhost/_page/${SHA}/index.html#host=${encodeURIComponent(HOST)}`,
     "desktop",
   );
   eq(settingsPageSrc(orgView.page!, env), `https://gw.example/v1/settings-pages/mcp/notes/1.0.0/T/index.html#host=${encodeURIComponent(HOST)}`, "browser");

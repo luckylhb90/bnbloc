@@ -76,8 +76,8 @@ organization). The files are served by the previewer's code
 (`frameCSP`, below), `nosniff`, `no-referrer`, and cached until the ticket
 expires. Anything else is a 404. The ticket is redacted from request logs.
 
-**Desktop.** `bnbloc-previewer://localhost/_settings/{sha256}/{path…}`
-(`apps/desktop/src-tauri/src/previewer_scheme.rs`; `_settings` is never a
+**Desktop.** `bnbloc-previewer://localhost/_page/{sha256}/{path…}`
+(`apps/desktop/src-tauri/src/previewer_scheme.rs`; `_page` is never a
 package name). The shell downloads the archive by its pin from the
 gateway's artifact route with the member's session, refuses a sha256
 mismatch, keeps it in the previewer caches and serves it with the same

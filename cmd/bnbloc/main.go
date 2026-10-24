@@ -95,10 +95,10 @@ Components:
   bnbloc cores list
   bnbloc cores uninstall <name>
   bnbloc cores enable <name> (--tenant <id>... | --all-tenants)
-  bnbloc components publish-package --package <file> --binary <goos-goarch>=<path>... [--settings-page <dir|tar>]
+  bnbloc components publish-package --package <file> --binary <goos-goarch>=<path>... [--settings-page <dir|tar>] [--panel <dir|tar>]
         [--rollout auto|optin|off] [--seckey f | --unsigned]
         a package file without artifacts (a plugin, a notifier sidecar): its binaries are uploaded and pinned,
-        and a settingsPage's bundle (--settings-page) too
+        and a settingsPage's bundle (--settings-page) and a plugin's panel (--panel) too
   bnbloc components list                  every installed component: kind, name, version, rollout
                                           (read it before publishing over one)
   bnbloc components rotate-secret <name> [--kind auth-provider|share-target|service]  new endpoint component credential (printed once)

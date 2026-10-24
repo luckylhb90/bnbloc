@@ -270,6 +270,22 @@ async fn skills_provider_pack(
         .map(tauri::ipc::Response::new)
 }
 
+/// One call of a plugin's panel, relayed to its sidecar with the bearer the
+/// desktop keeps (docs/architecture/plugin-panels.md).
+#[tauri::command]
+async fn plugin_panel_call(
+    account: Account,
+    plugin: String,
+    method: String,
+    path: String,
+    body: Option<serde_json::Value>,
+) -> Result<internal_ext::PanelAnswer, String> {
+    account
+        .adapter
+        .plugin_panel_call(&plugin, &method, &path, body)
+        .await
+}
+
 /// The folder picker for adding a skills source. None when the member cancels.
 /// The provider is told the path; this command only learns it from the dialog.
 #[tauri::command]
@@ -482,6 +498,7 @@ pub fn run() {
             skills_provider_state,
             skills_provider_settings,
             skills_provider_pack,
+            plugin_panel_call,
             skills_pick_folder,
             mcp_tool_sign_in,
             mcp_tool_sign_out,

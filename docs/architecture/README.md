@@ -83,8 +83,13 @@ extend it" references.
 - Components live in their own repositories
   ([PRD](../prd/2026-10-18-components-in-own-repos.md)): `bnbloc-browser`,
   `bnbloc-media-tools`, `bnbloc-local-skills`, `bnbloc-previewers`,
-  `bnbloc-acp`. They build against the public contract package `component`
+  `bnbloc-acp`, `bnbloc-agent-manager`. They build against the public contract package `component`
   (and `core`, `core/pkgmeta`, `web/previewer-sdk`).
+
+- [Plugin panels](plugin-panels.md) — a plugin's own page on the member's
+  desktop: a bundle the package pins, shown in the sandboxed frame, reaching
+  its sidecar only through one relay that adds the bearer the desktop keeps.
+  The platform names nothing a panel is for.
 
 ## Local Bridge
 

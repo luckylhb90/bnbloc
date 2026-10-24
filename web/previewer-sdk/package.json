@@ -12,6 +12,7 @@
     "./pointing": "./src/pointing.ts",
     "./compare": "./src/compare.ts",
     "./diff": "./src/diff.ts",
-    "./settings": "./src/settings.ts"
+    "./settings": "./src/settings.ts",
+    "./panel": "./src/panel.ts"
   }
 }

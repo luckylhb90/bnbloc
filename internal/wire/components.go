@@ -49,7 +49,7 @@ type PlatformComponent struct {
 	// console's "needs setup"). Organization and member scopes are their
 	// owners' to set and are not counted here.
 	SettingsMissing []string                     `json:"settingsMissing,omitempty"`
-	SettingsPage    *ComponentSettingsPage       `json:"settingsPage,omitempty"`
+	SettingsPage    *ComponentPage               `json:"settingsPage,omitempty"`
 	Artifacts       map[string]ComponentArtifact `json:"artifacts,omitempty"`
 	Endpoint        *ComponentEndpoint           `json:"endpoint,omitempty"`
 	Sidecar         *ComponentSidecar            `json:"sidecar,omitempty"`
@@ -115,13 +115,16 @@ type MemberComponent struct {
 	// component needs setup and does not run. Member-scope settings live on
 	// the member's desktop. SettingsPage is the component's own settings
 	// page, shown instead of the one form.
-	Settings        []ComponentSetting           `json:"settings,omitempty"`
-	SettingsSet     []string                     `json:"settingsSet,omitempty"`
-	SettingsMissing []string                     `json:"settingsMissing,omitempty"`
-	SettingsPage    *ComponentSettingsPage       `json:"settingsPage,omitempty"`
-	Artifacts       map[string]ComponentArtifact `json:"artifacts,omitempty"`
-	Endpoint        *ComponentEndpoint           `json:"endpoint,omitempty"`
-	Sidecar         *ComponentSidecar            `json:"sidecar,omitempty"`
+	Settings        []ComponentSetting `json:"settings,omitempty"`
+	SettingsSet     []string           `json:"settingsSet,omitempty"`
+	SettingsMissing []string           `json:"settingsMissing,omitempty"`
+	SettingsPage    *ComponentPage     `json:"settingsPage,omitempty"`
+	// Panel is the component's own page for its desktop sidecar, opened
+	// from its card (docs/architecture/plugin-panels.md).
+	Panel     *ComponentPage               `json:"panel,omitempty"`
+	Artifacts map[string]ComponentArtifact `json:"artifacts,omitempty"`
+	Endpoint  *ComponentEndpoint           `json:"endpoint,omitempty"`
+	Sidecar   *ComponentSidecar            `json:"sidecar,omitempty"`
 	// Capabilities and Protocol tell the desktop/bridge what a protocol
 	// component (a sandbox runtime) was published to support before it is
 	// launched; the running implementation's discovery stays authoritative.

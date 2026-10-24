@@ -155,8 +155,8 @@ func validatePluginPackage(pkg Package) error {
 	if pkg.Runtime != RuntimeSidecar {
 		return fmt.Errorf(`plugin runtime must be "sidecar"`)
 	}
-	if len(pkg.Hooks) == 0 && !slices.Contains(pkg.Capabilities, PluginCapabilitySkillsProvider) && !slices.Contains(pkg.Capabilities, PluginCapabilitySandboxMounts) {
-		return fmt.Errorf("plugin must declare at least one hook (or a capability that gives it another job)")
+	if len(pkg.Hooks) == 0 && pkg.Panel == nil && !slices.Contains(pkg.Capabilities, PluginCapabilitySkillsProvider) && !slices.Contains(pkg.Capabilities, PluginCapabilitySandboxMounts) {
+		return fmt.Errorf("plugin must declare at least one hook (or a panel, or a capability that gives it another job)")
 	}
 	for _, id := range pkg.Hooks {
 		if _, ok := hookRegistry[id]; !ok {

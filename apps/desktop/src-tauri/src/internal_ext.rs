@@ -54,7 +54,7 @@ pub use sidecar_model::AdapterStatus;
 use sidecar_model::{GatewayAccess, Inner, ManagedSidecar, SidecarSpec};
 pub use sidecar_targets::SidecarAuthStatus;
 use sidecar_util::core_env_var;
-pub use skills_provider::SkillsProviderView;
+pub use skills_provider::{PanelAnswer, SkillsProviderView};
 
 use crate::child_process::{Backoff, Child, Stopping};
 

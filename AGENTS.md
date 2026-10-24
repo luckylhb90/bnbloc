@@ -914,7 +914,15 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   chosen by the capability, never by a component's name) and `sandbox-mounts` (a descriptor file and a
   mirror folder, `docs/architecture/sandbox-mounts.md`); the package names the
   env vars and a plugin with only those subscribes to no hook
-  (`docs/architecture/local-skills.md`). Which kinds may carry which payload field is
+  (`docs/architecture/local-skills.md`). A plugin with a screen of its own
+  declares a **panel** (`panel: {entry, bundle}`, a bundle pinned like a
+  settings page's, needs `sidecar.tokenEnv`): the member opens it from the
+  card on the desktop, in the previewer's sandboxed frame with no network, and
+  it reaches its sidecar only through the one relay
+  (`Adapter::plugin_panel_call`, `panel_request` the one rule for a call's
+  path and method), which adds the bearer the desktop keeps. The platform
+  names nothing a panel is for; do not add a second relay or a capability per
+  use (`docs/architecture/plugin-panels.md`). Which kinds may carry which payload field is
   one table (`kindFields`, `core/pkgmeta/shape.go`; a stray field is
   refused, `TestKindOnlyFieldsRefused`), and the runtime blocks are
   `RequireEndpointRuntime`/`requireGuardedEndpoint`/`requireSidecarRuntime`

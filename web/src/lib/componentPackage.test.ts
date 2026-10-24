@@ -106,6 +106,20 @@ if (skills.ok) assert(skills.value.sidecar?.mountsEnv === "SK_MOUNTS_FILE", "mou
 assert(!parseComponentPackage(JSON.stringify({ ...skillsPlugin, capabilities: [] })).ok, "a plugin with no hook and no job is refused");
 assert(!parseComponentPackage(JSON.stringify({ ...skillsPlugin, capabilities: ["skills-provider"] })).ok, "mount envs without the capability are refused");
 
+const panelPlugin = {
+  kind: "bnbloc.plugin.package/v1",
+  contract: "bnbloc.plugin.contract/v1",
+  name: "board",
+  version: "0.1.0",
+  publisher: "platform",
+  runtime: "sidecar",
+  sidecar: { localUrl: "http://127.0.0.1:7193", tokenEnv: "AM_TOKEN" },
+  panel: { entry: "index.html", bundle: { url: "", sha256: "" } },
+  artifacts: { "darwin-arm64": { url: "", sha256: "" } },
+};
+assert(parseComponentPackage(JSON.stringify(panelPlugin)).ok, "a plugin with a panel needs no hook");
+assert(!parseComponentPackage(JSON.stringify({ ...panelPlugin, sidecar: { localUrl: "http://127.0.0.1:7193" } })).ok, "a panel without the bearer is refused");
+
 const previewerJSON = JSON.stringify({
   kind: "bnbloc.previewer.package/v1",
   contract: "bnbloc.previewer.contract/v1",

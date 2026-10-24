@@ -253,7 +253,7 @@ func (s *Service) handleResolvedComponentSettings(w http.ResponseWriter, r *http
 // failure is logged and reads as every required one missing (fail closed:
 // the component does not run on a guess).
 func (s *Service) catalogSettings(ctx context.Context, claims auth.Claims, rec extpipe.Record, cfg extpipe.PackageConfig, out *wire.MemberComponent) {
-	out.Settings, out.SettingsPage = cfg.Settings, cfg.SettingsPage
+	out.Settings, out.SettingsPage, out.Panel = cfg.Settings, cfg.SettingsPage, cfg.Panel
 	scopes := []string{pkgmeta.SettingScopePlatform, pkgmeta.SettingScopeOrg}
 	if len(pkgmeta.SettingsOfScope(cfg.Settings, scopes...)) == 0 {
 		return

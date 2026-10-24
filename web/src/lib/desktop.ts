@@ -175,11 +175,11 @@ async function popOutWindow(command: string, args: Record<string, string>): Prom
   }
 }
 
-// skillsInvoke calls one of the shell's skills commands; a failure reads as
+// pluginInvoke calls one of the shell's plugin commands (skills, panels); a failure reads as
 // its message.
-async function skillsInvoke(command: string, args: Record<string, unknown>): Promise<unknown> {
+async function pluginInvoke(command: string, args: Record<string, unknown>): Promise<unknown> {
   const t = tauri();
-  if (!t) throw new Error("local skills are only available in the desktop app");
+  if (!t) throw new Error("this is only available in the desktop app");
   return t.invoke(command, args).catch((e: unknown) => {
     throw new Error(e instanceof Error ? e.message : String(e));
   });
@@ -387,22 +387,28 @@ export const desktop = {
   },
 
   async skillsProviderState(plugin: string): Promise<SkillsState> {
-    return (await skillsInvoke("skills_provider_state", { plugin })) as SkillsState;
+    return (await pluginInvoke("skills_provider_state", { plugin })) as SkillsState;
   },
 
   async saveSkillsSettings(plugin: string, settings: SkillsSettings): Promise<SkillsState> {
-    return (await skillsInvoke("skills_provider_settings", { plugin, settings })) as SkillsState;
+    return (await pluginInvoke("skills_provider_settings", { plugin, settings })) as SkillsState;
+  },
+
+  // One call of a plugin's panel, made by the desktop with the bearer it keeps
+  // (docs/architecture/plugin-panels.md): the plugin's status and JSON answer.
+  async panelCall(plugin: string, method: string, path: string, body?: unknown): Promise<{ status: number; body: unknown }> {
+    return (await pluginInvoke("plugin_panel_call", { plugin, method, path, body: body ?? null })) as { status: number; body: unknown };
   },
 
   // One skill packed by its provider: the tar.gz and the hash of the skill.
   async packSkill(plugin: string, name: string): Promise<{ hash: string; archive: Uint8Array }> {
-    const raw = (await skillsInvoke("skills_provider_pack", { plugin, name })) as ArrayBuffer;
+    const raw = (await pluginInvoke("skills_provider_pack", { plugin, name })) as ArrayBuffer;
     return unframePackedSkill(new Uint8Array(raw));
   },
 
   // The folder picker for a skills source; null when cancelled.
   async pickSkillsFolder(): Promise<string | null> {
-    return (await skillsInvoke("skills_pick_folder", {})) as string | null;
+    return (await pluginInvoke("skills_pick_folder", {})) as string | null;
   },
 
   // Sign in to an MCP tool that takes an OAuth sign-in: its sign-in page

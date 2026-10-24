@@ -124,7 +124,7 @@ as every kind. An installed entry carries:
 
 A component's own settings page is a bundle of this format, served by the
 same code under the same policy (`/v1/settings-pages/…` and the desktop
-scheme's `_settings/…`; `docs/architecture/settings-pages.md`).
+scheme's `_page/…`; `docs/architecture/settings-pages.md`).
 
 **Browser.** `GET /v1/previewers/{name}/{version}/{ticket}/{path…}`
 (`services/gateway/previewers.go`). An iframe `src` cannot carry the session

@@ -20,7 +20,8 @@ import (
 //
 // A file the sidecar needs beside its executable (sidecar.files) is a
 // --binary <platform>/<name>=<path>; the bundle of a settingsPage is
-// --settings-page <dir or tar> (settings_page.go).
+// --settings-page <dir or tar>, and of a panel --panel <dir or tar>
+// (settings_page.go).
 func componentsPublishPackage(args []string) error {
 	fs := flag.NewFlagSet("components publish-package", flag.ContinueOnError)
 	gw := addGatewayFlags(fs)
@@ -29,6 +30,7 @@ func componentsPublishPackage(args []string) error {
 	var binaries multiFlag
 	fs.Var(&binaries, "binary", "platform binary as <goos-goarch>=<path>, or <goos-goarch>/<file>=<path> for a declared sidecar file (repeatable)")
 	settingsPage := addSettingsPageFlag(fs)
+	panel := addPanelFlag(fs)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -44,6 +46,11 @@ func componentsPublishPackage(args []string) error {
 		return err
 	}
 	defer cleanup()
+	panelPath, cleanupPanel, err := panelInput(pkg, *panel)
+	if err != nil {
+		return err
+	}
+	defer cleanupPanel()
 	priv, err := sign.key()
 	if err != nil {
 		return err
@@ -55,6 +62,9 @@ func componentsPublishPackage(args []string) error {
 	}
 	pkg.Artifacts = artifacts
 	if err := pinSettingsPage(c, &pkg, pagePath); err != nil {
+		return err
+	}
+	if err := pinPanel(c, &pkg, panelPath); err != nil {
 		return err
 	}
 	body, err := json.Marshal(pkg)

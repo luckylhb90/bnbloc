@@ -93,7 +93,9 @@ function packageShapeError(
   if (meta?.runtimes && !meta.runtimes.includes(runtime)) return `${meta.noun} package runtime must be ${meta.runtimes.join(" or ")}`;
   if (short === "plugin") {
     const jobs = (capabilities ?? []).filter((c) => c === SKILLS_PROVIDER || c === "sandbox-mounts");
-    if ((!hooks || hooks.length === 0) && jobs.length === 0) return "plugin package requires at least one hook (or a capability that gives it another job)";
+    const panel = "panel" in record;
+    if ((!hooks || hooks.length === 0) && jobs.length === 0 && !panel) return "plugin package requires at least one hook (or a panel, or a capability that gives it another job)";
+    if (panel && !sidecar?.tokenEnv) return "a panel requires sidecar.tokenEnv: the desktop calls the sidecar for the page with that bearer";
     const mounts = (capabilities ?? []).includes("sandbox-mounts");
     if (mounts && !(sidecar?.mountsEnv && sidecar?.mountRootEnv)) return "a sandbox-mounts plugin requires sidecar.mountsEnv and sidecar.mountRootEnv";
     if (!mounts && (sidecar?.mountsEnv || sidecar?.mountRootEnv)) return "sidecar.mountsEnv and sidecar.mountRootEnv need the sandbox-mounts capability";

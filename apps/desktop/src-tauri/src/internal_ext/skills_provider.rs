@@ -161,7 +161,7 @@ fn private_dir(dir: &Path) -> Result<(), String> {
 }
 
 /// What a plugin's capabilities add to its launch: env pairs, and the bearer of
-/// a `skills-provider` launch.
+/// a `skills-provider` or panel launch.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(super) struct JobEnv {
     pub(super) env: Vec<(String, PathBuf)>,
@@ -195,7 +195,7 @@ pub(super) fn job_env(
             .push((plugin.mounts_env.clone(), folder.join(MOUNTS_FILE)));
         out.env.push((plugin.mount_root_env.clone(), mirror));
     }
-    if plugin.has(CAP_PROVIDER) {
+    if plugin.has(CAP_PROVIDER) || plugin.panel {
         out.token = Some((plugin.token_env.clone(), Secret::generate()?));
     }
     Ok(out)
@@ -210,6 +210,31 @@ async fn call(
     body: Option<Value>,
     limit: usize,
 ) -> Result<(reqwest::header::HeaderMap, Vec<u8>), String> {
+    let (status, headers, bytes) = call_raw(provider, method, path, body, limit).await?;
+    if !status.is_success() {
+        return Err(error_text(&bytes, status));
+    }
+    Ok((headers, bytes))
+}
+
+/// The `error` text of a failed answer, else its status.
+fn error_text(bytes: &[u8], status: reqwest::StatusCode) -> String {
+    serde_json::from_slice::<Value>(bytes)
+        .ok()
+        .and_then(|v| v.get("error").and_then(Value::as_str).map(str::to_string))
+        .unwrap_or_else(|| format!("status {}", status.as_u16()))
+}
+
+/// The one call to a plugin's loopback API with its bearer: the status,
+/// headers and body (up to `limit` bytes) whatever the status. The skills
+/// provider's calls and a panel's relay both go through it.
+async fn call_raw(
+    provider: &ProviderLaunch,
+    method: reqwest::Method,
+    path: &str,
+    body: Option<Value>,
+    limit: usize,
+) -> Result<(reqwest::StatusCode, reqwest::header::HeaderMap, Vec<u8>), String> {
     let plugin = &provider.plugin;
     loopback::LoopbackHttp::parse(&provider.url)?;
     let url = format!("{}{path}", provider.url.trim_end_matches('/'));
@@ -233,14 +258,7 @@ async fn call(
         }
         bytes.extend_from_slice(&chunk);
     }
-    if !status.is_success() {
-        let message = serde_json::from_slice::<Value>(&bytes)
-            .ok()
-            .and_then(|v| v.get("error").and_then(Value::as_str).map(str::to_string))
-            .unwrap_or_else(|| format!("status {}", status.as_u16()));
-        return Err(message);
-    }
-    Ok((headers, bytes))
+    Ok((status, headers, bytes))
 }
 
 impl Adapter {
@@ -253,7 +271,8 @@ impl Adapter {
     ) -> Result<Option<Secret>, String> {
         let wants = !spec.plugin.data_dir_env.is_empty()
             || spec.plugin.has(CAP_MOUNTS)
-            || spec.plugin.has(CAP_PROVIDER);
+            || spec.plugin.has(CAP_PROVIDER)
+            || spec.plugin.panel;
         if !wants {
             return Ok(None);
         }
@@ -307,10 +326,14 @@ impl Adapter {
             let id = component_id(ComponentKind::Plugin, plugin);
             let inner = self.inner.lock();
             match inner.sidecars.get(&id) {
-                Some(s) if s.spec.as_ref().is_some_and(|s| s.plugin.has(CAP_PROVIDER)) => {
+                Some(s)
+                    if s.spec
+                        .as_ref()
+                        .is_some_and(|s| s.plugin.has(CAP_PROVIDER) || s.plugin.panel) =>
+                {
                     format!("{plugin} is not running: {}", s.status.message)
                 }
-                _ => format!("{plugin} is not an installed skills provider"),
+                _ => format!("{plugin} has no API the desktop calls"),
             }
         })
     }
@@ -379,6 +402,81 @@ impl Adapter {
             .unwrap_or_default()
             .to_string();
         Ok(frame_packed_skill(&hash, &body))
+    }
+}
+
+/// What a panel's call to its plugin came back with.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct PanelAnswer {
+    pub status: u16,
+    /// The answer's JSON, or its text as a string when it is not JSON.
+    pub body: Value,
+}
+
+/// The calls the member's page for a plugin may relay: a page's path stays
+/// under `/v1/`, with no dot segment, no escape in the path, no fragment.
+const PANEL_METHODS: [&str; 4] = ["GET", "POST", "PUT", "DELETE"];
+const PANEL_PREFIX: &str = "/v1/";
+const MAX_PANEL_PATH: usize = 2048;
+/// A panel's request body; the answer is bounded by `MAX_JSON_BYTES`.
+const MAX_PANEL_BODY: usize = 1 << 20;
+
+/// The method and path of a panel call, checked; the error is the reason.
+pub(super) fn panel_request(method: &str, path: &str) -> Result<reqwest::Method, String> {
+    if !PANEL_METHODS.contains(&method) {
+        return Err(format!("{method} is not a method a panel may call with"));
+    }
+    let (route, query) = path.split_once('?').unwrap_or((path, ""));
+    let bad_char = |c: char| c.is_control() || c.is_whitespace() || c == '\\' || c == '#';
+    if path.len() > MAX_PANEL_PATH
+        || !route.starts_with(PANEL_PREFIX)
+        || route.len() == PANEL_PREFIX.len()
+        || route.contains('%')
+        || path.chars().any(bad_char)
+        || route.split('/').skip(1).any(|s| s.is_empty() || s == "." || s == "..")
+        || query.contains("..")
+    {
+        return Err("a panel may only call paths under /v1/".to_string());
+    }
+    method.parse().map_err(|_| format!("{method} is not a method"))
+}
+
+impl Adapter {
+    /// Relay one call of a plugin's panel to its sidecar (docs/architecture/
+    /// plugin-panels.md): only a plugin that declares a panel and runs, only
+    /// `panel_request`'s paths and methods, the body and answer bounded, with
+    /// the bearer the desktop keeps. The page never holds it.
+    pub async fn plugin_panel_call(
+        &self,
+        plugin: &str,
+        method: &str,
+        path: &str,
+        body: Option<Value>,
+    ) -> Result<PanelAnswer, String> {
+        let method = panel_request(method, path)?;
+        let has_panel = {
+            let id = component_id(ComponentKind::Plugin, plugin);
+            let inner = self.inner.lock();
+            inner
+                .sidecars
+                .get(&id)
+                .and_then(|s| s.spec.as_ref())
+                .is_some_and(|spec| spec.plugin.panel)
+        };
+        if !has_panel {
+            return Err(format!("{plugin} is not an installed plugin with a panel"));
+        }
+        if body.as_ref().is_some_and(|b| b.to_string().len() > MAX_PANEL_BODY) {
+            return Err("the request is too large".to_string());
+        }
+        let provider = self.provider(plugin)?;
+        let (status, _, bytes) = call_raw(&provider, method, path, body, MAX_JSON_BYTES).await?;
+        let body = serde_json::from_slice(&bytes)
+            .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(&bytes).into_owned()));
+        Ok(PanelAnswer {
+            status: status.as_u16(),
+            body,
+        })
     }
 }
 

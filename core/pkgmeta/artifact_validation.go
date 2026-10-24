@@ -163,10 +163,10 @@ func (r Runtime) CarriesArtifacts() bool {
 }
 
 // ValidateCompleteArtifacts refuses a publish whose downloadable artifacts
-// (a runtime's, a settings page's bundle) are still upload placeholders.
+// (a runtime's, a page's bundle) are still upload placeholders.
 func ValidateCompleteArtifacts(pkg Package) error {
 	for at, artifact := range pkg.Pins() {
-		if at != SettingsPageBundle && !pkg.Runtime.CarriesArtifacts() {
+		if !IsPagePin(at) && !pkg.Runtime.CarriesArtifacts() {
 			continue
 		}
 		if isUploadPlaceholder(artifact) {

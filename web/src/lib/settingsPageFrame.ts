@@ -43,7 +43,7 @@ export interface SettingsPageSource {
  *  without a frame ticket, a malformed entry). */
 export function settingsPageSrc(page: SettingsPageSource, env: FrameEnv): string | null {
   if (!validBundlePath(page.entry) || (!env.convertFileSrc && !page.frameUrl)) return null;
-  return frameSrc({ schemePath: `_settings/${page.bundleSha256}/${page.entry}`, gatewayPath: `${page.frameUrl ?? ""}${page.entry}` }, env);
+  return frameSrc({ schemePath: `_page/${page.bundleSha256}/${page.entry}`, gatewayPath: `${page.frameUrl ?? ""}${page.entry}` }, env);
 }
 
 /** A page message from the page's own frame, validated; null otherwise. */
