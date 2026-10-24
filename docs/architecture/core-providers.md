@@ -312,6 +312,19 @@ with it through `BNBLOC_CONFINE_DENY_READ` (`protocol.VMExecEnv`). A core that
 keeps its own copy of the descriptor must carry it: a copy without the field
 drops the protection silently (found 2026-10-22, in a core with its own struct).
 
+A component that keeps a login of its own on the machine can protect it from every
+confined run, whichever core starts it, with a machine-wide drop-in
+`~/.bnbloc/confine.d/<name>.json` (`{"denyRead": ["/abs/path"]}`, mode 0600 or
+0644, owned by the member): `bnbloc-vmexec confine` adds the paths to
+`hostConfine.denyRead`. It only restricts. A file that does not parse, is
+writable by others, is not the member's, or names a relative path is skipped with
+a note on stderr; `~/.bnbloc` is itself unreadable to a confined agent, so an
+agent cannot change it. A core that confines the very tool whose state is named
+(a CLI that must read its own login) sets `BNBLOC_CONFINE_MACHINE_DENY=off` for
+that run; the descriptor's own `denyRead` still applies. An older helper ignores
+the directory, so a core still carries the protection in its own descriptor where
+it can.
+
 Vocabulary note: the codebase overloads "provider". **Core** = the daemon
 backend (an installed manifest or adapter core such as `acme`), carried on the wire as `core`. **Harness** = the
 agent kind inside a core (`codex`, `claude`), carried in `core.Target.Provider`

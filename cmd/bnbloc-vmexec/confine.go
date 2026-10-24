@@ -786,6 +786,9 @@ func confine(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "bnbloc-vmexec confine: %v\n", err)
 		return 2
 	}
+	if os.Getenv(machineDenyOffEnv) != "off" {
+		spec.DenyReadFinal = append(spec.DenyReadFinal, machineDenyRead(spec.Home, stderr)...)
+	}
 	spec.resolve()
 	switch runtime.GOOS {
 	case "darwin":
