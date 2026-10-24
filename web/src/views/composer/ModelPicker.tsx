@@ -4,6 +4,21 @@ import { cn } from "@/lib/cn";
 import { useDismissOnOutside } from "@/ui/useDismissOnOutside";
 import { prettyModel } from "@/lib/modelLabel";
 
+// Marker is the selected-row indicator. It leads the row and always takes its
+// width, so labels line up and it can never be pushed out of a narrow window
+// (at the row's end it was clipped, and nothing showed which one was chosen).
+function Marker({ active }: { active: boolean }) {
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "size-1.5 shrink-0 rounded-full",
+        active ? "bg-[var(--color-accent)]" : "bg-transparent",
+      )}
+    />
+  );
+}
+
 // ModelPicker selects the model + reasoning effort for the effective agent.
 // Mirrors AgentPicker's open/close, styling, and dropdown structure. Options are
 // daemon-discovered (AgentTarget), never hardcoded. Empty model/reasoning means
@@ -61,12 +76,10 @@ export function ModelPicker({
           : "text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-fg)]",
       )}
     >
-      <span className="flex-1 font-medium text-[var(--color-fg)]">
+      <Marker active={!activeWhenEmpty} />
+      <span className="min-w-0 flex-1 break-words font-medium text-[var(--color-fg)]">
         Default{suffix}
       </span>
-      {!activeWhenEmpty && (
-        <span className="size-1.5 rounded-full bg-[var(--color-accent)]" />
-      )}
     </button>
   );
 
@@ -91,7 +104,7 @@ export function ModelPicker({
       </button>
 
       {open && (
-        <div className="animate-in absolute bottom-full right-0 z-20 mb-2 w-60 @md:left-0 @md:right-auto overflow-hidden rounded-[var(--radius)] border border-[var(--color-border-strong)] bg-[var(--color-elevated)] shadow-[var(--shadow-pop)]">
+        <div className="animate-in absolute bottom-full right-0 z-20 mb-2 w-60 max-w-[calc(100vw-1rem)] @md:left-0 @md:right-auto overflow-hidden rounded-[var(--radius)] border border-[var(--color-border-strong)] bg-[var(--color-elevated)] shadow-[var(--shadow-pop)]">
           {models.length > 0 && (
             <>
               <div className="border-b border-[var(--color-border)] px-3 py-2 text-xs font-medium uppercase tracking-wide text-[var(--color-fg-subtle)]">
@@ -112,12 +125,10 @@ export function ModelPicker({
                           : "text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-fg)]",
                       )}
                     >
-                      <span className="flex-1 font-medium text-[var(--color-fg)]">
+                      <Marker active={active} />
+                      <span className="min-w-0 flex-1 break-words font-medium text-[var(--color-fg)]">
                         {prettyModel(m)}
                       </span>
-                      {active && (
-                        <span className="size-1.5 rounded-full bg-[var(--color-accent)]" />
-                      )}
                     </button>
                   );
                 })}
@@ -144,10 +155,8 @@ export function ModelPicker({
                           : "text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-fg)]",
                       )}
                     >
-                      <span className="flex-1">{lvl}</span>
-                      {active && (
-                        <span className="size-1.5 rounded-full bg-[var(--color-accent)]" />
-                      )}
+                      <Marker active={active} />
+                      <span className="min-w-0 flex-1 break-words">{lvl}</span>
                     </button>
                   );
                 })}
