@@ -25,7 +25,7 @@ task declares and relays the reply. Nothing else calls a model.
   URL turns assists off.
 - **The client** (`assist.Client`) reaches only the configured host
   (`extgov.NetGuard`: no link-local or metadata address either), never
-  follows a redirect, and bounds a call to 60 s and 2000 reply tokens. A
+  follows a redirect, and bounds a call to 60 s and 4000 reply tokens. A
   text task streams (`stream: true`, the usage in the last chunk; a proxy
   that answers one completion instead is read whole). A JSON task asks for
   `response_format: json_object` and again without it when the model

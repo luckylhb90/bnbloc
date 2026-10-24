@@ -38,8 +38,10 @@ func (m Model) Configured() bool { return m.BaseURL != "" && m.Model != "" }
 
 // Bounds of one call.
 const (
-	// MaxReplyTokens bounds a reply (max_tokens).
-	MaxReplyTokens = 2000
+	// MaxReplyTokens bounds a reply (max_tokens): room for a task that
+	// answers structured fields (a review with its findings ran past 2000
+	// and its JSON was cut off).
+	MaxReplyTokens = 4000
 	// maxReplyBytes bounds what is read of a model's answer.
 	maxReplyBytes = 1 << 20
 )
