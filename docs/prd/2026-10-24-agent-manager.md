@@ -279,9 +279,12 @@ credential.
   rollback is the same rewrite. The previous version is kept; older ones are
   pruned when nothing runs from them (a delete that fails because a process uses
   it is retried later, never forced).
-- **A running agent is never stopped.** A process that runs from the old version
-  keeps running; the new one is used by the next launch. The component never
-  signals or kills an agent process.
+- **A running agent is never stopped, and the files it runs from stay.** The
+  component never signals or kills an agent process, and (§2.4a) never removes a
+  version a live session still runs from. This record first said a running agent
+  "keeps running from its old files" because the files are not needed once loaded;
+  that is not true of a Node program, which loads modules on demand, and was never
+  checked.
 - **One operation per agent at a time.** An operation ends when it shows no
   activity (no output, no bytes) for the stall window; there is no total time
   cap (an agent's first download can be about 0.5 GB). Cancelling is the
@@ -289,6 +292,47 @@ credential.
 - **No sudo, nothing outside the store and the registration file**: no edit to
   the member's `PATH`, shell profile, global npm prefix or `agents.json`.
 - **Offline or a failed lookup is "can't check"**, never "up to date".
+
+### 2.4a A conversation is never lost to an update (2026-10-24)
+
+A session of the ACP core fixes the program it was created with (the command,
+arguments and environment of its agent) and continues with exactly that program
+after an idle stop (`session/resume`). So the files of that launch must exist for
+as long as the session does. Reproduced against the real core and a real model
+(`docs/bugs/2026-10-24-update-removed-a-rooms-agent.md`): a conversation on
+version 1, two updates (cleanup kept only the current and the previous version),
+and the next message failed `command … not found`: the conversation was lost.
+
+Three layers, each tested on its own:
+
+1. **The core says what its sessions hold** (`<acp home>/in-use.json`, written by
+   the core: every path in a live session's launch, renewed every minute, marked
+   `stopped` on a clean exit). A path in an environment value counts: an adapter
+   may be told where its agent is (`commandEnv`), so a session of the adapter holds
+   the agent's version too.
+2. **The manager removes only what nothing needs.** Cleanup keeps the current
+   version, the rollback target and every version a live session holds. Three
+   states: *current* (written within five minutes, not stopped): keep what it
+   lists; *gone* (stopped, or silent for five minutes: the core died and its
+   sessions with it): remove; *unknown* (no file: a core that predates it, or none
+   has run): **remove nothing**. Remove is refused while a room still runs the
+   agent; the row says "kept for a room still using …". Cleanup also runs on each
+   check, so a version is released once its session ends.
+3. **If a file is gone anyway, the session continues with the agent's current
+   registration** (the core re-reads the registration first: an update writes it
+   seconds before the next message), and the log says so. The agent keeps the
+   conversation in its own store; a version that cannot read it fails visibly.
+   Verified: a conversation begun on opencode 1.18.35 and continued by 1.19.4
+   remembered its content.
+
+What this costs: a room that is never restarted can keep an old version (a few
+hundred MB for some adapters) for as long as its session lives. A session lives
+as long as the core process, so it ends when the app restarts.
+
+Not covered: an organization's `pinned` version that is not installed yet, and a
+core older than 0.2.12 (its sessions are invisible, so the manager removes nothing
+for as long as no newer core has run; the setting that removes the files of an
+unknown core by hand is not offered).
 
 ### 2.5 Registration: the ACP core's drop-in directory
 
@@ -443,9 +487,12 @@ The manager's engine does not depend on the other two; they meet at the end.
    removing its file on stop and uninstall, the sweep removing the store; to be
    checked against `shared_core_tests.rs` and the multi-account record before
    slice 3.
-2. **A session resumed by a newer agent version.** Not verified for any agent.
-   Test: start a session on version N, update to N+1, resume after the idle
-   stop. Blocks a default of `autoUpdate: on`.
+2. **A session resumed by a newer agent version.** Verified for one agent
+   (opencode, 1.18.35 begun, 1.19.4 continued, a real model recalled it) and for
+   the case that matters most, a removed version (§2.4a). Not verified for any
+   other agent, and not for a version that changes its session format.
+   `autoUpdate: on` stays off by default until the agents in the catalog are tried
+   the same way.
 3. **A sandboxed run of a managed agent.** Partly verified 2026-10-24 (§7c);
    the VM leg is not.
 4. **Org-added catalog entries** are refused (§2.3). If an organization needs

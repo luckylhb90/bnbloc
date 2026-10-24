@@ -46,6 +46,10 @@ a turn matched by message text.
 - Updated afterwards: when something a session depends on gets a new
   version (a tool, a skill pack), does the session keep its memory, and
   if it must restart, is it handed what it knew and is the person told?
+- Before removing a file (an old version, a cache, a copy): who else holds it?
+  Another process may continue from exactly that path later (a conversation
+  resumed after an idle stop), and the remover usually cannot see it. Ask the
+  holder for its list; with no answer, remove nothing.
 - Resumed after a long pause: is stale state still valid?
 - What does each value belong to — the session, the turn, or the call —
   and is it set where that lifetime starts (a per-turn job id in a
@@ -61,7 +65,10 @@ a turn matched by message text.
 *Test:* run it long; restart each process in the middle; upgrade across
 it; edit or delete its inputs afterwards; let a result land after newer
 requests.
-*Seen:* a queued job's failure notice, posted minutes later, shown under
+*Seen:* an agent manager's cleanup of old versions that deleted the program a
+room's idle conversation continues with, so its next message failed
+(docs/bugs/2026-10-24-update-removed-a-rooms-agent.md);
+a queued job's failure notice, posted minutes later, shown under
 the newest request, which was running fine;
 every release of a tool silently restarting the conversations
 that used it; a signed-out member's bridge still claiming their jobs (the
