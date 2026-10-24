@@ -446,12 +446,8 @@ The manager's engine does not depend on the other two; they meet at the end.
 2. **A session resumed by a newer agent version.** Not verified for any agent.
    Test: start a session on version N, update to N+1, resume after the idle
    stop. Blocks a default of `autoUpdate: on`.
-3. **A sandboxed run of a managed agent.** The ACP sandbox recognises the
-   routing from the agent's command ("also by an npx or another path"); not
-   verified for an absolute path inside a version directory, nor that the
-   confinement can read and execute the store. Slice 3 checks it with the real
-   helper (docs/prd/2026-10-22-acp-sandbox.md §2.3); until then a managed agent's
-   row says whether sandbox mode `all` can run it.
+3. **A sandboxed run of a managed agent.** Partly verified 2026-10-24 (§7c);
+   the VM leg is not.
 4. **Org-added catalog entries** are refused (§2.3). If an organization needs
    its own agent without publishing its own manager build, the way is a signed
    per-tenant catalog add-on, which needs a signing seam that does not exist:
@@ -582,3 +578,29 @@ started by the real ACP core over its registry line (`bnbloc-acp check`):
   worth a catalog entry follow, each probed.
 - Left out for being less common, not for being unfit: Factory Droid, Grok,
   CodeBuddy, Qoder, Dirac, and the registry's smaller agents.
+
+### 7c. A managed agent under the agent sandbox (2026-10-24)
+
+Checked with the real ACP core and the real `bnbloc-vmexec confine` on macOS, the
+store at its real kind of place (`~/Library/Application Support/…/agents/<id>/
+<version>/node_modules/.bin/`):
+
+- **Recognised.** `bnbloc-acp check` shows routing `claude` for the managed
+  `claude-agent-acp` and `opencode` for the managed `opencode`: the core names the
+  routing from the command's base name, so the absolute path in a version
+  directory is recognised as `npx` was.
+- **Runs confined.** Under `confine` (workspace only) the managed opencode
+  reports its version and the managed Claude adapter answers a real ACP
+  `initialize`, as they do unconfined.
+- **The check is not vacuous.** With the store read-denied the same adapter fails
+  with `EPERM` on its own files, so the pass above is the default confinement
+  letting the store be read, not the absence of one.
+- **A confined process cannot write the store.** `touch` into `agents/` is refused,
+  so a prompt-injected agent cannot plant a package there that a later run would
+  execute (the exposure the npx cache has, which the core answers with a private
+  cache). A managed install also removes the confined first-start download (the
+  Claude adapter is about 0.5 GB).
+- **Not verified:** a whole sandboxed turn with its shell commands routed into a
+  VM (needs the sandbox service running); the routing hook does not depend on where
+  the binary sits, but that is a reading of the code, not a run. Codex's adapter has
+  no routing in the core yet, as before.
