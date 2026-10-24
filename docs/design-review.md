@@ -270,7 +270,24 @@ version identity; problems found only by a user.
 
 ## The process
 
-### 14. Component or platform
+### 14. Content, component or platform
+
+This lens is the core rule of AGENTS.md ("the platform provides only what it
+must"). It is answered with a **Placement table** in the PRD, one row per part:
+
+| Part | Content / component / platform | Why (for platform: the named reason) | What an organization would swap |
+|---|---|---|---|
+
+Order of the questions, for each part: (1) can an expert, skill pack, prompt
+pack, assist or sample do it with what the platform already has? (2) else, can
+a component behind a generic contract (its own repository)? (3) platform only
+for consent, signing and confinement, identity, isolation, events only the
+platform sees, the member-authenticated proxy, budgets and quotas, audit, the
+kill switch, and the contracts with their conformance suites. The platform
+ships a **mechanism** (a seam, a gate, a registry); the policy, provider,
+scanner, viewer, prompt or example that plugs into it is not platform. Facts
+about the outside world (which files mark an ecosystem, a credential's format,
+a tool's name) are a component's or content's data, never platform code.
 
 - Before any code: could this be an installable component behind generic
   contracts (a core, a plugin, a notifier, an extension, content), the way
@@ -302,6 +319,11 @@ manifests, participant modes and a lifecycle the apps can own (2026-10-12).
 An outcome-review room planned as built-in content with a fixed cause list,
 table columns, digest and task flow, when the platform only had to provide
 the room kind, the consented `runs` source and `read_records` (2026-10-20).
+A deliverable-backends draft that put a credential scanner, a marker list of
+language ecosystems, a project file-tree viewer and a realtime channel into the
+platform, when the platform needed only the publish gate, the project bundle and
+`appProxy`, and the rest were a check component, a previewer, a service
+component and content (2026-10-24).
 
 ### 13. AI capability
 
@@ -324,8 +346,9 @@ assist model off the feature still works and says why the AI part is gone.
 
 ### Before building — in the PRD
 
-Every PRD (`docs/prd/`) for a change that alters behaviour has a
-**Design review** section:
+Every PRD (`docs/prd/`) for a change that alters behaviour first has a
+**Placement table** (lens 14: every part of the change as content, component
+or platform, with the reason), then a **Design review** section:
 
 ```markdown
 ## Design review

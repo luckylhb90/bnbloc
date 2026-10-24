@@ -574,11 +574,17 @@ Seen 1× (2026-10-16).
   lenses 9 and 11 ask the same.
 - **Ship capabilities, not use cases: a use case is a member's to build,
   or a sample in its own repository, never hardcoded in the platform.**
-  Seen 3× (2026-10-12 interactive apps with platform modes and lifecycle;
+  Seen 4× (2026-10-12 interactive apps with platform modes and lifecycle;
   2026-10-17 room memory compiled into four services; 2026-10-20 an
   outcome-review room planned as built-in content with fixed causes,
-  columns and digest). Promoted 2026-10-20 → `docs/design-review.md`,
-  lens 14 ("Capabilities, not use cases").
+  columns and digest; 2026-10-24 a backends draft with a scanner, an
+  ecosystem list, a viewer and a channel in the platform, caught in review
+  by the product owner before any code). Promoted 2026-10-20 →
+  `docs/design-review.md`, lens 14; hardened 2026-10-24 → AGENTS.md "Core
+  rule: the platform provides only what it must" and lens 14's Placement
+  table (content, component or platform, for every part, in every PRD). The
+  recurrence was the draft not asking the question per part: it asked it for
+  hosts, the headline, and not for the parts around them.
 - **Never skip, drop or truncate silently: say what was left out, to the
   person and to the agent.** Seen 3× (2026-10-08 a download truncated at a
   proxy deadline; 2026-10-13 attachments dropped; 2026-10-14 files under

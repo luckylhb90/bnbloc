@@ -33,6 +33,58 @@ not memory. A bug record includes "Why it was not caught" (the lens, the
 missing question or test) and adds that question to `docs/design-review.md`
 in the same change.
 
+## Core rule: the platform provides only what it must (violations get reverted)
+
+bnbloc is a platform. What is not necessary for it to be a platform is
+extensible, and is built as an extension. This is the first question of every
+design, asked **before** the PRD's body is written: for each part of a change,
+which of three places is it, tried in this order?
+
+1. **Content**: an expert, a skill pack, a prompt pack, an assist, a room
+   package, or a **sample**. Guidance, conventions, workflows, drafting,
+   review, starters and example apps are content that people and agents
+   already know how to use, copy and change. They live in a content
+   repository, published through the Library. The platform ships no use case,
+   and no built-in content beyond what it cannot start without.
+2. **Component**: behind a generic contract, in its own repository, signed,
+   rolled out and tenant-scoped (a core, plugin, notifier, auth provider,
+   previewer, share target, service, sandbox, host, MCP tool). Anything with
+   its own runtime, its own external system, its own settings, a provider an
+   organization may choose, or a checker or viewer it may swap.
+3. **Platform**, only for what neither can do safely or at all: consent and
+   enablement, signing and confinement, identity and the attested caller,
+   isolation, events only the platform sees, the member-authenticated proxy,
+   budgets, quotas and metering, the audit, the kill switch, and the
+   **contracts themselves** with their conformance suites.
+
+The platform ships **mechanisms** (a seam, a gate, a registry, a contract, a
+cap). A policy, provider, scanner, viewer, prompt, workflow or example is what
+plugs into one, and is never written into the platform.
+
+Four tests, each answered in the PRD:
+
+- **Name:** grep the platform for the feature's nouns. A provider, language,
+  framework, ecosystem, product or use case named in platform code is the
+  feature compiled in, not a contract. Facts about the outside world (which
+  files mark which ecosystem, token formats, tool names) are a component's or
+  content's data.
+- **Fork:** would an organization that wants its own version have to change the
+  platform? Then there is no seam yet.
+- **Replace:** could a second implementation be installed beside this one?
+- **Reason:** a platform part names the allowed reason above. "It is small",
+  "it is convenient" and "it is only the default" are not reasons.
+
+Every PRD that alters behaviour carries a **Placement table** (part, content /
+component / platform, why, what an organization would swap), before its design
+review (`docs/design-review.md`, lens 14). A part marked platform without a
+named reason is moved out before anything is built; reviewers read the table
+first. Real incidents: room memory compiled into four services (2026-10-17);
+interactive apps with platform modes and lifecycle (2026-10-12); a review room
+as built-in content (2026-10-20); and, on 2026-10-24, a first draft of the
+deliverable-backends record that put a credential scanner, a list of language
+ecosystems, a project viewer and a realtime channel into the platform when each
+was a component or content (`LESSONS.md`).
+
 ## Language: English unless told otherwise
 
 Everything the project keeps is written in English: code comments, commit
