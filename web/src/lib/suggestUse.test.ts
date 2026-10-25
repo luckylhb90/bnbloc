@@ -132,6 +132,8 @@ const pick = (draft: string, opts?: Parameters<typeof suggestUse>[2]) => suggest
 {
   assert(tokens("Please build a website for the team").join(",") === "page,team", "filler dropped, website is page");
   assert(tokens("polls and surveys").join(",") === "poll,survey", "plurals");
+  assert(tokens("translate").join() === tokens("translation").join() && tokens("reviewer").join() === tokens("reviewing").join(), "words of one family are one word");
+  assert(tokens("reports").join() !== tokens("request").join(), "different words stay apart");
   assert(tokens("做一个投票页面").includes("投票") && tokens("做一个投票页面").includes("页面") && !tokens("做一个投票页面").includes("一个"), "keyword pairs kept, 一个 dropped");
 }
 

@@ -67,10 +67,14 @@ export function useAgentPrefs({
   // (nothing to match against yet), stops once restored, and never clobbers
   // a selection the user made. Best-effort: a failed read leaves defaults.
   const restored = useRef(false);
+  // The channel the restore read for: the default channel resolving while the
+  // composer stays mounted (it keeps the draft) reads its stored pick again.
+  const restoredFor = useRef(channelId);
   // The recipient was chosen as a default (not by the member).
   const defaulted = useRef(false);
   const [settled, setSettled] = useState(false);
   useEffect(() => {
+    if (restored.current && restoredFor.current !== channelId) restored.current = false;
     if (!enabled || restored.current || roomAgents.length === 0) return;
     let cancelled = false;
     void (async () => {
@@ -80,6 +84,7 @@ export function useAgentPrefs({
         if (!p.found && ch) p = await api.getAgentPrefs(roomId, "");
         if (cancelled || restored.current) return;
         restored.current = true; // landed (or nothing stored): stop retrying
+        restoredFor.current = channelId;
         setSettled(true);
         const r = restoreAgent(p, roomAgents, targets, subject);
         if (r && "ownTargetId" in r) {

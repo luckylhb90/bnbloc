@@ -74,14 +74,21 @@ const SAME: Record<string, string> = { website: "page", webpage: "page", site: "
 const CJK_STOP = new Set("一个 一份 一下 一些 帮我 我们 大家 可以 需要 如何 怎么 这个 那个 请问 帮忙 麻烦 能否 是否 什么 为什么 有没有 的话 然后 以及 或者 还是 已经 一起 让大".split(" "));
 const HAN = /\p{Script=Han}/u;
 
+// STEM_CHARS: a word is known by its first characters, so "translate" and
+// "translation", "review" and "reviewer", "report" and "reporting" are one word. A
+// longer prefix keeps more words apart; measured on a real Library, 6 found more
+// of the right ones than 5 or none without showing more wrong ones.
+const STEM_CHARS = 6;
+
 function stem(w: string): string {
   const same = SAME[w];
   if (same) return same;
-  if (w.length > 5 && w.endsWith("ing")) return w.slice(0, -3);
-  if (w.length > 4 && w.endsWith("ies")) return w.slice(0, -3) + "y";
-  if (w.length > 4 && w.endsWith("ed")) return w.slice(0, -2);
-  if (w.length > 3 && w.endsWith("s") && !w.endsWith("ss")) return w.slice(0, -1);
-  return w;
+  let out = w;
+  if (w.length > 5 && w.endsWith("ing")) out = w.slice(0, -3);
+  else if (w.length > 4 && w.endsWith("ies")) out = w.slice(0, -3) + "y";
+  else if (w.length > 4 && w.endsWith("ed")) out = w.slice(0, -2);
+  else if (w.length > 3 && w.endsWith("s") && !w.endsWith("ss")) out = w.slice(0, -1);
+  return out.length > STEM_CHARS ? out.slice(0, STEM_CHARS) : out;
 }
 
 /** tokens: the keywords of a text. Words are lower-cased, stemmed and stripped of

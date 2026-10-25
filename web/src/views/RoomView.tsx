@@ -1,3 +1,4 @@
+import { FIRST_COMPOSER_KEY, nextComposerKey, type ComposerKeyState } from "@/lib/composerKey";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { onboardingEvents } from "@/lib/onboardingEvents";
 import { feedSeqRange } from "@/lib/feedSeqRange";
@@ -96,6 +97,11 @@ export function RoomView({
   // The active channel scopes the feed, the stream, sends and read cursors.
   // Null until the rail selects the room's default channel.
   const [channelId, setChannelId] = useState<string | null>(null);
+  // The composer's key: the channel, except that the default channel resolving the
+  // first time does not replace what the member is already typing.
+  const [composerKey, setComposerKey] = useState<ComposerKeyState>(FIRST_COMPOSER_KEY);
+  const nextKey = nextComposerKey(composerKey, channelId);
+  if (nextKey !== composerKey) setComposerKey(nextKey);
   // Bumped when the active channel turned out stale (404): the rail reloads
   // the channel list and re-selects the room's default channel.
   const [channelsEpoch, setChannelsEpoch] = useState(0);
@@ -658,7 +664,7 @@ export function RoomView({
             {/* Composer (fresh per channel: draft, recipient and its restored
                 per-channel preference), or the join panel for a preview. */}
             <RoomComposer
-              key={channelId ?? ""}
+              key={nextKey.key}
               join={preview ? { needsCode: joinNeedsInviteCode(room), joining: data.joining, onJoin: (code) => void data.join(code) } : undefined}
               readOnly={readOnly}
               agent={agent}

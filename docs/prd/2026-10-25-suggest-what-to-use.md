@@ -84,11 +84,31 @@ The decision model reads intent in any language, so the default content, which
 stays in neutral English, is found by a request in Chinese; the keyword fallback
 matches only words that appear in the descriptions and tags.
 
-Measured on a real organization's Library (40 candidates, 18 requests in two
-languages): the decision model gave a sensible answer to all 18, the keyword
-matcher to about 12 (it missed the Chinese requests against English
-descriptions and several indirect ones). A call is about 2,100 input tokens and
-one output token, 1.2 to 1.8 s.
+Measured on a real organization's Library (40 candidates; requests I wrote
+in English and Chinese, plain, indirect and misspelled, and ones nothing fits):
+
+- The decision model answered 18 of 18 sensibly in a first run, and sat out the
+  ambiguous ones by probability.
+- The keyword fallback, on 71 requests (49 and 22 held out from tuning): it picks
+  the right candidate for about 60% of the ones that have one, stays silent for
+  nearly all the ones that have none, and shows a wrong one about 1 time in 5
+  of those it shows. It misses what shares no word with a candidate (a request in
+  Chinese against English descriptions, "is this agreement safe to sign" against
+  "review contracts"). That is why the model is the main path and the member
+  who turns it off gets a plainer feature, not an equal one.
+- Tried against the same sets and **not adopted**: BM25 weighting (identical
+  results: with about 40 short documents it has nothing to saturate or
+  normalize), and typo tolerance by edit distance (it recovers a few typos and
+  adds wrong ones: "lunch" finds the launch-readiness team, "cook" finds the QA
+  designer). A grid search over BM25 settings looked better on the first set and
+  was worse on the held-out one. **Adopted:** words are known by their first six
+  letters, so "translate" finds "translation" and "review" finds "reviewer"
+  (+3 right, -2 wrong on the first set, no change on the held-out one).
+- A call to the decision model is about 2,100 input tokens and one output token,
+  1.2 to 1.8 s.
+
+What improves the fallback is the content: descriptions written as triggers and
+tags in the words people use, including their language.
 
 ## Lenses (pre-mortem)
 

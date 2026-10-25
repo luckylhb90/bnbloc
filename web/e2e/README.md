@@ -62,3 +62,13 @@ keyword matcher does without it, on a rate limit or when the member turned it of
 ```sh
 BNBLOC_E2E_URL=http://localhost:5173 node web/e2e/suggest-use.mjs
 ```
+
+## A draft survives the room opening (`composer-draft.mjs`)
+
+What is typed before a room's channel list arrives stays in the composer when it
+does (the default channel resolving the first time is not another conversation,
+`lib/composerKey.ts`), and another channel still gets its own, empty one.
+
+```sh
+BNBLOC_E2E_URL=http://localhost:5173 node web/e2e/composer-draft.mjs
+```
