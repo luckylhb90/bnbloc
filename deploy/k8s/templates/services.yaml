@@ -208,16 +208,28 @@ spec:
                 secretKeyRef: { name: {{ required "webPush.privateKeySecretRef.name is required when webPush.publicKey is set" $.Values.webPush.privateKeySecretRef.name }}, key: {{ $.Values.webPush.privateKeySecretRef.key }} }
             {{- end }}
             {{- if and $.Values.pulse.enabled (has $name (list "activity" "room" "realtime" "pulse")) }}
-            # The board's Redis stream (empty = the emitters stay off; pulse needs it).
+            # The board's Redis stream. A Secret ref when one is named; otherwise
+            # empty, so the AWS Secrets Manager loader (BNBLOC_AWS_SECRET_ID) fills
+            # it: an empty value is overridable, a non-empty one is not.
+            {{- if $.Values.pulse.redisURLSecretRef.name }}
             - name: BNBLOC_PULSE_REDIS_URL
               valueFrom:
-                secretKeyRef: { name: {{ required "pulse.redisURLSecretRef.name is required when pulse.enabled" $.Values.pulse.redisURLSecretRef.name }}, key: {{ $.Values.pulse.redisURLSecretRef.key }} }
+                secretKeyRef: { name: {{ $.Values.pulse.redisURLSecretRef.name }}, key: {{ $.Values.pulse.redisURLSecretRef.key }} }
+            {{- else }}
+            - name: BNBLOC_PULSE_REDIS_URL
+              value: ""
             {{- end }}
-            {{- if and $.Values.pulse.enabled $.Values.pulse.keySecretRef.name (has $name (list "room" "realtime")) }}
+            {{- end }}
+            {{- if and $.Values.pulse.enabled (has $name (list "room" "realtime")) }}
             # Member digest key, shared by the emitters (presence and message events).
+            {{- if $.Values.pulse.keySecretRef.name }}
             - name: BNBLOC_PULSE_KEY
               valueFrom:
                 secretKeyRef: { name: {{ $.Values.pulse.keySecretRef.name }}, key: {{ $.Values.pulse.keySecretRef.key }} }
+            {{- else }}
+            - name: BNBLOC_PULSE_KEY
+              value: ""
+            {{- end }}
             {{- end }}
             {{- if and $.Values.pulse.enabled (eq $name "gateway") }}
             - name: BNBLOC_PULSE_BASE_URL

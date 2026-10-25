@@ -187,6 +187,12 @@ Design: `docs/prd/2026-10-24-executive-pulse-backend.md`.
 | `BNBLOC_PULSE_FLUSH` | no | Rollup write and stream ack interval (default `15s`). |
 | `BNBLOC_PULSE_RETENTION` | no | How long rollup rows are kept (default `2160h`, 90 days). |
 
+Secrets: with `BNBLOC_AWS_SECRET_ID` set, put `BNBLOC_MYSQL_DSN`, `BNBLOC_INTERNAL_KEY`,
+`BNBLOC_PULSE_REDIS_URL` and `BNBLOC_PULSE_KEY` in that secret's JSON. The loader runs in every
+binary at start and fills only variables that are empty in the environment, so pulse, room,
+realtime and activity read the same values. Without `BNBLOC_AWS_SECRET_ID` set on the pulse
+process, pulse does not read the secret at all and fails with "BNBLOC_PULSE_REDIS_URL is required".
+
 The production compose overlay starts it only with the `pulse` profile (see
 `deploy/compose.prod.yml`); the all-in-one image runs it only when
 `BNBLOC_PULSE_REDIS_URL` is set.

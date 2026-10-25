@@ -199,7 +199,9 @@ relay:
 # The organization board (bnbloc-pulse, docs/prd/2026-10-24-executive-pulse-backend.md).
 # Off until enabled: the board then answers "not deployed" and the emitting
 # services (activity, room, realtime) stay silent. Enabling it needs a Redis for
-# the stream and the member digest key; create both Secrets out of band.
+# the stream and the member digest key. Either put them in the AWS Secrets Manager
+# secret (awsSecrets.secretID) as BNBLOC_PULSE_REDIS_URL and BNBLOC_PULSE_KEY, or
+# name Secrets below; an empty ref leaves the variable to the secret.
 pulse:
   enabled: false
   # Redis URL of the board's stream and live state (redis://[user:password@]host:6379/0).
