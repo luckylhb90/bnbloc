@@ -1,10 +1,19 @@
 // Decision models (docs/prd/2026-10-17-decision-models.md): the one owner of
-// the decision routes in the web. Today that is the consoles' provider API;
-// the member route (POST /v1/decisions) joins here with its first web
-// caller. No other file names a decision route.
+// the decision routes in the web: the consoles' provider API and the member
+// route (POST /v1/decisions), whose first caller is the composer's suggestions
+// (lib/suggestUse.ts). No other file names a decision route.
 
 import { req } from "./api.ts";
 import type { MediaProviderApi, MediaProviderConfigView, MediaProviderUpdateBody } from "./media.ts";
+import type { DecisionReply, DecisionRequest } from "./wire.gen.ts";
+
+/** The member's decision calls: whether the organization's decision model runs
+ *  for them, and one call (a signal drops an answer nobody waits for). */
+export const decisionsApi = {
+  available: () => req<{ available: boolean; models?: string[] }>("/v1/decisions"),
+  decide: (body: DecisionRequest, signal?: AbortSignal) =>
+    req<DecisionReply>("/v1/decisions", { method: "POST", body: JSON.stringify(body), signal }),
+};
 
 /** The adapter kinds the console offers for a decision model. */
 export const DECISION_ADAPTER_KINDS = ["openai-decisions"] as const;

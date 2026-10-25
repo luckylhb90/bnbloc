@@ -4,14 +4,24 @@ import { gatewayBase } from "@/lib/config";
 import type { ContentUsesReply } from "@/lib/contentComponents";
 import { contentApi } from "@/lib/contentComponentsApi";
 import { contentUsesChanged } from "@/lib/contentUsesEvents";
+import { decisionsApi } from "@/lib/decisions";
 import { ApiError, errorText } from "@/lib/errors";
 import { StorageKey, browserStorage, memberKey } from "@/lib/storageKeys";
 import {
+  aiSuggestionsOn,
+  asked,
   candidatesOf,
+  DECISION_BACKOFF_MS,
+  decisionRequest,
   dismissSuggestion,
   dismissedKeys,
+  eligibleForAsk,
   MIN_DRAFT_CHARS,
+  NO_ASKS,
+  shouldAsk,
+  suggestionFromDecision,
   suggestUse,
+  type AskState,
   type UseCandidate,
   type UseSuggestion,
 } from "@/lib/suggestUse";
@@ -19,10 +29,15 @@ import { useContentChanged } from "@/lib/useContentChanged";
 import { useToast } from "@/ui/Toast";
 import type { ExpertChoice } from "@/lib/contentComponents";
 
+/** WARM_CHARS: the Library is read as soon as a request has this many characters, so it
+ *  is there by the time the member pauses. */
+const WARM_CHARS = 5;
 /** SETTLE_MS: how long the member pauses before a request is placed. */
 const SETTLE_MS = 700;
 /** CATALOG_FRESH_MS: how long the Library read for suggestions is reused. */
 const CATALOG_FRESH_MS = 5 * 60_000;
+/** NO_DECISION_MS: how long "the organization has no decision model" is believed. */
+const NO_DECISION_MS = 5 * 60_000;
 
 export interface UseSuggestionState {
   readonly suggestion: UseSuggestion | null;
@@ -32,10 +47,13 @@ export interface UseSuggestionState {
 }
 
 // useUseSuggestion recommends one expert, skill pack or tool for what the member
-// is writing (docs/prd/2026-10-25-suggest-what-to-use.md): the ranking is
-// lib/suggestUse's, local; this hook reads the Library when a request is first
-// worth placing, leaves out what is already on, picked or dismissed, and applies
-// the member's click with the Library's own calls. Nothing happens without it.
+// is writing (docs/prd/2026-10-25-suggest-what-to-use.md). The organization's
+// decision model places the request when it runs for the member and they have not
+// turned it off (a few calls per draft, never per keystroke: lib/suggestUse's
+// ask rules); otherwise lib/suggestUse's keyword matcher does, locally. The hook
+// reads the Library when a request is first worth placing, leaves out what is
+// already on, picked or dismissed, and applies the member's click with the
+// Library's own calls. Nothing happens without it.
 export function useUseSuggestion({
   roomId,
   enabled,
@@ -89,8 +107,9 @@ export function useUseSuggestion({
     });
   }, [enabled, roomId, reload]);
   const placing = settled !== "";
+  const warm = enabled && draft.trim().length >= WARM_CHARS;
   useEffect(() => {
-    if (!placing || (loadedAt.current && Date.now() - loadedAt.current < CATALOG_FRESH_MS)) return;
+    if (!warm || (loadedAt.current && Date.now() - loadedAt.current < CATALOG_FRESH_MS)) return;
     let live = true;
     Promise.all([api.components(), contentApi.uses(roomId)])
       .then(([catalog, u]) => {
@@ -103,37 +122,104 @@ export function useUseSuggestion({
     return () => {
       live = false;
     };
-  }, [placing, roomId, epoch]);
+  }, [warm, roomId, epoch]);
 
-  const storeKey = useMemo(
-    () => (subject ? memberKey(StorageKey.useSuggestions, { gateway: gatewayBase(), subject }) : ""),
+  const keys = useMemo(
+    () =>
+      subject
+        ? {
+            dismissed: memberKey(StorageKey.useSuggestions, { gateway: gatewayBase(), subject }),
+            ai: memberKey(StorageKey.suggestWithAi, { gateway: gatewayBase(), subject }),
+          }
+        : null,
     [subject],
   );
 
-  const suggestion = useMemo(() => {
-    if (!placing || !candidates || !uses || !storeKey) return null;
-    const exclude = dismissedKeys(browserStorage(), storeKey, Date.now());
-    const on = new Set<string>();
-    for (const u of [...(uses.member ?? []), ...(uses.room ?? [])]) on.add(`${u.kind}/${u.componentId}`);
-    for (const k of on) exclude.add(k);
+  // What is not offered: dismissed, already on, picked or the room's expert, an
+  // expert that cannot be picked here; and the skill packs an expert in effect or
+  // dismissed wears (they are not offered in its place).
+  const eligibility = useMemo(() => {
+    if (!candidates || !uses || !keys) return null;
+    const exclude = dismissedKeys(browserStorage(), keys.dismissed, Date.now());
+    for (const u of [...(uses.member ?? []), ...(uses.room ?? [])]) exclude.add(`${u.kind}/${u.componentId}`);
     if (picked) exclude.add(`expert/${picked.component.id}`);
     if (uses.roomExpert) exclude.add(`expert/${uses.roomExpert}`);
-    // An expert that cannot be picked here is not offered.
     const pickable = new Set(choices.map((c) => c.component.id));
     for (const c of candidates) if (c.kind === "expert" && !pickable.has(c.id)) exclude.add(c.key);
-    // An expert in effect, or one the member dismissed, speaks for the skill packs it
-    // wears: they are not offered in its place.
     const worn = new Set(candidates.filter((c) => c.kind === "expert" && exclude.has(c.key)).flatMap((c) => c.wears));
-    return suggestUse(settled, candidates, { exclude, worn });
+    return { exclude, worn };
     // dismissedAt re-reads the dismissals after one.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [placing, settled, candidates, uses, storeKey, picked, choices, dismissedAt]);
+  }, [candidates, uses, keys, picked, choices, dismissedAt]);
+
+  // The decision model's side: asked after a pause, a few times per draft, never
+  // while one is running for older text, and out of it for a minute after a failure.
+  const [ai, setAi] = useState<UseSuggestion | null>(null);
+  const [aiBlockedUntil, setAiBlockedUntil] = useState(0);
+  const askState = useRef<AskState>(NO_ASKS);
+  const seq = useRef(0);
+  const inflight = useRef<AbortController | null>(null);
+  const noDecisionUntil = useRef(0);
+  const availableAt = useRef(0);
+  const aiOn = !!keys && aiSuggestionsOn(browserStorage(), keys.ai);
+  const aiUsable = aiOn && Date.now() >= aiBlockedUntil;
+
+  // A new draft starts over; the member clearing the box drops what was asked.
+  useEffect(() => {
+    if (draft.trim() !== "") return;
+    askState.current = NO_ASKS;
+    seq.current++;
+    inflight.current?.abort();
+    setAi(null);
+  }, [draft]);
+  useEffect(() => () => inflight.current?.abort(), []);
+
+  useEffect(() => {
+    if (!placing || !eligibility || !candidates || !aiUsable) return;
+    const now = Date.now();
+    if (!shouldAsk(askState.current, settled, now)) return;
+    const eligible = eligibleForAsk(settled, candidates, eligibility);
+    if (eligible.length === 0) return;
+    askState.current = asked(askState.current, settled, now);
+    const mine = ++seq.current;
+    inflight.current?.abort();
+    const ctl = new AbortController();
+    inflight.current = ctl;
+    void (async () => {
+      try {
+        if (now < noDecisionUntil.current) throw new Error("no decision model");
+        if (now - availableAt.current > NO_DECISION_MS) {
+          const a = await decisionsApi.available();
+          availableAt.current = Date.now();
+          if (!a.available) {
+            noDecisionUntil.current = Date.now() + NO_DECISION_MS;
+            throw new Error("no decision model");
+          }
+        }
+        const reply = await decisionsApi.decide(decisionRequest(settled, eligible), ctl.signal);
+        if (mine === seq.current) setAi(suggestionFromDecision(reply, eligible));
+      } catch (e) {
+        if (ctl.signal.aborted || mine !== seq.current) return;
+        // Off, unavailable, throttled or failed: the keyword matcher takes over for a while.
+        if (!(e instanceof ApiError) || e.status === 409) noDecisionUntil.current = Date.now() + NO_DECISION_MS;
+        setAiBlockedUntil(Date.now() + DECISION_BACKOFF_MS);
+        setAi(null);
+      }
+    })();
+  }, [placing, settled, eligibility, candidates, aiUsable]);
+
+  const suggestion = useMemo(() => {
+    if (!placing || !eligibility || !candidates) return null;
+    // The decision model, when it runs for the member; its answer stands (silence included).
+    if (aiUsable) return ai && !eligibility.exclude.has(ai.candidate.key) ? ai : null;
+    return suggestUse(settled, candidates, eligibility);
+  }, [placing, settled, candidates, eligibility, ai, aiUsable]);
 
   const dismiss = useCallback(() => {
-    if (!suggestion || !storeKey) return;
-    dismissSuggestion(browserStorage(), storeKey, suggestion.candidate.key, Date.now());
+    if (!suggestion || !keys) return;
+    dismissSuggestion(browserStorage(), keys.dismissed, suggestion.candidate.key, Date.now());
     setDismissedAt((n) => n + 1);
-  }, [suggestion, storeKey]);
+  }, [suggestion, keys]);
 
   const accept = useCallback(() => {
     const c = suggestion?.candidate;
@@ -152,8 +238,9 @@ export function useUseSuggestion({
           toast.success(`${c.label} added. Ask again and the agent can use it.`);
         }
         // It is on now: it is not suggested again.
-        if (storeKey) dismissSuggestion(browserStorage(), storeKey, c.key, Date.now());
+        if (keys) dismissSuggestion(browserStorage(), keys.dismissed, c.key, Date.now());
         setDismissedAt((n) => n + 1);
+        setAi(null);
         reload();
       } catch (e) {
         toast.error(errorText(e, `Could not turn on ${c.label}`));
@@ -161,7 +248,7 @@ export function useUseSuggestion({
         setBusy(false);
       }
     })();
-  }, [suggestion, busy, choices, pickExpert, roomId, storeKey, toast, reload]);
+  }, [suggestion, busy, choices, pickExpert, roomId, keys, toast, reload]);
 
   return { suggestion, busy, accept, dismiss };
 }

@@ -2,7 +2,10 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { defaultDisplayName, validateDisplayName } from "@/lib/displayNames";
 import { MaxDisplayNameRunes } from "@/lib/wire.gen";
+import { gatewayBase } from "@/lib/config";
 import { setPrivacyMode, usePrivacyMode } from "@/lib/privacyMode";
+import { StorageKey, browserStorage, memberKey } from "@/lib/storageKeys";
+import { aiSuggestionsOn, setAiSuggestions } from "@/lib/suggestUse";
 import { profilesApi } from "@/lib/profilesApi";
 import { nameResolver } from "@/lib/useDisplayName";
 import { Button } from "@/ui/Button";
@@ -21,6 +24,8 @@ export function ProfileSettings() {
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
   const privacy = usePrivacyMode();
+  const aiKey = subject ? memberKey(StorageKey.suggestWithAi, { gateway: gatewayBase(), subject }) : "";
+  const [suggestAi, setSuggestAi] = useState(() => !aiKey || aiSuggestionsOn(browserStorage(), aiKey));
 
   useEffect(() => {
     if (!subject) return;
@@ -111,7 +116,7 @@ export function ProfileSettings() {
       <section className="flex flex-col gap-3">
         <div>
           <h2 className="text-sm font-semibold">Privacy</h2>
-          <p className="mt-0.5 text-sm text-[var(--color-fg-muted)]">For demos and screenshots. Applies to this browser only.</p>
+          <p className="mt-0.5 text-sm text-[var(--color-fg-muted)]">These apply to this browser only.</p>
         </div>
         <Card>
           <label className="flex cursor-pointer items-center justify-between gap-4 px-4 py-3">
@@ -128,6 +133,27 @@ export function ProfileSettings() {
               checked={privacy}
               onChange={(e) => setPrivacyMode(e.target.checked)}
               aria-label="Hide email addresses"
+            />
+          </label>
+          <label className="flex cursor-pointer items-center justify-between gap-4 border-t border-[var(--color-border)] px-4 py-3">
+            <span className="min-w-0">
+              <span className="block text-sm font-medium">Suggest with your organization's AI</span>
+              <span className="block text-xs text-[var(--color-fg-muted)]">
+                While you write a request, a few short pauses send what you wrote to your organization's AI model, which suggests an expert, skill pack or tool that fits. It is not stored.
+                Off: suggestions are worked out in this browser only.
+              </span>
+            </span>
+            <input
+              type="checkbox"
+              role="switch"
+              className="size-4 accent-[var(--color-accent)]"
+              checked={suggestAi}
+              disabled={!aiKey}
+              onChange={(e) => {
+                setSuggestAi(e.target.checked);
+                setAiSuggestions(browserStorage(), aiKey, e.target.checked);
+              }}
+              aria-label="Suggest with your organization's AI"
             />
           </label>
         </Card>

@@ -1,5 +1,16 @@
 import {
+  aiSuggestionsOn,
+  asked,
+  ASK_MAX_PER_DRAFT,
+  askedText,
   candidatesOf,
+  decisionRequest,
+  eligibleForAsk,
+  MAX_ASKED_CANDIDATES,
+  NO_ASKS,
+  setAiSuggestions,
+  shouldAsk,
+  suggestionFromDecision,
   dismissSuggestion,
   dismissedKeys,
   MIN_DRAFT_CHARS,
@@ -9,7 +20,7 @@ import {
   tokens,
   type UseCandidate,
 } from "./suggestUse.ts";
-import type { ContentComponent, MemberComponent } from "./wire.gen.ts";
+import type { ContentComponent, DecisionReply, MemberComponent } from "./wire.gen.ts";
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
@@ -139,4 +150,86 @@ const pick = (draft: string, opts?: Parameters<typeof suggestUse>[2]) => suggest
   assert(dismissedKeys(storage, "bad", now).size === 0, "an unreadable store is empty");
   assert(dismissedKeys(null, "k", now).size === 0, "no storage, nothing dismissed");
   dismissSuggestion(null, "k", "x", now);
+}
+
+// ---- the decision model ----------------------------------------------------
+
+const byName = (name: string) => catalog.find((c) => c.name === name) as UseCandidate;
+const answer = (probs: Record<string, number>, type = "choice"): DecisionReply =>
+  ({ model: "decision-1", usage: { input_tokens: 1, output_tokens: 1 }, answers: [{ type, name: "fit", probabilities: Object.entries(probs).map(([value, probability]) => ({ value, probability })) }] }) as unknown as DecisionReply;
+
+// How often a draft is asked about: once it says enough, then only when it has grown a lot
+// and a while has passed, and never more than four times, however long it gets.
+{
+  const t0 = 1_000_000;
+  assert(!shouldAsk(NO_ASKS, "too short", t0), "a short draft is not asked about");
+  assert(shouldAsk(NO_ASKS, "a request that says enough", t0), "a draft that says enough is asked about");
+  const first = asked(NO_ASKS, "a request that says enough", t0);
+  assert(!shouldAsk(first, "a request that says enough, and a little more", t0 + 60_000), "a little more is not enough");
+  const longer = "x".repeat(80);
+  assert(!shouldAsk(first, longer, t0 + 1_000), "grown, but too soon");
+  assert(shouldAsk(first, longer, t0 + 6_000), "grown and a while later");
+  // The worst case: a pause after every character, a second apart, 5000 characters.
+  let state = NO_ASKS;
+  let calls = 0;
+  for (let len = 1; len <= 5000; len++) {
+    const draft = "a".repeat(len);
+    const now = t0 + len * 1_000;
+    if (shouldAsk(state, draft, now)) {
+      calls++;
+      state = asked(state, draft, now);
+    }
+  }
+  assert(calls === ASK_MAX_PER_DRAFT, `a long text costs ${ASK_MAX_PER_DRAFT} calls at most (${calls})`);
+  const long = "w".repeat(3000);
+  assert(askedText(long).length < 1300 && askedText(long).startsWith("w") && askedText(long).includes("[…]"), "a long draft is cut to its start and end");
+  assert(askedText("  short  ") === "short", "a short draft is sent whole");
+}
+
+// The question: every eligible candidate and "none", the draft as the input.
+{
+  const eligible = eligibleForAsk("anything", catalog, { exclude: new Set(["expert/cc_sql-helper"]), worn: new Set(["interactive-apps"]) });
+  assert(!eligible.some((c) => c.name === "sql-helper" || c.name === "interactive-apps"), "excluded and worn are not asked about");
+  const body = decisionRequest("build me a page", eligible);
+  const q = body.questions[0];
+  assert(body.input === "build me a page" && q?.type === "choice", "one choice question over the draft");
+  assert(q?.choices?.length === eligible.length + 1 && q.choices.at(-1)?.value === "none", "every candidate and none");
+  assert(new Set(q?.choices?.map((c) => c.value)).size === q?.choices?.length, "values are unique");
+  assert(!(q?.instructions ?? "").includes("build me a page"), "the draft is never part of the instructions");
+  const many: UseCandidate[] = Array.from({ length: 300 }, (_, i) => ({ key: `expert/e${i}`, kind: "expert", id: `e${i}`, name: `e${i}`, label: `E${i}`, description: i === 299 ? "invoice invoice reconciliation" : "something", tags: [], wears: [] }));
+  const capped = eligibleForAsk("reconcile the invoice", many);
+  assert(capped.length === MAX_ASKED_CANDIDATES && capped[0]?.id === "e299", "too many candidates: the closest in words, capped");
+}
+
+// The answer: a candidate the model is sure of and clearly prefers, or silence.
+{
+  const all = catalog;
+  const expectName = (reply: DecisionReply, name: string | null, why: string, eligible = all) =>
+    assert((suggestionFromDecision(reply, eligible)?.candidate.name ?? null) === name, why);
+  expectName(answer({ "expert/cc_app-builder": 0.86, "skill/cc_interactive-apps": 0.09, none: 0.02 }), "app-builder", "a clear choice");
+  expectName(answer({ "skill/cc_interactive-apps": 0.37, none: 0.33, "expert/cc_app-builder": 0.26 }), null, "an ambiguous request stays silent");
+  expectName(answer({ none: 1, "expert/cc_sql-helper": 0 }), null, "none");
+  expectName(answer({ "expert/cc_code-reviewer": 0.69, "expert/cc_tech-design-reviewer": 0.29, none: 0.01 }), "code-reviewer", "sure enough and twice the runner-up");
+  expectName(answer({ "expert/cc_code-reviewer": 0.55, none: 0.1 }), null, "not sure enough");
+  expectName(answer({ "expert/cc_code-reviewer": 0.6, "expert/cc_tech-design-reviewer": 0.4 }), null, "a close runner-up");
+  expectName(answer({ "skill/cc_interactive-apps": 0.99, none: 0 }), "app-builder", "a skill pack an eligible expert wears is the expert");
+  const noExpert = all.filter((c) => c.name !== "app-builder");
+  expectName(answer({ "skill/cc_interactive-apps": 0.99, none: 0 }), "interactive-apps", "the skill pack itself when its expert is not offered", noExpert);
+  expectName(answer({ "expert/cc_app-builder": 0.5, "skill/cc_interactive-apps": 0.45, none: 0.05 }), "app-builder", "the expert takes its skill pack's share");
+  expectName(answer({ "expert/cc_sql-helper": 1 }, "refusal"), null, "a refusal");
+  expectName({ model: "m", usage: { input_tokens: 1, output_tokens: 1 }, answers: [] } as unknown as DecisionReply, null, "no answer");
+  assert(suggestionFromDecision(answer({ "expert/cc_sql-helper": 0.99, none: 0 }), all)?.probability === 0.99, "the probability is kept");
+  assert(byName("sql-helper").kind === "expert", "fixture sanity");
+}
+
+// The member's choice: on unless turned off.
+{
+  const data = new Map<string, string>();
+  const storage = { getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => void data.set(k, v) };
+  assert(aiSuggestionsOn(storage, "k") && aiSuggestionsOn(null, "k"), "on by default");
+  setAiSuggestions(storage, "k", false);
+  assert(!aiSuggestionsOn(storage, "k") && aiSuggestionsOn(storage, "other"), "off for that member only");
+  setAiSuggestions(storage, "k", true);
+  assert(aiSuggestionsOn(storage, "k"), "on again");
+  setAiSuggestions(null, "k", false);
 }

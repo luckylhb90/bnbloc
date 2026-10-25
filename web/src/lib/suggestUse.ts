@@ -5,7 +5,7 @@
 // holds. The one owner of the tokenizing, the scoring and the "clear enough to
 // show" rules; the hook (views/composer/useUseSuggestion.ts) loads the Library and
 // applies the click, the row (views/composer/UseSuggestionRow.tsx) draws.
-import type { ContentComponent, MemberComponent } from "./wire.gen.ts";
+import type { ContentComponent, DecisionReply, DecisionRequest, MemberComponent } from "./wire.gen.ts";
 
 export type UseKind = "expert" | "skill" | "mcp";
 
@@ -27,8 +27,10 @@ export interface UseCandidate {
 
 export interface UseSuggestion {
   readonly candidate: UseCandidate;
-  /** The words of the request that matched, for the row's tooltip. */
+  /** The words of the request that matched, for the row's tooltip (the keyword path). */
   readonly matched: readonly string[];
+  /** How sure the decision model was (the decision path). */
+  readonly probability?: number;
 }
 
 /** The member catalog (GET /v1/components) as candidates: content experts and
@@ -194,6 +196,143 @@ export function suggestUse(draft: string, candidates: readonly UseCandidate[], o
   if (!best) return null;
   if (next && next.words.length === best.words.length && best.score < CLOSE * next.score) return null;
   return { candidate: best.d.c, matched: best.words };
+}
+
+// ---- the organization's decision model places a request ---------------------
+// The same candidates, asked as one choice question of the organization's
+// decision model (docs/prd/2026-10-17-decision-models.md): it reads intent and
+// any language, and its probabilities are calibrated, so "clear enough" is a
+// threshold, not a tuned score. The keyword matcher above is what runs when the
+// model is off, unavailable or throttled. What is asked, how often and what an
+// answer must be are all here; lib/decisions.ts owns the call.
+
+/** MAX_ASKED_CANDIDATES bounds the question: more eligible candidates than this
+ *  are cut to the ones whose words are closest to the request. */
+export const MAX_ASKED_CANDIDATES = 120;
+const ASK_HEAD_CHARS = 800;
+const ASK_TAIL_CHARS = 400;
+const ASK_DESCRIPTION_CHARS = 160;
+/** ASK_MAX_PER_DRAFT: a draft is placed at most this many times, however long it grows. */
+export const ASK_MAX_PER_DRAFT = 4;
+/** After a first ask, another needs the draft this many times as long... */
+const ASK_MIN_GROWTH = 1.8;
+/** ...and at least this many characters more... */
+const ASK_MIN_ADDED = 40;
+/** ...and this long since the last. */
+export const ASK_MIN_GAP_MS = 5_000;
+/** DECISION_BACKOFF_MS: how long a refusal, a rate limit or a failure keeps the
+ *  decision model out of it (the keyword matcher runs meanwhile). */
+export const DECISION_BACKOFF_MS = 60_000;
+/** SURE: the least probability a choice needs, and LEAD how many times the
+ *  runner-up's (or "none") it must be. */
+const SURE = 0.6;
+const LEAD = 2;
+const NONE = "none";
+
+export interface AskState {
+  readonly asks: number;
+  readonly lastLen: number;
+  readonly lastAt: number;
+}
+/** NO_ASKS: a new draft, not asked about yet. */
+export const NO_ASKS: AskState = { asks: 0, lastLen: 0, lastAt: 0 };
+
+/** shouldAsk: whether the draft, as it stands after a pause, is worth another
+ *  question. A draft is asked about when it first says enough; again only once it
+ *  has grown a lot and a while has passed; never more than ASK_MAX_PER_DRAFT
+ *  times, so a long text costs a handful of calls, not one per keystroke. */
+export function shouldAsk(state: AskState, draft: string, now: number): boolean {
+  const len = draft.trim().length;
+  if (len < MIN_DRAFT_CHARS || state.asks >= ASK_MAX_PER_DRAFT) return false;
+  if (state.asks === 0) return true;
+  return now - state.lastAt >= ASK_MIN_GAP_MS && len >= state.lastLen * ASK_MIN_GROWTH && len - state.lastLen >= ASK_MIN_ADDED;
+}
+
+/** asked is the state after a question about the draft. */
+export function asked(state: AskState, draft: string, now: number): AskState {
+  return { asks: state.asks + 1, lastLen: draft.trim().length, lastAt: now };
+}
+
+/** askedText is the part of a draft the model reads: all of a short one, the start
+ *  (what is wanted) and the end (where it has got to) of a long one. */
+export function askedText(draft: string): string {
+  const t = draft.trim();
+  if (t.length <= ASK_HEAD_CHARS + ASK_TAIL_CHARS) return t;
+  return `${t.slice(0, ASK_HEAD_CHARS)}\n[…]\n${t.slice(-ASK_TAIL_CHARS)}`;
+}
+
+/** eligibleForAsk are the candidates worth asking about: not excluded (picked, on,
+ *  dismissed), no skill pack an expert in effect wears; at most MAX_ASKED_CANDIDATES,
+ *  the closest in words first when there are more. */
+export function eligibleForAsk(draft: string, candidates: readonly UseCandidate[], options: SuggestOptions = {}): UseCandidate[] {
+  const open = candidates.filter((c) => !options.exclude?.has(c.key) && !(c.kind === "skill" && options.worn?.has(c.name)));
+  if (open.length <= MAX_ASKED_CANDIDATES) return open;
+  const index = indexOf(candidates);
+  const query = [...new Set(tokens(draft))];
+  const closeness = new Map<string, number>();
+  for (const d of index.docs) {
+    let score = 0;
+    for (const t of query) score += index.idf(t) * (d.name.has(t) ? 3 : d.tags.has(t) ? 2 : d.desc.has(t) ? 1 : 0);
+    closeness.set(d.c.key, score);
+  }
+  return [...open].sort((a, b) => (closeness.get(b.key) ?? 0) - (closeness.get(a.key) ?? 0) || a.key.localeCompare(b.key)).slice(0, MAX_ASKED_CANDIDATES);
+}
+
+const QUESTION =
+  "A person is writing a request to an AI agent in a team workspace. Choose the one expert, skill pack or tool from the list that would help most with this request. " +
+  'Choose "none" when nothing clearly fits, or the person is only chatting or asking something no listed item is for.';
+
+/** decisionRequest is the one choice question over the eligible candidates and
+ *  "none". The draft is the input, never part of the instructions. */
+export function decisionRequest(draft: string, eligible: readonly UseCandidate[]): DecisionRequest {
+  const choices = eligible.map((c) => ({ value: c.key, description: `${c.label}. ${c.description.replace(/\s+/g, " ").trim().slice(0, ASK_DESCRIPTION_CHARS)}` }));
+  choices.push({ value: NONE, description: "None of these fits." });
+  return { input: askedText(draft), questions: [{ type: "choice", name: "fit", instructions: QUESTION, choices }] };
+}
+
+/** suggestionFromDecision reads the model's answer: the candidate it is sure of
+ *  and clearly prefers to every other (and to "none"), or null. An expert takes
+ *  the probability of the skill packs it wears, since choosing such a skill pack
+ *  means the expert that carries it. */
+export function suggestionFromDecision(reply: DecisionReply, eligible: readonly UseCandidate[]): UseSuggestion | null {
+  const answer = reply.answers?.[0];
+  if (!answer || answer.type !== "choice" || !answer.probabilities) return null;
+  const p = new Map<string, number>();
+  for (const x of answer.probabilities) p.set(String(x.value), x.probability);
+  const stood = new Set(eligible.filter((c) => c.kind === "expert").flatMap((e) => e.wears));
+  const entries: { readonly candidate: UseCandidate | null; readonly p: number }[] = [{ candidate: null, p: p.get(NONE) ?? 0 }];
+  for (const c of eligible) {
+    if (c.kind === "skill" && stood.has(c.name)) continue;
+    let prob = p.get(c.key) ?? 0;
+    if (c.kind === "expert") for (const s of eligible) if (s.kind === "skill" && c.wears.includes(s.name)) prob += p.get(s.key) ?? 0;
+    entries.push({ candidate: c, p: prob });
+  }
+  entries.sort((a, b) => b.p - a.p);
+  const [best, next] = entries;
+  if (!best?.candidate || best.p < SURE || (next && best.p < LEAD * next.p)) return null;
+  return { candidate: best.candidate, matched: [], probability: best.p };
+}
+
+// ---- the member's choice of how suggestions are placed -----------------------
+
+/** aiSuggestionsOn: whether suggestions are placed by the organization's AI (what
+ *  is typed is sent to it while typing). On unless the member turned it off. */
+export function aiSuggestionsOn(storage: Pick<globalThis.Storage, "getItem"> | null, storeKey: string): boolean {
+  if (!storage) return true;
+  try {
+    return storage.getItem(storeKey) !== "off";
+  } catch {
+    return true;
+  }
+}
+
+/** setAiSuggestions keeps the member's choice. */
+export function setAiSuggestions(storage: Pick<globalThis.Storage, "setItem"> | null, storeKey: string, on: boolean): void {
+  try {
+    storage?.setItem(storeKey, on ? "on" : "off");
+  } catch {
+    // private mode: the choice is not kept
+  }
 }
 
 /** SuggestionAction: what the row's button does, in the member's words. */

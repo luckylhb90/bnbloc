@@ -1,7 +1,8 @@
 # Suggest what to use: the composer recommends an expert, skill pack or tool, one click to turn it on
 
-Status: slice 1 built (experts, skill packs, MCP tools; a local keyword matcher).
-Slice 2 (open): an assist that ranks across languages.
+Status: built. The organization's decision model places the request when it runs
+for the member (on by default, a switch in Settings → Privacy); a local keyword
+matcher is the fallback.
 
 ## Why
 
@@ -41,21 +42,33 @@ has written enough to say what they want, dismissible for good (30 days).
 1. **Recommend, never enable by itself.** Nothing is turned on, picked or
    installed without the member's click. No global default-on, no agent
    prompt text, no new tool or platform rule for agents.
-2. **The draft stays in the browser.** Ranking is local (a keyword score over
-   the Library's names, tags and descriptions the client already has); nothing
-   about what the member writes is sent anywhere to produce a suggestion.
-3. **A suggestion is shown only when it is clear.** At least two distinct
-   words of the request match the candidate, or one word the author declared
-   as a tag when the request is short (at most five meaningful words); a
-   close second candidate with the same coverage means no suggestion; an
-   expert that wears a matched skill replaces the skill. Better silent than
-   wrong.
+2. **What is sent, to whom, how often.** With the decision model on (the
+   default whenever the organization runs one for the member), what the member
+   writes goes to the organization's own decision model through the gateway
+   (`POST /v1/decisions`: audited by count and latency, never by content; not
+   stored), after a pause of 0.7 s, at most four times per draft: once when it
+   first says enough, then only when it has grown 1.8 times and 40 characters
+   and 5 s have passed; at most its first 800 and last 400 characters; a stale
+   answer is dropped; a refusal, rate limit or failure keeps the model out for a
+   minute. The member can turn it off (Settings → Privacy): suggestions are then
+   worked out in the browser alone, by a keyword score over the Library's names,
+   tags and descriptions, and nothing is sent.
+3. **A suggestion is shown only when it is clear.** The decision model is asked
+   one choice question over the eligible candidates and "none"; its answer is
+   used when the choice has at least 0.6 and at least twice the runner-up's
+   (or "none"'s) probability. Its probabilities are calibrated, so this is a
+   threshold, not a tuned score: an ambiguous request ("improve the design…")
+   came back 0.37 against none 0.33 and stays silent. The keyword fallback shows
+   one only when at least two distinct words match (or one rare word of a name in
+   a short request) and no close second has the same coverage. In both, an
+   expert that wears a skill pack stands for it. Better silent than wrong.
 4. **Only what is not already on.** Not the expert already picked or the
    room's expert, not a skill pack already on for the room or the member, not a
    tool already added. Dismissed candidates stay quiet per member.
-5. **One owner** for the matching: `lib/suggestUse.ts` (tokenizing, scoring,
-   the rules above). The hook loads the Library and applies the click; the
-   row only draws.
+5. **One owner** for the matching: `lib/suggestUse.ts` (the question and how an
+   answer is read, the ask schedule, the keyword fallback). `lib/decisions.ts`
+   owns the call. The hook loads the Library and applies the click; the row only
+   draws.
 6. **The same rights as the Library's own buttons.** A skill pack for the room
    is the room dialog's `PUT /v1/content-uses` (owner or admin); a refusal
    falls back to the member's own agents. A tool is the Components page's
@@ -66,11 +79,16 @@ has written enough to say what they want, dismissible for good (30 days).
 
 Candidates are what `GET /v1/components` returns for the member: content
 experts and skill packs, and MCP tools (`kind: mcp`). Content authors steer
-the match with `description` (written as a trigger: "Use when…") and `tags`
-(keywords, in any language). The default content stays in neutral English (it
-hard-codes no other language), so a request in another language matches only
-the packs an organization wrote or localized in that language (an
-organization's experts often are): the cross-language case is slice 2.
+both paths with `description` (written as a trigger: "Use when…") and `tags`.
+The decision model reads intent in any language, so the default content, which
+stays in neutral English, is found by a request in Chinese; the keyword fallback
+matches only words that appear in the descriptions and tags.
+
+Measured on a real organization's Library (40 candidates, 18 requests in two
+languages): the decision model gave a sensible answer to all 18, the keyword
+matcher to about 12 (it missed the Chinese requests against English
+descriptions and several indirect ones). A call is about 2,100 input tokens and
+one output token, 1.2 to 1.8 s.
 
 ## Lenses (pre-mortem)
 
@@ -87,16 +105,11 @@ organization's experts often are): the cross-language case is slice 2.
   above, the dismissal and the "one at a time" limit are the defences; the
   matcher's tests hold real catalog names against real requests, including the
   ones it must stay silent on.
-- **Cost.** No server work, no assist call, no agent tokens. One extra
-  `GET /v1/components` per room visit that gets a suggestion (the Library
-  already reads it).
-- **Privacy.** See rule 2.
-
-## Slice 2 (open)
-
-A ranking assist on the organization's model for requests the keyword score
-cannot place (another language, an indirect request). It would take the draft
-and the candidates' labels and return a candidate; the draft would then leave
-the browser, so it is the member's setting, off by default for personal
-drafts. The row, the actions and the dismissal stay as they are: the matcher
-sits behind `suggestUse`'s signature.
+- **Cost.** No agent tokens. At most four decision calls per draft, each about
+  2,100 input tokens, against the member's assist rate (20 a minute): the ask
+  schedule leaves room for the member's own AI buttons, and a 429 puts the model
+  out of it for a minute. One extra `GET /v1/components` once a request has five
+  characters (the Library read is then ready when the member pauses).
+- **Privacy.** See rule 2: the one new thing is that text is sent as it is
+  written, not when the member clicks; hence the schedule, the cut, the switch
+  and the audit without content.

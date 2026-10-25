@@ -54,6 +54,10 @@ export const StorageKey = {
   // The composer's suggestions a member dismissed, per member, with when each
   // is suggested again (lib/suggestUse.ts).
   useSuggestions: "bnbloc.useSuggestions",
+  // Whether the composer's suggestions are placed by the organization's AI
+  // (what is typed is sent to it while typing), per member; on unless "off"
+  // (lib/suggestUse.ts).
+  suggestWithAi: "bnbloc.suggestWithAi",
 } as const;
 
 export type StorageKeyName = (typeof StorageKey)[keyof typeof StorageKey];

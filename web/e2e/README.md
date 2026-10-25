@@ -55,7 +55,9 @@ BNBLOC_E2E_URL=http://localhost:5173 node web/e2e/multi-account.mjs
 The composer's "fits this request" row, in a real browser against a mocked
 gateway: an expert is suggested and picked in one click, a request nothing
 fits gets no row, a dismissal lasts across a reload, a skill pack is turned on
-for the room and, when the room refuses, for the member's agents.
+for the room and, when the room refuses, for the member's agents; the decision
+model places a request in a few calls per draft (and its silence stands), and the
+keyword matcher does without it, on a rate limit or when the member turned it off.
 
 ```sh
 BNBLOC_E2E_URL=http://localhost:5173 node web/e2e/suggest-use.mjs
