@@ -25,7 +25,7 @@ func newOwnershipServer(t *testing.T, allowServeAll bool) (*httptest.Server, *ca
 	mem.Add("room-1", "mallory")
 	pub := &capturePublisher{}
 	jobs := store.NewMemoryBridgeJobs()
-	svc := &Service{Store: store.NewMemory(), Publisher: pub, Membership: mem, BridgeJobs: jobs, AllowServeAllOwners: allowServeAll}
+	svc := &Service{Store: store.NewMemory(), Publisher: pub, Membership: mem, BridgeJobs: jobs, BridgeSends: jobs, AllowServeAllOwners: allowServeAll}
 	srv := httptest.NewServer(svc.Handler())
 	t.Cleanup(srv.Close)
 	ctx := tenant.NewContext(context.Background(), tenant.Default)

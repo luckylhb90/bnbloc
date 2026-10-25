@@ -36,12 +36,13 @@ func main() {
 	}
 	go pulse.RunMetrics(context.Background(), metrics, pulseEm, 15*time.Second)
 	svc := &activity.Service{
-		Pulse:      pulseEm,
-		Metrics:    metrics,
-		Store:      backends.Activity,
-		Publisher:  realtime.NewHTTPPublisher(config.FromEnvRaw("BNBLOC_REALTIME_BASE_URL"), "activity"),
-		Membership: members,
-		BridgeJobs: backends.BridgeJobs,
+		Pulse:       pulseEm,
+		Metrics:     metrics,
+		Store:       backends.Activity,
+		Publisher:   realtime.NewHTTPPublisher(config.FromEnvRaw("BNBLOC_REALTIME_BASE_URL"), "activity"),
+		Membership:  members,
+		BridgeJobs:  backends.BridgeJobs,
+		BridgeSends: backends.BridgeSends,
 		// Team agent dashboard read side (same shared DB).
 		Team:     backends.TeamAgents(),
 		Usage:    backends.AgentUsage(),

@@ -178,6 +178,37 @@ func (c *ServiceClient) Assist(ctx context.Context, task string, req ServiceAssi
 	return out.Fields, nil
 }
 
+// ErrNoMemberComputer: none of the member's own bnbloc desktop apps is
+// running, so nothing can send from their computer.
+var ErrNoMemberComputer = errors.New("the member's bnbloc desktop app is not running")
+
+// SendFromMember asks that the member whose action granted act (Member.Act)
+// have their own computer send one GET or HEAD of url; the answer arrives
+// as that send's egress call (ServiceSendEgressPath). ErrNoMemberComputer
+// when none of their desktop apps is running.
+func (c *ServiceClient) SendFromMember(ctx context.Context, act, method, url string) (string, error) {
+	body, err := json.Marshal(ServiceSendRequest{Act: act, Method: method, URL: url})
+	if err != nil {
+		return "", err
+	}
+	code, raw, err := c.do(ctx, http.MethodPost, ComponentSendPath, body)
+	if err != nil {
+		return "", err
+	}
+	switch code {
+	case http.StatusOK:
+	case http.StatusConflict:
+		return "", fmt.Errorf("%w: %s", ErrNoMemberComputer, errorText(raw))
+	default:
+		return "", fmt.Errorf("bnbloc send answered %d: %s", code, errorText(raw))
+	}
+	var out ServiceSendReply
+	if err := json.Unmarshal(raw, &out); err != nil || out.ID == "" {
+		return "", fmt.Errorf("bnbloc send answered no id")
+	}
+	return out.ID, nil
+}
+
 // errorText is a platform error's message ({"error": …}), else the body.
 func errorText(raw []byte) string {
 	var e struct {

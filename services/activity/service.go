@@ -28,6 +28,9 @@ type Service struct {
 	Publisher  realtime.Publisher
 	Membership membership.Directory
 	BridgeJobs store.BridgeJobStore
+	// BridgeSends hands a bridge its owner's sends with its claim (nil:
+	// none).
+	BridgeSends store.BridgeSendStore
 	// AllowServeAllOwners is the SERVER-side gate for single-host serve-all
 	// testing (one bridge driving every member's agent). Only when it is set
 	// does a bridge's serveAllOwners request take effect, and only then may a

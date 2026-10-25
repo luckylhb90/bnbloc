@@ -365,9 +365,7 @@ var hopHeaders = []string{"Connection", "Proxy-Connection", "Keep-Alive", "Proxy
 // egressRoundTrip sends one request to the service for the bound job and
 // turns its answer into the command's response; a card in the answer is
 // posted for the turn's requester. When the service answers Send, the
-// bridge sends the request itself, from this computer, with the
-// credentials the service gives, and reports the system's answer back
-// (the service may ask once more with fresh credentials, or answer itself).
+// bridge sends the request itself, from this computer (exchange).
 func (s *Server) egressRoundTrip(sess *Session, host, service string, req *http.Request, body []byte) *http.Response {
 	_, job := sess.egressFor(host)
 	if job.JobID == "" {
@@ -383,60 +381,97 @@ func (s *Server) egressRoundTrip(sess *Session, host, service string, req *http.
 	path := component.TurnProxyPath + url.PathEscape(service) + "/egress/request?room=" + url.QueryEscape(scope.RoomID) + "&job=" + url.QueryEscape(job.JobID)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
+	sent, out, xerr := exchange(ctx, s.cfg.Gateway, path, service, host, in, func(c component.Card) { s.postCard(sess, job, service, c) })
+	if xerr != nil {
+		obs.ServerError(nil, "egress: "+service+" "+host+" job "+job.JobID, xerr.cause)
+		return egressError(xerr.status, xerr.msg)
+	}
+	if out.Accept {
+		slog.Info("bnbloc bridge egress", "event", "bnbloc.bridge.egress", "service", service, "host", host, "method", req.Method, "status", sent.StatusCode, "job", job.JobID, "from", "this computer")
+		return sent
+	}
+	slog.Info("bnbloc bridge egress", "event", "bnbloc.bridge.egress", "service", service, "host", host, "method", req.Method, "status", out.Status, "job", job.JobID)
+	resp := &http.Response{StatusCode: out.Status, ProtoMajor: 1, ProtoMinor: 1, Header: http.Header{}}
+	for k, v := range out.Header {
+		resp.Header[http.CanonicalHeaderKey(k)] = v
+	}
+	for _, h := range append(hopHeaders, "Content-Length", "Set-Cookie") {
+		resp.Header.Del(h)
+	}
+	resp.Body = io.NopCloser(bytes.NewReader(out.Body))
+	resp.ContentLength = int64(len(out.Body))
+	if req.Method == http.MethodHead {
+		resp.Body, resp.ContentLength = http.NoBody, 0
+	}
+	return resp
+}
+
+// exchangeError is why an exchange ended without the service's answer:
+// the status and message the command gets, and the cause for the log.
+type exchangeError struct {
+	status int
+	msg    string
+	cause  error
+}
+
+// exchange is the one egress protocol with a service, for a turn's command
+// and for a send outside a turn: ask the service about in at path; to a
+// Send, send it from this computer with the credentials it gives and ask
+// again with the report, at most component.MaxEgressSends times. It ends
+// with the service's answer (Accept: sent is the system's) or why not. A
+// card in an answer goes to onCard.
+func exchange(ctx context.Context, gw Gateway, path, service, host string, in component.EgressRequest, onCard func(component.Card)) (*http.Response, component.EgressResponse, *exchangeError) {
 	var sent *http.Response
 	for attempt := 0; ; attempt++ {
-		raw, err := s.cfg.Gateway.Do(ctx, http.MethodPost, path, in)
+		raw, err := gw.Do(ctx, http.MethodPost, path, in)
 		if err != nil {
 			var se *StatusError
 			msg := "the " + service + " service could not be reached"
 			if errors.As(err, &se) {
 				msg = fmt.Sprintf("the %s service refused the call (%s): %s", service, httpStatusText(se.Status), strings.TrimSpace(string(bytes.TrimSpace(se.Body))))
 			}
-			obs.ServerError(nil, "egress call failed: "+service+" "+host+" job "+job.JobID, err)
-			return egressError(http.StatusBadGateway, msg)
+			return nil, component.EgressResponse{}, &exchangeError{http.StatusBadGateway, msg, err}
 		}
 		var out component.EgressResponse
-		valid := json.Unmarshal(raw, &out) == nil && (out.Send != nil || (out.Accept && sent != nil) || (out.Status >= 100 && out.Status <= 599))
-		if !valid {
-			obs.ServerError(nil, "egress answer invalid: "+service, err)
-			return egressError(http.StatusBadGateway, "the "+service+" service answered something that is not an egress response")
+		if json.Unmarshal(raw, &out) != nil || !(out.Send != nil || (out.Accept && sent != nil) || (out.Status >= 100 && out.Status <= 599)) {
+			return nil, component.EgressResponse{}, &exchangeError{http.StatusBadGateway, "the " + service + " service answered something that is not an egress response", nil}
 		}
-		if out.Card != nil {
-			s.postCard(sess, job, service, *out.Card)
+		if out.Card != nil && onCard != nil {
+			onCard(*out.Card)
 		}
-		switch {
-		case out.Accept:
-			slog.Info("bnbloc bridge egress", "event", "bnbloc.bridge.egress", "service", service, "host", host, "method", req.Method, "status", sent.StatusCode, "job", job.JobID, "from", "this computer")
-			return sent
-		case out.Send != nil:
-			if err := sendsLeft(attempt); err != nil {
-				obs.ServerError(nil, "egress: the "+service+" service", err)
-				return egressError(http.StatusBadGateway, "the "+service+" service kept asking to send the request again")
-			}
-			resp, report, err := sendHere(ctx, in, out.Send)
-			if err != nil {
-				obs.ServerError(nil, "egress send from this computer: "+host, err)
-				return egressError(http.StatusBadGateway, "this computer could not reach "+host+": "+err.Error())
-			}
-			report.Attempt = attempt + 1
-			sent, in.Report = resp, report
-			continue
+		if out.Send == nil {
+			return sent, out, nil
 		}
-		slog.Info("bnbloc bridge egress", "event", "bnbloc.bridge.egress", "service", service, "host", host, "method", req.Method, "status", out.Status, "job", job.JobID)
-		resp := &http.Response{StatusCode: out.Status, ProtoMajor: 1, ProtoMinor: 1, Header: http.Header{}}
-		for k, v := range out.Header {
-			resp.Header[http.CanonicalHeaderKey(k)] = v
+		if err := sendsLeft(attempt); err != nil {
+			return nil, component.EgressResponse{}, &exchangeError{http.StatusBadGateway, "the " + service + " service kept asking to send the request again", err}
 		}
-		for _, h := range append(hopHeaders, "Content-Length", "Set-Cookie") {
-			resp.Header.Del(h)
+		resp, report, err := sendHere(ctx, in, out.Send)
+		if err != nil {
+			return nil, component.EgressResponse{}, &exchangeError{http.StatusBadGateway, "this computer could not reach " + host + ": " + err.Error(), err}
 		}
-		resp.Body = io.NopCloser(bytes.NewReader(out.Body))
-		resp.ContentLength = int64(len(out.Body))
-		if req.Method == http.MethodHead {
-			resp.Body, resp.ContentLength = http.NoBody, 0
-		}
-		return resp
+		report.Attempt = attempt + 1
+		sent, in.Report = resp, report
 	}
+}
+
+// SendFromHere runs a send outside a turn (docs/prd/2026-10-25-member-sends.md):
+// the platform queued it for this computer's owner; the bridge runs the
+// egress protocol for it through component.SendProxyPath. Its answer is
+// the service's to read; nothing reaches an agent.
+func SendFromHere(ctx context.Context, gw Gateway, id, method, rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	in := component.EgressRequest{Method: method, URL: u.String(), Header: map[string][]string{}}
+	_, _, xerr := exchange(ctx, gw, component.SendProxyPath+url.PathEscape(id), "component's", u.Host, in, nil)
+	if xerr != nil {
+		return errors.Join(errors.New(xerr.msg), xerr.cause)
+	}
+	slog.Info("bnbloc bridge send", "event", "bnbloc.bridge.send", "host", u.Host, "method", method, "send", id)
+	return nil
 }
 
 // sendsLeft refuses a send past component.MaxEgressSends.

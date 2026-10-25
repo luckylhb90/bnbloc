@@ -430,6 +430,9 @@ func (s *Service) handleComponentPage(w http.ResponseWriter, r *http.Request) {
 		}
 		member.Room, member.RoomRole = pt.Room, role
 	}
+	if r.Method == http.MethodPost {
+		member.Act = s.componentAct(claims, rec.Name)
+	}
 	ans, ok := s.forwardToService(w, r, rec, servicecomp.Call{
 		Method: r.Method, Path: component.ServicePagesPath + "/" + pt.Page + "/" + forwardedPath(r, component.ComponentPagePath),
 		IdentityHeader: component.MemberHeader, Identity: component.EncodeHeader(member),
@@ -469,6 +472,7 @@ func (s *Service) handleComponentCardCall(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
+	member.Act = s.componentAct(claims, rec.Name)
 	path := component.ServiceCardsPrefix + page
 	if req.Query != "" {
 		path += "?" + req.Query

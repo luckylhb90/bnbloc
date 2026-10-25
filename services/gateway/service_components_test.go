@@ -83,7 +83,7 @@ func newServiceFixture(t *testing.T) *serviceFixture {
 		if r.URL.RawQuery != "" {
 			pq += "?" + r.URL.RawQuery
 		}
-		identity := r.Header.Get(component.TurnHeader) + r.Header.Get(component.MemberHeader) + r.Header.Get(component.CallbackHeader)
+		identity := r.Header.Get(component.TurnHeader) + r.Header.Get(component.MemberHeader) + r.Header.Get(component.CallbackHeader) + r.Header.Get(component.SendHeader)
 		signed := component.Verify(r.Header.Get(component.SignatureHeader), fx.secret, component.SignedRequest(r.Method, pq, identity, body), time.Now(), time.Minute) == nil
 		fx.mu.Lock()
 		fx.calls = append(fx.calls, serviceCall{method: r.Method, path: pq, identity: identity, signed: signed, body: body})
@@ -104,6 +104,8 @@ func newServiceFixture(t *testing.T) *serviceFixture {
 			_, _ = w.Write([]byte("<!doctype html><title>connections</title>"))
 		case strings.HasPrefix(path, component.ServiceCardsPrefix):
 			_ = json.NewEncoder(w).Encode(component.CardReply{Text: "Allowed.", Done: true, Open: "http://plain.example.com/"})
+		case path == component.ServiceSendEgressPath:
+			_ = json.NewEncoder(w).Encode(component.EgressResponse{Status: http.StatusNoContent})
 		case strings.HasPrefix(path, component.ServiceCallbackPrefix):
 			w.Header().Set("Location", "https://idp.example.com/done")
 			w.WriteHeader(http.StatusFound)
@@ -143,6 +145,7 @@ func newServiceFixture(t *testing.T) *serviceFixture {
 	svc.RoomTenant = func(string) string { return "home" }
 	fx.jobs = store.NewMemoryBridgeJobs()
 	svc.ContentJobs = fx.jobs
+	svc.BridgeSends = fx.jobs
 	fx.svc, fx.srv = svc, srv
 	for _, u := range []string{"maya", "jack", "olga"} {
 		fx.tokens[u], _ = login(t, srv, u)

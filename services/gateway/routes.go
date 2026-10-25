@@ -171,6 +171,9 @@ func (s *Service) routes() []route {
 		open("PUT "+component.ComponentStorePath+"{path...}", "the service's signature", s.handleComponentStore),
 		open("DELETE "+component.ComponentStorePath+"{path...}", "the service's signature", s.handleComponentStore),
 		open("POST "+component.ComponentAssistPath+"{task}", "the service's signature", s.handleComponentAssist).with(needContent),
+		// Sends from a member's computer, outside a turn (member_sends.go).
+		open("POST "+component.ComponentSendPath, "the service's signature and the member's grant", s.handleComponentSend),
+		gated("POST "+component.SendProxyPath+"{send}", drive, s.handleSendProxy),
 		member("GET /v1/my/share-targets", s.handleShareTargets),
 		member("POST /v1/my/share-targets/{name}/sessions", s.handleShareSession).spends(costBudget),
 		open("GET "+shareTargetsPrefix+"{name}/pages/{ticket}/", "a share ticket in the path", s.handleSharePage).spends(publicBudget),

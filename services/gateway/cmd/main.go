@@ -112,6 +112,7 @@ type tenantWiring struct {
 	// ContentComponents and ContentJobs back the content component routes.
 	ContentComponents store.ContentComponentStore
 	ContentJobs       gateway.ContentJobs
+	BridgeSends       store.BridgeSendStore
 	// NotifierReplies resolves notification reply tokens (N1).
 	NotifierReplies store.NotificationReplyTokenStore
 	// ComponentValues keeps service components' sealed values.
@@ -238,6 +239,7 @@ func resolveTenantWiring() tenantWiring {
 		RoomSources: backends.RoomSources, RoomInfo: backends.Room.GetRoom, AgentRuns: backends.AgentRuns(),
 		ContentComponents: backends.ContentComponents,
 		ContentJobs:       contentJobs(backends.BridgeJobs),
+		BridgeSends:       backends.BridgeSends,
 		OrgSync: &orgsync.Syncer{
 			Settings: backends.Settings, Tenants: backends.Tenant, Rooms: backends.Room,
 			State: backends.OrgSync, Sessions: backends.RefreshTokens, Audit: backends.ExtAudit,
@@ -320,6 +322,7 @@ func main() {
 		ComponentInstalls: tw.ComponentInstalls,
 		ContentComponents: tw.ContentComponents,
 		ContentJobs:       tw.ContentJobs,
+		BridgeSends:       tw.BridgeSends,
 		NotifierReplies:   tw.NotifierReplies,
 		ComponentValues:   tw.ComponentValues,
 		MemberCount:       tw.MemberCount,

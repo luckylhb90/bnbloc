@@ -158,6 +158,35 @@ is not reachable. With the Sandbox Protocol's `hostProxy`:
   decides by the attested drive (the connections component serves one only
   as a digital worker, never in the owner's or the requester's name).
 
+### Sends from a member's computer, outside a turn
+
+docs/prd/2026-10-25-member-sends.md. A component that declares `egress`
+may have a member's own computer send one read for them, without an
+agent (a connector's test from a system only the members' computers
+reach):
+
+- **The grant.** A member's action on the component's page (a `POST` page
+  call) or a card's call carries `Member.Act`, a one-time grant signed by
+  the platform (`auth.KindComponentAct`: the member, the organization,
+  the component; two minutes). A page view carries none.
+- **The ask.** `POST /v1/component-sends` (`ServiceSendRequest{act,
+  method, url}`, signed; `ServiceClient.SendFromMember`): `GET` or `HEAD`
+  of https. Refused when the grant is not the component's or was used
+  (one send per grant: the send's id is the grant's hash), `409` when
+  none of the member's own bridges is live. Audited (`send`, the method,
+  host and path).
+- **The take.** The member's bridge takes it with its job claim
+  (`takesSends`; with no free slot `sendsOnly`); a bridge serving every
+  owner never does. A send waits two minutes, then is dropped
+  (`bridge_sends`).
+- **The exchange.** The bridge runs the egress exchange it runs for a
+  turn (`roomtools.exchange`) through `POST /v1/send-proxy/{send}`: the
+  gateway forwards it to the component's `/send/egress` with the send in
+  `X-Bnbloc-Send` (`component.Send{org, member, id, origin}`), the
+  request's method and URL replaced with the queued ones. The component
+  answers `Send`, then `Accept` to the report; its answer's card is not
+  shown. Nothing reaches an agent or a room.
+
 ## Room facts
 
 At a session's creation the bridge asks each `roomFacts` service for the

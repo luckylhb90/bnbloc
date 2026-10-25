@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/luckylhb90/bnbloc/core"
@@ -76,6 +77,10 @@ const (
 	// ServiceCallbackPrefix: ComponentCallbackPath/{component}/{path}
 	// reaches ServiceCallbackPrefix + path.
 	ServiceCallbackPrefix = "/callbacks/"
+	// ServiceSendEgressPath takes an EgressRequest of a send from a
+	// member's computer (SendHeader) and answers an EgressResponse, as
+	// ServiceEgressRequestPath does for a turn (its Card is not shown).
+	ServiceSendEgressPath = "/send/egress"
 )
 
 // Platform routes, on the gateway.
@@ -93,6 +98,12 @@ const (
 	ComponentCallbackPath = "/v1/component-callbacks/"
 	// ComponentPagePath + "{ticket}/{path}": a page a member opened.
 	ComponentPagePath = "/v1/component-pages/"
+	// ComponentSendPath: a send from a member's computer
+	// (ServiceSendRequest, ServiceSendReply), signed by the component.
+	ComponentSendPath = "/v1/component-sends"
+	// SendProxyPath + "{send}": the member's bridge's egress call for a
+	// send it took.
+	SendProxyPath = "/v1/send-proxy/"
 )
 
 // Headers of the contract.
@@ -103,6 +114,8 @@ const (
 	MemberHeader = "X-Bnbloc-Member"
 	// CallbackHeader carries the Callback facts on a callback.
 	CallbackHeader = "X-Bnbloc-Callback"
+	// SendHeader carries the attested Send on a send's egress call.
+	SendHeader = "X-Bnbloc-Send"
 	// ComponentHeader names the endpoint component that signed a call to
 	// the platform (SignatureHeader with that component's credential):
 	// "<kind>/<name>" ("service/<name>" for a service; a notifier's reply
@@ -155,10 +168,49 @@ type Member struct {
 	Origin   string `json:"origin"`
 	Room     string `json:"room,omitempty"`
 	RoomRole string `json:"roomRole,omitempty"`
+	// Act, on a member's action (a POST page call, a card's call), is a
+	// one-time grant to have this member's own computer send one request
+	// (ServiceClient.SendFromMember), valid MaxSendGrantAge.
+	Act string `json:"act,omitempty"`
 }
 
 // RoomOwner is the room role of its owner (Member.RoomRole).
 const RoomOwner = "owner"
+
+// Sends from a member's computer, outside a turn
+// (docs/prd/2026-10-25-member-sends.md): a component that declares egress
+// asks, with a member's grant (Member.Act), that their own bridge send one
+// read; the bridge runs the egress protocol with ServiceSendEgressPath.
+
+// ServiceSendRequest asks for one send: GET or HEAD of an https URL.
+type ServiceSendRequest struct {
+	Act    string `json:"act"`
+	Method string `json:"method"`
+	URL    string `json:"url"`
+}
+
+// ServiceSendReply is the queued send's id (Send.ID on its egress call).
+type ServiceSendReply struct {
+	ID string `json:"id"`
+}
+
+// Send is the send an egress call is for: the organization and member
+// whose computer sends it, its id, and the platform's public origin.
+type Send struct {
+	Org    string `json:"org"`
+	Member string `json:"member"`
+	ID     string `json:"id"`
+	Origin string `json:"origin"`
+}
+
+// Bounds of a send: a grant works MaxSendGrantAge after the action; a
+// send no bridge took in MaxSendWait is dropped; a taken one is served
+// MaxSendHeld.
+const (
+	MaxSendGrantAge = 2 * time.Minute
+	MaxSendWait     = 2 * time.Minute
+	MaxSendHeld     = 5 * time.Minute
+)
 
 // ServiceAssistRequest is one run of a service's own AI task for an
 // organization: the text the task works from (the service builds it; the

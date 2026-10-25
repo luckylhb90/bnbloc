@@ -281,6 +281,10 @@ export const ServicePagesPath = "/pages";
 // ServiceCallbackPrefix: ComponentCallbackPath/{component}/{path}
 // reaches ServiceCallbackPrefix + path.
 export const ServiceCallbackPrefix = "/callbacks/";
+// ServiceSendEgressPath takes an EgressRequest of a send from a
+// member's computer (SendHeader) and answers an EgressResponse, as
+// ServiceEgressRequestPath does for a turn (its Card is not shown).
+export const ServiceSendEgressPath = "/send/egress";
 
 // Platform routes, on the gateway.
 // TurnProxyPath + "{component}/{path}?room=&job=": a bridge's call for
@@ -296,6 +300,12 @@ export const ComponentAssistPath = "/v1/component-assist/";
 export const ComponentCallbackPath = "/v1/component-callbacks/";
 // ComponentPagePath + "{ticket}/{path}": a page a member opened.
 export const ComponentPagePath = "/v1/component-pages/";
+// ComponentSendPath: a send from a member's computer
+// (ServiceSendRequest, ServiceSendReply), signed by the component.
+export const ComponentSendPath = "/v1/component-sends";
+// SendProxyPath + "{send}": the member's bridge's egress call for a
+// send it took.
+export const SendProxyPath = "/v1/send-proxy/";
 
 // Headers of the contract.
 // TurnHeader carries the attested Turn (EncodeHeader) on a turn call.
@@ -304,6 +314,8 @@ export const TurnHeader = "X-Bnbloc-Turn";
 export const MemberHeader = "X-Bnbloc-Member";
 // CallbackHeader carries the Callback facts on a callback.
 export const CallbackHeader = "X-Bnbloc-Callback";
+// SendHeader carries the attested Send on a send's egress call.
+export const SendHeader = "X-Bnbloc-Send";
 // ComponentHeader names the endpoint component that signed a call to
 // the platform (SignatureHeader with that component's credential):
 // "<kind>/<name>" ("service/<name>" for a service; a notifier's reply
@@ -353,10 +365,42 @@ export interface Member {
   origin: string;
   room?: string;
   roomRole?: string;
+  // Act, on a member's action (a POST page call, a card's call), is a
+  // one-time grant to have this member's own computer send one request
+  // (ServiceClient.SendFromMember), valid MaxSendGrantAge.
+  act?: string;
 }
 
 // RoomOwner is the room role of its owner (Member.RoomRole).
 export const RoomOwner = "owner";
+
+// ServiceSendRequest asks for one send: GET or HEAD of an https URL.
+export interface ServiceSendRequest {
+  act: string;
+  method: string;
+  url: string;
+}
+
+// ServiceSendReply is the queued send's id (Send.ID on its egress call).
+export interface ServiceSendReply {
+  id: string;
+}
+
+// Send is the send an egress call is for: the organization and member
+// whose computer sends it, its id, and the platform's public origin.
+export interface Send {
+  org: string;
+  member: string;
+  id: string;
+  origin: string;
+}
+
+// Bounds of a send: a grant works MaxSendGrantAge after the action; a
+// send no bridge took in MaxSendWait is dropped; a taken one is served
+// MaxSendHeld.
+export const MaxSendGrantAge = 120000000000;
+export const MaxSendWait = 120000000000;
+export const MaxSendHeld = 300000000000;
 
 // ServiceAssistRequest is one run of a service's own AI task for an
 // organization: the text the task works from (the service builds it; the

@@ -121,6 +121,14 @@ const (
 	// page is sandboxed and holds no session) and authorizes only that
 	// page's calls to its service.
 	KindComponentPage = "component-page"
+	// KindComponentAct is a member's grant to a service for one send from
+	// their own computer (docs/prd/2026-10-25-member-sends.md): Subject is
+	// the member, Tenant their organization, ID the service and Data a
+	// random nonce. It rides in component.Member.Act on a member's action
+	// (a POST page call, a card's call), lives component.MaxSendGrantAge,
+	// and authorizes only one component.ComponentSendPath call of that
+	// service.
+	KindComponentAct = "component-act"
 )
 
 // HasRoom reports whether the claims authorize the given room scope.

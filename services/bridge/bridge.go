@@ -638,10 +638,23 @@ type claimRequest struct {
 	OwnerUserID    string `json:"ownerUserId"`
 	MaxJobs        int    `json:"maxJobs"`
 	ServeAllOwners bool   `json:"serveAllOwners"`
+	// TakesSends: this bridge sends from its owner's computer outside a
+	// turn (roomtools.SendFromHere); SendsOnly: no free slot for a job.
+	TakesSends bool `json:"takesSends"`
+	SendsOnly  bool `json:"sendsOnly,omitempty"`
 }
 
 type claimResponse struct {
-	Jobs []bridgeJob `json:"jobs"`
+	Jobs  []bridgeJob  `json:"jobs"`
+	Sends []bridgeSend `json:"sends"`
+}
+
+// bridgeSend is a request the platform queued for this computer's owner:
+// a component's read, sent from here outside a turn.
+type bridgeSend struct {
+	SendID string `json:"sendId"`
+	Method string `json:"method"`
+	URL    string `json:"url"`
 }
 
 // jobRef identifies the claimed job a drive runs for: its id, the chat
@@ -697,10 +710,14 @@ func (j bridgeJob) byRequester() bool {
 
 func (b *Bridge) claimOnce(ctx context.Context) bool {
 	slots := b.freeSlots()
-	if slots <= 0 {
+	// A bridge serving every owner sends nothing from this computer for
+	// them; with no free slot, it still takes its owner's sends.
+	takesSends := !b.cfg.ServeAllOwners
+	if slots <= 0 && !takesSends {
 		return false
 	}
-	raw, err := b.gatewayPOST(ctx, "/v1/bridge/jobs/claim", claimRequest{BridgeID: b.bridgeID(), OwnerUserID: b.cfg.OwnerSubject, MaxJobs: slots, ServeAllOwners: b.cfg.ServeAllOwners})
+	raw, err := b.gatewayPOST(ctx, "/v1/bridge/jobs/claim", claimRequest{BridgeID: b.bridgeID(), OwnerUserID: b.cfg.OwnerSubject, MaxJobs: max(slots, 1), ServeAllOwners: b.cfg.ServeAllOwners,
+		TakesSends: takesSends, SendsOnly: slots <= 0})
 	if err != nil {
 		slog.Warn("bnbloc bridge job claim failed", "event", "bnbloc.bridge.job_claim_failed", "error", err)
 		return false
@@ -713,6 +730,14 @@ func (b *Bridge) claimOnce(ctx context.Context) bool {
 	// Drives run under the Bridge root context, not the claim caller's: a roster
 	// change cancels stream contexts and must never abort a running turn.
 	driveCtx := b.detached(ctx)
+	for _, send := range resp.Sends {
+		go func(send bridgeSend) {
+			b.sendFromHere(driveCtx, send)
+		}(send)
+	}
+	if slots <= 0 {
+		return false
+	}
 	for _, job := range resp.Jobs {
 		select {
 		case b.claimSem <- struct{}{}:

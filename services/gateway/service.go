@@ -148,6 +148,9 @@ type Service struct {
 	// routes 503.
 	ContentComponents store.ContentComponentStore
 	ContentJobs       ContentJobs
+	// BridgeSends queues sends from a member's computer (member_sends.go);
+	// nil refuses them.
+	BridgeSends store.BridgeSendStore
 	// RoomSources holds rooms' asks to read organization records and the
 	// organization admins' grants (room_sources.go, the one consent
 	// owner); RoomInfo reads a room of the ctx tenant (a grant's scope

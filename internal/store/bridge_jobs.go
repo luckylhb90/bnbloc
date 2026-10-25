@@ -789,6 +789,8 @@ type MemoryBridgeJobs struct {
 	// bridge_agents primary key after the bridge id).
 	agents map[string]map[string]BridgeAgent
 	origin map[string]string
+	// sends are the queued and taken sends by id (bridge_sends.go).
+	sends map[string]BridgeSend
 }
 
 func NewMemoryBridgeJobs() *MemoryBridgeJobs {

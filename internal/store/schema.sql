@@ -167,6 +167,23 @@ CREATE TABLE IF NOT EXISTS bridge_heartbeats (
   KEY idx_bridge_heartbeats_owner_seen (owner_user_id, last_seen_at_ms)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- Sends from a member's computer outside a turn
+-- (docs/prd/2026-10-25-member-sends.md): a component's read, queued for
+-- the member's own bridge, taken by its claim (taken_by), served while
+-- held. A row lives minutes: the owner's claim deletes expired ones.
+CREATE TABLE IF NOT EXISTS bridge_sends (
+  send_id       VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin PRIMARY KEY,
+  tenant_id     VARCHAR(64) NOT NULL,
+  owner_user_id VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  component     VARCHAR(128) NOT NULL,
+  method        VARCHAR(8) NOT NULL,
+  url           VARCHAR(4096) NOT NULL,
+  created_at_ms BIGINT NOT NULL,
+  taken_by      VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '',
+  taken_at_ms   BIGINT NOT NULL DEFAULT 0,
+  KEY idx_bridge_sends_owner (owner_user_id, taken_by, created_at_ms)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS bridge_agents (
   bridge_id          VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   tenant_id          VARCHAR(64) NOT NULL,

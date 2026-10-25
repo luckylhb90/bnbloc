@@ -112,6 +112,11 @@ type claimBody struct {
 	OwnerUserID    string `json:"ownerUserId"`
 	MaxJobs        int    `json:"maxJobs"`
 	ServeAllOwners bool   `json:"serveAllOwners"`
+	// TakesSends: the bridge sends from its owner's computer outside a
+	// turn (docs/prd/2026-10-25-member-sends.md); the claim hands it its
+	// owner's queued sends. SendsOnly: no free slot, take no job.
+	TakesSends bool `json:"takesSends"`
+	SendsOnly  bool `json:"sendsOnly"`
 }
 
 func (s *Service) handleBridgeJobClaim(w http.ResponseWriter, r *http.Request) {
@@ -142,6 +147,20 @@ func (s *Service) handleBridgeJobClaim(w http.ResponseWriter, r *http.Request) {
 	if !s.requireBridgeOwner(w, r, body.BridgeID, caller) {
 		return
 	}
+	// A member's sends go only to a bridge of their own that takes them,
+	// never one serving every owner.
+	sends := []store.BridgeSend{}
+	if body.TakesSends && !body.ServeAllOwners && s.BridgeSends != nil {
+		taken, err := s.BridgeSends.TakeBridgeSends(r.Context(), caller, body.BridgeID, s.clock().UnixMilli())
+		if err != nil {
+			obs.ServerError(w, "bridge send take failed", err)
+		}
+		sends = append(sends, taken...)
+	}
+	if body.SendsOnly && body.TakesSends {
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"jobs": []store.AgentJob{}, "sends": sends})
+		return
+	}
 	jobs, err := s.BridgeJobs.ClaimAgentJobs(r.Context(), store.ClaimRequest{BridgeID: body.BridgeID, OwnerUserID: caller, MaxJobs: body.MaxJobs, NowMs: s.clock().UnixMilli(), LeaseMs: store.DefaultLeaseMs, ServeAllOwners: body.ServeAllOwners && s.AllowServeAllOwners})
 	if err != nil {
 		obs.ServerError(w, "bridge job claim failed", err)
@@ -154,7 +173,7 @@ func (s *Service) handleBridgeJobClaim(w http.ResponseWriter, r *http.Request) {
 	for _, j := range jobs {
 		s.pulseJobClaimed(j)
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"jobs": jobs})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"jobs": jobs, "sends": sends})
 }
 
 type jobStatusBody struct {

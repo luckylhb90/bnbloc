@@ -311,3 +311,44 @@ func TestEgressSendReplacesQueryAndBody(t *testing.T) {
 		t.Fatalf("sent query %q body %q", gotQuery, gotBody)
 	}
 }
+
+// A send outside a turn runs the same exchange through the send proxy: the
+// service's credentials go on the request sent from here, and the report
+// goes back to it; no turn is needed.
+func TestSendFromHereOutsideATurn(t *testing.T) {
+	var got http.Header
+	sys := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(w, `{"code":"50113","msg":"Invalid sign"}`)
+	}))
+	defer sys.Close()
+	old := hereClient
+	hereClient = &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, network, sys.Listener.Addr().String())
+		}}}
+	defer func() { hereClient = old }()
+	var report *component.EgressReport
+	gw := &fakeGateway{handle: func(method, path string, body []byte) (int, any) {
+		if path != component.SendProxyPath+"s-1" {
+			return http.StatusNotFound, map[string]string{"error": "no"}
+		}
+		var in component.EgressRequest
+		_ = json.Unmarshal(body, &in)
+		if in.Report == nil {
+			return http.StatusOK, component.EgressResponse{Send: &component.EgressSend{Header: map[string][]string{"Ok-Access-Key": {"K"}}}}
+		}
+		report = in.Report
+		return http.StatusOK, component.EgressResponse{Accept: true}
+	}}
+	if err := SendFromHere(context.Background(), gw, "s-1", http.MethodGet, "https://www.okx.com/api/v5/account/balance"); err != nil {
+		t.Fatal(err)
+	}
+	if got.Get("Ok-Access-Key") != "K" || report == nil || report.Status != 401 || !strings.Contains(string(report.Body), "50113") {
+		t.Fatalf("sent %v, reported %+v", got, report)
+	}
+	if err := SendFromHere(context.Background(), gw, "nope", http.MethodGet, "https://www.okx.com/x"); err == nil {
+		t.Fatal("a refused send reported no error")
+	}
+}

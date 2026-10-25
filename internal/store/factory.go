@@ -180,14 +180,16 @@ func requireUTF8MB4Session(db *sql.DB) error {
 // Backends bundles the concrete store implementations a service composes.
 // When DB is nil, in-memory implementations are used (local dev / tests).
 type Backends struct {
-	DB          *DB
-	Activity    ActivityStore
-	Room        RoomStore
-	Grant       GrantStore
-	Chat        ChatStore
-	Tenant      TenantStore
-	Channel     ChannelStore
-	BridgeJobs  BridgeJobStore
+	DB         *DB
+	Activity   ActivityStore
+	Room       RoomStore
+	Grant      GrantStore
+	Chat       ChatStore
+	Tenant     TenantStore
+	Channel    ChannelStore
+	BridgeJobs BridgeJobStore
+	// BridgeSends is BridgeJobs' send queue (bridge_sends.go).
+	BridgeSends BridgeSendStore
 	Artifacts   ArtifactStore
 	Settings    PlatformSettingsStore
 	Attachments AttachmentStore
@@ -280,6 +282,7 @@ func NewBackendsWithReplica(dsn, replicaDSN string) (*Backends, error) {
 		rooms := NewMemoryRoom()
 		artifacts, appDocs := NewMemoryArtifacts(), NewMemoryAppDocs(rooms)
 		artifacts.appData = appDocs
+		memJobs := NewMemoryBridgeJobs()
 		b := &Backends{
 			Activity:          NewMemory(),
 			Room:              rooms,
@@ -287,7 +290,8 @@ func NewBackendsWithReplica(dsn, replicaDSN string) (*Backends, error) {
 			Chat:              NewMemoryChat(),
 			Tenant:            NewMemoryTenant(),
 			Channel:           rooms.Channels(),
-			BridgeJobs:        NewMemoryBridgeJobs(),
+			BridgeJobs:        memJobs,
+			BridgeSends:       memJobs,
 			Artifacts:         artifacts,
 			Settings:          NewMemoryPlatformSettings(),
 			Attachments:       NewMemoryAttachments(),
@@ -342,6 +346,7 @@ func NewBackendsWithReplica(dsn, replicaDSN string) (*Backends, error) {
 
 // newMySQLBackends is the MySQL store set over one pool (schema already applied).
 func newMySQLBackends(db *DB) *Backends {
+	myJobs := NewMySQLBridgeJobs(db)
 	return &Backends{
 		DB:                db,
 		Activity:          NewMySQL(db),
@@ -350,7 +355,8 @@ func newMySQLBackends(db *DB) *Backends {
 		Chat:              NewMySQLChat(db),
 		Tenant:            NewMySQLTenant(db),
 		Channel:           NewMySQLChannel(db),
-		BridgeJobs:        NewMySQLBridgeJobs(db),
+		BridgeJobs:        myJobs,
+		BridgeSends:       myJobs,
 		Artifacts:         NewMySQLArtifacts(db),
 		Settings:          NewMySQLPlatformSettings(db),
 		Attachments:       NewMySQLAttachments(db),

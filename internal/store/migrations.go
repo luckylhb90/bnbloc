@@ -1803,6 +1803,14 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return addColumnIfMissing(ctx, db, "tenants", "pulse_geography", "TINYINT(1) NOT NULL DEFAULT 0 AFTER assist_disabled")
 		},
 	},
+	{
+		// Sends from a member's computer outside a turn
+		// (docs/prd/2026-10-25-member-sends.md). Additive: a new table.
+		id: "2026_10_bridge_sends",
+		run: func(ctx context.Context, db sqlConn) error {
+			return createSchemaTable(ctx, db, "bridge_sends")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes
