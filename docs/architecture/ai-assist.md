@@ -158,6 +158,30 @@ task declares and relays the reply. Nothing else calls a model.
   `explain-source-use` is skipped, logged, and the change is still told
   to the admins without an explanation.
 
+## Checking its work
+
+docs/prd/2026-10-25-ai-checks-its-work.md. An answer is checked before a
+person sees it, by code or by reality, never by the model.
+
+- **Shape repair, every JSON task**: a reply that is not the task's
+  object is answered once more (`completeJSONTask`): the reply as the
+  assistant's turn, then `assist.ShapeProblem` naming the fields. Each
+  call is an audit row; the second says "shape repair".
+- **Revision**: `AssistRequest.revise` (and `ServiceAssistRequest.revise`)
+  `{answer, problems}`: the previous answer and the caller's problems
+  (1 to 8 lines of at most 500 characters, `wire.CheckRevise`) join the
+  prompt after `<text>` as `<previous_answer>` and `<problems>`, fenced,
+  with one fixed line (`reviseNote`; golden `revise.txt`). The caller runs
+  the loop: `component.ServiceClient.AssistChecked(ctx, task, req, check,
+  rounds)` (at most `MaxAssistRounds`, 3), which answers the last fields
+  and the problems still left, never a failed answer as a passing one.
+- **The pages context** (`pages`): `urls` (at most 3) are fetched by the
+  gateway (`assist.FetchPages`, `PagesClient`: https on a public address
+  only, resolved and dialled by address, redirects only on the page's
+  host, 10 s, 2 MiB) and given as text (markup, scripts and navigation
+  left out) in `<pages>`, 20,000 characters in all; a page that cannot be
+  read says why. A service's task that declares `pages` gets them too.
+
 ## A service's own tasks
 
 A service component that declares `assist` runs its own JSON tasks

@@ -366,6 +366,18 @@ export interface ServiceAssistRequest {
   org: string;
   member?: string;
   text: string;
+  // URLs are public pages the task reads, when it declares the pages
+  // context; Revise asks it again with its previous answer and the
+  // problems the service's checks found (AssistChecked).
+  urls?: string[];
+  revise?: ServiceRevise;
+}
+
+// ServiceRevise is a revision: the previous answer (its fields as JSON)
+// and the problems found with it, each one line.
+export interface ServiceRevise {
+  answer: string;
+  problems: string[];
 }
 
 // MaxServiceAssistText bounds ServiceAssistRequest.Text, in characters.
@@ -576,6 +588,10 @@ export const MaxStoreKey = 128;
 // the platform's signed calls and makes the component's own signed calls
 // (the store). One install of the component at one platform.
 export interface ServiceClient {}
+
+// MaxAssistRounds bounds AssistChecked: the first answer and two
+// revisions.
+export const MaxAssistRounds = 3;
 
 // ---- component/signature.go ----
 
@@ -1387,15 +1403,24 @@ export const AssistContextCapabilities = "capabilities";
 // latest messages the member reads, never the people chat
 // (docs/prd/2026-10-20-complete-room-capture.md §2.1).
 export const AssistContextConversation = "conversation";
+// AssistContextPages: the text of the public web pages the request
+// names (urls), fetched by the server
+// (docs/prd/2026-10-25-ai-checks-its-work.md).
+export const AssistContextPages = "pages";
 
 // AssistContexts are the contexts an assist task may declare.
-export const AssistContexts: readonly string[] = ["room", "artifact", "attachments", "library", "clock", "capabilities", "conversation"];
+export const AssistContexts: readonly string[] = ["room", "artifact", "attachments", "library", "clock", "capabilities", "conversation", "pages"];
 
 // Bounds of an assist request. The text holds a room package's every text
 // and its instructions for describe-room's check
 // (docs/prd/2026-10-20-complete-room-capture.md §2.1).
 export const MaxAssistText = 16000;
 export const MaxAssistAttachments = 20;
+// MaxAssistURLs bounds the pages a request names; MaxAssistProblems
+// and MaxAssistProblemRunes a revision's problems.
+export const MaxAssistURLs = 3;
+export const MaxAssistProblems = 8;
+export const MaxAssistProblemRunes = 500;
 
 // AssistStatus is GET /v1/assist: whether assists are available to the
 // caller (a configured model, and an organization that has not turned
@@ -1503,6 +1528,19 @@ export interface AssistRequest {
   // decision model for the caller, the answer is AssistSkipped; a task
   // without a gate refuses it.
   gated?: boolean;
+  // URLs are public web pages the task reads (its pages context).
+  urls?: string[];
+  // Revise asks the task again: its previous answer did not pass the
+  // caller's checks, and the problems say why.
+  revise?: AssistRevise;
+}
+
+// AssistRevise is a revision: the previous answer (its JSON fields, or
+// its text) and the problems the caller's checks found with it, each one
+// line.
+export interface AssistRevise {
+  answer: string;
+  problems: string[];
 }
 
 // AssistUsage is a call's token counts and latency.
@@ -7070,8 +7108,8 @@ export type AppExportFormat = "json" | "csv";
 export const AppExportFormatValues: readonly AppExportFormat[] = ["json", "csv"];
 export type AssistOutput = "text" | "json";
 export const AssistOutputValues: readonly AssistOutput[] = ["text", "json"];
-export type AssistContext = "room" | "artifact" | "attachments" | "library" | "clock" | "capabilities" | "conversation";
-export const AssistContextValues: readonly AssistContext[] = ["room", "artifact", "attachments", "library", "clock", "capabilities", "conversation"];
+export type AssistContext = "room" | "artifact" | "attachments" | "library" | "clock" | "capabilities" | "conversation" | "pages";
+export const AssistContextValues: readonly AssistContext[] = ["room", "artifact", "attachments", "library", "clock", "capabilities", "conversation", "pages"];
 export type AssistSkipReason = "below" | "no-gate";
 export const AssistSkipReasonValues: readonly AssistSkipReason[] = ["below", "no-gate"];
 export type AssistFieldType = "text" | "list" | "items";

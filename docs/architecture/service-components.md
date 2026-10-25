@@ -198,9 +198,12 @@ shapes (`assist.Fields`). `component.ServiceClient.Assist` is the client.
   declares `assist`), then the organization's assist model, else the
   platform's; assists off or no model: 409. 20 runs a minute per service
   and organization (429).
-- **No context**: the model gets the task's instructions and the text,
-  fenced as data (`assist.Messages`); the platform reads nothing for the
-  service.
+- **No context** but what the service sends: the task's instructions and
+  the text, fenced as data (`assist.Messages`), the public pages it names
+  when the task declares `pages`, and a revision (`revise`: its previous
+  answer and the problems its checks found; `ServiceClient.AssistChecked`
+  runs that loop). The platform reads nothing of the organization's for
+  the service.
 - **Audit**: an `assist` row, actor `service/<name>`, the task and its
   version, `for <member>` when the request names one (the service's
   word), the model and tokens, never the text.

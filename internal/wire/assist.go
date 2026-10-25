@@ -1,5 +1,11 @@
 package wire
 
+import (
+	"fmt"
+	"strings"
+	"unicode/utf8"
+)
+
 // AI assist (docs/prd/2026-10-13-ai-assist.md): one fast model call behind
 // every manual entry point, through one API. A task is an assist content
 // component resolved by name; the assist model is the deployment's, set by
@@ -38,10 +44,14 @@ const (
 	// latest messages the member reads, never the people chat
 	// (docs/prd/2026-10-20-complete-room-capture.md §2.1).
 	AssistContextConversation = "conversation"
+	// AssistContextPages: the text of the public web pages the request
+	// names (urls), fetched by the server
+	// (docs/prd/2026-10-25-ai-checks-its-work.md).
+	AssistContextPages = "pages"
 )
 
 // AssistContexts are the contexts an assist task may declare.
-var AssistContexts = []string{AssistContextRoom, AssistContextArtifact, AssistContextAttachments, AssistContextLibrary, AssistContextClock, AssistContextCapabilities, AssistContextConversation}
+var AssistContexts = []string{AssistContextRoom, AssistContextArtifact, AssistContextAttachments, AssistContextLibrary, AssistContextClock, AssistContextCapabilities, AssistContextConversation, AssistContextPages}
 
 // Bounds of an assist request. The text holds a room package's every text
 // and its instructions for describe-room's check
@@ -49,6 +59,11 @@ var AssistContexts = []string{AssistContextRoom, AssistContextArtifact, AssistCo
 const (
 	MaxAssistText        = 16000
 	MaxAssistAttachments = 20
+	// MaxAssistURLs bounds the pages a request names; MaxAssistProblems
+	// and MaxAssistProblemRunes a revision's problems.
+	MaxAssistURLs         = 3
+	MaxAssistProblems     = 8
+	MaxAssistProblemRunes = 500
 )
 
 // AssistStatus is GET /v1/assist: whether assists are available to the
@@ -165,6 +180,35 @@ type AssistRequest struct {
 	// decision model for the caller, the answer is AssistSkipped; a task
 	// without a gate refuses it.
 	Gated bool `json:"gated,omitempty"`
+	// URLs are public web pages the task reads (its pages context).
+	URLs []string `json:"urls,omitempty"`
+	// Revise asks the task again: its previous answer did not pass the
+	// caller's checks, and the problems say why.
+	Revise *AssistRevise `json:"revise,omitempty"`
+}
+
+// AssistRevise is a revision: the previous answer (its JSON fields, or
+// its text) and the problems the caller's checks found with it, each one
+// line.
+type AssistRevise struct {
+	Answer   string   `json:"answer"`
+	Problems []string `json:"problems"`
+}
+
+// CheckRevise reports a revision out of its bounds.
+func CheckRevise(r *AssistRevise) error {
+	if r == nil {
+		return nil
+	}
+	if len(r.Problems) == 0 || len(r.Problems) > MaxAssistProblems || utf8.RuneCountInString(r.Answer) > MaxAssistText {
+		return fmt.Errorf("a revision holds its answer (at most %d characters) and 1 to %d problems", MaxAssistText, MaxAssistProblems)
+	}
+	for _, p := range r.Problems {
+		if strings.TrimSpace(p) == "" || utf8.RuneCountInString(p) > MaxAssistProblemRunes {
+			return fmt.Errorf("a problem is one line of at most %d characters", MaxAssistProblemRunes)
+		}
+	}
+	return nil
 }
 
 // AssistUsage is a call's token counts and latency.

@@ -132,6 +132,9 @@ type Service struct {
 	// AssistTransport, when set, carries the assist model's calls (tests);
 	// the host guard applies either way (internal/assist).
 	AssistTransport http.RoundTripper
+	// AssistPages, when set, fetches the pages context (tests); nil is the
+	// public-only client.
+	AssistPages *http.Client
 	// ComponentInstalls persists per-member opt-in installs of distributed
 	// components (rollout=optin extension records). nil (in-memory dev/tests)
 	// leaves optin components hidden for everyone; auto ones still distribute.

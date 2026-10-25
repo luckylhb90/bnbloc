@@ -188,3 +188,54 @@ func errorText(raw []byte) string {
 	}
 	return strings.TrimSpace(string(raw))
 }
+
+// MaxAssistRounds bounds AssistChecked: the first answer and two
+// revisions.
+const MaxAssistRounds = 3
+
+// AssistChecked runs the component's task and checks the answer with
+// check (the problems with the fields, each one line; none: they pass; a
+// check is code or reality, never the model): while the check finds problems and rounds are left (at most MaxAssistRounds), the
+// task answers again, given its previous answer and the problems
+// (docs/prd/2026-10-25-ai-checks-its-work.md). It answers the last fields
+// and the problems still left with them (none: they passed), so a caller
+// never takes an answer that failed its check for one that passed.
+func (c *ServiceClient) AssistChecked(ctx context.Context, task string, req ServiceAssistRequest, check func(fields map[string]any) []string, rounds int) (map[string]any, []string, error) {
+	rounds = min(max(rounds, 1), MaxAssistRounds)
+	var fields map[string]any
+	var problems []string
+	for round := 0; round < rounds; round++ {
+		if round > 0 {
+			answer, _ := json.Marshal(fields)
+			req.Revise = &ServiceRevise{Answer: string(answer), Problems: boundProblems(problems)}
+		}
+		f, err := c.Assist(ctx, task, req)
+		if err != nil {
+			if fields != nil {
+				return fields, problems, nil
+			}
+			return nil, nil, err
+		}
+		fields, problems = f, check(f)
+		if len(problems) == 0 {
+			return fields, nil, nil
+		}
+	}
+	return fields, problems, nil
+}
+
+// boundProblems is problems within a revision's bounds: at most 8, each one
+// line of at most 500 characters.
+func boundProblems(ps []string) []string {
+	var out []string
+	for _, p := range ps {
+		p = strings.Join(strings.Fields(p), " ")
+		if r := []rune(p); len(r) > 500 {
+			p = string(r[:499]) + "…"
+		}
+		if p != "" && len(out) < 8 {
+			out = append(out, p)
+		}
+	}
+	return out
+}

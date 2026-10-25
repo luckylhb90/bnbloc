@@ -28,6 +28,8 @@ import (
 type assistModelFake struct {
 	mu    sync.Mutex
 	reply string
+	// replies, when set, are answered first, one per call.
+	replies []string
 	seen  [][]map[string]string
 	auth  []string
 }
@@ -42,6 +44,9 @@ func (f *assistModelFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.seen = append(f.seen, body.Messages)
 	f.auth = append(f.auth, r.Header.Get("Authorization"))
 	reply := f.reply
+	if len(f.replies) > 0 {
+		reply, f.replies = f.replies[0], f.replies[1:]
+	}
 	f.mu.Unlock()
 	if !body.Stream {
 		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": reply}}},

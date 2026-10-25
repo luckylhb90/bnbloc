@@ -186,3 +186,14 @@ func items(v any, fields []wire.AssistField) []map[string]string {
 	}
 	return out
 }
+
+// ShapeProblem tells a model its reply was not the task's object: the one
+// fixed line of every shape repair, naming the fields.
+func ShapeProblem(fields []wire.AssistField) string {
+	names := make([]string, 0, len(fields))
+	for _, f := range fields {
+		names = append(names, f.Name)
+	}
+	return "That reply could not be read: it was not one complete JSON object holding the fields " + strings.Join(names, ", ") +
+		". Reply again with only that JSON object, complete, and nothing before or after it."
+}

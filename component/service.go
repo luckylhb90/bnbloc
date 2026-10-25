@@ -168,6 +168,18 @@ type ServiceAssistRequest struct {
 	Org    string `json:"org"`
 	Member string `json:"member,omitempty"`
 	Text   string `json:"text"`
+	// URLs are public pages the task reads, when it declares the pages
+	// context; Revise asks it again with its previous answer and the
+	// problems the service's checks found (AssistChecked).
+	URLs   []string       `json:"urls,omitempty"`
+	Revise *ServiceRevise `json:"revise,omitempty"`
+}
+
+// ServiceRevise is a revision: the previous answer (its fields as JSON)
+// and the problems found with it, each one line.
+type ServiceRevise struct {
+	Answer   string   `json:"answer"`
+	Problems []string `json:"problems"`
 }
 
 // MaxServiceAssistText bounds ServiceAssistRequest.Text, in characters.

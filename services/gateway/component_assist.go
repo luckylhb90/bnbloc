@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -103,7 +104,24 @@ func (s *Service) handleComponentAssist(w http.ResponseWriter, r *http.Request) 
 	if req.Member != "" {
 		what += ", for " + req.Member
 	}
-	fields, _, err := s.completeJSONTask(ctx, claims, task, model, assist.Messages(task.Package.Instructions, req.Text, assist.Context{}), what)
+	actx := assist.Context{}
+	if req.Revise != nil {
+		rev := &wire.AssistRevise{Answer: req.Revise.Answer, Problems: req.Revise.Problems}
+		if err := wire.CheckRevise(rev); err != nil {
+			httpx.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		actx.Revise = rev
+		what += ", a revision"
+	}
+	if len(req.URLs) > wire.MaxAssistURLs {
+		httpx.Error(w, fmt.Sprintf("at most %d pages", wire.MaxAssistURLs), http.StatusBadRequest)
+		return
+	}
+	if slices.Contains(task.Package.Manifest.Context, wire.AssistContextPages) && len(req.URLs) > 0 {
+		actx.Pages = assist.FetchPages(ctx, s.pagesClient(), req.URLs)
+	}
+	fields, _, err := s.completeJSONTask(ctx, claims, task, model, assist.Messages(task.Package.Instructions, req.Text, actx), what)
 	if err != nil {
 		writeAssistModelErr(w, err)
 		return

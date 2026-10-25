@@ -134,3 +134,63 @@ func TestComponentAssistTextBound(t *testing.T) {
 		}
 	}
 }
+
+// A reply that is not the task's object is answered once more, told what
+// it lacked (shape repair, every task); a service checks an answer and
+// gets it revised with its problems until it passes (AssistChecked); a
+// task that reads pages gets them fetched.
+func TestAssistChecksItsWork(t *testing.T) {
+	e, fake, sink := assistGW(t)
+	secret := e.installService("conn", []string{component.ServiceStore, component.ServiceAssist})
+	e.publishDefault(map[string]any{"kind": "assist", "name": "conn-draft", "displayName": "Draft", "instructions": "Draft it.", "output": "json",
+		"context": []string{wire.AssistContextPages}, "fields": []wire.AssistField{{Name: "connector", Type: "text", Description: "the connector"}}})
+	docs := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte("<h1>Items API</h1><p>GET /v1/items</p>"))
+	}))
+	defer docs.Close()
+	e.gw.AssistPages = docs.Client()
+	client := &component.ServiceClient{BaseURL: e.srv.URL, Name: "conn", Secret: secret}
+	sink.take()
+
+	fake.replies = []string{`Here is the connector: {"connector": `, `{"connector":"{\"name\":\"Bad Name\"}"}`, `{"connector":"{\"name\":\"items\"}"}`}
+	check := func(f map[string]any) []string {
+		if s, _ := f["connector"].(string); !strings.Contains(s, `"items"`) {
+			return []string{"connector: name: 1-32 of a-z, 0-9 and '-'"}
+		}
+		return nil
+	}
+	fields, problems, err := client.AssistChecked(context.Background(), "conn-draft", component.ServiceAssistRequest{Org: e.tenant, Text: "connect our items", URLs: []string{docs.URL + "/api"}}, check, 3)
+	if err != nil || problems != nil || !strings.Contains(fields["connector"].(string), "items") {
+		t.Fatalf("checked = %v %v %v", fields, problems, err)
+	}
+	if n := len(fake.seen); n != 3 {
+		t.Fatalf("model calls = %d, want 3 (a shape repair, a revision)", n)
+	}
+	first, repair, revision := fake.seen[0], fake.seen[1], fake.seen[2]
+	if !strings.Contains(first[1]["content"], "<pages>") || !strings.Contains(first[1]["content"], "GET /v1/items") {
+		t.Fatalf("the pages = %s", first[1]["content"])
+	}
+	if len(repair) != 4 || repair[2]["role"] != "assistant" || !strings.Contains(repair[3]["content"], "fields connector") {
+		t.Fatalf("the shape repair = %v", repair)
+	}
+	if !strings.Contains(revision[1]["content"], "<previous_answer>") || !strings.Contains(revision[1]["content"], "1-32 of a-z") {
+		t.Fatalf("the revision = %s", revision[1]["content"])
+	}
+	recs := sink.take()
+	repaired := false
+	for _, r := range recs {
+		repaired = repaired || strings.Contains(r.Detail, "shape repair")
+	}
+	if !repaired {
+		t.Fatalf("audit = %+v", recs)
+	}
+
+	// A check that never passes ends after the rounds with its problems.
+	fake.replies = nil
+	fake.reply = `{"connector":"{}"}`
+	_, problems, err = client.AssistChecked(context.Background(), "conn-draft", component.ServiceAssistRequest{Org: e.tenant, Text: "x"}, check, 5)
+	if err != nil || len(problems) != 1 || len(fake.seen) != 3+component.MaxAssistRounds {
+		t.Fatalf("never passing = %v %v (calls %d)", problems, err, len(fake.seen))
+	}
+}

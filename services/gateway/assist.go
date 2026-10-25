@@ -162,6 +162,14 @@ func (s *Service) handleAssist(w http.ResponseWriter, r *http.Request, claims au
 		httpx.Error(w, fmt.Sprintf("at most %d attachments", wire.MaxAssistAttachments), http.StatusBadRequest)
 		return
 	}
+	if len(req.URLs) > wire.MaxAssistURLs {
+		httpx.Error(w, fmt.Sprintf("at most %d pages", wire.MaxAssistURLs), http.StatusBadRequest)
+		return
+	}
+	if err := wire.CheckRevise(req.Revise); err != nil {
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	model, ok, err := s.assistModel(ctx, claims)
 	if err != nil {
 		obs.ServerError(w, "read the assist model failed", err)
@@ -195,7 +203,7 @@ func (s *Service) handleAssist(w http.ResponseWriter, r *http.Request, claims au
 		writeAssistContextErr(w, err)
 		return
 	}
-	if strings.TrimSpace(req.Text) == "" && actx.Room == nil && actx.Conversation == nil && actx.Artifact == nil && len(actx.Attachments) == 0 {
+	if strings.TrimSpace(req.Text) == "" && actx.Room == nil && actx.Conversation == nil && actx.Artifact == nil && len(actx.Attachments) == 0 && len(actx.Pages) == 0 {
 		httpx.Error(w, "nothing to work from: type something first", http.StatusBadRequest)
 		return
 	}
@@ -231,7 +239,28 @@ func (s *Service) completeJSONTask(ctx context.Context, claims auth.Claims, task
 		fields, err = assist.Fields(text, task.Package.Manifest.Fields)
 	}
 	s.auditModelRun(ctx, claims, assistName(task), what, model, usage, err)
+	if !errors.Is(err, assist.ErrBadReply) {
+		return fields, usage, err
+	}
+	// Shape repair (docs/prd/2026-10-25-ai-checks-its-work.md): a reply that
+	// is not the task's object is answered once more, told what it lacked.
+	repair := append(append([]assist.Message(nil), msgs...),
+		assist.Message{Role: "assistant", Content: cutRunes(text, wire.MaxAssistText)},
+		assist.Message{Role: "user", Content: assist.ShapeProblem(task.Package.Manifest.Fields)})
+	text, usage, err = s.assistClient().Complete(ctx, model, repair, true)
+	if err == nil {
+		fields, err = assist.Fields(text, task.Package.Manifest.Fields)
+	}
+	s.auditModelRun(ctx, claims, assistName(task), what+", shape repair", model, usage, err)
 	return fields, usage, err
+}
+
+// cutRunes is s within n characters.
+func cutRunes(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n])
+	}
+	return s
 }
 
 // runConsentJSON runs the consent task name (wire.AssistContract.Consent:
@@ -313,6 +342,14 @@ func (s *Service) assistText(w http.ResponseWriter, r *http.Request, claims auth
 }
 
 // assistClient is the model client (the tests' transport when set).
+// pagesClient fetches the pages context: public addresses only.
+func (s *Service) pagesClient() *http.Client {
+	if s.AssistPages != nil {
+		return s.AssistPages
+	}
+	return assist.PagesClient()
+}
+
 func (s *Service) assistClient() *assist.Client {
 	return &assist.Client{Transport: s.AssistTransport, Now: s.nowTime}
 }
@@ -410,6 +447,10 @@ func (s *Service) assistContext(ctx context.Context, claims auth.Claims, declare
 	var err error
 	roomID := strings.TrimSpace(req.RoomID)
 	wants := func(c string) bool { return slices.Contains(declared, c) }
+	out.Revise = req.Revise
+	if wants(wire.AssistContextPages) && len(req.URLs) > 0 {
+		out.Pages = assist.FetchPages(ctx, s.pagesClient(), req.URLs)
+	}
 	if wants(wire.AssistContextClock) {
 		out.Clock = assist.ClockIn(s.nowTime(), req.Timezone)
 	}
