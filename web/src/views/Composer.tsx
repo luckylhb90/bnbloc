@@ -37,7 +37,6 @@ import { StarterPrompts } from "@/views/composer/StarterPrompts";
 import { UseSuggestionRow } from "@/views/composer/UseSuggestionRow";
 import { useUseSuggestion } from "@/views/composer/useUseSuggestion";
 import { fileSuggestions, type PromptChoice } from "@/lib/promptPacks";
-import type { FileFacts } from "@/lib/fileMatch";
 import type { Referenceable, RoomAgent } from "@/views/composer/types";
 import { agentHandle } from "@/lib/roomAgents";
 import type { SendOptions } from "@/views/room/useRoomMessageActions";
@@ -56,9 +55,6 @@ import { useVoiceInput } from "@/views/composer/useVoiceInput";
 import { useMediaCapability } from "@/lib/media";
 import { AssistButton } from "@/views/AssistButton";
 
-const toolButton =
-  "tactile grid size-10 shrink-0 place-items-center rounded-[var(--radius)] text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60";
-
 // Composer is the room message input with a bottom toolbar: the "To: Agent |
 // People" segment, a recipient picker (my agents, or another member's agent to
 // borrow), the model picker, an @-mention autocomplete, and a "#" reference
@@ -67,15 +63,7 @@ const toolButton =
 // "+" menu. The "people" variant is the people chat's composer: no agent, no
 // pickers — every message is people-only by construction.
 
-/** The file a composer's conversation is about (Composer fileContext). */
-export interface ComposerFileContext {
-  readonly file: FileFacts;
-  /** What the member points at in it (a selection's kind): its
-   *  suggestions come first. */
-  readonly selectionKind?: string;
-  /** Where a picked suggestion goes; default: this composer's input. */
-  readonly onPick?: (c: PromptChoice) => void;
-}
+import { mentionAt, toolButton, type ComposerFileContext } from "@/views/composer/composerShared";
 export function Composer({
   roomId,
   channelId,
@@ -287,14 +275,9 @@ export function Composer({
   // provider may contain ':' (e.g. acp:hermes), '-' (claude-code), or '.' — so
   // autocomplete keeps matching after the user types the '/' separator.
   const detectMention = (value: string, caret: number) => {
-    const upto = value.slice(0, caret);
-    const m = /(?:^|\s)@([\w/:.-]*)$/.exec(upto);
-    if (m) {
-      setMention({ query: m[1], start: caret - m[1].length - 1 });
-      setActiveMention(0);
-    } else {
-      setMention(null);
-    }
+    const found = mentionAt(value, caret);
+    setMention(found);
+    if (found) setActiveMention(0);
   };
 
   // Throttle typing pings to at most one every 2s while actively typing.

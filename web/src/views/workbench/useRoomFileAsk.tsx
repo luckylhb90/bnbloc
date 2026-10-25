@@ -6,7 +6,7 @@ import type { SendOptions } from "@/views/room/useRoomMessageActions";
 import type { useRoomData } from "@/views/room/useRoomData";
 import type { FeedItem } from "@/views/room/types";
 import { RoomComposer } from "@/views/room/RoomComposer";
-import type { ComposerFileContext } from "@/views/Composer";
+import type { ComposerFileContext } from "@/views/composer/composerShared";
 import type { FileAsk, FileFocus } from "./FileAskPanel";
 
 // How a file's Ask AI panel gets its composer (docs/prd/2026-10-14-ai-document-editing.md
