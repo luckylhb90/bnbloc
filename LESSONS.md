@@ -493,6 +493,21 @@ Evidence: `web/e2e/long-message.mjs`, `MessageBody.onAccent`.
 Seen 1× (2026-10-23).
 
 
+### Run a new AI task once against the deployment's real model before calling it done
+
+The connections review, its fixes and the connector draft passed every test
+with a fake model that answered the shapes the code expected. The real model
+then ran into four things no fake did: the 2000-token reply cap (a review
+with findings was cut off), an object where a text field was asked (a
+patch), a fence inside a string (a guide's curl example cut the reply), and
+the 2000-character field bound (a draft cut into broken JSON). Each took a
+gateway release. A new task runs once on the real model, its audit row read
+(tokens, failure class), before it ships.
+
+Evidence: c96f2b57, 1d225764, b5c0480f, edd948f3; the QA audit log of
+connections-review-connector and connections-draft-connector.
+Seen 1× (2026-10-25).
+
 ## Done right
 
 ### Replay a member's long task across a release, not just a smoke reply
