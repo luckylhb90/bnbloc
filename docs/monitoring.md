@@ -121,6 +121,47 @@ replica's `bnbloc_http_requests_total`).
 Every series that an alert reads is registered at zero at startup, so a
 `== 0` or `rate()` rule sees a sample before the first event.
 
+### Store (read replica routing)
+
+Registered by every service that starts `store.RunReplicaMetrics` with a configured
+replica (activity and shareagent today). Per process; see
+[Read replica](./production-deployment.md#read-replica).
+
+| Metric | Type | Labels | Meaning |
+| --- | --- | --- | --- |
+| `bnbloc_store_replica_usable` | gauge | — | `1` when opted-in reads may use the replica (threads running, lag within the bound, check fresh), `0` when the primary serves them. |
+| `bnbloc_store_replica_lag_seconds` | gauge | — | Apply lag as the last check read it. |
+| `bnbloc_store_reads_total` | counter | `target` = `replica` \| `fallback` | Opted-in read-only queries by where they were served. `fallback` counts reads that wanted the replica while it was configured but not usable. |
+
+Suggested alert: `max(bnbloc_store_replica_usable) == 0` for 10 minutes while
+`bnbloc_store_reads_total{target="fallback"}` is rising.
+
+### Organization board (bnbloc-pulse)
+
+Registered by the Pulse consumer (`services/pulse`). One consumer per deployment; see
+[Environment variables](./environment-variables.md) for its settings.
+
+| Metric | Type | Labels | Meaning |
+| --- | --- | --- | --- |
+| `bnbloc_pulse_events_total` | counter | `result` = `applied` \| `duplicate` \| `invalid` | Stream entries read: counted, skipped as a redelivery, or refused by the schema and dropped. |
+| `bnbloc_pulse_flush_total` | counter | `result` = `ok` \| `error` | Rollup flushes: committed and acked, or kept for retry. A steady `error` rate means the database is not taking the rollup. |
+| `bnbloc_pulse_pending` | gauge | — | Stream messages read but not yet acked. It grows while flushes fail, and reading pauses at the consumer's bound. |
+| `bnbloc_pulse_live_errors_total` | counter | — | Live-state writes that failed (presence and job state; self-healing). |
+
+Suggested alert: `rate(bnbloc_pulse_flush_total{result="error"}[10m]) > 0` for 10 minutes.
+
+### Organization board emitter (product services)
+
+Registered by every service that sends Pulse events (activity, realtime, room) when
+`BNBLOC_PULSE_REDIS_URL` is set. Per process.
+
+| Metric | Type | Labels | Meaning |
+| --- | --- | --- | --- |
+| `bnbloc_pulse_emit_total` | counter | `result` = `accepted` \| `flushed` \| `invalid` \| `attr_dropped` \| `dropped_queue` \| `dropped_sink` \| `dropped_breaker` \| `sink_errors` | Events by outcome. Accounting holds: `accepted = flushed + dropped_sink + dropped_breaker` once the queue is empty. A Redis outage shows as `dropped_breaker`. |
+| `bnbloc_pulse_emit_queued` | gauge | — | Events waiting for the batcher. |
+
+Suggested alert: `rate(bnbloc_pulse_emit_total{result="dropped_breaker"}[5m]) > 0` for 5 minutes.
+
 ## Alert rules
 
 | Alert | Fires when | Severity |

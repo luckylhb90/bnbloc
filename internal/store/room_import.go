@@ -71,10 +71,10 @@ func (m *MemoryRoomImports) GetRoomImport(ctx context.Context, roomID string) (w
 }
 
 // MySQLRoomImports is the MySQL-backed RoomImportStore.
-type MySQLRoomImports struct{ DB *sql.DB }
+type MySQLRoomImports struct{ DB *DB }
 
 // NewMySQLRoomImports builds a MySQLRoomImports over a shared pool.
-func NewMySQLRoomImports(db *sql.DB) *MySQLRoomImports { return &MySQLRoomImports{DB: db} }
+func NewMySQLRoomImports(db *DB) *MySQLRoomImports { return &MySQLRoomImports{DB: db} }
 
 var _ RoomImportStore = (*MySQLRoomImports)(nil)
 

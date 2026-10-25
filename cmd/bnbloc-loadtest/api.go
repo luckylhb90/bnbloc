@@ -243,12 +243,15 @@ func (a *api) sendChat(ctx context.Context, m *member, roomID, channelID, client
 // subscribeRoom with the room view's scope): the session token as the
 // access_token query param (EventSource cannot set headers), the active
 // channel, allChannels=1 and includePeople=1.
-func (a *api) eventsURL(m *member, roomID, channelID string) string {
+func (a *api) eventsURL(m *member, roomID, channelID, tz string) string {
 	q := "access_token=" + url.QueryEscape(m.token)
 	if channelID != "" {
 		q += "&channelId=" + url.QueryEscape(channelID)
 	}
 	q += "&allChannels=1&includePeople=1"
+	if tz != "" {
+		q += "&tz=" + url.QueryEscape(tz)
+	}
 	return a.base + "/v1/rooms/" + url.PathEscape(roomID) + "/events?" + q
 }
 
@@ -257,4 +260,18 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "..."
+}
+
+// tzFor gives stream i the i-th time zone of the list, round-robin; "" when none.
+func tzFor(list string, i int) string {
+	var zones []string
+	for _, z := range strings.Split(list, ",") {
+		if z = strings.TrimSpace(z); z != "" {
+			zones = append(zones, z)
+		}
+	}
+	if len(zones) == 0 {
+		return ""
+	}
+	return zones[i%len(zones)]
 }

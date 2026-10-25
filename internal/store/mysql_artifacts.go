@@ -11,9 +11,9 @@ import (
 )
 
 // MySQLArtifacts is the MySQL-backed ArtifactStore.
-type MySQLArtifacts struct{ DB *sql.DB }
+type MySQLArtifacts struct{ DB *DB }
 
-func NewMySQLArtifacts(db *sql.DB) *MySQLArtifacts { return &MySQLArtifacts{DB: db} }
+func NewMySQLArtifacts(db *DB) *MySQLArtifacts { return &MySQLArtifacts{DB: db} }
 
 var _ ArtifactStore = (*MySQLArtifacts)(nil)
 

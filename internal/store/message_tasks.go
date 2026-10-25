@@ -118,10 +118,10 @@ func (s *MemoryMessageTasks) DeleteMessageTask(ctx context.Context, roomID strin
 // --- MySQL ---
 
 // MySQLMessageTasks is the MySQL-backed MessageTaskStore.
-type MySQLMessageTasks struct{ DB *sql.DB }
+type MySQLMessageTasks struct{ DB *DB }
 
 // NewMySQLMessageTasks constructs a MySQL task store.
-func NewMySQLMessageTasks(db *sql.DB) *MySQLMessageTasks { return &MySQLMessageTasks{DB: db} }
+func NewMySQLMessageTasks(db *DB) *MySQLMessageTasks { return &MySQLMessageTasks{DB: db} }
 
 var _ MessageTaskStore = (*MySQLMessageTasks)(nil)
 

@@ -8,3 +8,7 @@ bin/
 node_modules/
 web/dist/
 **/*.rcgu.o
+
+# Local agent state and worktrees: never part of an image build.
+.claude/
+bnbloc-vmexec

@@ -25,6 +25,11 @@ const (
 	PermDriveAgent Permission = "drive_agent"
 	// PermRead covers read-only access to rooms/feeds. Every role holds it.
 	PermRead Permission = "read"
+	// PermReadOrgPulse covers the organization board's read side (the Pulse
+	// snapshot and stream). Org admins and super admins hold it; members and
+	// viewers do not. Named grants to executives come later (docs/prd/2026-10-24-
+	// executive-pulse.md, section 3).
+	PermReadOrgPulse Permission = "read_org_pulse"
 )
 
 // Role is the org role string as it appears in the token (org_admin|member|
@@ -66,9 +71,11 @@ func Normalize(s string) Role {
 var grants = map[Role]map[Permission]bool{
 	RoleSuperAdmin: {
 		PermManagePlatform: true, PermManageOrg: true, PermCreateRoom: true, PermDriveAgent: true, PermRead: true,
+		PermReadOrgPulse: true,
 	},
 	RoleAdmin: {
 		PermManageOrg: true, PermCreateRoom: true, PermDriveAgent: true, PermRead: true,
+		PermReadOrgPulse: true,
 	},
 	RoleMember: {
 		PermCreateRoom: true, PermDriveAgent: true, PermRead: true,

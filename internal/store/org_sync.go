@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"sort"
 	"sync"
@@ -92,10 +91,10 @@ func (s *MemoryOrgSync) RecordDefaultRoom(_ context.Context, userID, roomID stri
 }
 
 // MySQLOrgSync implements OrgSyncStore over database/sql.
-type MySQLOrgSync struct{ DB *sql.DB }
+type MySQLOrgSync struct{ DB *DB }
 
 // NewMySQLOrgSync constructs a MySQL-backed org-sync store.
-func NewMySQLOrgSync(db *sql.DB) *MySQLOrgSync { return &MySQLOrgSync{DB: db} }
+func NewMySQLOrgSync(db *DB) *MySQLOrgSync { return &MySQLOrgSync{DB: db} }
 
 var _ OrgSyncStore = (*MySQLOrgSync)(nil)
 

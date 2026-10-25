@@ -30,6 +30,26 @@ const (
 	connMaxLifetime = 3 * time.Minute
 )
 
+// openReplica opens the read replica pool. It applies no schema or migrations:
+// the replica gets them through replication. It does not dial at open: a replica
+// that is down or not yet reachable is simply not usable until the health check
+// sees it (db.go), so a boot never waits on it.
+func openReplica(dsn string) (*sql.DB, error) {
+	cfg, err := mysqlConfig(dsn)
+	if err != nil {
+		return nil, err
+	}
+	connector, err := mysql.NewConnector(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("open mysql replica: %w", err)
+	}
+	db := sql.OpenDB(connector)
+	db.SetConnMaxLifetime(connMaxLifetime)
+	db.SetMaxOpenConns(config.GetInt("BNBLOC_MYSQL_REPLICA_MAX_CONNS", defaultReplicaConns))
+	db.SetMaxIdleConns(config.GetInt("BNBLOC_MYSQL_REPLICA_MAX_CONNS", defaultReplicaConns))
+	return db, nil
+}
+
 // OpenMySQL opens a MySQL connection from a DSN, waits for it to be reachable,
 // and applies the schema (idempotent CREATE TABLE IF NOT EXISTS). It returns a
 // ready *sql.DB. Callers pass the DSN, e.g.
@@ -160,7 +180,7 @@ func requireUTF8MB4Session(db *sql.DB) error {
 // Backends bundles the concrete store implementations a service composes.
 // When DB is nil, in-memory implementations are used (local dev / tests).
 type Backends struct {
-	DB          *sql.DB
+	DB          *DB
 	Activity    ActivityStore
 	Room        RoomStore
 	Grant       GrantStore
@@ -228,6 +248,9 @@ type Backends struct {
 	// ComponentValues holds service components' sealed values
 	// (component_values.go).
 	ComponentValues ComponentValueStore
+	// PulseMinutes is the organization board rollup store (pulse_minutes.go). Nil
+	// with the in-memory backends: the board needs MySQL.
+	PulseMinutes PulseMinutes
 }
 
 // NewBackends builds the store set. If dsn is empty, everything is in-memory.
@@ -236,6 +259,13 @@ type Backends struct {
 // first thing an operator needs when the stack misbehaves, so it is logged at
 // startup — the in-memory fallback is a warning, not a silent dev default.
 func NewBackends(dsn string) (*Backends, error) {
+	return NewBackendsWithReplica(dsn, config.FromEnvRaw("BNBLOC_MYSQL_REPLICA_DSN"))
+}
+
+// NewBackendsWithReplica is NewBackends with an explicit read replica DSN (empty =
+// none). Reads a handler marks with WithReplicaReads may use the replica; every
+// other read and every write uses the primary (db.go).
+func NewBackendsWithReplica(dsn, replicaDSN string) (*Backends, error) {
 	dsn = strings.TrimSpace(dsn)
 	if dsn == "" {
 		// Production never falls back to in-memory storage: data loss on restart
@@ -282,6 +312,7 @@ func NewBackends(dsn string) (*Backends, error) {
 			RoomGroups:        NewMemoryRoomGroups(),
 			RoomSources:       NewMemoryRoomSources(),
 			ComponentValues:   NewMemoryComponentValues(),
+			PulseMinutes:      NewMemoryPulseMinutes(),
 		}
 		// DeleteRoom clears every memory store holding room-owned rows, as
 		// the MySQL DeleteRoom clears roomOwnedTables.
@@ -291,16 +322,26 @@ func NewBackends(dsn string) (*Backends, error) {
 		}
 		return b, nil
 	}
-	db, err := OpenMySQL(dsn)
+	primary, err := OpenMySQL(dsn)
 	if err != nil {
 		return nil, err
 	}
 	log.Printf("bnbloc: store: mysql backend ready at %s (schema + migrations applied)", dsnSummary(dsn))
+	var replica *sql.DB
+	if replicaDSN = strings.TrimSpace(replicaDSN); replicaDSN != "" {
+		if replica, err = openReplica(replicaDSN); err != nil {
+			_ = primary.Close()
+			return nil, err
+		}
+		log.Printf("bnbloc: store: read replica configured at %s (opted-in reads only)", dsnSummary(replicaDSN))
+	}
+	db := NewDB(primary, replica, config.Duration("BNBLOC_MYSQL_REPLICA_MAX_LAG", defaultReplicaMaxLag),
+		config.Duration("BNBLOC_MYSQL_REPLICA_CHECK", defaultReplicaCheck))
 	return newMySQLBackends(db), nil
 }
 
 // newMySQLBackends is the MySQL store set over one pool (schema already applied).
-func newMySQLBackends(db *sql.DB) *Backends {
+func newMySQLBackends(db *DB) *Backends {
 	return &Backends{
 		DB:                db,
 		Activity:          NewMySQL(db),
@@ -328,6 +369,7 @@ func newMySQLBackends(db *sql.DB) *Backends {
 		Schedules:         NewMySQLRoomSchedules(db),
 		Budgets:           NewMySQLUsageBudgets(db),
 		OrgSync:           NewMySQLOrgSync(db),
+		PulseMinutes:      NewMySQLPulseMinutes(db),
 		Profiles:          NewMySQLUserProfiles(db),
 		ContentComponents: NewMySQLContentComponents(db),
 		AppDocs:           NewMySQLAppDocs(db),
@@ -344,7 +386,7 @@ func (b *Backends) HealthCheck() func() error {
 		return func() error { return nil }
 	}
 	db := b.DB
-	return func() error { return db.Ping() }
+	return func() error { return db.Primary().Ping() }
 }
 
 // dsnSummary renders a DSN's address and database for logs, never credentials.

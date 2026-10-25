@@ -43,6 +43,9 @@ type Backends struct {
 	Activity   string
 	ShareAgent string
 	Realtime   string
+	// Pulse is the organization board's service (services/pulse): the snapshot
+	// and stream of /v1/tenant/pulse/*. "" = the board is not deployed.
+	Pulse string
 	// Relay is the relay's internal URL, read only to report its /version
 	// in the deployment view (the gateway never proxies the relay); "" omits it.
 	Relay string

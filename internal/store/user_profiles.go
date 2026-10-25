@@ -161,10 +161,10 @@ func (s *MemoryUserProfiles) SetFeedLayout(_ context.Context, userID, layout str
 }
 
 // MySQLUserProfiles is the MySQL UserProfileStore (table user_profiles).
-type MySQLUserProfiles struct{ DB *sql.DB }
+type MySQLUserProfiles struct{ DB *DB }
 
 // NewMySQLUserProfiles returns a MySQL-backed profile store.
-func NewMySQLUserProfiles(db *sql.DB) *MySQLUserProfiles { return &MySQLUserProfiles{DB: db} }
+func NewMySQLUserProfiles(db *DB) *MySQLUserProfiles { return &MySQLUserProfiles{DB: db} }
 
 var _ UserProfileStore = (*MySQLUserProfiles)(nil)
 

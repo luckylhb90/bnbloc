@@ -20,6 +20,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/notify"
 	"github.com/luckylhb90/bnbloc/internal/obs"
+	"github.com/luckylhb90/bnbloc/internal/pulse"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/sealbox"
@@ -65,6 +66,12 @@ var errAgentInPeopleChat = errors.New("agents cannot be addressed in the people 
 
 // Service holds the realtime handler dependencies.
 type Service struct {
+	// Pulse receives the organization board's events (pulse.go). Nil = Pulse off.
+	// PulseKey keys the member hashes in presence events (pulse.MemberHash).
+	Pulse    *pulse.Emitter
+	PulseKey []byte
+	// PulseGeo answers whether an organization has member locations on; nil = off.
+	PulseGeo *pulse.GeoGate
 	// unreadSummaries holds each member's latest GET /v1/my/unread answer for
 	// a few seconds (unread_summary.go).
 	unreadSummaries unreadSummaryCache
@@ -504,6 +511,7 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 	if countPresence {
 		s.Presence.Enter(roomID, userID)
 		defer s.Presence.Leave(roomID, userID)
+		defer s.pulsePresenceStart(r.Context(), roomID, userID, r.URL.Query().Get("tz"))()
 	}
 	// The bridge advertises the agents it serves in this room via ?agents=
 	// (core/provider,…), tying their liveness to its subscription: the roster

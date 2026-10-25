@@ -20,7 +20,7 @@ func TestMySQLDeleteRoomRemovesEveryRoomOwnedRow(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	s := NewMySQLRoom(db)
+	s := NewMySQLRoom(NewDB(db, nil, 0, 0))
 	ctx := tenantCtx(tenantA)
 	seeds := map[string]string{
 		"room_messages":               `INSERT INTO room_messages (tenant_id, room_id, channel_id, seq, kind, payload_json, created_at_ms) VALUES ('org-a', '{id}', 'ch', 1, 'chat_message', '{}', 1)`,

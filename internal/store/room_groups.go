@@ -194,10 +194,10 @@ func (m *MemoryRoomGroups) deleteRoomRows(tenantID, roomID string) {
 
 // MySQLRoomGroups is the MySQL RoomGroupStore over room_groups and
 // room_group_codes.
-type MySQLRoomGroups struct{ DB *sql.DB }
+type MySQLRoomGroups struct{ DB *DB }
 
 // NewMySQLRoomGroups builds the MySQL store.
-func NewMySQLRoomGroups(db *sql.DB) *MySQLRoomGroups { return &MySQLRoomGroups{DB: db} }
+func NewMySQLRoomGroups(db *DB) *MySQLRoomGroups { return &MySQLRoomGroups{DB: db} }
 
 const roomGroupCols = `tenant_id, room_id, name, notifier, address, connected_by, created_at_ms`
 

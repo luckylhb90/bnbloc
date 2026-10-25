@@ -29,6 +29,9 @@ const (
 // (manage_platform at the gateway). Query: tzOffsetMin (as the usage
 // reports; default UTC) places "today" and "this month".
 func (s *Service) handlePlatformAgentsUsage(w http.ResponseWriter, r *http.Request) {
+	// Read-only and lag-tolerant: may be served by the read replica
+	// (docs/prd/2026-10-24-read-replica-routing.md). Writes stay on the primary.
+	r = r.WithContext(store.WithReplicaReads(r.Context()))
 	if callerSubject(r) == "" {
 		httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)
 		return

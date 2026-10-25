@@ -33,7 +33,7 @@ func TestAdvisoryLocksScopedByDatabase(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = db.Close() })
-		return NewMySQLRetention(db)
+		return NewMySQLRetention(NewDB(db, nil, 0, 0))
 	}
 	a, b := open(), open()
 	releaseA, ok, err := a.TryRetentionLock(ctx)

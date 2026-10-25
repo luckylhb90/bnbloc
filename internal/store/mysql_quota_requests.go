@@ -12,11 +12,11 @@ import (
 // shared_agent_quota_requests. The one-open-request rule is the unique
 // pending_key (set while pending, NULL once decided).
 type MySQLQuotaRequests struct {
-	DB *sql.DB
+	DB *DB
 }
 
 // NewMySQLQuotaRequests constructs a MySQL-backed quota request store.
-func NewMySQLQuotaRequests(db *sql.DB) *MySQLQuotaRequests { return &MySQLQuotaRequests{DB: db} }
+func NewMySQLQuotaRequests(db *DB) *MySQLQuotaRequests { return &MySQLQuotaRequests{DB: db} }
 
 var _ QuotaRequestStore = (*MySQLQuotaRequests)(nil)
 

@@ -14,6 +14,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/notify"
 	"github.com/luckylhb90/bnbloc/internal/obs"
+	"github.com/luckylhb90/bnbloc/internal/pulse"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/retention"
 	"github.com/luckylhb90/bnbloc/internal/sealbox"
@@ -41,7 +42,14 @@ func main() {
 		log.Fatalf("bnbloc-realtime: %v", err)
 	}
 	peers.Instrument(metrics, "bnbloc-realtime")
+	pulseEm, pulseKey, err := pulse.FromEnv(context.Background(), "realtime")
+	if err != nil {
+		log.Fatalf("bnbloc-realtime: %v", err)
+	}
+	go pulse.RunMetrics(context.Background(), metrics, pulseEm, 15*time.Second)
 	svc := &realtimehttp.Service{
+		Pulse:      pulseEm,
+		PulseKey:   pulseKey,
 		Hub:        realtime.NewHub(256, 64),
 		Membership: members,
 		// Global search reads only the rooms bnbloc-room lists for the caller.
@@ -59,6 +67,14 @@ func main() {
 	// (the other replicas probe its /readyz for the same answer).
 	peers.CheckSelfWith(backends.HealthCheck())
 	svc.Chat = backends.Chat
+	// Member locations (pulse_geography) are read per organization; a failed read is off.
+	svc.PulseGeo = pulse.NewGeoGate(func(ctx context.Context, id string) (bool, error) {
+		t, err := backends.Tenant.GetTenant(ctx, id)
+		if err != nil {
+			return false, err
+		}
+		return t.PulseGeography, nil
+	}, time.Minute)
 	// Channel routing: requests omitting channelId resolve the room's default
 	// channel, the event streams filter by channel, and unread aggregates
 	// per channel.

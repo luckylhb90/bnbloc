@@ -12,11 +12,11 @@ import (
 // every query is scoped by the tenant bound to the context and fails closed
 // when the context carries none.
 type MySQLChannel struct {
-	DB *sql.DB
+	DB *DB
 }
 
 // NewMySQLChannel constructs a MySQL-backed channel store.
-func NewMySQLChannel(db *sql.DB) *MySQLChannel { return &MySQLChannel{DB: db} }
+func NewMySQLChannel(db *DB) *MySQLChannel { return &MySQLChannel{DB: db} }
 
 var _ ChannelStore = (*MySQLChannel)(nil)
 

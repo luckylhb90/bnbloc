@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"sort"
 	"sync"
 )
@@ -101,10 +100,10 @@ func (s *MemoryComponentInstall) DeleteComponentInstall(_ context.Context, subje
 }
 
 // MySQLComponentInstall implements ComponentInstallStore over database/sql.
-type MySQLComponentInstall struct{ DB *sql.DB }
+type MySQLComponentInstall struct{ DB *DB }
 
 // NewMySQLComponentInstall constructs a MySQL-backed component install store.
-func NewMySQLComponentInstall(db *sql.DB) *MySQLComponentInstall {
+func NewMySQLComponentInstall(db *DB) *MySQLComponentInstall {
 	return &MySQLComponentInstall{DB: db}
 }
 

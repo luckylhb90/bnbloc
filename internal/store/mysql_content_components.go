@@ -12,10 +12,10 @@ import (
 )
 
 // MySQLContentComponents implements ContentComponentStore over database/sql.
-type MySQLContentComponents struct{ DB *sql.DB }
+type MySQLContentComponents struct{ DB *DB }
 
 // NewMySQLContentComponents constructs a MySQL-backed content store.
-func NewMySQLContentComponents(db *sql.DB) *MySQLContentComponents {
+func NewMySQLContentComponents(db *DB) *MySQLContentComponents {
 	return &MySQLContentComponents{DB: db}
 }
 

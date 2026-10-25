@@ -141,10 +141,10 @@ func (s *MemoryAPITokens) TouchAPIToken(_ context.Context, tokenID string, nowMs
 }
 
 // MySQLAPITokens is the MySQL-backed APITokenStore (table api_tokens).
-type MySQLAPITokens struct{ DB *sql.DB }
+type MySQLAPITokens struct{ DB *DB }
 
 // NewMySQLAPITokens builds a MySQLAPITokens over a shared pool.
-func NewMySQLAPITokens(db *sql.DB) *MySQLAPITokens { return &MySQLAPITokens{DB: db} }
+func NewMySQLAPITokens(db *DB) *MySQLAPITokens { return &MySQLAPITokens{DB: db} }
 
 var _ APITokenStore = (*MySQLAPITokens)(nil)
 

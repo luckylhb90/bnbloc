@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"sync"
 )
@@ -93,10 +92,10 @@ func (s *MemorySSOHandoff) TakeSSOHandoff(_ context.Context, keyHash string, now
 }
 
 // MySQLSSOHandoff implements SSOHandoffStore over database/sql.
-type MySQLSSOHandoff struct{ DB *sql.DB }
+type MySQLSSOHandoff struct{ DB *DB }
 
 // NewMySQLSSOHandoff constructs a MySQL-backed SSO hand-off store.
-func NewMySQLSSOHandoff(db *sql.DB) *MySQLSSOHandoff { return &MySQLSSOHandoff{DB: db} }
+func NewMySQLSSOHandoff(db *DB) *MySQLSSOHandoff { return &MySQLSSOHandoff{DB: db} }
 
 var _ SSOHandoffStore = (*MySQLSSOHandoff)(nil)
 

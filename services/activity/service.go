@@ -12,6 +12,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
+	"github.com/luckylhb90/bnbloc/internal/pulse"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -21,6 +22,8 @@ import (
 
 // Service holds the activity handler dependencies.
 type Service struct {
+	// Pulse receives the organization board's events (pulse.go). Nil = Pulse off.
+	Pulse      *pulse.Emitter
 	Store      store.ActivityStore
 	Publisher  realtime.Publisher
 	Membership membership.Directory
@@ -196,6 +199,9 @@ func (s *Service) handleMessages(w http.ResponseWriter, r *http.Request) {
 		s.Publisher.Publish(r.Context(), wire.Event{RoomID: roomID, ChannelID: in.ChannelID, Kind: wire.KindAgentMessages, Payload: out})
 		// Reported usage moves the owners' monthly budgets (R12).
 		s.noteReplyBurn(r.Context(), fresh)
+		for _, m := range fresh {
+			s.pulseReplyUsage(r.Context(), roomID, in.AgentSessionID, m)
+		}
 	}
 	httpx.WriteJSON(w, http.StatusOK, wire.ReportMessagesReply{NextCursor: next})
 }

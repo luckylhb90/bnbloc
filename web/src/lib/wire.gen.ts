@@ -6589,6 +6589,9 @@ export interface TenantPolicy {
   // each, so no client re-decides it.
   shareAccess: ShareAccess[];
   publishApproval: PublishApproval;
+  // PulseGeography: the organization reports members' countries on its board;
+  // the client reports its time zone only when this is on.
+  pulseGeography: boolean;
 }
 
 // ---- wire/turn_usage.go ----
@@ -7205,8 +7208,8 @@ export const RoomSyncModeValues: readonly RoomSyncMode[] = ["git", "mutagen", "n
 export type OrgRole = "super_admin" | "org_admin" | "member" | "viewer";
 export const OrgRoleValues: readonly OrgRole[] = ["super_admin", "org_admin", "member", "viewer"];
 // A coarse organization permission (rbac.Permission).
-export type OrgPermission = "manage_platform" | "manage_org" | "create_room" | "drive_agent" | "read";
-export const OrgPermissionValues: readonly OrgPermission[] = ["manage_platform", "manage_org", "create_room", "drive_agent", "read"];
+export type OrgPermission = "manage_platform" | "manage_org" | "create_room" | "drive_agent" | "read" | "read_org_pulse";
+export const OrgPermissionValues: readonly OrgPermission[] = ["manage_platform", "manage_org", "create_room", "drive_agent", "read", "read_org_pulse"];
 // How a component package runs (pkgmeta.Runtime).
 export type ComponentRuntime = "stdio" | "endpoint" | "manifest" | "sidecar" | "bundle";
 export const ComponentRuntimeValues: readonly ComponentRuntime[] = ["stdio", "endpoint", "manifest", "sidecar", "bundle"];
@@ -7228,8 +7231,8 @@ export const RoomRolesThatInvite: readonly RoomRole[] = ["owner", "admin"];
 // session minted without one.
 export const OrgRolePermissions: Readonly<Record<OrgRole | "", readonly OrgPermission[]>> = {
   "": ["create_room", "drive_agent", "read"],
-  super_admin: ["manage_platform", "manage_org", "create_room", "drive_agent", "read"],
-  org_admin: ["manage_org", "create_room", "drive_agent", "read"],
+  super_admin: ["manage_platform", "manage_org", "create_room", "drive_agent", "read", "read_org_pulse"],
+  org_admin: ["manage_org", "create_room", "drive_agent", "read", "read_org_pulse"],
   member: ["create_room", "drive_agent", "read"],
   viewer: ["read"],
 };

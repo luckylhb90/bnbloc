@@ -531,10 +531,10 @@ func (s *MemoryChat) MaxRoomSeq(_ context.Context, roomID string) (int64, error)
 }
 
 // MySQLChat implements ChatStore over database/sql.
-type MySQLChat struct{ DB *sql.DB }
+type MySQLChat struct{ DB *DB }
 
 // NewMySQLChat constructs a MySQL-backed chat store.
-func NewMySQLChat(db *sql.DB) *MySQLChat { return &MySQLChat{DB: db} }
+func NewMySQLChat(db *DB) *MySQLChat { return &MySQLChat{DB: db} }
 
 var _ ChatStore = (*MySQLChat)(nil)
 var _ ChatStore = (*MemoryChat)(nil)

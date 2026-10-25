@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"sync"
 )
 
@@ -48,10 +47,10 @@ func (s *MemoryExtensionAudit) AppendExtAudit(_ context.Context, rec ExtAuditRec
 }
 
 // MySQLExtensionAudit implements ExtensionAuditStore over database/sql.
-type MySQLExtensionAudit struct{ DB *sql.DB }
+type MySQLExtensionAudit struct{ DB *DB }
 
 // NewMySQLExtensionAudit constructs a MySQL-backed extension audit store.
-func NewMySQLExtensionAudit(db *sql.DB) *MySQLExtensionAudit { return &MySQLExtensionAudit{DB: db} }
+func NewMySQLExtensionAudit(db *DB) *MySQLExtensionAudit { return &MySQLExtensionAudit{DB: db} }
 
 var _ ExtensionAuditStore = (*MySQLExtensionAudit)(nil)
 

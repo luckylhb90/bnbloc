@@ -251,6 +251,7 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) 
 		return ChatPosted{}, fmt.Errorf("message persistence failed: %w", err)
 	}
 	posted := ChatPosted{Sequence: ev.Sequence}
+	s.pulseMessageSent(ctx, p.RoomID, ev.Sequence, agent, p.Author)
 	if agent && s.BridgeJobs != nil {
 		coreName := strings.TrimSpace(p.Recipient.Core)
 		var model, reasoningEffort string
@@ -297,6 +298,7 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) 
 			log.Printf("realtime: agent job room=%s seq=%d: %v", p.RoomID, ev.Sequence, err)
 		} else {
 			posted.Job = &job
+			s.pulseJobQueued(job)
 			s.auditExpertUse(ctx, expert, job)
 			_, _ = s.publish(ctx, wire.Event{RoomID: p.RoomID, ChannelID: channelID, Kind: wire.EventAgentJobCreated, Payload: job.View(), AtUnixMs: nowMs}, realtime.Durable{})
 		}

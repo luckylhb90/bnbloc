@@ -454,6 +454,7 @@ func (s *Service) refuseOverBudget(ctx context.Context, bridgeID string, jobs []
 			continue
 		}
 		s.publishJob(ctx, failed, now.UnixMilli())
+		s.pulseJobFinished(failed)
 		if failed.Status != store.AgentJobFailed {
 			continue // requeued for a retry (budget_unavailable): no notice yet
 		}

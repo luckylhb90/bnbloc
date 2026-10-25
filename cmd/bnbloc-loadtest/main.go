@@ -60,6 +60,7 @@ type config struct {
 	MemberPrefix   string
 	TokensFile     string
 	ForwardedFor   bool
+	TZ             string
 	LoginParallel  int
 	Rooms          int
 	RoomIDs        []string
@@ -94,6 +95,7 @@ func parseFlags(args []string, errOut io.Writer) (config, error) {
 	fs.IntVar(&c.Members, "members", 200, "simulated members, signed in through the dev sign-in (ignored with --tokens-file)")
 	fs.StringVar(&c.MemberPrefix, "member-prefix", "loadtest", "dev sign-in subjects are <prefix>-0001, <prefix>-0002, ...")
 	fs.StringVar(&c.TokensFile, "tokens-file", "", "file with one session token per line; each line is one member (instead of the dev sign-in)")
+	fs.StringVar(&c.TZ, "tz", "", "comma-separated IANA time zones, given to members round-robin on their room streams (the web client's tz parameter, sent only when the organization has member locations on); empty = no time zone")
 	fs.BoolVar(&c.ForwardedFor, "forwarded-for", false, "send a distinct synthetic X-Forwarded-For per member on sign-in, so the gateway's per-IP login throttle does not bind; effective only when the gateway trusts this host as a proxy (BNBLOC_TRUSTED_PROXIES)")
 	fs.IntVar(&c.LoginParallel, "login-parallel", 16, "concurrent sign-in and setup requests")
 	fs.IntVar(&c.Rooms, "rooms", 20, "rooms the tool creates (ignored with --room-ids)")

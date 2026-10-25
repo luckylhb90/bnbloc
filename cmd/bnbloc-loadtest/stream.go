@@ -36,6 +36,8 @@ type stream struct {
 	// idle ends a connection that delivered no bytes (not even the server's
 	// 15s keep-alive comment) for this long, as a browser or proxy would.
 	idle time.Duration
+	// tz is the time zone the member's client reports ("" = none).
+	tz string
 
 	live   atomic.Bool
 	opened atomic.Bool
@@ -94,7 +96,7 @@ func (st *stream) run(ctx context.Context) {
 func (st *stream) connectOnce(ctx context.Context) (opened bool, err error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, st.api.eventsURL(st.member, st.room.id, st.room.channel), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, st.api.eventsURL(st.member, st.room.id, st.room.channel, st.tz), nil)
 	if err != nil {
 		return false, err
 	}

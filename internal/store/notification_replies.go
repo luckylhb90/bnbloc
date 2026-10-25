@@ -127,10 +127,10 @@ func (m *MemoryNotificationReplies) PruneNotificationReplyTokens(_ context.Conte
 
 // MySQLNotificationReplies is the MySQL-backed reply-token store
 // (notification_reply_tokens).
-type MySQLNotificationReplies struct{ DB *sql.DB }
+type MySQLNotificationReplies struct{ DB *DB }
 
 // NewMySQLNotificationReplies builds the store over a shared pool.
-func NewMySQLNotificationReplies(db *sql.DB) *MySQLNotificationReplies {
+func NewMySQLNotificationReplies(db *DB) *MySQLNotificationReplies {
 	return &MySQLNotificationReplies{DB: db}
 }
 

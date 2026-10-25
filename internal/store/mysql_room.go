@@ -14,10 +14,10 @@ import (
 )
 
 // MySQLRoom implements RoomStore over database/sql. Schema matches deploy/schema.sql.
-type MySQLRoom struct{ DB *sql.DB }
+type MySQLRoom struct{ DB *DB }
 
 // NewMySQLRoom constructs a MySQL-backed room store.
-func NewMySQLRoom(db *sql.DB) *MySQLRoom { return &MySQLRoom{DB: db} }
+func NewMySQLRoom(db *DB) *MySQLRoom { return &MySQLRoom{DB: db} }
 
 var _ RoomStore = (*MySQLRoom)(nil)
 

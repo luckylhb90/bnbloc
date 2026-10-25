@@ -304,10 +304,10 @@ func (m *MemoryRoomSources) deleteRoomRows(tenantID, roomID string) {
 
 // MySQLRoomSources is the MySQL RoomSourceStore over room_source_grants
 // and room_source_opt_ins.
-type MySQLRoomSources struct{ DB *sql.DB }
+type MySQLRoomSources struct{ DB *DB }
 
 // NewMySQLRoomSources builds the MySQL store.
-func NewMySQLRoomSources(db *sql.DB) *MySQLRoomSources { return &MySQLRoomSources{DB: db} }
+func NewMySQLRoomSources(db *DB) *MySQLRoomSources { return &MySQLRoomSources{DB: db} }
 
 const roomSourceGrantCols = `tenant_id, room_id, source_name, component_id, component_name, component_version, purpose, alias_key,
   scope, asked_by, asked_at_ms, decided_by, decided_at_ms, grantee, COALESCE(watch_json, '')`

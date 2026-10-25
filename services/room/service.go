@@ -20,6 +20,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/obs"
+	"github.com/luckylhb90/bnbloc/internal/pulse"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/sealbox"
@@ -37,6 +38,8 @@ const (
 
 // Service holds the room handler dependencies.
 type Service struct {
+	// Pulse receives the organization board's events (pulse.go). Nil = Pulse off.
+	Pulse *pulse.Emitter
 	Store store.RoomStore
 	// AgentPrefs persists per-user, per-room+channel agent selections so the
 	// composer restores the last choice on any device. Optional: nil disables
@@ -90,6 +93,8 @@ type Service struct {
 	// per-app caps (zero: the wire constants).
 	appUsage appUsageCache
 	appCaps  appCaps
+	// PulseKey keys the member digests in deliverable and app events (pulse.MemberHash).
+	PulseKey []byte
 	// Publisher fans artifact change events to the room's live subscribers.
 	// Optional: nil (tests) simply skips the live notification.
 	Publisher realtime.Publisher

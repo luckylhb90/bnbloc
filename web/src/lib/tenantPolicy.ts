@@ -10,6 +10,13 @@ import type { TenantPolicy } from "./shares.ts";
 const TTL_MS = 5 * 60 * 1000;
 let cached: { tenant: string; at: number; policy: Promise<TenantPolicy> } | null = null;
 const listeners = new Set<() => void>();
+// The last policy read, for callers that cannot wait (a stream URL built on reconnect).
+let lastRead: TenantPolicy | null = null;
+
+/** The last policy read in this page, or null before the first read. */
+export function currentTenantPolicy(): TenantPolicy | null {
+  return lastRead;
+}
 
 export function loadTenantPolicy(tenant: string | null): Promise<TenantPolicy> {
   const key = tenant ?? "";
@@ -18,7 +25,9 @@ export function loadTenantPolicy(tenant: string | null): Promise<TenantPolicy> {
   const entry = { tenant: key, at: Date.now(), policy };
   cached = entry;
   // A failure is not cached: the next consumer retries.
-  policy.catch(() => {
+  policy.then((p) => {
+    lastRead = p;
+  }, () => {
     if (cached === entry) cached = null;
   });
   return policy;

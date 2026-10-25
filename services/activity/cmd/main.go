@@ -10,6 +10,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/notify"
 	"github.com/luckylhb90/bnbloc/internal/obs"
+	"github.com/luckylhb90/bnbloc/internal/pulse"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/svcauth"
@@ -27,8 +28,15 @@ func main() {
 		log.Fatalf("bnbloc-activity: %v", err)
 	}
 	metrics := obs.NewMetrics("bnbloc-activity")
+	go store.RunReplicaMetrics(context.Background(), metrics, backends.DB, 15*time.Second)
 	activity.RegisterMetrics(metrics)
+	pulseEm, _, err := pulse.FromEnv(context.Background(), "activity")
+	if err != nil {
+		log.Fatalf("bnbloc-activity: %v", err)
+	}
+	go pulse.RunMetrics(context.Background(), metrics, pulseEm, 15*time.Second)
 	svc := &activity.Service{
+		Pulse:      pulseEm,
 		Metrics:    metrics,
 		Store:      backends.Activity,
 		Publisher:  realtime.NewHTTPPublisher(config.FromEnvRaw("BNBLOC_REALTIME_BASE_URL"), "activity"),

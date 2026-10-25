@@ -16,6 +16,11 @@ func TestPermissionMatrix(t *testing.T) {
 		{"super_admin", PermCreateRoom, true},
 		{"super_admin", PermDriveAgent, true},
 		{"super_admin", PermRead, true},
+		{"super_admin", PermReadOrgPulse, true},
+		{"org_admin", PermReadOrgPulse, true},
+		{"member", PermReadOrgPulse, false},
+		{"viewer", PermReadOrgPulse, false},
+		{"", PermReadOrgPulse, false},
 
 		// manage_platform is super-admin ONLY: a wrong grant here lets an
 		// org_admin (or lower) escape their tenant. This is the escalation

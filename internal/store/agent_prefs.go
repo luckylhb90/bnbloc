@@ -44,10 +44,10 @@ var (
 )
 
 // MySQLAgentPrefs is the MySQL-backed AgentPrefsStore.
-type MySQLAgentPrefs struct{ DB *sql.DB }
+type MySQLAgentPrefs struct{ DB *DB }
 
 // NewMySQLAgentPrefs builds a MySQLAgentPrefs over a shared pool.
-func NewMySQLAgentPrefs(db *sql.DB) *MySQLAgentPrefs { return &MySQLAgentPrefs{DB: db} }
+func NewMySQLAgentPrefs(db *DB) *MySQLAgentPrefs { return &MySQLAgentPrefs{DB: db} }
 
 func (m *MySQLAgentPrefs) GetAgentPrefs(ctx context.Context, roomID, channelID, userID string) (AgentPrefs, bool, error) {
 	tid, err := tenant.Require(ctx)

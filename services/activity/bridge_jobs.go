@@ -151,6 +151,9 @@ func (s *Service) handleBridgeJobClaim(w http.ResponseWriter, r *http.Request) {
 	// The claim is the last server step before a bridge drives: a reached
 	// hard-stop usage budget refuses the job here (R12).
 	jobs = s.refuseOverBudget(r.Context(), body.BridgeID, jobs)
+	for _, j := range jobs {
+		s.pulseJobClaimed(j)
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"jobs": jobs})
 }
 
@@ -206,6 +209,7 @@ func (s *Service) handleBridgeJobStatus(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	s.publishJob(r.Context(), job, now)
+	s.pulseJobFinished(job)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"jobId": jobID, "status": job.Status, "leaseExpiresAtMs": job.LeaseExpiresAtMs})
 }
 
@@ -272,6 +276,8 @@ func (s *Service) SweepAgentJobs(ctx context.Context) {
 	}
 	for _, job := range jobs {
 		s.publishJob(ctx, job, now)
+		s.pulseJobSwept(job)
+		s.pulseJobFinished(job)
 		if job.Status.Terminal() {
 			s.postJobNotice(ctx, job, job.FailureReason.Text(job.Provider), now)
 		}

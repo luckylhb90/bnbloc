@@ -400,6 +400,34 @@ Two rules for the blob store follow from the collection:
   bucket versioning (or blob backups) for at least the database backup
   horizon.
 
+## Read replica
+
+A replica takes read-only analytics off the primary. Without one, every read
+runs on the primary exactly as before. With one, only the handlers that mark a
+read as lag-tolerant use it: the team agent dashboard, the usage reports and the
+platform-agent usage view. Chat, job claiming, room history and every write stay
+on the primary, so read-your-writes is never affected.
+
+Set `BNBLOC_MYSQL_REPLICA_DSN` to the replica (same credentials and database as
+`BNBLOC_MYSQL_DSN`). The replica must be a MySQL 8.0+ replica of that primary with
+GTIDs enabled (`SOURCE_AUTO_POSITION=1`), and `read_only` on. Schema and migrations
+run on the primary only; the replica receives them through replication. A local
+pair you can reproduce is in [Replication recipe](./replication.md).
+
+What to check after deploying:
+
+- `bnbloc_store_replica_usable` is `1` on every service with a replica. `0` means
+  the replica is down, a thread stopped, or lag is over `BNBLOC_MYSQL_REPLICA_MAX_LAG`;
+  the log line `replica not used for opted-in reads: <reason>` says which.
+- `bnbloc_store_replica_lag_seconds` stays under the bound with headroom.
+- `bnbloc_store_reads_total{target="fallback"}` rises only during a replica problem.
+- The primary's connection count includes `BNBLOC_MYSQL_REPLICA_MAX_CONNS` for each
+  replica pool. Size `max_connections` for both.
+
+Failure behaviour: a replica outage costs nothing but load moving back to the
+primary. Opted-in reads may show data up to the lag bound old; they never show
+data the primary does not have.
+
 ## Search backend
 
 Global search runs on MySQL FULLTEXT (an ngram index over the message text,

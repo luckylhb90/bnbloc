@@ -314,6 +314,9 @@ type settingsView struct {
 	// (docs/prd/2026-10-13-ai-assist.md §2); the gateway's assist status
 	// reads it.
 	AssistDisabled bool `json:"assistDisabled"`
+	// PulseGeography: the organization board reports members per country
+	// (docs/prd/2026-10-24-executive-pulse.md, section 4).
+	PulseGeography bool `json:"pulseGeography"`
 }
 
 func viewSettings(t store.Tenant) settingsView {
@@ -327,6 +330,7 @@ func viewSettings(t store.Tenant) settingsView {
 		AnonymousLinksDisabled:  t.AnonymousLinksDisabled,
 		PublishApproval:         t.PublishApproval,
 		AssistDisabled:          t.AssistDisabled,
+		PulseGeography:          t.PulseGeography,
 	}
 }
 
@@ -354,6 +358,7 @@ type settingsBody struct {
 	AnonymousLinksDisabled  *bool   `json:"anonymousLinksDisabled"`
 	PublishApproval         *string `json:"publishApproval"`
 	AssistDisabled          *bool   `json:"assistDisabled"`
+	PulseGeography          *bool   `json:"pulseGeography"`
 }
 
 // handleTenantUpdateSettings updates the tenant's display name, SSO
@@ -394,13 +399,14 @@ func (s *Service) handleTenantUpdateSettings(w http.ResponseWriter, r *http.Requ
 		httpx.Error(w, "update settings failed", http.StatusInternalServerError)
 		return
 	}
-	if body.RequireSandboxForBorrow != nil || body.OutsideLinksDisabled != nil || body.AnonymousLinksDisabled != nil || body.PublishApproval != nil || body.AssistDisabled != nil {
+	if body.RequireSandboxForBorrow != nil || body.OutsideLinksDisabled != nil || body.AnonymousLinksDisabled != nil || body.PublishApproval != nil || body.AssistDisabled != nil || body.PulseGeography != nil {
 		t, err = s.Tenants.SetTenantPolicy(r.Context(), tid, store.TenantPolicyUpdate{
 			RequireSandboxForBorrow: body.RequireSandboxForBorrow,
 			OutsideLinksDisabled:    body.OutsideLinksDisabled,
 			AnonymousLinksDisabled:  body.AnonymousLinksDisabled,
 			PublishApproval:         body.PublishApproval,
 			AssistDisabled:          body.AssistDisabled,
+			PulseGeography:          body.PulseGeography,
 		})
 		if err != nil {
 			obs.ServerError(w, "update tenant policy failed", err)

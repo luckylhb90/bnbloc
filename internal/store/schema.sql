@@ -1130,3 +1130,18 @@ CREATE TABLE IF NOT EXISTS component_values (
   PRIMARY KEY (component, scope, value_key),
   KEY idx_component_values_scope (scope)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Organization board rollups (docs/prd/2026-10-24-executive-pulse-backend.md,
+-- section 2): one row per (tenant, minute, metric, dimension). Counts and sums
+-- only, never a member id or a per-person row. The consumer adds each minute's
+-- deltas (INSERT ... ON DUPLICATE KEY UPDATE value = value + VALUES(value)).
+CREATE TABLE IF NOT EXISTS pulse_minutes (
+  tenant_id     VARCHAR(64) NOT NULL,
+  minute_ms     BIGINT NOT NULL,
+  metric        VARCHAR(32) NOT NULL,
+  dim           VARCHAR(64) NOT NULL DEFAULT '',
+  value         DOUBLE NOT NULL DEFAULT 0,
+  updated_at_ms BIGINT NOT NULL,
+  PRIMARY KEY (tenant_id, minute_ms, metric, dim),
+  KEY idx_pulse_minutes_metric (tenant_id, metric, minute_ms)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

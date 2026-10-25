@@ -2,11 +2,14 @@
 package main
 
 import (
+	"context"
 	"log"
+	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/appdata"
 	"github.com/luckylhb90/bnbloc/internal/config"
 	"github.com/luckylhb90/bnbloc/internal/obs"
+	"github.com/luckylhb90/bnbloc/internal/pulse"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/sealbox"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -21,6 +24,14 @@ func main() {
 		log.Fatalf("bnbloc-room: store: %v", err)
 	}
 	svc := room.New(backends.Room, backends.Channel)
+	pulseEm, pulseKey, err := pulse.FromEnv(context.Background(), "room")
+	if err != nil {
+		log.Fatalf("bnbloc-room: %v", err)
+	}
+	svc.Pulse = pulseEm
+	svc.PulseKey = pulseKey
+	metrics := obs.NewMetrics("bnbloc-room")
+	go pulse.RunMetrics(context.Background(), metrics, pulseEm, 15*time.Second)
 	svc.AgentPrefs = backends.AgentPrefs
 	svc.Artifacts = backends.Artifacts
 	// Share links read the org policy switch and org roles from the tenant
@@ -60,7 +71,7 @@ func main() {
 	if svc.AppCipher = appdata.NewCipher(box); svc.AppCipher == nil {
 		log.Printf("bnbloc-room: %s is not set: interactive app data is off", sealbox.KeyEnv)
 	}
-	if err := obs.ServeWithHealth("bnbloc-room", cfg.ListenAddr, svcauth.Middleware(svcauth.KeyFromEnv(), svc.Handler()), backends.HealthCheck()); err != nil {
+	if err := obs.ServeWithHealth("bnbloc-room", cfg.ListenAddr, svcauth.Middleware(svcauth.KeyFromEnv(), svc.Handler()), backends.HealthCheck(), obs.WithMetrics(metrics)); err != nil {
 		log.Fatalf("bnbloc-room: %v", err)
 	}
 }

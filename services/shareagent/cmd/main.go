@@ -26,6 +26,7 @@ func main() {
 	}
 	grants := backends.Grant
 	metrics := obs.NewMetrics("bnbloc-shareagent")
+	go store.RunReplicaMetrics(context.Background(), metrics, backends.DB, 15*time.Second)
 	shareagent.RegisterMetrics(metrics)
 	rooms, err := membership.FromEnv()
 	if err != nil {

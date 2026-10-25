@@ -37,6 +37,7 @@ import { downloadFilename, type RoomHandoffInfo, type RoomImportResult } from ".
 import type { Grant } from "./sessionGrant.ts";
 import type { TenantPolicy } from "./shares.ts";
 import type { RoomAgentCatalog } from "./agentCatalogs.ts";
+import type { OrgPulseSnapshot } from "./orgPulse.ts";
 import {
   teamAgentsPath,
   usageReportPath,
@@ -912,6 +913,11 @@ export const api = {
     ),
   // Team agent dashboard (F1): the caller's own agents ("self") or, for org
   // admins, every member's ("tenant", gated on manage_org by the gateway).
+  // The organization board (services/pulse, through the gateway's read_org_pulse
+  // gate): the snapshot, and the stream as a raw response to read with readSse.
+  orgPulseSnapshot: () => req<OrgPulseSnapshot>("/v1/tenant/pulse/snapshot"),
+  orgPulseStream: (signal: AbortSignal) =>
+    req<Response>("/v1/tenant/pulse/stream", { as: "response", signal, headers: { accept: "text/event-stream" } }),
   teamAgents: (scope: TeamScope, range: TeamRange) =>
     req<TeamAgentsReply>(teamAgentsPath(scope, range, new Date().getTimezoneOffset())),
   // Borrow billing (F3): grouped usage report for one month, and its CSV export.

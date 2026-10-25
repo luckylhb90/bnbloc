@@ -320,6 +320,10 @@ func (s *Service) route(p apiPath) string {
 		if p.section() == "tenant" && len(p.segs) >= 3 && p.segs[2] == "team" {
 			return s.Backends.Activity
 		}
+		// The organization board (executive Pulse): its own service.
+		if p.section() == "tenant" && len(p.segs) >= 3 && p.segs[2] == "pulse" {
+			return s.Backends.Pulse
+		}
 		// Tenant-wide agent run records (R10), beside the dashboard.
 		if p.section() == "tenant" && len(p.segs) >= 3 && p.segs[2] == "jobs" {
 			return s.Backends.Activity
@@ -360,6 +364,11 @@ func requiredPermission(method string, p apiPath) rbac.Permission {
 		// Cross-tenant administration: the most privileged, even for GET.
 		return rbac.PermManagePlatform
 	case "tenant":
+		// The organization board has its own grant (read_org_pulse); the rest of
+		// /v1/tenant/* is manage_org.
+		if len(p.segs) >= 3 && p.segs[2] == "pulse" {
+			return rbac.PermReadOrgPulse
+		}
 		// Org-admin endpoints (audit, usage) are privileged even for GET.
 		return rbac.PermManageOrg
 	case "tenants":

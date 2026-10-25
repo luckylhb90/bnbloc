@@ -118,10 +118,10 @@ func (m *MemoryComponentValues) DeleteScopeValues(_ context.Context, scope strin
 }
 
 // MySQLComponentValues is the MySQL ComponentValueStore (component_values).
-type MySQLComponentValues struct{ DB *sql.DB }
+type MySQLComponentValues struct{ DB *DB }
 
 // NewMySQLComponentValues builds the MySQL store.
-func NewMySQLComponentValues(db *sql.DB) *MySQLComponentValues { return &MySQLComponentValues{DB: db} }
+func NewMySQLComponentValues(db *DB) *MySQLComponentValues { return &MySQLComponentValues{DB: db} }
 
 func (s *MySQLComponentValues) PutComponentValue(ctx context.Context, v ComponentValue) error {
 	if v.Component == "" || v.Scope == "" || v.Key == "" {

@@ -109,8 +109,8 @@ func TestMySQLReadsReportFailures(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = db.Close() // every query now fails
-	b := newMySQLBackends(db)
-	stores := map[string]any{"Retention": NewMySQLRetention(db)}
+	b := newMySQLBackends(NewDB(db, nil, 0, 0))
+	stores := map[string]any{"Retention": NewMySQLRetention(NewDB(db, nil, 0, 0))}
 	bv := reflect.ValueOf(b).Elem()
 	for i := 0; i < bv.NumField(); i++ {
 		f := bv.Field(i)

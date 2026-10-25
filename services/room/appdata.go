@@ -395,6 +395,7 @@ func (s *Service) createAppDoc(a *appCall, collection, id string, body appdata.B
 		}
 		s.appUsage.add(a.tenantID, a.scope, collection, 1, int64(len(d.BodySealed)))
 		s.announceAppChange(a, collection, id, d.Version)
+		s.pulseAppWritten(a, d)
 		return d, nil
 	}
 }
@@ -453,6 +454,7 @@ func (s *Service) updateAppDoc(a *appCall, collection, id string, version int64,
 	}
 	s.appUsage.add(a.tenantID, a.scope, collection, 0, grew)
 	s.announceAppChange(a, collection, id, d.Version)
+	s.pulseAppWritten(a, d)
 	return d, nil
 }
 

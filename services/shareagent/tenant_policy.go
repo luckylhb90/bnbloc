@@ -22,7 +22,7 @@ func viewTenantPolicy(t store.Tenant) wire.TenantPolicy {
 			allowed = append(allowed, a)
 		}
 	}
-	return wire.TenantPolicy{TenantID: t.TenantID, Name: t.Name, RequireSandboxForBorrow: t.RequireSandboxForBorrow, ShareAccess: allowed, PublishApproval: t.PublishApproval}
+	return wire.TenantPolicy{TenantID: t.TenantID, Name: t.Name, RequireSandboxForBorrow: t.RequireSandboxForBorrow, ShareAccess: allowed, PublishApproval: t.PublishApproval, PulseGeography: t.PulseGeography}
 }
 
 // handleMyTenantPolicy answers the policy of ?tenant= (a tenant the caller is

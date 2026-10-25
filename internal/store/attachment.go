@@ -89,9 +89,9 @@ func (s *MemoryAttachments) GetAttachment(ctx context.Context, roomID, id string
 }
 
 // MySQLAttachments implements AttachmentStore over database/sql.
-type MySQLAttachments struct{ DB *sql.DB }
+type MySQLAttachments struct{ DB *DB }
 
-func NewMySQLAttachments(db *sql.DB) *MySQLAttachments {
+func NewMySQLAttachments(db *DB) *MySQLAttachments {
 	return &MySQLAttachments{DB: db}
 }
 

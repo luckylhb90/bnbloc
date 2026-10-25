@@ -1788,6 +1788,21 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return createSchemaTable(ctx, db, "component_values")
 		},
 	},
+	{
+		// The organization board's rollups (pulse_minutes): one row per tenant,
+		// minute, metric and dimension, written by the Pulse consumer.
+		id: "2026_10_pulse_minutes",
+		run: func(ctx context.Context, db sqlConn) error {
+			return createSchemaTable(ctx, db, "pulse_minutes")
+		},
+	},
+	{
+		// The organization board's member-location switch (off by default).
+		id: "2026_10_tenant_pulse_geography",
+		run: func(ctx context.Context, db sqlConn) error {
+			return addColumnIfMissing(ctx, db, "tenants", "pulse_geography", "TINYINT(1) NOT NULL DEFAULT 0 AFTER assist_disabled")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

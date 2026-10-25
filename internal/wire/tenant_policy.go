@@ -14,4 +14,7 @@ type TenantPolicy struct {
 	// each, so no client re-decides it.
 	ShareAccess     []string `json:"shareAccess" tstype:"ShareAccess"`
 	PublishApproval string   `json:"publishApproval" tstype:"PublishApproval"`
+	// PulseGeography: the organization reports members' countries on its board;
+	// the client reports its time zone only when this is on.
+	PulseGeography bool `json:"pulseGeography"`
 }

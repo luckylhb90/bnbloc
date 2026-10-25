@@ -92,7 +92,7 @@ func run(ctx context.Context, cfg config, logw io.Writer) (*Report, error) {
 	var streams []*stream
 	for _, r := range rooms {
 		for _, m := range r.members {
-			st := &stream{id: len(streams), room: r, member: m, api: a, tracker: tr, stats: ss, idle: cfg.StreamIdle}
+			st := &stream{id: len(streams), room: r, member: m, api: a, tracker: tr, stats: ss, idle: cfg.StreamIdle, tz: tzFor(cfg.TZ, len(streams))}
 			r.streams = append(r.streams, st)
 			streams = append(streams, st)
 		}

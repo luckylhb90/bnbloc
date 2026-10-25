@@ -304,10 +304,10 @@ func (s *MemoryRefreshToken) RevokeRefreshFamilies(_ context.Context, filter Ref
 }
 
 // MySQLRefreshToken implements RefreshTokenStore over database/sql.
-type MySQLRefreshToken struct{ DB *sql.DB }
+type MySQLRefreshToken struct{ DB *DB }
 
 // NewMySQLRefreshToken constructs a MySQL-backed refresh token store.
-func NewMySQLRefreshToken(db *sql.DB) *MySQLRefreshToken { return &MySQLRefreshToken{DB: db} }
+func NewMySQLRefreshToken(db *DB) *MySQLRefreshToken { return &MySQLRefreshToken{DB: db} }
 
 var _ RefreshTokenStore = (*MySQLRefreshToken)(nil)
 

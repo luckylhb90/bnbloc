@@ -89,6 +89,11 @@ type Tenant struct {
 	// the organization (docs/prd/2026-10-13-ai-assist.md §2; default off:
 	// assists run when the deployment has an assist model).
 	AssistDisabled bool
+	// PulseGeography is the org-admin switch for member locations on the board:
+	// when on, clients report their time zone and the board counts members per
+	// country (k = 5). Off by default; off means no zone ever reaches the stream
+	// (docs/prd/2026-10-24-executive-pulse.md, section 4). See pulse.ZoneCountry.
+	PulseGeography bool
 	// Retention is the org-admin data retention override (null = the
 	// platform default, 0 = keep forever, N = delete after N days); see
 	// wire.RetentionPolicy. Set only through SetTenantRetention.
@@ -121,6 +126,7 @@ type TenantPolicyUpdate struct {
 	AnonymousLinksDisabled  *bool
 	PublishApproval         *string
 	AssistDisabled          *bool
+	PulseGeography          *bool
 }
 
 // apply returns t with the update's set fields.
@@ -139,6 +145,9 @@ func (u TenantPolicyUpdate) apply(t Tenant) Tenant {
 	}
 	if u.AssistDisabled != nil {
 		t.AssistDisabled = *u.AssistDisabled
+	}
+	if u.PulseGeography != nil {
+		t.PulseGeography = *u.PulseGeography
 	}
 	return t
 }

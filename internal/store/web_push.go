@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"sort"
 	"sync"
 
@@ -128,10 +127,10 @@ func (m *MemoryWebPush) DeleteWebPushSubscriptionsForUser(ctx context.Context, u
 }
 
 // MySQLWebPush is the MySQL-backed WebPushSubscriptionStore.
-type MySQLWebPush struct{ DB *sql.DB }
+type MySQLWebPush struct{ DB *DB }
 
 // NewMySQLWebPush builds a MySQLWebPush over a shared pool.
-func NewMySQLWebPush(db *sql.DB) *MySQLWebPush { return &MySQLWebPush{DB: db} }
+func NewMySQLWebPush(db *DB) *MySQLWebPush { return &MySQLWebPush{DB: db} }
 
 func (m *MySQLWebPush) PutWebPushSubscription(ctx context.Context, s WebPushSubscription) error {
 	tid, err := tenant.Require(ctx)

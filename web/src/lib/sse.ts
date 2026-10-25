@@ -3,6 +3,7 @@ import { apiUrl } from "./config";
 import { normalizeRoomEvent, type RoomEvent } from "./roomEvents.ts";
 import { ROOM_EVENT_KINDS } from "./roomEventKinds.ts";
 import { roomPath } from "./roomId.ts";
+import { currentTenantPolicy } from "./tenantPolicy.ts";
 
 // Which events a room subscription receives. The default (the room view)
 // is every channel; includePeople also admits the room's people chat, which
@@ -94,10 +95,15 @@ export function subscribeRoom(
     // Files panel lists room-wide deliverables. Feed kinds are filtered to the
     // active channel by the caller.
     const scopeQ = scope.channelOnly ? "" : `&allChannels=1${scope.includePeople ? "&includePeople=1" : ""}`;
+    // Member locations: the time zone is sent only when the organization has them
+    // on (pulse_geography). Off, the zone never leaves the device.
+    const tzQ = currentTenantPolicy()?.pulseGeography
+      ? `&tz=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}`
+      : "";
     const url = apiUrl(
       `${roomPath(roomId, "events")}?${
         token ? `access_token=${encodeURIComponent(token)}` : ""
-      }${channelQ}${scopeQ}`,
+      }${channelQ}${scopeQ}${tzQ}`,
     );
     const src = new EventSource(url);
     es = src;

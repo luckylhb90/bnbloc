@@ -62,6 +62,9 @@ func teamSince(rng, tz string, now time.Time) (string, int64, bool) {
 
 func (s *Service) handleTeamAgents(scope string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Read-only and lag-tolerant: may be served by the read replica
+		// (docs/prd/2026-10-24-read-replica-routing.md). Writes stay on the primary.
+		r = r.WithContext(store.WithReplicaReads(r.Context()))
 		caller := svcauth.Subject(r)
 		if caller == "" {
 			httpx.Error(w, "missing authenticated subject", http.StatusUnauthorized)

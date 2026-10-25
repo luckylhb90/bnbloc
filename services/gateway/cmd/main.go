@@ -303,6 +303,7 @@ func main() {
 			Activity:   config.FromEnvRaw("BNBLOC_ACTIVITY_BASE_URL"),
 			ShareAgent: config.FromEnvRaw("BNBLOC_SHAREAGENT_BASE_URL"),
 			Realtime:   config.FromEnvRaw("BNBLOC_REALTIME_BASE_URL"),
+			Pulse:      config.FromEnvRaw("BNBLOC_PULSE_BASE_URL"),
 			Relay:      config.FromEnvRaw("BNBLOC_RELAY_BASE_URL"),
 		},
 		Rooms:             gateway.NewRoomMembershipResolver(config.FromEnvRaw("BNBLOC_ROOM_BASE_URL")),

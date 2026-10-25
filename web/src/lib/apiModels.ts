@@ -102,6 +102,9 @@ export interface TenantSettings {
   name: string;
   status: string;
   ssoIssuer: string;
+  // Member locations on the organization board: when on, members' clients send
+  // their time zone and the board counts members per country (k = 5).
+  pulseGeography: boolean;
   // Org policy: borrowed agents must run in their owner's agent sandbox
   // (refused when the owner's sandbox is off or not ready).
   requireSandboxForBorrow: boolean;

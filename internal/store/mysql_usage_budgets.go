@@ -10,10 +10,10 @@ import (
 )
 
 // MySQLUsageBudgets is the MySQL UsageBudgetStore (table usage_budgets).
-type MySQLUsageBudgets struct{ DB *sql.DB }
+type MySQLUsageBudgets struct{ DB *DB }
 
 // NewMySQLUsageBudgets returns a MySQL-backed budget store.
-func NewMySQLUsageBudgets(db *sql.DB) *MySQLUsageBudgets { return &MySQLUsageBudgets{DB: db} }
+func NewMySQLUsageBudgets(db *DB) *MySQLUsageBudgets { return &MySQLUsageBudgets{DB: db} }
 
 var _ UsageBudgetStore = (*MySQLUsageBudgets)(nil)
 

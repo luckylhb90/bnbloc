@@ -10,10 +10,10 @@ import (
 )
 
 // MySQLGrant implements GrantStore over database/sql. Schema matches deploy/schema.sql.
-type MySQLGrant struct{ DB *sql.DB }
+type MySQLGrant struct{ DB *DB }
 
 // NewMySQLGrant constructs a MySQL-backed grant store.
-func NewMySQLGrant(db *sql.DB) *MySQLGrant { return &MySQLGrant{DB: db} }
+func NewMySQLGrant(db *DB) *MySQLGrant { return &MySQLGrant{DB: db} }
 
 var _ GrantStore = (*MySQLGrant)(nil)
 

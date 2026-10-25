@@ -489,10 +489,10 @@ func utf8RuneStart(b byte) bool { return b&0xC0 != 0x80 }
 // --- MySQL ---
 
 // MySQLRoomSchedules is the MySQL-backed RoomScheduleStore.
-type MySQLRoomSchedules struct{ DB *sql.DB }
+type MySQLRoomSchedules struct{ DB *DB }
 
 // NewMySQLRoomSchedules constructs a MySQL schedule store.
-func NewMySQLRoomSchedules(db *sql.DB) *MySQLRoomSchedules { return &MySQLRoomSchedules{DB: db} }
+func NewMySQLRoomSchedules(db *DB) *MySQLRoomSchedules { return &MySQLRoomSchedules{DB: db} }
 
 var _ RoomScheduleStore = (*MySQLRoomSchedules)(nil)
 

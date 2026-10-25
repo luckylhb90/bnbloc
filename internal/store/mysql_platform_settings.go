@@ -7,10 +7,10 @@ import (
 )
 
 // MySQLPlatformSettings implements PlatformSettingsStore over database/sql.
-type MySQLPlatformSettings struct{ DB *sql.DB }
+type MySQLPlatformSettings struct{ DB *DB }
 
 // NewMySQLPlatformSettings constructs a MySQL-backed platform settings store.
-func NewMySQLPlatformSettings(db *sql.DB) *MySQLPlatformSettings {
+func NewMySQLPlatformSettings(db *DB) *MySQLPlatformSettings {
 	return &MySQLPlatformSettings{DB: db}
 }
 

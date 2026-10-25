@@ -145,6 +145,9 @@ func (s *Service) handleTenantUsageReport(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Service) serveUsageReport(w http.ResponseWriter, r *http.Request, as string, q store.BorrowTurnQuery) {
+	// Read-only and lag-tolerant: may be served by the read replica
+	// (docs/prd/2026-10-24-read-replica-routing.md). Writes stay on the primary.
+	r = r.WithContext(store.WithReplicaReads(r.Context()))
 	p, bad := parseReportParams(r, time.UnixMilli(s.Now()))
 	if bad != "" {
 		httpx.Error(w, bad, http.StatusBadRequest)

@@ -11,10 +11,10 @@ import (
 )
 
 // MySQLAppDocs is the MySQL AppDocs over app_docs and app_keys.
-type MySQLAppDocs struct{ DB *sql.DB }
+type MySQLAppDocs struct{ DB *DB }
 
 // NewMySQLAppDocs builds the MySQL store.
-func NewMySQLAppDocs(db *sql.DB) *MySQLAppDocs { return &MySQLAppDocs{DB: db} }
+func NewMySQLAppDocs(db *DB) *MySQLAppDocs { return &MySQLAppDocs{DB: db} }
 
 const appDocCols = `app_id, collection, doc_id, tenant_id, room_id, by_key, public, author_sealed, version, body_sealed, created_at_ms, updated_at_ms`
 

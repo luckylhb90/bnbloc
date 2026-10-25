@@ -38,7 +38,7 @@ import { PlatformContentTab } from "@/views/org/PlatformContentTab";
 import { RoomSourcesTab } from "@/views/org/RoomSourcesTab";
 import { invalidateTenantPolicy } from "@/lib/tenantPolicy";
 import { UserWithEmail } from "@/views/UserName";
-import { can } from "@/lib/permissions";
+import { can, type OrgPermission } from "@/lib/permissions";
 import { errorText } from "@/lib/errors";
 import { ConfirmDialog } from "@/ui/Dialog";
 import { displayNameOf } from "@/lib/useDisplayName";
@@ -47,6 +47,7 @@ import { exactTime, formatDate, formatUsd } from "@/lib/format";
 import { StatTile } from "@/ui/Card";
 import { Field } from "@/ui/Input";
 import { useToast } from "@/ui/Toast";
+import { OrgPulseTab } from "@/views/org/OrgPulseTab";
 
 type Tab =
   | "overview"
@@ -66,10 +67,13 @@ type Tab =
   | "platformContent"
   | "updates"
   | "assist"
-  | "releases";
+  | "releases"
+  | "pulse";
 
-const TABS: { id: Tab; label: string; superOnly?: boolean }[] = [
+const TABS: { id: Tab; label: string; superOnly?: boolean; perm?: OrgPermission }[] = [
   { id: "overview", label: "Overview" },
+  // The organization board: the admin's live view of the org's numbers.
+  { id: "pulse", label: "Board", perm: "read_org_pulse" },
   { id: "members", label: "Members" },
   { id: "requests", label: "Requests" },
   { id: "content", label: "Content" },
@@ -152,7 +156,7 @@ export function Organization() {
       </header>
 
       <nav className="flex gap-1 overflow-x-auto overflow-y-hidden border-b border-[var(--color-border)]">
-        {TABS.filter((t) => !t.superOnly || isSuper).map((t) => (
+        {TABS.filter((t) => (!t.superOnly || isSuper) && (!t.perm || can(role, t.perm))).map((t) => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
@@ -169,6 +173,7 @@ export function Organization() {
       </nav>
 
       {tab === "overview" && <OverviewTab key={activeTenant} role={role} />}
+      {tab === "pulse" && can(role, "read_org_pulse") && <OrgPulseTab key={activeTenant} />}
       {tab === "members" && <MembersTab key={activeTenant} selfId={subject} />}
       {tab === "requests" && <RequestsTab key={activeTenant} />}
       {tab === "quota" && <QuotaTab key={activeTenant} />}
@@ -607,6 +612,7 @@ function SettingsTab() {
     anonymousLinksDisabled?: boolean;
     publishApproval?: PublishApproval;
     assistDisabled?: boolean;
+    pulseGeography?: boolean;
   }) => {
     if (policySaving) return;
     setPolicySaving(true);
@@ -621,6 +627,12 @@ function SettingsTab() {
       setPolicySaving(false);
     }
   };
+
+  // The form and the policy switches wait for the settings: a switch drawn
+  // before the load would show a default that may not be the organization's.
+  if (!settings) {
+    return <section className="flex max-w-md flex-col gap-4">{error && <ErrorBox>{error}</ErrorBox>}</section>;
+  }
 
   return (
     <section className="flex max-w-md flex-col gap-4">
@@ -727,6 +739,21 @@ function SettingsTab() {
         </p>
         {!(settings?.assistDisabled ?? false) && <OrgAssistModel />}
         {!(settings?.assistDisabled ?? false) && <OrgMediaProviders />}
+      </div>
+      <div className="flex flex-col gap-2 border-t border-[var(--color-border)] pt-4">
+        <span className="text-xs font-medium uppercase tracking-wide text-[var(--color-fg-subtle)]">Organization board</span>
+        <Switch
+          checked={settings?.pulseGeography ?? false}
+          onChange={(v) => void savePolicy({ pulseGeography: v })}
+          label="Show members by country"
+          ariaLabel="Show members by country"
+        />
+        <p className="text-xs text-[var(--color-fg-subtle)]">
+          On: each member's app reports its time zone, and the board counts members per country. Only the country is
+          kept, never the time zone, and a country with fewer than 5 people is not shown. Members are not told by the
+          app, so tell them yourself before you turn this on. Off (the default): no time zone leaves a member's app,
+          and the board shows no real locations.
+        </p>
       </div>
       <TenantRetentionSection />
     </section>

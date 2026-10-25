@@ -11,9 +11,9 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
-type MySQLBridgeJobs struct{ DB *sql.DB }
+type MySQLBridgeJobs struct{ DB *DB }
 
-func NewMySQLBridgeJobs(db *sql.DB) *MySQLBridgeJobs { return &MySQLBridgeJobs{DB: db} }
+func NewMySQLBridgeJobs(db *DB) *MySQLBridgeJobs { return &MySQLBridgeJobs{DB: db} }
 
 var _ BridgeJobStore = (*MySQLBridgeJobs)(nil)
 

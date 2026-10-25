@@ -455,6 +455,9 @@ func (s *Service) publishArtifactEvent(ctx context.Context, art store.Artifact, 
 // change that is not a new version ("thumbnail": a version thumbnail was
 // stored, so file cards refetch it).
 func (s *Service) publishArtifactEventReason(ctx context.Context, art store.Artifact, actor, reason, sourceJob string) {
+	if reason == "" {
+		s.pulseArtifactVersion(art, actor)
+	}
 	if s.Publisher == nil {
 		return
 	}

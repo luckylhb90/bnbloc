@@ -17,11 +17,11 @@ import (
 // the same contract as Memory, enforcing canonical version monotonicity and
 // idempotent message appends through SQL constraints.
 type MySQL struct {
-	DB *sql.DB
+	DB *DB
 }
 
 // NewMySQL constructs a MySQL-backed activity store.
-func NewMySQL(db *sql.DB) *MySQL { return &MySQL{DB: db} }
+func NewMySQL(db *DB) *MySQL { return &MySQL{DB: db} }
 
 // PutSessionState advances the session's message_version (a monotonic
 // fence: GREATEST keeps the stored version when the incoming one is older)

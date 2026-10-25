@@ -10,10 +10,10 @@ import (
 )
 
 // MySQLNotifications is the MySQL-backed notification prefs + outbox store.
-type MySQLNotifications struct{ DB *sql.DB }
+type MySQLNotifications struct{ DB *DB }
 
 // NewMySQLNotifications builds a MySQLNotifications over a shared pool.
-func NewMySQLNotifications(db *sql.DB) *MySQLNotifications { return &MySQLNotifications{DB: db} }
+func NewMySQLNotifications(db *DB) *MySQLNotifications { return &MySQLNotifications{DB: db} }
 
 var (
 	_ NotificationPrefsStore  = (*MySQLNotifications)(nil)

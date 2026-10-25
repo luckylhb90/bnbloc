@@ -25,10 +25,10 @@ import (
 //   - shared_agent_audit / extension_audit: idx_audit_tenant_time /
 //     idx_extension_audit_tenant;
 //   - agent_jobs: idx_agent_jobs_tenant_created.
-type MySQLRetention struct{ DB *sql.DB }
+type MySQLRetention struct{ DB *DB }
 
 // NewMySQLRetention constructs the MySQL retention store.
-func NewMySQLRetention(db *sql.DB) *MySQLRetention { return &MySQLRetention{DB: db} }
+func NewMySQLRetention(db *DB) *MySQLRetention { return &MySQLRetention{DB: db} }
 
 var _ RetentionStore = (*MySQLRetention)(nil)
 

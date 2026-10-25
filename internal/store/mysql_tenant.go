@@ -12,14 +12,14 @@ import (
 // across tenants by design (it is the registry that establishes tenancy) and is
 // only reachable from the trusted gateway/admin path.
 type MySQLTenant struct {
-	DB *sql.DB
+	DB *DB
 }
 
 // NewMySQLTenant constructs a MySQL-backed tenant store.
-func NewMySQLTenant(db *sql.DB) *MySQLTenant { return &MySQLTenant{DB: db} }
+func NewMySQLTenant(db *DB) *MySQLTenant { return &MySQLTenant{DB: db} }
 
 // tenantCols is the column list a Tenant scans from, in Scan order.
-const tenantCols = `tenant_id, name, status, COALESCE(sso_issuer, ''), run_quota, cost_allowance, require_sandbox_for_borrow, outside_links_disabled, anonymous_links_disabled, publish_approval, assist_disabled, created_at_ms,
+const tenantCols = `tenant_id, name, status, COALESCE(sso_issuer, ''), run_quota, cost_allowance, require_sandbox_for_borrow, outside_links_disabled, anonymous_links_disabled, publish_approval, assist_disabled, pulse_geography, created_at_ms,
   retention_messages_days, retention_artifact_versions_days, retention_audit_days, retention_agent_jobs_days`
 
 // scanTenant reads one row of tenantCols.
@@ -27,7 +27,7 @@ func scanTenant(sc rowScanner) (Tenant, error) {
 	var t Tenant
 	var status string
 	var ret [4]sql.NullInt64
-	if err := sc.Scan(&t.TenantID, &t.Name, &status, &t.SSOIssuer, &t.RunQuota, &t.CostAllowance, &t.RequireSandboxForBorrow, &t.OutsideLinksDisabled, &t.AnonymousLinksDisabled, &t.PublishApproval, &t.AssistDisabled, &t.CreatedAtMs,
+	if err := sc.Scan(&t.TenantID, &t.Name, &status, &t.SSOIssuer, &t.RunQuota, &t.CostAllowance, &t.RequireSandboxForBorrow, &t.OutsideLinksDisabled, &t.AnonymousLinksDisabled, &t.PublishApproval, &t.AssistDisabled, &t.PulseGeography, &t.CreatedAtMs,
 		&ret[0], &ret[1], &ret[2], &ret[3]); err != nil {
 		return Tenant{}, err
 	}
@@ -147,8 +147,9 @@ UPDATE tenants SET
   outside_links_disabled = COALESCE(?, outside_links_disabled),
   anonymous_links_disabled = COALESCE(?, anonymous_links_disabled),
   publish_approval = COALESCE(?, publish_approval),
-  assist_disabled = COALESCE(?, assist_disabled)
-WHERE tenant_id = ?`, nullPtr(u.RequireSandboxForBorrow), nullPtr(u.OutsideLinksDisabled), nullPtr(u.AnonymousLinksDisabled), nullPtr(u.PublishApproval), nullPtr(u.AssistDisabled), tenantID); err != nil {
+  assist_disabled = COALESCE(?, assist_disabled),
+  pulse_geography = COALESCE(?, pulse_geography)
+WHERE tenant_id = ?`, nullPtr(u.RequireSandboxForBorrow), nullPtr(u.OutsideLinksDisabled), nullPtr(u.AnonymousLinksDisabled), nullPtr(u.PublishApproval), nullPtr(u.AssistDisabled), nullPtr(u.PulseGeography), tenantID); err != nil {
 		return Tenant{}, err
 	}
 	// The stored row is the result (ErrTenantNotFound when there is none).
