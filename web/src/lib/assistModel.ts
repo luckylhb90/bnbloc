@@ -1,5 +1,20 @@
 import { cleanTags, splitList, tagProblem } from "./contentComponents.ts";
-import { AssistTaskDescribeRoom, AssistTaskDescribeWork, AssistTaskEnhancePrompt, WorkCategoryValues, type AssistStatus, type AssistTask, type WorkCategory } from "./wire.gen.ts";
+import {
+  AssistTaskDescribeRoom,
+  AssistTaskDescribeWork,
+  AssistTaskEnhancePrompt,
+  MaxAssistProblemRunes,
+  MaxAssistProblems,
+  MaxAssistRounds,
+  MaxAssistText,
+  WorkCategoryValues,
+  type AssistJSONReply,
+  type AssistRequest,
+  type AssistRevise,
+  type AssistStatus,
+  type AssistTask,
+  type WorkCategory,
+} from "./wire.gen.ts";
 import { workNameFrom, type PublishWorkForm } from "./workGallery.ts";
 
 // The pure side of AI assist (docs/prd/2026-10-13-ai-assist.md §5; the
@@ -19,6 +34,56 @@ export const DESCRIBE_ROOM = AssistTaskDescribeRoom;
 export function assistTask(status: AssistStatus | null | undefined, name: string): AssistTask | null {
   if (!status?.available) return null;
   return status.tasks.find((t) => t.name === name) ?? null;
+}
+
+// ---- Checking its work (docs/prd/2026-10-25-ai-checks-its-work.md) ----
+
+/** A checked JSON reply: the fields, and the problems its check still
+ *  finds (empty: it passed). */
+export interface CheckedReply {
+  readonly reply: AssistJSONReply;
+  readonly problems: readonly string[];
+}
+
+/** assistRevision is the revision a failed check asks for: the previous
+ *  answer (its fields as JSON, cut to the request's bound) and the
+ *  problems as one line each, within their bounds; null when none is
+ *  left. */
+export function assistRevision(fields: AssistJSONReply["fields"], problems: readonly string[]): AssistRevise | null {
+  const lines: string[] = [];
+  for (const p of problems) {
+    const line = p.split(/\s+/).filter(Boolean).join(" ");
+    const chars = [...line];
+    if (line && lines.length < MaxAssistProblems) lines.push(chars.length > MaxAssistProblemRunes ? chars.slice(0, MaxAssistProblemRunes - 1).join("") + "…" : line);
+  }
+  if (lines.length === 0) return null;
+  return { answer: [...JSON.stringify(fields)].slice(0, MaxAssistText).join(""), problems: lines };
+}
+
+/** refineJSON is the web's one loop of an answer that checks its work: run
+ *  the task, check the fields (the form's own rules), and while problems
+ *  remain ask again with the previous answer and them, MaxAssistRounds in
+ *  all. A revision that fails keeps the last answer: it never comes back
+ *  as passing when it did not. */
+export async function refineJSON(
+  run: (body: AssistRequest) => Promise<AssistJSONReply>,
+  body: AssistRequest,
+  check: (fields: AssistJSONReply["fields"]) => readonly string[],
+): Promise<CheckedReply> {
+  let reply = await run(body);
+  let problems = check(reply.fields);
+  for (let round = 1; round < MaxAssistRounds && problems.length > 0; round++) {
+    const revise = assistRevision(reply.fields, problems);
+    if (!revise) break;
+    try {
+      reply = await run({ ...body, revise });
+    } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") throw e;
+      break;
+    }
+    problems = check(reply.fields);
+  }
+  return { reply, problems };
 }
 
 // ---- Server-Sent Events ----

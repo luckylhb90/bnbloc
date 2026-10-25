@@ -1,6 +1,6 @@
 # AI that checks its work (2026-10-25)
 
-Status: design, for a decision.
+Status: built (bnbloc 057faf53 and the web loop; bnbloc-connections v0.8.0).
 
 ## 1. Why
 
@@ -60,9 +60,10 @@ each is code, or reality.
   the same rate and budget as any run.
 - **One loop, in each language that calls it:**
   - Go: `component.ServiceClient.AssistChecked(ctx, task, req,
-    check, rounds)` for services, and `assist.Refine` inside the gateway.
-  - Web: `assistRefine(task, req, check)` for forms; the form's own
-    validator is the check.
+    check, rounds)` for services; the gateway's own shape repair is
+    `completeJSONTask`.
+  - Web: `runCheckedJSONAssist(task, req, check)` for forms (over the
+    pure `refineJSON`); the form's own validator is the check.
 
   The loop never accepts an answer that failed its check silently: it
   returns the last answer with its problems.
@@ -137,10 +138,9 @@ each is code, or reality.
 ## 4. Build order
 
 1. The platform: shape repair; `revise` on both requests and the
-   revision layout (goldens); `assist.Refine` and
-   `ServiceClient.AssistChecked`; the `pages` context and its fetcher.
+   revision layout (goldens); `ServiceClient.AssistChecked`; the `pages` context and its fetcher.
 2. Connections: drafting and fixes through `AssistChecked`; `test`
    (drafted, "Try it", after a member connects); a failed test as a
    problem for the review's fix; drafting from a link.
-3. Web: `assistRefine`, first for the Library's drafts and Fill from a
+3. Web: `runCheckedJSONAssist`, first for the Library's drafts and Fill from a
    note.

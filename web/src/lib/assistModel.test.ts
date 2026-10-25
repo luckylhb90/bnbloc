@@ -1,12 +1,12 @@
 import { DRAFT_EXPERT, DRAFT_PROMPT_PACK, DRAFT_SCHEDULE, DRAFT_SKILL_PACK, PLAN_ROOM } from "./assistDrafts.ts";
-import { assistTask, createSSEParser, DESCRIBE_ROOM, DESCRIBE_WORK, ENHANCE_PROMPT, workDraftPatch, type SSEEvent } from "./assistModel.ts";
+import { assistRevision, assistTask, createSSEParser, DESCRIBE_ROOM, DESCRIBE_WORK, ENHANCE_PROMPT, refineJSON, workDraftPatch, type SSEEvent } from "./assistModel.ts";
 import { FIND_A_WAY } from "./deadEnd.ts";
 import { EXPLAIN_SOURCE_USE } from "./roomSources.ts";
 import { FILL_SETTINGS } from "./settingsFill.ts";
 import { SUGGEST_SKILL_DIRS } from "./skillDirs.ts";
 import { REVIEW_SKILL } from "./skillReview.ts";
 import { publishWorkForm } from "./workGallery.ts";
-import { AssistContracts, AssistTaskNameValues, type AssistStatus } from "./wire.gen.ts";
+import { AssistContracts, AssistTaskNameValues, MaxAssistProblemRunes, MaxAssistProblems, MaxAssistRounds, type AssistJSONReply, type AssistRequest, type AssistStatus } from "./wire.gen.ts";
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
@@ -87,4 +87,45 @@ eq(parse(["event: delta\n\ndata: y\n\n"]), [{ event: "message", data: "y" }], "a
     EXPLAIN_SOURCE_USE, REVIEW_SKILL, FILL_SETTINGS, SUGGEST_SKILL_DIRS, FIND_A_WAY];
   eq([...web].sort(), [...AssistTaskNameValues].sort(), "the web's tasks are the contracts' names");
   eq(AssistContracts.map((c) => c.task).sort(), [...AssistTaskNameValues].sort(), "one contract per task");
+}
+
+// Checking its work: a failed check asks again with the previous answer
+// and the problems, MaxAssistRounds in all; a passing answer stops; a
+// failed revision keeps the last answer with its problems.
+{
+  const usage = { model: "m", promptTokens: 1, completionTokens: 1, latencyMs: 1 };
+  const answers = (list: readonly Record<string, unknown>[]) => {
+    const asked: AssistRequest[] = [];
+    let i = 0;
+    const run = async (body: AssistRequest): Promise<AssistJSONReply> => {
+      asked.push(body);
+      const f = list[Math.min(i++, list.length - 1)];
+      if (!f) throw new Error("down");
+      return { fields: f, usage };
+    };
+    return { asked, run };
+  };
+  const check = (f: Record<string, unknown>) => (f.name ? [] : ["Give it a name"]);
+  void (async () => {
+    const a = answers([{}, { name: "reviewer" }]);
+    const r = await refineJSON(a.run, { text: "a reviewer" }, check);
+    eq(r.problems, [], "the second answer passes");
+    eq(a.asked.map((b) => b.revise ?? null), [null, { answer: "{}", problems: ["Give it a name"] }], "the revision carries the answer and its problems");
+    eq(a.asked[1]?.text, "a reviewer", "a revision keeps the request");
+
+    const b = answers([{}]);
+    const s = await refineJSON(b.run, { text: "x" }, check);
+    eq([b.asked.length, s.problems], [MaxAssistRounds, ["Give it a name"]], "at most MaxAssistRounds, then the last problems");
+
+    const c = answers([{ draft: 1 }, null as unknown as Record<string, unknown>]);
+    const t = await refineJSON(c.run, { text: "x" }, check);
+    eq([t.reply.fields, t.problems], [{ draft: 1 }, ["Give it a name"]], "a failed revision keeps the last answer and its problems");
+  })().catch((e: unknown) => {
+    process.exitCode = 1;
+    console.error(e);
+  });
+  eq(assistRevision({}, ["  a \n b  ", "", ...Array.from({ length: 12 }, () => "x".repeat(900))])?.problems.length, MaxAssistProblems, "problems bounded");
+  eq([...(assistRevision({}, ["x".repeat(900)])?.problems[0] ?? "")].length, MaxAssistProblemRunes, "each within its bound");
+  eq(assistRevision({}, ["  a \n b  "])?.problems, ["a b"], "one line");
+  eq(assistRevision({}, ["", " "]), null, "no problem, no revision");
 }

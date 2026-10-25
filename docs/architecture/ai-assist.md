@@ -175,6 +175,11 @@ person sees it, by code or by reality, never by the model.
   the loop: `component.ServiceClient.AssistChecked(ctx, task, req, check,
   rounds)` (at most `MaxAssistRounds`, 3), which answers the last fields
   and the problems still left, never a failed answer as a passing one.
+  The web's one loop is `runCheckedJSONAssist` (lib/assist.ts, over the
+  pure `refineJSON` in lib/assistModel.ts); its check is the form's own
+  rules. Draft with AI (expert, skill pack, prompt pack: `formProblem`,
+  `promptPackProblem` over the drafted form) and Fill from a note (a value
+  a field would not take, a key that is no setting) use it.
 - **The pages context** (`pages`): `urls` (at most 3) are fetched by the
   gateway (`assist.FetchPages`, `PagesClient`: https on a public address
   only, resolved and dialled by address, redirects only on the page's

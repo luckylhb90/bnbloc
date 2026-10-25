@@ -51,6 +51,11 @@ export function fieldItems(fields: Fields, name: string): Record<string, string>
   return out;
 }
 
+/** problemList is a form's first problem as a draft's check reads it. */
+export function problemList(problem: string | null): string[] {
+  return problem ? [problem] : [];
+}
+
 // ---- The text a draft task is asked with ----
 
 const CURRENT_FORM = "\n\nCurrent form:\n";

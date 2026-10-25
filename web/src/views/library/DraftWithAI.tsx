@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { runJSONAssist, useAssistTask, type AssistTask } from "@/lib/assist";
+import { runCheckedJSONAssist, useAssistTask, type AssistTask } from "@/lib/assist";
 import { draftRequestText } from "@/lib/assistDrafts";
 import { errorText } from "@/lib/errors";
 import { isSubmitEnter } from "@/lib/keys";
@@ -11,35 +11,43 @@ import { AssistButton, type AssistRunState } from "@/views/AssistButton";
 // DraftWithAI is a Library form's "Draft with AI" (docs/prd/2026-10-13-ai-
 // assist.md §6): one sentence (plus what the form already holds) to a
 // draft task, whose reply the form maps onto its fields (lib/assistDrafts).
-// Nothing is saved: the member edits the draft and presses Save. Hidden
-// when assists are unavailable or the task is missing.
+// The draft is checked by the form's own rules (check: the problems the
+// form would show with it) and revised while they remain
+// (docs/prd/2026-10-25-ai-checks-its-work.md). Nothing is saved: the
+// member edits the draft and presses Save. Hidden when assists are
+// unavailable or the task is missing.
 
 export function DraftWithAI({
   task: taskName,
   placeholder,
   current,
+  check,
   onDraft,
 }: {
   readonly task: string;
   readonly placeholder: string;
   // What the form already holds ("Current form"; null or {} for nothing).
   readonly current: () => Readonly<Record<string, unknown>> | null;
+  // What the form would still need fixed with these fields.
+  readonly check: (fields: AssistJSONReply["fields"]) => readonly string[];
   readonly onDraft: (fields: AssistJSONReply["fields"]) => void;
 }) {
   const task = useAssistTask(taskName);
   if (!task) return null;
-  return <DraftRow task={task} placeholder={placeholder} current={current} onDraft={onDraft} />;
+  return <DraftRow task={task} placeholder={placeholder} current={current} check={check} onDraft={onDraft} />;
 }
 
 function DraftRow({
   task,
   placeholder,
   current,
+  check,
   onDraft,
 }: {
   readonly task: AssistTask;
   readonly placeholder: string;
   readonly current: () => Readonly<Record<string, unknown>> | null;
+  readonly check: (fields: AssistJSONReply["fields"]) => readonly string[];
   readonly onDraft: (fields: AssistJSONReply["fields"]) => void;
 }) {
   const toast = useToast();
@@ -51,9 +59,9 @@ function DraftRow({
     if (state !== "idle" || (!sentence.trim() && !hasForm)) return;
     setState("waiting");
     try {
-      const r = await runJSONAssist(task.name, { text: draftRequestText(sentence.trim() || "Improve this draft.", form) });
-      onDraft(r.fields);
-      toast.success("Drafted: review it, then save");
+      const { reply, problems } = await runCheckedJSONAssist(task.name, { text: draftRequestText(sentence.trim() || "Improve this draft.", form) }, check);
+      onDraft(reply.fields);
+      toast.success(problems.length ? `Drafted; still to fix: ${problems[0]}` : "Drafted: review it, then save");
     } catch (e) {
       toast.error(errorText(e, "Could not draft it"));
     } finally {

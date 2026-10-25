@@ -207,6 +207,9 @@ func (c *ServiceClient) AssistChecked(ctx context.Context, task string, req Serv
 	for round := 0; round < rounds; round++ {
 		if round > 0 {
 			answer, _ := json.Marshal(fields)
+			if r := []rune(string(answer)); len(r) > MaxServiceAssistText {
+				answer = []byte(string(r[:MaxServiceAssistText]))
+			}
 			req.Revise = &ServiceRevise{Answer: string(answer), Problems: boundProblems(problems)}
 		}
 		f, err := c.Assist(ctx, task, req)

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { req } from "./api.ts";
 import { useAuth } from "./auth";
 import { ApiError } from "./errors.ts";
-import { assistTask, createSSEParser } from "./assistModel.ts";
+import { assistTask, createSSEParser, refineJSON, type CheckedReply } from "./assistModel.ts";
 import { contentChanges, touches } from "./contentChanges.ts";
 import type {
   AssistDelta,
@@ -29,6 +29,7 @@ import type {
 // assist content components on the server. The pure helpers (the SSE
 // parser, a JSON reply onto the publish form) are lib/assistModel.ts.
 
+export type { CheckedReply } from "./assistModel.ts";
 export type { AssistModelConfig, AssistModelTest, AssistModelUpdate, AssistOrgModel, AssistTask, AssistUsage } from "./wire.gen.ts";
 export { DESCRIBE_ROOM, DESCRIBE_WORK, ENHANCE_PROMPT, workDraftPatch } from "./assistModel.ts";
 
@@ -164,6 +165,18 @@ export async function runTextAssist(
 /** runJSONAssist runs a JSON task: its declared fields. */
 export function runJSONAssist(task: string, body: AssistRequest, signal?: AbortSignal): Promise<AssistJSONReply> {
   return req<AssistJSONReply>(`/v1/assist/${enc(task)}`, { method: "POST", body: withTimezone(body), signal });
+}
+
+/** runCheckedJSONAssist runs a JSON task whose answer is checked by the
+ *  caller's rules (a form's), revised while problems remain
+ *  (lib/assistModel refineJSON). */
+export function runCheckedJSONAssist(
+  task: string,
+  body: AssistRequest,
+  check: (fields: AssistJSONReply["fields"]) => readonly string[],
+  signal?: AbortSignal,
+): Promise<CheckedReply> {
+  return refineJSON((b) => runJSONAssist(task, b, signal), body, check);
 }
 
 /** runGatedJSONAssist runs a JSON task behind its gate (one the client runs

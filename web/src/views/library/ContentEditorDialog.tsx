@@ -22,7 +22,7 @@ import { Select } from "@/ui/Select";
 import { useToast } from "@/ui/Toast";
 import { AssistFormFields } from "@/views/library/AssistFormFields";
 import { DraftWithAI } from "@/views/library/DraftWithAI";
-import { DRAFT_EXPERT, DRAFT_SKILL_PACK, expertDraftPatch, filledForm, skillPackDraftPatch } from "@/lib/assistDrafts";
+import { DRAFT_EXPERT, DRAFT_SKILL_PACK, expertDraftPatch, filledForm, problemList, skillPackDraftPatch } from "@/lib/assistDrafts";
 import { QuickPromptsEditor, RequirementsFields, TagsIconFields, TeamEditor } from "@/views/library/ContentFormExtras";
 import { errorText } from "@/lib/errors";
 
@@ -168,6 +168,7 @@ export function ContentEditorDialog({ target, onClose }: { readonly target: Edit
               task={kind === "expert" ? DRAFT_EXPERT : DRAFT_SKILL_PACK}
               placeholder={kind === "expert" ? "Describe the expert, e.g. a reviewer of our API designs" : "Describe the skills, e.g. checks for our release notes"}
               current={() => filledForm(form)}
+              check={(fields) => problemList(formProblem({ ...form, ...(kind === "expert" ? expertDraftPatch(fields, form, !base) : skillPackDraftPatch(fields, form, !base)) }))}
               onDraft={(fields) => patch(kind === "expert" ? expertDraftPatch(fields, form, !base) : skillPackDraftPatch(fields, form, !base))}
             />
           )}

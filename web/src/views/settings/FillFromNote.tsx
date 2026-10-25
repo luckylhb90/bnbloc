@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { runJSONAssist, useAssistTask, type AssistTask } from "@/lib/assist";
+import { runCheckedJSONAssist, useAssistTask, type AssistTask } from "@/lib/assist";
 import type { ComponentSetting } from "@/lib/componentSettings";
 import { errorText } from "@/lib/errors";
 import { FILL_SETTINGS, fillRequestText, fillResult, type FillResult } from "@/lib/settingsFill";
@@ -11,9 +11,12 @@ import { AssistButton, type AssistRunState } from "@/views/AssistButton";
 // (docs/prd/2026-10-19-component-settings.md §2.5): the person pastes a
 // setup note (an email, a README section), the fill-settings assist maps it
 // onto the fields this form edits, and the person ticks what goes into the
-// form. Nothing is saved until they press Save; a ticked value is checked
-// like a typed one. A secret's value is never shown, only that the note
-// gave one. Hidden when assists are unavailable.
+// form. A value a field would not take, or a key that is no setting here,
+// goes back to the assist to answer again
+// (docs/prd/2026-10-25-ai-checks-its-work.md). Nothing is saved until they
+// press Save; a ticked value is checked like a typed one. A secret's value
+// is never shown, only that the note gave one. Hidden when assists are
+// unavailable.
 
 export function FillFromNote({ fields, onApply }: { readonly fields: readonly ComponentSetting[]; readonly onApply: (values: Readonly<Record<string, string>>) => void }) {
   const task = useAssistTask(FILL_SETTINGS);
@@ -51,7 +54,8 @@ function FillPanel({
     setState("waiting");
     setFailure("");
     try {
-      const r = fillResult(fields, (await runJSONAssist(task.name, { text: fillRequestText(fields, note) })).fields);
+      const check = (reply: Parameters<typeof fillResult>[1]) => fillResult(fields, reply).skipped;
+      const r = fillResult(fields, (await runCheckedJSONAssist(task.name, { text: fillRequestText(fields, note) }, check)).reply.fields);
       setResult(r);
       setTicked(r.proposals.map((p) => p.key));
     } catch (e) {

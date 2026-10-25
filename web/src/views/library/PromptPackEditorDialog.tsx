@@ -20,7 +20,7 @@ import { Switch } from "@/ui/Segment";
 import { Select } from "@/ui/Select";
 import { useToast } from "@/ui/Toast";
 import { errorText } from "@/lib/errors";
-import { DRAFT_PROMPT_PACK, filledPromptPack, promptPackDraftPatch } from "@/lib/assistDrafts";
+import { DRAFT_PROMPT_PACK, filledPromptPack, problemList, promptPackDraftPatch } from "@/lib/assistDrafts";
 import { DraftWithAI } from "@/views/library/DraftWithAI";
 
 // The editor target: a new pack, a new version of one of the member's packs
@@ -228,6 +228,7 @@ export function PromptPackEditorDialog({
             task={DRAFT_PROMPT_PACK}
             placeholder="Describe the prompts, e.g. weekly report and retro prompts for our team"
             current={() => filledPromptPack(form)}
+            check={(fields) => problemList(promptPackProblem({ ...form, ...promptPackDraftPatch(fields, form, !into) }))}
             onDraft={(fields) => setForm((f) => ({ ...f, ...promptPackDraftPatch(fields, f, !into) }))}
           />
         )}
