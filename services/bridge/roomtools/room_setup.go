@@ -72,9 +72,12 @@ func roomSetupTool() Tool {
 			"A schedule that posts as the person is theirs to create in the room's Schedules. " +
 			"remove_schedule: one of the person's own by id (from get). " +
 			"ask_source: ask to read organization records (source runs: the organization's agent conversations) with the purpose the room's tasks read " +
-			"them for; it waits for the organization's admin, who decides.",
+			"them for; it waits for the organization's admin, who decides. " +
+			"share: a link to one of this room's deliverables (id, from .room/artifacts.md) for the people of their organization, who sign in to open it: " +
+			"that is how a site or app goes live, there is no deploy step. It puts a card in the room that only the person sees; the link exists when they click it, " +
+			"so tell them to. Offer it when they ask to share, put online or deploy something you built.",
 		InputSchema: objectSchema(map[string]any{
-			"action": map[string]any{"type": "string", "enum": []string{"get", "set", "use", "unuse", "add_channel", "add_schedule", "remove_schedule", "ask_source"},
+			"action": map[string]any{"type": "string", "enum": []string{"get", "set", "use", "unuse", "add_channel", "add_schedule", "remove_schedule", "ask_source", "share"},
 				"description": "What to do."},
 			"description": map[string]any{"type": "string", "description": "For set: the room's description (at most 500 characters)."},
 			"welcome":     map[string]any{"type": "string", "description": "For set: what the empty room says to every member."},
@@ -118,7 +121,7 @@ func roomSetupTool() Tool {
 				"required": []string{"kind"}, "additionalProperties": false,
 			},
 			"timezone": map[string]any{"type": "string", "description": "For add_schedule: an IANA zone such as Asia/Shanghai. Ask the person when you are unsure."},
-			"id":       map[string]any{"type": "string", "description": "For remove_schedule: a schedule's id from get (sch_…)."},
+			"id":       map[string]any{"type": "string", "description": "For remove_schedule: a schedule's id from get (sch_…); for share: a deliverable's id (art_… or artf_…)."},
 			"source":   map[string]any{"type": "string", "enum": wire.RoomSources, "description": "For ask_source: runs, the organization's agent conversations."},
 			"purpose":  map[string]any{"type": "string", "description": "For ask_source: what the room's tasks read it for, in a sentence the admin reads."},
 		}, "action"),
@@ -216,9 +219,53 @@ func roomSetup(ctx context.Context, env *Env, args json.RawMessage) Result {
 		return Result{Value: map[string]any{"removed": id, "note": "Tell the person it is gone."}}
 	case "ask_source":
 		return c.askSource(ctx, in)
+	case "share":
+		return c.share(ctx, in)
 	default:
-		return toolError("action must be get, set, use, unuse, add_channel, add_schedule, remove_schedule or ask_source")
+		return toolError("action must be get, set, use, unuse, add_channel, add_schedule, remove_schedule, ask_source or share")
 	}
+}
+
+// share offers the requester a link to one of the room's deliverables
+// (docs/prd/2026-10-25-agent-shares-from-conversation.md): a card in the room,
+// shown only to them, whose Create link button calls the share route as them.
+// The tool creates nothing: sharing is access for other people, so the person's
+// click is the authorization, as for components publish.
+func (c setupCall) share(ctx context.Context, in setupArgs) Result {
+	id := strings.TrimSpace(in.ID)
+	if id == "" || strings.ContainsAny(id, "/?#") || strings.HasPrefix(id, attachmentIDPrefix) {
+		return toolError("id is required: a deliverable's id (art_… or artf_…) from .room/artifacts.md")
+	}
+	raw, err := c.env.Gateway.Do(ctx, http.MethodGet, c.base+"/artifacts/"+url.PathEscape(id), nil)
+	if err != nil {
+		return refusal("reading deliverable "+id, err)
+	}
+	var detail wire.ArtifactDetail
+	if err := json.Unmarshal(raw, &detail); err != nil {
+		return failure("unreadable deliverable %s: %v", id, err)
+	}
+	art := detail.Artifact
+	if art.RoomID != c.room {
+		return toolError("deliverable %s is not one of this room's", id)
+	}
+	kind := "file"
+	if art.Kind == "site" {
+		kind = "site"
+		// The projection's own answer (store.Artifact.IsApp), never re-derived.
+		if art.IsApp {
+			kind = "app"
+		}
+	}
+	title := firstNonEmptyString(art.Title, art.FileName, id)
+	card := wire.ShareProposal{RoomID: c.room, ArtifactID: id, Title: title, Kind: kind, For: c.job.RequesterUserID}
+	text := fmt.Sprintf("%s's agent offers a link to %s", c.job.RequesterUserID, title)
+	if err := postNotice(ctx, c.env, c.job, wire.NoticeShareProposal, text, false, map[string]any{"shareProposal": card}); err != nil {
+		return refusal("putting the share card in the room", err)
+	}
+	return Result{Value: map[string]any{"artifactId": id, "title": title, "proposed": "organization",
+		"note": fmt.Sprintf("Nothing is shared yet: a card in the room, shown only to %s, offers them a link to %s that the people of their organization open after signing in. "+
+			"The link exists when they click Create link, and then shows on the card with a Copy button. Tell them to click it, and that the people they send it to sign in with their organization account.",
+			c.job.RequesterUserID, title)}}
 }
 
 // announce shows a change in the room as a line naming who asked

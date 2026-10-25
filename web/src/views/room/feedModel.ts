@@ -8,6 +8,7 @@ import { type FeedItem, type OutgoingMessage, isSelf, nextFeedId } from "./types
 import type { ChatExpert } from "../../lib/contentComponents.ts";
 import type { FileRef } from "../../lib/wire.gen.ts";
 import { proposalShownTo } from "../../lib/publishProposal.ts";
+import { shareProposalShownTo } from "../../lib/shareProposal.ts";
 import { cardShownTo } from "../../lib/componentCard.ts";
 
 // feedItemFromEvent converts a chat/agent event (live or from history) into a
@@ -18,6 +19,8 @@ export function feedItemFromEvent(e: RoomEvent, subject: string | null, live: bo
   if (!text && (!e.attachments || e.attachments.length === 0)) return null;
   // A publish card is only for the person the agent asked for.
   if (e.proposal && !proposalShownTo(e.proposal, subject)) return null;
+  // A link the agent offers, too: only for the person it asked for.
+  if (e.shareProposal && !shareProposalShownTo(e.shareProposal, subject)) return null;
   // A service's card too: only for the person the turn ran for.
   if (e.card && !cardShownTo(e.card, subject)) return null;
   const author = e.author || "agent";
@@ -45,6 +48,7 @@ export function feedItemFromEvent(e: RoomEvent, subject: string | null, live: bo
     notice: e.notice,
     noticeDetail: e.noticeDetail,
     proposal: e.proposal,
+    shareProposal: e.shareProposal,
     card: e.card,
     jobId: e.jobId,
     sourceSeq: e.sourceSeq,

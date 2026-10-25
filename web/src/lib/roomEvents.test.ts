@@ -147,3 +147,33 @@ function testPublishProposalCard(): void {
 }
 
 testPublishProposalCard();
+
+// A share card's notice carries the deliverable and who it is for
+// (payload.shareProposal); the feed shows it only to the person the agent asked for,
+// and only a share-proposal notice is such a card.
+function testShareProposalCard(): void {
+  const shareProposal = { roomId: "r1", artifactId: "art_1", title: "Landing page", kind: "site", for: "maya" };
+  const text = "maya's agent offers a link to Landing page";
+  const [ev] = normalized({
+    kind: "agent_messages",
+    sequence: 11,
+    payload: { messages: [{ payload: { role: "assistant", text, ownerUserId: "jack", provider: "codex", notice: "share-proposal", shareProposal } }] },
+  });
+  assert(ev.shareProposal?.artifactId === "art_1" && ev.shareProposal.for === "maya", `share proposal ${JSON.stringify(ev.shareProposal)}`);
+  assert(feedItemFromEvent(ev, "maya", true)?.shareProposal?.title === "Landing page", "maya sees the card");
+  assert(feedItemFromEvent(ev, "jack", true) === null, "nobody else does");
+  const [other] = normalized({
+    kind: "agent_messages",
+    sequence: 12,
+    payload: { messages: [{ payload: { role: "assistant", text: "Phase 2", ownerUserId: "jack", provider: "codex", notice: "progress", shareProposal } }] },
+  });
+  assert(other.shareProposal === undefined, "only a share-proposal notice is a card");
+  const [half] = normalized({
+    kind: "agent_messages",
+    sequence: 13,
+    payload: { messages: [{ payload: { role: "assistant", text, ownerUserId: "jack", provider: "codex", notice: "share-proposal", shareProposal: { roomId: "r1" } } }] },
+  });
+  assert(half.shareProposal === undefined, "a half-written proposal is no card");
+}
+
+testShareProposalCard();

@@ -42,6 +42,14 @@ func setupGateway(refuse string) *fakeGateway {
 				{ID: "cc_e", Kind: "expert", Name: "reviewer", DisplayName: "Reviewer", LatestVersion: "1.2.0"},
 				{ID: "cc_p", Kind: "prompt", Name: "recaps", LatestVersion: "1.0.0"},
 				{ID: "cc_x", Kind: "skill", Name: "twin", LatestVersion: "1.0.0"}, {ID: "cc_y", Kind: "prompt", Name: "twin", LatestVersion: "1.0.0"}}}
+		case method == "GET" && p == "/v1/rooms/room-1/artifacts/art_site":
+			return 200, wire.ArtifactDetail{Artifact: wire.Artifact{ArtifactID: "art_site", RoomID: "room-1", Kind: "site", Title: "Landing page", IsApp: false}}
+		case method == "GET" && p == "/v1/rooms/room-1/artifacts/art_app":
+			return 200, wire.ArtifactDetail{Artifact: wire.Artifact{ArtifactID: "art_app", RoomID: "room-1", Kind: "site", Title: "Lunch poll", IsApp: true}}
+		case method == "GET" && p == "/v1/rooms/room-1/artifacts/art_doc":
+			return 200, wire.ArtifactDetail{Artifact: wire.Artifact{ArtifactID: "art_doc", RoomID: "room-1", Kind: "markdown", Title: "Plan"}}
+		case method == "GET" && p == "/v1/rooms/room-1/artifacts/art_other":
+			return 200, wire.ArtifactDetail{Artifact: wire.Artifact{ArtifactID: "art_other", RoomID: "room-2", Kind: "site", Title: "Not ours"}}
 		case method == "POST" && p == "/v1/rooms/room-1/channels":
 			return 200, map[string]string{"channelId": "ch_9", "name": "digest"}
 		case method == "POST" && p == "/v1/rooms/room-1/schedules":
@@ -353,5 +361,70 @@ func TestRoomSetupEventSchedule(t *testing.T) {
 	}
 	if l := lines(gw); len(l) != 1 || l[0] != "maya's agent scheduled an AI task, "+want {
 		t.Fatalf("lines = %v", l)
+	}
+}
+
+// shareCards are the share cards room_setup posted: each notice's proposal.
+func shareCards(gw *fakeGateway) []wire.ShareProposal {
+	var out []wire.ShareProposal
+	for _, c := range gw.callsTo("POST", "/v1/rooms/room-1/agent-activity/messages") {
+		var batch wire.ReportMessagesInput
+		_ = json.Unmarshal(c.Body, &batch)
+		p, _ := batch.Messages[0].Payload.(map[string]any)
+		if p["notice"] != wire.NoticeShareProposal {
+			continue
+		}
+		raw, _ := json.Marshal(p["shareProposal"])
+		var card wire.ShareProposal
+		_ = json.Unmarshal(raw, &card)
+		out = append(out, card)
+	}
+	return out
+}
+
+// share offers the requester a link in a card only they see, and creates
+// nothing: the person's click is the authorization (docs/prd/2026-10-25-agent-
+// shares-from-conversation.md).
+func TestRoomSetupShareOffersACardAndCreatesNothing(t *testing.T) {
+	for _, c := range []struct{ id, kind, title string }{
+		{"art_site", "site", "Landing page"}, {"art_app", "app", "Lunch poll"}, {"art_doc", "file", "Plan"},
+	} {
+		gw := setupGateway("")
+		res := runSetup(setupEnv(t, gw, true), `{"action":"share","id":"`+c.id+`"}`)
+		if res.Err != "" {
+			t.Fatalf("%s: %+v", c.id, res)
+		}
+		cards := shareCards(gw)
+		if len(cards) != 1 || cards[0].ArtifactID != c.id || cards[0].Kind != c.kind || cards[0].Title != c.title || cards[0].For != "maya" || cards[0].RoomID != "room-1" {
+			t.Fatalf("%s: cards = %+v", c.id, cards)
+		}
+		if got := gw.callsTo("POST", "/v1/rooms/room-1/artifacts/"+c.id+"/shares"); len(got) != 0 {
+			t.Fatalf("%s: the tool created a link itself: %v", c.id, got)
+		}
+		note, _ := res.Value.(map[string]any)["note"].(string)
+		if !strings.Contains(note, "Nothing is shared yet") || !strings.Contains(note, "Create link") {
+			t.Fatalf("%s: the note must tell the agent nothing is shared until the click: %q", c.id, note)
+		}
+	}
+}
+
+func TestRoomSetupShareRefusals(t *testing.T) {
+	for _, c := range []struct{ name, args, want string }{
+		{"no id", `{"action":"share"}`, "id is required"},
+		{"a path in the id", `{"action":"share","id":"art_site/../x"}`, "id is required"},
+		{"an attachment", `{"action":"share","id":"att_1"}`, "id is required"},
+		{"another room's deliverable", `{"action":"share","id":"art_other"}`, "not one of this room's"},
+	} {
+		gw := setupGateway("")
+		res := runSetup(setupEnv(t, gw, true), c.args)
+		if !strings.Contains(res.Err, c.want) {
+			t.Errorf("%s: %+v, want an error with %q", c.name, res, c.want)
+		}
+		if len(shareCards(gw)) != 0 {
+			t.Errorf("%s: a card was posted", c.name)
+		}
+	}
+	if res := runSetup(setupEnv(t, setupGateway(""), false), `{"action":"share","id":"art_site"}`); res.Err == "" {
+		t.Errorf("without a bound request share must refuse: %+v", res)
 	}
 }

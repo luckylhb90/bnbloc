@@ -60,7 +60,7 @@ var briefs = map[string]brief{
 	"room_setup": {
 		Text: "This room's setup as the person who asked you; " +
 			"make a change only after they agree. " +
-			"Actions: get set use unuse add_channel add_schedule remove_schedule ask_source (room_help room_setup).",
+			"Actions: get set use unuse add_channel add_schedule remove_schedule ask_source share (room_help room_setup).",
 	},
 	"room_help": {Text: "A room tool's full instructions (topic: its name); read them before using a tool you do not know. For you, not the person."},
 }

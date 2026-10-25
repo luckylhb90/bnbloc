@@ -1805,6 +1805,17 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   expert stands for the skill packs it wears, dismissed or in effect too. The
   default content hard-codes no language besides English: the decision model reads
   any language, the fallback only the words that are there.
+- **An agent offers a live link; the person's click makes it** (`room_setup` action `share`,
+  `wire.ShareProposal` / `NoticeShareProposal`, `web/src/lib/shareProposal.ts`,
+  `views/room/ShareProposalCard.tsx`; `docs/prd/2026-10-25-agent-shares-from-
+  conversation.md`). A published page is a site: it has no server of its own, so
+  "deploy it" and "give me a live URL" are the Share link, and the one guidance
+  line says so once per session (`guidance.tmpl`, budget raised by what it costs).
+  The tool creates nothing: it puts a card in the room only the requester sees
+  and the click calls the existing share route as them (the organization's
+  signed-in members, a week; More options opens the dialog), the same rule as a
+  publish proposal. No new tool: the action joins `room_setup`; the tools/list
+  budget does not rise (it reuses the `id` parameter).
 - **A room's setup is a content kind, `bnbloc.room.package/v1`**
   (`contentpkg/room.go`; docs/prd/2026-10-20-rooms-as-components.md,
   docs/architecture/content-components.md "Room packages"); room

@@ -72,3 +72,14 @@ does (the default channel resolving the first time is not another conversation,
 ```sh
 BNBLOC_E2E_URL=http://localhost:5173 node web/e2e/composer-draft.mjs
 ```
+
+## An agent's offer of a link (`share-proposal.mjs`)
+
+The card an agent puts in the room (`room_setup` `share`) is seen only by the
+person it was for, shows what is offered and that nothing is shared yet, creates
+the default link on a click (the organization's members, a week), shows it with
+Copy and opens the Share dialog from More options.
+
+```sh
+BNBLOC_E2E_URL=http://localhost:5173 node web/e2e/share-proposal.mjs
+```

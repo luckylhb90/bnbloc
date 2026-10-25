@@ -4,6 +4,7 @@ import type { DispatchAttribution } from "@/lib/dispatch";
 import type { ChatExpert, ExpertMarker } from "@/lib/contentComponents";
 import type { FileRef } from "@/lib/wire.gen";
 import type { PublishProposal } from "@/lib/publishProposal";
+import type { ShareProposal } from "@/lib/shareProposal";
 import type { ComponentCard } from "@/lib/componentCard";
 import { sameUser } from "../../lib/format.ts";
 
@@ -90,6 +91,9 @@ export interface FeedItem {
   // A publish-proposal notice's card (payload.proposal): only the person
   // the agent asked for is shown it (feedItemFromEvent drops it for others).
   proposal?: PublishProposal;
+  // A share-proposal notice's card (payload.shareProposal): only the person
+  // the agent asked for is shown it (feedItemFromEvent drops it for others).
+  shareProposal?: ShareProposal;
   // A component-card notice's card (payload.card): only the person the
   // turn ran for is shown it (feedItemFromEvent drops it for others).
   card?: ComponentCard;

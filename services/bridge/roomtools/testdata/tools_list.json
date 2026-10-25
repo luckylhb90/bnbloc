@@ -345,7 +345,7 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "This room's setup as the person who asked you; make a change only after they agree. Actions: get set use unuse add_channel add_schedule remove_schedule ask_source (room_help room_setup).",
+      "description": "This room's setup as the person who asked you; make a change only after they agree. Actions: get set use unuse add_channel add_schedule remove_schedule ask_source share (room_help room_setup).",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -358,7 +358,8 @@
               "add_channel",
               "add_schedule",
               "remove_schedule",
-              "ask_source"
+              "ask_source",
+              "share"
             ],
             "type": "string"
           },

@@ -35,7 +35,7 @@ import type { DispatchAttribution } from "../../lib/dispatch.ts";
 import { isLiveJob } from "../../lib/agentRuns.ts";
 import { turnStart, type JobProgress } from "../../lib/jobProgress.ts";
 import { titleFromText } from "../../lib/promptPacks.ts";
-import { AgentJobTerminalStatuses, NoticeContextReset, NoticeJobFailed, NoticeProgress, NoticePublishProposal, NoticeRoomSetup, type AgentJob } from "../../lib/wire.gen.ts";
+import { AgentJobTerminalStatuses, NoticeContextReset, NoticeJobFailed, NoticeProgress, NoticePublishProposal, NoticeRoomSetup, NoticeShareProposal, type AgentJob } from "../../lib/wire.gen.ts";
 
 // The fields of a feed row the layouts read (FeedItem satisfies it).
 export interface TurnRow {
@@ -170,7 +170,7 @@ function delegatedBlock(feed: readonly TurnRow[], chain: Chain, anchor: number, 
 // server's job-failed, the bridge's refusals, a member timeout,
 // attachments or a file edit that did not arrive), so a new kind of
 // failure is placed with its request by default.
-const IN_TURN_NOTICES: ReadonlySet<string> = new Set([NoticeProgress, NoticeRoomSetup, NoticePublishProposal, NoticeContextReset]);
+const IN_TURN_NOTICES: ReadonlySet<string> = new Set([NoticeProgress, NoticeRoomSetup, NoticePublishProposal, NoticeShareProposal, NoticeContextReset]);
 
 // reportsOutcome: the row is a notice about how its job ended.
 const reportsOutcome = (r: Pick<TurnRow, "notice">) => !!r.notice && !IN_TURN_NOTICES.has(r.notice);

@@ -103,8 +103,12 @@ func TestPromptBudgets(t *testing.T) {
 		// schedule, not a timer in a page or the agent's own scheduler; +60 on
 		// 2026-10-16 for the notice form of schedules (fixed words, or an AI writing
 		// the body) beside the AI task.
-		{"session guidance (tools, .room/)", guidance, 745},
-		{"session guidance (tools, .room/, team lead)", team, 825},
+		// +40 on 2026-10-25: one line that a published page has no server of its own
+		// and that room_setup's share gives the person its live link
+		// (docs/prd/2026-10-25-agent-shares-from-conversation.md): the one fact an
+		// agent cannot find out, and the reason a member asked 25 turns how to deploy.
+		{"session guidance (tools, .room/)", guidance, 785},
+		{"session guidance (tools, .room/, team lead)", team, 865},
 		// The room tools only shrink (docs/prd/2026-10-20-fewer-sharper-room-tools.md
 		// §2.3): a new tool or action fits these budgets by merging or
 		// shortening, never by raising them. Each is the size measured at its
@@ -113,7 +117,7 @@ func TestPromptBudgets(t *testing.T) {
 		// room_setup's brief one sentence and its actions, details in
 		// room_help: tools/list 2,351 -> 1,787, session prefix 3,090 -> 2,520.
 		{"tools/list", toolsList, 1790},
-		{"session prefix (guidance + tools/list)", guidance + toolsList, 2520},
+		{"session prefix (guidance + tools/list)", guidance + toolsList, 2570},
 	} {
 		got := tokens(c.text)
 		t.Logf("%-48s %5d tokens (budget %d)", c.name, got, c.budget)

@@ -50,6 +50,23 @@ type ContentSaved struct {
 	Owner string `json:"owner"`
 }
 
+// ShareProposal is a link an agent offers the person who asked it to make to
+// a deliverable of the room (room_setup share,
+// docs/prd/2026-10-25-agent-shares-from-conversation.md): a notice row of kind
+// NoticeShareProposal carries it as payload.shareProposal. Clients show it, as
+// a card with a Create link button, only to For; the link is created when they
+// click it (the share route, as them, for the organization's signed-in
+// members), never from the tool call.
+type ShareProposal struct {
+	RoomID     string `json:"roomId"`
+	ArtifactID string `json:"artifactId"`
+	// Title is the deliverable's name; Kind is how the share dialog words it:
+	// "app", "site" or "file".
+	Title string `json:"title"`
+	Kind  string `json:"kind"`
+	For   string `json:"for"`
+}
+
 // PublishProposal is what an agent proposes to share for the person who
 // asked it (components publish, docs/prd/2026-10-20-room-setup-by-conversation.md
 // §2.3): a notice row of kind NoticePublishProposal carries it as

@@ -78,6 +78,10 @@ const (
 	// component (components publish): payload.proposal is a PublishProposal,
 	// shown to them only.
 	NoticePublishProposal = "publish-proposal"
+	// NoticeShareProposal offers the person who asked the agent a link to a
+	// deliverable of the room (room_setup share): payload.shareProposal is a
+	// ShareProposal, shown to them only; their click creates the link.
+	NoticeShareProposal = "share-proposal"
 )
 
 // AttachmentNoticeSessionID is the activity session of a job's
