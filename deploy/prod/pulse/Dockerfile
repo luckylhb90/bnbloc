@@ -19,7 +19,7 @@
 # when the generated copies drift.
 #
 # Base images are pinned by version + distro release; bump them here.
-ARG GO_VERSION=1.24
+ARG GO_VERSION=1.26
 ARG NODE_VERSION=22
 ARG ALPINE_VERSION=3.22
 # Selects which webui stage feeds the Go build: `full` builds the SPA, `none`

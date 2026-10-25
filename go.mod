@@ -1,6 +1,6 @@
 module github.com/luckylhb90/bnbloc
 
-go 1.24.0
+go 1.26.0
 
 require (
 	github.com/SherClockHolmes/webpush-go v1.4.0
@@ -10,7 +10,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.39.6
 	github.com/coder/websocket v1.8.15
 	github.com/go-sql-driver/mysql v1.8.1
-	github.com/redis/go-redis/v9 v9.22.0
+	github.com/redis/go-redis/v9 v9.23.0
 	golang.org/x/net v0.47.0
 )
 
@@ -31,5 +31,5 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.2.1 // indirect
 	go.uber.org/atomic v1.12.0 // indirect
 	golang.org/x/crypto v0.45.0 // indirect
-	golang.org/x/sys v0.38.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
 )

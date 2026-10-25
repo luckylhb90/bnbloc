@@ -13,8 +13,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/redis/go-redis/v9"
-
 	"github.com/luckylhb90/bnbloc/internal/config"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/pulse"
@@ -47,11 +45,14 @@ func main() {
 	if url := strings.TrimSpace(config.FromEnvRaw(pulse.EnvURL)); url == "" {
 		log.Printf("bnbloc-pulse: WARNING %s is unset: the organization board is not configured; consuming nothing, answering 503", pulse.EnvURL)
 	} else {
-		opts, err := redis.ParseURL(url)
+		cluster, err := pulse.ClusterFromEnv()
+		if err != nil {
+			log.Fatalf("bnbloc-pulse: %v", err)
+		}
+		rdb, err := pulse.NewRedis(url, cluster, 0)
 		if err != nil {
 			log.Fatalf("bnbloc-pulse: %s: %v", pulse.EnvURL, err)
 		}
-		rdb := redis.NewClient(opts)
 		consumer := pulsesvc.NewConsumer(rdb, backends.PulseMinutes, pulsesvc.ConsumerConfig{
 			Name:       config.FromEnvRaw("BNBLOC_PULSE_CONSUMER"),
 			FlushEvery: config.Duration("BNBLOC_PULSE_FLUSH", 15*time.Second),

@@ -11,17 +11,17 @@ import (
 
 // The sink against a real Redis. Gated on BNBLOC_TEST_REDIS_URL; each test uses
 // its own stream name, so a shared test Redis is safe.
-func testRedis(t *testing.T) *redis.Client {
+func testRedis(t *testing.T) redis.UniversalClient {
 	t.Helper()
 	url := os.Getenv("BNBLOC_TEST_REDIS_URL")
 	if url == "" {
 		t.Skip("BNBLOC_TEST_REDIS_URL not set")
 	}
-	opts, err := redis.ParseURL(url)
+	cluster := os.Getenv("BNBLOC_TEST_REDIS_CLUSTER") == "true"
+	rdb, err := NewRedis(url, cluster, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rdb := redis.NewClient(opts)
 	t.Cleanup(func() { _ = rdb.Close() })
 	return rdb
 }

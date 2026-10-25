@@ -219,6 +219,8 @@ spec:
             - name: BNBLOC_PULSE_REDIS_URL
               value: ""
             {{- end }}
+            - name: BNBLOC_PULSE_REDIS_CLUSTER
+              value: {{ ternary "true" "" $.Values.pulse.redisCluster | quote }}
             {{- end }}
             {{- if and $.Values.pulse.enabled (has $name (list "room" "realtime")) }}
             # Member digest key, shared by the emitters (presence and message events).

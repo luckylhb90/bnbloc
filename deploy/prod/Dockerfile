@@ -15,7 +15,7 @@
 # Room defaults to :8080, which the gateway also uses, so room is moved to
 # :8086 here; all other ports keep their defaults (8081-8083, 8085).
 
-ARG GO_VERSION=1.24
+ARG GO_VERSION=1.26
 ARG NODE_VERSION=22
 ARG ALPINE_VERSION=3.22
 

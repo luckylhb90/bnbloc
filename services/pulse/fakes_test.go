@@ -10,6 +10,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
+	"github.com/luckylhb90/bnbloc/internal/pulse"
 	"github.com/luckylhb90/bnbloc/internal/store"
 )
 
@@ -45,17 +46,17 @@ func (f *fakeRows) total(tenant, metric string) float64 {
 }
 
 // testRedis returns a client for the test Redis, or skips without one.
-func testRedis(t *testing.T) *redis.Client {
+func testRedis(t *testing.T) redis.UniversalClient {
 	t.Helper()
 	url := os.Getenv("BNBLOC_TEST_REDIS_URL")
 	if url == "" {
 		t.Skip("BNBLOC_TEST_REDIS_URL not set")
 	}
-	opts, err := redis.ParseURL(url)
+	cluster := os.Getenv("BNBLOC_TEST_REDIS_CLUSTER") == "true"
+	rdb, err := pulse.NewRedis(url, cluster, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rdb := redis.NewClient(opts)
 	t.Cleanup(func() { _ = rdb.Close() })
 	return rdb
 }

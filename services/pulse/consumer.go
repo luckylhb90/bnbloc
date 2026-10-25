@@ -57,7 +57,7 @@ type Stats struct {
 // known trade-off, and the board's totals are a dashboard, not a bill.
 type Consumer struct {
 	cfg    ConsumerConfig
-	rdb    *redis.Client
+	rdb    redis.UniversalClient
 	live   *Live
 	roll   *Rollup
 	rows   store.PulseMinutes
@@ -72,7 +72,7 @@ type Consumer struct {
 }
 
 // NewConsumer returns a consumer over rdb, writing rollups to rows.
-func NewConsumer(rdb *redis.Client, rows store.PulseMinutes, cfg ConsumerConfig) *Consumer {
+func NewConsumer(rdb redis.UniversalClient, rows store.PulseMinutes, cfg ConsumerConfig) *Consumer {
 	if cfg.Stream == "" {
 		cfg.Stream = pulse.Stream
 	}

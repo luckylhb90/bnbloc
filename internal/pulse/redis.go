@@ -15,12 +15,61 @@ import (
 // Deployment settings. An empty EnvURL turns Pulse off: no connection, no
 // goroutine, and every product hook stays a no-op.
 const (
-	EnvURL = "BNBLOC_PULSE_REDIS_URL"
-	EnvKey = "BNBLOC_PULSE_KEY"
+	EnvURL     = "BNBLOC_PULSE_REDIS_URL"
+	EnvKey     = "BNBLOC_PULSE_KEY"
+	EnvCluster = "BNBLOC_PULSE_REDIS_CLUSTER"
 )
 
+// KeyPrefix is the hash tag every Pulse key carries. Redis Cluster places a key
+// by the hash tag in braces, so with one tag all of Pulse's keys share a shard:
+// a pipeline may touch any of them, which a cluster otherwise rejects (CROSSSLOT)
+// or redirects (MOVED). Pulse's state is small, so one shard is enough.
+const KeyPrefix = "{pulse}:"
+
 // Stream is the Redis stream the emitter writes and the consumer reads.
-const Stream = "pulse:events"
+const Stream = KeyPrefix + "events"
+
+// NewRedis returns the client for Pulse's stream and live state. cluster selects
+// a Redis Cluster client (BNBLOC_PULSE_REDIS_CLUSTER); the URL then names a
+// cluster node or the configuration endpoint. timeout, when set, bounds dial,
+// read and write (the emitter's fire-and-forget writes); zero keeps the
+// library's defaults, which the consumer's blocking reads need.
+func NewRedis(url string, cluster bool, timeout time.Duration) (redis.UniversalClient, error) {
+	if cluster {
+		opts, err := redis.ParseClusterURL(url)
+		if err != nil {
+			return nil, err
+		}
+		if timeout > 0 {
+			opts.DialTimeout, opts.ReadTimeout, opts.WriteTimeout = timeout, timeout, timeout
+			opts.PoolSize = 8
+		}
+		return redis.NewClusterClient(opts), nil
+	}
+	opts, err := redis.ParseURL(url)
+	if err != nil {
+		return nil, err
+	}
+	if timeout > 0 {
+		opts.DialTimeout, opts.ReadTimeout, opts.WriteTimeout = timeout, timeout, timeout
+		opts.PoolSize = 8
+	}
+	return redis.NewClient(opts), nil
+}
+
+// ClusterFromEnv reads BNBLOC_PULSE_REDIS_CLUSTER: unset or "false" is a single
+// node, "true" a Redis Cluster. Anything else is an error, so a typo fails at boot.
+func ClusterFromEnv() (bool, error) {
+	v := strings.TrimSpace(os.Getenv(EnvCluster))
+	switch v {
+	case "", "false":
+		return false, nil
+	case "true":
+		return true, nil
+	default:
+		return false, fmt.Errorf("%s: want true or false, got %q", EnvCluster, v)
+	}
+}
 
 // DefaultStreamMaxLen bounds the stream (approximate trimming). At the default
 // the stream holds roughly the last hour of a busy organization's events; a
@@ -30,12 +79,12 @@ const DefaultStreamMaxLen = 500000
 
 // NewRedisSink writes each batch as one pipelined round trip: one XADD per event,
 // the envelope JSON in field "e".
-func NewRedisSink(rdb *redis.Client, stream string, maxLen int64) Sink {
+func NewRedisSink(rdb redis.UniversalClient, stream string, maxLen int64) Sink {
 	return redisSink{rdb: rdb, stream: stream, maxLen: maxLen}
 }
 
 type redisSink struct {
-	rdb    *redis.Client
+	rdb    redis.UniversalClient
 	stream string
 	maxLen int64
 }
@@ -67,19 +116,19 @@ func FromEnv(ctx context.Context, service string) (*Emitter, []byte, error) {
 	if url == "" {
 		return nil, nil, nil
 	}
-	opts, err := redis.ParseURL(url)
+	cluster, err := ClusterFromEnv()
+	if err != nil {
+		return nil, nil, err
+	}
+	rdb, err := NewRedis(url, cluster, 2*time.Second)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%s: %w", EnvURL, err)
 	}
-	opts.DialTimeout = 2 * time.Second
-	opts.ReadTimeout = 2 * time.Second
-	opts.WriteTimeout = 2 * time.Second
-	opts.PoolSize = 8
 	key := []byte(os.Getenv(EnvKey))
 	if len(key) != 0 && len(key) < MinKeyLen {
 		return nil, nil, fmt.Errorf("%s: %w", EnvKey, ErrShortKey)
 	}
-	em := New(NewRedisSink(redis.NewClient(opts), Stream, DefaultStreamMaxLen), Config{})
+	em := New(NewRedisSink(rdb, Stream, DefaultStreamMaxLen), Config{})
 	go em.Run(ctx)
 	if len(key) == 0 {
 		log.Printf("pulse: %s: %s unset: presence events are off (member ids cannot be hashed)", service, EnvKey)

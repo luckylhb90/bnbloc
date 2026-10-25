@@ -206,6 +206,9 @@ pulse:
   enabled: false
   # Redis URL of the board's stream and live state (redis://[user:password@]host:6379/0).
   redisURLSecretRef: { name: "", key: redisURL }
+  # Redis Cluster (BNBLOC_PULSE_REDIS_CLUSTER=true): set when the Redis is cluster-mode
+  # (a MOVED error on the snapshot is the sign of the single-node client against it).
+  redisCluster: false
   # Member digest key (BNBLOC_PULSE_KEY, at least 32 bytes), shared by realtime and
   # room. Keep it stable: changing it resets the active-people count. Empty name =
   # presence events off.

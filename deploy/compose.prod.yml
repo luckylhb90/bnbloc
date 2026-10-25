@@ -75,6 +75,8 @@ services:
       # Organization board: empty URL = off. Set it (with the pulse profile,
       # below) to turn the board on.
       BNBLOC_PULSE_REDIS_URL: "${BNBLOC_PULSE_REDIS_URL:-}"
+      # Redis Cluster client (true) or a single node (empty = the secret or the default).
+      BNBLOC_PULSE_REDIS_CLUSTER: "${BNBLOC_PULSE_REDIS_CLUSTER:-}"
       BNBLOC_PULSE_KEY: "${BNBLOC_PULSE_KEY:-}"
     healthcheck:
       <<: *health
@@ -96,6 +98,8 @@ services:
       # Organization board (events; see room): empty URL = off. Set it (with the pulse profile,
       # below) to turn the board on.
       BNBLOC_PULSE_REDIS_URL: "${BNBLOC_PULSE_REDIS_URL:-}"
+      # Redis Cluster client (true) or a single node (empty = the secret or the default).
+      BNBLOC_PULSE_REDIS_CLUSTER: "${BNBLOC_PULSE_REDIS_CLUSTER:-}"
       BNBLOC_PULSE_KEY: "${BNBLOC_PULSE_KEY:-}"
       # Signed plugin packages only (realtime rehydrates plugin records too).
       BNBLOC_EXT_ALLOW_UNSIGNED: ""
@@ -147,6 +151,8 @@ services:
       BNBLOC_INTERNAL_KEY: "${BNBLOC_INTERNAL_KEY:-}"
       # Organization board events (see room): empty URL = off.
       BNBLOC_PULSE_REDIS_URL: "${BNBLOC_PULSE_REDIS_URL:-}"
+      # Redis Cluster client (true) or a single node (empty = the secret or the default).
+      BNBLOC_PULSE_REDIS_CLUSTER: "${BNBLOC_PULSE_REDIS_CLUSTER:-}"
       # Single-host serve-all bridges are a testing mode, refused in production.
       BNBLOC_ACTIVITY_ALLOW_SERVE_ALL: ""
       # Links in usage budget warnings (R12).
@@ -280,6 +286,8 @@ services:
       BNBLOC_AWS_REGION: "${BNBLOC_AWS_REGION:-}"
       BNBLOC_INTERNAL_KEY: "${BNBLOC_INTERNAL_KEY:-}"
       BNBLOC_PULSE_REDIS_URL: "${BNBLOC_PULSE_REDIS_URL:-}"
+      # Redis Cluster client (true) or a single node (empty = the secret or the default).
+      BNBLOC_PULSE_REDIS_CLUSTER: "${BNBLOC_PULSE_REDIS_CLUSTER:-}"
     healthcheck:
       <<: *health
       test: ["CMD", "/usr/local/bin/healthcheck", "http://127.0.0.1:8090/readyz"]

@@ -25,32 +25,32 @@ const (
 	activeKeyTTL   = 8 * 24 * time.Hour
 )
 
-func presenceKey(tenant string) string { return "pulse:presence:" + tenant }
-func jobsKey(tenant string) string     { return "pulse:jobs:" + tenant }
-func queuedKey(tenant string) string   { return "pulse:queued:" + tenant }
-func tenantsKey() string               { return "pulse:tenants" }
+func presenceKey(tenant string) string { return pulse.KeyPrefix + "presence:" + tenant }
+func jobsKey(tenant string) string     { return pulse.KeyPrefix + "jobs:" + tenant }
+func queuedKey(tenant string) string   { return pulse.KeyPrefix + "queued:" + tenant }
+func tenantsKey() string               { return pulse.KeyPrefix + "tenants" }
 
 // geoKey holds the members whose presence is in a country, per tenant and country.
-func geoKey(tenant, cc string) string { return "pulse:geo:" + tenant + ":" + cc }
+func geoKey(tenant, cc string) string { return pulse.KeyPrefix + "geo:" + tenant + ":" + cc }
 
 // geoOfKey maps each member to the country their presence is in (one country at a time).
-func geoOfKey(tenant string) string { return "pulse:geoof:" + tenant }
+func geoOfKey(tenant string) string { return pulse.KeyPrefix + "geoof:" + tenant }
 
 // geoCountriesKey lists the countries a tenant has had presence in.
-func geoCountriesKey(tenant string) string { return "pulse:geocountries:" + tenant }
+func geoCountriesKey(tenant string) string { return pulse.KeyPrefix + "geocountries:" + tenant }
 func activeKey(tenant string, at time.Time) string {
-	return "pulse:active:" + tenant + ":" + at.UTC().Format("20060102")
+	return pulse.KeyPrefix + "active:" + tenant + ":" + at.UTC().Format("20060102")
 }
 
 // Live keeps the Redis state the board reads now: who is online, which agents
 // are working, which jobs wait for a bridge, and who was active this week. Every
 // write is idempotent (ZADD, ZREM, PFADD), so a redelivered event does no harm.
 type Live struct {
-	rdb *redis.Client
+	rdb redis.UniversalClient
 }
 
 // NewLive returns the live state over rdb.
-func NewLive(rdb *redis.Client) *Live { return &Live{rdb: rdb} }
+func NewLive(rdb redis.UniversalClient) *Live { return &Live{rdb: rdb} }
 
 // Apply queues one event's live effects on pipe.
 func (l *Live) Apply(pipe redis.Pipeliner, ctx context.Context, ev pulse.Event) {

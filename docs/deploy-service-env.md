@@ -182,13 +182,14 @@ Design: `docs/prd/2026-10-24-executive-pulse-backend.md`.
 | `BNBLOC_MYSQL_DSN` | yes | The rollups (`pulse_minutes`). Without it the service refuses to start. |
 | `BNBLOC_INTERNAL_KEY` | yes | Same value as gateway (the gateway calls it). |
 | `BNBLOC_PULSE_REDIS_URL` | for the board | The stream and the live state. Unset = the process stays up with a startup WARNING, consumes nothing, and answers the board routes 503. A malformed URL refuses to start. |
+| `BNBLOC_PULSE_REDIS_CLUSTER` | for a Redis Cluster | `true` when the Redis is cluster-mode (a Redis Cluster or ElastiCache with cluster mode on). Unset or `false` = one node. Set it on pulse and on every service that emits (activity, room, realtime): a single-node client against a cluster fails with `MOVED`. Helm: `pulse.redisCluster`. |
 | `BNBLOC_PULSE_LISTEN_ADDR` | no | Default `:8090`. Internal only, like every service's main listener. |
 | `BNBLOC_PULSE_CONSUMER` | no | This consumer's name in the stream group (default `pulse-1`). Keep it stable across restarts. |
 | `BNBLOC_PULSE_FLUSH` | no | Rollup write and stream ack interval (default `15s`). |
 | `BNBLOC_PULSE_RETENTION` | no | How long rollup rows are kept (default `2160h`, 90 days). |
 
 Secrets: with `BNBLOC_AWS_SECRET_ID` set, put `BNBLOC_MYSQL_DSN`, `BNBLOC_INTERNAL_KEY`,
-`BNBLOC_PULSE_REDIS_URL` and `BNBLOC_PULSE_KEY` in that secret's JSON. The loader runs in every
+`BNBLOC_PULSE_REDIS_URL`, `BNBLOC_PULSE_KEY` and, for a cluster, `BNBLOC_PULSE_REDIS_CLUSTER=true` in that secret's JSON. The loader runs in every
 binary at start and fills only variables that are empty in the environment, so pulse, room,
 realtime and activity read the same values. Without `BNBLOC_AWS_SECRET_ID` set on the pulse
 process, pulse does not read the secret at all and fails with "BNBLOC_PULSE_REDIS_URL is required".
