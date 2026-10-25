@@ -27,7 +27,8 @@ func TestMessagesWithPagesAndRevision(t *testing.T) {
 }
 
 // Pages are fetched as text (scripts, styles and navigation left out) and
-// bounded; the public-only client refuses a loopback address; a page that
+// bounded; the public-only client refuses a loopback address, a listed
+// client any host not listed; a page that
 // cannot be read is a line, not a failure.
 func TestFetchPages(t *testing.T) {
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -43,7 +44,16 @@ func TestFetchPages(t *testing.T) {
 	if len(ps) != 3 || ps[0].Text != "Items API\nGET /v1/items & more" || ps[1].Error != "answered 404" || ps[2].Error == "" {
 		t.Fatalf("pages = %+v", ps)
 	}
-	if ps := FetchPages(context.Background(), PagesClient(), []string{srv.URL + "/doc"}); ps[0].Error != "not a public address" {
+	if ps := FetchPages(context.Background(), PagesClient(nil), []string{srv.URL + "/doc"}); ps[0].Error != "not a public address" {
 		t.Fatalf("loopback through the public client = %+v", ps)
+	}
+	// A deployment's list: an unlisted name is never sent; a listed one is
+	// dialled on its address (here loopback, whose certificate this client
+	// does not trust).
+	if ps := FetchPages(context.Background(), PagesClient([]string{"docs.example.com"}), []string{srv.URL + "/doc"}); ps[0].Error != errNotListed.Error() {
+		t.Fatalf("an unlisted host = %+v", ps)
+	}
+	if ps := FetchPages(context.Background(), PagesClient([]string{"127.0.0.1"}), []string{srv.URL + "/doc"}); ps[0].Error != "could not be fetched" {
+		t.Fatalf("a listed host = %+v", ps)
 	}
 }

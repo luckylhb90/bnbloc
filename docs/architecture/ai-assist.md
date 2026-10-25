@@ -186,6 +186,9 @@ person sees it, by code or by reality, never by the model.
   host, 10 s, 2 MiB) and given as text (markup, scripts and navigation
   left out) in `<pages>`, 20,000 characters in all; a page that cannot be
   read says why. A service's task that declares `pages` gets them too.
+  A deployment whose egress is a DNS allowlist or a private proxy names
+  the hosts instead (`BNBLOC_ASSIST_PAGES_HOSTS`): only those are looked
+  up, on any address `extgov.CheckAddr` allows.
 
 ## A service's own tasks
 

@@ -342,12 +342,13 @@ func (s *Service) assistText(w http.ResponseWriter, r *http.Request, claims auth
 }
 
 // assistClient is the model client (the tests' transport when set).
-// pagesClient fetches the pages context: public addresses only.
+// pagesClient fetches the pages context (assist.PagesClient over the
+// deployment's AssistPagesHosts).
 func (s *Service) pagesClient() *http.Client {
 	if s.AssistPages != nil {
 		return s.AssistPages
 	}
-	return assist.PagesClient()
+	return assist.PagesClient(s.AssistPagesHosts)
 }
 
 func (s *Service) assistClient() *assist.Client {

@@ -330,6 +330,7 @@ func main() {
 		RoomInfo:          tw.RoomInfo,
 		AgentRuns:         tw.AgentRuns,
 		AllowedOrigins:    config.List("BNBLOC_ALLOWED_ORIGINS"),
+		AssistPagesHosts:  config.List("BNBLOC_ASSIST_PAGES_HOSTS"),
 		TrustedProxies:    resolveTrustedProxies(),
 		PublicURL:         config.FromEnvRaw(notify.PublicURLEnv),
 		SitesOrigin:       sitesOrigin,
