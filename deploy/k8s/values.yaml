@@ -196,6 +196,24 @@ relay:
   replicas: 1
   hpa: { enabled: false, minReplicas: 2, maxReplicas: 4, targetCPUUtilizationPercentage: 70 }
 
+# The organization board (bnbloc-pulse, docs/prd/2026-10-24-executive-pulse-backend.md).
+# Off until enabled: the board then answers "not deployed" and the emitting
+# services (activity, room, realtime) stay silent. Enabling it needs a Redis for
+# the stream and the member digest key; create both Secrets out of band.
+pulse:
+  enabled: false
+  # Redis URL of the board's stream and live state (redis://[user:password@]host:6379/0).
+  redisURLSecretRef: { name: "", key: redisURL }
+  # Member digest key (BNBLOC_PULSE_KEY, at least 32 bytes), shared by realtime and
+  # room. Keep it stable: changing it resets the active-people count. Empty name =
+  # presence events off.
+  keySecretRef: { name: "", key: pulseKey }
+  # One consumer per deployment: keep at 1 (no HPA).
+  replicas: 1
+  resources:
+    requests: { cpu: "100m", memory: "128Mi" }
+    limits:   { cpu: "500m", memory: "256Mi" }
+
 resources:
   requests: { cpu: "100m", memory: "128Mi" }
   limits:   { cpu: "500m", memory: "512Mi" }

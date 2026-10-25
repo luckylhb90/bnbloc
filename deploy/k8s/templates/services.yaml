@@ -18,7 +18,7 @@ BNBLOC_<PEER>_BASE_URL), and its scale-out role (`shard`):
 The env each service receives mirrors what its services/<name>/cmd/main.go
 reads — see docs/deploy-service-env.md.
 */ -}}
-{{- $ports := dict "gateway" 8080 "room" 8080 "activity" 8081 "realtime" 8082 "shareagent" 8083 "relay" 8085 -}}
+{{- $ports := dict "gateway" 8080 "room" 8080 "activity" 8081 "realtime" 8082 "shareagent" 8083 "relay" 8085 "pulse" 8090 -}}
 {{- $services := dict
   "gateway"         (dict "cfg" .Values.gateway         "db" true  "shard" "count" "peers" (list "room" "activity" "realtime" "shareagent" "relay"))
   "room"            (dict "cfg" .Values.room            "db" true  "shard" ""      "peers" (list "realtime"))
@@ -26,13 +26,18 @@ reads — see docs/deploy-service-env.md.
   "realtime"        (dict "cfg" .Values.realtime        "db" true  "shard" "owner" "peers" (list "room" "gateway"))
   "shareagent"      (dict "cfg" .Values.shareagent      "db" true  "shard" ""      "peers" (list "room"))
   "relay"           (dict "cfg" .Values.relay           "db" false "shard" "owner" "peers" (list))
+  "pulse"           (dict "cfg" .Values.pulse           "db" true  "shard" ""      "peers" (list))
 -}}
 {{- range $name, $svc := $services }}
+{{- if or (ne $name "pulse") $.Values.pulse.enabled }}
 {{- $cfg := $svc.cfg | default dict }}
 {{- $port := get $ports $name }}
 {{- $owner := eq $svc.shard "owner" }}
 {{- /* Scale-out mode: more than one replica, now or through the HPA. */ -}}
 {{- $scaled := or (gt (int (default 1 $cfg.replicas)) 1) (and $cfg.hpa $cfg.hpa.enabled) }}
+{{- if and (eq $name "pulse") $scaled }}
+{{- fail "bnbloc-pulse runs one consumer per deployment (its stream group consumer is fixed): keep pulse.replicas at 1 and no HPA" }}
+{{- end }}
 {{- if and (eq $name "realtime") $scaled (not $cfg.attachments.s3.bucket) }}
 {{- fail "bnbloc-realtime with more than one replica (or an HPA) needs realtime.attachments.s3.bucket: the disk blob store is one pod's volume, and realtime refuses it when peers are configured" }}
 {{- end }}
@@ -202,6 +207,22 @@ spec:
               valueFrom:
                 secretKeyRef: { name: {{ required "webPush.privateKeySecretRef.name is required when webPush.publicKey is set" $.Values.webPush.privateKeySecretRef.name }}, key: {{ $.Values.webPush.privateKeySecretRef.key }} }
             {{- end }}
+            {{- if and $.Values.pulse.enabled (has $name (list "activity" "room" "realtime" "pulse")) }}
+            # The board's Redis stream (empty = the emitters stay off; pulse needs it).
+            - name: BNBLOC_PULSE_REDIS_URL
+              valueFrom:
+                secretKeyRef: { name: {{ required "pulse.redisURLSecretRef.name is required when pulse.enabled" $.Values.pulse.redisURLSecretRef.name }}, key: {{ $.Values.pulse.redisURLSecretRef.key }} }
+            {{- end }}
+            {{- if and $.Values.pulse.enabled $.Values.pulse.keySecretRef.name (has $name (list "room" "realtime")) }}
+            # Member digest key, shared by the emitters (presence and message events).
+            - name: BNBLOC_PULSE_KEY
+              valueFrom:
+                secretKeyRef: { name: {{ $.Values.pulse.keySecretRef.name }}, key: {{ $.Values.pulse.keySecretRef.key }} }
+            {{- end }}
+            {{- if and $.Values.pulse.enabled (eq $name "gateway") }}
+            - name: BNBLOC_PULSE_BASE_URL
+              value: "http://bnbloc-pulse:8090"
+            {{- end }}
             {{- with $cfg.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -282,6 +303,7 @@ spec:
         target:
           type: Utilization
           averageUtilization: {{ $cfg.hpa.targetCPUUtilizationPercentage }}
+{{- end }}
 {{- end }}
 {{- end }}
 {{- if not .Values.realtime.attachments.s3.bucket }}

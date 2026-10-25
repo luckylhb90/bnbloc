@@ -14,6 +14,18 @@ services:
       timeout: 5s
       retries: 30
 
+  # The organization board's stream and live state (bnbloc-pulse). Only the
+  # board reads it: a Redis outage never fails a product request.
+  redis:
+    image: redis:7
+    volumes:
+      - bnbloc-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
   # CI_COMMIT_SHA stamps every image's build identity (GET /version, the
   # Platform console's Deployment card); .git is not in the build context:
   #   CI_COMMIT_SHA=$(git rev-parse --short=12 HEAD) docker compose build
@@ -21,6 +33,11 @@ services:
     build: { context: ., args: { SERVICE: room, CI_COMMIT_SHA: "${CI_COMMIT_SHA:-}" } }
     environment:
       BNBLOC_ROOM_LISTEN_ADDR: ":8080"
+      # Organization board: presence and message events go to the board's
+      # Redis stream. Empty URL = off (no connection, no events).
+      BNBLOC_PULSE_REDIS_URL: "${BNBLOC_PULSE_REDIS_URL:-redis://redis:6379/0}"
+      # Member digest key (HMAC, at least 32 bytes), shared by realtime and room.
+      BNBLOC_PULSE_KEY: "${BNBLOC_PULSE_KEY:-dev-bnbloc-pulse-key-change-me-0123456789}"
       BNBLOC_MYSQL_DSN: "bnbloc:bnbloc-pass@tcp(mysql:3306)/bnbloc?parseTime=true"
       BNBLOC_INTERNAL_KEY: "${BNBLOC_INTERNAL_KEY:-dev-bnbloc-internal-key-change-me}"
       # Artifact change events fan out through realtime so open previews refresh;
@@ -38,6 +55,11 @@ services:
     build: { context: ., args: { SERVICE: realtime, CI_COMMIT_SHA: "${CI_COMMIT_SHA:-}" } }
     environment:
       BNBLOC_REALTIME_LISTEN_ADDR: ":8082"
+      # Organization board: presence and message events go to the board's
+      # Redis stream. Empty URL = off (no connection, no events).
+      BNBLOC_PULSE_REDIS_URL: "${BNBLOC_PULSE_REDIS_URL:-redis://redis:6379/0}"
+      # Member digest key (HMAC, at least 32 bytes), shared by realtime and room.
+      BNBLOC_PULSE_KEY: "${BNBLOC_PULSE_KEY:-dev-bnbloc-pulse-key-change-me-0123456789}"
       # One replica = a single node that owns every room: no
       # BNBLOC_REALTIME_PEERS/_SELF. Scaling realtime out by room ownership
       # is the Helm chart's job (docs/production-deployment.md).
@@ -99,6 +121,8 @@ services:
     build: { context: ., args: { SERVICE: activity, CI_COMMIT_SHA: "${CI_COMMIT_SHA:-}" } }
     environment:
       BNBLOC_ACTIVITY_LISTEN_ADDR: ":8081"
+      # Organization board events (see room).
+      BNBLOC_PULSE_REDIS_URL: "${BNBLOC_PULSE_REDIS_URL:-redis://redis:6379/0}"
       BNBLOC_INTERNAL_KEY: "${BNBLOC_INTERNAL_KEY:-dev-bnbloc-internal-key-change-me}"
       BNBLOC_MYSQL_DSN: "bnbloc:bnbloc-pass@tcp(mysql:3306)/bnbloc?parseTime=true"
       BNBLOC_ROOM_BASE_URL: "http://room:8080"
@@ -127,6 +151,20 @@ services:
       mysql: { condition: service_healthy }
       room: { condition: service_started }
 
+  # The organization board's backend (docs/prd/2026-10-24-executive-pulse-backend.md):
+  # consumes the Redis stream the services above emit to, and serves the
+  # board's snapshot and stream to the gateway.
+  pulse:
+    build: { context: ., args: { SERVICE: pulse, CI_COMMIT_SHA: "${CI_COMMIT_SHA:-}" } }
+    environment:
+      BNBLOC_PULSE_LISTEN_ADDR: ":8090"
+      BNBLOC_INTERNAL_KEY: "${BNBLOC_INTERNAL_KEY:-dev-bnbloc-internal-key-change-me}"
+      BNBLOC_MYSQL_DSN: "bnbloc:bnbloc-pass@tcp(mysql:3306)/bnbloc?parseTime=true"
+      BNBLOC_PULSE_REDIS_URL: "redis://redis:6379/0"
+    depends_on:
+      mysql: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
   relay:
     build: { context: ., args: { SERVICE: relay, CI_COMMIT_SHA: "${CI_COMMIT_SHA:-}" } }
     environment:
@@ -139,6 +177,8 @@ services:
       - "7090:8080"
     environment:
       BNBLOC_GATEWAY_LISTEN_ADDR: ":8080"
+      # The organization board's snapshot and stream come from bnbloc-pulse.
+      BNBLOC_PULSE_BASE_URL: "http://pulse:8090"
       # /metrics lives on this internal listener only (never published; the
       # public :8080 answers /metrics with 404). Scrape gateway:9090.
       BNBLOC_METRICS_ADDR: "${BNBLOC_METRICS_ADDR:-:9090}"
@@ -196,7 +236,7 @@ services:
     # passed with -f, never in this file.
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    depends_on: [room, activity, realtime, shareagent, relay]
+    depends_on: [room, activity, realtime, shareagent, relay, pulse]
 
   # bnbloc-bridge connects a member's local, unmodified agent runtime to bnbloc: it
   # drives the local agent from room chat and pushes replies back into the room
@@ -249,5 +289,6 @@ services:
 
 volumes:
   bnbloc-mysql:
+  bnbloc-redis:
   bnbloc-attachments:
   bnbloc-opensearch:

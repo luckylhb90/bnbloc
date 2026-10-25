@@ -61,6 +61,7 @@ embedded SPA. Stateless apart from the shared database — scale horizontally.
 | `BNBLOC_TRUSTED_PROXIES` | behind a proxy | CIDRs of the edge proxy, so the per-IP limits (direct login and the API-token exchange, public share reads) see real clients. Needed on SSO-only production too: the API-token exchange and public shares stay reachable there. |
 | `BNBLOC_ALLOWED_ORIGINS` | if cross-origin | Extra browser origins for CORS. |
 | `BNBLOC_CORES` (+ `BNBLOC_CORE_<NAME>_URL`) | optional | Explicit cores only; installed packages need none. |
+| `BNBLOC_PULSE_BASE_URL` | for the organization board | `http://bnbloc-pulse:8090` (Helm: rendered when `pulse.enabled`). Unset = the board routes answer "not deployed". |
 | `BNBLOC_METRICS_ADDR` | for metrics | Internal `/metrics` listener (`:9090` in compose/Helm). The public listener never serves `/metrics` (404); unset = no gateway metrics; the gateway's own listen address refuses to start. Never route or publish it. |
 | `BNBLOC_GATEWAY_PEERS` | with >1 replica | The gateway replica set (Helm: the headless `bnbloc-gateway-peers:8080`; or a comma list of `host:port`). Each replica enforces 1/N of every rate limit, N = live replicas, so the configured budget holds across the deployment. Unset = one replica (N replicas would then allow N times every budget). |
 
@@ -81,6 +82,8 @@ owns interactive apps' data (sealed documents per site artifact).
 | `BNBLOC_INTERNAL_KEY` | yes | Same value as gateway. |
 | `BNBLOC_REALTIME_BASE_URL` | yes | `http://bnbloc-realtime:8082` — artifact-change fan-out, blob artifact versions + thumbnails (stored in realtime's blob store over the signed internal route), and the feed/attachment side of handoff package export/import. |
 | `BNBLOC_ARTIFACT_MAX_BYTES` | no | Max bytes of one blob artifact version. Unset = 100 MiB; must be 1..268435456 (realtime's 256 MiB blob cap) or the service refuses to start. Raise the edge proxy's body limit for `POST /v1/rooms/*/artifacts/*/versions` with it. |
+| `BNBLOC_PULSE_REDIS_URL` | for the board | Redis of the board's stream (`redis://[user:password@]host:6379/0`). Unset = the board's events are off: no connection, no goroutine, a no-op. A Redis outage never fails a request: events are dropped and counted. Helm: `pulse.redisURLSecretRef`. |
+| `BNBLOC_PULSE_KEY` | for presence and message events | Not read here; room and realtime read it (see below). |
 | `BNBLOC_SECRET_STORE_KEY` | for app data | The gateway's value (every room replica): wraps each interactive app's data key. Unset = the app data routes answer 503; malformed = refuses to start. |
 
 ## realtime (`:8082`) — scales out by room ownership
@@ -116,6 +119,8 @@ history. Kubernetes runs it as a StatefulSet behind the headless
 | `BNBLOC_SEARCH_OPENSEARCH_URL` | optional | OpenSearch base URL for message search; unset = MySQL FULLTEXT. Probed at startup: in production an unreachable cluster, refused credentials or an index that is neither ready nor creatable stops the replica. Helm: `realtime.search.opensearch.url`. |
 | `BNBLOC_SEARCH_OPENSEARCH_USERNAME` / `_PASSWORD` | optional | HTTP basic credentials, both or neither; the password is a secret (Helm: `passwordSecretRef`). |
 | `BNBLOC_SEARCH_OPENSEARCH_INDEX_PREFIX` | optional | Index `<prefix>-room-messages-v<N>`; default `bnbloc`. |
+| `BNBLOC_PULSE_REDIS_URL` | for the board | As in room; events to the board's stream. Unset = off. |
+| `BNBLOC_PULSE_KEY` | for presence and message events | Member digest key (HMAC, at least 32 bytes), shared with room. Unset = presence events off and message events omit the member. Keep it stable: changing it resets the active-people count. Helm: `pulse.keySecretRef`. |
 | `BNBLOC_SECRET_STORE_KEY` | with notifiers | The gateway's value: opens each notifier's signing secret (sealed at rest) to sign deliveries. Unset = no notifier whose secret is sealed is delivered to; malformed = refuses to start. |
 
 Realtime also runs the notification outbox worker (signed delivery to the
@@ -149,6 +154,7 @@ Agent-activity ingest, dedup, durable bridge jobs, and reply fan-out.
 | `BNBLOC_INTERNAL_KEY` | yes | Same value as gateway. |
 | `BNBLOC_ROOM_BASE_URL` | yes | `http://bnbloc-room:8080` — membership. |
 | `BNBLOC_REALTIME_BASE_URL` | yes | `http://bnbloc-realtime:8082` — the path agent replies reach clients. Without it replies persist but never reach clients. |
+| `BNBLOC_PULSE_REDIS_URL` | for the board | Events to the board's stream (job claims and finishes, reply usage). Unset = off. |
 | `BNBLOC_ACTIVITY_ALLOW_SERVE_ALL` | never in prod | Dev-only single-host serve-all bridges; fatal in production when on (an explicit `false` is the same as unset). |
 | `BNBLOC_PUBLIC_URL` | recommended | Links in usage budget warnings (queued to the shared outbox; realtime delivers). Unset = no links. |
 
@@ -162,6 +168,28 @@ Shared-agent (borrow) authorization, audit, usage.
 | `BNBLOC_INTERNAL_KEY` | yes | Same value as gateway. |
 | `BNBLOC_ROOM_BASE_URL` | yes | `http://bnbloc-room:8080` — membership. |
 | `BNBLOC_PUBLIC_URL` | recommended | Deep links in borrow-request notifications (queued to the shared outbox; realtime delivers). |
+
+## pulse (`:8090`) — the organization board's backend
+
+Consumes the Redis stream that activity, realtime and room emit to, keeps the
+live state (who is online, agents working and waiting, active people), writes
+per-minute rollups to MySQL, and serves the board's snapshot and stream to the
+gateway. Runs as one consumer per deployment (Helm: keep `pulse.replicas` at 1).
+Design: `docs/prd/2026-10-24-executive-pulse-backend.md`.
+
+| Variable | Required | Notes |
+| --- | --- | --- |
+| `BNBLOC_MYSQL_DSN` | yes | The rollups (`pulse_minutes`). Without it the service refuses to start. |
+| `BNBLOC_INTERNAL_KEY` | yes | Same value as gateway (the gateway calls it). |
+| `BNBLOC_PULSE_REDIS_URL` | yes | The stream and the live state. Unset = the service refuses to start. |
+| `BNBLOC_PULSE_LISTEN_ADDR` | no | Default `:8090`. Internal only, like every service's main listener. |
+| `BNBLOC_PULSE_CONSUMER` | no | This consumer's name in the stream group (default `pulse-1`). Keep it stable across restarts. |
+| `BNBLOC_PULSE_FLUSH` | no | Rollup write and stream ack interval (default `15s`). |
+| `BNBLOC_PULSE_RETENTION` | no | How long rollup rows are kept (default `2160h`, 90 days). |
+
+The production compose overlay starts it only with the `pulse` profile (see
+`deploy/compose.prod.yml`); the all-in-one image runs it only when
+`BNBLOC_PULSE_REDIS_URL` is set.
 
 ## relay (`:8085`) — scales out by session-key ownership
 
@@ -202,6 +230,7 @@ No database, no internal key; it talks to the gateway like any client.
 | realtime | 8082 | 1..n (room ownership) | ✅ | ✅ | ✅ | — | blob storage; optional OpenSearch |
 | activity | 8081 | 1..n | ✅ | ✅ | ✅ | ✅ | — |
 | shareagent | 8083 | 1..n | ✅ | ✅ | ✅ | — | — |
+| pulse | 8090 | 1 (one consumer) | ✅ | ✅ | — | — | Redis stream (required); rollups in MySQL |
 | relay | 8085 | 1..n (session ownership) | — | — | — | — | edge route `/relay/*` |
 
 All Go services additionally take `BNBLOC_ENV=production` and, optionally,

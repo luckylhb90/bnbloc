@@ -1,7 +1,7 @@
 #!/bin/sh
 # bnbloc all-in-one supervisor.
 #
-# Starts the six services as background processes inside one container and
+# Starts the services as background processes inside one container and
 # ties their lifetimes together: if any one exits, the whole container exits so
 # the orchestrator restarts the unit, rather than leaving the gateway serving
 # requests that fail downstream. tini (PID 1) reaps zombies and forwards
@@ -65,8 +65,8 @@ unset BNBLOC_REALTIME_PEERS BNBLOC_REALTIME_SELF BNBLOC_RELAY_PEERS BNBLOC_RELAY
 
 # /metrics: the internal services keep it on their loopback-only listeners;
 # the gateway (the public listener) serves it only on BNBLOC_METRICS_ADDR.
-# All six processes share this environment and one network namespace, so the
-# value is handed to the gateway alone — exported to every service, all six
+# All processes share this environment and one network namespace, so the
+# value is handed to the gateway alone — exported to every service, all of them
 # would try to bind the same address.
 gateway_metrics_addr="${BNBLOC_METRICS_ADDR:-:9090}"
 unset BNBLOC_METRICS_ADDR
@@ -98,11 +98,17 @@ start() {
 
 # Room first — the others perform membership checks against it. The gateway is
 # last so it only fronts traffic once its upstreams are live.
-start room
-start activity
-start realtime
-start shareagent
-start relay
+# The organization board's backend (pulse) runs only when its Redis is set: the
+# same variable the emitting services read. Without it the board is off and the
+# gateway's board routes answer "not deployed", as on any other deployment.
+supervised="room activity realtime shareagent relay gateway"
+if [ -n "${BNBLOC_PULSE_REDIS_URL:-}" ]; then
+  start pulse
+  supervised="$supervised pulse"
+  export BNBLOC_PULSE_BASE_URL="http://127.0.0.1:8090"
+else
+  unset BNBLOC_PULSE_BASE_URL
+fi
 start gateway
 
 echo "aio: all services started; supervising"
@@ -112,7 +118,7 @@ echo "aio: all services started; supervising"
 # SIGCHLD races that a trap-based supervisor hits under `set -e`.
 while true; do
   sleep 5
-  for name in room activity realtime shareagent relay gateway; do
+  for name in $supervised; do
     eval "pid=\$pid_${name}"
     if ! kill -0 "$pid" 2>/dev/null; then
       echo "aio: ${name} (pid ${pid}) exited; bringing the container down"

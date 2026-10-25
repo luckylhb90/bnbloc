@@ -16,7 +16,7 @@ cd "$repo_root"
 
 # cli is the operator CLI image (./cmd/bnbloc), used by the scheduled
 # in-cluster smoke (deploy/k8s smoke CronJob, compose `smoke` service).
-services="gateway room realtime activity shareagent relay cli"
+services="gateway room realtime activity shareagent relay pulse cli"
 check=0
 [ "${1:-}" = "--check" ] && check=1
 

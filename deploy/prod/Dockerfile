@@ -34,7 +34,7 @@ ENV CI_COMMIT_SHA=${CI_COMMIT_SHA}
 RUN sed -i 's#\.\./services/gateway/webui/static#/out/services/gateway/webui/static#' vite.config.ts \
     && pnpm build
 
-# --- Build all six service binaries (+ the operator CLI) ----------------
+# --- Build the service binaries (+ the operator CLI) --------------------
 # The CLI (/usr/local/bin/bnbloc) is not supervised; it is there so an
 # operator or a host scheduler can run e.g. the nightly smoke inside the
 # container: `docker exec <aio> bnbloc smoke --gateway http://127.0.0.1:8080`
@@ -50,14 +50,14 @@ ARG CI_COMMIT_SHA=""
 RUN set -eux; \
     bi=github.com/luckylhb90/bnbloc/internal/buildinfo; \
     ldflags="-X $bi.Commit=${CI_COMMIT_SHA} -X $bi.BuiltAt=$(date -u +%Y-%m-%dT%H:%M:%SZ)"; \
-    for svc in gateway room realtime activity shareagent relay; do \
+    for svc in gateway room realtime activity shareagent relay pulse; do \
       CGO_ENABLED=0 go build -trimpath -tags "${GO_TAGS}" -ldflags "$ldflags" \
         -o /out/bnbloc-${svc} ./services/${svc}/cmd; \
     done; \
     CGO_ENABLED=0 go build -trimpath -ldflags "$ldflags" -o /out/bnbloc ./cmd/bnbloc
 
 # --- Runtime -------------------------------------------------------------
-# One container runs six processes, which needs a shell and a process
+# One container runs the services as processes, which needs a shell and a process
 # supervisor — neither exists in a distroless image. Alpine keeps the image
 # small while providing both. tini is PID 1 for correct signal and zombie
 # handling; the entrypoint supervises the services and exits the container if

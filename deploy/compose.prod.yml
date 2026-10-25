@@ -55,6 +55,11 @@ services:
   mysql:
     profiles: ["disabled-external-db"]
 
+  # The board's Redis is external too (BNBLOC_PULSE_REDIS_URL). Only the
+  # board uses it: a Redis outage never fails a product request.
+  redis:
+    profiles: ["disabled-external-redis"]
+
   room:
     <<: *service
     depends_on: !override []
@@ -67,6 +72,10 @@ services:
       BNBLOC_ARTIFACT_MAX_BYTES: "${BNBLOC_ARTIFACT_MAX_BYTES:-}"
       # Seals interactive apps' data keys (unset = app data off).
       BNBLOC_SECRET_STORE_KEY: "${BNBLOC_SECRET_STORE_KEY:-}"
+      # Organization board: empty URL = off. Set it (with the pulse profile,
+      # below) to turn the board on.
+      BNBLOC_PULSE_REDIS_URL: "${BNBLOC_PULSE_REDIS_URL:-}"
+      BNBLOC_PULSE_KEY: "${BNBLOC_PULSE_KEY:-}"
     healthcheck:
       <<: *health
       test: ["CMD", "/usr/local/bin/healthcheck", "http://127.0.0.1:8080/readyz"]
@@ -84,6 +93,10 @@ services:
       BNBLOC_AWS_SECRET_ID: "${BNBLOC_AWS_SECRET_ID:-}"
       BNBLOC_AWS_REGION: "${BNBLOC_AWS_REGION:-}"
       BNBLOC_INTERNAL_KEY: "${BNBLOC_INTERNAL_KEY:-}"
+      # Organization board (events; see room): empty URL = off. Set it (with the pulse profile,
+      # below) to turn the board on.
+      BNBLOC_PULSE_REDIS_URL: "${BNBLOC_PULSE_REDIS_URL:-}"
+      BNBLOC_PULSE_KEY: "${BNBLOC_PULSE_KEY:-}"
       # Signed plugin packages only (realtime rehydrates plugin records too).
       BNBLOC_EXT_ALLOW_UNSIGNED: ""
       # Opens the notifiers' signing secrets, sealed at rest with the
@@ -132,6 +145,8 @@ services:
       BNBLOC_AWS_SECRET_ID: "${BNBLOC_AWS_SECRET_ID:-}"
       BNBLOC_AWS_REGION: "${BNBLOC_AWS_REGION:-}"
       BNBLOC_INTERNAL_KEY: "${BNBLOC_INTERNAL_KEY:-}"
+      # Organization board events (see room): empty URL = off.
+      BNBLOC_PULSE_REDIS_URL: "${BNBLOC_PULSE_REDIS_URL:-}"
       # Single-host serve-all bridges are a testing mode, refused in production.
       BNBLOC_ACTIVITY_ALLOW_SERVE_ALL: ""
       # Links in usage budget warnings (R12).
@@ -236,6 +251,9 @@ services:
       # hatch for explicitly-configured cores (each then needs a reachable
       # BNBLOC_CORE_<NAME>_URL), defaulting to none.
       BNBLOC_CORES: "${BNBLOC_CORES:-}"
+      # The board's snapshot service (the pulse profile). Empty = board routes
+      # answer "not deployed"; set http://pulse:8090 with the profile.
+      BNBLOC_PULSE_BASE_URL: "${BNBLOC_PULSE_BASE_URL:-}"
     # Drops the host.docker.internal alias from compose.yml; prod has no
     # host-core wiring.
     extra_hosts: !reset []
@@ -246,6 +264,28 @@ services:
       resources:
         # Proxies SSE and streams artifact uploads (up to 256 MiB) to realtime.
         limits: { cpus: "2.0", memory: 512M }
+
+  # The organization board's backend. Opt-in: start it with the `pulse`
+  # profile once BNBLOC_PULSE_REDIS_URL, BNBLOC_PULSE_KEY and
+  # BNBLOC_PULSE_BASE_URL=http://pulse:8090 are set:
+  #   docker compose -f compose.yml -f deploy/compose.prod.yml --env-file .env.production --profile pulse up -d
+  pulse:
+    <<: *service
+    profiles: ["pulse"]
+    depends_on: !override []
+    environment:
+      BNBLOC_ENV: production
+      BNBLOC_MYSQL_DSN: "${BNBLOC_MYSQL_DSN:-}"
+      BNBLOC_AWS_SECRET_ID: "${BNBLOC_AWS_SECRET_ID:-}"
+      BNBLOC_AWS_REGION: "${BNBLOC_AWS_REGION:-}"
+      BNBLOC_INTERNAL_KEY: "${BNBLOC_INTERNAL_KEY:-}"
+      BNBLOC_PULSE_REDIS_URL: "${BNBLOC_PULSE_REDIS_URL:-}"
+    healthcheck:
+      <<: *health
+      test: ["CMD", "/usr/local/bin/healthcheck", "http://127.0.0.1:8090/readyz"]
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 256M }
 
   # Nightly smoke (R3): `bnbloc smoke --alert-on-failure` from the CLI image
   # against the gateway on this network. Profile-gated, so `up` never starts
