@@ -51,6 +51,9 @@ export const StorageKey = {
   // "Don't ask again" for uploading an opened local document, per member
   // (lib/localOpen.ts).
   localOpenConsent: "bnbloc.localOpenConsent",
+  // The composer's suggestions a member dismissed, per member, with when each
+  // is suggested again (lib/suggestUse.ts).
+  useSuggestions: "bnbloc.useSuggestions",
 } as const;
 
 export type StorageKeyName = (typeof StorageKey)[keyof typeof StorageKey];

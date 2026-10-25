@@ -49,3 +49,14 @@ signing in. Run it the same way, with a web server on `BNBLOC_E2E_URL`:
 ```sh
 BNBLOC_E2E_URL=http://localhost:5173 node web/e2e/multi-account.mjs
 ```
+
+## Suggestions in the composer (`suggest-use.mjs`)
+
+The composer's "fits this request" row, in a real browser against a mocked
+gateway: an expert is suggested and picked in one click, a request nothing
+fits gets no row, a dismissal lasts across a reload, a skill pack is turned on
+for the room and, when the room refuses, for the member's agents.
+
+```sh
+BNBLOC_E2E_URL=http://localhost:5173 node web/e2e/suggest-use.mjs
+```

@@ -1787,6 +1787,20 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   room uses (resolved for the installer). `TestOneStarterMechanism`
   (`internal/contentpkg`) fails on a starter list in Go, the schema or the
   web.
+- **The composer recommends what fits, the member turns it on** (`web/src/lib/suggestUse.ts`,
+  `views/composer/useUseSuggestion.ts`, `UseSuggestionRow.tsx`;
+  `docs/prd/2026-10-25-suggest-what-to-use.md`). One suggestion at a time
+  (an expert to pick, a skill pack to turn on, an MCP tool to add) from a
+  local keyword score over the Library the client already reads: the draft never
+  leaves the browser, nothing is enabled without the click, no default-on, no
+  agent prompt text. Shown only when at least two words match (or one rare
+  word of a name in a short request); a close second means silence; an
+  expert stands for the skill packs it wears, dismissed or in effect too.
+  The matcher is the one owner of tokenizing and the rules
+  (`suggestUse.test.ts` holds real names against real requests, including the
+  silent ones); `web/e2e/suggest-use.mjs` runs the row in a browser. The default
+  content hard-codes no language besides English: another language matches
+  through an organization's own localized descriptions and tags.
 - **A room's setup is a content kind, `bnbloc.room.package/v1`**
   (`contentpkg/room.go`; docs/prd/2026-10-20-rooms-as-components.md,
   docs/architecture/content-components.md "Room packages"); room
