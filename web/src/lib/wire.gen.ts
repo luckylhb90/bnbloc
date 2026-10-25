@@ -4105,6 +4105,41 @@ export interface JobProgressInput {
   activity: JobActivity[];
 }
 
+// ---- wire/library_candidates.go ----
+
+// LibraryCandidates is GET /v1/library/candidates?q=<request>&limit=N: the shortlist of the
+// member's Library that may fit a request they sent
+// (docs/prd/2026-10-25-suggest-what-to-use.md), best first. It is the first stage of a
+// suggestion (the second is the organization's decision model): bounded, so the cost of a
+// suggestion does not grow with the Library. The request is the query; it is not stored.
+export interface LibraryCandidates {
+  candidates: LibraryCandidate[];
+  // Total is how many components the member may use (the shortlist is a part of them).
+  total: number;
+}
+
+// LibraryCandidate is one component as a decision needs it, nothing more.
+export interface LibraryCandidate {
+  // ID is a content component's id; empty for an MCP tool (named by Name).
+  id?: string;
+  // Kind is "expert", "skill" or "mcp".
+  kind: string;
+  name: string;
+  label: string;
+  description?: string;
+  tags?: string[];
+  // Wears is, for an expert, the skill packs it requires (names, no ranges).
+  wears?: string[];
+  // Version is the version a skill pack would be turned on at.
+  version?: string;
+}
+
+// Library candidate bounds.
+// MaxLibraryRequestRunes bounds the query: a request longer than this is cut.
+export const MaxLibraryRequestRunes = 1200;
+// MaxLibraryDescriptionRunes trims each candidate's description.
+export const MaxLibraryDescriptionRunes = 160;
+
 // ---- wire/limits.go ----
 
 // Limits a service enforces and a client checks before it sends, so the

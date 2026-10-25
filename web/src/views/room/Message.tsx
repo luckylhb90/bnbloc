@@ -33,6 +33,7 @@ import { DeadEndCard } from "@/views/room/DeadEndCard";
 import { ComponentCardView } from "@/views/room/ComponentCardView";
 import { PublishProposalCard } from "@/views/room/PublishProposalCard";
 import { ShareProposalCard } from "@/views/room/ShareProposalCard";
+import { UseSuggestionCard } from "@/views/room/UseSuggestionCard";
 import { NoticeRoomSetup } from "@/lib/wire.gen";
 import { isSubmitEnter } from "@/lib/keys";
 import { copyText } from "@/lib/clipboard";
@@ -431,6 +432,7 @@ export const Message = memo(function Message({
             )}
           </div>
         )}
+        <UseSuggestionCard item={item} />
       </div>
     );
   }

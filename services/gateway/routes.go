@@ -223,6 +223,7 @@ func (s *Service) routes() []route {
 		// drives agents' configuration and spends the cost budget; whether
 		// a route honors a job grant is the handler's (contentGrant).
 		member("GET /v1/content-components", s.handleListContent).with(needContent),
+		member("GET /v1/library/candidates", s.handleLibraryCandidates).with(needContent),
 		gated("POST /v1/content-components", drive, s.handleCreateContent).spends(costBudget).with(needContent),
 		gated("POST /v1/content-components/import", drive, s.handleImportContent).spends(costBudget).with(needContent),
 		member("GET /v1/content-components/effective", s.handleContentEffective).with(needContent),

@@ -1788,23 +1788,23 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   room uses (resolved for the installer). `TestOneStarterMechanism`
   (`internal/contentpkg`) fails on a starter list in Go, the schema or the
   web.
-- **The composer recommends what fits, the member turns it on** (`web/src/lib/suggestUse.ts`,
-  `views/composer/useUseSuggestion.ts`, `UseSuggestionRow.tsx`;
-  `docs/prd/2026-10-25-suggest-what-to-use.md`). One suggestion at a time
-  (an expert to pick, a skill pack to turn on, an MCP tool to add). The
-  organization's decision model places the request when it runs for the member
-  (one choice question over the eligible candidates and "none"; sure at 0.6 and
-  twice the runner-up; at most 4 calls per draft, after a pause, on at most the
-  first 800 and last 400 characters; a failure or 429 leaves it out for a minute;
-  on by default, a switch in Settings → Privacy); else a local keyword matcher.
-  Nothing is enabled without the click, no default-on, no agent prompt text.
-  `suggestUse.ts` owns the question, how an answer is read, the ask schedule and
-  the fallback (`suggestUse.test.ts` holds real names against real requests, the
-  silent ones included, and the worst-case typing run); `lib/decisions.ts` owns the
-  call; `web/e2e/suggest-use.mjs` runs the row and both paths in a browser. An
-  expert stands for the skill packs it wears, dismissed or in effect too. The
-  default content hard-codes no language besides English: the decision model reads
-  any language, the fallback only the words that are there.
+- **After a request is sent, the platform says what fits it; one click asks again with it**
+  (`web/src/views/room/useSentRequestSuggestion.ts`, `UseSuggestionCard.tsx`,
+  `lib/suggestUse.ts`, `lib/sentRequestCard.ts`, `lib/libraryApi.ts`; server:
+  `internal/librarysearch`, `GET /v1/library/candidates`;
+  `docs/prd/2026-10-25-suggest-what-to-use.md`). Never while typing: a person presses
+  Enter the moment they finish, so anything that needs an answer before the send loses to
+  the Enter key (the first version did and never showed). Once the server took a message
+  that went to an agent, the member's own text is asked about once: the server shortlists
+  the member's Library for it (a bounded lexical first stage behind the `Ranker` seam, at
+  most 60 candidates whatever the Library's size, visibility applied inside), the
+  organization's decision model chooses one (sure at 0.6, twice the runner-up), and a card
+  under that message offers it. The click turns it on and sends the same request again
+  through the room's normal send; the first message and its run are never touched. The web
+  holds no catalog and cuts no list. Nothing is enabled without the click; no default-on, no
+  agent prompt text. A semantic ranker (embeddings) is a retrieval component implementing
+  `librarysearch.Ranker`, not platform code. `web/e2e/suggest-use.mjs` types and presses
+  Enter at once, as a person does.
 - **An agent offers a live link; the person's click makes it** (`room_setup` action `share`,
   `wire.ShareProposal` / `NoticeShareProposal`, `web/src/lib/shareProposal.ts`,
   `views/room/ShareProposalCard.tsx`; `docs/prd/2026-10-25-agent-shares-from-

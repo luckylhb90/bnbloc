@@ -34,8 +34,6 @@ import { useContextUsage } from "@/views/composer/useContextUsage";
 import type { FeedItem } from "@/views/room/types";
 import { SendModeToggle } from "@/views/composer/SendModeToggle";
 import { StarterPrompts } from "@/views/composer/StarterPrompts";
-import { UseSuggestionRow } from "@/views/composer/UseSuggestionRow";
-import { useUseSuggestion } from "@/views/composer/useUseSuggestion";
 import { fileSuggestions, type PromptChoice } from "@/lib/promptPacks";
 import type { Referenceable, RoomAgent } from "@/views/composer/types";
 import { agentHandle } from "@/lib/roomAgents";
@@ -179,16 +177,6 @@ export function Composer({
   // Experts (the room's pinned ones and the member's own) answer @name too:
   // picking one sets the expert, which runs on the selected agent.
   const exp = useComposerExpert(roomId, !people);
-  // What fits the request being written, one click to turn on (main composer only).
-  const suggest = useUseSuggestion({
-    roomId,
-    enabled: main && !disabled,
-    draft: text,
-    subject: subject ?? null,
-    picked: exp.expert,
-    choices: exp.choices,
-    pickExpert: exp.pick,
-  });
   const enhance = useEnhancePrompt({
     roomId,
     channelId: people ? null : channelId,
@@ -625,9 +613,6 @@ export function Composer({
               prompts.pick(c);
             }}
           />
-        )}
-        {suggest.suggestion && (
-          <UseSuggestionRow suggestion={suggest.suggestion} busy={suggest.busy} onAccept={suggest.accept} onDismiss={suggest.dismiss} />
         )}
         {!people && exp.expert && (
           <ExpertBanner

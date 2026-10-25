@@ -51,6 +51,7 @@ export function useRoomMessageActions({
   onStaleChannel,
   onQuotaExhausted,
   onPlatformOffline,
+  onSent,
 }: {
   readonly roomId: string;
   readonly channelId: string | null;
@@ -64,6 +65,9 @@ export function useRoomMessageActions({
   // A platform agent's host went offline before the send (409
   // platform_agent_offline): the room re-reads its hosts' state.
   readonly onPlatformOffline?: () => void;
+  // The room took a message the member sent (not a retry, not an edit): what the
+  // composer's suggestion (useSentRequestSuggestion) reads once the agent has started.
+  readonly onSent?: (sent: { readonly text: string; readonly toAgent: boolean; readonly expertId?: string; readonly clientMsgId: string; readonly recipient: RoomAgent | null }) => void;
 }): RoomMessageActions {
   const toast = useToast();
 
@@ -166,9 +170,10 @@ export function useRoomMessageActions({
         return false;
       }
       if (result === "failed") setFeed((f) => markStatus(f, localId, "failed"));
+      else onSent?.({ text, toAgent: !!out.recipient, expertId: out.expert?.id, clientMsgId, recipient: opts.recipient });
       return true;
     },
-    [channelId, deliver, ensureBorrow, setFeed, subject],
+    [channelId, deliver, ensureBorrow, setFeed, subject, onSent],
   );
 
   // retry re-sends a failed message EXACTLY as it was first sent — same text,

@@ -507,6 +507,19 @@ gateway release. A new task runs once on the real model, its audit row read
 Evidence: c96f2b57, 1d225764, b5c0480f, edd948f3; the QA audit log of
 connections-review-connector and connections-draft-connector.
 Seen 1× (2026-10-25).
+### Test a feature the way a person uses it, not the way the test finds it convenient: if the member does not pause, the test must not pause.
+
+A suggestion that appeared while the member was typing passed every browser test and
+never showed to a real user. The tests typed, then waited several seconds and looked;
+people type and press Enter at once, and the answer (a model call, about 2.4 s) arrived after
+the message was gone. The design, not the speed, was wrong: any result that must exist
+before the send loses to the Enter key. The rewrite moved the one useful moment to after the
+send (the request is whole, and someone is waiting on the agent anyway), and the test now
+presses Enter at once.
+
+Evidence: docs/prd/2026-10-25-suggest-what-to-use.md, `web/e2e/suggest-use.mjs`.
+Seen 1× (2026-10-25).
+
 
 ## Done right
 

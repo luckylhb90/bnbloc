@@ -34,7 +34,9 @@ import { usePeopleChat } from "@/views/room/usePeopleChat";
 import { shareComposerRef } from "@/lib/team";
 import { RoomDialogs } from "@/views/room/RoomDialogs";
 import { ActivityRail } from "@/views/room/ActivityRail";
-import { useRoomMessageActions } from "@/views/room/useRoomMessageActions";
+import { useRoomMessageActions, type SendOptions } from "@/views/room/useRoomMessageActions";
+import { useSentRequestSuggestion } from "@/views/room/useSentRequestSuggestion";
+import { UseSuggestionProvider } from "@/views/room/UseSuggestionCard";
 import { useDeadEnd } from "@/views/room/useDeadEnd";
 import { DeadEndProvider } from "@/views/room/DeadEndCard";
 import { QuotaRequestDialog } from "@/views/team/QuotaRequestDialog";
@@ -257,6 +259,10 @@ export function RoomView({
     [],
   );
 
+  // What fits a request the member sent, shown under it while the agent works. It sends
+  // through the room's own send; the send reports accepted messages to it.
+  const sendRef = useRef<(text: string, opts: SendOptions) => Promise<boolean>>(async () => false);
+  const suggestion = useSentRequestSuggestion({ roomId, subject, roomAgents, send: (t, o) => sendRef.current(t, o) });
   const { send, retry, deleteOwnMessage, editOwnMessage } = useRoomMessageActions({
     roomId,
     channelId,
@@ -266,7 +272,9 @@ export function RoomView({
     onStaleChannel,
     onQuotaExhausted,
     onPlatformOffline: data.platform.refresh,
+    onSent: suggestion.observe,
   });
+  sendRef.current = send;
   // Never a dead end: a card under a reply that left the member's own
   // request undone, theirs alone (the find-a-way assist).
   const deadEnd = useDeadEnd({ roomId, channelId, subject, feed, roomAgents, send, agentJobs: activity.agentJobs });
@@ -624,6 +632,7 @@ export function RoomView({
                 <JobProgressProvider value={activity.jobProgress}>
                 <JobLiveProvider value={liveRoom}>
                 <DeadEndProvider value={deadEnd.room}>
+                <UseSuggestionProvider value={suggestion.actions}>
                 <MessageFeed
                   loaded={!!room}
                   roomId={roomId}
@@ -654,6 +663,7 @@ export function RoomView({
                   agentReady={roomAgents.some((a) => !a.platform) || data.platform.choices.some((c) => c.inRoom && c.online)}
                   layout={feedLayout.layout}
                 />
+                </UseSuggestionProvider>
                 </DeadEndProvider>
                 </JobLiveProvider>
                 </JobProgressProvider>

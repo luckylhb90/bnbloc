@@ -22,6 +22,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/coreset"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
+	"github.com/luckylhb90/bnbloc/internal/librarysearch"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/notify"
 	"github.com/luckylhb90/bnbloc/internal/obs"
@@ -53,9 +54,13 @@ type Backends struct {
 
 // Service holds the gateway dependencies.
 type Service struct {
-	Verifier auth.IDPVerifier
-	Signer   *auth.Signer
-	Backends Backends
+	// LibraryRanker finds the components that may fit a request
+	// (librarysearch.Ranker); nil is the lexical default. A deployment with a
+	// Library too large for a lexical first stage plugs a semantic ranker here.
+	LibraryRanker librarysearch.Ranker
+	Verifier      auth.IDPVerifier
+	Signer        *auth.Signer
+	Backends      Backends
 	// Rooms resolves a subject's room memberships at login; production reads
 	// bnbloc-room, tests inject a fake.
 	Rooms func(subject, tenantID string) []string
