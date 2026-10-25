@@ -45,6 +45,7 @@ func TestPlatformVersions(t *testing.T) {
 	gw.Backends.Activity = fakeVersionBackend(t, "bnbloc-activity", [2]string{"act-a", "abc1234def"}).URL
 	gw.Backends.Realtime = fakeVersionBackend(t, "bnbloc-realtime", [2]string{"rt-a", "abc1234def"}).URL
 	gw.Backends.ShareAgent = fakeVersionBackend(t, "bnbloc-shareagent", [2]string{"sa-a", "abc1234def"}).URL
+	gw.Backends.Pulse = fakeVersionBackend(t, "bnbloc-pulse", [2]string{"pu-a", "abc1234def"}).URL
 	gw.Backends.Relay = ""
 	gw.WebBuild = &wire.WebBundleVersion{Version: "0.1.14", Commit: "abc1234"}
 
@@ -57,8 +58,8 @@ func TestPlatformVersions(t *testing.T) {
 	if code != http.StatusOK || json.Unmarshal(body, &got) != nil {
 		t.Fatalf("status %d body %s", code, body)
 	}
-	if !got.Consistent || len(got.Services) != 6 {
-		t.Fatalf("want 6 consistent instances (gateway + 2 room replicas + 3), got %s", body)
+	if !got.Consistent || len(got.Services) != 7 {
+		t.Fatalf("want 7 consistent instances (gateway + 2 room replicas + 4), got %s", body)
 	}
 
 	// A skewed replica and an unreachable service are both reported.

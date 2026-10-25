@@ -61,6 +61,7 @@ func (s *Service) deploymentVersions(ctx context.Context) wire.DeploymentVersion
 		{"bnbloc-realtime", s.Backends.Realtime},
 		{"bnbloc-shareagent", s.Backends.ShareAgent},
 		{"bnbloc-relay", s.Backends.Relay},
+		{"bnbloc-pulse", s.Backends.Pulse},
 	}
 	var mu sync.Mutex
 	var wg sync.WaitGroup
