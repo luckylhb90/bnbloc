@@ -138,10 +138,6 @@ type Service struct {
 	// AssistPages, when set, fetches the pages context (tests); nil is the
 	// public-only client.
 	AssistPages *http.Client
-	// AssistPagesHosts are the only hosts the pages context is fetched
-	// from (BNBLOC_ASSIST_PAGES_HOSTS); empty: any host on a public
-	// address.
-	AssistPagesHosts []string
 	// ComponentInstalls persists per-member opt-in installs of distributed
 	// components (rollout=optin extension records). nil (in-memory dev/tests)
 	// leaves optin components hidden for everyone; auto ones still distribute.

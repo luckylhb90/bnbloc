@@ -119,7 +119,7 @@ func (s *Service) handleComponentAssist(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if slices.Contains(task.Package.Manifest.Context, wire.AssistContextPages) && len(req.URLs) > 0 {
-		actx.Pages = assist.FetchPages(ctx, s.pagesClient(), req.URLs)
+		actx.Pages = assist.FetchPages(ctx, s.pagesClient(ctx), req.URLs)
 	}
 	fields, _, err := s.completeJSONTask(ctx, claims, task, model, assist.Messages(task.Package.Instructions, req.Text, actx), what)
 	if err != nil {

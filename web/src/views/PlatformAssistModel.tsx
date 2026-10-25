@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { assistModelApi, type AssistModelConfig, type AssistModelTest } from "@/lib/assist";
 import { errorText } from "@/lib/errors";
 import { relativeTime } from "@/lib/format";
+import { hostList } from "@/lib/hosts";
 import { Button } from "@/ui/Button";
 import { Badge, Card } from "@/ui/Card";
 import { ErrorBox } from "@/ui/ErrorBox";
@@ -174,9 +175,4 @@ export function PlatformAssistModel() {
       </Card>
     </section>
   );
-}
-
-// hostList reads the organization hosts field: lower-cased, de-duplicated.
-function hostList(s: string): string[] {
-  return [...new Set(s.split(/[,\s]+/).map((h) => h.trim().toLowerCase()).filter(Boolean))];
 }

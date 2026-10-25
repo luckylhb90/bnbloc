@@ -50,6 +50,9 @@ const (
 	// the detail names its type and subject and how many tasks it set,
 	// never its data).
 	AuditKindEvent = "event"
+	// AuditKindNetwork: the platform's server egress saved (the mode and
+	// the hosts).
+	AuditKindNetwork = "network"
 )
 
 // AuditLogEntry is one normalized audit record. ID is unique across sources

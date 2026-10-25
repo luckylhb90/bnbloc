@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"slices"
@@ -17,6 +18,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
 	"github.com/luckylhb90/bnbloc/internal/contentuse"
+	"github.com/luckylhb90/bnbloc/internal/egress"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
@@ -342,13 +344,18 @@ func (s *Service) assistText(w http.ResponseWriter, r *http.Request, claims auth
 }
 
 // assistClient is the model client (the tests' transport when set).
-// pagesClient fetches the pages context (assist.PagesClient over the
-// deployment's AssistPagesHosts).
-func (s *Service) pagesClient() *http.Client {
+// pagesClient fetches the pages context under the platform's server
+// egress; a policy that cannot be read reaches nothing.
+func (s *Service) pagesClient(ctx context.Context) *http.Client {
 	if s.AssistPages != nil {
 		return s.AssistPages
 	}
-	return assist.PagesClient(s.AssistPagesHosts)
+	p, err := egress.Load(ctx, s.PlatformSettings)
+	if err != nil {
+		slog.Warn("bnbloc-gateway: server egress unreadable; pages are not fetched", "error", err)
+		p = wire.ServerEgress{Mode: wire.ServerEgressAllowlist}
+	}
+	return assist.PagesClient(p)
 }
 
 func (s *Service) assistClient() *assist.Client {
@@ -450,7 +457,7 @@ func (s *Service) assistContext(ctx context.Context, claims auth.Claims, declare
 	wants := func(c string) bool { return slices.Contains(declared, c) }
 	out.Revise = req.Revise
 	if wants(wire.AssistContextPages) && len(req.URLs) > 0 {
-		out.Pages = assist.FetchPages(ctx, s.pagesClient(), req.URLs)
+		out.Pages = assist.FetchPages(ctx, s.pagesClient(ctx), req.URLs)
 	}
 	if wants(wire.AssistContextClock) {
 		out.Clock = assist.ClockIn(s.nowTime(), req.Timezone)

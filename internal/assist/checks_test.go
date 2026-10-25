@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/luckylhb90/bnbloc/internal/egress"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
@@ -44,16 +45,16 @@ func TestFetchPages(t *testing.T) {
 	if len(ps) != 3 || ps[0].Text != "Items API\nGET /v1/items & more" || ps[1].Error != "answered 404" || ps[2].Error == "" {
 		t.Fatalf("pages = %+v", ps)
 	}
-	if ps := FetchPages(context.Background(), PagesClient(nil), []string{srv.URL + "/doc"}); ps[0].Error != "not a public address" {
+	if ps := FetchPages(context.Background(), PagesClient(egress.Default()), []string{srv.URL + "/doc"}); ps[0].Error != "not a public address" {
 		t.Fatalf("loopback through the public client = %+v", ps)
 	}
 	// A deployment's list: an unlisted name is never sent; a listed one is
 	// dialled on its address (here loopback, whose certificate this client
 	// does not trust).
-	if ps := FetchPages(context.Background(), PagesClient([]string{"docs.example.com"}), []string{srv.URL + "/doc"}); ps[0].Error != errNotListed.Error() {
+	if ps := FetchPages(context.Background(), PagesClient(wire.ServerEgress{Mode: wire.ServerEgressAllowlist, Hosts: []string{"docs.example.com"}}), []string{srv.URL + "/doc"}); ps[0].Error != egress.ErrNotListed.Error() {
 		t.Fatalf("an unlisted host = %+v", ps)
 	}
-	if ps := FetchPages(context.Background(), PagesClient([]string{"127.0.0.1"}), []string{srv.URL + "/doc"}); ps[0].Error != "could not be fetched" {
+	if ps := FetchPages(context.Background(), PagesClient(wire.ServerEgress{Mode: wire.ServerEgressAllowlist, Hosts: []string{"127.0.0.1"}}), []string{srv.URL + "/doc"}); ps[0].Error != "could not be fetched" {
 		t.Fatalf("a listed host = %+v", ps)
 	}
 }

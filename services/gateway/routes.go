@@ -352,6 +352,9 @@ func (s *Service) routes() []route {
 		gated("GET /v1/platform/assist-model", platform, s.handleAssistModel),
 		gated("PUT /v1/platform/assist-model", platform, s.handlePutAssistModel),
 		gated("POST /v1/platform/assist-model/test", platform, s.handleTestAssistModel),
+		// Where the platform's own server-side requests may go (server_egress.go).
+		gated("GET /v1/platform/server-egress", platform, s.handleServerEgress),
+		gated("PUT /v1/platform/server-egress", platform, s.handlePutServerEgress),
 		// Media providers (media.go): speech-to-text, image and video
 		// generation.
 		gated("GET /v1/platform/media/{capability}", platform, s.handleMediaProvider),

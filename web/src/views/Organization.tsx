@@ -17,6 +17,7 @@ import { PlatformComponents } from "@/views/PlatformComponents";
 import { PlatformReleases } from "@/views/PlatformReleases";
 import { PlatformUpdateConfig } from "@/views/PlatformUpdateConfig";
 import { PlatformAssistModel } from "@/views/PlatformAssistModel";
+import { PlatformServerEgress } from "@/views/PlatformServerEgress";
 import { PlatformMediaProviders } from "@/views/PlatformMediaProviders";
 import { invalidateAssistStatus } from "@/lib/assist";
 import { ErrorBox } from "@/ui/ErrorBox";
@@ -67,6 +68,7 @@ type Tab =
   | "platformContent"
   | "updates"
   | "assist"
+  | "network"
   | "releases"
   | "pulse";
 
@@ -90,6 +92,7 @@ const TABS: { id: Tab; label: string; superOnly?: boolean; perm?: OrgPermission 
   { id: "platformContent", label: "Platform content", superOnly: true },
   { id: "updates", label: "Updates", superOnly: true },
   { id: "assist", label: "AI assist", superOnly: true },
+  { id: "network", label: "Network", superOnly: true },
   { id: "releases", label: "Releases", superOnly: true },
 ];
 
@@ -195,6 +198,7 @@ export function Organization() {
           <PlatformMediaProviders />
         </>
       )}
+      {tab === "network" && isSuper && <PlatformServerEgress />}
       {tab === "components" && isSuper && <PlatformComponents />}
       {tab === "platformContent" && isSuper && <PlatformContentTab />}
       {tab === "releases" && isSuper && <PlatformReleases />}

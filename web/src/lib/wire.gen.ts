@@ -1750,6 +1750,9 @@ export const AuditKindSource = "source";
 // the detail names its type and subject and how many tasks it set,
 // never its data).
 export const AuditKindEvent = "event";
+// AuditKindNetwork: the platform's server egress saved (the mode and
+// the hosts).
+export const AuditKindNetwork = "network";
 
 // AuditLogEntry is one normalized audit record. ID is unique across sources
 // ("<source>:<row id>"). Name is the record's subject (component name, member
@@ -5906,6 +5909,28 @@ export interface SearchUpdateStats {
   failed: number;
   dropped: number;
 }
+
+// ---- wire/server_egress.go ----
+
+// ServerEgress is GET/PUT /v1/platform/server-egress: where the platform's
+// own server-side requests may go (today the pages an assist reads,
+// docs/architecture/server-egress.md). Mode public (the default): any
+// host on a public address, and the listed hosts on any address (an
+// external name the deployment's egress proxy answers on a private one);
+// allowlist: the listed hosts only, and no other name is looked up.
+export interface ServerEgress {
+  mode: string;
+  hosts: string[];
+  updatedAtMs?: number;
+  updatedBy?: string;
+}
+
+// Server egress modes.
+export const ServerEgressPublic = "public";
+export const ServerEgressAllowlist = "allowlist";
+
+// MaxServerEgressHosts bounds ServerEgress.Hosts.
+export const MaxServerEgressHosts = 200;
 
 // ---- wire/service_components.go ----
 

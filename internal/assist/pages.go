@@ -6,27 +6,23 @@ import (
 	"fmt"
 	"html"
 	"io"
-	"net"
 	"net/http"
-	"net/netip"
 	"net/url"
 	"regexp"
 	"strings"
-	"syscall"
 	"time"
 	"unicode/utf8"
 
-	"github.com/luckylhb90/bnbloc/internal/extgov"
+	"github.com/luckylhb90/bnbloc/internal/egress"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
-// The pages context (wire.AssistContextPages): public web pages a request
-// names, fetched here and given to the model as text. Only https, no
-// redirect off the page's host, bounded in time and size. Where pages are
-// fetched from is the deployment's (PagesClient): by default any host on a
-// public address (resolved and dialled by address: no private, loopback,
-// link-local or metadata one); a deployment whose egress is a DNS
-// allowlist names its hosts instead, so an unlisted name is never looked
-// up. A page that cannot be read is a line saying so, never a failed run.
+// The pages context (wire.AssistContextPages): web pages a request names,
+// fetched here and given to the model as text. Only https, no redirect off
+// the page's host, bounded in time and size, and only where the
+// platform's server egress allows (internal/egress: by default any host on
+// a public address, never an internal one). A page that cannot be read is
+// a line saying so, never a failed run.
 
 // Page is one fetched page: its address and its text (markup removed), or
 // why it could not be read.
@@ -43,75 +39,12 @@ const (
 	maxPagesText = 20000
 )
 
-var (
-	errNotPublic = errors.New("not a public address")
-	errNotListed = errors.New("not a host this deployment reads pages from")
-)
-
-// publicControl refuses a connection to anything but a public address.
-func publicControl(_, address string, _ syscall.RawConn) error {
-	host, _, err := net.SplitHostPort(address)
-	if err != nil {
-		return err
-	}
-	a, err := netip.ParseAddr(host)
-	if err != nil {
-		return errNotPublic
-	}
-	a = a.Unmap()
-	if extgov.CheckAddr(a) != nil || !a.IsGlobalUnicast() || a.IsPrivate() || a.IsLoopback() || netip.MustParsePrefix("100.64.0.0/10").Contains(a) {
-		return errNotPublic
-	}
-	return nil
-}
-
-// listedControl refuses only what no fetch may reach (extgov.CheckAddr):
-// a listed host may sit behind the deployment's private egress proxy.
-func listedControl(_, address string, _ syscall.RawConn) error {
-	host, _, err := net.SplitHostPort(address)
-	if err != nil {
-		return err
-	}
-	a, err := netip.ParseAddr(host)
-	if err != nil || extgov.CheckAddr(a) != nil {
-		return errNotPublic
-	}
-	return nil
-}
-
-// listedTransport sends only to the listed hosts, before any lookup.
-type listedTransport struct {
-	hosts map[string]bool
-	base  http.RoundTripper
-}
-
-func (t listedTransport) RoundTrip(r *http.Request) (*http.Response, error) {
-	if !t.hosts[strings.ToLower(r.URL.Hostname())] {
-		return nil, errNotListed
-	}
-	return t.base.RoundTrip(r)
-}
-
-// PagesClient is the fetcher's client, redirects kept on the page's host:
-// with no hosts, any public address; with hosts (the deployment's list),
-// only those names, on any address extgov allows.
-func PagesClient(hosts []string) *http.Client {
-	control := publicControl
-	if len(hosts) > 0 {
-		control = listedControl
-	}
-	d := &net.Dialer{Timeout: pageTimeout, Control: control}
-	var rt http.RoundTripper = &http.Transport{DialContext: d.DialContext, TLSHandshakeTimeout: pageTimeout, ResponseHeaderTimeout: pageTimeout}
-	if len(hosts) > 0 {
-		listed := map[string]bool{}
-		for _, h := range hosts {
-			listed[strings.ToLower(strings.TrimSpace(h))] = true
-		}
-		rt = listedTransport{hosts: listed, base: rt}
-	}
+// PagesClient is the fetcher's client under the server egress policy p,
+// redirects kept on the page's host.
+func PagesClient(p wire.ServerEgress) *http.Client {
 	return &http.Client{
 		Timeout:   pageTimeout,
-		Transport: rt,
+		Transport: egress.Transport(p, pageTimeout),
 		CheckRedirect: func(r *http.Request, via []*http.Request) error {
 			if len(via) >= 3 || r.URL.Scheme != "https" || !strings.EqualFold(r.URL.Hostname(), via[0].URL.Hostname()) {
 				return errors.New("a redirect off the page")
@@ -156,11 +89,10 @@ func fetchText(ctx context.Context, c *http.Client, u string) (string, error) {
 	req.Header.Set("Accept", "text/html,text/plain,text/markdown,application/json;q=0.9,*/*;q=0.5")
 	resp, err := c.Do(req)
 	if err != nil {
-		switch {
-		case errors.Is(err, errNotPublic):
-			return "", errNotPublic
-		case errors.Is(err, errNotListed):
-			return "", errNotListed
+		for _, known := range []error{egress.ErrNotPublic, egress.ErrNotListed} {
+			if errors.Is(err, known) {
+				return "", known
+			}
 		}
 		return "", errors.New("could not be fetched")
 	}
