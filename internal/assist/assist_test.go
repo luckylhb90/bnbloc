@@ -304,6 +304,11 @@ func TestFieldsHoldItems(t *testing.T) {
 	if st := got["steps"].([]map[string]string); len(st) != 2 || st[0]["text"] != "one" || st[1]["text"] != "two" {
 		t.Fatalf("steps = %v", st)
 	}
+	// An object past the text bound is kept whole, never cut into broken JSON.
+	long := `{"prompts":[{"title":"Big","prompt":{"guide":"` + strings.Repeat("x", 3*maxFieldRunes) + `"}}]}`
+	if got, _ := Fields(long, fields); len(got["prompts"].([]map[string]string)[0]["prompt"]) != 3*maxFieldRunes+len(`{"guide":""}`) {
+		t.Fatal("a long object was cut")
+	}
 	// A reply whose string holds a fenced block (a guide's examples) is one
 	// object, bare or fenced itself.
 	guide := `{"prompts":[{"title":"Guide","prompt":"Read it:\n` + "```" + `sh\ncurl -s https://x\n` + "```" + `\nDone."}]}`

@@ -12,6 +12,9 @@ import (
 const (
 	maxFieldRunes = 2000
 	maxListItems  = 30
+	// maxStructured bounds a text field given an object or a list: kept
+	// whole as its JSON (cutting it would break it), or dropped.
+	maxStructured = 32 << 10
 )
 
 // Fields holds a JSON task's reply to its declared fields: the object (a
@@ -45,8 +48,8 @@ func Fields(reply string, fields []wire.AssistField) (map[string]any, error) {
 			}
 			continue
 		}
-		if s := scalar(v); s != "" {
-			out[f.Name] = cut(s, maxFieldRunes)
+		if s := text(v); s != "" {
+			out[f.Name] = s
 		}
 	}
 	if len(out) == 0 {
@@ -90,6 +93,21 @@ func object(reply string) (map[string]any, bool) {
 		return nil, false
 	}
 	return obj, true
+}
+
+// text is a text field's value in its bound: a string cut at
+// maxFieldRunes, an object or a list as its whole JSON (structured data, a
+// patch or a draft, is never cut: past maxStructured it is dropped).
+func text(v any) string {
+	s := scalar(v)
+	switch v.(type) {
+	case map[string]any, []any:
+		if len(s) > maxStructured {
+			return ""
+		}
+		return s
+	}
+	return cut(s, maxFieldRunes)
 }
 
 // scalar is a text field's value: a string, a number or a boolean as
@@ -147,8 +165,8 @@ func items(v any, fields []wire.AssistField) []map[string]string {
 		switch t := e.(type) {
 		case map[string]any:
 			for _, f := range fields {
-				if s := scalar(t[f.Name]); s != "" {
-					item[f.Name] = cut(s, maxFieldRunes)
+				if s := text(t[f.Name]); s != "" {
+					item[f.Name] = s
 				}
 			}
 		case string:
