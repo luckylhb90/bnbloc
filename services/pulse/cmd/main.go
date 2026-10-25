@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -31,47 +32,52 @@ func main() {
 	if backends.PulseMinutes == nil {
 		log.Fatalf("bnbloc-pulse: needs BNBLOC_MYSQL_DSN: the board's rollups are stored in MySQL")
 	}
-	url := strings.TrimSpace(config.FromEnvRaw(pulse.EnvURL))
-	if url == "" {
-		log.Fatalf("bnbloc-pulse: %s is required (the stream and the live state live in Redis)", pulse.EnvURL)
-	}
-	opts, err := redis.ParseURL(url)
-	if err != nil {
-		log.Fatalf("bnbloc-pulse: %s: %v", pulse.EnvURL, err)
-	}
-	rdb := redis.NewClient(opts)
-
 	// SIGTERM ends the consume loop, which flushes and acks once more before exit.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	consumer := pulsesvc.NewConsumer(rdb, backends.PulseMinutes, pulsesvc.ConsumerConfig{
-		Name:       config.FromEnvRaw("BNBLOC_PULSE_CONSUMER"),
-		FlushEvery: config.Duration("BNBLOC_PULSE_FLUSH", 15*time.Second),
-		Retention:  config.Duration("BNBLOC_PULSE_RETENTION", 90*24*time.Hour),
-	})
-	go func() {
-		if err := consumer.Run(ctx); err != nil {
-			log.Fatalf("bnbloc-pulse: consumer: %v", err)
-		}
-	}()
-
 	metrics := obs.NewMetrics("bnbloc-pulse")
-	go pulsesvc.RunMetrics(ctx, metrics, consumer, 15*time.Second)
+	health := backends.HealthCheck()
+	var handler http.Handler = pulsesvc.NotConfigured()
 
-	board := &pulsesvc.Server{
-		State: pulsesvc.NewLive(rdb),
-		Rows:  backends.PulseMinutes,
-		Now:   time.Now,
-	}
-	health := func() error {
-		if err := rdb.Ping(ctx).Err(); err != nil {
-			return err
+	// Without a Redis the board has nothing to read. The process stays up (an
+	// all-in-one container supervises it with the other services) and answers
+	// the board routes 503. A malformed URL is still fatal: that is a mistake to
+	// fix, not an absence to tolerate.
+	if url := strings.TrimSpace(config.FromEnvRaw(pulse.EnvURL)); url == "" {
+		log.Printf("bnbloc-pulse: WARNING %s is unset: the organization board is not configured; consuming nothing, answering 503", pulse.EnvURL)
+	} else {
+		opts, err := redis.ParseURL(url)
+		if err != nil {
+			log.Fatalf("bnbloc-pulse: %s: %v", pulse.EnvURL, err)
 		}
-		return backends.HealthCheck()()
+		rdb := redis.NewClient(opts)
+		consumer := pulsesvc.NewConsumer(rdb, backends.PulseMinutes, pulsesvc.ConsumerConfig{
+			Name:       config.FromEnvRaw("BNBLOC_PULSE_CONSUMER"),
+			FlushEvery: config.Duration("BNBLOC_PULSE_FLUSH", 15*time.Second),
+			Retention:  config.Duration("BNBLOC_PULSE_RETENTION", 90*24*time.Hour),
+		})
+		go func() {
+			if err := consumer.Run(ctx); err != nil {
+				log.Fatalf("bnbloc-pulse: consumer: %v", err)
+			}
+		}()
+		go pulsesvc.RunMetrics(ctx, metrics, consumer, 15*time.Second)
+
+		handler = (&pulsesvc.Server{
+			State: pulsesvc.NewLive(rdb),
+			Rows:  backends.PulseMinutes,
+			Now:   time.Now,
+		}).Handler()
+		health = func() error {
+			if err := rdb.Ping(ctx).Err(); err != nil {
+				return err
+			}
+			return backends.HealthCheck()()
+		}
 	}
-	handler := svcauth.Middleware(svcauth.KeyFromEnv(), board.Handler())
-	if err := obs.ServeWithHealth("bnbloc-pulse", cfg.ListenAddr, handler, health, obs.WithMetrics(metrics)); err != nil {
+
+	if err := obs.ServeWithHealth("bnbloc-pulse", cfg.ListenAddr, svcauth.Middleware(svcauth.KeyFromEnv(), handler), health, obs.WithMetrics(metrics)); err != nil {
 		log.Fatalf("bnbloc-pulse: %v", err)
 	}
 }

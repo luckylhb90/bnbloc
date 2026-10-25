@@ -98,18 +98,22 @@ start() {
 
 # Room first — the others perform membership checks against it. The gateway is
 # last so it only fronts traffic once its upstreams are live.
-# The organization board's backend (pulse) runs only when its Redis is set: the
-# same variable the emitting services read. Without it the board is off and the
-# gateway's board routes answer "not deployed", as on any other deployment.
-supervised="room activity realtime shareagent relay gateway"
-if [ -n "${BNBLOC_PULSE_REDIS_URL:-}" ]; then
-  start pulse
-  supervised="$supervised pulse"
-  export BNBLOC_PULSE_BASE_URL="http://127.0.0.1:8090"
-else
-  unset BNBLOC_PULSE_BASE_URL
-fi
+start room
+start activity
+start realtime
+start shareagent
+start relay
+# The organization board's backend (pulse) always runs. Its Redis may come from
+# the environment or from the AWS Secrets Manager secret, which only the Go
+# process reads, so this script cannot tell whether the board is configured.
+# Without a Redis pulse stays up and answers the board routes 503 (it logs a
+# warning at start), so the supervised set never changes with configuration.
+export BNBLOC_PULSE_BASE_URL="http://127.0.0.1:8090"
+start pulse
 start gateway
+
+# Every started service is supervised; the list is fixed (pulse is always in it).
+supervised="room activity realtime shareagent relay pulse gateway"
 
 echo "aio: all services started; supervising"
 

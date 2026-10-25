@@ -181,7 +181,7 @@ Design: `docs/prd/2026-10-24-executive-pulse-backend.md`.
 | --- | --- | --- |
 | `BNBLOC_MYSQL_DSN` | yes | The rollups (`pulse_minutes`). Without it the service refuses to start. |
 | `BNBLOC_INTERNAL_KEY` | yes | Same value as gateway (the gateway calls it). |
-| `BNBLOC_PULSE_REDIS_URL` | yes | The stream and the live state. Unset = the service refuses to start. |
+| `BNBLOC_PULSE_REDIS_URL` | for the board | The stream and the live state. Unset = the process stays up with a startup WARNING, consumes nothing, and answers the board routes 503. A malformed URL refuses to start. |
 | `BNBLOC_PULSE_LISTEN_ADDR` | no | Default `:8090`. Internal only, like every service's main listener. |
 | `BNBLOC_PULSE_CONSUMER` | no | This consumer's name in the stream group (default `pulse-1`). Keep it stable across restarts. |
 | `BNBLOC_PULSE_FLUSH` | no | Rollup write and stream ack interval (default `15s`). |
@@ -194,8 +194,8 @@ realtime and activity read the same values. Without `BNBLOC_AWS_SECRET_ID` set o
 process, pulse does not read the secret at all and fails with "BNBLOC_PULSE_REDIS_URL is required".
 
 The production compose overlay starts it only with the `pulse` profile (see
-`deploy/compose.prod.yml`); the all-in-one image runs it only when
-`BNBLOC_PULSE_REDIS_URL` is set.
+`deploy/compose.prod.yml`). The all-in-one image always runs it; without a Redis
+(from the environment or the Secrets Manager secret) it answers the board 503.
 
 ## relay (`:8085`) — scales out by session-key ownership
 
