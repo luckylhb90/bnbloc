@@ -1462,7 +1462,8 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `sandbox_required`, `borrow_not_authorized`) goes through `b.refuse`,
   and a drive error through `b.fail`, classified by the stage it reached
   (`atStage`, `driveFailureReason`): a started or ambiguous turn,
-  `reply_timeout` and `agent_error` are final, or the prompt runs twice and
+  `no_reply` (the turn ended with no visible reply), `reply_timeout` (still
+  running at its deadline) and `agent_error` are final, or the prompt runs twice and
   a borrow is reserved twice. A turn its core reports `failed` fails the job
   `agent_error` even after it posted replies (`agentFailed`): what completed
   with the failure is never posted as a reply, and the core's message rides

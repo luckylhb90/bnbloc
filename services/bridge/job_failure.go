@@ -328,14 +328,17 @@ var errNoReply = errors.New("agent turn completed without a visible reply")
 // and an unreachable core core_unavailable; a start request that provably
 // never took effect (core.Retryable for a request that is not idempotent)
 // is runner_start_failed. All three retry. A turn that ran without a reply
-// is reply_timeout, and one its agent or core reported failed agent_error
-// (both final). Anything else — a started turn, an ambiguous start, a
+// is no_reply (one still running at its deadline, reply_timeout), and one its
+// agent or core reported failed agent_error (all final). Anything else — a started turn, an ambiguous start, a
 // deterministic failure, an error of unknown stage — is runner_failed,
 // which never retries.
 func driveFailureReason(err error) store.AgentJobFailureReason {
 	var deadline turnDeadlineError
-	if errors.Is(err, errNoReply) || errors.As(err, &deadline) {
+	if errors.As(err, &deadline) {
 		return store.FailureReplyTimeout
+	}
+	if errors.Is(err, errNoReply) {
+		return store.FailureNoReply
 	}
 	var reset contextResetError
 	if errors.As(err, &reset) {

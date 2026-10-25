@@ -141,10 +141,14 @@ const (
 	// not up yet (the desktop is still starting its machine); nothing ran,
 	// so it retries.
 	FailureSandboxStarting AgentJobFailureReason = "sandbox_starting"
-	// FailureReplyTimeout: the turn ran and produced no visible reply;
-	// final for the same reason.
+	// FailureReplyTimeout: the turn was still running at its deadline and was
+	// stopped; final for the same reason.
 	FailureReplyTimeout AgentJobFailureReason = "reply_timeout"
-	FailureCancelled    AgentJobFailureReason = "cancelled"
+	// FailureNoReply: the turn ran to its end (it may have acted) and left no
+	// visible reply; final for the same reason. Not a timeout: it ended by
+	// itself, often within seconds.
+	FailureNoReply   AgentJobFailureReason = "no_reply"
+	FailureCancelled AgentJobFailureReason = "cancelled"
 	// FailureBudgetExhausted: the agent owner's (or the tenant's) monthly
 	// usage budget is reached with hard stop on (R12); final, not retried.
 	FailureBudgetExhausted AgentJobFailureReason = "budget_exhausted"
@@ -245,7 +249,9 @@ func (r AgentJobFailureReason) Text(agent string) string {
 	case FailureSandboxStarting:
 		return the + " did not run: its agent sandbox was still starting."
 	case FailureReplyTimeout:
-		return the + " stopped responding."
+		return the + " ran out of time and was stopped."
+	case FailureNoReply:
+		return the + " finished without a visible reply. What it did stays; send the request again, or ask what it did."
 	case FailureAgentError:
 		return the + " reported an error and stopped."
 	case FailureContextReset:

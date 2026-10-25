@@ -31,7 +31,7 @@ func TestFailureText(t *testing.T) {
 	if got := FailureRunnerFailed.Text(""); got != "The agent could not complete this request." {
 		t.Errorf("generic = %q", got)
 	}
-	for _, r := range []AgentJobFailureReason{FailureBudgetExhausted, FailureSandboxRequired, FailureBorrowNotAuthorized, FailureReplyTimeout} {
+	for _, r := range []AgentJobFailureReason{FailureBudgetExhausted, FailureSandboxRequired, FailureBorrowNotAuthorized, FailureReplyTimeout, FailureNoReply} {
 		if strings.Contains(r.Text("codex"), string(r)) {
 			t.Errorf("%s text shows the raw reason: %q", r, r.Text("codex"))
 		}

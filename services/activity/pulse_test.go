@@ -67,7 +67,7 @@ func TestPulseAcceptsEveryStoreFailureReason(t *testing.T) {
 		store.FailureNoBridgeOnline, store.FailureAgentNotAdvertised, store.FailureBorrowNotAuthorized,
 		store.FailureCoreUnavailable, store.FailureRunnerStartFailed, store.FailureRunnerFailed,
 		store.FailureAgentError, store.FailureContextOverflow, store.FailureContextReset,
-		store.FailureLeaseExpired, store.FailureSandboxStarting, store.FailureReplyTimeout,
+		store.FailureLeaseExpired, store.FailureSandboxStarting, store.FailureReplyTimeout, store.FailureNoReply,
 		store.FailureCancelled, store.FailureBudgetExhausted, store.FailureBudgetUnavailable,
 		store.FailureSandboxRequired, store.FailureContentUnavailable, store.FailureTeamUnsupported,
 		store.FailureInvalidJob,

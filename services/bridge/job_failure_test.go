@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	corepkg "github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -30,6 +31,9 @@ func TestDriveRefusalsAreFinal(t *testing.T) {
 		if k.notice == "" {
 			t.Errorf("refusal %s posts no notice: the member would not see why nothing ran", k.reason)
 		}
+	}
+	if store.FailureNoReply.Retryable() {
+		t.Error("no_reply is retryable: the turn ran")
 	}
 	if store.FailureReplyTimeout.Retryable() {
 		t.Error("reply_timeout is retryable: the turn ran")
@@ -57,6 +61,8 @@ func TestDriveRefusalsAreFinal(t *testing.T) {
 		{"run: started turn, core gone", atStage(stageRun, dial), store.FailureRunnerFailed},
 		{"run: killed", atStage(stageRun, errors.New("runner killed by signal 9")), store.FailureRunnerFailed},
 		{"unknown stage", dial, store.FailureRunnerFailed},
+		{"run: ended with no visible reply", errNoReply, store.FailureNoReply},
+		{"run: still running at its deadline", turnDeadlineError{after: time.Minute}, store.FailureReplyTimeout},
 	}
 	for _, c := range cases {
 		got := driveFailureReason(c.err)

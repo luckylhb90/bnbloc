@@ -26,7 +26,7 @@ var (
 	// checks every store reason is accepted here); "other" takes a future reason.
 	failureValues = set("no_bridge_online", "agent_not_advertised", "borrow_not_authorized",
 		"core_unavailable", "runner_start_failed", "runner_failed", "agent_error", "context_overflow",
-		"context_reset", "lease_expired", "sandbox_starting", "reply_timeout", "cancelled",
+		"context_reset", "lease_expired", "sandbox_starting", "reply_timeout", "no_reply", "cancelled",
 		"budget_exhausted", "budget_unavailable", "sandbox_required", "content_unavailable",
 		"team_unsupported", "invalid_job", "other")
 	sweepValues   = set("no_bridge_online", "lease_expired", "other") // the sweep's own reasons
