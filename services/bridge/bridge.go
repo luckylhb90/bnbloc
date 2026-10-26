@@ -280,6 +280,9 @@ type Bridge struct {
 	// next lease renewal to discover the job is no longer ours.
 	runMu   sync.Mutex
 	running map[string]*runningJob
+	// syncNoticed is, per room, the last reason live sync told the room it mirrors nothing
+	// (b.mu): the same reason is not posted again (noticeSyncPlan).
+	syncNoticed map[string]string
 
 	// sandbox is the agent sandbox this bridge drives sandboxed turns in
 	// (sandbox.go); never nil (an unconfigured one is simply never ready).
@@ -1197,33 +1200,100 @@ func (b *Bridge) syncPlan(ctx context.Context, room string) (mode, dir string, e
 	if b.cfg.SyncDirFor != nil {
 		return rm.SyncMode, b.cfg.SyncDirFor(room), nil
 	}
-	// Default: the workspace cwd of the room's most recently driven session,
-	// fetched from that session's core.
-	rs := b.latestRoomSession(room)
+	// Default: the workspace directory of the session the owner's own agent ran last on
+	// this machine, asked of that session's core.
+	if rm.SyncMode != "mutagen" {
+		return rm.SyncMode, "", nil
+	}
+	rs, reason := pickSyncSession(b.syncCandidates(room), func(c *roomSession) string {
+		return b.workspaceDir(ctx, c.core, c.workspaceID, c.sessionID)
+	})
 	if rs == nil {
+		b.noticeSyncPlan(ctx, room, reason)
 		return rm.SyncMode, "", nil
 	}
 	return rm.SyncMode, b.workspaceDir(ctx, rs.core, rs.workspaceID, rs.sessionID), nil
 }
 
-// latestRoomSession returns the room's most recently driven bound session.
-// Sessions are keyed per (room, core, provider), so a room can have several;
-// live sync mirrors the one the room used last.
-func (b *Bridge) latestRoomSession(room string) *roomSession {
+// noticeSyncPlan tells the room why live sync mirrors nothing, once per reason (the plan is
+// recomputed at every reconnect, which must not repeat it).
+func (b *Bridge) noticeSyncPlan(ctx context.Context, room, reason string) {
+	b.mu.Lock()
+	if b.syncNoticed == nil {
+		b.syncNoticed = map[string]string{}
+	}
+	if b.syncNoticed[room] == reason {
+		b.mu.Unlock()
+		return
+	}
+	b.syncNoticed[room] = reason
+	b.mu.Unlock()
+	b.postNotice(ctx, jobRef{RoomID: room}, wire.JobNotice{
+		Kind:        "sync-plan",
+		Text:        "Live sync is on for this room but nothing is mirrored: " + reason + ". Pick the agent whose directory should be shared (send it a message), or ask the room's owner to choose the sync mode again.",
+		OwnerUserID: b.cfg.OwnerSubject,
+	})
+}
+
+// syncCandidates are the room's sessions whose workspace live sync may mirror: this
+// owner's own, driven on this machine's host. A session another member borrowed (its seat
+// has a requester), a sandboxed one (its workspace is a mount of the sandbox) and another
+// owner's (a bridge serving every owner) are not: mirroring one of those would hand a
+// stranger's working directory, or the sandbox's, to the room's other members.
+// decision: live-sync PRD §6.1 (only the owner's own host sessions are candidates).
+func (b *Bridge) syncCandidates(room string) []*roomSession {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	var best *roomSession
-	var bestAt int64
+	var out []*roomSession
 	for key, rs := range b.sessions {
-		if key.room != room {
+		if key.room != room || key.sandboxed || key.requester != "" {
 			continue
 		}
-		at := rs.lastTurnStart()
-		if best == nil || at > bestAt || (at == bestAt && rs.sessionID < best.sessionID) {
-			best, bestAt = rs, at
+		if key.owner != "" && key.owner != b.cfg.OwnerSubject {
+			continue
+		}
+		out = append(out, rs)
+	}
+	return out
+}
+
+// pickSyncSession says which of the candidates live sync mirrors, or why none: the one that
+// ran a turn last; sessions with no turn yet (a restored one) have no time to compare, so
+// they are a tie. A tie is decided only when every tied session has the same directory
+// (dirOf names it); different directories are not a choice the bridge may make, so it picks
+// nothing and says why (reason), and the room is told (noticeSyncPlan).
+// decision: live-sync PRD §6.2 (a tie between different directories mirrors none).
+func pickSyncSession(candidates []*roomSession, dirOf func(*roomSession) string) (rs *roomSession, reason string) {
+	if len(candidates) == 0 {
+		return nil, "no agent of yours has worked in this room on this computer yet"
+	}
+	var best int64
+	for _, c := range candidates {
+		best = max(best, c.lastTurnStart())
+	}
+	var tied []*roomSession
+	for _, c := range candidates {
+		if c.lastTurnStart() == best {
+			tied = append(tied, c)
 		}
 	}
-	return best
+	dirs := map[string]bool{}
+	for _, c := range tied {
+		if d := dirOf(c); d != "" {
+			dirs[d] = true
+		}
+	}
+	switch len(dirs) {
+	case 0:
+		return nil, "the agent's core does not say which directory it works in"
+	case 1:
+		for _, c := range tied {
+			if dirOf(c) != "" {
+				return c, ""
+			}
+		}
+	}
+	return nil, fmt.Sprintf("%d of your agents worked here most recently, in different directories", len(dirs))
 }
 
 // runSync dials the relay stream and runs one engine session until it ends.

@@ -199,3 +199,37 @@ run the engine **over a real bnbloc-relay raw stream** (`TestSyncOverRealRelay`,
 `TestSyncMergeOverRealRelay`): initial reconcile, incremental propagation, and a
 concurrent three-way merge converging on both sides. `net.Pipe` was replaced by a
 buffered loopback TCP pair in the harness to match the relay's buffered stream.
+
+## 6. Decisions (2026-10-26)
+
+Which directory live sync mirrors when the deployment names none (`SyncDirFor` unset) was
+"the room's most recently driven session", chosen by the code without anyone deciding it.
+The owner asked for it to be improved; the choices below are what was built, each with the
+key it uses and what happens when there is none. The "who points at the directory" choice
+(a setting the room's owner or the member makes) is NOT built: it adds a setting and a
+screen, and is left for the owner to decide (alternative C).
+
+1. **Candidates are the owner's own sessions, driven on this machine's host.** Not a
+   session another member borrowed (its seat has a requester): that workspace is on this
+   machine but is the borrower's work; not a sandboxed session: its workspace is a mount of
+   the sandbox; not another owner's (a bridge serving every owner). *Key:* the session key
+   (room, core, provider, sandboxed, owner, requester). *Two candidates:* a member's own
+   `codex` session and a borrower's `codex` session of the same room are two keys; only the
+   first is a candidate. (`syncCandidates`.)
+2. **Of the candidates, the one that ran a turn last; a tie is decided only when every tied
+   session has the same directory.** A restored session has no turn time, so after a
+   restart sessions tie; the session id is no reason to mirror one directory rather than
+   another. A tie between different directories mirrors none. (`pickSyncSession`.)
+3. **When nothing is mirrored the room is told why, once per reason** (a notice in the
+   default channel, `sync-plan`): no agent of the owner's has worked here on this machine; the
+   core does not say the directory; several agents worked here in different directories.
+   Reconnects recompute the plan and must not repeat it. Before this a room in Live sync
+   mode silently synced nothing.
+4. **The mirrored directory is still re-chosen at each reconnect** (the last turn may be a
+   different agent's by then). Fixing it for the room until someone changes it is the
+   alternative; it needs the setting of C, so it waits for the owner's answer.
+
+Alternatives for the owner: **A** (built) pick by the rules above and say when it cannot;
+**B** never pick: mirror nothing unless `SyncDirFor` is configured; **C** a setting on the
+room (or per member) naming the agent whose directory is shared, with A as the proposal
+shown when it is unset.
