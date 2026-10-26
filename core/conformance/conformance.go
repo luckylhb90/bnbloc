@@ -162,6 +162,17 @@ func checkOptionalCapabilities(ctx context.Context, provider core.Provider, cfg 
 			return fmt.Errorf("Interrupt advertised but failed: %w", err)
 		}
 	}
+	if steerer, ok := core.As[core.Steerer](ctx, provider, cfg.Endpoint, core.CapabilitySteer); ok {
+		// A steer is safe to ask whatever the session is doing: it answers one of three outcomes,
+		// consumes nothing unless it injects, and never starts, cancels or fails a turn.
+		out, err := steerer.Steer(ctx, cfg.Endpoint, workspaceID, sessionID, "conformance steer: ignore this line")
+		if err != nil {
+			return fmt.Errorf("Steer advertised but failed: %w", err)
+		}
+		if !out.Valid() {
+			return fmt.Errorf("Steer advertised but answered the unknown outcome %q", out)
+		}
+	}
 	if writer, ok := core.As[core.WorkspaceFileWriter](ctx, provider, cfg.Endpoint, core.CapabilityWriteFile); ok {
 		if err := checkWorkspaceFileWriter(ctx, writer, cfg, workspaceID); err != nil {
 			return err

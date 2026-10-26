@@ -177,3 +177,12 @@ func TestAttributionEverywhere(t *testing.T) {
 		t.Errorf("nowMarker without a sender = %q", got)
 	}
 }
+
+func TestSteerTextNamesTheSenderAndKeepsTheText(t *testing.T) {
+	if got := SteerText("Maya (u1)", "  use blue \n"); got != "[added while you work — from Maya (u1)]\nuse blue" {
+		t.Fatalf("got %q", got)
+	}
+	if got := SteerText("", "x"); got != "[added while you work]\nx" {
+		t.Fatalf("got %q", got)
+	}
+}

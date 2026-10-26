@@ -1,4 +1,4 @@
-import { agentJobStatusLabel, failureLabel, failureWhy, retryNote, retryWaiting } from "./agentJobLabels.ts";
+import { agentJobStatusLabel, failureLabel, failureWhy, queuedBehind, retryNote, retryWaiting, steeredNote } from "./agentJobLabels.ts";
 import type { AgentJob } from "../../lib/apiModels.ts";
 
 function assert(condition: boolean, message: string): void {
@@ -53,3 +53,20 @@ assert(retryNote(job({ status: "failed", attempt: 2, attempts: [starting] }), 0)
 // A reason this bundle does not know reads as words, never as a blank.
 assert(failureWhy("brand_new_reason") === "brand new reason", "unknown reason fallback");
 assert(failureLabel("sandbox_starting") === "sandbox starting", "label");
+
+// A message that joined the running turn says so; others say nothing.
+assert(steeredNote(job({ status: "replied", steeredInto: "j0" })) === "joined the running task", "steered note");
+assert(steeredNote(job({ status: "replied" })) === "", "an ordinary job has none");
+
+// A request waiting for its own session's running turn may offer to stop it.
+{
+  const turn = job({ jobId: "a", status: "reflowing", messageSeq: 1 });
+  const waiting = job({ jobId: "b", status: "running", messageSeq: 2 });
+  assert(queuedBehind(waiting, [turn, waiting])?.jobId === "a", "waits for the running turn");
+  assert(queuedBehind(waiting, [{ ...turn, requesterUserId: "bob" }, waiting]) === undefined, "another person's turn is not the one it waits for");
+  assert(queuedBehind(waiting, [{ ...turn, channelId: "other" }, waiting]) === undefined, "another channel's neither");
+  assert(queuedBehind(waiting, [{ ...turn, provider: "claude" }, waiting]) === undefined, "nor another agent's");
+  assert(queuedBehind(waiting, [{ ...turn, status: "replied" }, waiting]) === undefined, "an ended turn is not waited for");
+  assert(queuedBehind(turn, [turn, waiting]) === undefined, "the turn itself waits for nothing");
+  assert(queuedBehind({ ...waiting, steeredInto: "a" }, [turn, waiting]) === undefined, "a steered job waits for nothing");
+}

@@ -120,3 +120,15 @@ func nowMarker(from string) string {
 	}
 	return "[now — from " + from + "]\n"
 }
+
+// SteerText frames a message that joins the turn already running (the
+// capability steer, docs/prd/2026-10-25-steer-a-running-turn.md): the agent is
+// mid-task, so the marker says this arrived while it worked and who sent it
+// ("" when unknown). The text is passed as sent.
+func SteerText(from, text string) string {
+	head := "[added while you work"
+	if from = strings.TrimSpace(from); from != "" {
+		head += " — from " + from
+	}
+	return head + "]\n" + strings.TrimSpace(text)
+}

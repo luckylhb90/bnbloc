@@ -60,6 +60,10 @@ type AgentJob struct {
 	// ReplySessionID is the activity session a replied job's reply was
 	// posted under (notifications pair the reply with its job by it).
 	ReplySessionID string `json:"replySessionId,omitempty"`
+	// SteeredInto is the job whose running turn this job's message joined
+	// (docs/prd/2026-10-25-steer-a-running-turn.md): this job asked nothing of
+	// its own and its reply is that job's.
+	SteeredInto string `json:"steeredInto,omitempty"`
 }
 
 // AgentJobAttempt is one earlier attempt of a job: its number, the

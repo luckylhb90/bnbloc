@@ -12,7 +12,7 @@ import { useVisiblePoll } from "@/lib/useVisiblePoll";
 import { Dot } from "@/ui/Card";
 import { AgentJobStatus } from "@/views/AgentJobStatus";
 import { ActorLabel } from "@/views/room/ActorLabel";
-import { agentJobStatusLabel } from "@/views/room/agentJobLabels";
+import { agentJobStatusLabel, steeredNote } from "@/views/room/agentJobLabels";
 import { latestStep, requestElapsed, requestState, stepCountText, type RequestBlock, type RequestState } from "@/views/room/feedTurns";
 import { useJobProgress } from "@/views/room/JobProgressStrip";
 import type { FeedItem } from "@/views/room/types";
@@ -43,6 +43,7 @@ export function FeedRequestBlock({
   onToggle,
   onCancelJob,
   queueAhead,
+  behind,
   renderRow,
   renderStep,
   foot,
@@ -55,6 +56,7 @@ export function FeedRequestBlock({
   readonly onToggle: () => void;
   readonly onCancelJob: (jobId: string) => void;
   readonly queueAhead?: (job: AgentJob) => number;
+  readonly behind?: (job: AgentJob) => AgentJob | undefined;
   // One feed row without its job line or cards (the block draws those).
   readonly renderRow: (index: number) => ReactNode;
   // One step: a row, or the delegated work.
@@ -80,7 +82,15 @@ export function FeedRequestBlock({
   const latest = live ? latestStep(lastStep, current ? { label: stepLabel(current), atMs: current.atMs } : undefined) : "";
   const agent = request.agent || (job?.provider ? agentHandle({ ownerId: job.ownerUserId, core: job.core || undefined, provider: job.provider }) : "");
   const status =
-    state === "live" && job ? agentJobStatusLabel(job, queueAhead?.(job)) : state === "failed" ? (job ? agentJobStatusLabel(job) : "failed") : state === "done" ? "done" : "";
+    state === "live" && job
+      ? agentJobStatusLabel(job, queueAhead?.(job))
+      : state === "failed"
+        ? job
+          ? agentJobStatusLabel(job)
+          : "failed"
+        : state === "done"
+          ? (job && steeredNote(job)) || "done"
+          : "";
   const count = stepCountText(request.stepRows.length);
   const stepSeqs = open ? undefined : request.stepRows.map((i) => feed[i].seq).filter((s): s is number => typeof s === "number").join(" ") || undefined;
   // A settled job's chip says how it ended, unless a notice at the foot
@@ -142,7 +152,7 @@ export function FeedRequestBlock({
       {open && (
         <div id={stepsId} className="flex flex-col gap-1.5 border-t border-[var(--color-border)] px-3 py-2">
           {/* A live job's chip and progress strip (what it does now). */}
-          {live && <AgentJobStatus jobs={jobs} onCancel={onCancelJob} queueAhead={queueAhead} />}
+          {live && <AgentJobStatus jobs={jobs} onCancel={onCancelJob} queueAhead={queueAhead} behind={behind} />}
           {request.steps.map(renderStep)}
         </div>
       )}
@@ -150,7 +160,7 @@ export function FeedRequestBlock({
       <div data-request-foot className="flex flex-col gap-1.5 border-t border-[var(--color-border)] px-3 py-2 empty:hidden">
         {request.foot.map(renderRow)}
         {/* A settled job's outcome: its failure reason stays in view. */}
-        <AgentJobStatus jobs={settledJobs} onCancel={onCancelJob} queueAhead={queueAhead} />
+        <AgentJobStatus jobs={settledJobs} onCancel={onCancelJob} queueAhead={queueAhead} behind={behind} />
         {foot}
       </div>
     </section>

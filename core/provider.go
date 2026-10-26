@@ -35,6 +35,35 @@ type TurnInterrupter interface {
 	Interrupt(ctx context.Context, ep Endpoint, workspaceID, sessionID string) error
 }
 
+// SteerOutcome is what a core did with a steering message (docs/prd/2026-10-25-steer-a-running-turn.md).
+type SteerOutcome string
+
+const (
+	// SteerInjected: the text joined the running turn at its next safe point; the
+	// core took it, and the caller must not send it again.
+	SteerInjected SteerOutcome = "injected"
+	// SteerIdle: no turn is running; nothing was consumed, so the caller sends the
+	// text as an ordinary input.
+	SteerIdle SteerOutcome = "idle"
+	// SteerUnsupported: this agent cannot take a steer now; nothing was consumed,
+	// so the caller queues the text as an ordinary input.
+	SteerUnsupported SteerOutcome = "unsupported"
+)
+
+// Valid reports a known outcome.
+func (o SteerOutcome) Valid() bool {
+	return o == SteerInjected || o == SteerIdle || o == SteerUnsupported
+}
+
+// Steerer is implemented by cores that can fold a message into the turn that is
+// running (capability steer). It is optional: a core without it queues the message
+// behind the turn, as every core did before. Steer never starts, cancels or
+// fails a turn, and never consumes text it did not take (anything but
+// SteerInjected leaves the text with the caller).
+type Steerer interface {
+	Steer(ctx context.Context, ep Endpoint, workspaceID, sessionID, text string) (SteerOutcome, error)
+}
+
 // TargetResolver is implemented by cores whose target ids can be derived from a
 // provider name without listing live targets (capability resolveTarget:
 // callers reach it through As). False means the bridge should use the normal
@@ -50,7 +79,10 @@ type TargetResolver interface {
 type Capability string
 
 const (
-	CapabilityInterrupt       Capability = "interrupt"
+	CapabilityInterrupt Capability = "interrupt"
+	// CapabilitySteer (Steerer): a message sent while a turn runs can join it.
+	// Only Core Protocol daemons offer it.
+	CapabilitySteer           Capability = "steer"
 	CapabilityWriteFile       Capability = "writeFile"
 	CapabilityDeleteWorkspace Capability = "deleteWorkspace"
 	// CapabilitySessionFiles (SessionFiles) is offered by a manifest that

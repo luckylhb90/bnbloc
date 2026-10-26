@@ -2,7 +2,7 @@ import type { AgentJob } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { AgentHandle } from "@/views/UserName";
 import { isLiveJob } from "@/lib/agentRuns";
-import { agentJobStatusLabel, jobWearing, retryNote } from "@/views/room/agentJobLabels";
+import { agentJobStatusLabel, jobWearing, retryNote, steeredNote } from "@/views/room/agentJobLabels";
 import { useRetryClock } from "@/views/room/useRetryClock";
 import { JobProgressStrip } from "@/views/room/JobProgressStrip";
 
@@ -13,13 +13,18 @@ export function AgentJobStatus({
   jobs,
   onCancel,
   queueAhead,
+  behind,
 }: {
   jobs: AgentJob[];
   onCancel?: (jobId: string) => void;
   // Jobs queued before this one on its host (platform agents).
   queueAhead?: (job: AgentJob) => number;
+  // The earlier turn a job waits for (queuedBehind): its "stop it and do this
+  // now" button stops that one, by the member's click.
+  behind?: (job: AgentJob) => AgentJob | undefined;
 }) {
-  const visible = jobs.filter((j) => j.status !== "replied");
+  // A replied job has nothing to show, except one whose message joined a running turn.
+  const visible = jobs.filter((j) => j.status !== "replied" || steeredNote(j));
   const now = useRetryClock(visible);
   if (visible.length === 0) return null;
   return (
@@ -33,6 +38,7 @@ export function AgentJobStatus({
         const wearing = live ? jobWearing(j) : [];
         const missing = live ? (j.contentMissing ?? []) : [];
         const retry = retryNote(j, now);
+        const ahead = live && onCancel ? behind?.(j) : undefined;
         return (
           <div
             key={j.jobId}
@@ -49,15 +55,26 @@ export function AgentJobStatus({
                   failed ? "bg-[var(--color-danger,#7f1d1d)] text-white" : "bg-[var(--color-surface)]",
                 )}
               >
-                {agentJobStatusLabel(j, queueAhead?.(j))}
+                {steeredNote(j) || agentJobStatusLabel(j, queueAhead?.(j))}
               </span>
               {j.attempt > 1 && <span>attempt {j.attempt}</span>}
               {retry && <span className="min-w-0 truncate" title={retry}>{retry}</span>}
+              {ahead && onCancel && (
+                <button
+                  type="button"
+                  data-stop-and-send
+                  onClick={() => onCancel(ahead.jobId)}
+                  className="ml-auto rounded-[var(--radius)] px-1.5 py-0.5 text-[var(--color-fg-muted)] hover:bg-[var(--color-surface)] hover:text-[var(--color-fg)]"
+                  title="Stops the task that is running now (what it has not finished is lost); this request then starts"
+                >
+                  Stop the current task and do this now
+                </button>
+              )}
               {live && onCancel && (
                 <button
                   type="button"
                   onClick={() => onCancel(j.jobId)}
-                  className="ml-auto rounded-[var(--radius)] px-1.5 py-0.5 text-[var(--color-fg-muted)] hover:bg-[var(--color-surface)] hover:text-[var(--color-fg)]"
+                  className={cn("rounded-[var(--radius)] px-1.5 py-0.5 text-[var(--color-fg-muted)] hover:bg-[var(--color-surface)] hover:text-[var(--color-fg)]", !ahead && "ml-auto")}
                 >
                   stop
                 </button>

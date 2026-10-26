@@ -56,6 +56,7 @@ export function MessageFeed({
   onEdit,
   onCancelJob,
   queueAhead,
+  behind,
   onOpenArtifactInFiles,
   onViewAllDeliverables,
   people = false,
@@ -88,6 +89,7 @@ export function MessageFeed({
   readonly onCancelJob: (jobId: string) => void;
   // Jobs queued before a job on its platform host ("Queued — N ahead").
   readonly queueAhead?: (job: AgentJob) => number;
+  readonly behind?: (job: AgentJob) => AgentJob | undefined;
   readonly onOpenArtifactInFiles: (artifactId: string) => void;
   // "View all deliverables (N)" under a message: the workbench's deliverables
   // list filtered to that message.
@@ -202,6 +204,7 @@ export function MessageFeed({
           onEdit={onEdit}
           onCancelJob={onCancelJob}
           queueAhead={queueAhead}
+          behind={behind}
           onOpenArtifactInFiles={onOpenArtifactInFiles}
           onViewAllDeliverables={onViewAllDeliverables}
           onAskAgent={onAskAgent}
@@ -225,6 +228,7 @@ type RowActions = {
   readonly onEdit: (item: FeedItem, text: string) => void;
   readonly onCancelJob: (jobId: string) => void;
   readonly queueAhead?: (job: AgentJob) => number;
+  readonly behind?: (job: AgentJob) => AgentJob | undefined;
   readonly onOpenArtifactInFiles: (artifactId: string) => void;
   readonly onViewAllDeliverables?: (seq: number) => void;
   readonly onAskAgent?: (item: FeedItem) => void;
@@ -325,6 +329,7 @@ function FeedRows({
         onToggle={() => openBlocks.toggle(seq)}
         onCancelJob={actions.onCancelJob}
         queueAhead={actions.queueAhead}
+        behind={actions.behind}
         renderRow={(i) => row(i, undefined, true)}
         renderStep={(st) => (st.kind === "row" ? row(st.index, undefined, true) : delegated(st.block, true))}
         foot={
@@ -370,6 +375,7 @@ function FeedRow({
   onEdit,
   onCancelJob,
   queueAhead,
+  behind,
   onOpenArtifactInFiles,
   onViewAllDeliverables,
   onAskAgent,
@@ -411,6 +417,7 @@ function FeedRow({
           jobs={agentJobs[m.seq] || []}
           onCancel={onCancelJob}
           queueAhead={queueAhead}
+          behind={behind}
         />
       )}
       {!bare && typeof m.seq === "number" && <WaitingLive jobs={agentJobs[m.seq] || []} />}

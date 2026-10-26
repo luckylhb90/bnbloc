@@ -220,6 +220,24 @@ func (c *Client) Interrupt(ctx context.Context, ep core.Endpoint, workspaceID, s
 	return nil
 }
 
+// Steer implements core.Steerer (usable when Supports reports CapabilitySteer; a call
+// without it returns capability_missing). An answer that is not one of the three
+// outcomes is an error: the caller queues the text, which is always safe.
+func (c *Client) Steer(ctx context.Context, ep core.Endpoint, workspaceID, sessionID, text string) (core.SteerOutcome, error) {
+	if err := c.requireCapability(ctx, ep, CapabilitySteer); err != nil {
+		return "", err
+	}
+	var resp SteerResponse
+	if err := c.postJSON(ctx, ep, SessionSteerPath(workspaceID, sessionID), SteerRequest{Text: text}, &resp); err != nil {
+		return "", fmt.Errorf("steer turn: %w", err)
+	}
+	out := core.SteerOutcome(resp.Outcome)
+	if !out.Valid() {
+		return "", fmt.Errorf("steer turn: the core answered an unknown outcome %q", resp.Outcome)
+	}
+	return out, nil
+}
+
 // RefreshExecution implements core.ExecutionRefresher (capability
 // executionRefresh): it hands a running sandboxed session its fresh
 // execution descriptor.

@@ -658,3 +658,99 @@ func TestClient_CreateSession_continuesAndLost(t *testing.T) {
 		t.Fatalf("a refused continuation was asked %d times, want 1", n)
 	}
 }
+
+// A core that does not advertise steer is never asked to: the steer endpoint is not
+// called, and the caller queues the message as it always did.
+func TestClient_Steer_isNotOffered_whenNotAdvertised(t *testing.T) {
+	// Given
+	srv, calls := protocolServer(t, func(w http.ResponseWriter, r *http.Request) { writeDiscover(w, CapabilityInterrupt) })
+	client := NewClient("proto", srv.Client())
+
+	// When
+	_, offered := core.As[core.Steerer](context.Background(), client, core.Endpoint{BaseURL: srv.URL}, core.CapabilitySteer)
+
+	// Then
+	if offered {
+		t.Fatal("provider must not offer Steerer when steer is not advertised")
+	}
+	if len(*calls) != 1 || (*calls)[0].path != PathDiscover {
+		t.Fatalf("the steer endpoint was called despite the missing capability: %+v", *calls)
+	}
+}
+
+// Each answer a core may give reaches the caller as its outcome; the text goes in the body.
+func TestClient_Steer_returnsEachOutcome(t *testing.T) {
+	for _, want := range []core.SteerOutcome{core.SteerInjected, core.SteerIdle, core.SteerUnsupported} {
+		t.Run(string(want), func(t *testing.T) {
+			// Given
+			srv, calls := protocolServer(t, func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.EscapedPath() {
+				case PathDiscover:
+					writeDiscover(w, CapabilitySteer)
+				case "/core/v1/workspaces/ws-1/sessions/s-1/steer":
+					_ = json.NewEncoder(w).Encode(SteerResponse{Outcome: string(want)})
+				default:
+					w.WriteHeader(http.StatusNotFound)
+				}
+			})
+			ep := core.Endpoint{BaseURL: srv.URL}
+			steerer, ok := core.As[core.Steerer](context.Background(), NewClient("proto", srv.Client()), ep, core.CapabilitySteer)
+			if !ok {
+				t.Fatal("provider must implement Steerer when steer is advertised")
+			}
+
+			// When
+			got, err := steerer.Steer(context.Background(), ep, "ws-1", "s-1", "make the button blue")
+
+			// Then
+			if err != nil || got != want {
+				t.Fatalf("Steer = %q, %v; want %q", got, err, want)
+			}
+			last := (*calls)[len(*calls)-1]
+			if last.method != http.MethodPost || last.path != "/core/v1/workspaces/ws-1/sessions/s-1/steer" {
+				t.Fatalf("request = %+v", last)
+			}
+			if last.body["text"] != "make the button blue" {
+				t.Fatalf("the body carried %v", last.body)
+			}
+		})
+	}
+}
+
+// An answer that is not one of the three outcomes, and a core error, are errors: the
+// caller queues the message, which is always safe and loses nothing.
+func TestClient_Steer_anUnknownOutcomeOrErrorIsAnError(t *testing.T) {
+	for name, handler := range map[string]func(w http.ResponseWriter){
+		"unknown outcome": func(w http.ResponseWriter) { _ = json.NewEncoder(w).Encode(SteerResponse{Outcome: "maybe"}) },
+		"empty outcome":   func(w http.ResponseWriter) { _ = json.NewEncoder(w).Encode(SteerResponse{}) },
+		"server error":    func(w http.ResponseWriter) { w.WriteHeader(http.StatusInternalServerError) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv, _ := protocolServer(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.EscapedPath() == PathDiscover {
+					writeDiscover(w, CapabilitySteer)
+					return
+				}
+				handler(w)
+			})
+			ep := core.Endpoint{BaseURL: srv.URL}
+			steerer, _ := core.As[core.Steerer](context.Background(), NewClient("proto", srv.Client()), ep, core.CapabilitySteer)
+			if got, err := steerer.Steer(context.Background(), ep, "ws-1", "s-1", "x"); err == nil || got != "" {
+				t.Fatalf("Steer = %q, %v; want an error and no outcome", got, err)
+			}
+		})
+	}
+}
+
+func TestSteerOutcomeValid(t *testing.T) {
+	for _, o := range []core.SteerOutcome{core.SteerInjected, core.SteerIdle, core.SteerUnsupported} {
+		if !o.Valid() {
+			t.Errorf("%q must be valid", o)
+		}
+	}
+	for _, o := range []core.SteerOutcome{"", "queued", "INJECTED"} {
+		if o.Valid() {
+			t.Errorf("%q must not be valid", o)
+		}
+	}
+}

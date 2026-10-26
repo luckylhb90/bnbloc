@@ -43,6 +43,7 @@ import { QuotaRequestDialog } from "@/views/team/QuotaRequestDialog";
 import { usePendingQuotaCount } from "@/views/team/QuotaRequestsPanel";
 import { borrowKey } from "@/lib/roomAgents";
 import { jobQueueAhead } from "@/lib/platformAgents";
+import { queuedBehind } from "@/views/room/agentJobLabels";
 import { useDesktopHandoff } from "@/views/room/useDesktopHandoff";
 import { HandoffBanner } from "@/views/room/HandoffBanner";
 import { useHandoffExport } from "@/views/room/useHandoffExport";
@@ -281,6 +282,9 @@ export function RoomView({
   // A queued platform job shows how many of its host's jobs are ahead.
   const platformInRoom = data.platform.inRoom;
   const queueAhead = useCallback((job: AgentJob) => jobQueueAhead(job, platformInRoom), [platformInRoom]);
+  // A request waiting for the turn the agent already runs for the same person
+  // here can offer to stop that turn and start now (the member's click).
+  const behind = useCallback((job: AgentJob) => queuedBehind(job, Object.values(activity.agentJobs).flat()), [activity.agentJobs]);
 
   const { openArtifact: openWorkbenchTab, openDeliverables, openLive } = workbench;
   // A job's live view in its own window: the desktop's, or a browser tab
@@ -658,6 +662,7 @@ export function RoomView({
                   onEdit={editOwnMessage}
                   onCancelJob={cancelJob}
                   queueAhead={queueAhead}
+                  behind={behind}
                   onOpenArtifactInFiles={openArtifactInFiles}
                   onViewAllDeliverables={viewAllDeliverables}
                   agentReady={roomAgents.some((a) => !a.platform) || data.platform.choices.some((c) => c.inRoom && c.online)}

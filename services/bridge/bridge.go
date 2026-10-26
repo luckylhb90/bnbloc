@@ -372,6 +372,10 @@ type runningJob struct {
 	session *roomSession
 	abort   bool
 	stop    context.CancelFunc
+	// key is the channel session the job drives, set once the stages ran
+	// (steer.go finds a running turn of the same session by it).
+	key    sessionKey
+	hasKey bool
 }
 
 // bind records the core session a job is driving, so an abort can interrupt it.

@@ -34,6 +34,14 @@ func TestAgentJobViewProjectsDiagnostics(t *testing.T) {
 	}
 }
 
+// A job whose message joined a running turn says which one.
+func TestAgentJobViewNamesTheJobASteeredMessageJoined(t *testing.T) {
+	j := AgentJob{JobID: "job-2", Status: AgentJobReplied, DiagnosticsJSON: json.RawMessage(`{"steeredInto":"job-1"}`)}
+	if v := j.View(); v.SteeredInto != "job-1" {
+		t.Fatalf("view = %+v", v)
+	}
+}
+
 // A retried job's member view says why each earlier attempt failed: the
 // reason codes and times, never the diagnostics of those attempts.
 func TestAgentJobViewCarriesAttempts(t *testing.T) {

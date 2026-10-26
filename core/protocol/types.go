@@ -28,6 +28,7 @@ const (
 // capability identically.
 const (
 	CapabilityInterrupt       = string(core.CapabilityInterrupt)
+	CapabilitySteer           = string(core.CapabilitySteer)
 	CapabilityWriteFile       = string(core.CapabilityWriteFile)
 	CapabilityDeleteWorkspace = string(core.CapabilityDeleteWorkspace)
 	// CapabilitySandboxExec: the core honors the `execution` descriptor on
@@ -61,7 +62,7 @@ const (
 // package validation and the runtime share (a Capability* constant missing
 // here fails TestCoreCapabilitiesAcceptEveryProtocolCapability).
 var Capabilities = []string{
-	CapabilityInterrupt, CapabilityWriteFile, CapabilityDeleteWorkspace, CapabilitySandboxExec,
+	CapabilityInterrupt, CapabilitySteer, CapabilityWriteFile, CapabilityDeleteWorkspace, CapabilitySandboxExec,
 	CapabilitySessionFiles, CapabilitySessionFileBytes, CapabilityAgentProfile, CapabilityDiscover,
 	CapabilityTurnActivity, CapabilityExecutionRefresh,
 }
@@ -886,6 +887,23 @@ func SessionTurnPath(workspaceID, sessionID string) string {
 
 func SessionInterruptPath(workspaceID, sessionID string) string {
 	return WorkspaceSessionsPath(workspaceID) + "/" + escapePath(sessionID) + "/interrupt"
+}
+
+// SessionSteerPath is POST …/sessions/{sid}/steer (capability steer): the body is a
+// SteerRequest, the answer a SteerResponse. It never starts or ends a turn.
+func SessionSteerPath(workspaceID, sessionID string) string {
+	return WorkspaceSessionsPath(workspaceID) + "/" + escapePath(sessionID) + "/steer"
+}
+
+// SteerRequest is the body of a steer: the text to fold into the running turn.
+type SteerRequest struct {
+	Text string `json:"text"`
+}
+
+// SteerResponse is a steer's answer: injected, idle or unsupported (core.SteerOutcome).
+// Anything but injected leaves the text with the caller.
+type SteerResponse struct {
+	Outcome string `json:"outcome"`
 }
 
 // SessionExecutionPath is PUT …/sessions/{sid}/execution (capability

@@ -146,6 +146,10 @@ func (b *Bridge) runBridgeJob(ctx context.Context, job bridgeJob) {
 			return
 		}
 	}
+	d.run.setKey(d.sessionKey())
+	if b.steerInto(ctx, d) {
+		return
+	}
 	res, err := b.driveTurn(ctx, d)
 	b.settle(ctx, d, res, err)
 }

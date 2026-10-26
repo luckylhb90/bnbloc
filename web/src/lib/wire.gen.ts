@@ -749,6 +749,10 @@ export interface AgentJob {
   // ReplySessionID is the activity session a replied job's reply was
   // posted under (notifications pair the reply with its job by it).
   replySessionId?: string;
+  // SteeredInto is the job whose running turn this job's message joined
+  // (docs/prd/2026-10-25-steer-a-running-turn.md): this job asked nothing of
+  // its own and its reply is that job's.
+  steeredInto?: string;
 }
 
 // AgentJobAttempt is one earlier attempt of a job: its number, the
@@ -787,6 +791,8 @@ export const RunScopeTenant = "tenant";
 export const RunDiagReply = "reply";
 export const RunDiagUsage = "usage";
 export const RunDiagTools = "tools";
+// DiagSteeredInto names the job a steered job's message joined (AgentJob.SteeredInto).
+export const DiagSteeredInto = "steeredInto";
 
 // AgentRunTools is the run summary's tools (RunDiagTools): the MCP tool
 // components attached to the turn's session, by name, and the room tool

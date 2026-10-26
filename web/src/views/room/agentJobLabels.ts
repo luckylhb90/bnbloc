@@ -96,3 +96,30 @@ export function agentJobStatusLabel(job: AgentJob, ahead = 0): string {
   const base = AGENT_JOB_STATUS_LABELS[job.status];
   return job.failureReason && !isLiveJob(job) ? `${base}: ${failureLabel(job.failureReason)}` : base;
 }
+
+// steeredNote is what a job's row says when its message joined the turn the
+// agent was already running (docs/prd/2026-10-25-steer-a-running-turn.md):
+// the job asked nothing of its own, and the running one's reply answers both.
+export function steeredNote(job: Pick<AgentJob, "steeredInto">): string {
+  return job.steeredInto ? "joined the running task" : "";
+}
+
+// queuedBehind is the earlier turn a job waits for: a live job of the same
+// session (same person, channel and agent: the turns of one session queue)
+// whose turn is under way ("reflowing") while this one, reported running, has
+// not started its own (it waits at the session's gate). The member
+// may stop it and have this one start now; nothing stops by itself.
+export function queuedBehind(job: AgentJob, all: readonly AgentJob[]): AgentJob | undefined {
+  if (job.status !== "running" || job.steeredInto) return undefined;
+  return all.find(
+    (o) =>
+      o.jobId !== job.jobId &&
+      o.status === "reflowing" &&
+      o.messageSeq < job.messageSeq &&
+      o.requesterUserId === job.requesterUserId &&
+      o.channelId === job.channelId &&
+      o.ownerUserId === job.ownerUserId &&
+      o.core === job.core &&
+      o.provider === job.provider,
+  );
+}

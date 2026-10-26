@@ -26,6 +26,8 @@ const (
 	RunDiagReply = "reply" // AgentRunReply (without RoomSeq)
 	RunDiagUsage = "usage" // AgentRunUsage
 	RunDiagTools = "tools" // AgentRunTools
+	// DiagSteeredInto names the job a steered job's message joined (AgentJob.SteeredInto).
+	DiagSteeredInto = "steeredInto"
 )
 
 // AgentRunTools is the run summary's tools (RunDiagTools): the MCP tool
