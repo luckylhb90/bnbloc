@@ -1,6 +1,7 @@
 # Agents installed only in the sandbox (2026-10-26)
 
-Status: experiment done, nothing built. Records what was tried, what it showed
+Status: experiment done, nothing built. The design is
+[`2026-10-26-sandbox-only-agents-design.md`](2026-10-26-sandbox-only-agents-design.md). Records what was tried, what it showed
 and what is undecided. Owner (when built): the agent manager (where an agent is
 installed) and the ACP core (how it is launched), both components; the platform
 adds nothing it does not already have (§4).
