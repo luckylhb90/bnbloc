@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -75,6 +76,11 @@ func TestMachineDenyReadReadsOnlyWhatItTrusts(t *testing.T) {
 func TestConfineAppliesTheMachineDenyDropIns(t *testing.T) {
 	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
 		t.Skip("no host sandbox")
+	}
+	if runtime.GOOS == "linux" {
+		if _, err := exec.LookPath("bwrap"); err != nil {
+			t.Skip("bubblewrap is not installed")
+		}
 	}
 	home := t.TempDir()
 	login := filepath.Join(home, ".somelogin")
