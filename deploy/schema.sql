@@ -167,6 +167,23 @@ CREATE TABLE IF NOT EXISTS bridge_heartbeats (
   KEY idx_bridge_heartbeats_owner_seen (owner_user_id, last_seen_at_ms)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- Sends from a member's computer outside a turn
+-- (docs/prd/2026-10-25-member-sends.md): a component's read, queued for
+-- the member's own bridge, taken by its claim (taken_by), served while
+-- held. A row lives minutes: the owner's claim deletes expired ones.
+CREATE TABLE IF NOT EXISTS bridge_sends (
+  send_id       VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin PRIMARY KEY,
+  tenant_id     VARCHAR(64) NOT NULL,
+  owner_user_id VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  component     VARCHAR(128) NOT NULL,
+  method        VARCHAR(8) NOT NULL,
+  url           VARCHAR(4096) NOT NULL,
+  created_at_ms BIGINT NOT NULL,
+  taken_by      VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '',
+  taken_at_ms   BIGINT NOT NULL DEFAULT 0,
+  KEY idx_bridge_sends_owner (owner_user_id, taken_by, created_at_ms)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS bridge_agents (
   bridge_id          VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   tenant_id          VARCHAR(64) NOT NULL,
@@ -1129,4 +1146,19 @@ CREATE TABLE IF NOT EXISTS component_values (
   updated_at_ms BIGINT NOT NULL,
   PRIMARY KEY (component, scope, value_key),
   KEY idx_component_values_scope (scope)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Organization board rollups (docs/prd/2026-10-24-executive-pulse-backend.md,
+-- section 2): one row per (tenant, minute, metric, dimension). Counts and sums
+-- only, never a member id or a per-person row. The consumer adds each minute's
+-- deltas (INSERT ... ON DUPLICATE KEY UPDATE value = value + VALUES(value)).
+CREATE TABLE IF NOT EXISTS pulse_minutes (
+  tenant_id     VARCHAR(64) NOT NULL,
+  minute_ms     BIGINT NOT NULL,
+  metric        VARCHAR(32) NOT NULL,
+  dim           VARCHAR(64) NOT NULL DEFAULT '',
+  value         DOUBLE NOT NULL DEFAULT 0,
+  updated_at_ms BIGINT NOT NULL,
+  PRIMARY KEY (tenant_id, minute_ms, metric, dim),
+  KEY idx_pulse_minutes_metric (tenant_id, metric, minute_ms)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

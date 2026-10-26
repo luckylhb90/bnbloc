@@ -1,2 +1,12 @@
 e65f375f295912d1192182b560ec7245c7a69257:web/src/lib/hashRoute.test.ts:generic-api-key:73
 1001526e3644ec83d83512c21731ffef358175e7:test/e2e/connections_test.go:curl-auth-header:315
+
+# Test fixtures that look like secrets (made-up tokens, an AWS example key, a PEM header
+# string); each was read, none is real. Found 2026-10-26 when the scan ran over the full history.
+b0ce3a665fd0e841f9611ecb762462290382b4b0:services/gateway/component_settings_endpoint_test.go:private-key:105
+256295e2c6f365994f3715056deaafc9af45cd49:internal/localskills/localskills_test.go:aws-access-token:156
+256295e2c6f365994f3715056deaafc9af45cd49:internal/localskills/localskills_test.go:aws-access-token:172
+6c9f567a82ba6ad4479704d03a0d3bb5c9728b1a:services/bridge/progress_test.go:curl-auth-user:18
+6c9f567a82ba6ad4479704d03a0d3bb5c9728b1a:services/bridge/progress_test.go:curl-auth-header:18
+1e376495c487e362a8da4648a608fdd3ae1d09fe:web/src/lib/hashRoute.test.ts:generic-api-key:73
+d5e15c8a46b63f2f569522489e41dc13fcf1100b:web/src/lib/loginReturn.test.ts:generic-api-key:27

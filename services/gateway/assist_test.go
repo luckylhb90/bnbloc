@@ -30,8 +30,8 @@ type assistModelFake struct {
 	reply string
 	// replies, when set, are answered first, one per call.
 	replies []string
-	seen  [][]map[string]string
-	auth  []string
+	seen    [][]map[string]string
+	auth    []string
 }
 
 func (f *assistModelFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {

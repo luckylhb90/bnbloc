@@ -120,10 +120,7 @@ eq(parse(["event: delta\n\ndata: y\n\n"]), [{ event: "message", data: "y" }], "a
     const c = answers([{ draft: 1 }, null as unknown as Record<string, unknown>]);
     const t = await refineJSON(c.run, { text: "x" }, check);
     eq([t.reply.fields, t.problems], [{ draft: 1 }, ["Give it a name"]], "a failed revision keeps the last answer and its problems");
-  })().catch((e: unknown) => {
-    process.exitCode = 1;
-    console.error(e);
-  });
+  })(); // a rejection here is unhandled: Node prints it and exits non-zero
   eq(assistRevision({}, ["  a \n b  ", "", ...Array.from({ length: 12 }, () => "x".repeat(900))])?.problems.length, MaxAssistProblems, "problems bounded");
   eq([...(assistRevision({}, ["x".repeat(900)])?.problems[0] ?? "")].length, MaxAssistProblemRunes, "each within its bound");
   eq(assistRevision({}, ["  a \n b  "])?.problems, ["a b"], "one line");
