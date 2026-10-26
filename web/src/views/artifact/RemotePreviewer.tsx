@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ComponentType } from "react";
 import { WarningCircleIcon } from "@phosphor-icons/react";
 import { api } from "@/lib/api";
-import { previewerFrameUrl, readPreviewerMessage, wantsThumbnail, type PreviewerDescriptor } from "@/lib/previewerFrame";
+import { previewerFrameUrl, readPreviewerMessage, saveFailure, saveRefusal, wantsThumbnail, type PreviewerDescriptor } from "@/lib/previewerFrame";
 import { PREVIEWER_PROTOCOL, stateKey, type HostMessage } from "../../../previewer-sdk/src/protocol.ts";
 import type { ArtifactViewerProps, ViewerToolbarItem } from "./registry";
 import { freshPreviewer, installedPreviewer } from "./remotePreviewers";
@@ -88,6 +88,9 @@ function PreviewerFrame({
   const lastSentState = useRef("");
   const remoteNonce = useRef(0);
   const thumbnailDone = useRef(false);
+  // The version the frame was handed: a save is compare-and-swap on it, and
+  // moves on after each save (the frame keeps the bytes it saved).
+  const loadedVersion = useRef(0);
   const [error, setError] = useState("");
   // Until the frame says it is ready its bundle is still downloading: say so
   // (a large previewer on a slow link takes a while), never "no file".
@@ -128,6 +131,7 @@ function PreviewerFrame({
 
   const handOff = useCallback(async () => {
     const { blob: bytes, file: info, version: v } = latest.current;
+    loadedVersion.current = v;
     const box = boxRef.current;
     post({
       type: "preview.init",
@@ -152,6 +156,33 @@ function PreviewerFrame({
     // A new nonce shows it again.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reveal?.nonce]);
+
+  // The frame's save (capability "edit"): publishes its bytes as the next
+  // version of the file, compare-and-swap on the version the frame holds. The
+  // answer goes back to the frame; nothing here throws into it.
+  const saveScene = useCallback(
+    async (bytes: ArrayBuffer, summary: string | undefined) => {
+      const { roomId, artifactId, file: info } = latest.current;
+      const refusal = saveRefusal(desc, { roomId, artifactId });
+      if (refusal) {
+        post({ type: "preview.save.failed", message: refusal });
+        return;
+      }
+      try {
+        const reply = await api.publishArtifactFile(roomId, artifactId, {
+          file: new Blob([bytes], { type: info.mimeType }),
+          fileName: info.name,
+          baseVersion: loadedVersion.current,
+          summary,
+        });
+        if (reply.version) loadedVersion.current = reply.version.version;
+        post({ type: "preview.saved", version: loadedVersion.current });
+      } catch (e: unknown) {
+        post({ type: "preview.save.failed", message: saveFailure(e) });
+      }
+    },
+    [desc, post],
+  );
 
   const storeThumbnail = useCallback(
     (png: ArrayBuffer) => {
@@ -196,11 +227,14 @@ function PreviewerFrame({
         case "preview.selection":
           if (selection) latest.current.onSelection?.(msg.selection);
           return;
+        case "preview.save":
+          void saveScene(msg.bytes, msg.summary);
+          return;
       }
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [handOff, toolbar, liveState, selection, storeThumbnail]);
+  }, [handOff, toolbar, liveState, selection, storeThumbnail, saveScene]);
 
   // Remote live state from the room, deduped by nonce.
   useEffect(() => {

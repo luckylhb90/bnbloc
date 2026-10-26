@@ -1,3 +1,4 @@
+import { ApiError } from "./errors.ts";
 import {
   frameTicketStale,
   parsePreviewerCatalog,
@@ -5,11 +6,13 @@ import {
   previewerFrameUrl,
   previewerViewerId,
   readPreviewerMessage,
+  saveFailure,
+  saveRefusal,
   themeFromBackground,
   validBundlePath,
   wantsThumbnail,
 } from "./previewerFrame.ts";
-import { STATE_LIMIT, THUMBNAIL_LIMIT } from "../../previewer-sdk/src/protocol.ts";
+import { ERROR_LIMIT, STATE_LIMIT, THUMBNAIL_LIMIT } from "../../previewer-sdk/src/protocol.ts";
 
 // The web tsconfig has no node types, so the tests use a local runner (same
 // convention as the other *.test.ts files); a failure throws and fails `node --test`.
@@ -145,3 +148,19 @@ test("theme follows the app background", () => {
   eq(themeFromBackground("#101010"), "dark", "dark hex");
   eq(themeFromBackground(""), "light", "unknown");
 });
+
+test("a save is refused unless the previewer declared edit and the file is a room artifact", () => {
+  const at = { roomId: "room-1", artifactId: "art-1" };
+  eq(saveRefusal({ capabilities: ["edit"] }, at), null, "declared edit on a room artifact may publish");
+  eq(saveRefusal({ capabilities: ["thumbnail", "units"] }, at), "This previewer cannot save files.", "no edit declared");
+  eq(saveRefusal({ capabilities: ["edit"] }, { roomId: "room-1", artifactId: "" }), "This file cannot be saved here.", "a chat attachment has no versions");
+  eq(saveRefusal({ capabilities: ["edit"] }, { roomId: "", artifactId: "art-1" }), "This file cannot be saved here.", "a public share page has no room");
+});
+
+test("a failed save says a conflict plainly and keeps every message within the frame's limit", () => {
+  eq(saveFailure(new ApiError(409, "artifact was updated concurrently")), "changed meanwhile: a newer version exists; reload the file to take it.", "a 409 is a conflict");
+  eq(saveFailure(new ApiError(413, "too large")), "Could not save the file: too large", "other failures keep the server's reason");
+  eq(saveFailure(new Error("network down")), "Could not save the file: network down", "a thrown error keeps its reason");
+  eq([...saveFailure(new ApiError(500, "x".repeat(ERROR_LIMIT * 2)))].length, ERROR_LIMIT, "a long reason is cut to ERROR_LIMIT");
+});
+

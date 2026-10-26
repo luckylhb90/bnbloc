@@ -52,6 +52,13 @@ func TestPreviewerPackage_acceptsAValidPackage(t *testing.T) {
 	if err := parsePreviewer(t, nil); err != nil {
 		t.Fatalf("valid previewer rejected: %v", err)
 	}
+	// Capability "edit" (the frame saves its scene as a version) is a known capability.
+	if err := parsePreviewer(t, func(_, p map[string]any) {
+		p["capabilities"] = []string{"edit"}
+		delete(p, "toolbar")
+	}); err != nil {
+		t.Fatalf("edit capability rejected: %v", err)
+	}
 	// An upload placeholder parses (draft before upload) ...
 	err := parsePreviewer(t, func(pkg, _ map[string]any) {
 		pkg["artifacts"] = map[string]any{"bundle": map[string]string{"url": "", "sha256": ""}}
@@ -121,7 +128,6 @@ func TestPreviewerPackage_rejectsInvalidShapes(t *testing.T) {
 		{"rank zero", func(_, p map[string]any) { p["rank"] = 0 }, "rank"},
 		{"rank too high", func(_, p map[string]any) { p["rank"] = 1001 }, "rank"},
 		{"unknown capability", func(_, p map[string]any) { p["capabilities"] = []string{"network"} }, "unknown previewer capability"},
-		{"reserved edit capability", func(_, p map[string]any) { p["capabilities"] = []string{"edit"} }, "unknown previewer capability"},
 		{"toolbar without capability", func(_, p map[string]any) { p["capabilities"] = []string{"thumbnail"} }, "requires the \"toolbar\" capability"},
 		{"unknown icon", func(_, p map[string]any) {
 			p["toolbar"] = []map[string]string{{"id": "a", "icon": "https://evil/icon.png", "label": "A", "kind": "button"}}

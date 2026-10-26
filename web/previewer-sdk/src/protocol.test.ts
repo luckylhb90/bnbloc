@@ -1,6 +1,9 @@
 import {
   ERROR_LIMIT,
+  PREVIEWER_CAPABILITIES,
   PREVIEWER_PROTOCOL,
+  SAVE_LIMIT,
+  SAVE_SUMMARY_LIMIT,
   STATE_LIMIT,
   THUMBNAIL_LIMIT,
   TITLE_LIMIT,
@@ -195,3 +198,29 @@ test("a selection may say its kind, place and keys; units their place; reveal na
   eq(readHostMessage({ type: "preview.reveal", at: "Revenue!C3" }), { type: "preview.reveal", at: "Revenue!C3" }, "reveal");
   eq(readHostMessage({ type: "preview.reveal", at: "" }), null, "an empty reveal");
 });
+
+test("save: the edit capability, and a save is a non-empty buffer within SAVE_LIMIT", () => {
+  eq(PREVIEWER_CAPABILITIES.includes("edit"), true, "edit is a code-owned capability");
+  eq(readFrameMessage({ type: "preview.save", bytes: png(16) }), { type: "preview.save", bytes: png(16) }, "a save without a summary");
+  eq(readFrameMessage({ type: "preview.save", bytes: png(16), summary: "shorter title" })?.type, "preview.save", "a save with a summary");
+  eq(readFrameMessage({ type: "preview.save", bytes: png(16), summary: "" })?.type, "preview.save", "an empty summary is allowed");
+  eq(readFrameMessage({ type: "preview.save", bytes: new ArrayBuffer(0) }), null, "an empty save is refused");
+  eq(readFrameMessage({ type: "preview.save", bytes: new Uint8Array(png(16)) }), null, "a view is not an ArrayBuffer");
+  eq(readFrameMessage({ type: "preview.save" }), null, "a save needs bytes");
+  eq(readFrameMessage({ type: "preview.save", bytes: png(16), summary: 3 }), null, "the summary must be text");
+  eq(readFrameMessage({ type: "preview.save", bytes: png(16), summary: "x".repeat(SAVE_SUMMARY_LIMIT + 1) }), null, "a summary over its limit");
+  eq(readFrameMessage({ type: "preview.save", bytes: new ArrayBuffer(SAVE_LIMIT + 1) }), null, "a save over SAVE_LIMIT");
+  eq(readFrameMessage({ type: "preview.save", bytes: new ArrayBuffer(SAVE_LIMIT) })?.type, "preview.save", "a save at SAVE_LIMIT");
+});
+
+test("save answers: a saved version is a positive integer; a failure is bounded text", () => {
+  eq(readHostMessage({ type: "preview.saved", version: 4 }), { type: "preview.saved", version: 4 }, "saved");
+  eq(readHostMessage({ type: "preview.saved", version: 0 }), null, "version 0 is not a version");
+  eq(readHostMessage({ type: "preview.saved", version: 1.5 }), null, "a version is an integer");
+  eq(readHostMessage({ type: "preview.saved", version: "4" }), null, "a version is a number");
+  eq(readHostMessage({ type: "preview.save.failed", message: "changed meanwhile" }), { type: "preview.save.failed", message: "changed meanwhile" }, "failed");
+  eq(readHostMessage({ type: "preview.save.failed", message: "" }), null, "a failure needs a message");
+  eq(readHostMessage({ type: "preview.save.failed", message: "x".repeat(ERROR_LIMIT + 1) }), null, "a failure over ERROR_LIMIT");
+  eq(readFrameMessage({ type: "preview.saved", version: 4 }), null, "saved is a host message, not a frame one");
+});
+

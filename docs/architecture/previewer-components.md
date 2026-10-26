@@ -50,9 +50,10 @@ Validation (`core/pkgmeta/previewer_validation.go`, enforced at install):
   10). Specificity, highest first: multi-part extension (`.atlas.json`
   matching the end of the name — it beats the JSON viewer's exact
   `application/json`), exact MIME, plain extension, kind, MIME wildcard;
-- `capabilities` ⊆ `thumbnail`, `liveState`, `toolbar`, `selection`, `units`
-  (`edit` is reserved); a host ignores a capability it predates (it never
-  drops the previewer for one);
+- `capabilities` ⊆ `thumbnail`, `liveState`, `toolbar`, `selection`, `units`,
+  `edit` (the frame may save its scene as the file's next version:
+  `preview.save`, docs/prd/2026-10-26-excalidraw-previewer.md); a host ignores a
+  capability it predates (it never drops the previewer for one);
 - `toolbar`: at most 20 items, unique ids `[a-z][a-z0-9-]{0,31}`, an icon
   NAME from the code-owned list, a 1–40 character label, kind
   `button | toggle | zoom`; a non-empty toolbar requires the `toolbar`

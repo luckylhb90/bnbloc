@@ -16,6 +16,7 @@
 // `#host=<origin>` names the only origin the SDK accepts messages from.
 
 import {
+  ERROR_LIMIT,
   PREVIEWER_CAPABILITIES,
   readFrameMessage,
   readToolbar,
@@ -23,6 +24,7 @@ import {
   type PreviewerCapability,
   type ToolbarItem,
 } from "../../previewer-sdk/src/protocol.ts";
+import { ApiError, errorText } from "./errors.ts";
 import { schemeUrl, type ConvertFileSrc } from "./schemeUrl.ts";
 
 /** Desktop URI scheme serving verified previewer bundles. */
@@ -176,6 +178,31 @@ export function readPreviewerMessage(
  *  needs one, is the host's: ArtifactBody's onCover). */
 export function wantsThumbnail(desc: Pick<PreviewerDescriptor, "capabilities">): boolean {
   return desc.capabilities.includes("thumbnail");
+}
+
+/** Why the host refuses a frame's save (null: it may publish). A previewer
+ *  saves only with the "edit" capability it declared, and only a room's
+ *  artifact: a chat attachment has no versions, a public share page no room. */
+export function saveRefusal(
+  desc: Pick<PreviewerDescriptor, "capabilities">,
+  at: { readonly roomId: string; readonly artifactId: string },
+): string | null {
+  if (!desc.capabilities.includes("edit")) return "This previewer cannot save files.";
+  if (!at.roomId || !at.artifactId) return "This file cannot be saved here.";
+  return null;
+}
+
+/** What a failed save tells the frame. A 409 is the gateway's compare-and-swap
+ *  refusal: the file moved on since the frame was handed it. Nothing is merged;
+ *  the member reloads the file and saves again. */
+export function saveFailure(err: unknown): string {
+  const text =
+    err instanceof ApiError && err.status === 409
+      ? "changed meanwhile: a newer version exists; reload the file to take it."
+      : errorText(err, "Could not save the file");
+  // The frame reads a message of at most ERROR_LIMIT characters; a longer one
+  // would be dropped unseen, so it is cut here.
+  return [...text].slice(0, ERROR_LIMIT).join("");
 }
 
 /** Theme from the app's background lightness ("hsl(h s% l%)" or "#rrggbb"). */

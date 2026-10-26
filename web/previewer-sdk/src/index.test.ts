@@ -1,5 +1,5 @@
 import { createPreviewerClient, type InboundEvent, type PreviewerClient } from "./index.ts";
-import { PREVIEWER_PROTOCOL, THUMBNAIL_LIMIT } from "./protocol.ts";
+import { PREVIEWER_PROTOCOL, SAVE_LIMIT, SAVE_SUMMARY_LIMIT, THUMBNAIL_LIMIT } from "./protocol.ts";
 
 // Local runner (no node types in the web tsconfig); same convention as
 // web/src/lib/*.test.ts. Async cases are awaited at top level.
@@ -211,3 +211,26 @@ await test("units: a request waits for its handler, the answer is fitted, a thro
   await new Promise((r) => setTimeout(r, 0));
   eq((h.posted.at(-1)?.message as { id: string }).id, "r2", "a malformed request is ignored");
 });
+
+await test("save: the bytes are transferred with the summary cut; a bad save throws; answers reach their handlers", () => {
+  const h = harness();
+  const bytes = new ArrayBuffer(12);
+  h.client.savePreview(bytes, "x".repeat(SAVE_SUMMARY_LIMIT + 5));
+  const sent = h.posted.at(-1);
+  eq(sent?.message.type, "preview.save", "a save is posted");
+  eq(sent?.targetOrigin, "*", "outbound messages use the same target as the other messages");
+  eq(sent?.transfer?.[0] === bytes, true, "the bytes are transferred, not copied");
+  eq([...((sent?.message.summary as string) ?? "")].length, SAVE_SUMMARY_LIMIT, "the summary is cut to its limit");
+  h.client.savePreview(new ArrayBuffer(3));
+  eq((h.posted.at(-1)?.message as { summary?: string }).summary, undefined, "a save without a summary has none");
+  throws(() => h.client.savePreview(new ArrayBuffer(0)), "an empty save throws");
+  throws(() => h.client.savePreview(new ArrayBuffer(SAVE_LIMIT + 1)), "a save over SAVE_LIMIT throws");
+  const saved: number[] = [];
+  const failed: string[] = [];
+  h.client.onSaved((v) => saved.push(v));
+  h.client.onSaveFailed((m) => failed.push(m));
+  h.deliver({ type: "preview.saved", version: 5 });
+  h.deliver({ type: "preview.save.failed", message: "changed meanwhile" });
+  eq([saved, failed], [[5], ["changed meanwhile"]], "answers reach their handlers");
+});
+

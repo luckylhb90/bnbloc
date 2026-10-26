@@ -19,6 +19,8 @@
 
 import {
   ERROR_LIMIT,
+  SAVE_LIMIT,
+  SAVE_SUMMARY_LIMIT,
   TITLE_LIMIT,
   fitSelection,
   fitUnits,
@@ -71,6 +73,8 @@ export type StateHandler = (state: unknown, actor: string) => void;
 export type ResizeHandler = (viewport: Viewport) => void;
 /** Shows a unit (its `at`): the host's "Show" on a change. */
 export type RevealHandler = (at: string) => void;
+export type SavedHandler = (version: number) => void;
+export type SaveFailedHandler = (message: string) => void;
 /** A selection as a previewer reports it (fitSelection bounds it). */
 export type SelectionDraft = Parameters<typeof fitSelection>[0];
 /** Reads a file into its units for Compare (capability "units"). */
@@ -112,6 +116,14 @@ export interface PreviewerClient {
   onUnits(cb: UnitsHandler): Unsubscribe;
   /** Scrolls to a unit the host asks to show (the `at` its units carried). */
   onReveal(cb: RevealHandler): Unsubscribe;
+  /** Saves the file as its next version (capability "edit"): the bytes are
+   *  transferred, so the caller must not use the buffer afterwards. Throws
+   *  for empty or over-SAVE_LIMIT bytes; the summary is cut, not refused. */
+  savePreview(bytes: ArrayBuffer, summary?: string): void;
+  /** The host saved the bytes as this version. */
+  onSaved(cb: SavedHandler): Unsubscribe;
+  /** The host did not save the bytes (a conflict, a refusal, a limit). */
+  onSaveFailed(cb: SaveFailedHandler): Unsubscribe;
 }
 
 function subscribe<T>(list: T[], cb: T): Unsubscribe {
@@ -133,6 +145,8 @@ export function createPreviewerClient(env: PreviewerEnv): PreviewerClient {
   const stateHandlers: StateHandler[] = [];
   const resizeHandlers: ResizeHandler[] = [];
   const revealHandlers: RevealHandler[] = [];
+  const savedHandlers: SavedHandler[] = [];
+  const saveFailedHandlers: SaveFailedHandler[] = [];
   // A reveal that arrives before the file is shown waits for it.
   let pendingReveal: string | null = null;
   let init: PreviewInit | null = null;
@@ -204,6 +218,12 @@ export function createPreviewerClient(env: PreviewerEnv): PreviewerClient {
       case "preview.reveal":
         if (revealHandlers.length === 0) pendingReveal = msg.at;
         for (const cb of [...revealHandlers]) cb(msg.at);
+        return;
+      case "preview.saved":
+        for (const cb of [...savedHandlers]) cb(msg.version);
+        return;
+      case "preview.save.failed":
+        for (const cb of [...saveFailedHandlers]) cb(msg.message);
         return;
     }
   };
@@ -280,6 +300,15 @@ export function createPreviewerClient(env: PreviewerEnv): PreviewerClient {
         if (unitsHandler === cb) unitsHandler = null;
       };
     },
+    savePreview(bytes, summary) {
+      if (!(bytes instanceof ArrayBuffer) || bytes.byteLength === 0 || bytes.byteLength > SAVE_LIMIT) {
+        throw new Error(`savePreview: bytes must be a non-empty ArrayBuffer of at most ${SAVE_LIMIT} bytes`);
+      }
+      const text = summary === undefined ? undefined : [...String(summary)].slice(0, SAVE_SUMMARY_LIMIT).join("");
+      post({ type: "preview.save", bytes, ...(text === undefined ? {} : { summary: text }) }, [bytes]);
+    },
+    onSaved: (cb) => subscribe(savedHandlers, cb),
+    onSaveFailed: (cb) => subscribe(saveFailedHandlers, cb),
   };
 }
 
@@ -318,3 +347,6 @@ export const reportError = (message: string): void => client().reportError(messa
 export const sendSelection = (selection: SelectionDraft | null): void => client().sendSelection(selection);
 export const onUnits = (cb: UnitsHandler): Unsubscribe => client().onUnits(cb);
 export const onReveal = (cb: RevealHandler): Unsubscribe => client().onReveal(cb);
+export const savePreview = (bytes: ArrayBuffer, summary?: string): void => client().savePreview(bytes, summary);
+export const onSaved = (cb: SavedHandler): Unsubscribe => client().onSaved(cb);
+export const onSaveFailed = (cb: SaveFailedHandler): Unsubscribe => client().onSaveFailed(cb);

@@ -23,6 +23,9 @@
 //   host  -> frame: preview.units.request {id, file, bytes}                  (capability "units")
 //   frame -> host : preview.units       {id, units, truncated} | {id, error}
 //   host  -> frame: preview.reveal      {at}                                  (capability "units")
+//   frame -> host : preview.save        {bytes, summary?}                     (capability "edit")
+//   host  -> frame: preview.saved       {version}                             (answer to preview.save)
+//   host  -> frame: preview.save.failed {message}                             (answer to preview.save)
 
 /** Frame protocol version carried in preview.init. */
 export const PREVIEWER_PROTOCOL = 1;
@@ -36,6 +39,12 @@ export const TOOLBAR_LIMIT = 20;
 export const TOOLBAR_LABEL_LIMIT = 40;
 export const TITLE_LIMIT = 120;
 export const ERROR_LIMIT = 500;
+/** Capability "edit": one saved file, and the version's summary line. The
+ *  default room version cap (services/room/artifact_files.go,
+ *  DefaultArtifactMaxBytes); an operator may lower BNBLOC_ARTIFACT_MAX_BYTES,
+ *  and the host refuses a larger save with its own message. */
+export const SAVE_LIMIT = 100 << 20;
+export const SAVE_SUMMARY_LIMIT = 200;
 /** A selection's chip label and the content it carries to the agent. */
 export const SELECTION_LABEL_LIMIT = 120;
 export const SELECTION_DETAIL_LIMIT = 2000;
@@ -59,7 +68,9 @@ export const ZOOM_MIN = 0.01;
 export const ZOOM_MAX = 64;
 
 /** Code-owned capability vocabulary (package `previewer.capabilities`). */
-export const PREVIEWER_CAPABILITIES = ["thumbnail", "liveState", "toolbar", "selection", "units"] as const;
+// "edit": the frame may save its scene as the next version of the file
+// (preview.save); the host publishes it on the version the frame was handed.
+export const PREVIEWER_CAPABILITIES = ["thumbnail", "liveState", "toolbar", "selection", "units", "edit"] as const;
 export type PreviewerCapability = (typeof PREVIEWER_CAPABILITIES)[number];
 
 /** Code-owned toolbar item kinds. */
@@ -152,7 +163,9 @@ export type HostMessage =
   | { readonly type: "preview.state"; readonly state: unknown; readonly actor: string }
   | { readonly type: "preview.resize"; readonly w: number; readonly h: number }
   | { readonly type: "preview.units.request"; readonly id: string; readonly file: PreviewFile; readonly bytes: ArrayBuffer }
-  | { readonly type: "preview.reveal"; readonly at: string };
+  | { readonly type: "preview.reveal"; readonly at: string }
+  | { readonly type: "preview.saved"; readonly version: number }
+  | { readonly type: "preview.save.failed"; readonly message: string };
 
 /** One unit of a version for Compare (docs/prd/2026-10-14-file-prompts-and-compare.md
  *  rule 7): a slide, a paragraph, a cell, a page. key is a stable identity
@@ -175,7 +188,8 @@ export type FrameMessage =
   | { readonly type: "preview.title"; readonly text: string }
   | { readonly type: "preview.selection"; readonly selection: Selection | null }
   | { readonly type: "preview.units"; readonly id: string; readonly units: readonly Unit[]; readonly truncated: boolean }
-  | { readonly type: "preview.units"; readonly id: string; readonly error: string };
+  | { readonly type: "preview.units"; readonly id: string; readonly error: string }
+  | { readonly type: "preview.save"; readonly bytes: ArrayBuffer; readonly summary?: string };
 
 type Rec = Readonly<Record<string, unknown>>;
 
@@ -307,6 +321,12 @@ export function readFrameMessage(data: unknown): FrameMessage | null {
       }
       const units = readUnits(data.units);
       return units ? { type: "preview.units", id: data.id, units, truncated: data.truncated === true } : null;
+    }
+    case "preview.save": {
+      if (!isArrayBuffer(data.bytes) || data.bytes.byteLength === 0 || data.bytes.byteLength > SAVE_LIMIT) return null;
+      if (data.summary === undefined) return { type: "preview.save", bytes: data.bytes };
+      const summary = boundedText(data.summary, SAVE_SUMMARY_LIMIT, true);
+      return summary === null ? null : { type: "preview.save", bytes: data.bytes, summary };
     }
     default:
       return null;
@@ -468,6 +488,14 @@ export function readHostMessage(data: unknown): HostMessage | null {
     case "preview.reveal": {
       const at = boundedText(data.at, UNIT_KEY_LIMIT);
       return at === null ? null : { type: "preview.reveal", at };
+    }
+    case "preview.saved": {
+      const version = data.version;
+      return typeof version === "number" && Number.isSafeInteger(version) && version > 0 ? { type: "preview.saved", version } : null;
+    }
+    case "preview.save.failed": {
+      const message = boundedText(data.message, ERROR_LIMIT);
+      return message === null ? null : { type: "preview.save.failed", message };
     }
     default:
       return null;
