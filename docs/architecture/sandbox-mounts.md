@@ -44,7 +44,11 @@ read-only**. It trusts the component with nothing:
 | backend | the sandbox does not advertise `readOnlyMounts` (`sandbox-protocol.md`): nothing is mounted |
 
 A mount that fails is dropped and logged (`bnbloc.bridge.sandbox_mount_dropped`);
-the turn never fails because of a component. The contributed mounts are the
+the turn never fails because of a component. That holds for the sandbox's own
+refusal too: a guest path belongs to one space of the machine, so the second
+room that asks for a mount at the same fixed path is answered `conflict`; the
+bridge then asks again with the mounts that can be shared (the `perSpace` ones)
+and without the others (`bnbloc.bridge.sandbox_mounts_conflict`). The contributed mounts are the
 guest's alone: the core's host-to-guest path mapping stays the workspace.
 
 The files are read every turn, so installing, changing or removing a component

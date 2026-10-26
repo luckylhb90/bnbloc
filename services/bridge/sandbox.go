@@ -388,13 +388,32 @@ func (s *sandboxRuntime) prepare(ctx context.Context, k driveKey, owner string, 
 		}
 		spaceEnv = merged
 	}
-	if _, err := s.client.EnsureSpace(ctx, s.endpoint(), machine, space, sandbox.SpaceRequest{
-		Workdir:      workdir,
-		Mounts:       mounts,
-		Env:          spaceEnv,
-		EnvAllowlist: coreprotocol.ForwardEnvAllowlist(env),
-		Labels:       sandbox.Labels{Room: room, Core: core, Provider: provider, Owner: owner},
-	}); err != nil {
+	ensure := func(mounts []sandbox.SpaceMount) error {
+		_, err := s.client.EnsureSpace(ctx, s.endpoint(), machine, space, sandbox.SpaceRequest{
+			Workdir:      workdir,
+			Mounts:       mounts,
+			Env:          spaceEnv,
+			EnvAllowlist: coreprotocol.ForwardEnvAllowlist(env),
+			Labels:       sandbox.Labels{Room: room, Core: core, Provider: provider, Owner: owner},
+		})
+		return err
+	}
+	err := ensure(mounts)
+	if sandbox.ErrorCodeOf(err) == sandbox.ErrorConflict && len(mounts) > space0 {
+		// A guest path belongs to one space of the machine: a component's mount at
+		// a fixed path is the first room's, and this room is refused it. The turn
+		// never fails because of a component, so it runs without the mounts that
+		// cannot be shared (the per-space ones, which can, stay).
+		kept := mounts[:space0:space0]
+		for _, m := range mounts[space0:] {
+			if isPerSpaceTree(m.HostPath) {
+				kept = append(kept, m)
+			}
+		}
+		slog.Warn("bnbloc bridge sandbox mounts at a fixed guest path dropped: another room's space holds the path", "event", "bnbloc.bridge.sandbox_mounts_conflict", "dropped", len(mounts)-len(kept))
+		mounts, err = kept, ensure(kept)
+	}
+	if err != nil {
 		s.invalidate()
 		return nil, fmt.Errorf("agent sandbox space: %w", err)
 	}

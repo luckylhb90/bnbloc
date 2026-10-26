@@ -28,6 +28,11 @@ const (
 	maxLinkTreeEntries = 200_000
 )
 
+// isPerSpaceTree reports a host path that is one of the per-space trees.
+func isPerSpaceTree(hostPath string) bool {
+	return strings.Contains(hostPath, string(filepath.Separator)+spacesDir+string(filepath.Separator))
+}
+
 // perSpaceTree makes (or keeps) the space's hard-linked tree of src for one
 // slot and returns its path. src is a folder under hostRoot, immutable once
 // published (a new version is a new folder), so a tree that records src as its

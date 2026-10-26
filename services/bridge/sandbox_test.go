@@ -50,6 +50,9 @@ type fakeSandboxd struct {
 	// code).
 	ensureFails      *sandbox.ProtocolError
 	ensureFailStatus int
+	// refuseSharedPaths answers an ensure that mounts a host folder outside a
+	// per-space tree (".spaces") with a conflict: another space holds its path.
+	refuseSharedPaths bool
 	// caps replaces the advertised capabilities when set.
 	caps []string
 }
@@ -126,6 +129,15 @@ func newFakeSandboxd(t *testing.T) *fakeSandboxd {
 			var req sandbox.SpaceRequest
 			_ = json.NewDecoder(r.Body).Decode(&req)
 			f.calls = append(f.calls, "ensure")
+			if f.refuseSharedPaths {
+				for _, m := range req.Mounts[1:] {
+					if !strings.Contains(m.HostPath, "/.spaces/") {
+						w.WriteHeader(http.StatusConflict)
+						_ = json.NewEncoder(w).Encode(sandbox.ErrorEnvelope{Error: sandbox.ProtocolError{Code: sandbox.ErrorConflict, Message: "guest path " + m.GuestPath + " collides with another space"}})
+						return
+					}
+				}
+			}
 			if f.ensureFails != nil {
 				w.WriteHeader(f.ensureFailStatus)
 				_ = json.NewEncoder(w).Encode(sandbox.ErrorEnvelope{Error: *f.ensureFails})

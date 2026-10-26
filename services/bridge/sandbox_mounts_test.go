@@ -499,3 +499,44 @@ func TestContributedMounts_perSpaceRefusals(t *testing.T) {
 		t.Errorf("a fifo in the tree: mounts %+v dropped %v", mounts, dropped)
 	}
 }
+
+// A guest path belongs to one space: a second room asking for a component's
+// mount at the same fixed path is refused by the sandbox. The turn runs
+// without that mount (it never fails because of a component), and keeps the
+// mounts that are per-space.
+func TestSandbox_aMountAnotherRoomHoldsIsDroppedAndThePerSpaceOnesStay(t *testing.T) {
+	sbx := newFakeSandboxd(t)
+	sbx.caps = append(sbx.advertised(), sandbox.CapabilityReadOnlyMounts)
+	sbx.refuseSharedPaths = true
+	prov := &sandboxProv{supports: true}
+	prov.targets = []corepkg.Target{{ID: "c", Provider: "codex"}}
+	b, f := mountBridge(t, sbx, SandboxAll, prov)
+	fixed, agent := f.folder(t, "local-skills", "x"), f.folder(t, "agents", "tool/1.0")
+	f.descriptor(t, "local-skills", descriptor(desc{"host": fixed, "guest": f.guestRoot + "/skills/x"}))
+	f.descriptor(t, "agents", descriptor(desc{"host": agent, "guest": f.guestRoot + "/agents/tool", "perSpace": true, "env": "BNBLOC_MOUNT_TOOL"}))
+
+	b.runBridgeJob(context.Background(), job("job-1", "alice"))
+
+	asked := 0
+	for _, c := range sbx.spaceCalls() {
+		if c == "ensure" {
+			asked++
+		}
+	}
+	if asked != 2 {
+		t.Fatalf("the turn asks once, is refused, and asks again without the fixed mount: %v", sbx.spaceCalls())
+	}
+	if len(sbx.ensures) != 1 {
+		t.Fatalf("one ensure succeeded: %d", len(sbx.ensures))
+	}
+	got := sbx.ensures[0]
+	if len(got.Mounts) != 2 || !strings.Contains(got.Mounts[1].HostPath, "/.spaces/") || !strings.HasPrefix(got.Mounts[1].GuestPath, f.guestRoot+"/agents/tool-") {
+		t.Errorf("the space keeps the workspace and the per-space mount only: %+v", got.Mounts)
+	}
+	if got.Env["BNBLOC_MOUNT_TOOL"] != got.Mounts[1].GuestPath {
+		t.Errorf("the variable names the per-space path: %v", got.Env)
+	}
+	if prov.turns == 0 && len(prov.workdirs) == 0 {
+		t.Error("the turn ran")
+	}
+}
