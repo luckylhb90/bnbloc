@@ -347,7 +347,7 @@ export function unreadDividerAt(order: readonly number[], seqOf: (index: number)
 // roles, else "Delegated to bob/claude" (or "to 3 agents").
 export function blockTitle(block: Pick<TurnBlock, "roles" | "agents" | "dispatches">): string {
   if (block.roles.length > 0) return `Team · ${block.roles.join(", ")}`;
-  if (block.agents.length === 1) return `Delegated to ${block.agents[0]}`;
+  if (block.agents.length === 1) return `Delegated to ${block.agents[0]}`; // which-one: a label, not a recipient
   if (block.agents.length > 1) return `Delegated to ${block.agents.length} agents`;
   return block.dispatches.length === 1 ? "Delegated work" : `Delegated work (${block.dispatches.length})`;
 }

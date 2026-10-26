@@ -333,9 +333,9 @@ export function defaultRoomRecipient(
 ): RoomAgent | null {
   if (hasOwnAgent) return null;
   return (
-    roomAgents.find((a) => a.self && !a.platform) ??
-    roomAgents.find((a) => a.platform && !a.self) ??
-    offered.find((c) => c.online)?.agent ??
+    roomAgents.find((a) => a.self && !a.platform) ?? // which-one: the composer's default for an empty pick, never a send that has a recipient
+    roomAgents.find((a) => a.platform && !a.self) ?? // which-one: the same default
+    offered.find((c) => c.online)?.agent ?? // which-one: the same default
     null
   );
 }

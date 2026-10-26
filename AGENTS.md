@@ -280,6 +280,50 @@ Library).
   and claims (`TestMySQLTestsUseTestmysql`). For the same reason an advisory
   lock name is scoped to its database (`advisoryLock`,
   `internal/store/advisory_lock.go`): GET_LOCK names are server-wide.
+- **Refer to a thing by its identity, never by a description that happens to
+  match it first.** Every "which one?" has a key: an agent is (owner, core,
+  provider), a session is (room, channel, agent), a workspace its id, a
+  member their subject, a job its id, a version its number, a message its
+  client id. Code that acts on *the same thing again* (ask again, retry,
+  continue, resume, reply, undo, confirm, restore, deliver) **carries the key
+  of the thing it was about and resolves it by that key**. It never derives
+  the target again from a description: a role (`self`, `platform`, `online`,
+  `owner`), a position (`[0]`, "first", "last", "latest", "newest", "default",
+  "current"), a name, a label or a text. Those are *searches*; a search that
+  returns one match today returns another tomorrow, when a room holds two
+  agents of one provider, a member has two channels, a workspace two
+  sessions.
+  - **Resolve by key, or stop.** If the thing is gone, say so and do
+    nothing. An action meant for A never falls back to "some B": a fallback
+    here is not graceful, it acts on the wrong thing (a message sent to
+    another core's agent, a conversation resumed into another channel, a file
+    written for another member).
+  - **A search is allowed only to *propose*, never to *act*.** A default that
+    fills an empty choice (the composer's first pick, the room's default
+    channel, the newest version offered) is a search, and it may run only
+    where a person still confirms or replaces it; it is never the target of an
+    action whose caller already had a key. Say so on the line
+    (`which-one: <why this only proposes>`).
+  - **Keep the key where the thing is made.** If the key is not at hand when
+    the action runs, the design is missing a field: add it to the record the
+    action reads (the card remembers who the request went to; the job names
+    its session; the saved choice names its owner), do not recompute it.
+  - **Test it with two.** A flow that picks a target is tested in a world that
+    holds **two candidates that differ only in the part the search ignores**
+    (the same provider under two cores, two channels of one room, two
+    sessions of one workspace, a member and a borrower of one agent), and
+    asserts which one the *second* action reached. A test world with one
+    candidate cannot fail this way, so it proves nothing about it
+    (2026-10-26: "ask again" went to the first of a member's own agents, a
+    different core's `claude` that was not signed in, instead of the nimbus
+    `claude-code` the member had chosen; the e2e room had one agent).
+  - Owners of the keys: `agentIdentity`/`sameAgent` (`lib/roomAgents.ts`),
+    `sessionKey` (`services/bridge`), `contentuse` for components, `sameUser`
+    for subjects. Enforced where it can be: `web/scripts/which-one.test.mjs`
+    fails on a role lookup or a `[0]` of an agent list outside a line that says
+    why it only proposes. For any other kind of thing the rule is a review
+    lens (`docs/design-review.md` 7b) asked of every change that acts on "the
+    same X again".
 - **Use a design pattern when it removes duplication or makes a rule
   explicit**, never for its own sake: a registry/strategy for per-kind
   behaviour (`contentpkg.KindSpec`), middleware for per-request policy,

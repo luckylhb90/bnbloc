@@ -52,6 +52,30 @@ them.
 
 ## Mistakes
 
+### Act on a thing by its key, never by a search that returns it first
+
+"Ask again" on a suggestion sent the request to `roomAgents.find((a) => a.self &&
+!a.platform)`: the first of the member's own agents. The member had chosen
+nimbus's `claude-code`; the room also held another core's `claude`, which was
+not signed in, so the resend failed with a spawn error and the member
+reasonably blamed the feature they had just been told about (steering). The
+same shape had already cost us a saved agent restored by (core, provider) onto
+another member's agent (web H9), a turn matched to its sender by message text,
+and a conversation adopted as "the latest of the workspace" before it was handed
+over by name. The e2e room held one agent, so a wrong pick could not show.
+What went wrong is not the line: it is that the action had no key. The card
+knew the request and not who it went to, so the code searched.
+
+Rule (AGENTS.md "One rule, one owner", design-review lens 7b): a thing is
+referred to by its key (an agent by owner+core+provider, a session by
+room+channel+agent, a job by id); code that acts on it again carries the key and
+resolves by it, or says it is gone and does nothing. A search may only propose,
+never act. Test with two candidates that differ only in what the search ignores.
+
+Evidence: web/scripts/which-one.test.mjs, web/e2e/suggest-use.mjs (several
+agents in the room), web/src/lib/sentRequestCard.ts (`sentTo`).
+Seen 1× in this form (2026-10-26); the same class 2026-10-12, 2026-10-22.
+
 ### What an agent cannot see in this turn, it cannot act on: let a tool take what the agent has
 
 An agent wrote two decks and was asked to save them as gallery works. The

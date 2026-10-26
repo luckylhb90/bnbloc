@@ -168,6 +168,39 @@ from.
 *Seen:* the file picker and the upload check each with their own list of
 types; two components each deciding how long a turn may run.
 
+### 7b. Identity — which one, exactly?
+
+Asked of every change that acts on "the same X again": ask again, retry,
+continue, resume, reply, undo, confirm, restore, deliver, notify.
+
+- **What is X's key?** Name it (an agent: owner+core+provider; a session:
+  room+channel+agent; a job, a version, a message: its id). If you cannot
+  name it, the design is missing a field.
+- **Does the action carry the key of the thing it was about, or does it search
+  for the thing again** by a role (mine, platform, online, owner), a position
+  (first, last, latest, default, current), a name, a label or a text? A search
+  finds *a* match; the action needs *the* one.
+- **Can two candidates exist that differ only in what the search ignores?**
+  Two agents of one provider under two cores, two channels, two sessions of
+  one workspace, a member and a borrower of one agent. Today there is one;
+  what makes there be two?
+- **What happens when the thing is gone?** The only right answer is "say so
+  and do nothing". A fallback to "some other one" acts on the wrong thing.
+- **Where does a search remain, and who confirms it?** A default may fill an
+  empty choice that a person then confirms or changes. It is never the target
+  of an action.
+
+*Test:* a world with two candidates that differ only in the part the search
+ignores; do the first action, then the "again" action, and assert it reached
+**the same one**; then remove it and assert nothing was sent. A test world
+with one candidate cannot fail this way.
+*Seen:* "ask again" sent to the first of a member's own agents (another
+core's, not signed in) instead of the one the request went to (2026-10-26);
+a saved agent restored by (core, provider) onto another member's agent,
+starting a borrow (web H9, 2026-10-12); a turn matched to its sender by
+message text; a conversation adopted by "the latest of its workspace" before
+it was handed over by name (a core, 2026-10-22).
+
 ### 8. Defaults, unknowns and silent fallbacks
 
 - What happens when a value is missing, empty, unknown, or still loading?

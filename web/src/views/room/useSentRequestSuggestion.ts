@@ -5,7 +5,7 @@ import { gatewayBase } from "@/lib/config";
 import { contentApi } from "@/lib/contentComponentsApi";
 import { decisionsApi } from "@/lib/decisions";
 import { ApiError, errorText } from "@/lib/errors";
-import { sentRequestCards, staleAnswer } from "@/lib/sentRequestCard";
+import { agentSentTo, sentRequestCards, staleAnswer } from "@/lib/sentRequestCard";
 import { StorageKey, browserStorage, memberKey } from "@/lib/storageKeys";
 import {
   aiSuggestionsOn,
@@ -107,7 +107,10 @@ export function useSentRequestSuggestion({
           const reply = await decisionsApi.decide(decisionRequest(sent.text, eligible));
           const found = suggestionFromDecision(reply, eligible);
           if (!found || staleAnswer(sent.clientMsgId, latest.current, left.current || roomRef.current !== askedRoom)) return;
-          sentRequestCards.show(askedRoom, { clientMsgId: sent.clientMsgId, request: sent.text, suggestion: found });
+          // A message to an agent always has its recipient; one without is not asked about.
+          if (!sent.recipient) return;
+          const { ownerId, provider, core } = sent.recipient;
+          sentRequestCards.show(askedRoom, { clientMsgId: sent.clientMsgId, request: sent.text, sentTo: { ownerId, provider, core }, suggestion: found });
         } catch (e) {
           // No decision model (409), a rate limit or a failure: nothing is shown, and the
           // model is left alone for a while.
@@ -129,16 +132,22 @@ export function useSentRequestSuggestion({
     const c = sentRequestCards.of(roomRef.current);
     if (!c || busy) return;
     const cand = c.suggestion.candidate;
+    // The same request goes again to the agent it went to (the card remembers it). Checked
+    // before anything is turned on: nothing is added for a request that cannot go out.
+    const to = agentSentTo(roomAgents, c.sentTo);
+    if (!to) {
+      sentRequestCards.clear(roomRef.current);
+      toast.error("The agent this request went to is no longer in the room");
+      return;
+    }
     setBusy(true);
     void (async () => {
       try {
         await turnOn(cand, roomRef.current);
         if (keys) dismissSuggestion(browserStorage(), keys.dismissed, cand.key, Date.now());
         sentRequestCards.clear(roomRef.current);
-        // The same request again, as a normal send: to the agent it went to, wearing the
-        // expert when the candidate is one.
-        const first = roomAgents.find((a) => a.self && !a.platform) ?? roomAgents[0] ?? null;
-        const opts: SendOptions = { peopleOnly: false, recipient: first, ...(cand.kind === "expert" ? expertOf(cand) : {}) };
+        // Wearing the expert when the candidate is one.
+        const opts: SendOptions = { peopleOnly: false, recipient: to, ...(cand.kind === "expert" ? expertOf(cand) : {}) };
         const sent = await send(c.request, opts);
         if (!sent) toast.error("Could not send the request again");
         else if (cand.kind === "skill") toast.success(`${cand.label} is on; the request was sent again.`);

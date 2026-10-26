@@ -246,7 +246,7 @@ export function useDeadEnd({
       },
       attach: () => composerFilePicks.queue(roomId, true),
       ownAgent: (reply) => {
-        const mine = roomAgents.find((a) => a.self && !a.platform);
+        const mine = roomAgents.find((a) => a.self && !a.platform); // which-one: fills the composer's empty pick only; the member sends, and the toast names the agent
         if (!mine) {
           // The desktop app and its local agents: the download in a
           // browser, the set-up in the desktop app.
@@ -256,7 +256,7 @@ export function useDeadEnd({
         composerAgentPicks.queue(roomId, { core: mine.core ?? "", provider: mine.provider, own: true });
         const req = requestText(reply);
         if (req) composerDrafts.queue(roomId, req.text);
-        toast.info("Your own agent is picked: send the request to it");
+        toast.info(`${agentHandle(mine)} is picked: send the request to it`);
       },
       rephrase: async (reply) => {
         const req = requestText(reply);
@@ -282,8 +282,15 @@ export function useDeadEnd({
       sandbox: () => desktop.sandboxStatus(),
       askAgain: (reply) => {
         const req = requestText(reply);
-        const recipient = roomAgents.find((a) => agentHandle(a) === reply.agentLabel) ?? roomAgents.find((a) => a.self && !a.platform);
-        if (!req || !recipient) return;
+        if (!req) return;
+        // The agent that gave this reply, and no other: its handle names owner, core and
+        // provider. When it is not in the room any more there is nobody to ask again, and
+        // the member is told (never "my first agent").
+        const recipient = roomAgents.find((a) => agentHandle(a) === reply.agentLabel);
+        if (!recipient) {
+          toast.info("The agent that answered is no longer in the room");
+          return;
+        }
         const attachments = req.attachments ?? [];
         void send(req.text, { peopleOnly: false, recipient, attachmentIds: attachments.map((a) => a.id), attachments });
       },

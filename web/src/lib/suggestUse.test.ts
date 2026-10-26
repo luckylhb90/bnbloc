@@ -14,7 +14,8 @@ import {
   suggestionText,
   type UseCandidate,
 } from "./suggestUse.ts";
-import { cardForRow, createCardStore, staleAnswer } from "./sentRequestCard.ts";
+import { agentSentTo, cardForRow, createCardStore, staleAnswer } from "./sentRequestCard.ts";
+import { sameAgent } from "./roomAgents.ts";
 import type { DecisionReply, LibraryCandidate } from "./wire.gen.ts";
 
 function assert(condition: boolean, message: string): void {
@@ -119,7 +120,7 @@ assert(suggestionText(by("sql-helper")) === "SQL helper fits this request.", "th
   const store = createCardStore();
   let changes = 0;
   const off = store.subscribe(() => changes++);
-  const card = { clientMsgId: "m1", request: "build a page", suggestion: { candidate: by("app-builder"), probability: 0.9 } };
+  const card = { clientMsgId: "m1", request: "build a page", sentTo: { ownerId: "maya", provider: "claude-code", core: "nimbus" }, suggestion: { candidate: by("app-builder"), probability: 0.9 } };
   assert(store.of("r1") === null, "no card at first");
   store.show("r1", card);
   assert(store.of("r1") === card && store.of("r2") === null, "a card belongs to its room");
@@ -141,3 +142,21 @@ assert(!staleAnswer("m1", "m1", false), "the latest message's answer is wanted")
 assert(staleAnswer("m1", "m2", false), "a newer message supersedes it");
 assert(staleAnswer("m1", "m1", true), "an answer after leaving the room is dropped");
 assert(!staleAnswer("m1", null, false), "no message sent since is fine");
+
+// Asking again goes to the agent the request went to: a room holds one member's agents of
+// several cores (the same provider under two of them), and the second send must not land on
+// the first of them. A real room did exactly that (2026-10-26: a request sent to nimbus's
+// claude-code was sent again to acme's claude, which was not even signed in).
+{
+  const agents = [
+    { ownerId: "maya", provider: "claude", core: "acme", self: true },
+    { ownerId: "maya", provider: "claude-code", core: "nimbus", self: true },
+    { ownerId: "maya", provider: "claude-code", core: undefined, self: true },
+    { ownerId: "jack", provider: "claude-code", core: "nimbus", self: false },
+  ];
+  assert(agentSentTo(agents, { ownerId: "maya", provider: "claude-code", core: "nimbus" }) === agents[1], "the agent the request went to, not the first of mine");
+  assert(agentSentTo(agents, { ownerId: "maya", provider: "claude-code" }) === agents[2], "no core is its own agent");
+  assert(agentSentTo(agents, { ownerId: "jack", provider: "claude-code", core: "nimbus" }) === agents[3], "someone else's agent it was sent to");
+  assert(agentSentTo(agents, { ownerId: "maya", provider: "opencode", core: "nimbus" }) === null, "an agent that left the room is nobody");
+  assert(!sameAgent({ ownerId: "maya", provider: "claude", core: "acme" }, { ownerId: "maya", provider: "claude", core: "nimbus" }), "the core tells two agents of one provider apart");
+}

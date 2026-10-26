@@ -25,7 +25,16 @@ const REQUEST = "build a landing page with an AI assistant that answers question
 
 const browser = await chromium.launch();
 // decision: "app" (it picks App builder, else the skill pack), "none", "limited" (429), "unavailable".
-async function run(name, { catalog, decision = "app", roomRefuses = false, aiSetting = "" }, body) {
+const ONE_AGENT = [{ ownerUserId: "maya", provider: "codex", core: "acme" }];
+// A room holds one member's agents of several cores, the same provider under two of them: the
+// first of "mine" is not the one the request went to (a real room, 2026-10-26).
+const SEVERAL_AGENTS = [
+  { ownerUserId: "maya", provider: "claude", core: "acme" },
+  { ownerUserId: "maya", provider: "codex", core: "acme" },
+  { ownerUserId: "maya", provider: "claude-code", core: "nimbus" },
+  { ownerUserId: "maya", provider: "claude", core: "nimbus" },
+];
+async function run(name, { catalog, decision = "app", roomRefuses = false, aiSetting = "", agents = ONE_AGENT }, body) {
   const ctx = await browser.newContext({ viewport: { width: Number(process.env.W || 1280), height: 900 } });
   const puts = [];
   const decides = [];
@@ -40,7 +49,7 @@ async function run(name, { catalog, decision = "app", roomRefuses = false, aiSet
     if (p === "/v1/rooms/r1/history") return json({ messages: [] });
     if (p === "/v1/rooms/r1/channels") return json({ channels: [{ channelId: "general", name: "general", isDefault: true, createdBy: "maya" }] });
     if (p === "/v1/rooms/r1/members") return json({ members: [{ userId: "maya", role: "owner" }] });
-    if (p === "/v1/rooms/r1/agents") return json({ agents: [{ ownerUserId: "maya", provider: "codex", core: "acme" }] });
+    if (p === "/v1/rooms/r1/agents") return json({ agents });
     if (p === "/v1/rooms/r1/chat" && req.method() === "POST") { const b = JSON.parse(req.postData() || "{}"); chats.push(b); return json({ sequence: chats.length }); }
     if (p === "/v1/rooms/r1") return json({ roomId: "r1", name: "r1", description: "", visibility: "private", previewable: false, syncMode: "live", createdBy: "maya", createdAtMs: 1 });
     if (p === "/v1/users/maya/rooms") return json({ rooms: [{ roomId: "r1", name: "r1", description: "", visibility: "private", syncMode: "live", role: "owner", memberCount: 1, createdAtMs: 1 }] });
@@ -176,6 +185,23 @@ await run("a member who turned the AI off sends nothing to the model", { catalog
   await sendAtOnce(input);
   await page.waitForTimeout(2500);
   ok(chats.length === 1 && decides.length === 0 && (await card(page).count()) === 0, "no decision call, no card");
+});
+
+
+await run("asking again goes to the agent the request went to, not the first of my agents", { catalog: [...EXPERTS, SKILL], agents: SEVERAL_AGENTS }, async ({ page, input, chats }) => {
+  // Pick the third agent (nimbus's claude-code) in the composer, as a member does.
+  await page.getByRole("button", { name: /^Agent:/ }).click();
+  await page.getByRole("button", { name: /claude-code/ }).first().click().catch(async () => { await page.getByText("claude-code", { exact: true }).first().click(); });
+  await page.waitForTimeout(400);
+  await sendAtOnce(input);
+  await card(page).waitFor({ timeout: 8000 }).catch(() => {});
+  ok(chats.length === 1 && chats[0].recipient?.provider === "claude-code" && chats[0].recipient?.core === "nimbus", `the first send went to nimbus's claude-code (${JSON.stringify(chats[0]?.recipient)})`);
+  await card(page).getByRole("button", { name: "Ask again with it" }).click();
+  await page.waitForTimeout(1200);
+  ok(chats.length === 2, `the request is sent a second time (${chats.length})`);
+  const a = chats[0]?.recipient, b = chats[1]?.recipient;
+  ok(!!a && !!b && a.ownerId === b.ownerId && a.provider === b.provider && a.core === b.core, `the second send goes to the same agent: ${JSON.stringify(a)} then ${JSON.stringify(b)}`);
+  ok(chats[1]?.expert?.id === "cc_app-builder", "wearing the expert");
 });
 
 await browser.close();
