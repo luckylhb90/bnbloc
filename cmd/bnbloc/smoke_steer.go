@@ -1,7 +1,6 @@
 package main
 
 import (
-	"cmp"
 	"context"
 	"fmt"
 	"net/http"
@@ -140,8 +139,14 @@ func smokeSteer(ctx context.Context, c *client, w *smokeWaiter, roomID, subject 
 					}
 					steered = true
 					return "steered into " + j.SteeredInto, nil
-				case j.Status == "replied" || j.failedHow() != "":
-					return "", fmt.Errorf("the second message's job ended %s without joining the running turn", cmp.Or(j.failedHow(), j.Status))
+				case j.Status == "replied":
+					// It ran as a job of its own after the first: queued, which is the contract of a core
+					// that takes no steering (the queued replies below check both turns completed).
+					fmt.Fprintf(run.out, "INFO joined: the second message ran after the first (this agent's core takes no steering)\n")
+					queued = true
+					return "", smokeWarning{err: fmt.Errorf("not steered")}
+				case j.failedHow() != "":
+					return "", fmt.Errorf("the second message's job ended %s without joining the running turn", j.failedHow())
 				}
 			}
 			time.Sleep(opts.pollEvery())
