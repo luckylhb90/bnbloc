@@ -523,6 +523,22 @@ func (b *Bridge) targetTransports(coreName, target, provider string) []string {
 	return byProvider
 }
 
+// targetRequiresSandbox reports whether the target a drive runs is one that
+// exists only in its owner's sandbox, from the last listed targets of the core
+// (by target id, else by provider). Unknown means no.
+func (b *Bridge) targetRequiresSandbox(coreName, target, provider string) bool {
+	byProvider := false
+	for _, t := range b.cachedTargets(coreName) {
+		if t.ID == target {
+			return t.RequiresSandbox
+		}
+		if strings.EqualFold(t.Provider, provider) && t.RequiresSandbox {
+			byProvider = true
+		}
+	}
+	return target == "" && byProvider
+}
+
 // unbindLocked drops a session binding and releases what its contributors
 // granted (asynchronously: callers hold b.mu). Callers hold b.mu.
 func (b *Bridge) unbindLocked(sk sessionKey) {

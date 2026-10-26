@@ -565,6 +565,7 @@ func TestDecideSandbox(t *testing.T) {
 		name                     string
 		borrowed                 bool
 		foreign                  []string
+		requires                 bool
 		mode                     SandboxMode
 		ready, supports          bool
 		policy                   func() (bool, error)
@@ -572,43 +573,51 @@ func TestDecideSandbox(t *testing.T) {
 	}{
 		// An unreadable policy refuses an unsandboxed borrowed drive (fail
 		// closed); a drive the sandbox takes never reads it.
-		{"borrowed, mode off, policy unreadable", true, nil, SandboxOff, true, true, unreadable, false, true},
-		{"borrowed, unsupported, policy unreadable", true, nil, SandboxBorrowed, true, false, unreadable, false, true},
-		{"borrowed sandboxed, policy unreadable", true, nil, SandboxBorrowed, true, true, never, true, false},
-		{"own, policy unreadable", false, nil, SandboxOff, true, true, never, false, false},
-		{"borrowed sandboxed", true, nil, SandboxBorrowed, true, true, never, true, false},
-		{"borrowed in mode all", true, nil, SandboxAll, true, true, never, true, false},
-		{"own in mode borrowed", false, nil, SandboxBorrowed, true, true, never, false, false},
-		{"own in mode all", false, nil, SandboxAll, true, true, never, true, false},
-		{"own, sandbox down", false, nil, SandboxAll, false, true, never, false, false}, // waits
-		{"borrowed, mode off, not required", true, nil, SandboxOff, true, true, off, false, false},
-		{"borrowed, mode off, required", true, nil, SandboxOff, true, true, on, false, true},
-		{"borrowed, not ready, required", true, nil, SandboxBorrowed, false, true, never, false, false},  // waits
-		{"borrowed, not ready, mode all", true, nil, SandboxAll, false, true, never, false, false},       // waits
-		{"own, not ready, mode borrowed", false, nil, SandboxBorrowed, false, true, never, false, false}, // the host, as the mode says
-		{"own, sandbox down, unsupported", false, nil, SandboxAll, false, false, never, false, false},
+		{"borrowed, mode off, policy unreadable", true, nil, false, SandboxOff, true, true, unreadable, false, true},
+		{"borrowed, unsupported, policy unreadable", true, nil, false, SandboxBorrowed, true, false, unreadable, false, true},
+		{"borrowed sandboxed, policy unreadable", true, nil, false, SandboxBorrowed, true, true, never, true, false},
+		{"own, policy unreadable", false, nil, false, SandboxOff, true, true, never, false, false},
+		{"borrowed sandboxed", true, nil, false, SandboxBorrowed, true, true, never, true, false},
+		{"borrowed in mode all", true, nil, false, SandboxAll, true, true, never, true, false},
+		{"own in mode borrowed", false, nil, false, SandboxBorrowed, true, true, never, false, false},
+		{"own in mode all", false, nil, false, SandboxAll, true, true, never, true, false},
+		{"own, sandbox down", false, nil, false, SandboxAll, false, true, never, false, false}, // waits
+		{"borrowed, mode off, not required", true, nil, false, SandboxOff, true, true, off, false, false},
+		{"borrowed, mode off, required", true, nil, false, SandboxOff, true, true, on, false, true},
+		{"borrowed, not ready, required", true, nil, false, SandboxBorrowed, false, true, never, false, false},  // waits
+		{"borrowed, not ready, mode all", true, nil, false, SandboxAll, false, true, never, false, false},       // waits
+		{"own, not ready, mode borrowed", false, nil, false, SandboxBorrowed, false, true, never, false, false}, // the host, as the mode says
+		{"own, sandbox down, unsupported", false, nil, false, SandboxAll, false, false, never, false, false},
 		// The desktop does not know the mode yet: whatever might be
 		// sandboxed waits.
-		{"own, mode pending", false, nil, SandboxPending, false, true, never, false, false},
-		{"borrowed, mode pending", true, nil, SandboxPending, false, true, never, false, false},
-		{"borrowed, unsupported, not required", true, nil, SandboxBorrowed, true, false, off, false, false},
+		{"own, mode pending", false, nil, false, SandboxPending, false, true, never, false, false},
+		{"borrowed, mode pending", true, nil, false, SandboxPending, false, true, never, false, false},
+		{"borrowed, unsupported, not required", true, nil, false, SandboxBorrowed, true, false, off, false, false},
 		// Someone else's script-bearing content forces the sandbox, own
 		// drive or not, and is refused where the sandbox cannot take it.
-		{"foreign content, own drive", false, []string{"lint kit"}, SandboxBorrowed, true, true, never, true, false},
-		{"foreign content, own drive, mode all", false, []string{"lint kit"}, SandboxAll, true, true, never, true, false},
-		{"foreign content, mode off", false, []string{"lint kit"}, SandboxOff, false, true, never, false, true},
-		{"foreign content, unsupported", true, []string{"lint kit"}, SandboxBorrowed, true, false, never, false, true},
-		{"foreign content, not ready", false, []string{"lint kit"}, SandboxAll, false, true, never, false, false}, // waits
+		{"foreign content, own drive", false, []string{"lint kit"}, false, SandboxBorrowed, true, true, never, true, false},
+		{"foreign content, own drive, mode all", false, []string{"lint kit"}, false, SandboxAll, true, true, never, true, false},
+		{"foreign content, mode off", false, []string{"lint kit"}, false, SandboxOff, false, true, never, false, true},
+		{"foreign content, unsupported", true, []string{"lint kit"}, false, SandboxBorrowed, true, false, never, false, true},
+		{"foreign content, not ready", false, []string{"lint kit"}, false, SandboxAll, false, true, never, false, false}, // waits
+		// A target that exists only in the sandbox: sandboxed, or refused, never
+		// the host, in every mode. It is the owner's own run, so the owner's own
+		// environment applies (unlike foreign content).
+		{"sandbox-only, own, mode off", false, nil, true, SandboxOff, true, true, never, false, true},
+		{"sandbox-only, own, mode borrowed", false, nil, true, SandboxBorrowed, true, true, never, true, false},
+		{"sandbox-only, own, mode all", false, nil, true, SandboxAll, true, true, never, true, false},
+		{"sandbox-only, core cannot sandbox", false, nil, true, SandboxAll, true, false, never, false, true},
+		{"sandbox-only, sandbox not ready", false, nil, true, SandboxAll, false, true, never, false, false}, // waits
 	}
 	// The owner's forwarded environment goes to exactly one kind of drive:
 	// their own, sandboxed, wearing nothing from someone else that runs
 	// scripts. Never a borrowed one, never one forced by foreign content.
-	ownerEnv := map[string]bool{"own in mode all": true}
+	ownerEnv := map[string]bool{"own in mode all": true, "sandbox-only, own, mode borrowed": true, "sandbox-only, own, mode all": true}
 	// A drive the mode puts in the sandbox waits while it is not ready:
 	// never the host meanwhile, never a refusal.
-	wait := map[string]bool{"own, mode pending": true, "borrowed, mode pending": true, "own, sandbox down": true, "borrowed, not ready, required": true, "borrowed, not ready, mode all": true, "foreign content, not ready": true}
+	wait := map[string]bool{"own, mode pending": true, "borrowed, mode pending": true, "own, sandbox down": true, "borrowed, not ready, required": true, "borrowed, not ready, mode all": true, "foreign content, not ready": true, "sandbox-only, sandbox not ready": true}
 	for _, tc := range cases {
-		d := decideSandbox(tc.borrowed, tc.foreign, tc.mode, tc.ready, "", tc.supports, tc.policy, "alice", "codex")
+		d := decideSandbox(tc.borrowed, tc.foreign, tc.requires, tc.mode, tc.ready, "", tc.supports, tc.policy, "alice", "codex")
 		if d.sandboxed != tc.wantSandboxed || (d.refuse != "") != tc.wantRefus || d.ownerEnv != ownerEnv[tc.name] || d.wait != wait[tc.name] {
 			t.Errorf("%s: %+v", tc.name, d)
 		}
@@ -1031,5 +1040,97 @@ func TestSandbox_aMoveToAnotherPlaceIsSaid(t *testing.T) {
 	b.runBridgeJob(ctx, job("job-4", "alice"))
 	if gw.noticesContaining("runs on alice's computer, outside the agent sandbox again (until now in alice's agent sandbox) and continues the session it had there") != 1 {
 		t.Fatalf("moved notices %d; want the move back said, continuing the host session", moved())
+	}
+}
+
+// An agent that exists only in its owner's sandbox (Target.RequiresSandbox) is
+// never run on the host and never run for anyone else: a borrow and an own run
+// the sandbox cannot take are refused before anything reaches the core.
+func TestSandbox_aSandboxOnlyAgentNeverRunsOnTheHostOrForSomeoneElse(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		mode      SandboxMode
+		sbx       bool
+		requester string
+		want      string
+		// reason is the job's failure: a refusal, or the wait for a sandbox
+		// the mode wants (retried; never the host meanwhile).
+		reason string
+	}{
+		{"borrowed, mode all", SandboxAll, true, "bob", "cannot be borrowed", "sandbox_required"},
+		{"borrowed, mode off", SandboxOff, false, "bob", "cannot be borrowed", "sandbox_required"},
+		{"own, sandbox mode off", SandboxOff, false, "alice", "installed only in its owner's agent sandbox", "sandbox_required"},
+		{"own, mode all, the sandbox is not up yet", SandboxAll, false, "alice", "", "sandbox_starting"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gw := newSandboxGateway(t, "room-1", false)
+			var sbx *fakeSandboxd
+			if tc.sbx {
+				sbx = newFakeSandboxd(t)
+			}
+			prov := &sandboxProv{supports: true}
+			prov.targets = []corepkg.Target{{ID: "c", Provider: "codex", RequiresSandbox: true}}
+			b, _ := sandboxBridge(t, gw, sbx, tc.mode, prov)
+			b.cacheTargets("core-a", prov.targets)
+
+			b.runBridgeJob(context.Background(), job("job-1", tc.requester))
+
+			if prov.prompt != "" || prov.hostWorkspace != 0 || len(prov.workdirs) != 0 {
+				t.Fatalf("a refused drive must never reach the core (prompt=%q host workspaces=%d workdirs=%v)", prov.prompt, prov.hostWorkspace, prov.workdirs)
+			}
+			st := gw.lastStatus()
+			if st["status"] != "failed" || st["failureReason"] != tc.reason {
+				t.Fatalf("status = %v, want failure %s", st, tc.reason)
+			}
+			if tc.want == "" {
+				return
+			}
+			_, fresh := gw.stored()
+			if len(fresh) != 1 || !strings.Contains(payloadText(fresh[0]), tc.want) {
+				t.Fatalf("notice = %+v, want it to say %q", fresh, tc.want)
+			}
+		})
+	}
+}
+
+// The same agent runs for its owner when the sandbox is there, in every mode
+// that is not off: sandboxed in a space, with the owner's own environment.
+func TestSandbox_aSandboxOnlyAgentRunsSandboxedForItsOwner(t *testing.T) {
+	for _, mode := range []SandboxMode{SandboxBorrowed, SandboxAll} {
+		t.Run(string(mode), func(t *testing.T) {
+			gw := newSandboxGateway(t, "room-1", false)
+			sbx := newFakeSandboxd(t)
+			prov := &sandboxProv{supports: true}
+			prov.targets = []corepkg.Target{{ID: "c", Provider: "codex", RequiresSandbox: true}}
+			b, _ := sandboxBridge(t, gw, sbx, mode, prov)
+			b.cacheTargets("core-a", prov.targets)
+			owners := []string{"EXAMPLE_API_KEY"}
+			b.sandbox.cfg.Env = owners
+
+			b.runBridgeJob(context.Background(), job("job-1", "alice"))
+
+			if prov.hostWorkspace != 0 || len(prov.workdirs) != 1 || prov.opts.Execution == nil {
+				t.Fatalf("it must run sandboxed (host workspaces=%d workdirs=%v execution=%+v)", prov.hostWorkspace, prov.workdirs, prov.opts.Execution)
+			}
+			if !slices.Equal(prov.opts.Execution.Sandbox.Env, owners) {
+				t.Errorf("an own run keeps the owner's forwarded environment: %v", prov.opts.Execution.Sandbox.Env)
+			}
+		})
+	}
+}
+
+// A target the core does not mark is unaffected: an own run in mode off runs on
+// the host as before.
+func TestSandbox_anAgentNotMarkedSandboxOnlyIsUnchanged(t *testing.T) {
+	gw := newSandboxGateway(t, "room-1", false)
+	prov := &sandboxProv{supports: true}
+	prov.targets = []corepkg.Target{{ID: "c", Provider: "codex"}}
+	b, _ := sandboxBridge(t, gw, nil, SandboxOff, prov)
+	b.cacheTargets("core-a", prov.targets)
+
+	b.runBridgeJob(context.Background(), job("job-1", "alice"))
+
+	if prov.hostWorkspace != 1 || len(prov.workdirs) != 0 {
+		t.Fatalf("host workspaces=%d workdirs=%v", prov.hostWorkspace, prov.workdirs)
 	}
 }

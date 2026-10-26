@@ -480,6 +480,17 @@ func contentSandboxPrefix(foreign []string) string {
 	return "This turn uses " + strings.Join(foreign, ", ") + " from someone else, which runs scripts or tools and so runs only in the agent sandbox, and "
 }
 
+// requiresSandboxPrefix is the refusal of a run of an agent that exists only in
+// its owner's sandbox, when the sandbox cannot take it: such an agent has no
+// host install to fall back to.
+const requiresSandboxPrefix = "This agent is installed only in its owner's agent sandbox and runs only there, and "
+
+// ownerOnlyRefusal is the refusal of a borrow (or a platform seat) of such an
+// agent: the credentials it signs in with exist only for its owner's own runs,
+// so another person's run could not work, and giving it the owner's would hand
+// them over.
+const ownerOnlyRefusal = "This agent is installed only in its owner's agent sandbox, with a sign-in only the owner has, so it cannot be borrowed or used by anyone else."
+
 // decideSandbox applies the PRD policy. Own drives are sandboxed only in mode
 // all; borrowed drives in mode borrowed or all, when the core supports
 // sandboxExec. A drive the mode puts in the sandbox waits for it while it is
@@ -494,17 +505,25 @@ func contentSandboxPrefix(foreign []string) string {
 // borrowed one, and refused when it cannot be: such content never runs on
 // the owner's host. Only a sandboxed drive that is neither borrowed nor
 // forced gets the owner's forwarded environment (ownerEnv).
-func decideSandbox(borrowed bool, foreign []string, mode SandboxMode, ready bool, notReadyReason string, coreSupports bool, requirePolicy func() (bool, error), owner, provider string) sandboxDecision {
-	forced := len(foreign) > 0
+func decideSandbox(borrowed bool, foreign []string, requires bool, mode SandboxMode, ready bool, notReadyReason string, coreSupports bool, requirePolicy func() (bool, error), owner, provider string) sandboxDecision {
+	// requires: the target exists only in the sandbox. It is forced like foreign
+	// content (sandboxed, or refused, never the host), but unlike foreign content
+	// it is the owner's own run, so the owner's own environment still applies.
+	forcedForeign := len(foreign) > 0
+	forced := forcedForeign || requires
 	if coreSupports && (mode == SandboxAll || mode == SandboxPending || ((borrowed || forced) && mode == SandboxBorrowed)) {
 		if !ready {
 			return sandboxDecision{wait: true}
 		}
-		return sandboxDecision{sandboxed: true, ownerEnv: !borrowed && !forced}
+		return sandboxDecision{sandboxed: true, ownerEnv: !borrowed && !forcedForeign}
 	}
 	if forced {
 		unavailable := sandboxUnavailable(mode, ready, notReadyReason, coreSupports, owner, provider)
-		return sandboxDecision{refuse: contentSandboxPrefix(foreign) + unavailable, unavailable: unavailable}
+		prefix := requiresSandboxPrefix
+		if forcedForeign {
+			prefix = contentSandboxPrefix(foreign)
+		}
+		return sandboxDecision{refuse: prefix + unavailable, unavailable: unavailable}
 	}
 	if !borrowed {
 		return sandboxDecision{}
@@ -592,8 +611,13 @@ func (b *Bridge) fetchSandboxPolicy(ctx context.Context, tenantKey string) (bool
 // drive's capability snapshot.
 func (b *Bridge) planSandbox(ctx context.Context, d *drive) (refuse string) {
 	s := b.sandbox
+	requires := b.targetRequiresSandbox(d.core, d.target, d.job.Provider)
+	if requires && d.borrowed {
+		// A borrow and a platform seat are both someone else's run.
+		return ownerOnlyRefusal
+	}
 	ready, reason := s.status(ctx)
-	dec := decideSandbox(d.borrowed, d.content.foreign, s.cfg.Mode, ready, reason, d.caps.workdir != nil, func() (bool, error) {
+	dec := decideSandbox(d.borrowed, d.content.foreign, requires, s.cfg.Mode, ready, reason, d.caps.workdir != nil, func() (bool, error) {
 		return b.requireSandboxForBorrow(ctx, d.job.TenantID)
 	}, d.owner, d.job.Provider)
 	d.unsandboxed = dec.unavailable

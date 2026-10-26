@@ -497,6 +497,11 @@ type Target struct {
 	// stdio only (every ACP agent takes stdio). Per target: an adapter
 	// fronting several agents learns each agent's support separately.
 	MCPTransports []string
+	// RequiresSandbox: this target's agent runs only inside its owner's agent
+	// sandbox (it is installed there and nowhere else). The bridge treats a
+	// run of it as one the sandbox is mandatory for: never on the host
+	// whatever the member's sandbox mode, and never for anyone but the owner.
+	RequiresSandbox bool
 }
 
 // TransportSupported reports whether the target's agent accepts MCP
