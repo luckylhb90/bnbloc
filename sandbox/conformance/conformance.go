@@ -1031,13 +1031,29 @@ func (s *suite) checkSecretHidden(t *testing.T, machine string) {
 }
 
 // netProbe reports whether the guest can open an outbound connection.
-const netProbe = `if wget -q -T 4 -O /dev/null "$1" 2>/dev/null; then echo REACHED; else echo BLOCKED; fi`
+// It uses wget, or curl on an image that has no wget.
+const netProbe = `if command -v wget >/dev/null; then wget -q -T 4 -O /dev/null "$1" 2>/dev/null; else curl -sS -m 4 -o /dev/null "$1" 2>/dev/null; fi && echo REACHED || echo BLOCKED`
+
+// tlsProbe is the same over HTTPS. It prints NOCURL when the image has no curl:
+// a busybox wget cannot do TLS, so the guest cannot tell a refusal from a
+// missing feature and the HTTPS check is skipped.
+const tlsProbe = `command -v curl >/dev/null || { echo NOCURL; exit 0; }
+if curl -sS -m 8 -o /dev/null "$1" 2>/dev/null; then echo REACHED; else echo BLOCKED; fi`
 
 func (s *suite) probe(t *testing.T, machine, target string) string {
 	t.Helper()
 	res, err := s.c.Run(s.ctx, s.ep, machine, protocol.ExecRequest{Command: []string{"sh", "-c", netProbe, "probe", target}, TimeoutMs: 30_000})
 	if err != nil {
 		t.Fatalf("network probe: %v", err)
+	}
+	return strings.TrimSpace(out(t, res))
+}
+
+func (s *suite) tlsProbe(t *testing.T, machine, target string) string {
+	t.Helper()
+	res, err := s.c.Run(s.ctx, s.ep, machine, protocol.ExecRequest{Command: []string{"sh", "-c", tlsProbe, "probe", target}, TimeoutMs: 30_000})
+	if err != nil {
+		t.Fatalf("https probe: %v", err)
 	}
 	return strings.TrimSpace(out(t, res))
 }
@@ -1057,7 +1073,7 @@ func (s *suite) egressPolicy(t *testing.T) {
 	}
 	m, err := s.c.CreateMachine(s.ctx, s.ep, protocol.CreateMachineRequest{
 		Image: s.cfg.Image, MemoryMiB: 256,
-		Egress: &protocol.Egress{Mode: protocol.EgressAllowlist, Rules: []protocol.EgressRule{{Host: s.cfg.AllowHost, Port: 80}}},
+		Egress: &protocol.Egress{Mode: protocol.EgressAllowlist, Rules: []protocol.EgressRule{{Host: s.cfg.AllowHost, Port: 80}, {Host: s.cfg.AllowHost, Port: 443}}},
 	})
 	if err != nil {
 		t.Fatalf("create allowlist machine: %v", err)
@@ -1068,6 +1084,17 @@ func (s *suite) egressPolicy(t *testing.T) {
 	}
 	if got := s.probe(t, m.ID, "http://1.1.1.1/"); got != "BLOCKED" {
 		t.Fatalf("non-allowlisted 1.1.1.1 reachable under allowlist (%s)", got)
+	}
+	// A name rule over HTTPS must work without any secret on the machine: the
+	// listed host is reachable and an unlisted name is not (2026-10-26: a
+	// provider that only inspected TLS when secrets existed refused both).
+	if got := s.tlsProbe(t, m.ID, "https://"+s.cfg.AllowHost+"/"); got != "NOCURL" {
+		if got != "REACHED" {
+			t.Fatalf("allowlisted %s not reachable over HTTPS (%s)", s.cfg.AllowHost, got)
+		}
+		if got := s.tlsProbe(t, m.ID, "https://api.github.com/"); got != "BLOCKED" {
+			t.Fatalf("non-allowlisted api.github.com reachable over HTTPS under allowlist (%s)", got)
+		}
 	}
 	_ = s.c.DeleteMachine(s.ctx, s.ep, m.ID)
 }
