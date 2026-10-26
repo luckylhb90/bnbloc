@@ -13,6 +13,7 @@ import { ComponentCard } from "@/views/ComponentCard";
 import { ErrorBox } from "@/ui/ErrorBox";
 import { ServicePages } from "@/views/ServicePages";
 import { errorText } from "@/lib/errors";
+import { syncInstalledPreviewers } from "@/views/artifact/remotePreviewers";
 
 // MemberComponents is where a member adds components and sets them up: a
 // component's settings open from its card ("Set up" while it needs any),
@@ -71,6 +72,10 @@ export function MemberComponents() {
     try {
       await api.installComponent(component);
       toast.success(`${component.name} installed`);
+      // A previewer opens files in the artifact viewer, which reads its own
+      // registry (synced on sign-in and every ten minutes): sync it now, or an
+      // open file keeps showing the built-in viewer until then.
+      void syncInstalledPreviewers().catch(() => {});
       const loaded = await load();
       // Set it up now when it needs anything, else open what it shows.
       const added = loaded.list.find((c) => c.kind === component.kind && c.name === component.name);
@@ -90,6 +95,7 @@ export function MemberComponents() {
     try {
       await api.uninstallComponent(component);
       toast.success(`${component.name} removed`);
+      void syncInstalledPreviewers().catch(() => {});
       await load();
     } catch (caught: unknown) {
       setError(errorText(caught, `failed to remove ${component.name}`));
