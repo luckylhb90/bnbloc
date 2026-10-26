@@ -1,6 +1,6 @@
 # Sandbox-only agents: design (2026-10-26)
 
-Status: design, not built. Builds on the experiment record
+Status: design, not built; revised 2026-10-26 after the owner's decisions (§0). Builds on the experiment record
 [`2026-10-26-sandbox-only-agents.md`](2026-10-26-sandbox-only-agents.md) (what was
 tried and measured), `2026-10-09-agent-vm-sandbox.md` (the hybrid mode this sits
 beside), `2026-10-21-durable-sandbox-homes.md` and
@@ -16,14 +16,14 @@ shell commands in the VM (hybrid), because that mode uses the member's own
 installed agent, logins, skills and MCP servers. This is an option, never a
 replacement.
 
-## 0. Decisions for the owner
+## 0. Decided (owner, 2026-10-26)
 
-| # | Question | Recommendation |
+| # | Question | Decision |
 |---|---|---|
-| D1 | Which agents can be sandbox-only in the first version? | Those that authenticate with an **API key** (sent as a header to named hosts) or need no login. Agents whose only sign-in is a browser/OAuth login on the host are **not offered** (the page says why). §5 |
-| D2 | Whose runs? | The member's **own** runs. A borrowed run of a sandbox-only agent is refused with a reason: the member's keys never reach a borrower's run, so it could not work. §5.3 |
-| D3 | A new host-API permission for plugins (`sandbox`) so the manager can install into the guest? | Yes, narrow (§4.2). The alternative, handing the plugin the sandbox's admin bearer, would let it run anything as root and is rejected. |
-| D4 | Can an organization require it? | Yes, as a setting of the manager (`sandboxOnly`, agent ids): those agents are offered only as sandbox-only. §3.6 |
+| D1 | Which agents? | **Not a fixed list: the member chooses**, per agent, in the manager's page, and may add their own agents by configuration (the manager's `myAgents`). The catalog and the page *tell* what choosing it means for that agent (how it signs in, its size, where it can reach), they do not decide for the member. §2.5, §5 |
+| D2 | Whose runs? | **A sandbox-only agent is never borrowed**, and never run for a platform drive. A borrow request for it is refused with the reason. The member's key or login must never be reachable by anyone else's run, so this is a rule, not a default. §4.1, §5 |
+| D3 | New plugin interface? | **Yes, but smaller than first drafted.** The desktop does not run commands for the plugin; it prepares the plugin's installer space and hands the plugin a **space-scoped exec token**, which the Sandbox Protocol already has. Checked: a token can run a command in its own space and nothing else (§4.2). |
+| D4 | An organization can require it? | **Yes**, a manager setting (`sandboxOnly`): small, and enforced by what the manager offers (§3.6, with its limit stated). |
 
 ## 1. Why
 
@@ -73,18 +73,20 @@ room.
 
 ### 2.2 Installing
 
-The manager asks the desktop (§4.2) to run a command in its **installer space**:
-one space per member on their own machine, namespaced to the plugin, with the
-store mounted **writable**, an egress policy of the **hosts the signed package
-declares for installing** (the registries; for a release driver the release
-host), **no secrets** and no other mount. The command is the existing typed
-drivers' (`npm install --prefix <store>/<id>/<version> <package>@<version>`),
-or, for an agent whose only channel is a script, the catalog's `script` entry
-(§3.4). When it ends, the installer makes the tree readable by other spaces
-(`chmod -R a+rX`; §6, S2), then the manager checks the version the way it does on
-the host (the command must report the version asked for) before anything points
-at it. Staging, the partial directory, "a failed install leaves nothing behind"
-and stall detection (no total time cap) are the host driver's, unchanged.
+The manager asks the desktop (§4.2) for its **installer space**: one space per
+member on their own machine, namespaced to the plugin, created **by the desktop**
+with the store mounted writable, an egress policy of the hosts the signed package
+declares for installing (the registries; for a release driver the release host),
+**no secrets** and no other mount. The desktop hands the plugin the space's
+**exec token** (short-lived, renewed on request) and the sandbox's address. The
+manager then runs the typed drivers' commands in that space with the Sandbox
+Protocol's own `run`/`exec` (`npm install --prefix <store>/<id>/<version>
+<package>@<version>`, or, for an agent whose only channel is a script, §3.4). When
+it ends, the installer makes the tree readable by other spaces (`chmod -R a+rX`;
+§6, S2), then the manager checks the version the way it does on the host (the
+command must report the version asked for) before anything points at it.
+Staging, the partial directory, "a failed install leaves nothing behind" and
+stall detection (no total time cap) are the host driver's, unchanged.
 
 ### 2.3 Registering and running
 
@@ -196,77 +198,116 @@ plus nothing else by default). A member may widen the run-time list for their ow
 runs the way they allow hosts in the sandbox today; the manager shows what an
 agent is allowed to reach. Not verified; S4.
 
-### 3.6 Policy
+### 3.6 Policy: `sandboxOnly`
 
-`sandboxOnly` (org): agent ids a member may install only into the sandbox. The
-page then offers one choice for them. Whether an organization may forbid
-sandbox-only installs is not offered: the sandbox is the more confined option.
+A manager setting, organization scope, beside `allowed` and `pinned`: agent ids
+a member may install **only** into the sandbox (a lines setting, validated like
+`allowed`). The page then offers them with one choice. It is small: one setting,
+one filter where the page decides what to offer, one test.
+
+Its limit, stated rather than hidden: it governs **what the manager offers**, as
+`allowed` and `pinned` do. A member who installs the same agent some other way,
+or writes their own `agents.json` line, is outside it. An organization that needs
+a boundary rather than a policy has the sandbox mode `all` (every own run in the
+sandbox), which is the sandbox component's setting, not this one. Which hosts an
+install may reach is the signed package's declaration, never a setting: a setting
+that widens egress for every member's installer would be a new way to reach the
+internet from every computer.
 
 ## 4. What the platform adds (and why that is all)
 
-### 4.1 A target that requires the sandbox
+### 4.1 A target that requires the sandbox, and is never borrowed
 
 `Target.requiresSandbox` (Core Protocol v1, optional, reported by the core). The
 bridge's `decideSandbox` treats such a target like content that is **forced**:
 sandboxed when the sandbox is ready; otherwise refused with a reason, **never
 run on the host**, whatever the member's sandbox mode (`off`, `borrowed`, `all`).
-That machinery exists for foreign content (`forced`, `sandboxUnavailable`);
-this adds a second reason to be forced and one field on the wire. Reason:
-confinement. A conformance case: a target with the flag and the sandbox off is
-refused, with the mode `off`.
+That machinery exists for foreign content (`forced`, `sandboxUnavailable`); this
+adds a second reason to be forced and one field on the wire.
 
-### 4.2 A plugin host API `sandbox`
+The same flag means **own runs only** (D2): a borrowed drive or a platform drive
+of such a target is refused with "this agent runs only in its owner's sandbox and
+cannot be borrowed". Why a rule and not a case-by-case judgment: the agent's model
+key (a protocol secret on the own machine) or its login (a file in the own
+space's home) exists only for the owner's runs; a run for someone else on the
+shared machine has neither, so it could not work, and giving it either would hand
+over the owner's credential. One flag, two effects, a conformance case for each:
+the flag with the sandbox off is refused; the flag with a borrow is refused.
+
+### 4.2 A plugin host API `sandbox`: a scoped token, not a proxy
 
 `permissions.host: ["sandbox"]` on a plugin package (the table of
-`pluginHostPermissions`, beside `chat`). The desktop, which holds the sandbox's
-admin bearer, gives the plugin a loopback call (`POST {BNBLOC_PLUGIN_HOST_URL}/v1/
-sandbox/exec`, the plugin's host token, as `chat` works) that:
+`pluginHostPermissions`, beside `chat`). A first draft had the desktop run the
+plugin's commands for it (a proxy of `exec`). That would have made the desktop
+re-implement streaming, signals and limits that the Sandbox Protocol already has,
+and made it a place where commands are decided. The smaller interface:
 
-- runs only in **the plugin's own installer space** (named by the desktop from
-  the plugin's name, never by the plugin), on the member's **own** machine;
-- mounts only the plugin's store, writable, and nothing else;
-- applies the egress hosts and the **secret-free** policy the plugin's **signed
-  package** declares (`sandbox.installHosts`), refused if the call asks for more;
-- streams output and ends on a stall or cancel like any exec, and is rate and
-  size limited like the existing plugin host calls;
-- is audited as an action of the plugin for the member.
+- `POST {BNBLOC_PLUGIN_HOST_URL}/v1/sandbox/space` (the plugin's host token, as
+  `chat` works) → `{url, machine, space, token, expiresAtMs}`.
+- The **desktop** ensures the plugin's installer space on the member's **own**
+  machine (the name derived from the plugin's name, never chosen by the plugin),
+  with the mounts and egress the plugin's **signed package** declares
+  (`sandbox.store`, `sandbox.installHosts`) and **no secrets**, and mints an exec
+  token for that space only (`execTokens`, existing). Asked again before it
+  expires, it mints a new one.
+- The plugin then speaks the Sandbox Protocol's `run`/`exec` to that address with
+  that token. Nothing else of the sandbox is reachable.
 
-A plugin that does not declare the permission gets nothing; the sandbox's
-bearer, exec tokens and other spaces are never reachable. Reason: identity and
-confinement (the plugin is untrusted code; the desktop is the one holder of the
-credential). It names no agent, no installer and no registry.
+**What the token can do was checked** (2026-10-26, the real sandbox service, a
+space `installer` and another space `other` on one machine). With the installer's
+token: a command in its own space runs (as the space's unprivileged user); every
+other call is `403 forbidden` ("an exec token may only run commands in its own
+space"): a command in another space, a machine-level command as root, listing or
+creating machines, creating or altering a space (so no mount can be added),
+deleting its space, minting another token, files as root or in the space, and
+`/discover`. So a plugin holding it can run commands in one confined space and do
+nothing to the sandbox itself.
+
+A plugin without the permission gets nothing: the sandbox's admin bearer, other
+spaces and other machines are never reachable. Reason: identity and confinement
+(the plugin is untrusted code; the desktop is the one holder of the credential and
+the one that decides a space's mounts and egress). The interface names no agent,
+no installer and no registry. It is audited as an action of the plugin for the
+member (the desktop records each token it issues).
 
 Everything else (the store mount, the registration, the launch, the page, the
 catalog, egress values) is the manager's and the core's data and code.
 
-## 5. Sign-in (D1, D2)
+## 5. Sign-in: what each choice means, shown to the member (D1, D2)
 
 The 2026-10-21 record decided **not** to build sign-ins through the sandbox's
-`secrets` because a tool that checks its token's format locally, exchanges it for
-another token, or signs requests is not served, and "revisit when a concrete tool
-that sends its token in a header is the blocker." A guest-only agent's model key is
-that concrete case, so this design takes the narrow slice that record described and
-nothing more:
+`secrets`: a tool that checks its token's format locally, exchanges it for
+another token, or signs requests is not served. A guest-only agent forces the
+question, so the design is: **the member decides, with the consequence on the row
+before they choose**, and the catalog says which of three cases an agent is
+(a configured agent says it in its line):
 
-1. **The agent's model credential is an API key sent as a header to named hosts.**
-   The member sets it in the manager's member settings (a `secret` setting, stored
-   on their computer, never sent anywhere). The desktop creates the member's own
-   machine with it as a protocol **secret** (`name`, `value`, `hosts`): the guest's
-   `$NAME` holds a placeholder, the value is substituted on egress to those hosts
-   only. The agent never reads the value.
-2. **Agents that need no login** (free models, a local model) need nothing.
-3. **Agents whose only sign-in is a browser/OAuth login** (a subscription login
-   that writes a token file) are **not offered** in the first version: the token
-   would be a readable file in a per-room home, the exact case the earlier record
-   found unserved. The row says "this agent signs in with a browser; it can run
-   only on this computer".
-4. **Borrowed runs** (D2) never get the member's secrets (secrets are on the own
-   machine only, as in that record), so a sandbox-only agent that needs a key
-   cannot be borrowed; the refusal names why.
+| The agent signs in with | Where the credential lives | What the page says |
+|---|---|---|
+| **Nothing** (a free or local model) | nowhere | nothing to set up |
+| **An API key sent as a header to named hosts** (`credentials: [{env, hosts}]`) | the member's store on their computer; the own machine gets it as a protocol **secret**: the guest's `$NAME` is a placeholder, the value is substituted on egress to those hosts only; the agent never reads it | "Your key stays on your computer; the sandbox sends it only to <hosts>" |
+| **A login that writes a token file** (a browser or device flow) | the guest's durable home for the space, **readable by the agent** (like the agent's own login on the host for an own run) | "Its sign-in is stored in your sandbox, where the agent can read it. It is never available to anyone else's run." |
 
-What substitution does not cover is that record's list (local format checks,
-token exchange in a body, encoded or signed credentials). The catalog marks an
-agent's credentials as header-sent or not; only header-sent ones are offered.
+Two rules make the third case acceptable rather than the exact failure the earlier
+record warned of:
+
+1. **It is never borrowed (D2).** The credential exists only for the owner's own
+   runs and is a file in the owner's own space's home; no other run is given that
+   space or its home. An agent already reads its own login on the host for an own
+   run: the sandbox is not worse, and for the key case it is better.
+2. **A login must be completable.** A browser callback to `localhost` cannot
+   complete inside the guest, and the guest has no terminal for the member
+   today. An agent is offered the third way only when its catalog entry (or the
+   member's configured line) names a login that runs without a terminal: a
+   device-code flow the manager runs as an operation and shows (the URL and the
+   code in its log, the member opens the URL), `loginArgs`. An agent without one
+   shows the choice disabled with that reason; it is not hidden, and the member
+   can still run it on this computer.
+
+What substitution does not cover is the earlier record's list (local format
+checks, a token exchange in a body, encoded or signed credentials): an agent whose
+key is of that kind is marked so in the catalog and the first way is not offered
+for it.
 
 ## 6. What must be verified before building
 
@@ -276,21 +317,23 @@ Each is an experiment like the first, on the real sandbox, not a reading.
 |---|---|---|
 | S1 | A guest agent writes in its workspace, and the core and host read it; with the workspace created by the bridge's path | the `EACCES` of the experiment |
 | S2 | The installer's tree, `chmod a+rX`, is readable and **executable** by another space's user from a **read-only share** (virtiofs: exec bit, speed, `noexec`) | the shared store is the whole point; guest-created files appeared on the host as 0600/0700 |
+| S0 | **Done 2026-10-26:** the exec token's reach (§4.2): own space only | D3 |
 | S3 | A key agent through `secrets`: the placeholder works against a real model host, the value is never visible in the guest (`env`, `/proc`, the agent's config) | sign-in §5 |
 | S4 | The egress allowlists hold: the installer reaches only its registries, the run space only the model host, `curl` elsewhere is refused | §3.5, and that the script installer is safe |
 | S5 | The core's "program gone" test and `in-use.json` with guest paths through the mount table | a conversation must not be lost (the agent manager's §2.4a) |
 | S6 | Hermes's installer in the installer space completes within the home's capacity (it did not finish in 25 minutes in the experiment: a large git checkout over the VM network) | §3.4's claim |
+| S8 | A device-code login runs as a manager operation in the guest and its URL and code reach the page; the token file it writes is readable only in that space | §5, the third way |
 | S7 | The sandbox's two machines (own, shared): the store visible on both as a read-only mount for `own`, and absent for borrowed | D2 |
 
 ## 7. Design review
 
 | Lens | Answer |
 |---|---|
-| Actors | The member (own machine, own spaces); a borrower (cannot run a sandbox-only agent: refused, no keys); an organization admin (`sandboxOnly`); another space on the same machine (reads the store read-only, never writes it, never sees another room's home); the plugin (confined to its installer space and store). |
+| Actors | The member (own machine, own spaces); a borrower (cannot run a sandbox-only agent: refused, no keys); an organization admin (`sandboxOnly`); another space on the same machine (reads the store read-only, never writes it, never sees another room's home); the plugin (a token for its installer space only: it cannot reach another space, a machine or the sandbox itself, checked); a platform drive (refused, like a borrow). |
 | Time and lifecycle | A conversation survives an idle stop and an update (the in-use rule over guest paths, the fallback). The store survives a machine rebuild (host disk), the sandbox restarting and the desktop updating; the homes survive as durable homes already do. A desktop restart ends the core's sessions as it does for every agent. An install in progress when the sandbox stops fails and leaves a partial directory that the next start sweeps. |
 | Scale and cost | 465 MB for one agent, the home 4.7 GB: the page shows sizes before install and refuses what cannot fit. One store serves every room (no per-room copy). Versions are kept as for host installs (current, rollback, held by a session). |
 | Failure and recovery | Sandbox off, not ready, no backend: the option is hidden or the agent refused with the reason, never run on the host. An install that fails or reports another version registers nothing. A key the agent's API rejects is the agent's error, in the reply. A script that stalls ends by stall, not a total time. |
-| Boundaries and privacy | Nothing of the agent on the host; the store holds Linux files the host cannot run; keys never enter the guest; the plugin never holds the sandbox's bearer; the installer has no keys and an allowlist. The workspace is the one shared place, as in hybrid. |
+| Boundaries and privacy | Nothing of the agent on the host; the store holds Linux files the host cannot run. An API key never enters the guest (a placeholder, substituted on egress to its hosts); a login file does, in the owner's own space's home, readable by that agent only and never by another run (D2). The plugin holds a token for one space and never the sandbox's bearer; the installer has no keys and an allowlist. The workspace is the one shared place, as in hybrid. |
 | Abuse and untrusted input | The installer runs untrusted package scripts: unprivileged, no sudo, no keys, allowlisted egress, in a VM, with a store the run spaces mount read-only. A prompt-injected agent in a run space cannot modify the store (the experiment showed a confined process cannot write the host store; this adds a read-only mount). A hostile script can fill the home: bounded by its size, said on the page. |
 | One owner | The Sandbox Protocol owns spaces, mounts, egress, secrets; the desktop owns the host API and the machine; the manager owns installs and the store; the core owns launches and `in-use.json`; the bridge owns the "forced" decision (one added reason, not a second path). |
 | Defaults and fallbacks | The default is unchanged (host, hybrid). Nothing is sandbox-only until the member chooses it or the org lists it. No silent fallback to the host, ever. An agent not offered says why. |
@@ -302,6 +345,7 @@ Each is an experiment like the first, on the real sandbox, not a reading.
 
 **Pre-mortem.** It shipped and a month later it failed badly:
 
+0. **A borrower or a platform drive reached the owner's credential.** The target flag refuses both, a conformance case each, and the credential lives only on the own machine and in the own space's home.
 1. **Members lost a room's agent because the store changed under it.** The in-use
    rule is the same one that fixed the host case, now over guest paths; S5 tests
    it with a real conversation across two updates, the store is read-only to run
@@ -309,12 +353,14 @@ Each is an experiment like the first, on the real sandbox, not a reading.
 2. **A sandbox-only agent ran on the host after all** (a mode, a race, an older
    bridge). The target flag makes the bridge refuse rather than fall back, the
    core refuses a launch without an `execution`, and a conformance case for each.
-3. **A member could not sign in and blamed the feature.** Agents that need a
-   browser login are not offered, with the reason on the row; the first version
-   is small on purpose and says so.
+3. **A member chose it and could not sign in.** The choice shows how the agent signs
+   in and what that means before it is made; an agent whose login cannot complete
+   without a terminal has the choice disabled with the reason, never hidden and never
+   a dead end (it still runs on this computer).
 4. **The installer was a way out** (a script reaching an arbitrary host, or
-   reading a key). No keys, an allowlist declared in the signed package, no sudo,
-   verified by S4 before any script method exists.
+   reading a key), **or the plugin's token was more than it seemed.** No keys, an
+   allowlist declared in the signed package, no sudo, verified by S4 before any
+   script method exists; the token's reach was verified (S0): own space, run only.
 5. **The disk filled** (a 4.7 GB home, a Hermes checkout). Sizes before install;
    an agent that does not fit is refused; cleanup of versions no session holds.
 
@@ -325,11 +371,13 @@ Each is an experiment like the first, on the real sandbox, not a reading.
    sandbox and then the real one (S1, S5).
 2. **The bridge and the Core Protocol field**: `Target.requiresSandbox`, `forced`
    treatment, the conformance cases.
-3. **The desktop host API** `sandbox`, the package declaration
-   (`sandbox.installHosts`), the installer space, the store folder and its
+3. **The desktop host API** `sandbox` (the installer space ensured by the desktop,
+   the scoped token, renewal, the audit), the package declaration
+   (`sandbox.store`, `sandbox.installHosts`), the store folder and its
    `sandbox-mounts` descriptor (S2, S4).
-4. **The manager**: the target `sandbox`, the store, the page, sizes, the in-use
-   rule, `sandboxOnly`; the key setting and the secret on the own machine (S3).
+4. **The manager**: the target `sandbox`, the store, the page (the choice with its
+   consequences, sizes, hosts), the in-use rule, `sandboxOnly` (a day), the key
+   setting and the secret on the own machine (S3), device-code login (S8).
 5. **Script installers** in the installer space (S6), then Hermes.
 
 ## 9. Not in this record
@@ -337,9 +385,9 @@ Each is an experiment like the first, on the real sandbox, not a reading.
 - Linux and Windows hosts (no local sandbox backend yet), and a **server-side**
   sandbox for members whose machines cannot run one: the same seam, a different
   backend, a later phase of the sandbox record.
-- Browser/OAuth-login agents in the sandbox, and a terminal into the guest to
-  sign in once.
-- Borrowed runs of a sandbox-only agent.
+- A terminal into the guest to sign in interactively (agents whose login needs
+  one stay host-only until there is one).
+- Borrowed runs of a sandbox-only agent: never (D2), not deferred.
 - Sharing one store between members.
 - Replacing hybrid mode: it remains the default and the way for agents that use
   the member's own installation, skills and login.
