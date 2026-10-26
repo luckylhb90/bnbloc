@@ -368,13 +368,20 @@ func canonical(p string) string {
 	return filepath.Join(canonical(dir), rest)
 }
 
-// canonicalRegex canonicalizes the literal path prefix of a prefixRegex.
+// canonicalRegex canonicalizes the literal path prefix of a prefixRegex. A
+// literal that ends at a separator ("<dir>/" before "[a-z_]+...") keeps it:
+// canonical cleans the path and would drop the "/", gluing the pattern onto the
+// directory's name (".../.codex[a-z_]+_[0-9]+\.sqlite", which names nothing).
 func canonicalRegex(re string) string {
 	lit, rest := literalPrefix(re)
 	if lit == "" {
 		return re
 	}
-	return "^" + regexp.QuoteMeta(canonical(lit)) + rest
+	c := canonical(lit)
+	if strings.HasSuffix(lit, string(filepath.Separator)) && !strings.HasSuffix(c, string(filepath.Separator)) {
+		c += string(filepath.Separator)
+	}
+	return "^" + regexp.QuoteMeta(c) + rest
 }
 
 // literalPrefix splits "^<quoted path><rest>" into the unquoted path (up to

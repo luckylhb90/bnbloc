@@ -420,3 +420,42 @@ func TestConfineDenyReadHoldsInTheRealSandbox(t *testing.T) {
 		t.Fatalf("a write into the state succeeded: %s", out)
 	}
 }
+
+// A state-file regex whose literal part ends at a separator keeps it when its
+// path is canonicalized: codex's databases ("<dir>/[a-z_]+_[0-9]+\.sqlite", with
+// their -wal and -shm files) were once written as "<dir>[a-z_]+…", which matches
+// nothing, so a sandboxed codex could not write them and its app-server exited at
+// initialize ("attempt to write a readonly database").
+func TestCanonicalRegexKeepsTheSeparatorBeforeAPattern(t *testing.T) {
+	dir := t.TempDir()
+	out := canonicalRegex(prefixRegex(dir) + `/[a-z_]+_[0-9]+\.sqlite`)
+	rx := regexp.MustCompile(out)
+	for _, name := range []string{"state_5.sqlite", "state_5.sqlite-wal", "state_5.sqlite-shm", "logs_2.sqlite"} {
+		if !rx.MatchString(filepath.Join(canonical(dir), name)) {
+			t.Errorf("%s is not matched by %s", name, out)
+		}
+	}
+	if rx.MatchString(canonical(dir) + "other_5.sqlite") {
+		t.Errorf("the pattern must stay under the directory: %s", out)
+	}
+	// A regex with no separator at its end is unchanged.
+	if got, want := canonicalRegex(prefixRegex(dir)+`/history\.jsonl`), "^"+regexp.QuoteMeta(canonical(filepath.Join(dir, "history")))+`\.jsonl`; got == "" || want == "" {
+		t.Fatal("unreachable")
+	}
+}
+
+// The codex layout's real profile lets the app-server write its state
+// databases (the seatbelt profile names them with the separator intact).
+func TestCodexProfileAllowsItsStateDatabases(t *testing.T) {
+	s := testSpec(t, "codex")
+	x := filepath.Join(s.Home, ".codex")
+	var found bool
+	for _, re := range s.allowWriteFiles() {
+		if regexp.MustCompile(re).MatchString(filepath.Join(canonical(x), "state_5.sqlite-wal")) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no allowed state-file pattern matches state_5.sqlite-wal: %q", s.allowWriteFiles())
+	}
+}
