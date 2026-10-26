@@ -97,6 +97,18 @@ a guest path. What was shown to work:
   clone, but a room's first turn waits for the install and the home's 4.7 GB is the
   limit.
 
+**Size, measured (2026-10-26).** The 465 MB is one program, not many files:
+opencode 2 ships as a single compiled binary of about 236 MB, and its wrapper
+package `@opencode/cli` carries it a second time (`bin/opencode.exe` is a hard link
+of the platform package's binary, so the copy costs nothing in one tree but is
+counted twice by `du` and twice by anything that copies files one by one). On the
+home volume the wrapper install takes 447 MB; installing only the platform package
+(`@opencode/cli-<os>-<arch>`, `--ignore-scripts`, run the binary directly) takes
+225 MB and runs. The installer should therefore use the platform package when the
+catalog names one (`install.package` per platform), which halves the cost of this
+agent. It is still 225 MB **per copy**, so per-room installs would multiply it; the
+clone store above is what keeps it at one real copy.
+
 Which of the two is the first version is open (§6, S2 follow-up). Until it is built,
 a member installs the agent into their sandbox by hand (§10) and the running half
 works.
@@ -226,11 +238,23 @@ signed package declares for installing) and the run space's (the hosts of the
 agent's model API, from `credentials[].hosts` and the agent's own declaration,
 plus nothing else by default). A member may widen the run-time list for their own
 runs the way they allow hosts in the sandbox today; the manager shows what an
-agent is allowed to reach. **Checked (S4): an `allowlist` machine refuses every unlisted host but also failed the
-listed registry's TLS handshake** (curl: unexpected EOF; npm: network error), so the
-installer's allowlist cannot be relied on yet; how the sandbox lets a listed HTTPS
-host through is to be learned first. Until then the installer space would need
-`public` egress, which removes the safety argument for the script method (§3.4).
+agent is allowed to reach. **Checked (S4), root cause found and fixed:** an `allowlist` machine refused every
+unlisted host but also failed the listed registry's TLS handshake (curl: unexpected
+EOF; npm: network error). The cause is in the sandbox service, not the network: a
+rule that names a host can only be enforced by reading the TLS hostname, which
+needs the TLS interception, and the service switched that on only when the
+machine had secrets. Control: the same allowlist machine with one placeholder
+secret reached the registry (HTTP 200, issuer "microsandbox CA"), `npm install`
+through a registry-only allowlist worked, and an unlisted host was refused. (Not
+the cause, disproved by a control: the size or fragmentation of the ClientHello.) **Fixed in
+`bnbloc-sandboxd` 0.1.9** (intercept whenever an allowlist has a name rule; an
+allowlist of addresses only stays plain), checked live on the new binary: listed
+HTTPS 200, `npm view` works, two unlisted hosts refused. The conformance suite's
+`egressPolicy` now asserts both over HTTPS (it fails on 0.1.8). So the installer
+space can run under an allowlist of the registry hosts and the §3.4 argument for
+the script method holds; the guest then trusts the interception CA, which it
+already does for any machine with secrets. Not yet published (the desktop pins
+the sandbox service version).
 
 ### 3.6 Policy: `sandboxOnly`
 
