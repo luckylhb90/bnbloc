@@ -2731,6 +2731,21 @@ then `git reset -- <your files>`). Never stage in the shared index and wait:
 another agent's `git commit` takes it (2026-10-12: one commit swept up another
 agent's staged files).
 
+## Stop and delete only what you started
+
+A cleanup acts on the exact thing the agent created, by its own handle (the
+process id it was given, the directory it made, the name it chose), never on a
+pattern that other things may also match. `pkill -f <product name>`, `rm -rf
+/tmp/<prefix>-*` and a glob over a shared root all reach what belongs to the
+member or to another agent (2026-10-13: every directory under a shared
+workspace root; 2026-10-14: a build clone still in use; 2026-10-26:
+`pkill -f bnbloc-sandboxd`, meant for the sandbox service the agent had started
+for an experiment, also stopped the one the member's desktop was running; the
+desktop's supervisor restarted it and rebuilt the machines, and every sandboxed
+run in flight was cut). Start what an experiment needs on its own port, data
+directory and name, keep its pid, and stop that pid. Before any stop or delete
+that is not by handle, list what the pattern matches and read it.
+
 ## Toolchain
 
 - **`scripts/ci.sh [go|web|desktop|secrets|all]` is the single CI check

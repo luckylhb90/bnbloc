@@ -128,17 +128,6 @@ Evidence: AGENTS.md "Public repo: neutral names only"; the pre-push hook's
 refusals.
 Seen 2× (2026-10-13, 2026-10-14).
 
-### Delete only what you created
-
-Cleaning up after a test, an agent deleted every directory under a shared
-temporary workspace root, not just its own. The member's real workspace
-survived only because it lived elsewhere at the time.
-
-Evidence: session notes of 2026-10-13 (no commit: a local action). On
-2026-10-14 a cleanup glob over release build clones (`/tmp/<prefix>-*`)
-also removed the clone a build was still running in; it had to be redone.
-Seen 2× (2026-10-13, 2026-10-14).
-
 ### Run CI stages one at a time in one working tree
 
 The Go and web stages ran at the same time and raced on the embedded web
@@ -626,6 +615,13 @@ Evidence: commit e8589cdc (the test as landed).
 Seen 1× (2026-10-16).
 
 ## Promoted
+
+- **Stop and delete only what you started, by its own handle, never by a
+  pattern.** Seen 3× (2026-10-13 a cleanup removed every directory under a
+  shared workspace root; 2026-10-14 a glob over build clones removed one in
+  use; 2026-10-26 `pkill -f` by product name stopped the member's own sandbox
+  service). Promoted 2026-10-26 → AGENTS.md "Stop and delete only what you
+  started".
 
 - **Reproduce the reporter's exact case, and test a change where it will
   really run, on what it will really meet.** Seen 3× (2026-10-14 a long
