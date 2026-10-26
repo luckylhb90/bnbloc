@@ -479,7 +479,7 @@ continues in a new VM process and recalls the content; the only process on the h
 is the `bnbloc-vmexec` helper.
 
 **Using it now, by hand** (until the installing half exists): install the agent in
-the sandbox's space home as its user (e.g. `npm install --prefix ~/agents/x …`), then
+the sandbox's space home as its user (e.g. `npm install --prefix ~/agents/x --ignore-scripts <platform package>`, the platform package and not the wrapper: 225 MB instead of 447, §2.1a), then
 a line in `agents.json` with `"sandbox": "guest"` and the guest command. The agent
 runs per room in that room's space home, so it is installed once per room (the space
 name is per room and member).
