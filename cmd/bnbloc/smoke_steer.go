@@ -42,7 +42,11 @@ type steerJob struct {
 func (j steerJob) failedHow() string {
 	switch j.Status {
 	case "failed", "cancelled", "timed_out":
-		return strings.TrimSpace(j.Status + " " + j.Reason + ": " + j.Error)
+		out := strings.TrimSpace(j.Status + " " + j.Reason)
+		if j.Error != "" {
+			out += ": " + j.Error
+		}
+		return out
 	}
 	return ""
 }

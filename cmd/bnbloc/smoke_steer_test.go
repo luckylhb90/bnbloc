@@ -37,7 +37,7 @@ func TestSteerJobSaysHowItFailed(t *testing.T) {
 		{steerJob{Status: "running"}, ""},
 		{steerJob{Status: "replied"}, ""},
 		{steerJob{Status: "failed", Reason: "agent_error", Error: "403 model not available"}, "failed agent_error: 403 model not available"},
-		{steerJob{Status: "timed_out"}, "timed_out:"},
+		{steerJob{Status: "timed_out"}, "timed_out"},
 	} {
 		if got := c.job.failedHow(); got != c.want {
 			t.Errorf("%+v: failedHow = %q, want %q", c.job, got, c.want)
