@@ -489,3 +489,50 @@ manager's install target and page; the store and its clones (§2.1a); `sandboxOn
 the key as a protocol secret (§5); the device-code login; the egress allowlists.
 **Not run:** the desktop app itself (the bridge change is tested, not run in the
 real app), and a guest agent that needs a login or a key.
+
+## 11. As built (2026-10-26): the installing half, for agents that ship as a package
+
+What changed against §2.1a–§4.2 once it was tried, and why it is smaller.
+
+- **No installer space, no `sandbox` host API, no scoped token for this kind of
+  agent.** A package from the npm registry needs nothing run to be installed: the
+  manager downloads the tarball over https, checks it against the registry's
+  `sha512` integrity hash, and unpacks it itself (only files, folders and links
+  that stay inside; the package's scripts never run). The Linux files are data on
+  this computer that nothing here executes, so there is nothing to confine at
+  install time and no code of the package runs outside the VM. §4.2 stays the
+  design for installers that must *run* something (a script installer, Hermes);
+  it is not built, and nothing the manager does needs it yet.
+- **One copy, a tree of hard links per room (not an APFS clone).** A guest path
+  belongs to one space of the machine (measured: a second space asking for it is
+  refused; a host folder mounted by several is re-owned by the last). A
+  `perSpace` mount (`component.Mount`, `docs/architecture/sandbox-mounts.md`) gives
+  each space its own tree of hard links to the one unpacked copy, at its own guest
+  path, named to the agent by a `BNBLOC_MOUNT_<NAME>` variable of the space. Measured: three
+  links, one inode, 225 MB on disk for any number of rooms; it works on every file
+  system, where a clone is APFS only. This is the §2.1a store, and the only
+  platform change (the bridge's, a few fields of an existing contract).
+- **Package choice is data.** `sandbox.package` in the catalog names the build for
+  the sandbox image (`{cpu}`: arm64 or x64). The guest image is Debian (glibc), so
+  OpenCode 2 uses `@opencode/cli-linux-arm64` (225 MB), not the wrapper
+  (447 MB) and not the `-musl` build (which needs libstdc++ the image lacks; the
+  first end-to-end run failed on exactly that).
+- **A finding that mattered more than the feature:** `bnbloc-sandboxd` enforced
+  read-only mounts but never advertised `readOnlyMounts`, so the bridge applied *no*
+  component mount in the real app, local skills' included. 0.1.10 advertises it
+  (the conformance case passes). A component mount at a fixed guest path (local
+  skills') can serve one room only; a second room is now refused by the sandbox
+  and the bridge runs its turn without that mount rather than failing it.
+- **In use and update.** The ACP core already lists each session's launch line;
+  a guest agent's line starts with `$BNBLOC_MOUNT_AGENT_<ID>/`, which is how the
+  manager knows a room runs it (Remove is refused then, and when the core has said
+  nothing). An update is a click, never automatic: a room's tree is replaced when
+  its next turn starts, so a conversation continues with the new version.
+- **Checked end to end** (the manager's CLI, the bridge's `prepare`, the real ACP
+  core, the real sandbox 0.1.10, OpenCode 2.1.4 and a free model): two rooms of one
+  machine each answered and each wrote a file into its own host workspace; their
+  agent paths differed and were the same inode; the workspaces root held 229 MB
+  with both rooms live.
+- **Not yet:** the page was not opened in the real app; signing in to a provider
+  from the sandbox (§5); a per-space tree of a room that no longer exists is not
+  removed; Windows and Linux have no sandbox backend.
