@@ -1,6 +1,10 @@
 # Sandbox-only agents: design (2026-10-26)
 
-Status: design, not built; revised 2026-10-26 after the owner's decisions (§0). Builds on the experiment record
+Status: **the running half is built** (§10: the ACP core's guest launch, the bridge's
+requiresSandbox, checked end to end against the real sandbox); the installing half
+(the desktop interface, the manager's target, the store) is not, because two
+experiments changed its design (§6, S2 and S4). Revised 2026-10-26 after the
+owner's decisions (§0). Builds on the experiment record
 [`2026-10-26-sandbox-only-agents.md`](2026-10-26-sandbox-only-agents.md) (what was
 tried and measured), `2026-10-09-agent-vm-sandbox.md` (the hybrid mode this sits
 beside), `2026-10-21-durable-sandbox-homes.md` and
@@ -70,6 +74,32 @@ the host's disk), and a room's agent cannot change what the next room runs.
 An agent's **state** (its sessions, its config, its caches) is the space's home,
 per room, as for any command in that space: a room's conversation stays in that
 room.
+
+### 2.1a What the store has to be, after S2 (not built)
+
+§2.1 pictured one folder every room's space mounts read-only at one path. The
+sandbox does not allow it (§6, S2): a directory mounted by two spaces is re-owned by
+the last one and the other is locked out, and two spaces of a machine cannot share
+a guest path. What was shown to work:
+
+- **One canonical store** (the installer space writes it, a host folder), and **one
+  APFS clone of it per space** (`cp -c` on the host: 0.3 s, about 1.4 MB of real disk
+  for a 410 MB tree), each mounted read-only at a guest path of its own. Three spaces
+  ran the same program from their own clones, each unable to write.
+- The agent's command line then differs by space (the guest path is per space), so
+  the core derives it from the session's execution (`{store}` in the command line
+  is the space's mount), and the sandbox-mounts descriptor, which is one list for
+  every space of the member, cannot carry it: the bridge has to give each own space
+  its clone. That is a change to the bridge's space creation, not only to the
+  manager.
+- Or, simpler and costlier: **install into each room's own space home** (durable,
+  per room), 465 MB per room for the agent in the experiment. No sharing and no
+  clone, but a room's first turn waits for the install and the home's 4.7 GB is the
+  limit.
+
+Which of the two is the first version is open (§6, S2 follow-up). Until it is built,
+a member installs the agent into their sandbox by hand (§10) and the running half
+works.
 
 ### 2.2 Installing
 
@@ -196,7 +226,11 @@ signed package declares for installing) and the run space's (the hosts of the
 agent's model API, from `credentials[].hosts` and the agent's own declaration,
 plus nothing else by default). A member may widen the run-time list for their own
 runs the way they allow hosts in the sandbox today; the manager shows what an
-agent is allowed to reach. Not verified; S4.
+agent is allowed to reach. **Checked (S4): an `allowlist` machine refuses every unlisted host but also failed the
+listed registry's TLS handshake** (curl: unexpected EOF; npm: network error), so the
+installer's allowlist cannot be relied on yet; how the sandbox lets a listed HTTPS
+host through is to be learned first. Until then the installer space would need
+`public` egress, which removes the safety argument for the script method (§3.4).
 
 ### 3.6 Policy: `sandboxOnly`
 
@@ -316,10 +350,11 @@ Each is an experiment like the first, on the real sandbox, not a reading.
 | # | Question | Why it can sink the design |
 |---|---|---|
 | S1 | A guest agent writes in its workspace, and the core and host read it; with the workspace created by the bridge's path | the `EACCES` of the experiment |
-| S2 | The installer's tree, `chmod a+rX`, is readable and **executable** by another space's user from a **read-only share** (virtiofs: exec bit, speed, `noexec`) | the shared store is the whole point; guest-created files appeared on the host as 0600/0700 |
+| S2 | **Done 2026-10-26, and it changed the design (§2.1a).** Executing from a read-only mount works (script and Node program, writes and deletes refused). **One host directory cannot be mounted by several spaces:** the mount root is re-owned 0700 by whichever space ensured it last, the first is locked out and a third cannot read it, and a guest path may not be used by two spaces of a machine. | the shared store of §2.1 cannot exist as drawn |
 | S0 | **Done 2026-10-26:** the exec token's reach (§4.2): own space only | D3 |
+| S1 | **Done 2026-10-26:** a guest agent reads a file the core wrote into the workspace (mode 0600) and writes one the host sees; the workdir mount maps ownership, so no mode change is needed | the `EACCES` of the first experiment came from a directory the core made outside the mount, not from the workspace |
 | S3 | A key agent through `secrets`: the placeholder works against a real model host, the value is never visible in the guest (`env`, `/proc`, the agent's config) | sign-in §5 |
-| S4 | The egress allowlists hold: the installer reaches only its registries, the run space only the model host, `curl` elsewhere is refused | §3.5, and that the script installer is safe |
+| S4 | **Done 2026-10-26, half answered (§3.5):** an `allowlist` machine refuses every unlisted host (github, example.com, a raw IP), but also **fails the listed one**: `registry.npmjs.org` answered a TLS error for curl and npm could not install. How a listed HTTPS host is let through is not known. | the installer's allowlist is the safety of the script method |
 | S5 | The core's "program gone" test and `in-use.json` with guest paths through the mount table | a conversation must not be lost (the agent manager's §2.4a) |
 | S6 | Hermes's installer in the installer space completes within the home's capacity (it did not finish in 25 minutes in the experiment: a large git checkout over the VM network) | §3.4's claim |
 | S8 | A device-code login runs as a manager operation in the guest and its URL and code reach the page; the token file it writes is readable only in that space | §5, the third way |
@@ -391,3 +426,42 @@ Each is an experiment like the first, on the real sandbox, not a reading.
 - Sharing one store between members.
 - Replacing hybrid mode: it remains the default and the way for agents that use
   the member's own installation, skills and login.
+
+## 10. As built (2026-10-26): the running half
+
+**Core Protocol and the bridge** (bnbloc `74558287`): `Target.requiresSandbox`; the
+bridge treats a run of such a target as one the sandbox is mandatory for (sandboxed,
+refused, or waited for while the sandbox starts, never the host, in every mode), and
+refuses a borrow or platform seat of it ("cannot be borrowed or used by anyone
+else"). The owner's own run keeps the owner's forwarded environment. Tests: the
+decision table, and through the whole bridge (a borrow and an own run refused with
+the mode off, the owner's run sandboxed, an unmarked agent unchanged); each fails
+with the logic switched off.
+
+**The ACP core** (bnbloc-acp `a3902ab`): `"sandbox": "guest"` in an agent entry; the
+command is a command line of the guest, started as `vmexec run --stdio -- <line>`
+(arguments quoted for the guest shell); the agent is listed at once, unprobed on the
+host, with `requiresSandbox`; a request without a sandbox is refused; no `env`,
+`envProvider` or `models` yet; the host's "program is gone" fallback is skipped for
+it. Seven tests, three of them failing with their logic switched off.
+
+**Checked against the real sandbox, opencode 2 and a real model** (the sandbox
+service, the core and the helper as shipped; the descriptor built by hand because
+the desktop's bridge is not involved): the target is listed with `requiresSandbox`; a
+request without a sandbox is refused (400); a guest turn answers; the agent reads
+`.room/INDEX.md` the core wrote (mode 0600) and answers from it; a file the agent
+writes appears in the host workspace; after the idle stop the same conversation
+continues in a new VM process and recalls the content; the only process on the host
+is the `bnbloc-vmexec` helper.
+
+**Using it now, by hand** (until the installing half exists): install the agent in
+the sandbox's space home as its user (e.g. `npm install --prefix ~/agents/x …`), then
+a line in `agents.json` with `"sandbox": "guest"` and the guest command. The agent
+runs per room in that room's space home, so it is installed once per room (the space
+name is per room and member).
+
+**Not built:** the desktop's `sandbox` host interface and its installer space; the
+manager's install target and page; the store and its clones (§2.1a); `sandboxOnly`;
+the key as a protocol secret (§5); the device-code login; the egress allowlists.
+**Not run:** the desktop app itself (the bridge change is tested, not run in the
+real app), and a guest agent that needs a login or a key.
