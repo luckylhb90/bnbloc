@@ -7,6 +7,7 @@ import {
   GearSixIcon,
   GlobeIcon,
   PackageIcon,
+  PulseIcon,
   SignOutIcon,
   SwapIcon,
   UserCircleIcon,
@@ -32,6 +33,7 @@ import { can } from "@/lib/permissions";
 const MENU_VIEWS: ReadonlySet<View> = new Set<View>([
   "agents",
   "team",
+  "board",
   "components",
   "org",
   "directory",
@@ -164,6 +166,8 @@ export function AccountMenu({
         {/* Team dashboard + borrow billing: every member sees their own
             agents; org admins see the whole team (gateway gates /v1/tenant/*). */}
         {item("team", "Team", UsersThreeIcon)}
+        {/* The organization board: every member may open it (the server aggregates it). */}
+        {item("board", "Board", PulseIcon)}
       </MenuGroup>
       <MenuGroup label="Workspace">
         {item("components", "Components", PackageIcon)}

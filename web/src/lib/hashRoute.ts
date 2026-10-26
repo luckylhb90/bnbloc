@@ -3,7 +3,7 @@
 //
 // Route shapes:
 //   #/                     -> { view: "plaza" }
-//   #/plaza | #/myrooms | #/agents | #/team | #/components | #/org | #/directory | #/releases
+//   #/plaza | #/myrooms | #/agents | #/team | #/board | #/components | #/org | #/directory | #/releases
 //   #/room/<roomId>        -> a specific room
 //   #/room/<roomId>?seq=<n>[&channel=<channelId>]
 //                          -> the room, scrolled to one message (a

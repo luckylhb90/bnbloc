@@ -18,6 +18,7 @@ test("views and rooms parse as before", () => {
   eq(parseHashRoute(""), { kind: "view", view: "plaza" }, "empty");
   eq(parseHashRoute("#sessionToken=x&subject=y"), { kind: "view", view: "plaza" }, "sso hash");
   eq(parseHashRoute("#/agents"), { kind: "view", view: "agents" }, "view");
+  eq(parseHashRoute("#/board"), { kind: "view", view: "board" }, "the organization board");
   eq(parseHashRoute("#/room/r%201"), { kind: "room", roomId: "r 1" }, "room");
 });
 

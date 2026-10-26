@@ -7361,11 +7361,11 @@ export const RoomRolesThatInvite: readonly RoomRole[] = ["owner", "admin"];
 // What each organization role may do (rbac.Can). The empty role is a
 // session minted without one.
 export const OrgRolePermissions: Readonly<Record<OrgRole | "", readonly OrgPermission[]>> = {
-  "": ["create_room", "drive_agent", "read"],
+  "": ["create_room", "drive_agent", "read", "read_org_pulse"],
   super_admin: ["manage_platform", "manage_org", "create_room", "drive_agent", "read", "read_org_pulse"],
   org_admin: ["manage_org", "create_room", "drive_agent", "read", "read_org_pulse"],
-  member: ["create_room", "drive_agent", "read"],
-  viewer: ["read"],
+  member: ["create_room", "drive_agent", "read", "read_org_pulse"],
+  viewer: ["read", "read_org_pulse"],
 };
 // The role an unrecognized role string acts as (rbac.Normalize).
 export const OrgRoleUnknown: OrgRole = "viewer";

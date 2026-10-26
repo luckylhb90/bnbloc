@@ -30,7 +30,7 @@ import { onRoomGone, withoutRoom } from "@/lib/roomGone";
 import { can } from "@/lib/permissions";
 import { StorageKey, readStored, writeStored } from "@/lib/storageKeys";
 
-export type View = "plaza" | "myrooms" | "agents" | "team" | "components" | "org" | "directory" | "releases" | "library" | "settings";
+export type View = "plaza" | "myrooms" | "agents" | "team" | "board" | "components" | "org" | "directory" | "releases" | "library" | "settings";
 
 export function Shell({
   view,

@@ -32,6 +32,7 @@ const GlobalSearch = lazy(() => import("@/views/search/GlobalSearch").then((m) =
 const Team = lazy(() => import("@/views/Team").then((m) => ({ default: m.Team })));
 const MemberComponents = lazy(() => import("@/views/MemberComponents").then((m) => ({ default: m.MemberComponents })));
 const Organization = lazy(() => import("@/views/Organization").then((m) => ({ default: m.Organization })));
+const BoardPage = lazy(() => import("@/views/org/BoardPage").then((m) => ({ default: m.BoardPage })));
 const Directory = lazy(() => import("@/views/Directory").then((m) => ({ default: m.Directory })));
 const ReleaseHub = lazy(() => import("@/views/ReleaseHub").then((m) => ({ default: m.ReleaseHub })));
 const Settings = lazy(() => import("@/views/Settings").then((m) => ({ default: m.Settings })));
@@ -204,6 +205,8 @@ export function App() {
             <Team onOpenRoom={openRoom} />
           ) : view === "components" ? (
             <MemberComponents />
+          ) : view === "board" ? (
+            <BoardPage />
           ) : view === "org" ? (
             <Organization />
           ) : view === "directory" ? (
