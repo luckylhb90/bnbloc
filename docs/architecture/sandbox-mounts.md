@@ -49,3 +49,36 @@ guest's alone: the core's host-to-guest path mapping stays the workspace.
 
 The files are read every turn, so installing, changing or removing a component
 needs no restart, and a turn already running keeps what it started with.
+
+## A folder every room needs: `perSpace`
+
+A guest path belongs to **one space** of the machine (measured 2026-10-26: a
+second space asking for the same guest path is refused with `conflict`, and a
+host folder mounted by several spaces is re-owned by the last one, locking the
+first out). So a descriptor entry that names one fixed guest path works for one
+room's space only. A folder every room needs (an agent's installed files) is
+declared `"perSpace": true`:
+
+```
+{ "host": "<workspaces root>/.mounts/<component>/agents/opencode/2.1.4",
+  "guest": "<under a guest root>/agents/opencode",
+  "perSpace": true, "env": "BNBLOC_MOUNT_OPENCODE" }
+```
+
+- The bridge gives each space a tree of **hard links** to the files of `host`,
+  under `<component folder>/.spaces/<space>/<slot>`: no second copy on disk
+  (measured: three spaces ran one 20 MB program, 20 MB on disk), no dependence
+  on APFS clones, the same on any file system. Links are recreated as links,
+  never followed; a file that is not a file, a folder or a link refuses the tree
+  (the mount is dropped, a tree made earlier stays).
+- The space's guest path is `guest` + `-` + the space's name, so no two spaces
+  collide. `env` (only with `perSpace`, only `BNBLOC_MOUNT_<NAME>`, one name per
+  mount) is set in the space to that path: a command line says
+  `$BNBLOC_MOUNT_OPENCODE/bin/opencode` and means the same in every room.
+- A tree that records `host` as its source is reused untouched; a different
+  `host` (a new version, which is a new folder: **a version folder is never
+  changed in place**) replaces the tree of that slot whole, built beside it and
+  swapped in. The space has no process left from before when it is prepared, so
+  nothing runs from the tree that goes.
+- Not yet: trees of spaces that no longer exist are not removed (they hold the
+  inodes of old versions, nothing else).

@@ -43,6 +43,10 @@ const (
 
 var componentName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)
 
+// mountEnvName is the variable a per-space mount may set: its own namespace, so
+// a component cannot rewrite anything the core or the sandbox sets.
+var mountEnvName = regexp.MustCompile(`^BNBLOC_MOUNT_[A-Z0-9_]{1,48}$`)
+
 // mountDrop is a mount that did not pass, and why.
 type mountDrop struct {
 	Component string
@@ -107,13 +111,13 @@ func selects(forWhom string, borrowed bool) (bool, bool) {
 // readContributedMounts reads every component's descriptor under mountsDir and
 // returns the read-only mounts for a turn (own or borrowed) in a workdir, and
 // what was dropped.
-func readContributedMounts(mountsDir, workspacesRoot, workdir string, guestRoots []string, borrowed bool) (mounts []sandbox.SpaceMount, dropped []mountDrop) {
+func readContributedMounts(mountsDir, workspacesRoot, workdir, space string, guestRoots []string, borrowed bool) (mounts []sandbox.SpaceMount, env map[string]string, dropped []mountDrop) {
 	if mountsDir == "" {
-		return nil, nil
+		return nil, nil, nil
 	}
 	list, err := os.ReadDir(mountsDir)
 	if err != nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 	names := make([]string, 0, len(list))
 	for _, e := range list {
@@ -134,19 +138,29 @@ func readContributedMounts(mountsDir, workspacesRoot, workdir string, guestRoots
 			continue
 		}
 		taken++
-		got, drops := readComponentMounts(filepath.Join(mountsDir, name), name, workspacesRoot, workdir, guestRoots, borrowed, guests)
+		got, vars, drops := readComponentMounts(filepath.Join(mountsDir, name), name, workspacesRoot, workdir, space, guestRoots, borrowed, guests)
 		mounts = append(mounts, got...)
+		for k, v := range vars {
+			if _, dup := env[k]; dup {
+				dropped = append(dropped, mountDrop{Component: name, Reason: "the variable " + k + " is already set by another mount"})
+				continue
+			}
+			if env == nil {
+				env = map[string]string{}
+			}
+			env[k] = v
+		}
 		dropped = append(dropped, drops...)
 	}
-	return mounts, dropped
+	return mounts, env, dropped
 }
 
-func readComponentMounts(dir, name, workspacesRoot, workdir string, guestRoots []string, borrowed bool, guests map[string]bool) (mounts []sandbox.SpaceMount, dropped []mountDrop) {
+func readComponentMounts(dir, name, workspacesRoot, workdir, space string, guestRoots []string, borrowed bool, guests map[string]bool) (mounts []sandbox.SpaceMount, env map[string]string, dropped []mountDrop) {
 	drop := func(host, guest, why string) { dropped = append(dropped, mountDrop{name, host, guest, why}) }
 	file := filepath.Join(dir, mountsFileName)
 	st, err := os.Lstat(file)
 	if err != nil {
-		return nil, nil // no descriptor: nothing contributed
+		return nil, nil, nil // no descriptor: nothing contributed
 	}
 	if !st.Mode().IsRegular() || st.Size() > maxMountsFileBytes {
 		drop("", "", "the descriptor is not a plain file of at most 256 KiB")
@@ -181,6 +195,10 @@ func readComponentMounts(dir, name, workspacesRoot, workdir string, guestRoots [
 		if !want {
 			continue
 		}
+		if m.Env != "" && (!m.PerSpace || !mountEnvName.MatchString(m.Env)) {
+			drop(m.Host, m.Guest, "env needs perSpace and a name of the form BNBLOC_MOUNT_<NAME>")
+			continue
+		}
 		if !filepath.IsAbs(m.Host) || filepath.Clean(m.Host) != m.Host || !within(hostRoot, m.Host) || m.Host == hostRoot {
 			drop(m.Host, m.Guest, "the host path is not inside the component's folder")
 			continue
@@ -198,13 +216,17 @@ func readComponentMounts(dir, name, workspacesRoot, workdir string, guestRoots [
 			drop(m.Host, m.Guest, "the guest path is not an absolute, clean path")
 			continue
 		}
-		if overlaps(workdir, m.Guest) {
+		hostPath, guestPath := m.Host, m.Guest
+		if m.PerSpace {
+			guestPath = m.Guest + "-" + space
+		}
+		if overlaps(workdir, guestPath) {
 			drop(m.Host, m.Guest, "the guest path overlaps the workspace")
 			continue
 		}
 		underRoot := false
 		for _, r := range guestRoots {
-			if m.Guest != r && within(r, m.Guest) {
+			if guestPath != r && within(r, guestPath) {
 				underRoot = true
 				break
 			}
@@ -213,36 +235,54 @@ func readComponentMounts(dir, name, workspacesRoot, workdir string, guestRoots [
 			drop(m.Host, m.Guest, "the guest path is outside the allowed folders (BNBLOC_SANDBOX_MOUNT_ROOTS)")
 			continue
 		}
-		if guests[m.Guest] {
+		if guests[guestPath] {
 			drop(m.Host, m.Guest, "another mount already uses the guest path")
 			continue
 		}
-		guests[m.Guest] = true
-		mounts = append(mounts, sandbox.SpaceMount{Kind: sandbox.MountShared, HostPath: m.Host, GuestPath: m.Guest, ReadOnly: true})
+		if m.PerSpace {
+			tree, err := perSpaceTree(realRoot, space, m.Guest, real)
+			if err != nil {
+				drop(m.Host, m.Guest, "its tree for this space cannot be made: "+err.Error())
+				continue
+			}
+			hostPath = tree
+			if m.Env != "" {
+				if _, dup := env[m.Env]; dup {
+					drop(m.Host, m.Guest, "the variable "+m.Env+" is already set by another mount")
+					continue
+				}
+				if env == nil {
+					env = map[string]string{}
+				}
+				env[m.Env] = guestPath
+			}
+		}
+		guests[guestPath] = true
+		mounts = append(mounts, sandbox.SpaceMount{Kind: sandbox.MountShared, HostPath: hostPath, GuestPath: guestPath, ReadOnly: true})
 	}
-	return mounts, dropped
+	return mounts, env, dropped
 }
 
 // contributedMounts is what the component descriptors add to a turn: nothing
 // unless the sandbox is known to enforce read-only mounts (a mount that is
 // only read-only by the guest's goodwill is not offered to a guest).
-func (s *sandboxRuntime) contributedMounts(workdir string, borrowed bool) []sandbox.SpaceMount {
+func (s *sandboxRuntime) contributedMounts(workdir, space string, borrowed bool) ([]sandbox.SpaceMount, map[string]string) {
 	if s.cfg.MountsDir == "" {
-		return nil
+		return nil, nil
 	}
-	mounts, dropped := readContributedMounts(s.cfg.MountsDir, s.cfg.WorkspacesRoot, workdir, s.cfg.MountGuestRoots, borrowed)
+	mounts, env, dropped := readContributedMounts(s.cfg.MountsDir, s.cfg.WorkspacesRoot, workdir, space, s.cfg.MountGuestRoots, borrowed)
 	for _, d := range dropped {
 		slog.Warn("bnbloc bridge sandbox mount dropped", "event", "bnbloc.bridge.sandbox_mount_dropped", "mount", d.String())
 	}
 	if len(mounts) == 0 {
-		return nil
+		return nil, nil
 	}
 	s.mu.Lock()
 	enforced := s.readOnlyMounts
 	s.mu.Unlock()
 	if !enforced {
 		slog.Warn("bnbloc bridge sandbox mounts not applied: the sandbox does not advertise readOnlyMounts", "event", "bnbloc.bridge.sandbox_mounts_unenforced", "count", len(mounts))
-		return nil
+		return nil, nil
 	}
-	return mounts
+	return mounts, env
 }

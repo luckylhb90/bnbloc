@@ -56,7 +56,8 @@ func (f mountFixture) descriptor(t *testing.T, component string, body any) {
 }
 
 func (f mountFixture) read(borrowed bool) ([]sandbox.SpaceMount, []mountDrop) {
-	return readContributedMounts(f.mountsDir, f.root, f.workdir, []string{f.guestRoot}, borrowed)
+	m, _, d := readContributedMounts(f.mountsDir, f.root, f.workdir, "space-1", []string{f.guestRoot}, borrowed)
+	return m, d
 }
 
 type desc = map[string]any
@@ -142,7 +143,7 @@ func TestContributedMounts_refusals(t *testing.T) {
 	}
 	// A guest folder outside the default root is fine once the member allows it.
 	f.descriptor(t, "c1", descriptor(desc{"host": ok, "guest": "/opt/skills/x"}))
-	mounts, _ := readContributedMounts(f.mountsDir, f.root, f.workdir, []string{f.guestRoot, "/opt/skills"}, false)
+	mounts, _, _ := readContributedMounts(f.mountsDir, f.root, f.workdir, "space-1", []string{f.guestRoot, "/opt/skills"}, false)
 	if len(mounts) != 1 {
 		t.Errorf("an allowed extra root: %+v", mounts)
 	}
@@ -209,10 +210,10 @@ func TestContributedMounts_descriptorProblems(t *testing.T) {
 	if _, d := f.read(false); !slices.ContainsFunc(d, func(x mountDrop) bool { return x.Component == "Bad Name" }) {
 		t.Errorf("a bad component name: %v", d)
 	}
-	if m, d := readContributedMounts("", f.root, f.workdir, nil, false); m != nil || d != nil {
+	if m, e, d := readContributedMounts("", f.root, f.workdir, "space-1", nil, false); m != nil || e != nil || d != nil {
 		t.Error("no mounts dir configured: nothing")
 	}
-	if m, d := readContributedMounts(filepath.Join(f.mountsDir, "nowhere"), f.root, f.workdir, nil, false); m != nil || d != nil {
+	if m, e, d := readContributedMounts(filepath.Join(f.mountsDir, "nowhere"), f.root, f.workdir, "space-1", nil, false); m != nil || e != nil || d != nil {
 		t.Error("a mounts dir that is not there: nothing")
 	}
 }
@@ -373,5 +374,128 @@ func TestContributedMounts_theContractTypesAreAccepted(t *testing.T) {
 	}
 	if got := strings.Join(guests(true), " "); got != "/.agents/skills/beta /.claude/skills/gamma" {
 		t.Errorf("borrowed runs got %s", got)
+	}
+}
+
+// A per-space mount: every space gets a tree of its own (the sandbox lets a
+// guest path belong to one space only) made of hard links to one set of files,
+// and a variable of the space names it.
+func TestContributedMounts_perSpaceTreesShareFilesAndNameTheirPath(t *testing.T) {
+	f := newMountFixture(t)
+	v1 := f.folder(t, "agents", "tool/1.0")
+	if err := os.MkdirAll(filepath.Join(v1, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	prog := filepath.Join(v1, "bin", "tool")
+	os.WriteFile(prog, []byte("#!/bin/sh\necho v1\n"), 0o755)
+	if err := os.Symlink("bin/tool", filepath.Join(v1, "tool-link")); err != nil {
+		t.Fatal(err)
+	}
+	f.descriptor(t, "agents", descriptor(desc{"host": v1, "guest": f.guestRoot + "/agents/tool", "perSpace": true, "env": "BNBLOC_MOUNT_TOOL"}))
+
+	read := func(space string) ([]sandbox.SpaceMount, map[string]string, []mountDrop) {
+		return readContributedMounts(f.mountsDir, f.root, f.workdir, space, []string{f.guestRoot}, false)
+	}
+	ma, ea, da := read("a-1")
+	mb, eb, db := read("b-2")
+	if len(da)+len(db) != 0 || len(ma) != 1 || len(mb) != 1 {
+		t.Fatalf("mounts %+v %+v dropped %v %v", ma, mb, da, db)
+	}
+	if ma[0].GuestPath != f.guestRoot+"/agents/tool-a-1" || mb[0].GuestPath != f.guestRoot+"/agents/tool-b-2" {
+		t.Errorf("guest paths %q %q: one per space", ma[0].GuestPath, mb[0].GuestPath)
+	}
+	if ea["BNBLOC_MOUNT_TOOL"] != ma[0].GuestPath || eb["BNBLOC_MOUNT_TOOL"] != mb[0].GuestPath {
+		t.Errorf("env %v %v does not name each space's path", ea, eb)
+	}
+	if !ma[0].ReadOnly || ma[0].HostPath == mb[0].HostPath || ma[0].HostPath == v1 {
+		t.Errorf("host paths %q %q: read-only, a tree of its own per space, not the source", ma[0].HostPath, mb[0].HostPath)
+	}
+	same := func(a, b string) bool {
+		sa, ea := os.Stat(a)
+		sb, eb := os.Stat(b)
+		return ea == nil && eb == nil && os.SameFile(sa, sb)
+	}
+	if !same(filepath.Join(ma[0].HostPath, "bin", "tool"), prog) || !same(filepath.Join(mb[0].HostPath, "bin", "tool"), prog) {
+		t.Error("the trees must hard-link the one set of files, not copy them")
+	}
+	if got, err := os.Readlink(filepath.Join(ma[0].HostPath, "tool-link")); err != nil || got != "bin/tool" {
+		t.Errorf("a link is recreated as a link: %q %v", got, err)
+	}
+
+	// Asked again for the same source: the tree is kept as it is.
+	marker := filepath.Join(ma[0].HostPath, "marker")
+	os.WriteFile(marker, []byte("x"), 0o644)
+	if again, _, _ := read("a-1"); len(again) != 1 || again[0] != ma[0] {
+		t.Fatalf("again %+v, want %+v", again, ma)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Error("a tree whose source did not change was rebuilt")
+	}
+
+	// A new version is a new folder: the space's tree is replaced (no tree of the
+	// old version is left behind), the files of the old version stay where they
+	// are, and the other space is untouched.
+	v2 := f.folder(t, "agents", "tool/2.0")
+	os.MkdirAll(filepath.Join(v2, "bin"), 0o755)
+	os.WriteFile(filepath.Join(v2, "bin", "tool"), []byte("#!/bin/sh\necho v2\n"), 0o755)
+	f.descriptor(t, "agents", descriptor(desc{"host": v2, "guest": f.guestRoot + "/agents/tool", "perSpace": true, "env": "BNBLOC_MOUNT_TOOL"}))
+	na, _, nd := read("a-1")
+	if len(nd) != 0 || len(na) != 1 {
+		t.Fatalf("after the update: %+v %v", na, nd)
+	}
+	if got, _ := os.ReadFile(filepath.Join(na[0].HostPath, "bin", "tool")); !strings.Contains(string(got), "v2") {
+		t.Errorf("the tree still has the old version: %q", got)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("the replaced tree kept a file of the old tree")
+	}
+	if got, _ := os.ReadFile(prog); !strings.Contains(string(got), "v1") {
+		t.Error("the old version's files were touched")
+	}
+	if entries, _ := os.ReadDir(filepath.Dir(na[0].HostPath)); len(entries) != 2 { // the tree and its stamp
+		t.Errorf("the space's folder holds %d entries after an update, want the tree and its stamp", len(entries))
+	}
+	if again, _, _ := read("b-2"); len(again) != 1 || again[0] != mb[0] {
+		t.Errorf("the other space's tree changed: %+v, want %+v", again, mb)
+	}
+}
+
+func TestContributedMounts_perSpaceRefusals(t *testing.T) {
+	f := newMountFixture(t)
+	host := f.folder(t, "agents", "tool")
+	cases := []struct {
+		name string
+		m    desc
+		why  string
+	}{
+		{"a variable without perSpace", desc{"host": host, "guest": f.guestRoot + "/t", "env": "BNBLOC_MOUNT_T"}, "perSpace"},
+		{"a variable outside the namespace", desc{"host": host, "guest": f.guestRoot + "/t", "perSpace": true, "env": "PATH"}, "BNBLOC_MOUNT_"},
+		{"a lowercase variable", desc{"host": host, "guest": f.guestRoot + "/t", "perSpace": true, "env": "BNBLOC_MOUNT_x"}, "BNBLOC_MOUNT_"},
+	}
+	for _, c := range cases {
+		f.descriptor(t, "agents", descriptor(c.m))
+		mounts, dropped := f.read(false)
+		if len(mounts) != 0 || len(dropped) != 1 || !strings.Contains(dropped[0].Reason, c.why) {
+			t.Errorf("%s: mounts %+v dropped %v, want one drop mentioning %q", c.name, mounts, dropped, c.why)
+		}
+	}
+	// Two mounts that name the same variable: the second is dropped.
+	other := f.folder(t, "agents", "other")
+	f.descriptor(t, "agents", descriptor(
+		desc{"host": host, "guest": f.guestRoot + "/t", "perSpace": true, "env": "BNBLOC_MOUNT_T"},
+		desc{"host": other, "guest": f.guestRoot + "/o", "perSpace": true, "env": "BNBLOC_MOUNT_T"},
+	))
+	if mounts, dropped := f.read(false); len(mounts) != 1 || len(dropped) != 1 || !strings.Contains(dropped[0].Reason, "already set") {
+		t.Errorf("a variable named twice: mounts %+v dropped %v", mounts, dropped)
+	}
+	// Something that is not a file, a folder or a link cannot be linked: the
+	// mount is dropped and a tree made earlier stays.
+	bad := f.folder(t, "agents", "bad")
+	if err := syscallMkfifo(filepath.Join(bad, "pipe")); err != nil {
+		t.Skip("no fifo here:", err)
+	}
+	f.descriptor(t, "agents", descriptor(desc{"host": bad, "guest": f.guestRoot + "/b", "perSpace": true}))
+	if mounts, dropped := f.read(false); len(mounts) != 0 || len(dropped) != 1 || !strings.Contains(dropped[0].Reason, "cannot be made") {
+		t.Errorf("a fifo in the tree: mounts %+v dropped %v", mounts, dropped)
 	}
 }

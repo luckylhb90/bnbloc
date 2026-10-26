@@ -367,7 +367,8 @@ func (s *sandboxRuntime) prepare(ctx context.Context, k driveKey, owner string, 
 	// What components contribute (read-only copies, at paths the member
 	// allows) is the guest's alone: the core's path mapping is the workspace.
 	space0 := len(mounts)
-	mounts = append(mounts, s.contributedMounts(workdir, borrowed)...)
+	contributed, mountEnv := s.contributedMounts(workdir, space, borrowed)
+	mounts = append(mounts, contributed...)
 	// Every drive's commands reach the services' hosts through the
 	// bridge's egress proxy. Each service decides by the attested drive: a
 	// borrowed or platform drive is never served in the owner's name (the
@@ -375,6 +376,17 @@ func (s *sandboxRuntime) prepare(ctx context.Context, k driveKey, owner string, 
 	var spaceEnv map[string]string
 	if s.spaceEnv != nil {
 		spaceEnv = s.spaceEnv(ctx, workdir)
+	}
+	// A per-space mount names its guest path in a variable of the space.
+	if len(mountEnv) > 0 {
+		merged := make(map[string]string, len(spaceEnv)+len(mountEnv))
+		for k, v := range spaceEnv {
+			merged[k] = v
+		}
+		for k, v := range mountEnv {
+			merged[k] = v
+		}
+		spaceEnv = merged
 	}
 	if _, err := s.client.EnsureSpace(ctx, s.endpoint(), machine, space, sandbox.SpaceRequest{
 		Workdir:      workdir,
