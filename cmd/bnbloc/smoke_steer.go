@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"net/http"
@@ -32,6 +33,18 @@ type steerJob struct {
 	MessageSeq  int64  `json:"messageSeq"`
 	Status      string `json:"status"`
 	SteeredInto string `json:"steeredInto"`
+	// Error and Reason say why a job that ended did not do its work.
+	Error  string `json:"error"`
+	Reason string `json:"failureReason"`
+}
+
+// failedHow is how a job that ended without replying says so ("" while it may still run).
+func (j steerJob) failedHow() string {
+	switch j.Status {
+	case "failed", "cancelled", "timed_out":
+		return strings.TrimSpace(j.Status + " " + j.Reason + ": " + j.Error)
+	}
+	return ""
 }
 
 // smokeSteer runs the scenario's checks on the open room.
@@ -95,6 +108,8 @@ func smokeSteer(ctx context.Context, c *client, w *smokeWaiter, roomID, subject 
 			if j, ok := jobOf(firstSeq); ok && (j.Status == "running" || j.Status == "reflowing") {
 				time.Sleep(6 * time.Second)
 				return fmt.Sprintf("job %s %s", j.JobID, j.Status), nil
+			} else if ok && j.failedHow() != "" {
+				return "", fmt.Errorf("the task's job ended before it ran: %s", j.failedHow())
 			}
 			time.Sleep(opts.pollEvery())
 		}
@@ -103,7 +118,7 @@ func smokeSteer(ctx context.Context, c *client, w *smokeWaiter, roomID, subject 
 		return
 	}
 
-	steered := false
+	steered, queued := false, false
 	if !run.step("joined", func() (string, error) {
 		var err error
 		secondSeq, err = send("Also end your reply with the word " + second + ".")
@@ -121,8 +136,8 @@ func smokeSteer(ctx context.Context, c *client, w *smokeWaiter, roomID, subject 
 					}
 					steered = true
 					return "steered into " + j.SteeredInto, nil
-				case j.Status == "replied" || j.Status == "failed" || j.Status == "cancelled" || j.Status == "timed_out":
-					return "", fmt.Errorf("the second message's job ended %s without joining the running turn", j.Status)
+				case j.Status == "replied" || j.failedHow() != "":
+					return "", fmt.Errorf("the second message's job ended %s without joining the running turn", cmp.Or(j.failedHow(), j.Status))
 				}
 			}
 			time.Sleep(opts.pollEvery())
@@ -130,8 +145,22 @@ func smokeSteer(ctx context.Context, c *client, w *smokeWaiter, roomID, subject 
 		// Not steered within the wait: it is queued behind the turn. That is the contract
 		// of a core that takes no steering, so it is reported, not failed.
 		fmt.Fprintf(run.out, "INFO joined: the second message was queued behind the running turn (this agent's core takes no steering)\n")
+		queued = true
 		return "", smokeWarning{err: fmt.Errorf("not steered")}
-	}) {
+	}) && !queued {
+		return
+	}
+
+	if queued {
+		// Both turns still complete, one after the other: the first task's word (its command ran,
+		// wherever the agent runs commands), then the queued message's.
+		run.step("queued replies", func() (string, error) {
+			reply, err := collectReply(ctx, w, rcpt, opts, first, second)
+			if err != nil {
+				return "", err
+			}
+			return reply, nil
+		})
 		return
 	}
 

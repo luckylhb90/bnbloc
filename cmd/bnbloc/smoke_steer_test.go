@@ -26,3 +26,21 @@ func TestSteerScenarioIsKnown(t *testing.T) {
 		t.Fatalf("scenario name %q", scenarioSteer)
 	}
 }
+
+// A job that ended without replying says why (the reason and the core's error), so a failed
+// smoke names the cause instead of timing out; one that may still run says nothing.
+func TestSteerJobSaysHowItFailed(t *testing.T) {
+	for _, c := range []struct {
+		job  steerJob
+		want string
+	}{
+		{steerJob{Status: "running"}, ""},
+		{steerJob{Status: "replied"}, ""},
+		{steerJob{Status: "failed", Reason: "agent_error", Error: "403 model not available"}, "failed agent_error: 403 model not available"},
+		{steerJob{Status: "timed_out"}, "timed_out:"},
+	} {
+		if got := c.job.failedHow(); got != c.want {
+			t.Errorf("%+v: failedHow = %q, want %q", c.job, got, c.want)
+		}
+	}
+}
