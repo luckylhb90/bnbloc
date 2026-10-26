@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { api } from "@/lib/api";
 import { libraryApi } from "@/lib/libraryApi";
 import { gatewayBase } from "@/lib/config";
-import type { ExpertChoice } from "@/lib/contentComponents";
 import { contentApi } from "@/lib/contentComponentsApi";
 import { decisionsApi } from "@/lib/decisions";
 import { ApiError, errorText } from "@/lib/errors";
@@ -179,5 +178,3 @@ function expertOf(c: UseCandidate): Pick<SendOptions, "expert" | "expertMarker">
     expertMarker: { id: c.id, name: c.name, displayName: c.label, version: c.version ?? "" },
   };
 }
-
-export type { ExpertChoice };
