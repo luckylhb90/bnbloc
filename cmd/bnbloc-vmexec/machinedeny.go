@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	coreprotocol "github.com/luckylhb90/bnbloc/core/protocol"
 )
 
 // Machine-wide read denials. A component that keeps a login of its own (a
@@ -28,7 +30,7 @@ import (
 // it; the descriptor's own denyRead is unaffected.
 const (
 	machineDenyDir     = "confine.d"
-	machineDenyOffEnv  = "BNBLOC_CONFINE_MACHINE_DENY"
+	machineDenyOffEnv  = coreprotocol.EnvConfineMachineDeny
 	machineDenyMaxFile = 64 << 10
 	machineDenyMaxLen  = 64 // files read; the rest are ignored
 )

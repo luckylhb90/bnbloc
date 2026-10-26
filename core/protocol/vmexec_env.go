@@ -38,6 +38,10 @@ const (
 	EnvConfineAllowWrite = "BNBLOC_CONFINE_ALLOW_WRITE" // JSON array of host paths
 	EnvConfineDenyWrite  = "BNBLOC_CONFINE_DENY_WRITE"  // JSON array of host paths
 	EnvConfineDenyRead   = "BNBLOC_CONFINE_DENY_READ"   // JSON array of host paths
+	// EnvConfineMachineDeny set to "off" runs a CLI without the machine-wide read denials of
+	// ~/.bnbloc/confine.d: a CLI that is itself the tool whose state is named (it must read its
+	// own login) is run so by the core that confines it. The descriptor's own denyRead stays.
+	EnvConfineMachineDeny = "BNBLOC_CONFINE_MACHINE_DENY"
 )
 
 // VMExecEnv returns the KEY=VALUE environment entries for s. A core appends
