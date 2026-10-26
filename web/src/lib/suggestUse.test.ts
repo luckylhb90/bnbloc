@@ -14,8 +14,8 @@ import {
   suggestionText,
   type UseCandidate,
 } from "./suggestUse.ts";
-import { agentSentTo, cardForRow, createCardStore, staleAnswer } from "./sentRequestCard.ts";
-import { sameAgent } from "./roomAgents.ts";
+import { cardForRow, createCardStore, staleAnswer } from "./sentRequestCard.ts";
+import { agentByIdentity, sameAgent } from "./roomAgents.ts";
 import type { DecisionReply, LibraryCandidate } from "./wire.gen.ts";
 
 function assert(condition: boolean, message: string): void {
@@ -154,9 +154,9 @@ assert(!staleAnswer("m1", null, false), "no message sent since is fine");
     { ownerId: "maya", provider: "claude-code", core: undefined, self: true },
     { ownerId: "jack", provider: "claude-code", core: "nimbus", self: false },
   ];
-  assert(agentSentTo(agents, { ownerId: "maya", provider: "claude-code", core: "nimbus" }) === agents[1], "the agent the request went to, not the first of mine");
-  assert(agentSentTo(agents, { ownerId: "maya", provider: "claude-code" }) === agents[2], "no core is its own agent");
-  assert(agentSentTo(agents, { ownerId: "jack", provider: "claude-code", core: "nimbus" }) === agents[3], "someone else's agent it was sent to");
-  assert(agentSentTo(agents, { ownerId: "maya", provider: "opencode", core: "nimbus" }) === null, "an agent that left the room is nobody");
+  assert(agentByIdentity(agents, { ownerId: "maya", provider: "claude-code", core: "nimbus" }) === agents[1], "the agent the request went to, not the first of mine");
+  assert(agentByIdentity(agents, { ownerId: "maya", provider: "claude-code" }) === agents[2], "no core is its own agent");
+  assert(agentByIdentity(agents, { ownerId: "jack", provider: "claude-code", core: "nimbus" }) === agents[3], "someone else's agent it was sent to");
+  assert(agentByIdentity(agents, { ownerId: "maya", provider: "opencode", core: "nimbus" }) === null, "an agent that left the room is nobody");
   assert(!sameAgent({ ownerId: "maya", provider: "claude", core: "acme" }, { ownerId: "maya", provider: "claude", core: "nimbus" }), "the core tells two agents of one provider apart");
 }

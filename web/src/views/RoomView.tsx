@@ -41,7 +41,7 @@ import { useDeadEnd } from "@/views/room/useDeadEnd";
 import { DeadEndProvider } from "@/views/room/DeadEndCard";
 import { QuotaRequestDialog } from "@/views/team/QuotaRequestDialog";
 import { usePendingQuotaCount } from "@/views/team/QuotaRequestsPanel";
-import { borrowKey } from "@/lib/roomAgents";
+import { agentByIdentity, borrowKey } from "@/lib/roomAgents";
 import { jobQueueAhead } from "@/lib/platformAgents";
 import { queuedBehind } from "@/views/room/agentJobLabels";
 import { useDesktopHandoff } from "@/views/room/useDesktopHandoff";
@@ -301,7 +301,10 @@ export function RoomView({
   // opens the turn that resumes the run.
   const continueLive = useCallback(
     (live: JobLive) => {
-      const recipient = roomAgents.find((a) => a.ownerId === live.owner && a.provider === live.provider && (!live.core || !a.core || a.core === live.core));
+      // The agent whose job opened this view: its owner, core and provider, exactly (a
+      // missing core is not "any core": two cores can offer one provider). When the view
+      // does not name it, or it is not in the room, the member chooses; nothing is guessed.
+      const recipient = live.provider ? agentByIdentity(roomAgents, { ownerId: live.owner, core: live.core, provider: live.provider }) : null;
       if (!recipient) {
         toast.info("Tell the agent in the room that you are done");
         return;

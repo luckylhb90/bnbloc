@@ -72,9 +72,21 @@ room+channel+agent, a job by id); code that acts on it again carries the key and
 resolves by it, or says it is gone and does nothing. A search may only propose,
 never act. Test with two candidates that differ only in what the search ignores.
 
-Evidence: web/scripts/which-one.test.mjs, web/e2e/suggest-use.mjs (several
-agents in the room), web/src/lib/sentRequestCard.ts (`sentTo`).
-Seen 1× in this form (2026-10-26); the same class 2026-10-12, 2026-10-22.
+The same day the owner found the next one in the code I had just said was
+fixed: "Continue" resolved its agent with `(!live.core || !a.core || …)`, a
+missing core matching any core. My check only knew the spellings I had already
+met (`.find(… self …)`, `[0]`), so it did not see it. A check that lists
+spellings is a fence, not a fix; what works is the gate before the code: a
+choice the code invents (a target without a key, a fallback, a wildcard, a
+number nobody gave) is shown to the owner as a Decision card before it is
+written (AGENTS.md "Workflow: Decision gate"). I also said steering worked when
+only a layer of it had been run; its end-to-end proof is now the `steer` smoke
+scenario.
+
+Evidence: web/scripts/which-one.test.mjs, services/bridge/which_one_test.go,
+web/e2e/suggest-use.mjs (several agents in the room), web/src/lib/roomAgents.ts
+(`agentByIdentity`), cmd/bnbloc/smoke_steer.go.
+Seen 2× (2026-10-26 twice); the same class 2026-10-12, 2026-10-22.
 
 ### What an agent cannot see in this turn, it cannot act on: let a tool take what the agent has
 

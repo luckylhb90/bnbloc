@@ -128,3 +128,29 @@ implements the same capability in its core. Replace: a second core installs besi
 9. **Not here.** Steering a turn on another bridge (a job's session lives on one bridge);
    merging replies; steering a scheduled or dispatched job (they are not a person's
    follow-up).
+
+## 5. Decisions (the owner decided; the code cites them as `decision: steer PRD §5.n`)
+
+Choices the implementation made that the design did not give, shown to the owner after the
+fact (they should have been shown before; AGENTS.md "Decision gate" now requires it). Each
+is the proposal as built, for the owner to confirm or change.
+
+1. **A message is steered only when its own session has a running turn, the core can take
+   it, and the message is a person's plain text** (no attachment, no file to edit, no
+   expert, not dispatched by an agent). *Key:* the session key (room, channel, agent,
+   requester). *Missing or refused:* the message is queued, as before; nothing is guessed.
+   *Two candidates:* two channels or two members of one agent are two sessions, never
+   steered into each other. (Built: `steerInto`, `drive.steerable`.)
+2. **`steer` outcome `idle` or an error means "queue / send as an ordinary input", never
+   retry on another core.** *Two candidates:* two cores offering one provider: the job names
+   its core; a steer goes to that core only.
+3. **A steered job settles `replied` at once, with `steeredInto`.** The alternative (the
+   job stays open until the running turn replies) keeps the activity strip honest about
+   waiting but holds a lease for no work. Recommended: as built.
+4. **"Stop the current task and do this now" is shown only for a message queued behind its
+   own session's running turn**, and stops only that turn, by the member's click. *Key:* the
+   running job's id (never "the latest running job").
+5. **Which codex turns use the app-server:** a named model, on the host, or sandboxed when
+   the sandbox helper's own profile lets codex write its state databases (read from the
+   helper, not from a version). Anything else keeps `codex exec`. *Missing:* an unreadable
+   profile counts as unable (exec), never as able.

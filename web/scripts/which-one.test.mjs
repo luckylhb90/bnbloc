@@ -15,8 +15,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { agentIdentity, sameAgent } from "../src/lib/roomAgents.ts";
-import { agentSentTo } from "../src/lib/sentRequestCard.ts";
+import { agentByIdentity, agentIdentity, sameAgent } from "../src/lib/roomAgents.ts";
 
 const SRC = fileURLToPath(new URL("../src/", import.meta.url));
 
@@ -72,7 +71,45 @@ test("the agent a request went to is resolved by identity, among agents of one p
     { ownerId: "maya", provider: "claude-code", core: "nimbus", self: true },
     { ownerId: "jack", provider: "claude", core: "nimbus", self: false },
   ];
-  for (const a of agents) assert.equal(agentSentTo(agents, a), a, `${agentIdentity(a)} resolves to itself`);
-  assert.equal(agentSentTo(agents, { ownerId: "maya", provider: "claude", core: "other" }), null, "an agent that left is nobody");
+  for (const a of agents) assert.equal(agentByIdentity(agents, a), a, `${agentIdentity(a)} resolves to itself`);
+  assert.equal(agentByIdentity(agents, { ownerId: "maya", provider: "claude", core: "other" }), null, "an agent that left is nobody");
   assert.ok(!sameAgent(agents[0], agents[1]), "the core tells two agents of one provider apart");
+});
+
+// A missing core is "no core", never "any core": a live view that does not name its core must
+// not be resolved to whichever agent of that owner and provider comes first (RoomView's
+// "Continue" once did, with the same provider under two cores).
+test("a reference without a core does not match an agent that has one", () => {
+  const agents = [
+    { ownerId: "maya", provider: "claude", core: "acme" },
+    { ownerId: "maya", provider: "claude", core: "nimbus" },
+  ];
+  assert.equal(agentByIdentity(agents, { ownerId: "maya", provider: "claude" }), null, "no core is not any core");
+  assert.equal(agentByIdentity(agents, { ownerId: "maya", provider: "claude", core: "nimbus" }), agents[1]);
+  // and a core-less agent is found only by a core-less reference
+  const bare = [{ ownerId: "maya", provider: "claude" }];
+  assert.equal(agentByIdentity(bare, { ownerId: "maya", provider: "claude" }), bare[0]);
+  assert.equal(agentByIdentity(bare, { ownerId: "maya", provider: "claude", core: "acme" }), null);
+});
+
+// The other loose spelling of the same mistake: an identity comparison in which an absent
+// part matches anything ("!x.core ||", "x.core ?? true", "x.core === undefined ||").
+const PART = String.raw`\w+\.(?:core|owner|ownerId|provider)`;
+// An absent part that makes the comparison true: "!x.core || y.core === z", "x.core ?? true",
+// "x.core === undefined ||". A bare guard ("if (!x.core || !x.provider) return") compares
+// nothing and is not this: the pattern needs the absent part to sit next to an equality.
+const LOOSE = new RegExp(String.raw`!\s*${PART}\s*\|\|[^;\n]*===|${PART}\s*\?\?\s*true|${PART}\s*===\s*undefined\s*\|\|`);
+
+test("no identity comparison treats a missing part as a wildcard", () => {
+  assert.ok(LOOSE.test("(!live.core || !a.core || a.core === live.core)"));
+  assert.ok(LOOSE.test("a.core === undefined || a.core === core"));
+  assert.ok(!LOOSE.test("a.core === live.core"));
+  assert.ok(!LOOSE.test("if (!saved.ownerId || !saved.provider) return null;"), "a guard compares nothing");
+  const found = [];
+  for (const path of sources(SRC)) {
+    readFileSync(path, "utf8").split("\n").forEach((line, i) => {
+      if (LOOSE.test(line) && !line.includes("which-one:")) found.push(`${relative(SRC, path)}:${i + 1}: ${line.trim()}`);
+    });
+  }
+  assert.deepEqual(found, [], `a missing core, owner or provider is not a wildcard: compare with sameAgent/agentByIdentity, or say why on the line with "which-one: <reason>":\n${found.join("\n")}`);
 });

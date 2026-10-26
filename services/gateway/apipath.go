@@ -133,7 +133,7 @@ func (p apiPath) searchRoom(r *http.Request) string {
 	if len(rooms) != 1 {
 		return ""
 	}
-	room := strings.TrimSpace(rooms[0])
+	room := strings.TrimSpace(rooms[0]) // decision: the only element (len == 1 checked above), not a pick among several
 	if roomctx.ValidateID(room) != nil {
 		return ""
 	}

@@ -33,6 +33,7 @@ func (r *runningJob) setKey(k sessionKey) {
 // session sk: bound to its core session, not stopped. Only the same session
 // (same requester, channel and agent) is found, which is the privacy rule of
 // multi-member rooms: a person's text never enters another's session.
+// decision: steer PRD §5.1 (the session key alone: another member's or channel's turn is never found).
 func (b *Bridge) runningTurnOf(sk sessionKey, except string) (jobID, core string, rs *roomSession) {
 	b.runMu.Lock()
 	defer b.runMu.Unlock()
@@ -54,6 +55,7 @@ func (b *Bridge) runningTurnOf(sk sessionKey, except string) (jobID, core string
 // steerable is whether the job's message can join a turn as plain text: a
 // person's own message, with nothing that needs the workspace prepared
 // (attachments, a file to edit) or another expert worn.
+// decision: steer PRD §5.1 (a person's plain message only; anything else queues).
 func (d *drive) steerable() bool {
 	j := d.job
 	return j.byRequester() && len(j.AttachmentIDs) == 0 && j.FileRef == nil && j.ExpertID == "" && strings.TrimSpace(d.text) != ""

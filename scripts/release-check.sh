@@ -43,6 +43,18 @@ for agent in ${agents[@]+"${agents[@]}"}; do
   fi
 done
 
+# With BNBLOC_RELEASE_STEER=1 each agent also runs the steer scenario
+# (`bnbloc smoke --scenario steer`: a message sent while the agent works joins
+# that task, the first job's one reply answers both, and a message after the
+# turn is an ordinary job). An agent whose core takes no steering reports INFO,
+# not FAIL.
+if [ "${BNBLOC_RELEASE_STEER:-}" = 1 ]; then
+  for agent in ${agents[@]+"${agents[@]}"}; do
+    echo "==> bnbloc smoke --agent $agent --scenario steer"
+    bnbloc smoke --agent "$agent" --scenario steer --timeout "$timeout" || failed=1
+  done
+fi
+
 # With BNBLOC_RELEASE_TWO_MEMBERS=1 a second member reads the room and
 # borrows the first agent (scripts/two-member-check.sh; the teammate's
 # provider in BNBLOC_RELEASE_TEAMMATE_AGENT).

@@ -109,6 +109,7 @@ export function steeredNote(job: Pick<AgentJob, "steeredInto">): string {
 // whose turn is under way ("reflowing") while this one, reported running, has
 // not started its own (it waits at the session's gate). The member
 // may stop it and have this one start now; nothing stops by itself.
+// decision: steer PRD §5.4 (a request queued behind its own session's running turn; stops that job by id).
 export function queuedBehind(job: AgentJob, all: readonly AgentJob[]): AgentJob | undefined {
   if (job.status !== "running" || job.steeredInto) return undefined;
   return all.find(

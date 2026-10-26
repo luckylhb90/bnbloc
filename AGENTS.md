@@ -33,6 +33,57 @@ not memory. A bug record includes "Why it was not caught" (the lens, the
 missing question or test) and adds that question to `docs/design-review.md`
 in the same change.
 
+**Decision gate: a rule the code invents is shown to the owner before it is
+written (mandatory).** Some logic is not an implementation detail: it is a
+decision about what the system does when something is not certain. An agent
+writes it without noticing, it looks like plumbing, and it is wrong in exactly
+the situations nobody tested (2026-10-26: "ask again" picked the first of the
+member's agents; a "continue" button treated a missing core as any core).
+Before writing such logic, **stop and put it in front of the owner** as a
+**Decision card** (below), in the chat or in the PRD's "Decisions" section, and
+write the code only after the owner answers. "It is obvious" and "it is a small
+change" are not reasons to skip it: the cases that went wrong were both.
+
+The gate applies when code, in a situation where it was **not told exactly
+what to do**, chooses or assumes any of:
+
+- **a target**: which agent, session, channel, workspace, room, member, job,
+  version, file or account an action goes to, when the caller does not hold
+  its key (a role, a position, "first", "latest", "default", "current", a name);
+- **a fallback**: what happens when the thing is missing, offline, unknown,
+  expired or refused: another thing, a default, a retry elsewhere, a silent
+  skip, a different mode, a lower setting, an empty value;
+- **a wildcard or a tolerance**: a missing field that matches anything, a
+  case, spelling or format treated as equal, a partial match, a fuzzy match;
+- **a threshold, limit, timeout, count or ordering** that nobody gave (a number
+  written because something had to be written);
+- **who may, who is told, who pays**: an authorization, a visibility, a
+  notification or a cost decided by the code instead of by a rule that exists.
+
+The gate does not apply to: following a rule that already exists and is named
+(an owner function, a PRD decision, a contract), passing a key it already holds,
+or an obvious type default (an empty list for no items). If unsure whether it
+applies, it applies.
+
+**A Decision card** is short and answers, for each such choice:
+1. **What is chosen**, in one sentence, and where the code will do it.
+2. **What it acts on**, and **the key** that identifies it. Where the key is at
+   that moment (a field it already holds / not available: say what must be
+   added where it is made).
+3. **When the key is missing or the thing is gone**: the proposed behaviour, and
+   whether anything is guessed. The default proposal is "say so and do nothing".
+4. **Two candidates** that differ only in what the choice ignores (two cores,
+   two channels, two sessions): what happens to each. If there can be only
+   one, why.
+5. **The alternatives** (including "ask the person") and the recommendation.
+
+The owner's answer is recorded in the PRD ("Decisions"), and the code carries a
+`decision: <PRD or date>` comment at the place that makes the choice, so a
+reader can find who decided it. A choice found in the code without that
+comment, and without a rule it follows, is treated as a defect and reported.
+This gate is how "refer to a thing by its key" (below) is enforced before the
+fact; the checks named there are what catches the cases nobody brought to it.
+
 ## Core rule: the platform provides only what it must (violations get reverted)
 
 bnbloc is a platform. What is not necessary for it to be a platform is
@@ -317,7 +368,10 @@ Library).
     (2026-10-26: "ask again" went to the first of a member's own agents, a
     different core's `claude` that was not signed in, instead of the nimbus
     `claude-code` the member had chosen; the e2e room had one agent).
-  - Owners of the keys: `agentIdentity`/`sameAgent` (`lib/roomAgents.ts`),
+  - **Doing it is a decision, so it goes through the Decision gate** (Workflow,
+    above) before it is written: a target chosen without a key, a fallback, a
+    wildcard.
+  - Owners of the keys: `agentIdentity`/`sameAgent`/`agentByIdentity` (`lib/roomAgents.ts`),
     `sessionKey` (`services/bridge`), `contentuse` for components, `sameUser`
     for subjects. Enforced where it can be: `web/scripts/which-one.test.mjs`
     fails on a role lookup or a `[0]` of an agent list outside a line that says
@@ -2634,6 +2688,17 @@ workspace an agent keeps; a check of only the new path misses that
   return once the change is in effect), then asks for both: each of
   attachment, workspace write, memory and workspace file is its own
   PASS/FAIL line, and a failed run keeps its room for debugging.
+- **A change to messages, queues or turns runs the steer scenario**:
+  `bnbloc smoke --agent <agent> --scenario steer` (or
+  `BNBLOC_RELEASE_STEER=1 scripts/release-check.sh`). It starts a task that
+  runs for a while, sends a second message while it runs, and checks that the
+  second job settled as steered into the first, that the one reply answers both,
+  and that a message after the turn is an ordinary job. Each is its own
+  PASS/FAIL line; an agent whose core takes no steering reports INFO (its
+  second message queues, which is that core's contract). Steering was shipped
+  on unit tests and a check of one core, and the first time anyone saw it
+  work end to end was after the owner asked (2026-10-26): a feature that
+  spans the desktop, the bridge and a core is proven across all three.
 - **A change to what an agent is told or given is proven on a resumed
   session of the real core, not on a new one.** Guidance, tools and
   instructions reach a session through a channel the core may freeze when it

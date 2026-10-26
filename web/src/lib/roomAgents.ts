@@ -52,6 +52,17 @@ export function sameAgent(a: AgentRef, b: AgentRef): boolean {
   return agentIdentity(a) === agentIdentity(b);
 }
 
+// agentByIdentity resolves a remembered agent among the room's agents, by identity
+// alone: owner, core and provider all equal (a missing core is "no core", never "any
+// core"). It is the one answer to "which agent was this about": a flow that acts on the
+// same agent again (ask again, continue, retry) keeps the AgentRef it was about and
+// resolves it here. null means the agent is not there (it left the room, or the ref
+// does not name one): the caller says so and sends nothing; it never falls back to
+// another agent (AGENTS.md, "Refer to a thing by its identity").
+export function agentByIdentity<A extends AgentRef>(agents: readonly A[], ref: AgentRef): A | null {
+  return agents.find((a) => sameAgent(a, ref)) ?? null;
+}
+
 // agentHandle is an agent's text handle: "core/owner/provider" when it has a
 // core (two cores exposing the same owner/provider stay distinct in
 // mentions, templates and recipient resolution), "owner/provider" without

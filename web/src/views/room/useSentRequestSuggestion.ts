@@ -5,7 +5,8 @@ import { gatewayBase } from "@/lib/config";
 import { contentApi } from "@/lib/contentComponentsApi";
 import { decisionsApi } from "@/lib/decisions";
 import { ApiError, errorText } from "@/lib/errors";
-import { agentSentTo, sentRequestCards, staleAnswer } from "@/lib/sentRequestCard";
+import { agentByIdentity } from "@/lib/roomAgents";
+import { sentRequestCards, staleAnswer } from "@/lib/sentRequestCard";
 import { StorageKey, browserStorage, memberKey } from "@/lib/storageKeys";
 import {
   aiSuggestionsOn,
@@ -134,7 +135,7 @@ export function useSentRequestSuggestion({
     const cand = c.suggestion.candidate;
     // The same request goes again to the agent it went to (the card remembers it). Checked
     // before anything is turned on: nothing is added for a request that cannot go out.
-    const to = agentSentTo(roomAgents, c.sentTo);
+    const to = agentByIdentity(roomAgents, c.sentTo);
     if (!to) {
       sentRequestCards.clear(roomRef.current);
       toast.error("The agent this request went to is no longer in the room");

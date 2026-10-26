@@ -88,7 +88,7 @@ func runSmoke(args []string) error {
 	gw := addGatewayFlags(fs)
 	agent := fs.String("agent", "", "also wait for a reply from this agent: provider | core/provider | target id of your own agent, or owner/provider | owner/core/provider")
 	timeout := fs.Duration("timeout", 120*time.Second, "how long to wait for the agent reply (each turn of a scenario; default 4m for one)")
-	scenario := fs.String("scenario", "", `run a scenario instead of the single agent reply: "long-task" or "two-members" (both need --agent)`)
+	scenario := fs.String("scenario", "", `run a scenario instead of the single agent reply: "long-task", "two-members" or "steer" (all need --agent)`)
 	teammateToken := fs.String("teammate-token", "", "two-members: the teammate's API token (prefer "+teammateTokenEnv+": argv is visible to other processes)")
 	teammateAgent := fs.String("teammate-agent", "", "two-members: the teammate's agent (provider or core/provider)")
 	between := fs.String("between", "", "long-task: a shell command run between its turns (e.g. a core publish); it must return once the change is in effect")
@@ -110,8 +110,8 @@ func runSmoke(args []string) error {
 		Scenario: strings.TrimSpace(*scenario), Between: strings.TrimSpace(*between),
 		TeammateToken: teammateTokenFrom(*teammateToken, os.Getenv), TeammateAgent: strings.TrimSpace(*teammateAgent)}
 	switch {
-	case opts.Scenario != "" && opts.Scenario != scenarioLongTask && opts.Scenario != scenarioTwoMembers:
-		return fmt.Errorf("smoke: unknown --scenario %q (want %s or %s)", opts.Scenario, scenarioLongTask, scenarioTwoMembers)
+	case opts.Scenario != "" && opts.Scenario != scenarioLongTask && opts.Scenario != scenarioTwoMembers && opts.Scenario != scenarioSteer:
+		return fmt.Errorf("smoke: unknown --scenario %q (want %s, %s or %s)", opts.Scenario, scenarioLongTask, scenarioTwoMembers, scenarioSteer)
 	case opts.Scenario != "" && opts.Agent == "":
 		return fmt.Errorf("smoke: --scenario %s needs --agent", opts.Scenario)
 	case opts.Between != "" && opts.Scenario != scenarioLongTask:
@@ -302,6 +302,8 @@ func smokeChecks(ctx context.Context, c *client, opts smokeOptions, run *smokeRu
 		smokeLongTask(ctx, c, w, roomID, subject, opts, run)
 	} else if opts.Scenario == scenarioTwoMembers {
 		smokeTwoMembers(ctx, c, w, roomID, subject, opts, run)
+	} else if opts.Scenario == scenarioSteer {
+		smokeSteer(ctx, c, w, roomID, subject, opts, run)
 	} else if opts.Agent == "" {
 		run.skip("agent reply (pass --agent)")
 	} else if !run.step("agent reply", func() (string, error) {

@@ -4,7 +4,7 @@
 // request's card, and goes when the member dismisses it, acts on it or sends another
 // message (docs/prd/2026-10-25-suggest-what-to-use.md). The views read it through
 // useSyncExternalStore, so a card shows under its row without re-rendering the feed.
-import { sameAgent, type AgentRef } from "./roomAgents.ts";
+import type { AgentRef } from "./roomAgents.ts";
 import type { UseSuggestion } from "./suggestUse.ts";
 
 export interface SuggestionCard {
@@ -68,10 +68,4 @@ export function cardForRow(card: SuggestionCard | null, clientMsgId: string | un
  *  sent another message since (its client id is the room's latest), or left. */
 export function staleAnswer(askedFor: string, latestClientMsgId: string | null, leftRoom: boolean): boolean {
   return leftRoom || (latestClientMsgId !== null && latestClientMsgId !== askedFor);
-}
-
-/** agentSentTo resolves the card's recipient among the room's agents, or null when it is
- *  not there any more (the agent left the room): then there is nobody to ask again. */
-export function agentSentTo<A extends AgentRef>(agents: readonly A[], sentTo: AgentRef): A | null {
-  return agents.find((a) => sameAgent(a, sentTo)) ?? null;
 }
