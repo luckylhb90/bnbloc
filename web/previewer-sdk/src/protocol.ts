@@ -26,6 +26,9 @@
 //   frame -> host : preview.save        {bytes, summary?}                     (capability "edit")
 //   host  -> frame: preview.saved       {version}                             (answer to preview.save)
 //   host  -> frame: preview.save.failed {message}                             (answer to preview.save)
+//   frame -> host : preview.draft       {prompt}                              (capability "draft")
+//   host  -> frame: preview.drafted     {reply}                               (answer to preview.draft)
+//   host  -> frame: preview.draft.failed {message}                            (answer to preview.draft)
 
 /** Frame protocol version carried in preview.init. */
 export const PREVIEWER_PROTOCOL = 1;
@@ -45,6 +48,11 @@ export const ERROR_LIMIT = 500;
  *  and the host refuses a larger save with its own message. */
 export const SAVE_LIMIT = 100 << 20;
 export const SAVE_SUMMARY_LIMIT = 200;
+/** Capability "draft": one sentence the host sends to the assist task the
+ *  package declares (previewer.draft.task); the reply is that task's JSON
+ *  fields, bounded by its serialized size. */
+export const DRAFT_PROMPT_LIMIT = 1000;
+export const DRAFT_REPLY_LIMIT = 64 * 1024;
 /** A selection's chip label and the content it carries to the agent. */
 export const SELECTION_LABEL_LIMIT = 120;
 export const SELECTION_DETAIL_LIMIT = 2000;
@@ -70,7 +78,9 @@ export const ZOOM_MAX = 64;
 /** Code-owned capability vocabulary (package `previewer.capabilities`). */
 // "edit": the frame may save its scene as the next version of the file
 // (preview.save); the host publishes it on the version the frame was handed.
-export const PREVIEWER_CAPABILITIES = ["thumbnail", "liveState", "toolbar", "selection", "units", "edit"] as const;
+// "draft": the frame may ask for a draft from a sentence (preview.draft); the
+// host runs the assist task the package declares, and no other.
+export const PREVIEWER_CAPABILITIES = ["thumbnail", "liveState", "toolbar", "selection", "units", "edit", "draft"] as const;
 export type PreviewerCapability = (typeof PREVIEWER_CAPABILITIES)[number];
 
 /** Code-owned toolbar item kinds. */
@@ -165,7 +175,9 @@ export type HostMessage =
   | { readonly type: "preview.units.request"; readonly id: string; readonly file: PreviewFile; readonly bytes: ArrayBuffer }
   | { readonly type: "preview.reveal"; readonly at: string }
   | { readonly type: "preview.saved"; readonly version: number }
-  | { readonly type: "preview.save.failed"; readonly message: string };
+  | { readonly type: "preview.save.failed"; readonly message: string }
+  | { readonly type: "preview.drafted"; readonly reply: Rec }
+  | { readonly type: "preview.draft.failed"; readonly message: string };
 
 /** One unit of a version for Compare (docs/prd/2026-10-14-file-prompts-and-compare.md
  *  rule 7): a slide, a paragraph, a cell, a page. key is a stable identity
@@ -189,7 +201,8 @@ export type FrameMessage =
   | { readonly type: "preview.selection"; readonly selection: Selection | null }
   | { readonly type: "preview.units"; readonly id: string; readonly units: readonly Unit[]; readonly truncated: boolean }
   | { readonly type: "preview.units"; readonly id: string; readonly error: string }
-  | { readonly type: "preview.save"; readonly bytes: ArrayBuffer; readonly summary?: string };
+  | { readonly type: "preview.save"; readonly bytes: ArrayBuffer; readonly summary?: string }
+  | { readonly type: "preview.draft"; readonly prompt: string };
 
 type Rec = Readonly<Record<string, unknown>>;
 
@@ -221,6 +234,17 @@ export function stateKey(state: unknown): string | null {
   }
   if (typeof key !== "string" || new TextEncoder().encode(key).length > STATE_LIMIT) return null;
   return key;
+}
+
+/** True when the value serializes to JSON within limit bytes. */
+function jsonWithin(value: unknown, limit: number): boolean {
+  let json: string | undefined;
+  try {
+    json = JSON.stringify(value);
+  } catch {
+    return false;
+  }
+  return typeof json === "string" && new TextEncoder().encode(json).length <= limit;
 }
 
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
@@ -321,6 +345,10 @@ export function readFrameMessage(data: unknown): FrameMessage | null {
       }
       const units = readUnits(data.units);
       return units ? { type: "preview.units", id: data.id, units, truncated: data.truncated === true } : null;
+    }
+    case "preview.draft": {
+      const prompt = boundedText(data.prompt, DRAFT_PROMPT_LIMIT);
+      return prompt === null ? null : { type: "preview.draft", prompt: prompt.trim() };
     }
     case "preview.save": {
       if (!isArrayBuffer(data.bytes) || data.bytes.byteLength === 0 || data.bytes.byteLength > SAVE_LIMIT) return null;
@@ -496,6 +524,13 @@ export function readHostMessage(data: unknown): HostMessage | null {
     case "preview.save.failed": {
       const message = boundedText(data.message, ERROR_LIMIT);
       return message === null ? null : { type: "preview.save.failed", message };
+    }
+    case "preview.drafted": {
+      return isRecord(data.reply) && jsonWithin(data.reply, DRAFT_REPLY_LIMIT) ? { type: "preview.drafted", reply: data.reply } : null;
+    }
+    case "preview.draft.failed": {
+      const message = boundedText(data.message, ERROR_LIMIT);
+      return message === null ? null : { type: "preview.draft.failed", message };
     }
     default:
       return null;

@@ -1,4 +1,6 @@
 import {
+  DRAFT_PROMPT_LIMIT,
+  DRAFT_REPLY_LIMIT,
   ERROR_LIMIT,
   PREVIEWER_CAPABILITIES,
   PREVIEWER_PROTOCOL,
@@ -222,5 +224,29 @@ test("save answers: a saved version is a positive integer; a failure is bounded 
   eq(readHostMessage({ type: "preview.save.failed", message: "" }), null, "a failure needs a message");
   eq(readHostMessage({ type: "preview.save.failed", message: "x".repeat(ERROR_LIMIT + 1) }), null, "a failure over ERROR_LIMIT");
   eq(readFrameMessage({ type: "preview.saved", version: 4 }), null, "saved is a host message, not a frame one");
+});
+
+test("draft: the draft capability, a trimmed prompt within DRAFT_PROMPT_LIMIT", () => {
+  eq(PREVIEWER_CAPABILITIES.includes("draft"), true, "draft is a known capability");
+  eq(readFrameMessage({ type: "preview.draft", prompt: "  a login flow  " }), { type: "preview.draft", prompt: "a login flow" }, "a prompt is trimmed");
+  eq(readFrameMessage({ type: "preview.draft", prompt: "   " }), null, "a blank prompt is refused");
+  eq(readFrameMessage({ type: "preview.draft" }), null, "a draft needs a prompt");
+  eq(readFrameMessage({ type: "preview.draft", prompt: 3 }), null, "the prompt must be text");
+  eq(readFrameMessage({ type: "preview.draft", prompt: "x".repeat(DRAFT_PROMPT_LIMIT + 1) }), null, "a prompt over its limit");
+  eq(readFrameMessage({ type: "preview.draft", prompt: "x".repeat(DRAFT_PROMPT_LIMIT) })?.type, "preview.draft", "a prompt at its limit");
+  eq(readHostMessage({ type: "preview.draft", prompt: "a" }), null, "a draft request is a frame message, not a host one");
+});
+
+test("draft answers: a reply is a JSON object within DRAFT_REPLY_LIMIT; a failure is bounded text", () => {
+  const reply = { title: "Login", nodes: [{ id: "a", label: "Sign in" }], edges: [] };
+  eq(readHostMessage({ type: "preview.drafted", reply }), { type: "preview.drafted", reply }, "a drafted reply");
+  eq(readHostMessage({ type: "preview.drafted", reply: [1, 2] }), null, "a reply is an object, not a list");
+  eq(readHostMessage({ type: "preview.drafted", reply: "text" }), null, "a reply is not text");
+  eq(readHostMessage({ type: "preview.drafted" }), null, "a reply is required");
+  eq(readHostMessage({ type: "preview.drafted", reply: { big: "x".repeat(DRAFT_REPLY_LIMIT) } }), null, "a reply over DRAFT_REPLY_LIMIT");
+  eq(readHostMessage({ type: "preview.draft.failed", message: "Assists are off here." }), { type: "preview.draft.failed", message: "Assists are off here." }, "a failure");
+  eq(readHostMessage({ type: "preview.draft.failed", message: "" }), null, "a failure needs a message");
+  eq(readHostMessage({ type: "preview.draft.failed", message: "x".repeat(ERROR_LIMIT + 1) }), null, "a failure over ERROR_LIMIT");
+  eq(readFrameMessage({ type: "preview.drafted", reply }), null, "drafted is a host message, not a frame one");
 });
 

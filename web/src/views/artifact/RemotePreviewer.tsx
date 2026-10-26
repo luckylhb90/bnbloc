@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type ComponentType } from "react";
 import { WarningCircleIcon } from "@phosphor-icons/react";
 import { api } from "@/lib/api";
-import { previewerFrameUrl, readPreviewerMessage, saveFailure, saveRefusal, wantsThumbnail, type PreviewerDescriptor } from "@/lib/previewerFrame";
+import { draftFailure, draftRefusal, draftReplyFits, previewerFrameUrl, readPreviewerMessage, saveFailure, saveRefusal, wantsThumbnail, type PreviewerDescriptor } from "@/lib/previewerFrame";
+import { runJSONAssist } from "@/lib/assist";
 import { PREVIEWER_PROTOCOL, stateKey, type HostMessage } from "../../../previewer-sdk/src/protocol.ts";
 import type { ArtifactViewerProps, ViewerToolbarItem } from "./registry";
 import { freshPreviewer, installedPreviewer } from "./remotePreviewers";
@@ -88,6 +89,14 @@ function PreviewerFrame({
   const lastSentState = useRef("");
   const remoteNonce = useRef(0);
   const thumbnailDone = useRef(false);
+  // False once the frame is gone: a draft that answers later is dropped.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   // The version the frame was handed: a save is compare-and-swap on it, and
   // moves on after each save (the frame keeps the bytes it saved).
   const loadedVersion = useRef(0);
@@ -184,6 +193,30 @@ function PreviewerFrame({
     [desc, post],
   );
 
+  // The frame's draft (capability "draft"): the assist task the package declares,
+  // run on the member's own request. The host names no task: it runs desc.draftTask.
+  const draft = useCallback(
+    async (prompt: string) => {
+      const task = desc.draftTask;
+      if (draftRefusal(desc) || !task) {
+        post({ type: "preview.draft.failed", message: draftRefusal(desc) ?? "This previewer cannot draft content." });
+        return;
+      }
+      try {
+        const { fields } = await runJSONAssist(task, { text: prompt });
+        if (!mounted.current) return;
+        if (!draftReplyFits(fields)) {
+          post({ type: "preview.draft.failed", message: "The draft is too large to add; ask for a smaller diagram." });
+          return;
+        }
+        post({ type: "preview.drafted", reply: fields });
+      } catch (e: unknown) {
+        if (mounted.current) post({ type: "preview.draft.failed", message: draftFailure(e) });
+      }
+    },
+    [desc, post],
+  );
+
   const storeThumbnail = useCallback(
     (png: ArrayBuffer) => {
       if (thumbnailDone.current || !wantsThumbnail(desc)) return;
@@ -230,11 +263,14 @@ function PreviewerFrame({
         case "preview.save":
           void saveScene(msg.bytes, msg.summary);
           return;
+        case "preview.draft":
+          void draft(msg.prompt);
+          return;
       }
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [handOff, toolbar, liveState, selection, storeThumbnail, saveScene]);
+  }, [handOff, toolbar, liveState, selection, storeThumbnail, saveScene, draft]);
 
   // Remote live state from the room, deduped by nonce.
   useEffect(() => {

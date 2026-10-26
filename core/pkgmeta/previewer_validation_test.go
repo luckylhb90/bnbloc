@@ -59,6 +59,14 @@ func TestPreviewerPackage_acceptsAValidPackage(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("edit capability rejected: %v", err)
 	}
+	// Capability "draft" with its draft block (the assist task the host runs) is valid.
+	if err := parsePreviewer(t, func(_, p map[string]any) {
+		p["capabilities"] = []string{"draft"}
+		p["draft"] = map[string]string{"task": "draw-diagram"}
+		delete(p, "toolbar")
+	}); err != nil {
+		t.Fatalf("draft capability rejected: %v", err)
+	}
 	// An upload placeholder parses (draft before upload) ...
 	err := parsePreviewer(t, func(pkg, _ map[string]any) {
 		pkg["artifacts"] = map[string]any{"bundle": map[string]string{"url": "", "sha256": ""}}
@@ -87,6 +95,23 @@ func TestPreviewerPackage_rejectsInvalidShapes(t *testing.T) {
 		// File suggestions are prompt packs' (prompts with a files scope);
 		// the strict schema refuses the old previewer field.
 		{"suggestions", func(_, p map[string]any) { p["suggestions"] = []map[string]string{{"label": "x", "prompt": "y"}} }, "suggestions"},
+		{"draft block without the capability", func(_, p map[string]any) {
+			p["draft"] = map[string]string{"task": "draw-diagram"}
+		}, `previewer.draft requires the "draft" capability`},
+		{"draft capability without the block", func(_, p map[string]any) {
+			p["capabilities"] = []string{"draft"}
+			delete(p, "toolbar")
+		}, `requires previewer.draft.task`},
+		{"draft task not a content name", func(_, p map[string]any) {
+			p["capabilities"] = []string{"draft"}
+			p["draft"] = map[string]string{"task": "Draw Diagram/../x"}
+			delete(p, "toolbar")
+		}, "content name"},
+		{"draft block with an unknown field", func(_, p map[string]any) {
+			p["capabilities"] = []string{"draft"}
+			p["draft"] = map[string]any{"task": "draw-diagram", "model": "x"}
+			delete(p, "toolbar")
+		}, "model"},
 		{"wrong runtime", func(pkg, _ map[string]any) { pkg["runtime"] = "sidecar" }, `runtime must be "bundle"`},
 		{"no previewer", func(pkg, _ map[string]any) { delete(pkg, "previewer") }, "requires previewer"},
 		{"two artifacts", func(pkg, _ map[string]any) {

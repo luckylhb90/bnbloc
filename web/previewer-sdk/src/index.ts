@@ -18,6 +18,7 @@
 // in a browser.
 
 import {
+  DRAFT_PROMPT_LIMIT,
   ERROR_LIMIT,
   SAVE_LIMIT,
   SAVE_SUMMARY_LIMIT,
@@ -75,6 +76,9 @@ export type ResizeHandler = (viewport: Viewport) => void;
 export type RevealHandler = (at: string) => void;
 export type SavedHandler = (version: number) => void;
 export type SaveFailedHandler = (message: string) => void;
+/** The assist task's JSON fields for a draft (its shape is the package's). */
+export type DraftedHandler = (reply: Readonly<Record<string, unknown>>) => void;
+export type DraftFailedHandler = (message: string) => void;
 /** A selection as a previewer reports it (fitSelection bounds it). */
 export type SelectionDraft = Parameters<typeof fitSelection>[0];
 /** Reads a file into its units for Compare (capability "units"). */
@@ -124,6 +128,13 @@ export interface PreviewerClient {
   onSaved(cb: SavedHandler): Unsubscribe;
   /** The host did not save the bytes (a conflict, a refusal, a limit). */
   onSaveFailed(cb: SaveFailedHandler): Unsubscribe;
+  /** Asks the host to draft content from a sentence (capability "draft"); the
+   *  prompt is trimmed. Throws for an empty or over-DRAFT_PROMPT_LIMIT prompt. */
+  requestDraft(prompt: string): void;
+  /** The host's draft: the assist task's fields, as the package declares them. */
+  onDrafted(cb: DraftedHandler): Unsubscribe;
+  /** The host did not draft (no model, a refusal, a reply too large). */
+  onDraftFailed(cb: DraftFailedHandler): Unsubscribe;
 }
 
 function subscribe<T>(list: T[], cb: T): Unsubscribe {
@@ -147,6 +158,8 @@ export function createPreviewerClient(env: PreviewerEnv): PreviewerClient {
   const revealHandlers: RevealHandler[] = [];
   const savedHandlers: SavedHandler[] = [];
   const saveFailedHandlers: SaveFailedHandler[] = [];
+  const draftedHandlers: DraftedHandler[] = [];
+  const draftFailedHandlers: DraftFailedHandler[] = [];
   // A reveal that arrives before the file is shown waits for it.
   let pendingReveal: string | null = null;
   let init: PreviewInit | null = null;
@@ -224,6 +237,12 @@ export function createPreviewerClient(env: PreviewerEnv): PreviewerClient {
         return;
       case "preview.save.failed":
         for (const cb of [...saveFailedHandlers]) cb(msg.message);
+        return;
+      case "preview.drafted":
+        for (const cb of [...draftedHandlers]) cb(msg.reply);
+        return;
+      case "preview.draft.failed":
+        for (const cb of [...draftFailedHandlers]) cb(msg.message);
         return;
     }
   };
@@ -309,6 +328,15 @@ export function createPreviewerClient(env: PreviewerEnv): PreviewerClient {
     },
     onSaved: (cb) => subscribe(savedHandlers, cb),
     onSaveFailed: (cb) => subscribe(saveFailedHandlers, cb),
+    requestDraft(prompt) {
+      const text = typeof prompt === "string" ? prompt.trim() : "";
+      if (text === "" || [...text].length > DRAFT_PROMPT_LIMIT) {
+        throw new Error(`requestDraft: prompt must be a non-empty string of at most ${DRAFT_PROMPT_LIMIT} characters`);
+      }
+      post({ type: "preview.draft", prompt: text });
+    },
+    onDrafted: (cb) => subscribe(draftedHandlers, cb),
+    onDraftFailed: (cb) => subscribe(draftFailedHandlers, cb),
   };
 }
 
@@ -350,3 +378,6 @@ export const onReveal = (cb: RevealHandler): Unsubscribe => client().onReveal(cb
 export const savePreview = (bytes: ArrayBuffer, summary?: string): void => client().savePreview(bytes, summary);
 export const onSaved = (cb: SavedHandler): Unsubscribe => client().onSaved(cb);
 export const onSaveFailed = (cb: SaveFailedHandler): Unsubscribe => client().onSaveFailed(cb);
+export const requestDraft = (prompt: string): void => client().requestDraft(prompt);
+export const onDrafted = (cb: DraftedHandler): Unsubscribe => client().onDrafted(cb);
+export const onDraftFailed = (cb: DraftFailedHandler): Unsubscribe => client().onDraftFailed(cb);

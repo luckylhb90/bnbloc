@@ -6,6 +6,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/luckylhb90/bnbloc/component"
 	"github.com/luckylhb90/bnbloc/internal/filematch"
 )
 
@@ -32,7 +33,7 @@ const PreviewerBundleArtifact = "bundle"
 // web/previewer-sdk/src/protocol.ts (PREVIEWER_CAPABILITIES, TOOLBAR_KINDS,
 // TOOLBAR_ICONS); TestPreviewerVocabulariesMatchFrameProtocol keeps them equal.
 var (
-	PreviewerCapabilities = []string{"thumbnail", "liveState", "toolbar", "selection", "units", "edit"}
+	PreviewerCapabilities = []string{"thumbnail", "liveState", "toolbar", "selection", "units", "edit", "draft"}
 	PreviewerToolbarKinds = []string{"button", "toggle", "zoom"}
 	PreviewerToolbarIcons = []string{
 		"zoom-in", "zoom-out", "fit", "expand", "grid", "layers", "background", "frames",
@@ -47,6 +48,7 @@ const (
 	minPreviewerRank         = 1
 	maxPreviewerRank         = 1000
 	previewerCapabilityTool  = "toolbar"
+	previewerCapabilityDraft = "draft"
 	previewerCapabilityThumb = "thumbnail"
 )
 
@@ -99,7 +101,27 @@ func validatePreviewer(p Previewer) error {
 	if len(p.Toolbar) > 0 && !caps[previewerCapabilityTool] {
 		return fmt.Errorf("previewer.toolbar requires the %q capability", previewerCapabilityTool)
 	}
+	if err := validatePreviewerDraft(p.Draft, caps[previewerCapabilityDraft]); err != nil {
+		return err
+	}
 	return validatePreviewerToolbar(p.Toolbar)
+}
+
+// validatePreviewerDraft keeps the draft block and the "draft" capability in
+// step: each requires the other. The task is a content name, so the host can
+// look it up like any content; the host runs only the task declared here.
+func validatePreviewerDraft(d *PreviewerDraft, declared bool) error {
+	switch {
+	case d == nil && declared:
+		return fmt.Errorf("the %q capability requires previewer.draft.task", previewerCapabilityDraft)
+	case d != nil && !declared:
+		return fmt.Errorf("previewer.draft requires the %q capability", previewerCapabilityDraft)
+	case d == nil:
+		return nil
+	case !component.ValidName(d.Task):
+		return fmt.Errorf("previewer.draft.task must be a content name (lowercase letters, digits and dashes)")
+	}
+	return nil
 }
 
 func validatePreviewerMatch(m PreviewerMatch) error {

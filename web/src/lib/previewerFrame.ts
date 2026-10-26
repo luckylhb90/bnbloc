@@ -16,6 +16,7 @@
 // `#host=<origin>` names the only origin the SDK accepts messages from.
 
 import {
+  DRAFT_REPLY_LIMIT,
   ERROR_LIMIT,
   PREVIEWER_CAPABILITIES,
   readFrameMessage,
@@ -48,6 +49,9 @@ export interface PreviewerDescriptor {
   /** Gateway-relative browser frame base (ticket included), ends with "/". */
   readonly frameUrl: string;
   readonly frameExpiresAtMs: number;
+  /** The assist task the host runs for a frame's draft request (the package's
+   *  draft.task); present only for a previewer that declares "draft". */
+  readonly draftTask?: string;
 }
 
 type Rec = Readonly<Record<string, unknown>>;
@@ -91,6 +95,8 @@ export function parsePreviewerEntry(entry: unknown): PreviewerDescriptor | null 
   if (typeof rank !== "number" || !Number.isInteger(rank) || rank < 1 || rank > 1000) return null;
   if (typeof frameUrl !== "string" || !FRAME_URL_RE.test(frameUrl)) return null;
   if (typeof frameExpiresAtMs !== "number" || typeof bundleSha256 !== "string") return null;
+  const draft = block.draft;
+  const draftTask = isRecord(draft) && typeof draft.task === "string" && draft.task !== "" ? draft.task : undefined;
   return {
     name,
     version,
@@ -106,6 +112,7 @@ export function parsePreviewerEntry(entry: unknown): PreviewerDescriptor | null 
     bundleSha256,
     frameUrl,
     frameExpiresAtMs,
+    ...(draftTask === undefined ? {} : { draftTask }),
   };
 }
 
@@ -203,6 +210,24 @@ export function saveFailure(err: unknown): string {
   // The frame reads a message of at most ERROR_LIMIT characters; a longer one
   // would be dropped unseen, so it is cut here.
   return [...text].slice(0, ERROR_LIMIT).join("");
+}
+
+/** Whether a draft reply fits the frame's limit: the frame refuses a larger
+ *  one, so the host says so itself rather than send a reply nobody reads. */
+export function draftReplyFits(reply: Rec): boolean {
+  return new TextEncoder().encode(JSON.stringify(reply)).length <= DRAFT_REPLY_LIMIT;
+}
+
+/** What a failed draft tells the frame, within the frame's message limit. */
+export function draftFailure(err: unknown): string {
+  return [...errorText(err, "Could not draft the content")].slice(0, ERROR_LIMIT).join("");
+}
+
+/** Why the host refuses a frame's draft request (null: it may run the task).
+ *  A previewer drafts only with the "draft" capability and a task it declared. */
+export function draftRefusal(desc: Pick<PreviewerDescriptor, "capabilities" | "draftTask">): string | null {
+  if (!desc.capabilities.includes("draft") || !desc.draftTask) return "This previewer cannot draft content.";
+  return null;
 }
 
 /** Theme from the app's background lightness ("hsl(h s% l%)" or "#rrggbb"). */

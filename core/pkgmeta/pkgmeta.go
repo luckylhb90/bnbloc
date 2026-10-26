@@ -94,6 +94,7 @@ type (
 	Previewer            = wire.ComponentPreviewer
 	PreviewerMatch       = wire.FileMatch
 	PreviewerToolbarItem = wire.ComponentPreviewerToolbarItem
+	PreviewerDraft       = wire.ComponentPreviewerDraft
 	MCP                  = wire.ComponentMCP
 	MCPTool              = wire.ComponentMCPTool
 	MCPStdio             = wire.ComponentMCPStdio

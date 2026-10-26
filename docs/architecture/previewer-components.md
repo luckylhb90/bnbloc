@@ -52,8 +52,17 @@ Validation (`core/pkgmeta/previewer_validation.go`, enforced at install):
   `application/json`), exact MIME, plain extension, kind, MIME wildcard;
 - `capabilities` ⊆ `thumbnail`, `liveState`, `toolbar`, `selection`, `units`,
   `edit` (the frame may save its scene as the file's next version:
-  `preview.save`, docs/prd/2026-10-26-excalidraw-previewer.md); a host ignores a
-  capability it predates (it never drops the previewer for one);
+  `preview.save`, docs/prd/2026-10-26-excalidraw-previewer.md), `draft` (the
+  frame may ask for a draft from a sentence: `preview.draft`, below); a host
+  ignores a capability it predates (it never drops the previewer for one);
+- `draft`: `{"task": "<content name>"}` is required with the `draft`
+  capability and refused without it. The host runs the assist task it names
+  (`POST /v1/assist/{task}` with the frame's prompt, from the web client's
+  assist owner) and no other. The catalog carries the block as
+  `previewer.draft`. Frame to host `preview.draft {prompt}` (1–1000
+  characters, trimmed); host to frame `preview.drafted {reply}` (the task's
+  JSON fields, at most 64 KiB) or `preview.draft.failed {message}`. The frame
+  checks the reply's shape against its own schema;
 - `toolbar`: at most 20 items, unique ids `[a-z][a-z0-9-]{0,31}`, an icon
   NAME from the code-owned list, a 1–40 character label, kind
   `button | toggle | zoom`; a non-empty toolbar requires the `toolbar`

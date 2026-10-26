@@ -2214,6 +2214,15 @@ export interface ComponentPreviewer {
   rank: number;
   capabilities?: string[];
   toolbar?: ComponentPreviewerToolbarItem[];
+  // Draft names the assist task that drafts this file's content from a
+  // sentence (capability "draft"); the host runs that task and no other.
+  draft?: ComponentPreviewerDraft;
+}
+
+// ComponentPreviewerDraft is a previewer's draft block: the content name of
+// the assist task the host runs for a frame's draft request.
+export interface ComponentPreviewerDraft {
+  task: string;
 }
 
 // FileMatch declares the files something applies to: the files a

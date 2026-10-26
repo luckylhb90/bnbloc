@@ -1,5 +1,5 @@
 import { createPreviewerClient, type InboundEvent, type PreviewerClient } from "./index.ts";
-import { PREVIEWER_PROTOCOL, SAVE_LIMIT, SAVE_SUMMARY_LIMIT, THUMBNAIL_LIMIT } from "./protocol.ts";
+import { DRAFT_PROMPT_LIMIT, PREVIEWER_PROTOCOL, SAVE_LIMIT, SAVE_SUMMARY_LIMIT, THUMBNAIL_LIMIT } from "./protocol.ts";
 
 // Local runner (no node types in the web tsconfig); same convention as
 // web/src/lib/*.test.ts. Async cases are awaited at top level.
@@ -210,6 +210,22 @@ await test("units: a request waits for its handler, the answer is fitted, a thro
   h.deliver({ ...req("bad id!") });
   await new Promise((r) => setTimeout(r, 0));
   eq((h.posted.at(-1)?.message as { id: string }).id, "r2", "a malformed request is ignored");
+});
+
+await test("draft: the prompt is trimmed and posted; a bad prompt throws; answers reach their handlers", () => {
+  const h = harness();
+  h.client.requestDraft("  a login flow with a reset branch  ");
+  const sent = h.posted.at(-1);
+  eq(sent?.message, { type: "preview.draft", prompt: "a login flow with a reset branch" }, "a draft request is posted, trimmed");
+  throws(() => h.client.requestDraft("   "), "a blank prompt throws");
+  throws(() => h.client.requestDraft("x".repeat(DRAFT_PROMPT_LIMIT + 1)), "a prompt over DRAFT_PROMPT_LIMIT throws");
+  const drafts: unknown[] = [];
+  const failed: string[] = [];
+  h.client.onDrafted((r) => drafts.push(r));
+  h.client.onDraftFailed((m) => failed.push(m));
+  h.deliver({ type: "preview.drafted", reply: { title: "Login", nodes: [], edges: [] } });
+  h.deliver({ type: "preview.draft.failed", message: "Assists are off here." });
+  eq([drafts, failed], [[{ title: "Login", nodes: [], edges: [] }], ["Assists are off here."]], "answers reach their handlers");
 });
 
 await test("save: the bytes are transferred with the summary cut; a bad save throws; answers reach their handlers", () => {

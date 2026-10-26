@@ -1,5 +1,8 @@
 import { ApiError } from "./errors.ts";
 import {
+  draftFailure,
+  draftRefusal,
+  draftReplyFits,
   frameTicketStale,
   parsePreviewerCatalog,
   parsePreviewerEntry,
@@ -12,7 +15,7 @@ import {
   validBundlePath,
   wantsThumbnail,
 } from "./previewerFrame.ts";
-import { ERROR_LIMIT, STATE_LIMIT, THUMBNAIL_LIMIT } from "../../previewer-sdk/src/protocol.ts";
+import { DRAFT_REPLY_LIMIT, ERROR_LIMIT, STATE_LIMIT, THUMBNAIL_LIMIT } from "../../previewer-sdk/src/protocol.ts";
 
 // The web tsconfig has no node types, so the tests use a local runner (same
 // convention as the other *.test.ts files); a failure throws and fails `node --test`.
@@ -155,6 +158,27 @@ test("a save is refused unless the previewer declared edit and the file is a roo
   eq(saveRefusal({ capabilities: ["thumbnail", "units"] }, at), "This previewer cannot save files.", "no edit declared");
   eq(saveRefusal({ capabilities: ["edit"] }, { roomId: "room-1", artifactId: "" }), "This file cannot be saved here.", "a chat attachment has no versions");
   eq(saveRefusal({ capabilities: ["edit"] }, { roomId: "", artifactId: "art-1" }), "This file cannot be saved here.", "a public share page has no room");
+});
+
+test("a draft is refused unless the previewer declared draft and its task", () => {
+  eq(draftRefusal({ capabilities: ["draft"], draftTask: "draw-diagram" }), null, "declared draft with a task may run");
+  eq(draftRefusal({ capabilities: ["edit"], draftTask: "draw-diagram" }), "This previewer cannot draft content.", "no draft capability");
+  eq(draftRefusal({ capabilities: ["draft"] }), "This previewer cannot draft content.", "no task declared");
+});
+
+test("a draft reply must fit the frame's limit; a failure says why in bounded text", () => {
+  eq(draftReplyFits({ nodes: [{ id: "a", label: "Sign in" }] }), true, "a small reply fits");
+  eq(draftReplyFits({ big: "x".repeat(DRAFT_REPLY_LIMIT) }), false, "a reply over DRAFT_REPLY_LIMIT does not");
+  eq(draftFailure(new ApiError(503, "no assist model")), "Could not draft the content: no assist model", "a server reason is kept");
+  eq(draftFailure(new Error("network down")), "Could not draft the content: network down", "a thrown error keeps its reason");
+  eq([...draftFailure(new ApiError(500, "x".repeat(ERROR_LIMIT * 2)))].length, ERROR_LIMIT, "a long reason is cut to ERROR_LIMIT");
+});
+
+test("the catalog's draft block becomes draftTask; a previewer without one has no draftTask key", () => {
+  eq(parsePreviewerEntry(withBlock({ capabilities: ["draft"], draft: { task: "draw-diagram" } }))?.draftTask, "draw-diagram", "the declared task");
+  eq(parsePreviewerEntry(withBlock({ capabilities: ["draft"], draft: { task: "" } }))?.draftTask, undefined, "an empty task is no task");
+  const plain = parsePreviewerEntry(withBlock({ capabilities: ["thumbnail"] }));
+  eq(plain !== null && "draftTask" in plain, false, "no draft, no key");
 });
 
 test("a failed save says a conflict plainly and keeps every message within the frame's limit", () => {

@@ -158,6 +158,15 @@ type ComponentPreviewer struct {
 	Rank         int                             `json:"rank"`
 	Capabilities []string                        `json:"capabilities,omitempty"`
 	Toolbar      []ComponentPreviewerToolbarItem `json:"toolbar,omitempty"`
+	// Draft names the assist task that drafts this file's content from a
+	// sentence (capability "draft"); the host runs that task and no other.
+	Draft *ComponentPreviewerDraft `json:"draft,omitempty"`
+}
+
+// ComponentPreviewerDraft is a previewer's draft block: the content name of
+// the assist task the host runs for a frame's draft request.
+type ComponentPreviewerDraft struct {
+	Task string `json:"task"`
 }
 
 // FileMatch declares the files something applies to: the files a

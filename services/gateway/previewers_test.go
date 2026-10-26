@@ -42,6 +42,23 @@ var testPreviewerFiles = map[string]string{
 
 func previewerPackageBody(t *testing.T, name, version string, bundle pkgmeta.Artifact) []byte {
 	t.Helper()
+	return previewerPackageBodyWith(t, name, version, bundle, nil)
+}
+
+// previewerPackageBodyWith is the test package with its previewer block
+// changed by change (nil keeps the default block).
+func previewerPackageBodyWith(t *testing.T, name, version string, bundle pkgmeta.Artifact, change func(previewer map[string]any)) []byte {
+	t.Helper()
+	previewer := map[string]any{
+		"entry":        "index.html",
+		"match":        map[string]any{"mimeTypes": []string{"image/*"}, "extensions": []string{".atlas.json"}},
+		"rank":         50,
+		"capabilities": []string{"thumbnail", "toolbar"},
+		"toolbar":      []map[string]string{{"id": "grid", "icon": "grid", "label": "Grid", "kind": "toggle"}},
+	}
+	if change != nil {
+		change(previewer)
+	}
 	raw, err := json.Marshal(map[string]any{
 		"kind":        pkgmeta.KindPreviewerPackageV1,
 		"contract":    pkgmeta.PreviewerContractV1,
@@ -51,13 +68,7 @@ func previewerPackageBody(t *testing.T, name, version string, bundle pkgmeta.Art
 		"publisher":   "Example Co",
 		"description": "sprite sheets",
 		"artifacts":   map[string]any{"bundle": map[string]string{"url": bundle.URL, "sha256": bundle.SHA256}},
-		"previewer": map[string]any{
-			"entry":        "index.html",
-			"match":        map[string]any{"mimeTypes": []string{"image/*"}, "extensions": []string{".atlas.json"}},
-			"rank":         50,
-			"capabilities": []string{"thumbnail", "toolbar"},
-			"toolbar":      []map[string]string{{"id": "grid", "icon": "grid", "label": "Grid", "kind": "toggle"}},
-		},
+		"previewer":   previewer,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -87,6 +98,10 @@ type catalogPreviewer struct {
 		Extensions []string `json:"extensions"`
 	} `json:"match"`
 	Toolbar []map[string]string `json:"toolbar"`
+	// Draft is the assist task a frame's draft request runs (capability "draft").
+	Draft *struct {
+		Task string `json:"task"`
+	} `json:"draft"`
 }
 
 func memberPreviewers(t *testing.T, baseURL, token string) map[string]map[string]any {
@@ -340,4 +355,29 @@ func frameTicket(t *testing.T, svc *Service, sessionToken, scope string, ttl tim
 	}
 	c.Kind, c.ID, c.ExpiresAtUnix = auth.KindPreviewerFrame, scope, time.Now().Add(ttl).Unix()
 	return svc.Signer.Issue(c)
+}
+
+func TestPreviewerCatalog_carriesTheDraftTask(t *testing.T) {
+	// Given a previewer that declares the draft capability and its task.
+	_, srv, adminToken, memberToken := rolloutTestGateway(t)
+	bundle := uploadComponentArtifact(t, srv.URL, adminToken, previewerBundleBytes(t, testPreviewerFiles))
+	body := previewerPackageBodyWith(t, "drafter", "1.0.0", bundle, func(p map[string]any) {
+		p["capabilities"] = []string{"draft"}
+		p["draft"] = map[string]string{"task": "draw-diagram"}
+		delete(p, "toolbar")
+	})
+	if raw, status := postComponent(t, srv.URL, adminToken, body, ""); status != http.StatusOK {
+		t.Fatalf("install status=%d body=%s, want 200", status, raw)
+	}
+
+	// When the member reads the catalog, the block reaches the frame's host.
+	p := catalogBlock(t, memberPreviewers(t, srv.URL, memberToken)["drafter"])
+	if p.Draft == nil || p.Draft.Task != "draw-diagram" {
+		t.Fatalf("draft block = %+v, want task draw-diagram", p.Draft)
+	}
+	// And a previewer without one carries none.
+	installPreviewer(t, srv, adminToken, "sprites", "1.0.0")
+	if plain := catalogBlock(t, memberPreviewers(t, srv.URL, memberToken)["sprites"]); plain.Draft != nil {
+		t.Fatalf("draft block on a previewer without one = %+v", plain.Draft)
+	}
 }
