@@ -117,6 +117,10 @@ type agentWorkspaces struct {
 	// (Unix ms): their workspaces are purged once the mark is old enough and
 	// the room is still reported deleted (room_cleanup.go).
 	gone map[string]int64
+	// syncDirs is, per room, the directory live sync mirrors (sync_plan.go): chosen once,
+	// kept across reconnects and restarts, replaced only when it is no longer one of the
+	// owner's sessions' directories.
+	syncDirs map[string]string
 }
 
 // workspaceRecord is one binding as persisted. Fence is the sandbox fence
@@ -149,6 +153,13 @@ type workspacesDoc struct {
 	Sessions   []sessionRecord   `json:"sessions,omitempty"`
 	Places     []placeRecord     `json:"places,omitempty"`
 	Gone       []goneRecord      `json:"gone,omitempty"`
+	SyncDirs   []syncDirRecord   `json:"syncDirs,omitempty"`
+}
+
+// syncDirRecord is the directory live sync mirrors for a room, as persisted.
+type syncDirRecord struct {
+	Room string `json:"room"`
+	Dir  string `json:"dir"`
 }
 
 // goneRecord is a room reported deleted, and when first (Unix ms).
@@ -174,7 +185,7 @@ type placeRecord struct {
 // reset: the agents then start in new workspaces, and the old ones stay on
 // their cores.
 func newAgentWorkspaces(dir string) *agentWorkspaces {
-	w := &agentWorkspaces{m: map[driveKey]agentWorkspace{}, sessions: map[sessionKey]sessionRecord{}, places: map[sessionKey]string{}, gone: map[string]int64{}}
+	w := &agentWorkspaces{m: map[driveKey]agentWorkspace{}, sessions: map[sessionKey]sessionRecord{}, places: map[sessionKey]string{}, gone: map[string]int64{}, syncDirs: map[string]string{}}
 	if dir == "" {
 		return w
 	}
@@ -216,6 +227,11 @@ func newAgentWorkspaces(dir string) *agentWorkspaces {
 			w.gone[r.Room] = r.AtMs
 		}
 	}
+	for _, r := range doc.SyncDirs {
+		if r.Room != "" && r.Dir != "" {
+			w.syncDirs[r.Room] = r.Dir
+		}
+	}
 	for _, r := range doc.Places {
 		if r.Place != "" {
 			w.places[sessionKey{driveKey: driveKey{room: r.Room, core: r.Core, provider: r.Provider, owner: r.SeatOwner, requester: r.Requester}, channel: r.Channel}] = r.Place
@@ -240,6 +256,31 @@ func (w *agentWorkspaces) moveTo(sk sessionKey) (before string) {
 	w.places[seat] = place
 	w.saveLocked()
 	return prev
+}
+
+// syncDir is the directory live sync mirrors for room ("" = none chosen yet).
+func (w *agentWorkspaces) syncDir(room string) string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.syncDirs[room]
+}
+
+// setSyncDir records the directory live sync mirrors for room and returns the one it
+// replaced ("" = none before). An empty dir forgets it.
+func (w *agentWorkspaces) setSyncDir(room, dir string) (before string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	before = w.syncDirs[room]
+	if before == dir {
+		return before
+	}
+	if dir == "" {
+		delete(w.syncDirs, room)
+	} else {
+		w.syncDirs[room] = dir
+	}
+	w.saveLocked()
+	return before
 }
 
 // id is the workspace slot k uses ("", false before its first session).
@@ -362,6 +403,7 @@ func (w *agentWorkspaces) purged(k driveKey, id string) {
 	}
 	if !left {
 		delete(w.gone, k.room)
+		delete(w.syncDirs, k.room)
 		for sk := range w.places {
 			if sk.room == k.room {
 				delete(w.places, sk)
@@ -503,6 +545,10 @@ func (w *agentWorkspaces) saveLocked() {
 		doc.Sessions = append(doc.Sessions, r)
 	}
 	sort.Slice(doc.Sessions, func(i, j int) bool { return sessionRecordLess(doc.Sessions[i], doc.Sessions[j]) })
+	for room, dir := range w.syncDirs {
+		doc.SyncDirs = append(doc.SyncDirs, syncDirRecord{Room: room, Dir: dir})
+	}
+	sort.Slice(doc.SyncDirs, func(i, j int) bool { return doc.SyncDirs[i].Room < doc.SyncDirs[j].Room })
 	for room, at := range w.gone {
 		doc.Gone = append(doc.Gone, goneRecord{Room: room, AtMs: at})
 	}

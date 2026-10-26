@@ -1200,23 +1200,55 @@ func (b *Bridge) syncPlan(ctx context.Context, room string) (mode, dir string, e
 	if b.cfg.SyncDirFor != nil {
 		return rm.SyncMode, b.cfg.SyncDirFor(room), nil
 	}
-	// Default: the workspace directory of the session the owner's own agent ran last on
-	// this machine, asked of that session's core.
+	// Default: the directory chosen for this room once and kept (chooseSyncDir).
 	if rm.SyncMode != "mutagen" {
 		return rm.SyncMode, "", nil
 	}
-	rs, reason := pickSyncSession(b.syncCandidates(room), func(c *roomSession) string {
-		return b.workspaceDir(ctx, c.core, c.workspaceID, c.sessionID)
-	})
-	if rs == nil {
-		b.noticeSyncPlan(ctx, room, reason)
-		return rm.SyncMode, "", nil
-	}
-	return rm.SyncMode, b.workspaceDir(ctx, rs.core, rs.workspaceID, rs.sessionID), nil
+	return rm.SyncMode, b.chooseSyncDir(ctx, room), nil
 }
 
-// noticeSyncPlan tells the room why live sync mirrors nothing, once per reason (the plan is
-// recomputed at every reconnect, which must not repeat it).
+// chooseSyncDir is the directory live sync mirrors for room, "" when there is none. The
+// choice is made once and kept: a reconnect, a restart or another agent's turn does not
+// move it, because the sync engine keeps its index in the mirrored directory, and a new
+// directory is another project's files offered to the room's other members. It is replaced
+// only when the kept directory is no longer the working directory of any of the owner's own
+// host sessions (the agent moved, the session is gone); then the plan of pickSyncSession
+// runs again, and the room is told the directory changed. Without a kept directory the plan
+// runs, and nothing mirrored is told with its reason (noticeSyncPlan).
+// decision: live-sync PRD §6.4 (kept until it stops being one of the owner's session directories).
+func (b *Bridge) chooseSyncDir(ctx context.Context, room string) string {
+	candidates := b.syncCandidates(room)
+	dirOf := func(c *roomSession) string { return b.workspaceDir(ctx, c.core, c.workspaceID, c.sessionID) }
+	kept := b.workspaces.syncDir(room)
+	if kept != "" {
+		for _, c := range candidates {
+			if dirOf(c) == kept {
+				return kept
+			}
+		}
+	}
+	rs, reason := pickSyncSession(candidates, dirOf)
+	if rs == nil {
+		if kept != "" {
+			// The kept directory is gone and no new one is clear: keep mirroring what was
+			// agreed rather than stop (the directory may be a session the bridge has not
+			// bound yet after a restart); the room is told why the plan cannot confirm it.
+			b.noticeSyncPlan(ctx, room, "Live sync keeps sharing "+kept+", which is no longer the working directory of any of your agents here ("+reason+"). Send a message to the agent whose directory should be shared.")
+			return kept
+		}
+		b.noticeSyncPlan(ctx, room, "Live sync is on for this room but nothing is shared: "+reason+". Send a message to the agent whose directory should be shared.")
+		return ""
+	}
+	dir := dirOf(rs)
+	if before := b.workspaces.setSyncDir(room, dir); before != "" && before != dir {
+		b.noticeSyncPlan(ctx, room, "Live sync now shares "+dir+" instead of "+before+": none of your agents here works in the first any more.")
+	}
+	return dir
+}
+
+// noticeSyncPlan tells the room something about its live sync (nothing is mirrored and why,
+// or the mirrored directory changed), once per sentence: the plan is recomputed at every
+// reconnect, which must not repeat it.
 func (b *Bridge) noticeSyncPlan(ctx context.Context, room, reason string) {
 	b.mu.Lock()
 	if b.syncNoticed == nil {
@@ -1230,7 +1262,7 @@ func (b *Bridge) noticeSyncPlan(ctx context.Context, room, reason string) {
 	b.mu.Unlock()
 	b.postNotice(ctx, jobRef{RoomID: room}, wire.JobNotice{
 		Kind:        "sync-plan",
-		Text:        "Live sync is on for this room but nothing is mirrored: " + reason + ". Pick the agent whose directory should be shared (send it a message), or ask the room's owner to choose the sync mode again.",
+		Text:        reason,
 		OwnerUserID: b.cfg.OwnerSubject,
 	})
 }
