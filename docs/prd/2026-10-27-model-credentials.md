@@ -1,6 +1,6 @@
 # Model credentials for agents in the sandbox: keys that never enter it (2026-10-27)
 
-Status: **design, nothing built.** Owner when built: a new component (its own
+Status: **design; slice 1 (the experiments that need no new code) done 2026-10-27, results in §8; nothing built.** Owner when built: a new component (its own
 repository, `bnbloc-model-credentials`), the agent manager's catalog (which agent uses
 which provider), and one small platform mechanism in the bridge and one in the
 desktop (§4). Builds on `2026-10-26-sandbox-only-agents-design.md` (§5, whose
@@ -175,29 +175,52 @@ The seam reuses the existing shapes (`EgressHosts`, `EgressSend`, `Card`); the
 local transport differs from the service's only in who attests the turn: the bridge
 itself, which is on the member's computer and already holds the job.
 
-### 3.4 Streaming (a change the model traffic needs)
+### 3.4 Streaming (what exists, what it measured, what changes)
 
-Checked in `services/bridge/roomtools/egress.go`: the existing exchange **reads
-the whole request body (at most 8 MiB, `component.MaxEgressBody`), sends it, reads
-the whole answer (again at most 8 MiB) and only then answers the command**, with a
-2-minute timeout on the whole request. Model calls stream (server-sent events for
-minutes) and carry large bodies (images). Through that path a completion would
-appear all at once at the end, would be cut at two minutes, and an image over 8 MiB
-would be refused. So an `inject` answer sets `stream: true` and the bridge:
+Another session built streaming on the member-send path while this was being
+designed (`docs/prd/2026-10-27-streamed-member-sends.md`, commit `c4d356ea`):
+answers stream to the command after the service's `Accept`, a request body over
+8 MiB streams to a component that says `streams`, a send is bounded by activity
+(2 minutes with nothing moving), `Expect: 100-continue` is answered. That is most of
+what this record needs, and it is reused, not rebuilt.
 
-- sends the request with the body streamed through, no 8 MiB cap (the provider's
-  own limit applies);
-- streams the response back as it arrives, headers first, flushing each chunk;
-- ends on **inactivity** (no byte either way for a window), never on total time
-  (the rule that an agent's turn is never capped by a fixed duration); the stall
-  window is a setting of the component's catalog per provider, default 10 minutes;
-- scrubs the credential from response headers and from an error body (invariant 6,
-  buffered only for status 400 and above, at most 64 KiB);
-- reports status, bytes and time to the component when it ends, or when the
-  agent drops the connection (so a cancelled stream is counted).
+**Measured against that code (E2, 2026-10-27):** it does **not** make a model
+completion stream. `sendHere` reads the answer's first `MaxEgressReportBody`
+(64 KiB) with `io.ReadFull` before it reports to the component and relays; a
+completion arrives at a few hundred bytes a second, so the first token reaches the
+agent only after 64 KiB have accumulated or the stream ends. With a 6 s stream of 100 bytes per
+300 ms, the response was handed back at 6.0 s and the first bytes reached the agent at 6.0 s.
+That is right for a `git clone` (the head is read at once) and wrong for SSE.
 
-The buffered path stays as it is for the services that use it; one `sendHere`
-gets a streaming mode rather than a second sender (one rule, one owner).
+So a credential injection answers with `relay: true` (a field of `EgressSend`), and
+the bridge, for that send only:
+
+- reads the answer's **head only** (status and headers), reports nothing of the body
+  to the component (an injection never needs the body), and relays each chunk as it
+  arrives, flushing every write;
+- ends on the existing **activity bound** (no byte either way for the window),
+  never on total time; the window is the provider's catalog entry, default 10
+  minutes (the 2-minute idle bound is right for git and too short for a model that
+  thinks), and the proxy's own idle deadline (`egressIdle`) is raised for a relayed
+  connection to match, because a stream with no bytes for two minutes while a model
+  thinks must not be cut;
+- scrubs the credential from response headers and, for status 400 and above, from
+  the body (buffered, at most 64 KiB); a streamed success body is not scanned;
+- streams the request body with no 8 MiB cap (an image), as the existing
+  `streams` path does;
+- reports status, bytes and time to the component when the stream ends or the agent
+  drops it (`/egress/report`), so a cancelled stream is counted.
+
+One sender stays (`sendHere`, which gains the `relay` mode); no second one.
+
+**A second finding (E1): Codex opens a WebSocket first.** It sends `GET
+/v1/responses` with `Upgrade: websocket` to the model host and falls back to
+HTTPS when that fails. The proxy strips the hop headers (`Upgrade` among them), so
+the request would be forwarded as a plain `GET` **with the credential injected**:
+harmless but wasteful, and a provider that answers it differently would make the
+fallback slow or wrong. A request with `Upgrade` to a claimed host is answered `426`
+by the proxy itself and never sent, so the fallback is immediate and nothing carries
+the key.
 
 ### 3.5 What the agent sees
 
@@ -385,58 +408,97 @@ It is six months later and this went wrong. The likely ways:
 
 ## 8. Experiments before building
 
-Each is run against the real sandbox, the real bridge and the real agent, in a
-throwaway environment; a failure changes the design as stated.
+Each is run against the real sandbox (0.1.11), the real agent and, where the code
+exists, the real bridge, in a throwaway environment; a failure changes the design as
+stated. A fake provider stands in for the model host: a throwaway Go program that
+is the proxy (TLS terminated with a CA of its own for the claimed host names, as the
+bridge does) and answers like OpenAI chat completions with an SSE stream.
 
-| # | Question | Pass | If it fails |
+**Method of E1.** A sandbox machine with `egress: none` and `hostPorts` (so the
+only way out is the proxy), the proxy's CA and a bundle of the guest's roots plus
+it in `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE` and the other variables the bridge sets,
+`HTTPS_PROXY` with an alias, a placeholder key in the agent's own variable. Each
+agent ran as a room runs it, an ACP session (`initialize`, `session/new`,
+`session/prompt`), not just `--version`. Pass: the agent's model request reaches the
+fake provider through the proxy, TLS accepted, placeholder key in the header the
+catalog expects.
+
+| Agent | Result | What it sends | Notes |
 |---|---|---|---|
-| E1 | Does each catalogued agent send its model traffic through `HTTPS_PROXY` and trust `NODE_EXTRA_CA_CERTS` / `SSL_CERT_FILE` (OpenCode 2's compiled binary, the Node agents on Node 24, the Rust and Go ones)? | a claimed-host request arrives at a fake provider with the injected header | the agent is not offered the sandbox until it does |
-| E2 | Does an SSE completion stream incrementally through the streaming exchange, for minutes? | first token within the provider's own latency; no cut before the provider ends | fix the stream path before anything else |
-| E3 | A client that drops mid-stream, an idle provider, a 10 MiB request | stream ends, is reported; the idle window ends it; the body goes through | adjust the limits or the mode |
-| E4 | HTTP/1.1 only on the claimed path (`NextProtos`): does any agent require h2? | none | add h2 to the claimed path |
-| E5 | The agent's own `Authorization` and any credential-bearing header are removed and the injected one wins | the fake provider sees only ours | extend `Remove` per provider |
-| E6 | A provider (fake, then the real one with a wrong key) that echoes the key in an error | the agent's answer has none of it | widen the scrub |
-| E7 | The canary: a known key through a full run, then search the guest (env, files, `/proc`), the room, every log, the gateway's recorded traffic | zero bytes outside the keychain and the bridge's request memory | the leak is the bug; no rollout |
-| E8 | The keychain on macOS and Windows: no prompt per request, per-plugin isolation, refusal on a platform without one | as stated | fall back to asking once per launch, never to a file |
-| E9 | The own-run decision against an own run and a borrowed run in one room, and two accounts | the second gets no claim | the decision is wrong and is fixed first |
-| E10 | Placeholder shapes: does each agent's local check accept the catalogued placeholder? | agent starts | per-provider shape in the catalog |
+| OpenCode 2 (single compiled binary) | **pass** | `POST /v1/chat/completions` to its free-model host with `Bearer public`; the streamed chunks arrived | its own free models need no key at all; an OpenAI key would go to `api.openai.com` |
+| Gemini CLI | **pass** | `POST /v1beta/models/<m>:generateContent` to `generativelanguage.googleapis.com`, `x-goog-api-key` | needs `GEMINI_CLI_TRUST_WORKSPACE=true` for a headless run |
+| Qwen Code | **pass** | `POST /v1/chat/completions`, `Bearer`; streamed chunks arrived | its HOME must exist (it crashed on a missing one) |
+| Kilo | **pass** (transport) | `POST /v1/responses`, `Bearer`; its own default provider also contacts `api.kilo.ai` and says "You need to sign in to use this model" | only a provider chosen with a key uses this path |
+| Codex (ACP adapter) | **pass** | `GET /v1/responses` with `Upgrade: websocket`, then HTTPS | see the WebSocket finding (§3.4) |
+| Claude Code (the SDK's native binary, under the ACP adapter) | **pass** | `x-api-key` to `api.anthropic.com` | an API key only: a subscription login is never offered |
+| DeepSeek Harness | **pass** | `POST /anthropic/v1/messages`, `x-api-key` | DeepSeek's Anthropic-compatible endpoint |
+| pi (ACP adapter) | **pass** | `POST /v1/responses`, `Bearer` | |
+| Cline | **no key path** | its ACP offers only OAuth account logins (`cline`, `cline-pass`, `openai-codex`) | not offered in the sandbox |
+| GitHub Copilot CLI | **no key path** | `authenticate` is a GitHub login | a subscription: hybrid mode |
+| Auggie | **no key path** | "does not currently support authenticating over ACP" | not offered |
+
+Reading it: **the proxy-and-CA path works for every agent that has an API-key way
+in** (8 of 8), including the compiled binary (OpenCode 2, Kilo) and the Node ones
+(Node 24 honours `NODE_USE_ENV_PROXY`). Direct access was refused throughout (the machine has no
+egress), so nothing slipped past the proxy. The three that fail have no key to
+inject at all, which is the case the design already refuses; the catalog marks them
+`signIn: "login"` and the page says so, instead of "not yet".
+
+| # | Question | Result |
+|---|---|---|
+| E1 | Does each catalogued agent send its model traffic through the proxy and trust the CA? | **Done, table above.** |
+| E2 | Does an SSE completion stream incrementally through the existing send path? | **No (measured):** first bytes at 6.0 s of a 6 s stream (§3.4). A `relay` mode is part of the design. |
+| E4 | HTTP/1.1 only on the claimed path (`NextProtos`): does any agent require h2? | **None did.** Eight agents negotiated `http/1.1` (curl, Node, Python offered `h2` and accepted `http/1.1`). |
+| E10 | Do the agents accept a placeholder key? | **Yes:** `sk-PLACEHOLDER-x1` was accepted by the OpenAI-, Anthropic- and DeepSeek-style clients, with no local format check. The real shape per provider is still a catalog field (Gemini and others not format-probed). |
+| E3 | A client that drops mid-stream, an idle provider, a 10 MiB request body | needs the `relay` mode; slice 2 |
+| E5 | The agent's own credential headers are removed and the injected one wins | needs the injection; slice 2 |
+| E6 | A provider that echoes the key in an error | needs the scrub; slice 2 |
+| E7 | The canary: a known key through a full run, then search every sink | needs the whole path; slice 2 (the gate to any rollout) |
+| E8 | The OS keychain on macOS and Windows | needs the `secrets` host API; slice 3 |
+| E9 | The own-run decision with an own and a borrowed run in one room, and two accounts | bridge test in slice 2 |
 
 ## 9. Slices (each a slice of the end state, none a stopgap)
 
-1. **Experiments** E1 to E7 and E9 with a fake provider and the real bridge, the real
-   sandbox and each catalogued agent. Results written into this record.
+1. **Experiments** E1, E2, E4 and E10 **done** (§8). E3, E5, E6, E7 and E9 need the
+   bridge's injection and `relay` mode and are the first gate of slice 2.
 2. **The bridge**: the local-provider contract (conformance cases first: an own run
    claims, a borrowed one does not; a missing key answers a card; between turns 503),
-   the streaming exchange, the scrub, the space environment for a local provider
-   alone, the turn built by the bridge. Tested against a fake provider component.
+   the `relay` mode of the send path (§3.4), `426` for an `Upgrade`, the scrub, the space
+   environment for a local provider alone, the turn built by the bridge. Tested against a
+   fake provider component, then E3, E5, E6, E7, E9.
 3. **The desktop** `secrets` host API (macOS first, then Windows), with E8.
 4. **The component** `bnbloc-model-credentials`: the page, the provider catalog (the
    header-key providers of §3.6), limits, last uses, the card actions.
-5. **The manager's catalog** (`sandbox.credentials`, `signIn: "subscription"`), the
+5. **The manager's catalog** (`sandbox.credentials`, `signIn: "login"` for Cline, Copilot and Auggie), the
    row text, the placeholder into the space's environment, enabling the seven agents
    that passed E1.
 6. **Organization**: the settings of §3.8 and the decision on audit.
 7. Later: OAuth for a provider's API logins, SigV4, a sample egress service with
    organization-held keys, a second key per provider.
 
-## 10. Open questions for the owner
+## 10. Decided by the owner (2026-10-27)
 
-1. **Audit to the organization.** Should a member's use of their **personal** key in
-   an organization's room appear in the organization's audit log (host, path, status,
-   no key, no body)? The platform owns audit and the bridge has no path to post one
-   today (a gateway endpoint would be needed). Recommended: yes for runs in the
-   organization's rooms, named on the page, because the compute and the data are the
-   organization's; the member sees exactly what is recorded.
-2. **The OS keychain as a requirement.** Recommended: yes, refusing a platform
-   without one. The alternative (a file, 0600) is what the vendors' CLIs do and is
-   weaker; it would be an explicit opt-in per organization.
-3. **Organization-held keys first or later.** They need no platform work (the
-   existing egress service) and some organizations will want them before members'
-   own keys. Recommended: after slice 5, as a sample service, so one mechanism is
-   proven before two are offered.
-4. **An agent that does not pass E1.** Recommended: not offered the sandbox and
-   said so on its row, rather than offered with an own network path that would
-   need a key in the guest.
+1. **Audit to the organization: yes**, for a member's use of a personal key in an
+   organization's room: host, path, status, bytes, never the key or a body, named on
+   the page so the member knows what is recorded.
+2. **The OS keychain is required**, and a platform without one is refused. The
+   owner asked for a better and safer answer where there is one: the extra
+   hardening that costs little is (a) a keychain item that is **not synchronised**
+   to a cloud keychain (no iCloud Keychain, no Windows roaming credentials), so the
+   key exists on this one computer; (b) a **per-launch unlock only where the OS
+   offers a biometric or login prompt without prompting per request**: the
+   component reads the key once per run into the bridge's memory, not per request;
+   (c) a key typed into the page is sent to the desktop's `secrets` API and never
+   shown again (the page shows the last four characters and a check mark), and the
+   page's frame has no network, so the key never leaves through the page. A hardware
+   token or an OS-managed secure enclave is the next step up and is OS-specific;
+   it is not promised here.
+3. **Organization-held keys** (a company's enterprise quota, an internal model
+   gateway, the platform's own agents, which have no member): with the existing
+   egress service, after the member-key path is proven.
+4. **An agent that does not pass E1, or has no key path, is not offered the
+   sandbox**, and its row says why (`signIn: "login"`). Security is not traded for
+   coverage.
 
 ## Sources
 
@@ -444,4 +506,3 @@ throwaway environment; a failure changes the design as stated.
 - The pattern (a proxy on the sandbox's outbound path holds the credential and
   injects it for approved destinations; environment-variable injection leaves the
   secret readable by any code the agent runs): [Blaxel](https://blaxel.ai/blog/egress-proxy-api-credentials-ai-agent-sandboxes), [LangSmith Auth Proxy](https://www.langchain.com/blog/how-auth-proxy-secures-network-access-for-langsmith-agent-sandboxes), [Cloudflare Sandbox as described by W. Zujkowski](https://williamzujkowski.github.io/posts/2026-07-02-agentic-ai-sandbox-secret-proxying-gap/), [the credential-canary test in readme2demo #64](https://github.com/alphacrack/readme2demo/issues/64).
-
