@@ -5,7 +5,8 @@ import { useAuth } from "@/lib/auth";
 import { fileCategory, fileTypeLabel, isTextual, type ArtifactFileFacts } from "@/lib/artifactFiles";
 import { formatBytes } from "@/lib/format";
 import { beginShareSignIn } from "@/lib/loginReturn";
-import { expiresLabel, openShareLink, shareVersionLabel, type PublicShare, type ShareOpening } from "@/lib/shares";
+import { isPreviewerViewerId } from "@/lib/previewerFrame";
+import { expiresLabel, openShareLink, shareBytesWanted, shareVersionLabel, type PublicShare, type ShareOpening } from "@/lib/shares";
 import { publicShareApi, sharesApi } from "@/lib/sharesApi";
 import "@/views/artifact/builtin";
 import { ArtifactBody, resolveViewer } from "@/views/artifact/ArtifactBody";
@@ -15,6 +16,7 @@ import type { ViewerToolbarItem, ViewerToolbarValue } from "@/views/artifact/reg
 import { ViewerToolbar } from "@/views/artifact/toolbar";
 import { categoryIcons } from "@/views/workbench/fileIcons";
 import { SharedApp } from "./SharedApp";
+import { useSharePoster, useSharePreviewers } from "./shareViewerHooks";
 
 // PublicSharePage is what a link's holder sees at the share page's hash
 // (lib/hashRoute shareHash; a share link `<origin>/s/<token>` redirects there)
@@ -183,11 +185,16 @@ function SharedFile({ link, share }: { readonly link: string; readonly share: Pu
     mimeType: share.version.mimeType,
   };
   const file = fileInfoFromFacts(facts, share.version.version, share.version.sizeBytes);
-  const viewer = resolveViewer(file, undefined, isTextual(facts));
+  // The share's previewers join the registry first; until that has answered no
+  // viewer is chosen, so a file with a previewer is never shown as code.
+  const lookedUp = useSharePreviewers(link);
+  const claimedNow = resolveViewer(file, undefined, isTextual(facts));
+  const viewer = lookedUp ? claimedNow : null;
   // A site the gateway does not serve has no frame and no bytes here: the
   // file fallback offers the download.
   const runsSite = viewer?.input === "site";
-  const { blob, error } = usePublicBytes(link, viewer !== null && !runsSite, file.mimeType);
+  const { blob, error } = usePublicBytes(link, shareBytesWanted(viewer, claimedNow), file.mimeType);
+  const { poster, onRendered } = useSharePoster(link, share.cover === true, isPreviewerViewerId(viewer?.id));
   const [tools, setTools] = useState<{ items: readonly ViewerToolbarItem[]; emit: (id: string, value: ViewerToolbarValue) => void }>({
     items: [],
     emit: () => {},
@@ -232,7 +239,7 @@ function SharedFile({ link, share }: { readonly link: string; readonly share: Pu
       <main className="relative min-h-0 flex-1 overflow-hidden" aria-label={file.name}>
         {error ? (
           <p className="p-4 text-sm text-[var(--color-fg-subtle)]">Could not load this file. Use Download to get a copy.</p>
-        ) : viewer && !runsSite && !blob ? (
+        ) : !lookedUp || (viewer && !runsSite && !blob) ? (
           <p className="p-4 text-sm text-[var(--color-fg-subtle)]">Loading preview…</p>
         ) : (
           <ArtifactBody
@@ -243,7 +250,15 @@ function SharedFile({ link, share }: { readonly link: string; readonly share: Pu
             viewer={viewer}
             onDownload={() => window.location.assign(download)}
             onToolbar={onToolbar}
+            viewOnly
+            onRendered={onRendered}
           />
+        )}
+        {poster && (
+          // The version's cover, over the previewer while it loads out of sight beneath.
+          <div className="absolute inset-0 z-10 grid place-items-center bg-[var(--color-bg)] p-3">
+            <img src={poster} alt={file.name} className="max-h-full max-w-full object-contain" draggable={false} />
+          </div>
         )}
       </main>
     </Frame>

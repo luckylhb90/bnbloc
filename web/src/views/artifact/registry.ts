@@ -81,6 +81,14 @@ export interface ArtifactViewerProps {
   readonly toolbar: ViewerToolbarSink;
   readonly onLocalState?: (s: unknown) => void;
   readonly remoteState?: { readonly state: unknown; readonly actor: string; readonly nonce: number };
+  /** The frame is for looking only (a shared link): a previewer is told to
+   *  offer no editing and the host refuses its saves, drafts, live state and
+   *  selection whatever it declares. */
+  readonly viewOnly?: boolean;
+  /** Called once when a previewer has drawn the file (its first cover
+   *  message) or failed: the share page swaps its cover picture for the live
+   *  viewer then. */
+  readonly onRendered?: () => void;
   /** The part of the file the member points at (a slide, a cell range,
    *  selected text), null when none: the Ask AI panel names it. */
   readonly onSelection?: (s: ViewerSelection | null) => void;

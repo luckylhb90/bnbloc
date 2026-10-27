@@ -22,6 +22,7 @@ import {
   readFrameMessage,
   readToolbar,
   type FrameMessage,
+  type HostMessage,
   type PreviewerCapability,
   type ToolbarItem,
 } from "../../previewer-sdk/src/protocol.ts";
@@ -123,8 +124,15 @@ export function parsePreviewerCatalog(body: unknown): PreviewerDescriptor[] {
 }
 
 /** The registry id of an installed previewer. */
+const VIEWER_ID_PREFIX = "component.previewer.";
+
 export function previewerViewerId(name: string): string {
-  return `component.previewer.${name}`;
+  return `${VIEWER_ID_PREFIX}${name}`;
+}
+
+/** Whether a registry viewer id is an installed previewer's (not a built-in). */
+export function isPreviewerViewerId(id: string | undefined): boolean {
+  return id !== undefined && id.startsWith(VIEWER_ID_PREFIX);
 }
 
 /** Whether a descriptor's browser frame ticket must be refreshed first. */
@@ -210,6 +218,27 @@ export function saveFailure(err: unknown): string {
   // The frame reads a message of at most ERROR_LIMIT characters; a longer one
   // would be dropped unseen, so it is cut here.
   return [...text].slice(0, ERROR_LIMIT).join("");
+}
+
+/** What the host does with a frame's message when the frame is shown to
+ *  someone who only looks (a shared link): null means handle it as usual; a
+ *  refusal drops the message, and answers it when the frame waits for an
+ *  answer (a save, a draft), so it does not sit on "Saving…". The host decides
+ *  this itself, whatever the frame declared or its init said: a previewer that
+ *  predates `viewOnly` must not be able to write through a share. */
+export function viewOnlyRefusal(type: FrameMessage["type"]): { readonly reply: HostMessage | null } | null {
+  const message = "This file is shown for viewing only.";
+  switch (type) {
+    case "preview.save":
+      return { reply: { type: "preview.save.failed", message } };
+    case "preview.draft":
+      return { reply: { type: "preview.draft.failed", message } };
+    case "preview.state.send":
+    case "preview.selection":
+      return { reply: null };
+    default:
+      return null;
+  }
 }
 
 /** Whether a draft reply fits the frame's limit: the frame refuses a larger

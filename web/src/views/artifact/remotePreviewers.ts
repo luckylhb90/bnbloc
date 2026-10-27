@@ -1,24 +1,29 @@
 import { req } from "@/lib/api";
-import {
-  frameTicketStale,
-  parsePreviewerCatalog,
-  previewerViewerId,
-  type PreviewerDescriptor,
-} from "@/lib/previewerFrame";
+import { inDesktopShell } from "@/lib/config";
+import { previewerViewerId, type PreviewerDescriptor } from "@/lib/previewerFrame";
+import { createPreviewerSync, settledWithin, type PreviewerSource } from "@/lib/previewerSync";
+import { publicShareApi } from "@/lib/sharesApi";
 import { registerArtifactViewer, unregisterArtifactViewer } from "./registry";
 import { registerComparer, unregisterComparer } from "./compare/registry";
 import { visiblePoll } from "@/lib/useVisiblePoll";
 
-// Installed previewer components in the viewer registry. The member catalog
-// (GET /v1/components?kind=previewer — rollout + tenant gated server-side) is
-// the only source: every installed previewer becomes a "component" viewer
-// whose host is RemotePreviewer; a previewer that leaves the catalog
-// (uninstall, rollout off, opt-out) is unregistered on the next sync.
+// Installed previewer components in the viewer registry. Every installed
+// previewer becomes a "component" viewer whose host is RemotePreviewer; a
+// previewer that leaves its source (uninstall, rollout off, opt-out, a sharer
+// who no longer offers it) is unregistered on the next sync. The source is the
+// member catalog (GET /v1/components?kind=previewer — rollout + tenant gated
+// server-side) in the signed-in app, and a share's own list on the public share
+// page (startSharePreviewers); lib/previewerSync keeps one active at a time.
 
 const SYNC_INTERVAL_MS = 10 * 60 * 1000;
+/** How long the share page waits for a share's previewers before it renders the
+ *  file as it would without them. */
+const SHARE_LOOKUP_MS = 5000;
 
 const installed = new Map<string, PreviewerDescriptor>();
-let inflight: Promise<void> | null = null;
+
+const memberCatalog: PreviewerSource = { read: () => req<unknown>("/v1/components?kind=previewer") };
+const catalog = createPreviewerSync(memberCatalog, applyCatalog, (name) => installed.get(name));
 
 /** The current descriptor of an installed previewer. */
 export function installedPreviewer(name: string): PreviewerDescriptor | undefined {
@@ -28,13 +33,7 @@ export function installedPreviewer(name: string): PreviewerDescriptor | undefine
 /** Re-reads the catalog and reconciles the registry. Concurrent callers
  *  share one request; a failure keeps the previous registrations. */
 export function syncInstalledPreviewers(): Promise<void> {
-  if (inflight) return inflight;
-  inflight = req<unknown>("/v1/components?kind=previewer")
-    .then((body) => applyCatalog(parsePreviewerCatalog(body)))
-    .finally(() => {
-      inflight = null;
-    });
-  return inflight;
+  return catalog.sync();
 }
 
 function applyCatalog(descriptors: readonly PreviewerDescriptor[]): void {
@@ -104,11 +103,31 @@ function sameRegistration(a: PreviewerDescriptor, b: PreviewerDescriptor): boole
 /** A descriptor whose browser frame ticket is still valid for a new frame:
  *  re-reads the catalog first when the ticket is near expiry. undefined when
  *  the previewer is no longer installed for this member. */
-export async function freshPreviewer(name: string, nowMs = Date.now()): Promise<PreviewerDescriptor | undefined> {
-  const current = installed.get(name);
-  if (current && !frameTicketStale(current, nowMs)) return current;
-  await syncInstalledPreviewers();
-  return installed.get(name);
+export function freshPreviewer(name: string, nowMs = Date.now()): Promise<PreviewerDescriptor | undefined> {
+  return catalog.fresh(name, nowMs);
+}
+
+/** Fills the registry for the public share page from the link's own list (the
+ *  previewers its creator can offer for the shared file, each with a frame
+ *  ticket), instead of the member catalog the page cannot read. `settled`
+ *  resolves when the first lookup answered or failed, or after SHARE_LOOKUP_MS:
+ *  the page chooses its viewer then, so a file with a previewer is never shown
+ *  as code first. `stop` removes what the lookup registered and gives the
+ *  registry its member source back. */
+export function startSharePreviewers(link: string): { readonly settled: Promise<void>; readonly stop: () => void } {
+  // The desktop shell serves a frame from its own bnbloc-previewer scheme, out of
+  // the member's own catalog: a previewer only the share's creator has would not
+  // load there. The page keeps its viewers as they were.
+  if (inDesktopShell()) return { settled: Promise.resolve(), stop: () => {} };
+  const restore = catalog.setSource({ read: () => publicShareApi.previewers(link) });
+  const settled = settledWithin(catalog.sync().catch(() => {}), SHARE_LOOKUP_MS);
+  return {
+    settled,
+    stop: () => {
+      restore();
+      for (const name of [...installed.keys()]) remove(name);
+    },
+  };
 }
 
 /** Starts the catalog sync for a signed-in member (now, then periodically);

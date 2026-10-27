@@ -8,7 +8,7 @@
 //
 // Pure: no DOM globals, no dependencies, so it is unit-tested under node.
 //
-//   host  -> frame: preview.init      {protocol, file:{name,mimeType,sizeBytes,version}, theme, viewport}
+//   host  -> frame: preview.init      {protocol, file:{name,mimeType,sizeBytes,version}, theme, viewport, viewOnly?}
 //   host  -> frame: preview.file      {bytes: ArrayBuffer}            (transferred)
 //   host  -> frame: preview.toolbar   {id, value}                     (a toolbar gesture)
 //   host  -> frame: preview.state     {state, actor}                  (live state from the room)
@@ -167,6 +167,10 @@ export type HostMessage =
       readonly file: PreviewFile;
       readonly theme: Theme;
       readonly viewport: Viewport;
+      /** The frame is shown to someone who only looks (a shared link, an older
+       *  version): it should offer no editing. The host refuses what such a
+       *  frame asks for anyway (previewerFrame.viewOnlyRefusal). */
+      readonly viewOnly?: true;
     }
   | { readonly type: "preview.file"; readonly bytes: ArrayBuffer }
   | { readonly type: "preview.toolbar"; readonly id: string; readonly value: boolean | number | null }
@@ -480,12 +484,15 @@ export function readHostMessage(data: unknown): HostMessage | null {
       const h = finiteNonNegative(viewport.h);
       if (sizeBytes === null || version === null || w === null || h === null) return null;
       if (data.theme !== "light" && data.theme !== "dark") return null;
+      // Absent means false; present, it must be a boolean.
+      if (data.viewOnly !== undefined && typeof data.viewOnly !== "boolean") return null;
       return {
         type: "preview.init",
         protocol: PREVIEWER_PROTOCOL,
         file: { name: file.name, mimeType: file.mimeType, sizeBytes, version },
         theme: data.theme,
         viewport: { w, h },
+        ...(data.viewOnly === true ? { viewOnly: true as const } : {}),
       };
     }
     case "preview.file":

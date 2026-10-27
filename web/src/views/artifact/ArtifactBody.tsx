@@ -146,6 +146,8 @@ export function ArtifactBody({
   onPublish,
   onCover,
   onOpenFile,
+  viewOnly,
+  onRendered,
 }: {
   readonly roomId: string;
   readonly actor?: string;
@@ -169,6 +171,9 @@ export function ArtifactBody({
   // thumbnail).
   readonly onCover?: ArtifactViewerProps["onCover"];
   readonly onOpenFile?: ArtifactViewerProps["onOpenFile"];
+  // The viewer is for looking only (a share page), and how it says it has drawn.
+  readonly viewOnly?: ArtifactViewerProps["viewOnly"];
+  readonly onRendered?: ArtifactViewerProps["onRendered"];
 }) {
   const instanceKey = `${viewer?.id ?? ""}:${artifactId}:${file.version}`;
   const onToolbarRef = useStableRef(onToolbar);
@@ -224,6 +229,8 @@ export function ArtifactBody({
     onPublish,
     onCover: onCover ?? roomCover,
     onOpenFile,
+    viewOnly,
+    onRendered,
   };
   return (
     <ViewerBoundary resetKey={instanceKey}>

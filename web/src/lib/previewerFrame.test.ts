@@ -4,6 +4,7 @@ import {
   draftRefusal,
   draftReplyFits,
   frameTicketStale,
+  isPreviewerViewerId,
   parsePreviewerCatalog,
   parsePreviewerEntry,
   previewerFrameUrl,
@@ -13,6 +14,7 @@ import {
   saveRefusal,
   themeFromBackground,
   validBundlePath,
+  viewOnlyRefusal,
   wantsThumbnail,
 } from "./previewerFrame.ts";
 import { DRAFT_REPLY_LIMIT, ERROR_LIMIT, STATE_LIMIT, THUMBNAIL_LIMIT } from "../../previewer-sdk/src/protocol.ts";
@@ -188,3 +190,20 @@ test("a failed save says a conflict plainly and keeps every message within the f
   eq([...saveFailure(new ApiError(500, "x".repeat(ERROR_LIMIT * 2)))].length, ERROR_LIMIT, "a long reason is cut to ERROR_LIMIT");
 });
 
+
+test("a view-only frame's save and draft are answered, its state and selection are dropped, the rest passes", () => {
+  eq(viewOnlyRefusal("preview.save"), { reply: { type: "preview.save.failed", message: "This file is shown for viewing only." } }, "a save is answered, so the frame does not wait");
+  eq(viewOnlyRefusal("preview.draft"), { reply: { type: "preview.draft.failed", message: "This file is shown for viewing only." } }, "a draft is answered");
+  eq(viewOnlyRefusal("preview.state.send"), { reply: null }, "live state is dropped");
+  eq(viewOnlyRefusal("preview.selection"), { reply: null }, "a selection is dropped");
+  for (const type of ["preview.ready", "preview.toolbar.set", "preview.thumbnail", "preview.error", "preview.title", "preview.units"] as const) {
+    eq(viewOnlyRefusal(type), null, `${type} is not refused`);
+  }
+});
+
+test("a registry viewer id says whether it is an installed previewer's", () => {
+  eq(isPreviewerViewerId(previewerViewerId("excalidraw")), true, "a previewer's id");
+  eq(isPreviewerViewerId("core.code"), false, "a built-in");
+  eq(isPreviewerViewerId(undefined), false, "no viewer");
+  eq(isPreviewerViewerId("x.component.previewer.y"), false, "only a prefix counts");
+});

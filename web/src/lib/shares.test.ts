@@ -8,6 +8,7 @@ import {
   shareAccessChanged,
   shareAccessLabel,
   shareAccessOptions,
+  shareBytesWanted,
   shareCopyState,
   shareCreatedHint,
   shareRequest,
@@ -182,4 +183,15 @@ test("a link row offers a copy only to its creator, and says when it cannot be",
   eq(shareCopyState({ createdBy: "maya" }, "active", ""), "none", "no signed-in subject");
   eq(shareCreatedHint(true).includes("again"), true, "a copyable link says so");
   eq(shareCreatedHint(false).includes("only once"), true, "a link shown once says so");
+});
+
+test("the share page loads bytes beside the previewer lookup only when a built-in already claims the file", () => {
+  const builtin = { input: "blob" };
+  const site = { input: "site" };
+  eq(shareBytesWanted(null, builtin), true, "a built-in claims it before the lookup answers: bytes load now");
+  eq(shareBytesWanted(null, null), false, "nobody claims it yet: wait, it may be a large download-only file");
+  eq(shareBytesWanted(null, site), false, "a site is the gateway's own frame: no bytes");
+  eq(shareBytesWanted(builtin, builtin), true, "a chosen viewer that reads bytes");
+  eq(shareBytesWanted({ input: "blob" }, null), true, "a previewer chosen after the lookup reads bytes");
+  eq(shareBytesWanted(site, site), false, "a chosen site needs none");
 });

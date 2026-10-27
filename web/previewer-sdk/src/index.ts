@@ -39,11 +39,13 @@ import {
 
 export * from "./protocol.ts";
 
-/** What preview.init carried: the file's metadata, theme and viewport. */
+/** What preview.init carried: the file's metadata, theme and viewport, and
+ *  whether the viewer is for looking only (offer no editing). */
 export interface PreviewInit {
   readonly file: PreviewFile;
   readonly theme: Theme;
   readonly viewport: Viewport;
+  readonly viewOnly?: boolean;
 }
 
 /** The minimal message event the client inspects. */
@@ -207,7 +209,7 @@ export function createPreviewerClient(env: PreviewerEnv): PreviewerClient {
   const handle = (msg: HostMessage): void => {
     switch (msg.type) {
       case "preview.init":
-        init = { file: msg.file, theme: msg.theme, viewport: msg.viewport };
+        init = { file: msg.file, theme: msg.theme, viewport: msg.viewport, ...(msg.viewOnly ? { viewOnly: true } : {}) };
         for (const cb of [...initHandlers]) cb(init);
         deliverFile();
         return;

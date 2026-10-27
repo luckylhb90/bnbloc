@@ -73,6 +73,16 @@ await test("ready is posted once, to the host origin", () => {
   eq(h.posted, [{ message: { type: "preview.ready" }, targetOrigin: "*" }], "one ready");
 });
 
+await test("preview.init tells a viewer whether it is for looking only", () => {
+  const h = harness();
+  const seen: (boolean | undefined)[] = [];
+  h.client.onInit((i) => seen.push(i.viewOnly));
+  h.deliver(init);
+  h.deliver({ ...init, viewOnly: true });
+  h.deliver({ ...init, viewOnly: "yes" });
+  eq(seen, [undefined, true], "absent stays absent, true is carried, a wrong type is refused");
+});
+
 await test("without a host origin or a parent the client is inert", () => {
   for (const h of [harness(""), harness(HOST, false)]) {
     eq(h.client.active, false, "inactive");

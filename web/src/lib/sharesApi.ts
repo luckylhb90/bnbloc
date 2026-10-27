@@ -1,5 +1,5 @@
 import { ApiError, req } from "./api.ts";
-import { apiUrl } from "./config";
+import { apiUrl } from "./config.ts";
 import { errorDetail } from "./session.ts";
 import { tapOnboarding } from "./onboardingEvents.ts";
 import type { PublicShare, ShareAccess, ShareCreated, ShareLink, ShareTicket, ShareView, SiteTicket, TenantShareView } from "./shares.ts";
@@ -68,6 +68,12 @@ export const publicShareApi = {
   get: async (link: string) => (await (await publicFetch(publicPath(link))).json()) as PublicShare,
   // The version's bytes, for the viewers.
   content: async (link: string) => (await publicFetch(publicPath(link, "/content"))).blob(),
+  // The previewers the link's creator can offer for this file, in the member
+  // catalog's shape with a frame ticket each (the page parses and registers
+  // them: lib/previewerFrame parsePreviewerCatalog). Does not count a view.
+  previewers: async (link: string) => (await publicFetch(publicPath(link, "/previewers"))).json() as Promise<unknown>,
+  // The version's cover picture (404 when it has none).
+  cover: async (link: string) => (await publicFetch(publicPath(link, "/thumbnail"))).blob(),
   // The Download button's target (attachment; may redirect to storage).
   downloadUrl: (link: string) => apiUrl(publicPath(link, "/content?download=1")),
   // A visitor token for an anyone link's app (held by lib/appVisitor.ts);

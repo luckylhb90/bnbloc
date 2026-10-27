@@ -142,6 +142,10 @@ test("host messages are validated by type", () => {
   eq(readHostMessage({ ...init, theme: "sepia" }), null, "unknown theme");
   eq(readHostMessage({ ...init, file: { ...init.file, sizeBytes: -1 } }), null, "negative size");
   eq(readHostMessage({ ...init, viewport: { w: 1 } }), null, "viewport needs both sides");
+  eq(readHostMessage({ ...init, viewOnly: true }), { ...init, viewOnly: true }, "view-only init");
+  eq(readHostMessage({ ...init, viewOnly: false }), init, "viewOnly false is the same as absent");
+  eq(readHostMessage({ ...init, viewOnly: "yes" }), null, "viewOnly must be a boolean");
+  eq(readHostMessage({ ...init, viewOnly: 1 }), null, "viewOnly is not a number");
   eq(readHostMessage({ type: "preview.file", bytes: png(16) })?.type, "preview.file", "file bytes");
   eq(readHostMessage({ type: "preview.file", bytes: "data" }), null, "file bytes must be an ArrayBuffer");
   eq(readHostMessage({ type: "preview.toolbar", id: "fit", value: null }), { type: "preview.toolbar", id: "fit", value: null }, "button gesture");

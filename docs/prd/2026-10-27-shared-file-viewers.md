@@ -1,6 +1,6 @@
 # A shared file renders in its viewer, for people who have nothing installed (2026-10-27)
 
-Status: proposed, building (2026-10-27). Builds on
+Status: built locally (2026-10-27), not yet deployed or released. Builds on
 `docs/prd/2026-10-09-artifact-shares-and-site-previews.md` (the share routes),
 `docs/prd/2026-10-13-share-link-sign-in.md` (who may open a link, the share
 ticket) and `docs/architecture/previewer-components.md` (the frame route).
@@ -88,7 +88,10 @@ and has nothing installed, must see the file.** Components are opt-in per member
   subject and the link's tenant, minted by the same function the member catalog
   uses (`previewerCatalog`), lifetime one hour. The frame route is unchanged:
   every request re-checks the **creator's** installed state, so a sharer who
-  uninstalls a previewer, or who leaves, takes it away from the link at once.
+  uninstalls a previewer takes it away from the link at once. A sharer who
+  leaves the organization ends new lists at once (the eligibility above); the
+  tickets already minted last until they expire, an hour, because the frame
+  route checks the install and not the membership.
 - `Cache-Control: no-store`.
 
 ### 2. Cover (gateway, room service)
@@ -155,9 +158,10 @@ confinement, the share's own access rule.
    admin (the link audience switches already exist). Agents create shares too;
    if the creator has no installs the link renders as today.
 2. **Time and lifecycle.** A ticket lasts one hour and the frame route re-checks
-   the creator on every request, so revocation is immediate. A link that follows
-   the latest version serves the latest version's cover and bytes. A creator who
-   leaves the organization ends the interactive view of their links.
+   the creator's install on every request, so an uninstall takes effect at once.
+   A creator who leaves the organization ends new lists at once and old tickets
+   within the hour. A link that follows the latest version serves the latest
+   version's cover and bytes.
 3. **Scale and cost.** One more open request per page view (rate-limited per IP
    like its siblings) and one cover request. The bundle is downloaded per visit:
    the frame base carries a per-visit ticket, so a browser cannot reuse a bundle
@@ -226,6 +230,42 @@ confinement, the share's own access rule.
 
 Not run before release: the desktop app's behaviour for a share link, a real
 external browser on a mobile network, and the bundle's cost per visit.
+
+## As built (2026-10-27)
+
+Where the code differs from the text above, or found something the text had
+wrong:
+
+- **Leaving the organization.** The frame route re-checks the ticket subject's
+  *install*, not their membership. A creator who uninstalls cuts a link at once;
+  one who leaves ends new lists at once and old tickets within the hour. The
+  design review above says so now.
+- **The entry type.** `sharePreviewerEntry`, not `wire.MemberComponent`: that
+  type's non-omitempty fields (`rollout`, `managed`) would add keys to the
+  answer. `bundleUrl` is present and empty.
+- **The matcher** is `filematch.Claims` in `internal/filematch`, the one owner
+  of the match vocabulary, not a gateway helper.
+- **Metrics.** The gateway had no domain registry; `Service.Metrics` is new and
+  served where the other services serve theirs (never on the public listener).
+  Outcomes of the previewer list: `listed`, `empty`, `creator-gone`, `closed`
+  (the organization is suspended), `unverified` (no tenant directory: fails
+  closed, as `shareAccess` does).
+- **The ticket's role** is the lowest (`viewer`); it reads one bundle and nothing
+  else.
+- **View mode is the host's, not the file's.** Excalidraw's `restoreAppState`
+  returns a whole state with view mode off, which undid the mode in WebKit; the
+  component sets it again after loading a scene.
+- **The desktop shell.** A desktop frame loads from the shell's own
+  `bnbloc-previewer` scheme, out of the member's own catalog, so a previewer only
+  the sharer has would not load there. The share page does not look up share
+  previewers inside the shell and shows what it showed before. Not changed here.
+- **No extra wait for built-in files.** The page does not choose a viewer before
+  the previewer lookup answers, but it starts the file's bytes at once when a
+  built-in viewer already claims it (an image, a PDF), so those do not pay a
+  second round trip. A file nobody claims yet waits for the lookup before its
+  bytes (it may be a large download-only file).
+- **The poster** is shown once a previewer is the chosen viewer, so during the
+  lookup itself the page still says "Loading preview…" (one round trip).
 
 ## Not in this change
 

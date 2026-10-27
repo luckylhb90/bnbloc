@@ -30,6 +30,9 @@ export interface PublicShare {
   readonly sharedBy: { readonly displayName: string };
   readonly expiresAtMs: number;
   readonly followsLatest: boolean;
+  /** The version has a stored cover picture (GET …/thumbnail): the page shows
+   *  it while the file's previewer loads. */
+  readonly cover?: boolean;
   /** Base of a `site` version's files: gateway-relative, or absolute on
    *  the sites origin. It carries the credential the page was opened with
    *  (the link's token, or the member's share ticket). */
@@ -203,6 +206,16 @@ const DAY_MS = 86_400_000;
 const HOUR_MS = 3_600_000;
 
 /** "Expires in 6 days" / "Expires in 3 hours" / "Expired". */
+/** Whether the share page fetches the file's bytes now. With a chosen viewer: when
+ *  it reads bytes (a site is the gateway's own frame). Before the previewer lookup
+ *  has answered, when a viewer that exists already (a built-in) claims the file:
+ *  its bytes are needed whichever viewer wins, so they load beside the lookup, not
+ *  after it. A file nobody claims yet waits: it may be a large download-only file. */
+export function shareBytesWanted(chosen: { readonly input: string } | null, claimedNow: { readonly input: string } | null): boolean {
+  if (chosen) return chosen.input !== "site";
+  return claimedNow !== null && claimedNow.input !== "site";
+}
+
 export function expiresLabel(expiresAtMs: number, nowMs: number): string {
   const left = expiresAtMs - nowMs;
   if (left <= 0) return "Expired";

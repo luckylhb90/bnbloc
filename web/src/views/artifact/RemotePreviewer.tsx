@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ComponentType } from "react";
 import { WarningCircleIcon } from "@phosphor-icons/react";
 import { api } from "@/lib/api";
-import { draftFailure, draftRefusal, draftReplyFits, previewerFrameUrl, readPreviewerMessage, saveFailure, saveRefusal, wantsThumbnail, type PreviewerDescriptor } from "@/lib/previewerFrame";
+import { draftFailure, draftRefusal, draftReplyFits, previewerFrameUrl, readPreviewerMessage, saveFailure, saveRefusal, viewOnlyRefusal, wantsThumbnail, type PreviewerDescriptor } from "@/lib/previewerFrame";
 import { runJSONAssist } from "@/lib/assist";
 import { PREVIEWER_PROTOCOL, stateKey, type HostMessage } from "../../../previewer-sdk/src/protocol.ts";
 import type { ArtifactViewerProps, ViewerToolbarItem } from "./registry";
@@ -82,6 +82,8 @@ function PreviewerFrame({
   onSelection,
   reveal,
   onCover,
+  viewOnly,
+  onRendered,
 }: ArtifactViewerProps & { readonly desc: Desc }) {
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const boxRef = useRef<HTMLDivElement | null>(null);
@@ -89,6 +91,7 @@ function PreviewerFrame({
   const lastSentState = useRef("");
   const remoteNonce = useRef(0);
   const thumbnailDone = useRef(false);
+  const renderedDone = useRef(false);
   // False once the frame is gone: a draft that answers later is dropped.
   const mounted = useRef(true);
   useEffect(() => {
@@ -116,8 +119,8 @@ function PreviewerFrame({
 
   // Latest props for the message handler (registered once per frame).
   const units = desc.capabilities.includes("units");
-  const latest = useRef({ blob, file, version, onLocalState, onSelection, onCover, roomId, artifactId, revealAt: reveal?.at });
-  latest.current = { blob, file, version, onLocalState, onSelection, onCover, roomId, artifactId, revealAt: reveal?.at };
+  const latest = useRef({ blob, file, version, onLocalState, onSelection, onCover, onRendered, viewOnly, roomId, artifactId, revealAt: reveal?.at });
+  latest.current = { blob, file, version, onLocalState, onSelection, onCover, onRendered, viewOnly, roomId, artifactId, revealAt: reveal?.at };
 
   const post = useCallback((msg: HostMessage, transfer?: Transferable[]) => {
     // A sandboxed frame's origin is opaque: "*" is the only accepted target;
@@ -148,12 +151,15 @@ function PreviewerFrame({
       file: { name: info.name, mimeType: info.mimeType, sizeBytes: bytes.size, version: v },
       theme: frameTheme(),
       viewport: { w: box?.clientWidth ?? 0, h: box?.clientHeight ?? 0 },
+      ...(latest.current.viewOnly ? { viewOnly: true as const } : {}),
     });
     const buffer = await bytes.arrayBuffer();
     post({ type: "preview.file", bytes: buffer }, [buffer]);
     const at = latest.current.revealAt;
     if (at && units) post({ type: "preview.reveal", at });
-    if (liveState && latest.current.artifactId) {
+    // The room's live state needs a room: a share page has none, and a
+    // viewer that only looks takes no part in it.
+    if (liveState && !latest.current.viewOnly && latest.current.roomId && latest.current.artifactId) {
       const snap = await api.getArtifactState(latest.current.roomId, latest.current.artifactId).catch(() => null);
       if (snap && stateKey(snap.state) !== null) post({ type: "preview.state", state: snap.state, actor: snap.actor });
     }
@@ -217,19 +223,35 @@ function PreviewerFrame({
     [desc, post],
   );
 
+  // The first sign that the previewer has drawn the file, or failed to.
+  const rendered = useCallback(() => {
+    if (renderedDone.current) return;
+    renderedDone.current = true;
+    latest.current.onRendered?.();
+  }, []);
+
   const storeThumbnail = useCallback(
     (png: ArrayBuffer) => {
-      if (thumbnailDone.current || !wantsThumbnail(desc)) return;
+      rendered();
+      // A viewer that only looks keeps no cover: nothing is written from a share.
+      if (latest.current.viewOnly || thumbnailDone.current || !wantsThumbnail(desc)) return;
       thumbnailDone.current = true;
       latest.current.onCover?.(png, "previewer");
     },
-    [desc],
+    [desc, rendered],
   );
 
   useEffect(() => {
     const onMessage = (ev: MessageEvent) => {
       const msg = readPreviewerMessage(ev, frameRef.current?.contentWindow);
       if (!msg) return;
+      if (latest.current.viewOnly) {
+        const refusal = viewOnlyRefusal(msg.type);
+        if (refusal) {
+          if (refusal.reply) post(refusal.reply);
+          return;
+        }
+      }
       switch (msg.type) {
         case "preview.ready":
           if (readyRef.current) return; // one hand-off per frame
@@ -253,6 +275,7 @@ function PreviewerFrame({
           return;
         case "preview.error":
           setError(msg.message);
+          rendered();
           return;
         case "preview.title":
           setTitle(msg.text);
@@ -270,16 +293,16 @@ function PreviewerFrame({
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [handOff, toolbar, liveState, selection, storeThumbnail, saveScene, draft]);
+  }, [handOff, toolbar, liveState, selection, storeThumbnail, saveScene, draft, post, rendered]);
 
   // Remote live state from the room, deduped by nonce.
   useEffect(() => {
-    if (!liveState || !remoteState || !readyRef.current) return;
+    if (!liveState || viewOnly || !remoteState || !readyRef.current) return;
     if (remoteState.nonce === remoteNonce.current) return;
     remoteNonce.current = remoteState.nonce;
     if (stateKey(remoteState.state) === null) return;
     post({ type: "preview.state", state: remoteState.state, actor: remoteState.actor });
-  }, [remoteState, liveState, post]);
+  }, [remoteState, liveState, viewOnly, post]);
 
   // Viewport changes.
   useEffect(() => {
