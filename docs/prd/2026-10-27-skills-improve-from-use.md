@@ -1,6 +1,6 @@
-# A skill pack improves from use: the AI proposes, its owner decides (2026-10-27)
+# Content and components improve from use: the AI proposes, the owner decides (2026-10-27)
 
-Status: decided 2026-10-27 (section 3): a component of its own; slice 1 building.
+Status: decided 2026-10-27 for skill packs (section 3); widened the same day to experts, prompt packs, assists, room packages and executable components (section 2a, decisions 5 to 9 wait for the owner).
 
 ## 1. Why
 
@@ -68,6 +68,41 @@ scheduled task that opens the coach's suggestion for its packs: content).
 What it does not do: change a pack by itself; read runs the member may not
 read; learn from one room into another room's files.
 
+## 2a. Everything that can improve from use
+
+Skill packs were the first case; the same loop serves every kind of
+content, and gives executable components (which no AI rewrites) a report.
+
+| What | Evidence it learns from (signals below) | What the coach proposes | Who decides |
+|---|---|---|---|
+| Expert (instructions, required packs and tools) | S1 S2 S4 S5 S6 of runs that wore it | a new version: instruction changes; a skill pack or MCP tool to require or drop | its author |
+| Skill pack | S1 S2 S3 S4 S6 of runs that wore it | a new version (files) | its author |
+| Prompt pack, a room's quick prompts | S4 S5 of runs a prompt started (S8); requests typed by hand again and again | reworded prompts; a new prompt for a repeated request | its author; a room's owner |
+| Assist (an AI feature's instructions) | S7: answers discarded or changed before they were applied | a new version of its instructions | its author |
+| Room package, a room's task setup and schedules | S1 S4 S5 of scheduled and event-started runs | revised task text, schedule, recipients | its author; the room's owner |
+| MCP tool, core, plugin (executable, signed) | S3: its calls refused or failing, by tool; S1 of runs that wore it | never its code: (a) a usage note for the expert or pack that wears it (content, as above), (b) a report for its maintainer with the evidence, which the member sends | the member (sends); the maintainer |
+| Something new | the same instructions given by hand across runs | a new skill pack drafted from them (the existing `draft-skill-pack` contract) | the member, who saves it or not |
+| Connector (policy, guide) | refused, held and failed calls | stays in the connections component's own loop (Suggest rules, AI checks), the same pattern; the coach links to it | an org admin |
+
+**Signals** are facts the platform records; it judges none of them (the
+propose task reads them):
+
+| | Signal | Recorded today? |
+|---|---|---|
+| S1 | A run's outcome and failure reason | yes (`agent_jobs`) |
+| S2 | Room tool calls: tool, action, outcome | yes (run diagnostics, no arguments) |
+| S3 | MCP tool calls: component, tool, outcome (no arguments, no result) | no: only the attached components' names; added by the bridge |
+| S4 | The next human message in the thread after the reply | yes (messages; read at evidence time) |
+| S5 | The same request asked again (ask again, a retry, a regenerate) | partly (job attempts); a link from the new job to the one it redoes |
+| S6 | A person's version of a deliverable right after the agent's | yes (artifact versions carry their author) |
+| S7 | An assist's answer applied, changed or discarded | no: the web reports it (fields applied, not their values) |
+| S8 | The quick prompt a request came from | no: the request carries the prompt's id |
+
+The run keeps every content component and MCP tool component it wore,
+with versions (today: the expert only, and MCP names). The `runs`
+primitive takes any component id; `contentVersion` takes any content kind
+the member may change, never an executable.
+
 ## 3. Decisions (answered 2026-10-27)
 
 0. **An independent component**, not platform code; the platform gives
@@ -80,11 +115,28 @@ read; learn from one room into another room's files.
 4. **Someone else's pack**: any member may ask for a suggestion; it goes to
    the pack's author, who alone accepts.
 
+Raised by section 2a (recommendations; to confirm):
+
+5. **First widening**: experts with skill packs (signals S1, S2, S4, S6 are
+   recorded today), then prompt packs, room packages and assists (S5, S7,
+   S8), then executable components (S3).
+6. **Executables are never changed**: for an MCP tool, a core or a plugin
+   the coach writes a usage note into content and a maintainer report the
+   member sends themselves (copied, or opened at the component's declared
+   support address); it never files anything on its own.
+7. **New signals record names and outcomes only** (S3, S7, S8): no
+   arguments, results or text, under the runs' retention.
+8. **Connectors stay with the connections component's own loop**; the
+   coach links there.
+9. **"Something new" is offered, not made**: a drafted pack appears as a
+   proposal the member saves or drops, like any other.
+
 ## 4. Placement
 
 | Part | Where | Why (platform reason) | What an organization swaps |
 |---|---|---|---|
 | The packs a run wore | platform (bridge report, `agent_jobs`) | events only the platform sees | nothing |
+| Signals S3, S5, S7, S8 (names and outcomes, no text) | platform (bridge, web, `agent_jobs`) | events only the platform sees | nothing |
 | `runs` primitive | platform (component contract) | identity and the attested caller; who may read which run | nothing |
 | `contentVersion` primitive | platform (component contract) | consent: a pack changes only by its owner's click, through the existing version and review path | nothing |
 | Proposals, diff, pages, the propose task, its prompt | component (bnbloc-skill-coach) | — | its own coach, prompt, model, rules |
@@ -103,7 +155,7 @@ own way.
 | 2 Time | Evidence ages out with the runs' retention; a proposal against an outdated base is marked and never merged silently; proposals not decided in 30 days are dropped (a number to confirm). |
 | 3 Scale and cost | 50 runs × a few hundred characters per proposal: bounded input. One proposal at a time per pack and owner. Assists are metered and rate-limited as today. |
 | 4 Failure | The assist answers nothing usable: "no change suggested" with its why. Accept conflicts (someone published meanwhile): "propose again". |
-| 5 Boundaries and privacy | No text from a room the owner cannot read. The proposal stores run ids, not copied conversation; opening one checks the reader's access again. |
+| 5 Boundaries and privacy | No text from a room the owner cannot read. The proposal stores run ids, not copied conversation; opening one checks the reader's access again. The new signals (S3, S7, S8) keep names and outcomes only, never arguments, results or the text of an answer. A maintainer report leaves bnbloc only when the member sends it. |
 | 6 Abuse | A room member steers a run so that the pack "learns" something harmful: nothing is applied without the owner, the diff shows every line and the runs behind it, and an org copy also passes the organization's review. A proposal cannot touch files outside the pack, add executables or change `component.json`'s `requires` without saying so in its own line of the diff. |
 | 7 One owner | Versions are made only by the existing version path (the primitive calls it); run reads only by the runs' read tiers. |
 | 8 Defaults | No automatic proposing (decision 2); no automatic accepting ever. |
@@ -123,8 +175,12 @@ reader, at read time.
 
 ## 6. Slices (of the end state above)
 
-1. Platform: the run keeps its packs (bridge report, store, run detail).
+1. Platform: the run keeps every content and MCP tool component it wore,
+   with versions (bridge report, store, run detail).
 2. Platform: the `runs` and `contentVersion` primitives, with conformance
    tests.
-3. The component: repository, package, pages, store, propose task.
-4. Content: the scheduled room package.
+3. The component (bnbloc-skill-coach, named for its first case): pages,
+   store, propose task; skill packs and experts.
+4. Signals S5, S7, S8; prompt packs, assists, room packages.
+5. Signal S3; usage notes and maintainer reports for executables.
+6. Content: the scheduled room package; "something new" drafts.
