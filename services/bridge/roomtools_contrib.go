@@ -385,10 +385,12 @@ func (c *roomToolsContributor) egressAlias(workdir string) string {
 const sandboxEgressDir = ".room/egress"
 
 // sandboxEgressEnv is the default environment of an own drive's space when
-// a service declares egress: the proxy at the address the guests reach it
-// (SandboxConfig.HostProxy) with the workspace's alias bearer, and the CA
-// files, copied into the workspace. nil: none.
-func (c *roomToolsContributor) sandboxEgressEnv(ctx context.Context, workdir string) map[string]string {
+// a service declares egress: the services' placeholders for the turn's job
+// (what a host session's commands get, docs/bugs/2026-10-27-sandboxed-commands-miss-connector-env.md),
+// the proxy at the address the guests reach it (SandboxConfig.HostProxy)
+// with the workspace's alias bearer, and the CA files, copied into the
+// workspace. nil: none.
+func (c *roomToolsContributor) sandboxEgressEnv(ctx context.Context, workdir, room, job string) map[string]string {
 	if len(c.b.servicesWith(ctx, component.ServiceEgress)) == 0 {
 		return nil
 	}
@@ -396,7 +398,14 @@ func (c *roomToolsContributor) sandboxEgressEnv(ctx context.Context, workdir str
 	if !ok {
 		return nil
 	}
-	env := c.srv.EgressEnv(c.egressAlias(workdir), c.b.cfg.Sandbox.HostProxy)
+	env := map[string]string{}
+	if job != "" {
+		actx, cancel := context.WithTimeout(ctx, egressAskTimeout)
+		_, placeholders, _ := c.b.egressFor(actx, room, job, nil)
+		cancel()
+		maps.Copy(env, placeholders)
+	}
+	maps.Copy(env, c.srv.EgressEnv(c.egressAlias(workdir), c.b.cfg.Sandbox.HostProxy))
 	env["NODE_EXTRA_CA_CERTS"] = caFile
 	if bundleFile != "" {
 		for _, k := range []string{"SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "GIT_SSL_CAINFO"} {

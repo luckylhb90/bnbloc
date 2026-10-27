@@ -28,6 +28,8 @@ test it. "Not applicable" is a valid answer only with a reason.
 - Does anything key state by "the thing" when it should key it by "the
   thing **and** who uses it" (sessions, caches, workspaces, preferences)?
 - Is identity decided from data an actor controls (text, display names)?
+- Does a sandboxed command get everything a host command gets for the same
+  drive (environment, CA, placeholders), and does a test compare the two?
 
 *Test:* two actors at once, with different rights, on the same object.
 *Seen:* borrowers sharing the owner's session and workspace; the sender of

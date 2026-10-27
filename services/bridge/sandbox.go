@@ -188,8 +188,9 @@ type sandboxRuntime struct {
 	client *sandbox.Client
 	now    func() time.Time
 	// spaceEnv, when set, is the default environment of a space for its
-	// workdir: the egress proxy (roomtools_contrib.go).
-	spaceEnv func(ctx context.Context, workdir string) map[string]string
+	// workdir and the turn's room and job: the egress proxy and the egress
+	// services' placeholders for that job (roomtools_contrib.go).
+	spaceEnv func(ctx context.Context, workdir, room, job string) map[string]string
 
 	mu        sync.Mutex
 	ready     bool
@@ -347,7 +348,7 @@ func slugPart(s string, max int) string {
 // forwarded names for this drive (nil unless decideSandbox marked it
 // ownerEnv): the space's envAllowlist is re-ensured from it every turn, so
 // a turn for someone else after the owner's converges back to the default.
-func (s *sandboxRuntime) prepare(ctx context.Context, k driveKey, owner string, env []string, ttl time.Duration, borrowed bool, denyRead []string) (*corepkg.Execution, error) {
+func (s *sandboxRuntime) prepare(ctx context.Context, k driveKey, job, owner string, env []string, ttl time.Duration, borrowed bool, denyRead []string) (*corepkg.Execution, error) {
 	room, core, provider := k.room, k.core, k.provider
 	space, machine := sandboxSpaceName(k, s.cfg.Account), s.machineOf(k)
 	workdir := filepath.Join(s.cfg.WorkspacesRoot, space)
@@ -379,7 +380,7 @@ func (s *sandboxRuntime) prepare(ctx context.Context, k driveKey, owner string, 
 	// connections component serves one only as a digital worker).
 	var spaceEnv map[string]string
 	if s.spaceEnv != nil {
-		spaceEnv = s.spaceEnv(ctx, workdir)
+		spaceEnv = s.spaceEnv(ctx, workdir, room, job)
 	}
 	// A per-space mount names its guest path in a variable of the space.
 	if len(mountEnv) > 0 {
@@ -684,7 +685,7 @@ func (b *Bridge) planSandbox(ctx context.Context, d *drive) (refuse string) {
 		if err != nil {
 			return nil, err
 		}
-		exec, err := s.prepare(ctx, key, owner, env, d.execTokenTTL(), d.borrowed, denyRead)
+		exec, err := s.prepare(ctx, key, d.job.JobID, owner, env, d.execTokenTTL(), d.borrowed, denyRead)
 		if err != nil {
 			return nil, s.prepareFailure(ctx, err)
 		}

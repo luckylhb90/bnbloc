@@ -127,7 +127,9 @@ func TestSandboxedSessionKeepsItsCAFiles(t *testing.T) {
 	defer stop()
 	workdir := t.TempDir()
 	ca := filepath.Join(workdir, ".room", "egress", "ca.pem")
-	if env := b.sandbox.spaceEnv(context.Background(), workdir); env["HTTPS_PROXY"] == "" || env["NODE_EXTRA_CA_CERTS"] != ca {
+	// The space's commands get what a host session's do: the services'
+	// placeholders for the turn's job, never over the proxy's own.
+	if env := b.sandbox.spaceEnv(context.Background(), workdir, "room-1", "job-1"); env["HTTPS_PROXY"] == "" || env["HTTPS_PROXY"] == "x" || env["NODE_EXTRA_CA_CERTS"] != ca || env["WIKI_TOKEN"] != "connected" {
 		t.Fatalf("space env = %v", env)
 	}
 	resetProtectedPaths(workdir)
