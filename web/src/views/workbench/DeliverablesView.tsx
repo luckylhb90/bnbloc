@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Select } from "@/ui/Select";
-import { FileCodeIcon, FileDocIcon, ListIcon, MagnifyingGlassIcon, SquaresFourIcon, XIcon } from "@phosphor-icons/react";
+import { CaretRightIcon, FileCodeIcon, FileDocIcon, FolderIcon, FolderSimpleIcon, ListIcon, MagnifyingGlassIcon, SquaresFourIcon, XIcon } from "@phosphor-icons/react";
 import { api, type Artifact, type ArtifactListFilter } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { useToast } from "@/ui/Toast";
@@ -19,6 +19,7 @@ import {
 import { useDisplayNames } from "@/lib/useDisplayName";
 import { errorText } from "@/lib/errors";
 import { StorageKey, readStored, writeStored } from "@/lib/storageKeys";
+import { folderContents, folderCrumbs, type FolderEntry } from "./deliverableFolders";
 
 // DeliverablesView: every artifact of the room as a filterable grid or list
 // (type — "Apps" among them —, author, date, search; optionally only one
@@ -26,11 +27,21 @@ import { StorageKey, readStored, writeStored } from "@/lib/storageKeys";
 // apps) narrow each page; the same filters also apply client-side
 // (deliverableFilters.ts), so a page from a server that ignores one still
 // shows only matching items. The other types and the date are client-side.
+// By folder (the default), the deliverables' paths are folders to open
+// (deliverableFolders.ts); a search or a filter shows every match, flat.
 
 type Layout = "grid" | "list";
 
 const PAGE_SIZE = 60;
 const LAYOUT_KEY = StorageKey.deliverablesLayout;
+
+function readFolders(): boolean {
+  try {
+    return readStored(StorageKey.deliverablesFolders) !== "off";
+  } catch {
+    return true;
+  }
+}
 
 function readLayout(): Layout {
   try {
@@ -69,6 +80,9 @@ export function DeliverablesView({
   const [author, setAuthor] = useState("");
   const [date, setDate] = useState<DateFilter>("any");
   const [layout, setLayout] = useState<Layout>(readLayout);
+  const [byFolder, setByFolder] = useState<boolean>(readFolders);
+  const [folder, setFolder] = useState("");
+  useEffect(() => setFolder(""), [roomId]);
   const [items, setItems] = useState<Artifact[] | null>(null);
   const [cursor, setCursor] = useState<string | undefined>(undefined);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -157,7 +171,22 @@ export function DeliverablesView({
     }
   };
 
+  const switchFolders = () => {
+    const next = !byFolder;
+    setByFolder(next);
+    setFolder("");
+    try {
+      writeStored(StorageKey.deliverablesFolders, next ? "on" : "off");
+    } catch {
+      /* preference only */
+    }
+  };
+
   const filtered = deliverableFiltered(shownFilter);
+  // decision: docs/prd/2026-10-27-repo-files-and-folders.md (2), a search or
+  // a filter shows every match, flat.
+  const flat = !byFolder || filtered || sourceSeq !== undefined;
+  const view = flat ? { folders: [] as FolderEntry[], files: shown } : folderContents(shown, folder);
   return (
     <div className="@container flex h-full min-h-0 flex-col">
       <div className="flex flex-col gap-2 border-b border-[var(--color-border)] p-3">
@@ -175,6 +204,9 @@ export function DeliverablesView({
                 </IconButton>
               </>
             )}
+            <IconButton label={byFolder ? "Show all files, without folders" : "Show by folder"} pressed={byFolder} onClick={switchFolders}>
+              <FolderSimpleIcon size={15} />
+            </IconButton>
             <div className="flex rounded-[var(--radius)] border border-[var(--color-border)] p-0.5" role="group" aria-label="Layout">
               <IconButton label="Grid" pressed={layout === "grid"} onClick={() => switchLayout("grid")}>
                 <SquaresFourIcon size={15} />
@@ -238,12 +270,15 @@ export function DeliverablesView({
         )}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
+        {!flat && folder !== "" && <FolderCrumbs folder={folder} onGo={setFolder} />}
         {failed !== null && items === null ? (
           <LoadFailed message={errorText(failed, "Could not load the deliverables")} onRetry={() => setReloads((n) => n + 1)} />
         ) : items === null ? (
           <p role="status" className="py-6 text-center text-xs text-[var(--color-fg-subtle)]">
             Loading…
           </p>
+        ) : !flat && folder !== "" && view.folders.length === 0 && view.files.length === 0 ? (
+          <p className="py-6 text-center text-xs text-[var(--color-fg-subtle)]">This folder has no deliverables.</p>
         ) : shown.length === 0 ? (
           <p className="py-6 text-center text-xs text-[var(--color-fg-subtle)]">
             {type === "apps" && !q && !author && date === "any" && sourceSeq === undefined
@@ -254,13 +289,19 @@ export function DeliverablesView({
           </p>
         ) : layout === "grid" ? (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-2">
-            {shown.map((a) => (
+            {view.folders.map((f) => (
+              <FolderCard key={f.path} folder={f} onOpen={setFolder} />
+            ))}
+            {view.files.map((a) => (
               <FileCard key={a.artifactId} roomId={roomId} artifactId={a.artifactId} onOpen={onOpen} />
             ))}
           </div>
         ) : (
           <div className="flex flex-col">
-            {shown.map((a) => (
+            {view.folders.map((f) => (
+              <FolderRow key={f.path} folder={f} onOpen={setFolder} />
+            ))}
+            {view.files.map((a) => (
               <FileRow key={a.artifactId} artifact={a} onOpen={onOpen} />
             ))}
           </div>
@@ -279,6 +320,71 @@ export function DeliverablesView({
         )}
       </div>
     </div>
+  );
+}
+
+function countLabel(n: number): string {
+  return n === 1 ? "1 file" : `${n} files`;
+}
+
+/** The way back from a folder: the top, then each folder above it. */
+function FolderCrumbs({ folder, onGo }: { readonly folder: string; readonly onGo: (path: string) => void }) {
+  const crumbs = folderCrumbs(folder);
+  return (
+    <nav aria-label="Folder" className="mb-2 flex min-w-0 flex-wrap items-center gap-0.5 text-xs">
+      <button type="button" onClick={() => onGo("")} className="tactile rounded px-1 py-0.5 text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-fg)]">
+        All
+      </button>
+      {crumbs.map((c, i) => (
+        <span key={c.path} className="flex min-w-0 items-center gap-0.5">
+          <CaretRightIcon size={10} className="shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
+          {i === crumbs.length - 1 ? (
+            <span aria-current="page" className="truncate px-1 py-0.5 font-medium text-[var(--color-fg)]">
+              {c.name}
+            </span>
+          ) : (
+            <button type="button" onClick={() => onGo(c.path)} className="tactile truncate rounded px-1 py-0.5 text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-fg)]">
+              {c.name}
+            </button>
+          )}
+        </span>
+      ))}
+    </nav>
+  );
+}
+
+function FolderCard({ folder, onOpen }: { readonly folder: FolderEntry; readonly onOpen: (path: string) => void }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen(folder.path)}
+      title={`Open ${folder.name}`}
+      aria-label={`Open folder ${folder.name}, ${countLabel(folder.count)}`}
+      className="tactile group flex min-w-0 flex-col overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-2)] text-left hover:border-[var(--color-border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+    >
+      <span className="grid aspect-[16/10] w-full place-items-center bg-[var(--color-surface)]">
+        <FolderIcon size={30} weight="duotone" className="text-[var(--color-fg-subtle)]" aria-hidden />
+      </span>
+      <span className="flex min-w-0 flex-col gap-0.5 px-2 py-1.5">
+        <span className="truncate text-xs font-medium text-[var(--color-fg)]">{folder.name}</span>
+        <span className="truncate text-[11px] text-[var(--color-fg-subtle)]">Folder · {countLabel(folder.count)}</span>
+      </span>
+    </button>
+  );
+}
+
+function FolderRow({ folder, onOpen }: { readonly folder: FolderEntry; readonly onOpen: (path: string) => void }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen(folder.path)}
+      aria-label={`Open folder ${folder.name}, ${countLabel(folder.count)}`}
+      className="tactile flex w-full min-w-0 items-center gap-2.5 rounded-[var(--radius)] px-2 py-2 text-left text-sm hover:bg-[var(--color-surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]/60"
+    >
+      <FolderIcon size={18} weight="duotone" className="shrink-0 text-[var(--color-fg-subtle)]" aria-hidden />
+      <span className="min-w-0 flex-1 truncate text-[var(--color-fg)]">{folder.name}</span>
+      <span className="shrink-0 text-[11px] text-[var(--color-fg-subtle)] tabular">{countLabel(folder.count)}</span>
+    </button>
   );
 }
 

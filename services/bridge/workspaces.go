@@ -67,6 +67,9 @@ type workspaceShared struct {
 	// deliverable publish (nil before the first): the diff against the
 	// current listing is what changed since. Guarded by publishMu.
 	published map[string]fileStamp
+	// dir is the workspace's folder on this computer once known
+	// (publishDir). Guarded by publishMu.
+	dir string
 	// edits maps a path a room file was placed at for editing to that
 	// file's artifact (file_edit.go): a later rewrite of the path, in any
 	// turn, is a version of that file, never a new deliverable.

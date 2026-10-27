@@ -33,6 +33,8 @@ export const StorageKey = {
   sidebarCollapsed: "bnbloc.sidebarCollapsed",
   peopleChatWidth: "bnbloc.peopleChatWidth",
   deliverablesLayout: "bnbloc.deliverables.layout",
+  // Whether Files shows deliverables by folder (views/workbench/DeliverablesView.tsx).
+  deliverablesFolders: "bnbloc.deliverables.folders",
   // The request blocks a member opened in a room's feed, per member and
   // room (sessionStorage, views/room/FeedRequestBlock.tsx).
   feedOpenBlocks: "bnbloc.feedOpenBlocks",

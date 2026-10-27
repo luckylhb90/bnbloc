@@ -236,6 +236,12 @@ func (b *Bridge) publishDeliverables(ctx context.Context, room, channelID string
 			changedPaths = append(changedPaths, p)
 		}
 	}
+	// What a working copy's git tracks is its source, not this turn's
+	// deliverables, sites included (repo_files.go).
+	if tracked := trackedFiles(ctx, b.publishDir(ctx, rs, sh), changedPaths); len(tracked) > 0 {
+		changed = slices.DeleteFunc(changed, func(f corepkg.SessionFile) bool { return tracked[f.Path] })
+		changedPaths = slices.DeleteFunc(changedPaths, func(p string) bool { return tracked[p] })
+	}
 	if len(changedPaths) == 0 {
 		sh.published = now
 		return
@@ -298,6 +304,20 @@ func (b *Bridge) publishDeliverables(ctx context.Context, room, channelID string
 				"event", "bnbloc.bridge.artifact_publish_failed", "room", room, "file", f.Path, "error", err)
 		}
 	}
+}
+
+// publishDir is the workspace's folder on this computer: the sandbox
+// workdir, or the session workdir the core reports (kept once known); ""
+// when neither is known, and the publisher then works from the listing
+// alone.
+func (b *Bridge) publishDir(ctx context.Context, rs *roomSession, sh *workspaceShared) string {
+	if rs.workdir != "" {
+		return rs.workdir
+	}
+	if sh.dir == "" {
+		sh.dir = b.workspaceDir(ctx, rs.core, rs.workspaceID, rs.sessionID)
+	}
+	return sh.dir
 }
 
 // deliverableFor is how a workspace file publishes: inline text, or a blob
