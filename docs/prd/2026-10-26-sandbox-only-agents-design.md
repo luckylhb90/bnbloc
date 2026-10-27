@@ -333,6 +333,12 @@ catalog, egress values) is the manager's and the core's data and code.
 
 ## 5. Sign-in: what each choice means, shown to the member (D1, D2)
 
+**Superseded in part (2026-10-27):** the key row below is now designed as an
+egress injection on the member's computer (the key never enters the sandbox, per
+run, streamed, audited), and the token-file row is dropped; subscription logins
+(Claude Pro/Max, ChatGPT plans) are not offered in the sandbox at all. The whole
+answer is [`2026-10-27-model-credentials.md`](2026-10-27-model-credentials.md).
+
 The 2026-10-21 record decided **not** to build sign-ins through the sandbox's
 `secrets`: a tool that checks its token's format locally, exchanges it for
 another token, or signs requests is not served. A guest-only agent forces the
@@ -344,7 +350,7 @@ before they choose**, and the catalog says which of three cases an agent is
 |---|---|---|
 | **Nothing** (a free or local model) | nowhere | nothing to set up |
 | **An API key sent as a header to named hosts** (`credentials: [{env, hosts}]`) | the member's store on their computer; the own machine gets it as a protocol **secret**: the guest's `$NAME` is a placeholder, the value is substituted on egress to those hosts only; the agent never reads it | "Your key stays on your computer; the sandbox sends it only to <hosts>" |
-| **A login that writes a token file** (a browser or device flow) | the guest's durable home for the space, **readable by the agent** (like the agent's own login on the host for an own run) | "Its sign-in is stored in your sandbox, where the agent can read it. It is never available to anyone else's run." |
+| ~~**A login that writes a token file** (a browser or device flow)~~ **Dropped 2026-10-27**: the agent can read it, so a prompt-injected agent can send it anywhere the sandbox reaches; see [`2026-10-27-model-credentials.md`](2026-10-27-model-credentials.md) | the guest's durable home for the space, **readable by the agent** (like the agent's own login on the host for an own run) | "Its sign-in is stored in your sandbox, where the agent can read it. It is never available to anyone else's run." |
 
 Two rules make the third case acceptable rather than the exact failure the earlier
 record warned of:
