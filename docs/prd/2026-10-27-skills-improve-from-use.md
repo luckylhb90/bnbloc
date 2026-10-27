@@ -1,186 +1,164 @@
-# Content and components improve from use: the AI proposes, the owner decides (2026-10-27)
+# Content improves from use: a coach made of content (2026-10-27)
 
-Status: decided 2026-10-27 for skill packs (section 3); widened the same day to experts, prompt packs, assists, room packages and executable components (section 2a, decisions 5 to 9 wait for the owner).
+Status: proposed for stage A (content only; no platform code). Earlier
+drafts of this record (a service component with three new platform
+primitives) are superseded by section 4; the decisions the owner gave on
+2026-10-27 stand (section 6).
 
 ## 1. Why
 
-A skill pack is written once and then meets real runs. When it is wrong,
-the same correction is made by hand in every room: on 2026-10-27 a release
-skill told its agent to ask the person for a token and run an interactive
-sign-in, which the room's connections had made unnecessary; the person
-corrected it in chat, the skill's author never learned, and the next room
-would repeat it. Nothing connects a run's trouble to the skill version it
-wore: the job record keeps the expert, not the packs (`store.AgentJob`).
+Experts, skill packs and prompts are written once and then meet real runs.
+When one is wrong, the same correction is made by hand in every room. On
+2026-10-27 a release skill told its agent to ask the person for a token and
+run an interactive sign-in; the person corrected it in chat; nothing
+reached the skill, so the next room would repeat it.
 
-Prior art, and what it teaches: `2026-10-16-room-memory-and-evolution.md`
-(withdrawn) built notes, routes and a panel into the platform; the owner
-wanted the behaviour as installable content and components. Its domain
-rules stand: a change to a pack is never made in place by a run; it is a
-proposal against a version, with its evidence, that a person accepts.
+Two traps the design must avoid, both seen that same day:
 
-## 2. What it is
+- **The wrong culprit.** That run's real causes were a platform bug
+  (sandboxed commands lacked the connectors' placeholders,
+  docs/bugs/2026-10-27-sandboxed-commands-miss-connector-env.md) and a
+  connector nobody had added. Rewriting the skill to work around them would
+  have baked in a workaround that became wrong the day the bug was fixed.
+- **Platform code for a behaviour.** `2026-10-16-room-memory-and-evolution.md`
+  was withdrawn because it compiled notes, routes and a panel into the
+  platform. Its domain rule stands: a change to a component is never made in
+  place by a run; it is a proposal a person accepts.
 
-A service component, **skill coach** (its own repository), reads the runs
-that wore a pack, asks the organization's model for a revised version, keeps
-the proposal, shows its diff, and on the owner's Accept saves it as the
-pack's next version. The platform adds only what a component cannot do:
-know what a run wore, let a component read runs as a member, and let a
-component save a version as the member who clicked.
+## 2. What exists already (checked 2026-10-27)
 
-```
-run wears pack P@v ──(platform: the run keeps P@v)──▶
-skill coach page (owner) ──"Suggest improvements"──▶ runs of P@v the owner may read (platform primitive)
-   ──▶ assist "skill-coach-propose" (component assist, the org's model) ──▶ proposal (component store)
-owner reads the diff on the coach's page ──Accept (a page action, Member.Act)──▶
-   platform primitive: save P@v+1 as the owner (the existing version path, org review) │ Dismiss
-```
+The platform already lets an agent improve content for the person who
+asked, with the consent rules this needs:
 
-Platform (contracts only):
+- The `components` room tool (`services/bridge/roomtools/components.go`):
+  `list` the person's Library; `get` a component's manifest and files to
+  improve it (another author's files come fenced as their data); `try` a
+  draft in the workspace by dispatching a sample task to another agent
+  wearing it (content drafts, never shown in the Library); `save` the next
+  version (`id`) **only after the person confirmed**; `publish` only
+  withdraws: taking a component to the organization is the person's own
+  click (`errJobWidens`), and an organization copy goes through the
+  organization's publish review.
+- The `room_setup` tool: the room's own instructions and description, its
+  quick prompts, its schedules.
+- The conversation itself: the agent reads the room's history, its own runs
+  there and the person's corrections.
+- Assist contracts `review-skill` and `draft-skill-pack`.
 
-1. **The run keeps what it wore.** The bridge already resolves the job's
-   content (`resolveJobContent`); it reports the packs in effect (id,
-   version, source) with the run, kept on `agent_jobs` beside the expert,
-   under the run's retention, and shown on the run's detail.
-2. **`runs` primitive** for a service component that declares it: `GET
-   ComponentRunsPath?pack=<id>&version=` answered for the member a page
-   call attests (`component.Member`): the runs that wore that pack version
-   and that this member may read through the existing run read tiers,
-   newest first, at most 50, each with outcome and failure reason, tool
-   call outcomes (no arguments), the request, the reply's start and the
-   next human message in the same thread after the reply (text cut to a few
-   hundred characters). Nothing is judged by the platform.
-3. **`contentVersion` primitive**: `POST ComponentContentVersionPath` with
-   the member's page action grant (`Member.Act`, one click, one save): a
-   new version of a pack that member may change (`ownContent`), on a base
-   version (conflict when it is not the latest), through the existing
-   version path; an organization copy then waits for the organization's
-   publish review as today. A component cannot save without a click.
+## 3. What it is
 
-The component (bnbloc-skill-coach): pages (the member's packs and
-"Suggest improvements"; a proposal with its per-file diff, each change's
-reason and links to its runs; Accept, Dismiss), its store (proposals, one
-open per pack and owner, dropped after 30 days), a component assist task
-`skill-coach-propose` (input: the pack's files and the runs; output:
-`changes[{path, after, reason, runs[]}]`, `summary`, or `nothing` with
-why), and, for an organization that wants it, a schedule (a room package's
-scheduled task that opens the coach's suggestion for its packs: content).
+**Coach**, a content package (an expert, its skill pack, a prompt pack, and
+an optional room package with a schedule), published in a content
+repository and installed through the Library like any content. It needs no
+component of its own and no platform change.
 
-What it does not do: change a pack by itself; read runs the member may not
-read; learn from one room into another room's files.
+How a member uses it:
 
-## 2a. Everything that can improve from use
+1. In the room where something went wrong: "Improve what you used from
+   this" (a quick prompt), or "this was wrong because …". The coach is the
+   room's agent wearing the Coach expert, or a dispatch to it.
+2. The coach reads the conversation and, with `components get`, the
+   expert and skill packs the run wore.
+3. **Triage before any change.** Each finding is classed: *content* (the
+   instructions are wrong or missing), *environment* (a connector, a
+   setting, an installed tool missing), *platform* (a bug), *tool* (an MCP
+   tool or core misbehaving), *model* (one core or model only), or
+   *one-off*. Only *content* gets a change; the others become a short
+   report for whom it belongs to (the room's owner, an org admin, a bug
+   record, the tool's maintainer), which the member sends themselves.
+4. **The narrowest home**: a lesson about this room (its repo, its
+   environment names, its people) goes into the room's instructions
+   (`room_setup`); a person's preference into their own content; only a
+   general lesson into the shared pack. Names, hosts, paths, people and
+   anything that looks like a secret seen only in the evidence never go into
+   a shared pack.
+5. **A proposal, never a change**: the coach drafts the revision in
+   `drafts/<name>/` (`components get` copies), shows the person a diff with,
+   per change, its reason, the messages it rests on, and the runs that went
+   well with the same pack (counter-evidence). **Risky changes are
+   flagged**: a new host or URL, a command that downloads or runs code,
+   anything about credentials, a new requirement or permission.
+6. **Try before save**: `components try` runs the request that went wrong
+   (or a realistic one) with the draft, on another agent, and shows the
+   result beside the original.
+7. **Save only on the person's confirmation**, as the next version
+   (`components save` with the id). Someone else's pack: the person cannot
+   save it; the coach writes the proposal as a message for its author, which
+   the person reads, trims and sends (nothing from this room reaches the
+   author without the person's eyes on it).
+8. **Revert** is the same path: a new version from an older one's files.
 
-Skill packs were the first case; the same loop serves every kind of
-content, and gives executable components (which no AI rewrites) a report.
+Prompt packs, room quick prompts and room setups are improved the same way
+(they are content the tools reach). MCP tools, cores and plugins
+(executable, signed) are never changed: the coach writes a usage note into
+the content that wears them and a maintainer report the person sends.
+Connectors keep their own loop in the connections component (Suggest
+rules, AI checks); the coach points there.
 
-| What | Evidence it learns from (signals below) | What the coach proposes | Who decides |
-|---|---|---|---|
-| Expert (instructions, required packs and tools) | S1 S2 S4 S5 S6 of runs that wore it | a new version: instruction changes; a skill pack or MCP tool to require or drop | its author |
-| Skill pack | S1 S2 S3 S4 S6 of runs that wore it | a new version (files) | its author |
-| Prompt pack, a room's quick prompts | S4 S5 of runs a prompt started (S8); requests typed by hand again and again | reworded prompts; a new prompt for a repeated request | its author; a room's owner |
-| Assist (an AI feature's instructions) | S7: answers discarded or changed before they were applied | a new version of its instructions | its author |
-| Room package, a room's task setup and schedules | S1 S4 S5 of scheduled and event-started runs | revised task text, schedule, recipients | its author; the room's owner |
-| MCP tool, core, plugin (executable, signed) | S3: its calls refused or failing, by tool; S1 of runs that wore it | never its code: (a) a usage note for the expert or pack that wears it (content, as above), (b) a report for its maintainer with the evidence, which the member sends | the member (sends); the maintainer |
-| Something new | the same instructions given by hand across runs | a new skill pack drafted from them (the existing `draft-skill-pack` contract) | the member, who saves it or not |
-| Connector (policy, guide) | refused, held and failed calls | stays in the connections component's own loop (Suggest rules, AI checks), the same pattern; the coach links to it | an org admin |
-
-**Signals** are facts the platform records; it judges none of them (the
-propose task reads them):
-
-| | Signal | Recorded today? |
-|---|---|---|
-| S1 | A run's outcome and failure reason | yes (`agent_jobs`) |
-| S2 | Room tool calls: tool, action, outcome | yes (run diagnostics, no arguments) |
-| S3 | MCP tool calls: component, tool, outcome (no arguments, no result) | no: only the attached components' names; added by the bridge |
-| S4 | The next human message in the thread after the reply | yes (messages; read at evidence time) |
-| S5 | The same request asked again (ask again, a retry, a regenerate) | partly (job attempts); a link from the new job to the one it redoes |
-| S6 | A person's version of a deliverable right after the agent's | yes (artifact versions carry their author) |
-| S7 | An assist's answer applied, changed or discarded | no: the web reports it (fields applied, not their values) |
-| S8 | The quick prompt a request came from | no: the request carries the prompt's id |
-
-The run keeps every content component and MCP tool component it wore,
-with versions (today: the expert only, and MCP names). The `runs`
-primitive takes any component id; `contentVersion` takes any content kind
-the member may change, never an executable.
-
-## 3. Decisions (answered 2026-10-27)
-
-0. **An independent component**, not platform code; the platform gives
-   contracts only.
-1. **Evidence**: only runs the member asking may read already.
-2. **When**: the owner presses Suggest improvements, or a schedule the
-   organization installs; never by a platform threshold.
-3. **Accept** makes an ordinary version: latest followers get it, pinned
-   uses stay pinned, organization copies go through publish review.
-4. **Someone else's pack**: any member may ask for a suggestion; it goes to
-   the pack's author, who alone accepts.
-
-Raised by section 2a (recommendations; to confirm):
-
-5. **First widening**: experts with skill packs (signals S1, S2, S4, S6 are
-   recorded today), then prompt packs, room packages and assists (S5, S7,
-   S8), then executable components (S3).
-6. **Executables are never changed**: for an MCP tool, a core or a plugin
-   the coach writes a usage note into content and a maintainer report the
-   member sends themselves (copied, or opened at the component's declared
-   support address); it never files anything on its own.
-7. **New signals record names and outcomes only** (S3, S7, S8): no
-   arguments, results or text, under the runs' retention.
-8. **Connectors stay with the connections component's own loop**; the
-   coach links there.
-9. **"Something new" is offered, not made**: a drafted pack appears as a
-   proposal the member saves or drops, like any other.
+**On a schedule** (optional): the room package's scheduled task runs the
+coach over that room's recent conversation; it acts as the schedule's
+creator (room schedules do), so it reads only what they read, and it ends
+with proposals in the room, never a save.
 
 ## 4. Placement
 
-| Part | Where | Why (platform reason) | What an organization swaps |
-|---|---|---|---|
-| The packs a run wore | platform (bridge report, `agent_jobs`) | events only the platform sees | nothing |
-| Signals S3, S5, S7, S8 (names and outcomes, no text) | platform (bridge, web, `agent_jobs`) | events only the platform sees | nothing |
-| `runs` primitive | platform (component contract) | identity and the attested caller; who may read which run | nothing |
-| `contentVersion` primitive | platform (component contract) | consent: a pack changes only by its owner's click, through the existing version and review path | nothing |
-| Proposals, diff, pages, the propose task, its prompt | component (bnbloc-skill-coach) | — | its own coach, prompt, model, rules |
-| Running it on a schedule | content (a room package's scheduled task) | — | its own cadence |
+| Part | Where | Why |
+|---|---|---|
+| Coach: expert, skill pack (triage, homes, flags, diff, try, save), prompt pack, scheduled room package | content (a content repository, the Library) | guidance and a workflow: content first (AGENTS.md core rule) |
+| Reading the conversation, getting, trying and saving components, setting room instructions | platform, **as built** (room tools) | nothing new |
+| Evidence beyond the room (runs in other rooms that wore a pack), the packs a run wore, effect over time, an explicit feedback signal | not in stage A; section 7 | only when stage A shows the value and its limit |
 
-Name test: the platform names no skill, task or coach. Fork: an
-organization changes the component or its prompt, never the platform.
-Replace: a second component with `runs` and `contentVersion` does it its
-own way.
+Name test: the platform gains no noun. Fork: an organization edits or
+replaces the Coach content. Replace: any other content package does it its
+own way with the same tools.
 
-## 5. Design review
+## 5. Design review (stage A)
 
 | Lens | Answer |
 |---|---|
-| 1 Actors | Owner (decides), users of the pack (their runs are evidence only where the asking member may read them), an org admin (reviews org copies as today), the component (proposes; saves only on the owner's click, `Member.Act`). A member who asks about someone else's pack sends the proposal to the author; they cannot accept it. |
-| 2 Time | Evidence ages out with the runs' retention; a proposal against an outdated base is marked and never merged silently; proposals not decided in 30 days are dropped (a number to confirm). |
-| 3 Scale and cost | 50 runs × a few hundred characters per proposal: bounded input. One proposal at a time per pack and owner. Assists are metered and rate-limited as today. |
-| 4 Failure | The assist answers nothing usable: "no change suggested" with its why. Accept conflicts (someone published meanwhile): "propose again". |
-| 5 Boundaries and privacy | No text from a room the owner cannot read. The proposal stores run ids, not copied conversation; opening one checks the reader's access again. The new signals (S3, S7, S8) keep names and outcomes only, never arguments, results or the text of an answer. A maintainer report leaves bnbloc only when the member sends it. |
-| 6 Abuse | A room member steers a run so that the pack "learns" something harmful: nothing is applied without the owner, the diff shows every line and the runs behind it, and an org copy also passes the organization's review. A proposal cannot touch files outside the pack, add executables or change `component.json`'s `requires` without saying so in its own line of the diff. |
-| 7 One owner | Versions are made only by the existing version path (the primitive calls it); run reads only by the runs' read tiers. |
-| 8 Defaults | No automatic proposing (decision 2); no automatic accepting ever. |
-| 9 External contracts | The two primitives are component contracts with conformance tests; the propose task's output is the component's own (a component assist answers text, the component validates it). |
-| 10 Load on users and agents | Agents: none (nothing new in their context). Owners: one button on the coach's page and a review. |
-| 11 Release | Platform: a nullable column for the packs (a migration only adds), two component primitives; older bridges report no packs (their runs give no evidence). The component ships on its own (its repository, a signed package, optin first). |
-| 12 Observability | Proposals made, accepted, dismissed per pack (audit rows); the evidence count shown with each proposal. |
-| 13 AI capability | This is the AI capability: improve-skill proposes; people decide (the house rule). |
-| 14 Component or platform | Section 4: the platform keeps facts and consent; the behaviour is the component's. |
+| 1 Actors | The person asking (decides, saves their own components, sends anything addressed to others); the coach (reads what the person's agent may read, proposes, never saves unconfirmed); another component's author (receives only what the person sends); the room's owner (room instruction changes go through `room_setup`'s own rules). |
+| 2 Time | A proposal lives in the conversation; nothing is kept elsewhere. A saved version is permanent history; revert is a new version. |
+| 3 Scale and cost | One coach turn per request, on the person's agent and model; a schedule is one turn per run of it. No platform cost. |
+| 4 Failure | Triage may say "nothing to change in content", a normal answer. A failed try is shown; a save is not offered after a failed try without saying so. |
+| 5 Boundaries and privacy | Evidence is the room's conversation the agent already reads; nothing from it reaches another person except what the person sends. Shared packs never receive room-only names. |
+| 6 Abuse | Conversation text is untrusted: the coach treats it as data, flags risky changes, and the person confirms every save; an agent can never publish to the organization (`errJobWidens`); organization copies pass the organization's review. A member steering the coach can only propose to themselves. |
+| 7 One owner | Saving, trying and publishing stay the room tools' (one path for every agent). |
+| 8 Defaults | No automatic save, no automatic schedule (the room package is opt-in). |
+| 9 External contracts | The room tools' actions as documented in `room_help components`. |
+| 10 Load on agents | None for other agents; the coach's guidance is its own skill pack, loaded only when worn. |
+| 11 Release | Content only: published and rolled back like any content; no deploy. |
+| 12 Observability | Saves and publishes are audited as today; the coach's proposals are messages in the room. |
+| 13 AI capability | The capability is the AI's; people decide. |
+| 14 Component or platform | Content (section 4). |
 
-Pre-mortem: *the evidence is mostly noise* — the owner sees the runs behind
-each change and dismisses; the assist may answer "nothing"; *proposals
-pile up* — one open per pack and owner, dropped after 30 days; *a pack
-silently changes under a room* — only through Accept, and pinned uses stay
-pinned; *it reads conversations it should not* — evidence is computed per
-reader, at read time.
+Pre-mortem: *the coach rewrites a skill around a bug* — triage classes it
+*platform* and writes a bug report instead; *a room's repo name lands in an
+org-wide pack* — the home rule and the name check; *a poisoned message
+teaches the skill to leak tokens* — flagged as a credential change, and only
+the person saves; *nobody uses it* — it is content: cheap to change or drop.
 
-## 6. Slices (of the end state above)
+## 6. Decisions (answered 2026-10-27, carried over)
 
-1. Platform: the run keeps every content and MCP tool component it wore,
-   with versions (bridge report, store, run detail).
-2. Platform: the `runs` and `contentVersion` primitives, with conformance
-   tests.
-3. The component (bnbloc-skill-coach, named for its first case): pages,
-   store, propose task; skill packs and experts.
-4. Signals S5, S7, S8; prompt packs, assists, room packages.
-5. Signal S3; usage notes and maintainer reports for executables.
-6. Content: the scheduled room package; "something new" drafts.
+1. Evidence: only what the person asking may read (stage A: the room's
+   conversation).
+2. When: when a person asks, or a schedule they install; never automatic.
+3. A save is an ordinary version: latest followers get it, pinned uses stay
+   pinned, organization copies go through review.
+4. Someone else's component: a proposal goes to its author, sent by the
+   person.
+5. Experts and skill packs first; prompt packs and room setups next;
+   executables get notes and reports, never code changes.
+6. The behaviour is not platform code (stage A has none).
+
+## 7. Later, only if stage A shows the need (each its own decision)
+
+Measured against what stage A cannot do:
+
+| Need | What it would take | Kind |
+|---|---|---|
+| Evidence from other rooms that wore the same pack | the run keeps the content versions it wore (indexed), and a `components` action that lists the runs the asker may read that wore a component | platform: events only the platform sees; identity |
+| "Did the new version help" | the same, compared before and after a version | platform data, read by the coach |
+| A one-click "this was wrong" on a reply | a feedback event on a message | platform (a quick prompt already does most of it as content) |
+| Outcomes of MCP tool calls | recorded by the bridge like room tool calls (names and outcomes only) | platform |
+
+None is built until stage A is used and its limit is the reason.
