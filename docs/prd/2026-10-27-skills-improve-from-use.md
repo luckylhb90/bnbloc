@@ -1,9 +1,16 @@
 # Content improves from use: a coach made of content (2026-10-27)
 
-Status: proposed for stage A (content only; no platform code). Earlier
-drafts of this record (a service component with three new platform
-primitives) are superseded by section 4; the decisions the owner gave on
-2026-10-27 stand (section 6).
+Status: **deferred 2026-10-27** by the owner. Not built, in any form.
+
+Why deferred (the owner's question "is it worth it", answered the same day):
+the day's own case was mostly not a content fault (a platform bug and a
+missing connector); an agent can already improve a component when asked
+(the `components` tool: get, try, save on confirmation); at this stage there
+are few packs and their authors are at hand; and reflection without an
+explicit correction is noisy and costs a turn per room. Reconsider when
+two to four weeks of noted manual corrections show the same content fault
+recurring across rooms (how often, and caused by content rather than
+environment, platform or model). The design below is kept for that day.
 
 ## 1. Why
 
