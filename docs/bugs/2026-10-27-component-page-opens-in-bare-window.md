@@ -27,6 +27,9 @@ in the same tab, so it keeps what the host gave it. In a plain browser the
 only difference is that the tab shows the app's spinner instead of a blank
 page while it asks. The tab drops `window.opener` before it leaves for the
 page. The desktop app is unchanged (system browser).
+`window.open`'s answer is not checked: a host that opens the tab itself
+denies the browser's window and answers null, and an earlier fallback on
+null opened the page a second time.
 
 ## Lesson
 

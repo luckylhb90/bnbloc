@@ -40,9 +40,8 @@ export async function openComponentPage(component: string, page: string, query?:
     await openExternal(url);
     return;
   }
-  const route = `${window.location.pathname}${window.location.search}${componentPageRouteHash({ component, page, query, roomId })}`;
-  if (window.open(route, "_blank") === null) {
-    const { url } = await componentPagesApi.open(component, page, query, roomId);
-    await openExternal(url);
-  }
+  // No fallback on a null answer: a host that opens the tab itself (and
+  // denies the browser's window) answers null too, and a second tab would
+  // open.
+  window.open(`${window.location.pathname}${window.location.search}${componentPageRouteHash({ component, page, query, roomId })}`, "_blank");
 }
