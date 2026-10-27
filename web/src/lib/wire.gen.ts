@@ -6388,6 +6388,12 @@ export interface ShareVersion {
   content?: string; // inline versions only
   summary?: string;
   createdAtMs: number;
+  // ThumbnailBlobKey and ThumbnailMime locate the version's stored cover
+  // (docs/prd/2026-10-27-shared-file-viewers.md); empty when it has none.
+  // They are for the gateway's own cover route: the public share view is
+  // built field by field and never carries them.
+  thumbnailBlobKey?: string;
+  thumbnailMime?: string;
 }
 
 // ShareUser names who shared the link.

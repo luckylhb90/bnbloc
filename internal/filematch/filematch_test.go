@@ -35,6 +35,34 @@ func TestValidate(t *testing.T) {
 	}
 }
 
+func TestClaims(t *testing.T) {
+	m := wire.FileMatch{MimeTypes: []string{"image/*", "application/vnd.x+json"}, Extensions: []string{".atlas.json", ".drawio"}}
+	for _, c := range []struct {
+		name, mime string
+		want       bool
+	}{
+		{"ship.atlas.json", "application/json", true}, // a multi-part extension, by the end of the name
+		{"SHIP.ATLAS.JSON", "", true},                 // case-insensitive
+		{"plan.drawio", "text/plain", true},           // a plain extension
+		{"plan.drawio.bak", "text/plain", false},      // the end of the name, not the middle
+		{"atlas.json", "application/json", false},     // ".atlas.json" needs the dot
+		{"photo", "image/png", true},                  // type/* by the file's top-level type
+		{"photo", "IMAGE/PNG; charset=binary", true},  // lower-case, parameters dropped
+		{"data", "application/vnd.x+json", true},      // exact
+		{"data", "application/vnd.y+json", false},
+		{"data", "", false}, // nothing known claims nothing
+		{"", "", false},
+		{"note.md", "text/markdown", false},
+	} {
+		if got := Claims(m, c.name, c.mime); got != c.want {
+			t.Errorf("Claims(%q, %q) = %v, want %v", c.name, c.mime, got, c.want)
+		}
+	}
+	if Claims(wire.FileMatch{}, "a.png", "image/png") {
+		t.Error("an empty match claims a file")
+	}
+}
+
 // One owner for "does this apply to this file"
 // (docs/prd/2026-10-14-file-prompts-and-compare.md rule 1): Go validates a
 // match only here (no second MIME-type pattern), and the web scores one only

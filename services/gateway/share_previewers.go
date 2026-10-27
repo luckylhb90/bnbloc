@@ -23,9 +23,11 @@ import (
 // with frame tickets the existing frame route (previewers.go) already serves
 // with no session. That route re-reads the ticket subject's installed state on
 // every request, and the ticket's subject is the creator, so a creator who
-// uninstalls a previewer, or leaves the organization, takes it from the link
-// at once. The route's rules are unchanged; only the minting of the tickets is
-// new, through the one minter (previewerCatalog).
+// uninstalls a previewer takes it from the link at once. One who leaves the
+// organization ends new lists at once (sharePreviewers checks it), but tickets
+// already minted last until they expire (an hour): the frame route checks the
+// install, not the membership. The route's rules are unchanged; only the
+// minting of the tickets is new, through the one minter (previewerCatalog).
 
 // Domain series (Service.Metrics), one label each: outcome, from a fixed set.
 const (

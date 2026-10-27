@@ -159,6 +159,12 @@ type ShareVersion struct {
 	Content     string `json:"content,omitempty"` // inline versions only
 	Summary     string `json:"summary,omitempty"`
 	CreatedAtMs int64  `json:"createdAtMs"`
+	// ThumbnailBlobKey and ThumbnailMime locate the version's stored cover
+	// (docs/prd/2026-10-27-shared-file-viewers.md); empty when it has none.
+	// They are for the gateway's own cover route: the public share view is
+	// built field by field and never carries them.
+	ThumbnailBlobKey string `json:"thumbnailBlobKey,omitempty"`
+	ThumbnailMime    string `json:"thumbnailMime,omitempty"`
 }
 
 // ShareUser names who shared the link.
