@@ -234,9 +234,9 @@ func (c *roomToolsContributor) hooks(sess *roomtools.Session, egress bool, sandb
 			}
 			if egress {
 				ctx, cancel := context.WithTimeout(context.Background(), egressAskTimeout)
-				hosts, _ := c.b.egressFor(ctx, sess.Scope().RoomID, t.JobID, sess.EgressHosts())
+				hosts, _, streams := c.b.egressFor(ctx, sess.Scope().RoomID, t.JobID, sess.EgressHosts())
 				cancel()
-				sess.SetEgressHosts(hosts)
+				sess.SetEgressHosts(hosts, streams)
 			}
 		}, func(t TurnInfo) {
 			sess.Unbind(t.JobID)
@@ -353,9 +353,9 @@ func (c *roomToolsContributor) egressEnv(ctx context.Context, info SessionInfo, 
 		return nil, false
 	}
 	actx, cancel := context.WithTimeout(ctx, egressAskTimeout)
-	hosts, env := c.b.egressFor(actx, info.RoomID, info.JobID, nil)
+	hosts, env, streams := c.b.egressFor(actx, info.RoomID, info.JobID, nil)
 	cancel()
-	sess.SetEgressHosts(hosts)
+	sess.SetEgressHosts(hosts, streams)
 	if info.Sandboxed {
 		c.writeSandboxCA(info.Workdir)
 		return nil, true

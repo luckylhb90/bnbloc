@@ -110,6 +110,16 @@ The bridge's room tools server is also the session's HTTPS proxy
   the bridge, in its memory; never the agent. `Send.RawQuery` replaces the
   query string as it is and `ReplaceBody` the body (a request the service
   signed over its exact query and body).
+- **Streaming** (docs/prd/2026-10-27-streamed-member-sends.md): the answer
+  to a send from the member's computer streams to the command once the
+  service accepted its report, at any size (chunked when its length is
+  unknown). A request body larger than `MaxEgressBody` goes only to a
+  service whose `EgressHosts` said `streams`, as an `EgressRequest` with
+  `streamed` and no body; on `Send` the bridge sends the body as the command
+  streams it, once (a second `Send` is refused), and the connection ends
+  with that answer. Any other service gets 413. A send, its body and its
+  answer are bounded by activity (2 minutes with nothing moving), not by a
+  clock; the proxy answers `Expect: 100-continue` itself.
 - **The local CA** (`roomtools/egress_ca.go`): one per member directory
   (`egress-ca.pem`, its key `egress-ca.key` 0600), never sent anywhere,
   replaced 30 days before its end. Leaves last a day. Only the turn's

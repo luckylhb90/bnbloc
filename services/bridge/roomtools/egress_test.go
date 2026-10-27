@@ -71,7 +71,7 @@ func TestEgressProxyRoutesClaimedHostsThroughTheService(t *testing.T) {
 		return http.StatusNotFound, map[string]string{"error": "nope"}
 	}}
 	srv, token, sess := startServer(t, gw)
-	sess.SetEgressHosts(map[string]string{"wiki.example.com": "connections"})
+	sess.SetEgressHosts(map[string]string{"wiki.example.com": "connections"}, nil)
 	direct := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, "direct") }))
 	defer direct.Close()
 	client := proxyClient(t, srv, token, direct.Certificate())
@@ -158,7 +158,7 @@ func TestEgressAliasForSandboxedCommands(t *testing.T) {
 	if err := srv.AliasEgress(alias, sess); err != nil {
 		t.Fatal(err)
 	}
-	sess.SetEgressHosts(map[string]string{"wiki.example.com": "connections"})
+	sess.SetEgressHosts(map[string]string{"wiki.example.com": "connections"}, nil)
 	sess.Bind(Job{JobID: "job-1", RequesterUserID: "maya"})
 	local := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, "local") }))
 	defer local.Close()
@@ -226,7 +226,7 @@ func TestEgressSendFromThisComputer(t *testing.T) {
 		}
 	}}
 	srv, token, sess := startServer(t, gw)
-	sess.SetEgressHosts(map[string]string{"wiki.example.com": "connections"})
+	sess.SetEgressHosts(map[string]string{"wiki.example.com": "connections"}, nil)
 	sess.Bind(Job{JobID: "job-1", RequesterUserID: "maya"})
 	req, _ := http.NewRequest(http.MethodGet, "https://wiki.example.com/page", nil)
 	req.Header.Set("Authorization", "Bearer agent-made-up")
@@ -299,7 +299,7 @@ func TestEgressSendReplacesQueryAndBody(t *testing.T) {
 		return http.StatusOK, component.EgressResponse{Accept: true}
 	}}
 	srv, token, sess := startServer(t, gw)
-	sess.SetEgressHosts(map[string]string{"wiki.example.com": "connections"})
+	sess.SetEgressHosts(map[string]string{"wiki.example.com": "connections"}, nil)
 	sess.Bind(Job{JobID: "job-1", RequesterUserID: "maya"})
 	req, _ := http.NewRequest(http.MethodPost, "https://wiki.example.com/order?a=1&signature=fake", strings.NewReader("x=1&signature=fake"))
 	resp, err := proxyClient(t, srv, token, nil).Do(req)

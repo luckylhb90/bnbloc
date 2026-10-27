@@ -134,9 +134,11 @@ type Session struct {
 	notes jobNotes
 	// host are the host tools this session fronts (hosttools.go).
 	host map[string]HostTool
-	// egress are the hosts services claim for the session, and the cards
-	// posted for the bound job (egress.go).
+	// egress are the hosts services claim for the session, the services
+	// that take a streamed body, and the cards posted for the bound job
+	// (egress.go).
 	egress   egressHosts
+	streams  map[string]bool
 	cards    map[[2]string]bool
 	cardsJob string
 }

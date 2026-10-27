@@ -175,10 +175,11 @@ func serviceFactFiles(facts []serviceFacts) []roomlog.NamedFile {
 // egressFor asks every egress service which hosts it handles for the job
 // and the environment it gives the session's commands: host → service
 // (a host two services claim stays with the first by name, logged), and
-// the merged environment. A service that cannot be read keeps the hosts
-// it claimed before (prev), so its hosts never go out unauthenticated.
-func (b *Bridge) egressFor(ctx context.Context, room, job string, prev map[string]string) (hosts map[string]string, env map[string]string) {
-	hosts, env = map[string]string{}, map[string]string{}
+// the merged environment, and the services that take a streamed body. A
+// service that cannot be read keeps the hosts it claimed before (prev), so
+// its hosts never go out unauthenticated (and takes no streamed body).
+func (b *Bridge) egressFor(ctx context.Context, room, job string, prev map[string]string) (hosts map[string]string, env map[string]string, streams map[string]bool) {
+	hosts, env, streams = map[string]string{}, map[string]string{}, map[string]bool{}
 	for _, name := range b.servicesWith(ctx, component.ServiceEgress) {
 		var h component.EgressHosts
 		err := b.turnProxyGET(ctx, name, "egress/hosts", room, job, &h)
@@ -190,6 +191,9 @@ func (b *Bridge) egressFor(ctx context.Context, room, job string, prev map[strin
 				}
 			}
 			continue
+		}
+		if h.Streams {
+			streams[name] = true
 		}
 		for _, host := range h.Hosts {
 			if len(hosts) >= component.MaxEgressHosts*4 || !component.ValidEgressHost(host) {
@@ -208,7 +212,7 @@ func (b *Bridge) egressFor(ctx context.Context, room, job string, prev map[strin
 		}
 	}
 	slog.Info("bnbloc bridge egress hosts", "event", "bnbloc.bridge.egress_hosts", "room", room, "job", job, "hosts", len(hosts))
-	return hosts, env
+	return hosts, env, streams
 }
 
 // validEnvName accepts a POSIX environment name that is not bnbloc's own
