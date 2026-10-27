@@ -38,10 +38,48 @@ export function liveRouteHash(roomId: string, jobId: string): string {
   return `#/live/${encodeURIComponent(roomId)}/${encodeURIComponent(jobId)}`;
 }
 
-// isAuxWindow: this page is a torn-out window (a preview, a people chat or a
-// live page) rather than an app window. It shows the account of the window
-// that opened it, which the desktop shell binds when it creates the window.
+// A component page opened in a tab of its own (openComponentPage):
+// #/open-page/<component>/<page>?query=..&room=.. asks for the page's
+// address and replaces itself with it. The tab is opened at that address at
+// once (not about:blank first): an embedding host can then tell it is the
+// app's own page and open it as the app (with what the host gives the app's
+// pages), where a blank window would be a bare one.
+export type ComponentPageRoute = { component: string; page: string; query?: string; roomId?: string };
+
+export function componentPageRouteHash(r: ComponentPageRoute): string {
+  const q = new URLSearchParams();
+  if (r.query) q.set("query", r.query);
+  if (r.roomId) q.set("room", r.roomId);
+  const qs = q.toString();
+  return `#/open-page/${encodeURIComponent(r.component)}/${encodeURIComponent(r.page)}${qs ? `?${qs}` : ""}`;
+}
+
+export function componentPageRouteFromHash(hash: string): ComponentPageRoute | null {
+  const m = /^#\/open-page\/([^/?]+)\/([^/?]*)(?:\?(.*))?$/.exec(hash);
+  if (!m) return null;
+  try {
+    const q = new URLSearchParams(m[3] ?? "");
+    return {
+      component: decodeURIComponent(m[1]),
+      page: decodeURIComponent(m[2]),
+      ...(q.get("query") ? { query: q.get("query")! } : {}),
+      ...(q.get("room") ? { roomId: q.get("room")! } : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
+// isAuxWindow: this page is a torn-out window (a preview, a people chat, a
+// live page or a component page being opened) rather than an app window. It
+// shows the account of the window that opened it, which the desktop shell
+// binds when it creates the window.
 export function isAuxWindow(): boolean {
   const hash = window.location.hash;
-  return isPreviewRoute() !== null || peopleChatRoomFromHash(hash) !== null || liveRouteFromHash(hash) !== null;
+  return (
+    isPreviewRoute() !== null ||
+    peopleChatRoomFromHash(hash) !== null ||
+    liveRouteFromHash(hash) !== null ||
+    componentPageRouteFromHash(hash) !== null
+  );
 }

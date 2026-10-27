@@ -1,5 +1,6 @@
 import { req } from "./api.ts";
 import { desktop, openExternal } from "./desktop.ts";
+import { componentPageRouteHash } from "./previewRoute.ts";
 import type { CardReply, ComponentCardCall, ComponentPageList, ComponentPageOpen, ComponentPageSession } from "./wire.gen.ts";
 
 // Service components' pages (docs/architecture/service-components.md): a
@@ -26,22 +27,22 @@ export const componentPagesApi = {
 
 // openComponentPage opens a page apart from the app, never in its place:
 // in the desktop app in the system browser (the app's webview would replace
-// the app with it); in a browser in a new tab, opened at once (inside the
-// click, so no popup blocker stops it) and pointed at the page when its
-// address is known.
+// the app with it); in a browser in a new tab, opened inside the click (so
+// no popup blocker stops it) at the app's own #/open-page route, which asks
+// for the page's address and replaces itself with it
+// (views/OpeningComponentPage.tsx). Not about:blank: a host that embeds the
+// app (a work chat's in-app browser) opens a blank window bare, without what
+// it gives the app's own pages, and a page that needs that (a sign-in's
+// consent) fails there.
 export async function openComponentPage(component: string, page: string, query?: string, roomId?: string): Promise<void> {
   if (desktop.available()) {
     const { url } = await componentPagesApi.open(component, page, query, roomId);
     await openExternal(url);
     return;
   }
-  const tab = window.open("about:blank", "_blank");
-  try {
+  const route = `${window.location.pathname}${window.location.search}${componentPageRouteHash({ component, page, query, roomId })}`;
+  if (window.open(route, "_blank") === null) {
     const { url } = await componentPagesApi.open(component, page, query, roomId);
-    if (tab) tab.location.href = url;
-    else await openExternal(url);
-  } catch (e) {
-    tab?.close();
-    throw e;
+    await openExternal(url);
   }
 }

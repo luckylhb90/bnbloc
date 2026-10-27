@@ -8,7 +8,7 @@ import { listenForPushNavigation } from "@/lib/webPush";
 import { Shell, type View } from "@/views/Shell";
 import { Plaza } from "@/views/Plaza";
 import { MyRooms } from "@/views/MyRooms";
-import { isAuxWindow, isPreviewRoute, liveRouteFromHash, peopleChatRoomFromHash } from "@/lib/previewRoute";
+import { componentPageRouteFromHash, isAuxWindow, isPreviewRoute, liveRouteFromHash, peopleChatRoomFromHash } from "@/lib/previewRoute";
 import { useDesktopUpdate } from "@/views/DesktopUpdateWatcher";
 import { DesktopPresenceProvider } from "@/lib/desktopPresence";
 import { DesktopConnectNotice } from "@/views/DesktopConnect";
@@ -39,6 +39,9 @@ const Settings = lazy(() => import("@/views/Settings").then((m) => ({ default: m
 const StandaloneLive = lazy(() => import("@/views/live/StandaloneLive").then((m) => ({ default: m.StandaloneLive })));
 const StandalonePreview = lazy(() =>
   import("@/views/StandalonePreview").then((m) => ({ default: m.StandalonePreview })),
+);
+const OpeningComponentPage = lazy(() =>
+  import("@/views/OpeningComponentPage").then((m) => ({ default: m.OpeningComponentPage })),
 );
 const StandalonePeopleChat = lazy(() =>
   import("@/views/StandalonePeopleChat").then((m) => ({ default: m.StandalonePeopleChat })),
@@ -123,6 +126,16 @@ export function App() {
     return (
       <Suspense fallback={<Spinner />}>
         <Login />
+      </Suspense>
+    );
+  }
+
+  // A component page being opened in its own tab (openComponentPage).
+  const componentPage = componentPageRouteFromHash(window.location.hash);
+  if (componentPage) {
+    return (
+      <Suspense fallback={<Spinner />}>
+        <OpeningComponentPage route={componentPage} />
       </Suspense>
     );
   }
