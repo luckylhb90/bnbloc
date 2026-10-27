@@ -1,6 +1,6 @@
 # A skill pack improves from use: the AI proposes, its owner decides (2026-10-27)
 
-Status: proposed (decisions below wait for the owner).
+Status: decided 2026-10-27 (section 3): a component of its own; slice 1 building.
 
 ## 1. Why
 
@@ -20,105 +20,99 @@ proposal against a version, with its evidence, that a person accepts.
 
 ## 2. What it is
 
+A service component, **skill coach** (its own repository), reads the runs
+that wore a pack, asks the organization's model for a revised version, keeps
+the proposal, shows its diff, and on the owner's Accept saves it as the
+pack's next version. The platform adds only what a component cannot do:
+know what a run wore, let a component read runs as a member, and let a
+component save a version as the member who clicked.
+
 ```
-runs that wore pack P@v ──(platform records P@v on the run)──▶ evidence of P@v
-owner opens P in the Library ──"Suggest improvements"──▶ improve-skill assist(evidence, files)
-   ──▶ a proposal: changed files + a reason and the runs behind each change
-owner reads the diff ──Accept──▶ P@v+1 (the existing version path and org review) │ Dismiss
+run wears pack P@v ──(platform: the run keeps P@v)──▶
+skill coach page (owner) ──"Suggest improvements"──▶ runs of P@v the owner may read (platform primitive)
+   ──▶ assist "skill-coach-propose" (component assist, the org's model) ──▶ proposal (component store)
+owner reads the diff on the coach's page ──Accept (a page action, Member.Act)──▶
+   platform primitive: save P@v+1 as the owner (the existing version path, org review) │ Dismiss
 ```
 
-1. **The run keeps what it wore** (platform). The bridge already resolves
-   the job's content (`resolveJobContent`); it reports the packs in effect
-   (id, version, source) with the run, kept on `agent_jobs` beside the
-   expert, under the run's retention.
-2. **Evidence of a version** (platform): `GET
-   /v1/content-components/{id}/evidence?version=` for the pack's owner:
-   the runs that wore it that the owner may read (decision 1), newest
-   first, each with its outcome and failure reason, its tool calls'
-   outcomes (no arguments, as diagnostics keep them), the request, the
-   reply's start, and the next human message in the same thread after the
-   reply (where a correction would be). Bounded (the last 50 runs, text cut
-   to a few hundred characters each). Nothing is judged here: a correction
-   is the AI's reading, not a platform heuristic.
-3. **Proposals** (platform, the seam the 2026-10-17 knowledge PRD named):
-   `POST /v1/content-components/{id}/proposals` stores a candidate version
-   (the files that change, the base version, a summary, per change a reason
-   and the run ids it rests on) that is not a version: nobody wears it.
-   The owner sees it on the pack's Library page as the existing per-file
-   diff (`contentFileChanges`), each change with its reason and links to
-   its runs; **Accept** makes it the next version through
-   `POST …/versions` (base check, patch bump; a shared org copy then goes
-   through the organization's existing publish review); **Dismiss** drops
-   it. A proposal against a base that is no longer the latest says so and
-   offers to propose again.
-4. **The proposing** (content): an assist task `improve-skill` (contract in
-   `internal/wire/assist_contracts.go`: input the pack's files and the
-   evidence; output `changes[{path, after, reason, runs[]}]`, `summary`,
-   or `nothing` with why). The Library's **Suggest improvements** button on
-   a pack its owner opens runs it (decision 2); an organization that wants
-   it on a schedule installs a room package whose scheduled task runs the
-   same task for its packs (content, not platform).
+Platform (contracts only):
 
-What it does not do: change a pack by itself; read runs the owner may not
+1. **The run keeps what it wore.** The bridge already resolves the job's
+   content (`resolveJobContent`); it reports the packs in effect (id,
+   version, source) with the run, kept on `agent_jobs` beside the expert,
+   under the run's retention, and shown on the run's detail.
+2. **`runs` primitive** for a service component that declares it: `GET
+   ComponentRunsPath?pack=<id>&version=` answered for the member a page
+   call attests (`component.Member`): the runs that wore that pack version
+   and that this member may read through the existing run read tiers,
+   newest first, at most 50, each with outcome and failure reason, tool
+   call outcomes (no arguments), the request, the reply's start and the
+   next human message in the same thread after the reply (text cut to a few
+   hundred characters). Nothing is judged by the platform.
+3. **`contentVersion` primitive**: `POST ComponentContentVersionPath` with
+   the member's page action grant (`Member.Act`, one click, one save): a
+   new version of a pack that member may change (`ownContent`), on a base
+   version (conflict when it is not the latest), through the existing
+   version path; an organization copy then waits for the organization's
+   publish review as today. A component cannot save without a click.
+
+The component (bnbloc-skill-coach): pages (the member's packs and
+"Suggest improvements"; a proposal with its per-file diff, each change's
+reason and links to its runs; Accept, Dismiss), its store (proposals, one
+open per pack and owner, dropped after 30 days), a component assist task
+`skill-coach-propose` (input: the pack's files and the runs; output:
+`changes[{path, after, reason, runs[]}]`, `summary`, or `nothing` with
+why), and, for an organization that wants it, a schedule (a room package's
+scheduled task that opens the coach's suggestion for its packs: content).
+
+What it does not do: change a pack by itself; read runs the member may not
 read; learn from one room into another room's files.
 
-## 3. Decisions (for the owner)
+## 3. Decisions (answered 2026-10-27)
 
-1. **Whose runs are evidence.** Recommended: the runs the pack's owner may
-   read already (rooms they are in, their own agents' runs, everything for
-   an org admin of the pack's organization). Alternatives: every run of the
-   organization that wore it, reduced to signals (outcome, failure reason,
-   tool outcomes; no text), which teaches less and still crosses rooms; or
-   full text organization-wide (refused: it shows room conversations to
-   someone outside the room).
-2. **When a proposal is made.** Recommended: when the owner presses
-   **Suggest improvements** (an assist, metered as assists are), plus the
-   optional scheduled room package. Alternative: the platform starts one by
-   itself after N refused tool calls or failed runs of a version (a
-   threshold nobody chose yet, and a cost nobody asked for).
-3. **Accepting never skips review.** An accepted proposal is an ordinary
-   new version: members who follow the latest get it; a pinned use stays
-   pinned; an organization copy waits for the organization's publish
-   approval when the organization requires it. Recommended as is.
-4. **Who receives proposals for a pack someone else wrote** (an org
-   pack, a colleague's): its author (the row's owner). A member who only
-   uses it can press Suggest improvements too; the proposal then goes to the
-   author, who decides (a member cannot change someone else's pack).
-   Recommended.
+0. **An independent component**, not platform code; the platform gives
+   contracts only.
+1. **Evidence**: only runs the member asking may read already.
+2. **When**: the owner presses Suggest improvements, or a schedule the
+   organization installs; never by a platform threshold.
+3. **Accept** makes an ordinary version: latest followers get it, pinned
+   uses stay pinned, organization copies go through publish review.
+4. **Someone else's pack**: any member may ask for a suggestion; it goes to
+   the pack's author, who alone accepts.
 
 ## 4. Placement
 
 | Part | Where | Why (platform reason) | What an organization swaps |
 |---|---|---|---|
 | The packs a run wore | platform (bridge report, `agent_jobs`) | events only the platform sees | nothing |
-| Evidence read for the owner | platform (gateway route, read tiers of runs) | identity and the attested caller; who may read which run | nothing |
-| Proposals: kept, shown as a diff, accepted into a version | platform (content components) | consent: only the owner changes a pack, through the existing version and review path | nothing |
-| `improve-skill`: reading the evidence, writing the changes and reasons | content (an assist package) | — | its own prompt, model, rules |
-| Running it on a schedule | content (a room package with a scheduled task) | — | its own cadence, scope |
+| `runs` primitive | platform (component contract) | identity and the attested caller; who may read which run | nothing |
+| `contentVersion` primitive | platform (component contract) | consent: a pack changes only by its owner's click, through the existing version and review path | nothing |
+| Proposals, diff, pages, the propose task, its prompt | component (bnbloc-skill-coach) | — | its own coach, prompt, model, rules |
+| Running it on a schedule | content (a room package's scheduled task) | — | its own cadence |
 
-Name test: no skill, product or task name in the platform beyond the assist
-contract's name. Fork: an organization changes the assist or the schedule
-package, never the platform. Replace: a second proposer (another assist, a
-component) posts to the same proposals route.
+Name test: the platform names no skill, task or coach. Fork: an
+organization changes the component or its prompt, never the platform.
+Replace: a second component with `runs` and `contentVersion` does it its
+own way.
 
 ## 5. Design review
 
 | Lens | Answer |
 |---|---|
-| 1 Actors | Owner (decides), users of the pack (their runs are evidence only where the owner may read them, decision 1), an org admin (reviews org copies as today), the assist (proposes, never applies). A member who presses Suggest on someone else's pack sends a proposal to the author; they cannot accept it. |
+| 1 Actors | Owner (decides), users of the pack (their runs are evidence only where the asking member may read them), an org admin (reviews org copies as today), the component (proposes; saves only on the owner's click, `Member.Act`). A member who asks about someone else's pack sends the proposal to the author; they cannot accept it. |
 | 2 Time | Evidence ages out with the runs' retention; a proposal against an outdated base is marked and never merged silently; proposals not decided in 30 days are dropped (a number to confirm). |
 | 3 Scale and cost | 50 runs × a few hundred characters per proposal: bounded input. One proposal at a time per pack and owner. Assists are metered and rate-limited as today. |
 | 4 Failure | The assist answers nothing usable: "no change suggested" with its why. Accept conflicts (someone published meanwhile): "propose again". |
 | 5 Boundaries and privacy | No text from a room the owner cannot read. The proposal stores run ids, not copied conversation; opening one checks the reader's access again. |
 | 6 Abuse | A room member steers a run so that the pack "learns" something harmful: nothing is applied without the owner, the diff shows every line and the runs behind it, and an org copy also passes the organization's review. A proposal cannot touch files outside the pack, add executables or change `component.json`'s `requires` without saying so in its own line of the diff. |
-| 7 One owner | Versions are made only by the existing version path; diffs only by `contentFileChanges`; run reads only by the runs' read tiers. |
+| 7 One owner | Versions are made only by the existing version path (the primitive calls it); run reads only by the runs' read tiers. |
 | 8 Defaults | No automatic proposing (decision 2); no automatic accepting ever. |
-| 9 External contracts | The assist output contract, versioned with the others (`bnbloc content contracts`). |
-| 10 Load on users and agents | Agents: none (nothing new in their context). Owners: one button and a review. |
-| 11 Release | Additive: a nullable column for the packs, a table for proposals (a migration only adds), the route and the Library section; the assist ships as content. Runs before the release have no packs and give no evidence. |
+| 9 External contracts | The two primitives are component contracts with conformance tests; the propose task's output is the component's own (a component assist answers text, the component validates it). |
+| 10 Load on users and agents | Agents: none (nothing new in their context). Owners: one button on the coach's page and a review. |
+| 11 Release | Platform: a nullable column for the packs (a migration only adds), two component primitives; older bridges report no packs (their runs give no evidence). The component ships on its own (its repository, a signed package, optin first). |
 | 12 Observability | Proposals made, accepted, dismissed per pack (audit rows); the evidence count shown with each proposal. |
 | 13 AI capability | This is the AI capability: improve-skill proposes; people decide (the house rule). |
-| 14 Component or platform | Section 4. |
+| 14 Component or platform | Section 4: the platform keeps facts and consent; the behaviour is the component's. |
 
 Pre-mortem: *the evidence is mostly noise* — the owner sees the runs behind
 each change and dismisses; the assist may answer "nothing"; *proposals
@@ -129,8 +123,8 @@ reader, at read time.
 
 ## 6. Slices (of the end state above)
 
-1. The run keeps its packs (bridge report, store, run detail shows them).
-2. Evidence route + proposals (store, routes, Library diff with Accept and
-   Dismiss).
-3. The `improve-skill` contract and assist package, the Suggest button.
-4. The scheduled room package (content).
+1. Platform: the run keeps its packs (bridge report, store, run detail).
+2. Platform: the `runs` and `contentVersion` primitives, with conformance
+   tests.
+3. The component: repository, package, pages, store, propose task.
+4. Content: the scheduled room package.
