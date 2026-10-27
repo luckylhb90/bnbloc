@@ -135,6 +135,7 @@ func Run(t *testing.T, cfg Config) {
 		{"spaceIsolation", s.spaceIsolation, false},
 		{"sharedMountLive", s.sharedMountLive, false},
 		{"readOnlyMounts", s.readOnlyMounts, false},
+		{"privateMounts", s.privateMounts, false},
 		{"execLatency", s.execLatency, false},
 		{"stdinPipe", s.stdinPipe, false},
 		{"tty", s.tty, false},
@@ -673,6 +674,53 @@ func (s *suite) readOnlyMounts(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(src, "new.txt")); err == nil {
 		t.Fatal("a file was created on the host through a read-only mount")
+	}
+}
+
+// privateMounts: a read-only shared mount is private to its space. Two spaces
+// mount different folders at one guest path and each reads its own, a space
+// with no such mount sees neither, the mount stays read-only, and a writable
+// mount cannot take a path another space holds privately.
+func (s *suite) privateMounts(t *testing.T) {
+	s.need(t, protocol.CapabilitySpaces, protocol.CapabilityShares, protocol.CapabilityPrivateMounts)
+	if s.shareDir == "" {
+		t.Skip("no host share dir")
+	}
+	const guest = "/mnt/private-view"
+	rooms := []string{"room-pv1", "room-pv2", "room-pv3"}
+	for i, room := range rooms[:2] {
+		src := filepath.Join(s.shareDir, "pv-source-"+room)
+		if err := os.MkdirAll(src, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(src, "who"), []byte(room), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		req := s.spaceRequest(room)
+		req.Mounts = append(req.Mounts, protocol.SpaceMount{Kind: protocol.MountShared, HostPath: src, GuestPath: guest, ReadOnly: true})
+		if _, err := s.c.EnsureSpace(s.ctx, s.ep, s.main.ID, room, req); err != nil {
+			t.Fatalf("space %d (%s) asking for the same private path: %v", i+1, room, err)
+		}
+		t.Cleanup(func() { _ = s.c.DeleteSpace(s.ctx, s.ep, s.main.ID, room, true) })
+	}
+	if _, err := s.c.EnsureSpace(s.ctx, s.ep, s.main.ID, rooms[2], s.spaceRequest(rooms[2])); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.c.DeleteSpace(s.ctx, s.ep, s.main.ID, rooms[2], true) })
+	for _, room := range rooms[:2] {
+		if got := out(t, s.spaceSh(t, room, "cat "+guest+"/who; (touch "+guest+"/w) 2>/dev/null && echo WROTE; true")); got != room {
+			t.Fatalf("%s sees %q at %s, want its own folder and a read-only view", room, got, guest)
+		}
+	}
+	if got := out(t, s.spaceSh(t, rooms[2], "cat "+guest+"/who 2>/dev/null; true")); got != "" {
+		t.Fatalf("a space that did not ask for the mount sees %q", got)
+	}
+	// The same path writable would be machine-wide: refused while another space holds it.
+	req := s.spaceRequest("room-pv4")
+	req.Mounts = append(req.Mounts, protocol.SpaceMount{Kind: protocol.MountShared, HostPath: filepath.Join(s.shareDir, "room-pv4"), GuestPath: guest})
+	if _, err := s.c.EnsureSpace(s.ctx, s.ep, s.main.ID, "room-pv4", req); protocol.ErrorCodeOf(err) != protocol.ErrorConflict {
+		_ = s.c.DeleteSpace(s.ctx, s.ep, s.main.ID, "room-pv4", true)
+		t.Fatalf("a writable mount over a private path: %v, want conflict", err)
 	}
 }
 

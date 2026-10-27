@@ -206,6 +206,8 @@ func (s *Service) routes() []route {
 		open(sharelink.Pattern, shareCredential, s.handleShareLink),
 		open("GET /v1/public/shares/{token}", shareCredential, s.handlePublicShare),
 		open("GET /v1/public/shares/{token}/content", shareCredential, s.handlePublicShareContent),
+		open("GET /v1/public/shares/{token}/thumbnail", shareCredential, s.handlePublicShareThumbnail),
+		open("GET /v1/public/shares/{token}/previewers", shareCredential, s.handlePublicSharePreviewers),
 		open("GET /v1/public/shares/{token}/site", shareCredential, s.handleSiteRootRedirect),
 		open("GET /v1/public/shares/{token}/site/{path...}", shareCredential, s.handlePublicShareSite),
 		open("POST /v1/public/shares/{token}/visitor", shareCredential, s.handleAppVisitor).spends(visitorBudget),

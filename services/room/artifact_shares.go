@@ -492,5 +492,8 @@ func (s *Service) resolveShare(ctx context.Context, req wire.ShareResolveRequest
 	} else {
 		out.Version.Content = v.Content
 	}
+	if v.ThumbnailBlobKey != "" && v.Thumbnail != nil {
+		out.Version.ThumbnailBlobKey, out.Version.ThumbnailMime = v.ThumbnailBlobKey, v.Thumbnail.MimeType
+	}
 	return out, true, nil
 }

@@ -183,6 +183,59 @@ artifact runner's. A reconcile drops cached bundles of previewers that left
 the catalog. Statuses: 404 (bad path / not installed / unknown file), 405,
 502 (bundle refused), 503 (no session / catalog unreachable — retry).
 
+## Previewers on a share
+
+A shared file (`/s/<token>`, docs/prd/2026-10-27-shared-file-viewers.md)
+renders in its previewer for a recipient who has installed nothing. The
+recipient's own components play no part: the viewers a link may use are the
+ones its **creator** can use in the link's organization, so what the sharer
+sees is what the recipient sees.
+
+- **`GET /v1/public/shares/{token}/previewers`** (`share_previewers.go`), an
+  open route like its siblings: the credential is the link's token or a share
+  ticket, `publicShare` rate-limits and `shareAccess` decides who may open it
+  (an `org` link refuses an anonymous caller 401, as everywhere). It never
+  counts a view and answers `no-store`.
+- **Eligibility.** The creator must still be a member of the link's
+  organization and the organization open (`memberRole`, `tenantClosed`, the
+  reads `shareAccess` makes; without a tenant directory it fails closed).
+  Otherwise the answer is `{"components": []}`, never an error: the page
+  renders as it did before.
+- **Which.** The previewers whose visibility for the creator is installed
+  (`auto`, managed, or opt-in the creator took) and whose `match` claims the
+  shared file (`filematch.Claims`: an extension at the end of the name, an exact
+  MIME type or `type/*`). The answer names only these.
+- **The entry** is the least of a member catalog entry the web parser reads:
+  `kind`, `name`, `version`, `description`, `installed` and the `previewer`
+  block (`entry`, `match`, `rank`, `capabilities`, `toolbar`, `draft`,
+  `bundleSha256`, `frameUrl`, `frameExpiresAtMs`; `bundleUrl` is empty, it is the
+  desktop's). No permissions, settings, publisher, artifacts, counts, endpoint
+  or hooks.
+- **The ticket** in `frameUrl` is the frame ticket the member catalog mints
+  (`previewerCatalog`, the one minter), with the creator as subject and the
+  link's organization. The frame route is unchanged and takes no session, so an
+  anonymous browser loads the bundle through it. Because it re-checks the
+  **ticket subject's** installed state on every request, a creator who
+  uninstalls the previewer takes it from the link at once. One who leaves the
+  organization ends new lists at once (the eligibility above), but tickets
+  already minted last until they expire: the frame route checks the install,
+  not the membership. A ticket lasts an hour and reads only that bundle's
+  files.
+- **The cover.** `GET /v1/public/shares/{token}/thumbnail` serves the shared
+  version's stored cover (the picture its previewer made for the file card):
+  the stored PNG or WebP only, `nosniff`, `Content-Security-Policy: sandbox`,
+  `no-store`; 404 when there is none (the public view says `cover: true` when
+  there is). A link that follows the latest version serves the latest
+  version's. The resolution carries the cover's blob key and media type
+  (`wire.ShareVersion`) for this route; the public view never does.
+
+The host runs such a frame view-only (it refuses save, draft, live state and
+selection, whatever the frame declares).
+
+Series (`Service.Metrics`): `share_previewer_lists_total{outcome}` (`listed`,
+`empty`, `creator-gone`, `closed`, `unverified`) and `share_covers_total{outcome}`
+(`served`, `none`). No token, file name or content is recorded.
+
 ## Frame protocol
 
 The host loads `<frame base><entry>#host=<host origin>` into
@@ -192,7 +245,7 @@ are `postMessage` objects with a `type`:
 | direction | message | notes |
 |---|---|---|
 | frame → host | `preview.ready` | once, on window load (after the bundle registered its handlers) |
-| host → frame | `preview.init {protocol: 1, file: {name, mimeType, sizeBytes, version}, theme, viewport: {w, h}}` | answer to ready |
+| host → frame | `preview.init {protocol: 1, file: {name, mimeType, sizeBytes, version}, theme, viewport: {w, h}, viewOnly?: true}` | answer to ready; `viewOnly` (a boolean when present, absent means false) says the frame is shown to someone who only looks (a shared link): it should offer no editing |
 | host → frame | `preview.file {bytes: ArrayBuffer}` | transferred, right after init |
 | frame → host | `preview.toolbar.set {items}` | replaces the tab's toolbar; items follow the package toolbar rules plus state: `active` (toggle), `value` (zoom factor 0.01–64), `disabled` |
 | host → frame | `preview.toolbar {id, value}` | a gesture: `null` (button), boolean (toggle), number (zoom) |
@@ -205,6 +258,15 @@ are `postMessage` objects with a `type`:
 | frame → host | `preview.units {id, units, truncated}` or `{id, error}` | ordered units `{key?, label, text}`: at most 5,000, key ≤ 200, label ≤ 120, text ≤ 4,000 characters, 2 MiB in all; `key` is a stable identity across versions when the format has one (a slide id, a cell address). The host registers the previewer as the comparer of its files |
 | frame → host | `preview.selection {selection}` | the part the member points at, `{label ≤ 120, detail ≤ 2000}` or `null` to clear (needs `selection`); the Ask AI panel shows the label as a removable chip and sends both with the request, the detail fenced as the file's data |
 | host → frame | `preview.resize {w, h}` | viewport changes |
+
+**View-only.** The host does not rely on the frame to honour `viewOnly` (a
+previewer that predates it ignores it): for such a frame it drops, whatever the
+package declared, `preview.state.send` and `preview.selection`, and answers
+`preview.save` and `preview.draft` with their failure message ("This file is
+shown for viewing only.") so the frame does not wait; it keeps no cover from it
+and reads no room state for it (`viewOnlyRefusal`, `web/src/lib/previewerFrame.ts`).
+`preview.thumbnail` and `preview.error` are still read: the host reports the
+frame's first drawing (or failure) to its page (`onRendered`).
 
 Validation on both sides uses the same module
 (`web/previewer-sdk/src/protocol.ts`): the host accepts only messages whose
@@ -309,6 +371,15 @@ the member catalog (`remotePreviewers.ts`, re-read at sign-in, tenant switch
 and every 10 minutes; a previewer that leaves the catalog is unregistered).
 `RemotePreviewer.tsx` hosts the frame and speaks the protocol; a frame
 ticket near expiry is refreshed by re-reading the catalog before a new frame
-mounts. "Open with…" (`OpenWithMenu.tsx`) lists every viewer that claims
+mounts. The source of that list is pluggable (`lib/previewerSync.ts`, one
+active source at a time, the same one used to refresh a ticket): on the public
+share page, which has no session and cannot read the member catalog, it is the
+share's own list, `GET /v1/public/shares/{credential}/previewers` (the previewers
+the link's creator can offer for the shared file, each with a ticketed frame
+URL; `startSharePreviewers`). The page chooses its viewer only after that lookup
+has answered, failed or run out of time (5 s), runs the frame view-only, and
+shows the version's cover (`GET …/thumbnail`) over the loading frame until it
+reports its first drawing, errors, or 20 s pass (`lib/sharePoster.ts`)
+(docs/prd/2026-10-27-shared-file-viewers.md). "Open with…" (`OpenWithMenu.tsx`) lists every viewer that claims
 the file and remembers the member's choice per MIME type / extension
 (`lib/viewerPreference.ts`, localStorage).

@@ -49,6 +49,9 @@ type publicShareView struct {
 	ExpiresAtMs   int64  `json:"expiresAtMs"`
 	FollowsLatest bool   `json:"followsLatest"`
 	SiteURL       string `json:"siteUrl,omitempty"`
+	// Cover is set when the shared version has a stored cover the page can
+	// fetch from the link's thumbnail route (docs/prd/2026-10-27-shared-file-viewers.md).
+	Cover bool `json:"cover,omitempty"`
 }
 
 var errShareNotFound = errors.New("share not found")
@@ -154,11 +157,65 @@ func (s *Service) handlePublicShare(w http.ResponseWriter, r *http.Request) {
 	out.SharedBy.DisplayName = res.SharedBy.DisplayName
 	out.ExpiresAtMs = res.Share.ExpiresAtMs
 	out.FollowsLatest = res.Share.Version == 0
+	_, _, out.Cover = shareCover(res)
 	if _, isSite := siteVersionOf(res.Version.Storage, res.Version.MimeType, res.Version.BlobKey, res.Version.ContentHash); isSite && res.Artifact.Kind == store.ArtifactKindSite {
 		out.SiteURL = s.siteURL(publicSiteBase(r.PathValue("token")))
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+// shareCoverTypes are the media types a stored cover may be served as (the
+// thumbnail contract: PNG or WebP). The type is the stored one, checked here
+// again, never a client's or a guess.
+var shareCoverTypes = map[string]bool{"image/png": true, "image/webp": true}
+
+// shareCover is the shared version's stored cover: its blob key and media type;
+// ok=false when it has none (or one this route would not serve).
+func shareCover(res wire.ShareResolution) (blobKey, mimeType string, ok bool) {
+	mt := store.MediaType(res.Version.ThumbnailMime)
+	if res.Version.ThumbnailBlobKey == "" || !shareCoverTypes[mt] {
+		return "", "", false
+	}
+	return res.Version.ThumbnailBlobKey, mt, true
+}
+
+// handlePublicShareThumbnail answers GET /v1/public/shares/{token}/thumbnail:
+// the shared version's cover, the picture its previewer made for its card, for
+// the share page to show while the interactive viewer loads. Same access as
+// /content (publicShare); it never counts a view. 404 when the version has no
+// cover: the link is alive, so that does not spend the guess budget.
+func (s *Service) handlePublicShareThumbnail(w http.ResponseWriter, r *http.Request) {
+	o, ok := s.publicShare(w, r, false)
+	if !ok {
+		return
+	}
+	key, mimeType, has := shareCover(o.res)
+	if !has {
+		s.shareMetric(metricShareCovers, "none")
+		w.Header().Set("Cache-Control", "no-store")
+		httpx.Error(w, "no cover", http.StatusNotFound)
+		return
+	}
+	rc, size, err := s.blobs().OpenBlob(r.Context(), key)
+	if err != nil {
+		writeBlobStoreErr(w, err)
+		return
+	}
+	defer rc.Close()
+	s.shareMetric(metricShareCovers, "served")
+	h := w.Header()
+	h.Set("Content-Type", mimeType)
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Content-Security-Policy", "sandbox")
+	h.Set("Cache-Control", "no-store")
+	if r.Method == http.MethodHead {
+		if size >= 0 {
+			h.Set("Content-Length", strconv.FormatInt(size, 10))
+		}
+		return
+	}
+	streamBlob(w, rc, size)
 }
 
 // publicMIME is the version's media type (an inline version without one is

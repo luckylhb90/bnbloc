@@ -173,3 +173,79 @@ func TestSandboxPrepare_livePerSpaceMounts(t *testing.T) {
 		t.Errorf("the other room's next turn: %q", got)
 	}
 }
+
+// TestSandboxPrepare_liveFixedPathMountsServeEveryRoom: a component's mount at
+// one fixed guest path (local skills' folders) reaches every room of a sandbox
+// that advertises privateMounts, each room reading it read-only, and a room with
+// no such mount sees nothing there.
+func TestSandboxPrepare_liveFixedPathMountsServeEveryRoom(t *testing.T) {
+	base := os.Getenv("SANDBOX_URL")
+	if base == "" {
+		t.Skip("SANDBOX_URL not set")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	admin := corepkg.Endpoint{BaseURL: base, Token: os.Getenv("SANDBOX_TOKEN")}
+	c := sandbox.NewClient(nil)
+	c.REST.Timeout = 3 * time.Minute
+	if d, err := c.Discover(ctx, admin); err != nil || !sandbox.HasCapability(d, sandbox.CapabilityPrivateMounts) {
+		t.Skip("the sandbox does not advertise privateMounts")
+	}
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	guestRoot := filepath.Join(root, "guest-home")
+	mountsDir := t.TempDir()
+	name := "bridge-fx-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	m, err := c.CreateMachine(ctx, admin, sandbox.CreateMachineRequest{
+		Name: name, Image: "bnbloc.local/guest:0.1.0", MemoryMiB: 512,
+		Shares: []sandbox.Share{{Name: "workspaces", HostPath: root, GuestPath: root}},
+	})
+	if err != nil {
+		t.Fatalf("create machine: %v", err)
+	}
+	t.Cleanup(func() { _ = c.DeleteMachine(context.Background(), admin, m.ID) })
+	skill := filepath.Join(MountsHostRoot(root, "local-skills"), "archify")
+	if err := os.MkdirAll(skill, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skill, "SKILL.md"), []byte("the skill"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(descriptor(desc{"host": skill, "guest": guestRoot + "/.agents/skills/archify"}))
+	if err := os.MkdirAll(filepath.Join(mountsDir, "local-skills"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mountsDir, "local-skills", mountsFileName), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rt := newSandboxRuntime(SandboxConfig{Mode: SandboxBorrowed, URL: base, Token: admin.Token, VMExec: "/x/bnbloc-vmexec", Machine: name, WorkspacesRoot: root, MountsDir: mountsDir, MountGuestRoots: []string{guestRoot}})
+	if ready, reason := rt.status(ctx); !ready {
+		t.Fatalf("sandbox not ready: %s", reason)
+	}
+	run := func(room string, borrowed bool) string {
+		k := driveKey{room: room, core: "core-a", provider: "codex", sandboxed: true}
+		exec, err := rt.prepare(ctx, k, "alice", nil, sandboxExecTokenTTL, borrowed, nil)
+		if err != nil {
+			t.Fatalf("prepare %s: %v", room, err)
+		}
+		s := exec.Sandbox
+		res, err := c.SpaceRun(ctx, corepkg.Endpoint{BaseURL: base, Token: s.ExecToken}, s.Machine, s.Space, sandbox.ExecRequest{Command: []string{"sh", "-c", "cat " + guestRoot + "/.agents/skills/archify/SKILL.md 2>/dev/null; echo; touch " + guestRoot + "/.agents/skills/archify/x 2>&1 | sed 's/.*: //'"}, HostWorkdir: s.Workdir})
+		if err != nil {
+			t.Fatalf("run in %s: %v", room, err)
+		}
+		out, _ := base64.StdEncoding.DecodeString(res.StdoutBase64)
+		return strings.TrimSpace(string(out))
+	}
+	for _, room := range []string{"room-a", "room-b", "room-c"} {
+		if got := run(room, false); got != "the skill\nRead-only file system" {
+			t.Errorf("%s (the owner's own run): %q, want the skill, read-only", room, got)
+		}
+	}
+	// The mount is for the owner's runs: a run another member borrows has none, and
+	// does not see the owner's through the machine either.
+	if got := run("room-d", true); strings.Contains(got, "the skill") {
+		t.Errorf("a borrowed run sees the owner's own mount: %q", got)
+	}
+}

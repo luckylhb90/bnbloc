@@ -376,7 +376,9 @@ func main() {
 	go svc.RecordDeploy(context.Background(), buildinfo.Get("bnbloc-gateway").Commit)
 	// The gateway is the public edge: /metrics is never served on its main
 	// listener; BNBLOC_METRICS_ADDR exposes it on an internal one.
-	if err := obs.ServeWithHealth("bnbloc-gateway", cfg.ListenAddr, svc.Handler(), tw.Health, obs.PublicListener()); err != nil {
+	svc.Metrics = obs.NewMetrics("bnbloc-gateway")
+	gateway.DescribeMetrics(svc.Metrics)
+	if err := obs.ServeWithHealth("bnbloc-gateway", cfg.ListenAddr, svc.Handler(), tw.Health, obs.PublicListener(), obs.WithMetrics(svc.Metrics)); err != nil {
 		log.Fatalf("bnbloc-gateway: %v", err)
 	}
 }

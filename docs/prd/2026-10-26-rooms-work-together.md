@@ -161,6 +161,12 @@ Three producers, all on the existing envelope and dispatcher:
   delivery: a removed link delivers nothing, and the task says why in its row.
 - A link carries events, never instructions: a task reads the event fenced as
   data naming its source room (`schedule.RunText`).
+- **A room never acts inside another room.** It only sends events; the room
+  that receives one acts through its own task, as that task's creator. A send
+  back is therefore an event to the earlier room (over a link the other way),
+  whose own task asks the same agent in the same channel, by the keys the
+  event carries. This one rule is what keeps every step's authority, budget
+  and audit in the room that does it.
 - **Within one room** no link is needed: same members, same records. A task in
   channel X takes the room's events from channel Y with the channel filter. A
   small flow lives in one room, a station per channel; a large one spans rooms;
@@ -184,7 +190,9 @@ deliverables).
 
 ### 2.4 Who is free
 
-- `list_room_agents` adds, per agent, `running` and `queued`: its jobs now
+- `list_room_agents` (room agents) and `list_agents` (AI tasks, the usual
+  dispatcher of an event-triggered station) add, per agent, `running` and
+  `queued` from one owner: its jobs now
   running and waiting (D2 decides whether these count the agent's work in other
   rooms). The dispatching agent (or the AI task) chooses an agent **by its
   handle**, as today; the platform picks nobody. "A free agent" is the

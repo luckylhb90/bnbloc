@@ -54,6 +54,10 @@ type Backends struct {
 
 // Service holds the gateway dependencies.
 type Service struct {
+	// Metrics records the domain series the gateway keeps beside its request
+	// metrics (the share routes' outcomes, shareMetrics); nil records nothing.
+	// The gateway's main serves the same registry at /metrics.
+	Metrics *obs.Metrics
 	// LibraryRanker finds the components that may fit a request
 	// (librarysearch.Ranker); nil is the lexical default. A deployment with a
 	// Library too large for a lexical first stage plugs a semantic ranker here.

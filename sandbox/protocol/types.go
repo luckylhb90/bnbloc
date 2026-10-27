@@ -94,6 +94,14 @@ const (
 	// touched. A component's mounts (the bridge's mount contributions) are
 	// applied only to a backend that advertises it.
 	CapabilityReadOnlyMounts = "readOnlyMounts"
+	// CapabilityPrivateMounts: a read-only shared mount is private to its
+	// space. Two spaces of a machine may mount different folders, or the same
+	// one, at the same guest path (each sees only its own), and no space sees
+	// another's. Without it a guest path can belong to one space only (a second
+	// space asking for it is answered `conflict`), and a component that needs a
+	// folder at one fixed path in every room cannot have it
+	// (docs/architecture/sandbox-mounts.md). Requires readOnlyMounts.
+	CapabilityPrivateMounts = "privateMounts"
 	// CapabilityDurableHomes: a space's home outlives its machine. It is the
 	// same on every machine created from an image that the space name is
 	// ensured on, as the space's uid is, and only a delete with purge
@@ -114,7 +122,7 @@ const (
 var Capabilities = []string{
 	CapabilityExec, CapabilityTTY, CapabilitySpaces, CapabilityShares, CapabilityPorts, CapabilityDisks,
 	CapabilitySnapshots, CapabilityPause, CapabilityEgressPolicy, CapabilitySpaceEgress, CapabilityEgressHosts, CapabilitySecrets,
-	CapabilityFork, CapabilityWarmPool, CapabilityExecTokens, CapabilityReadOnlyMounts, CapabilityDurableHomes, CapabilityHostProxy,
+	CapabilityFork, CapabilityWarmPool, CapabilityExecTokens, CapabilityReadOnlyMounts, CapabilityPrivateMounts, CapabilityDurableHomes, CapabilityHostProxy,
 }
 
 // KnownCapability reports whether name is a v1 capability.

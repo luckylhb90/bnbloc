@@ -90,18 +90,24 @@ declared `"perSpace": true`:
   `<component>/.spaces/<space>` for a space not listed and idle for an hour (a
   space being created has its trees before the sandbox lists it).
 
-### Why a fixed guest path stays one room's
+### A fixed guest path in every room: `privateMounts`
 
-The guest is one machine with one mount namespace: a mount is a bind mount of the
-whole machine, so a guest path can only hold one thing, and its root is owned
-0700 by the space that mounted it. Letting several spaces share one read-only
-path would mean making it readable by every space of the machine, and the bridge
-cannot promise that is safe: when no machine of its own is configured, the
-member's own runs and runs they lend to others share the machine, so an
-own-only mount would be readable by a borrowed run. A mount at a fixed path
-(local skills' skill folders) therefore serves the first room that asks; the
-others run without it (see above), and a component that needs a folder in every
-room uses `perSpace`. Sharing a path across spaces would be a Sandbox Protocol
-feature (an explicit shared, world-readable, reference-counted read-only mount,
-offered only for what is meant for everyone), not a bridge change; it is not
-built.
+A mount at one fixed guest path (local skills' skill folders) must reach every room,
+and a plain bind mount cannot do it: the guest is one machine with one mount
+namespace, so a path can hold one thing and its root is owned by one space
+(measured: a second room asking for the path was answered `conflict`, so only the
+first room had the folder). A backend that advertises **`privateMounts`**
+(`sandbox-protocol.md`) makes a read-only shared mount private to its space: the
+sandbox does not bind it in the machine's namespace but in a mount namespace of
+each exec of that space (`guest-exec`, a table per space user), so the same path
+means each room's own folder and no room sees another's, an own-only mount is
+never visible to a borrowed run, and nothing of the descriptor changes. Verified
+against the real sandbox: three rooms read the folder, each read-only, a borrowed
+run and the machine itself see nothing, a changed folder is followed on the next
+turn.
+
+Without the capability (an older sandbox, another backend) the first room gets the
+mount and the others are refused; the bridge then runs their turn without it
+(above), and `perSpace` is how a component gets a folder to every room there.
+A private mount leaves an empty directory at its path in the guest (the path's
+name, never its content).

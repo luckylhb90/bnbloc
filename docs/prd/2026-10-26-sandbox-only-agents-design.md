@@ -553,10 +553,15 @@ What changed against §2.1a–§4.2 once it was tried, and why it is smaller.
   rooms are swept from the sandbox's list of spaces; the `ports` conformance case
   no longer assumes `nc` (the Debian image has none; python3 answers instead) and
   the whole suite passes on the real 0.1.10 service.
-- **Not fixable here, and why** (`docs/architecture/sandbox-mounts.md`, "Why a
-  fixed guest path stays one room's"): a component mount at one fixed guest path
-  (local skills) serves one room, because the guest has one mount namespace and
-  sharing the path would make it readable by every space of the machine.
+- **A component mount at a fixed guest path serving one room only (found while
+  checking the above; fixed the same day, in the sandbox, not the bridge).** The
+  guest has one mount namespace, so a guest path could belong to one space. The
+  first answer was to keep the limit and write down why; that was wrong, a member has
+  many rooms. The sandbox's `guest-exec` already builds a namespace per exec; it
+  now also builds a mount namespace holding the space's read-only mounts
+  (capability `privateMounts`, sandboxd 0.1.11), so the same path is each room's own
+  folder and no room (nor a borrowed run, nor the machine) sees another's.
+  `docs/architecture/sandbox-mounts.md`, "A fixed guest path in every room".
 - **Not yet:** the page was not opened in the member's own desktop app (it was
   rendered and driven against the real manager and catalog); signing in to a
   provider from the sandbox (§5); agents that need `npm install` of their

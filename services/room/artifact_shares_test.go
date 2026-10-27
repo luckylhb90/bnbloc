@@ -353,6 +353,41 @@ func TestShareResolveBlobAndEmpty(t *testing.T) {
 	}
 }
 
+// The resolution carries the shared version's cover (its blob key and media
+// type) for the gateway's cover route: none until one is stored, the latest
+// version's for a link that follows the latest, the pinned version's otherwise.
+func TestShareResolveCarriesTheCover(t *testing.T) {
+	e, _, _ := sharesRoom(t)
+	art := e.createArtifact("alice", map[string]any{"kind": "markdown", "title": "Spec", "fileName": "spec.md", "content": "# v1"})
+	_, latest := e.share(http.MethodPost, sharesPath(art.ArtifactID), "alice", map[string]any{"access": "anyone"})
+	_, pinned := e.share(http.MethodPost, sharesPath(art.ArtifactID), "alice", map[string]any{"access": "anyone", "version": 1})
+
+	if _, res := e.resolve(latest.Token); res.Version.ThumbnailBlobKey != "" || res.Version.ThumbnailMime != "" {
+		t.Fatalf("a version with no cover resolved with one: %+v", res.Version)
+	}
+	cover := func(version int, key, mime string) {
+		t.Helper()
+		if _, _, err := e.svc.Artifacts.SetArtifactThumbnail(testCtx(t), art.ArtifactID, version, store.ArtifactThumbnailWrite{BlobKey: key, MimeType: mime, Width: 4, Height: 4, Rank: 2}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cover(1, "sha256/v1cover", "image/png")
+	if _, res := e.resolve(latest.Token); res.Version.ThumbnailBlobKey != "sha256/v1cover" || res.Version.ThumbnailMime != "image/png" {
+		t.Fatalf("v1 cover = %+v", res.Version)
+	}
+	e.publishText("alice", art.ArtifactID, 1, "# v2")
+	if _, res := e.resolve(latest.Token); res.Version.Version != 2 || res.Version.ThumbnailBlobKey != "" {
+		t.Fatalf("v2 has no cover of its own: %+v", res.Version)
+	}
+	cover(2, "sha256/v2cover", "image/webp")
+	if _, res := e.resolve(latest.Token); res.Version.ThumbnailBlobKey != "sha256/v2cover" || res.Version.ThumbnailMime != "image/webp" {
+		t.Fatalf("latest follows v2: %+v", res.Version)
+	}
+	if _, res := e.resolve(pinned.Token); res.Version.Version != 1 || res.Version.ThumbnailBlobKey != "sha256/v1cover" {
+		t.Fatalf("pinned keeps v1: %+v", res.Version)
+	}
+}
+
 // Revoking is open to the link's creator, the room's owner/admins, and an
 // org admin (even one outside the room); nobody else.
 func TestShareRevokeAuthorization(t *testing.T) {

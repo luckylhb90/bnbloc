@@ -107,6 +107,7 @@ conforming, advertising one and failing it is not:
 | `fork` | live fork |
 | `warmPool` | warm pools + claim |
 | `execTokens` | space-scoped exec tokens (required by bnbloc's hybrid execution) |
+| `privateMounts` | requires `readOnlyMounts`: a read-only shared mount is private to its space, so two spaces may mount different folders (or the same one) at the same guest path and each sees only its own; a writable mount, or a private mount over another space's writable one, is still `conflict` |
 | `readOnlyMounts` | a shared space mount with `readOnly:true` is enforced: writes, creates and deletes fail in the guest, the host folder is never touched (a component's mounts are applied only where this is advertised) |
 | `durableHomes` | a space's home outlives its machine: the same on every machine created from an image that the space name is ensured on, removed only by a delete with `purge=1`; its commands find tools installed there by name (`PATH` starts with `~/.local/bin`, `~/.bun/bin`, `~/.cargo/bin`, `~/go/bin`; npm's global prefix is `~/.local` unless the run sets `NPM_CONFIG_PREFIX`) |
 | `hostProxy` | a machine created with `hostPorts` (at most 4) reaches those host loopback ports, and nothing else of the host, at `Discovery.hostAlias:<port>`, whatever its egress mode; the machine reports them. The bridge's egress proxy listens on one for the guests' commands (service-components.md) |
