@@ -256,9 +256,12 @@ func TestSharePreviewers_theCreatorsInstallsDecide(t *testing.T) {
 	}
 }
 
-// A creator who has left the organization, or an organization that is closed,
-// offers nothing: the page renders as it did before.
-func TestSharePreviewers_aGoneCreatorOrAClosedOrganizationOffersNothing(t *testing.T) {
+// A closed organization offers nothing: the page renders as it did before. A
+// creator who is not listed in the tenant directory still offers their viewers:
+// a platform super admin enters an organization by role and is not listed in it
+// (found on QA, where the product owner's own link listed nothing), and the
+// link shows the file whoever made it.
+func TestSharePreviewers_aClosedOrganizationOffersNothingAnUnlistedCreatorStillOffers(t *testing.T) {
 	e := newAppGW(t)
 	metrics := obs.NewMetrics("gateway")
 	e.gw.Metrics = metrics
@@ -277,13 +280,18 @@ func TestSharePreviewers_aGoneCreatorOrAClosedOrganizationOffersNothing(t *testi
 	if err := e.b.Tenant.RemoveMember(e.ctx(), e.tenant, "maya"); err != nil {
 		t.Fatal(err)
 	}
-	if l := e.sharePreviewers(tok); l.status != http.StatusOK || len(l.entries) != 0 {
-		t.Fatalf("creator left = %d %s", l.status, l.raw)
+	if l := e.sharePreviewers(tok); l.status != http.StatusOK || len(l.entries) != 1 {
+		t.Fatalf("creator not in the directory = %d %s, want their viewer still listed", l.status, l.raw)
+	}
+	// With no directory at all (nothing to ask) the list is the same.
+	e.gw.TenantMemberRole = nil
+	if l := e.sharePreviewers(tok); l.status != http.StatusOK || len(l.entries) != 1 {
+		t.Fatalf("no tenant directory = %d %s", l.status, l.raw)
 	}
 
 	rec := httptest.NewRecorder()
 	metrics.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
-	for _, want := range []string{`outcome="listed"`, `outcome="closed"`, `outcome="creator-gone"`, "share_previewer_lists_total"} {
+	for _, want := range []string{`outcome="listed"`, `outcome="closed"`, "share_previewer_lists_total"} {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Errorf("metrics lack %s:\n%s", want, rec.Body.String())
 		}

@@ -233,7 +233,7 @@ The host runs such a frame view-only (it refuses save, draft, live state and
 selection, whatever the frame declares).
 
 Series (`Service.Metrics`): `share_previewer_lists_total{outcome}` (`listed`,
-`empty`, `creator-gone`, `closed`, `unverified`) and `share_covers_total{outcome}`
+`empty`, `closed`) and `share_covers_total{outcome}`
 (`served`, `none`). No token, file name or content is recorded.
 
 ## Frame protocol

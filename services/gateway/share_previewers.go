@@ -1,7 +1,6 @@
 package gateway
 
 import (
-	"errors"
 	"net/http"
 	"path"
 	"sort"
@@ -23,21 +22,22 @@ import (
 // with frame tickets the existing frame route (previewers.go) already serves
 // with no session. That route re-reads the ticket subject's installed state on
 // every request, and the ticket's subject is the creator, so a creator who
-// uninstalls a previewer takes it from the link at once. One who leaves the
-// organization ends new lists at once (sharePreviewers checks it), but tickets
-// already minted last until they expire (an hour): the frame route checks the
-// install, not the membership. The route's rules are unchanged; only the
-// minting of the tickets is new, through the one minter (previewerCatalog).
+// uninstalls a previewer takes it from the link at once. What the creator may
+// use is their install and the rollout gate, never their listing in the tenant
+// directory: a platform super admin enters an organization by role and is not
+// listed in it, and the link already shows the file whoever made it. The route's
+// rules are unchanged; only the minting of the tickets is new, through the one
+// minter (previewerCatalog).
 
 // Domain series (Service.Metrics), one label each: outcome, from a fixed set.
 const (
-	metricSharePreviewers = "share_previewer_lists_total" // listed, empty, creator-gone, closed, unverified
+	metricSharePreviewers = "share_previewer_lists_total" // listed, empty, closed
 	metricShareCovers     = "share_covers_total"          // served, none
 )
 
 // DescribeMetrics sets the help text of the gateway's domain series.
 func DescribeMetrics(m *obs.Metrics) {
-	m.Describe(metricSharePreviewers, "Previewer lists answered for a share link by outcome (listed, empty, creator-gone, closed, unverified).")
+	m.Describe(metricSharePreviewers, "Previewer lists answered for a share link by outcome (listed, empty, closed).")
 	m.Describe(metricShareCovers, "Share cover requests by outcome (served, none).")
 }
 
@@ -89,16 +89,12 @@ func (s *Service) handlePublicSharePreviewers(w http.ResponseWriter, r *http.Req
 func (s *Service) sharePreviewers(r *http.Request, res wire.ShareResolution) ([]sharePreviewerEntry, string, error) {
 	none := []sharePreviewerEntry{}
 	creator := res.Share.CreatedBy
-	// The creator must still belong to the link's organization, and the
-	// organization be open: the reads shareAccess makes for an org link. With
-	// no tenant directory it fails closed, as there.
-	role, err := s.memberRole(res.TenantID, creator)
-	switch {
-	case errors.Is(err, errNotTenantMember):
-		return none, "creator-gone", nil
-	case err != nil:
-		return none, "unverified", nil
-	case s.tenantClosed(res.TenantID, role):
+	// The organization must be open: the one suspended-tenant gate, asked as the
+	// lowest role (no platform exemption: the ticket is a stranger's). The
+	// creator's listing in the tenant directory is NOT asked: a platform super
+	// admin is not listed (they enter by role), and the share's own access rule
+	// already decided who may open the link. What the creator may use is below.
+	if s.tenantClosed(res.TenantID, string(rbac.RoleViewer)) {
 		return none, "closed", nil
 	}
 	// The viewer is the creator in the link's organization; the ticket carries

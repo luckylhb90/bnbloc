@@ -88,10 +88,9 @@ and has nothing installed, must see the file.** Components are opt-in per member
   subject and the link's tenant, minted by the same function the member catalog
   uses (`previewerCatalog`), lifetime one hour. The frame route is unchanged:
   every request re-checks the **creator's** installed state, so a sharer who
-  uninstalls a previewer takes it away from the link at once. A sharer who
-  leaves the organization ends new lists at once (the eligibility above); the
-  tickets already minted last until they expire, an hour, because the frame
-  route checks the install and not the membership.
+  uninstalls a previewer takes it away from the link at once. The frame route
+  checks the install, not the creator's listing in the tenant directory (a
+  platform super admin enters an organization by role and is not listed).
 - `Cache-Control: no-store`.
 
 ### 2. Cover (gateway, room service)
@@ -159,7 +158,7 @@ confinement, the share's own access rule.
    if the creator has no installs the link renders as today.
 2. **Time and lifecycle.** A ticket lasts one hour and the frame route re-checks
    the creator's install on every request, so an uninstall takes effect at once.
-   A creator who leaves the organization ends new lists at once and old tickets
+   A creator whose install goes away ends the list at once and old tickets
    within the hour. A link that follows the latest version serves the latest
    version's cover and bytes.
 3. **Scale and cost.** One more open request per page view (rate-limited per IP
@@ -217,8 +216,8 @@ confinement, the share's own access rule.
 - Gateway: for a link of each audience, the previewers route returns the
   minimal entries for a matching file, nothing for a non-matching one; the
   ticket loads the bundle's entry through the unchanged frame route with no
-  session; a creator who left the organization, or has not installed it, gets an
-  empty list; `org` and `signed_in` links refuse an anonymous caller as their
+  session; a creator who has not installed it gets an empty list, one who is not
+  listed in the tenant directory (a platform super admin) still gets theirs; `org` and `signed_in` links refuse an anonymous caller as their
   siblings do; the cover route serves, 404s without one, follows the latest.
 - Web: the registry source, no flash of code, the poster's swap, timeout and
   error paths, view-only refusals in the host.
@@ -247,9 +246,12 @@ wrong:
   of the match vocabulary, not a gateway helper.
 - **Metrics.** The gateway had no domain registry; `Service.Metrics` is new and
   served where the other services serve theirs (never on the public listener).
-  Outcomes of the previewer list: `listed`, `empty`, `creator-gone`, `closed`
-  (the organization is suspended), `unverified` (no tenant directory: fails
-  closed, as `shareAccess` does).
+  Outcomes of the previewer list: `listed`, `empty`, `closed`
+  (the organization is suspended). **Found on QA:** the first version also
+  required the creator to be in the tenant directory (`creator-gone`,
+  `unverified`); the product owner's own link listed nothing because a platform
+  super admin is not listed there. The check was dropped: the link's own access
+  rule decides who may open it, and the creator's install decides what renders.
 - **The ticket's role** is the lowest (`viewer`); it reads one bundle and nothing
   else.
 - **View mode is the host's, not the file's.** Excalidraw's `restoreAppState`
