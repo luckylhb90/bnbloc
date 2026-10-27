@@ -50,6 +50,10 @@ type fakeSandboxd struct {
 	// code).
 	ensureFails      *sandbox.ProtocolError
 	ensureFailStatus int
+	// listed are the spaces a list of the machine's spaces answers; listFails
+	// makes the list answer 500.
+	listed    []string
+	listFails bool
 	// refuseSharedPaths answers an ensure that mounts a host folder outside a
 	// per-space tree (".spaces") with a conflict: another space holds its path.
 	refuseSharedPaths bool
@@ -125,6 +129,17 @@ func newFakeSandboxd(t *testing.T) *fakeSandboxd {
 				return
 			}
 			w.WriteHeader(http.StatusNoContent)
+		case p == sandbox.SpacesPath(machine) && r.Method == http.MethodGet:
+			if f.listFails {
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(`{"error":{"code":"internal","message":"down"}}`))
+				return
+			}
+			out := sandbox.ListSpacesResponse{}
+			for _, n := range f.listed {
+				out.Spaces = append(out.Spaces, sandbox.Space{Name: n})
+			}
+			_ = json.NewEncoder(w).Encode(out)
 		case strings.HasPrefix(p, sandbox.SpacesPath(machine)+"/") && r.Method == http.MethodPut:
 			var req sandbox.SpaceRequest
 			_ = json.NewDecoder(r.Body).Decode(&req)

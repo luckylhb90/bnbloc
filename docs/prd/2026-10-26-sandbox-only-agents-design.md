@@ -533,6 +533,32 @@ What changed against §2.1a–§4.2 once it was tried, and why it is smaller.
   machine each answered and each wrote a file into its own host workspace; their
   agent paths differed and were the same inode; the workspaces root held 229 MB
   with both rooms live.
-- **Not yet:** the page was not opened in the real app; signing in to a provider
-  from the sandbox (§5); a per-space tree of a room that no longer exists is not
-  removed; Windows and Linux have no sandbox backend.
+- **The member chooses where (2026-10-27).** The first cut gave OpenCode 2 a row
+  of its own; the design's choice is on the row. A catalog entry that has a
+  `sandbox` block offers *Install on this computer* and *Install in my sandbox*,
+  with the size and what differs (`approxMB`, `note`); the choice is recorded in
+  the state (`method: sandbox`) and drives the store, the registration (a guest
+  agent or a host command, never both), the newest version looked for (`sandbox.
+  latest`, OpenCode 2 ships as `@opencode/cli`), update and remove. Moving an agent
+  is Remove, then Install in the other place; installing in a second place is
+  refused naming where it is. `sandboxOnly` (organization) offers an agent only in
+  the sandbox, and the host install is refused, not just hidden. An agent found on
+  the computer that the manager did not install can still be put in the sandbox
+  beside it; the sandbox copy is then what rooms run once it is "used in rooms".
+  Seen on the real page: the sign-in line of a host install ("Run `opencode auth
+  login`") is replaced for a sandbox install by what is true (not available yet).
+- **Fixed in the same pass.** The tree's name carries its source version, so an
+  update is a new host path the sandbox converges to instead of a replaced folder
+  under a live bind mount (checked live, both rooms follow); trees of deleted
+  rooms are swept from the sandbox's list of spaces; the `ports` conformance case
+  no longer assumes `nc` (the Debian image has none; python3 answers instead) and
+  the whole suite passes on the real 0.1.10 service.
+- **Not fixable here, and why** (`docs/architecture/sandbox-mounts.md`, "Why a
+  fixed guest path stays one room's"): a component mount at one fixed guest path
+  (local skills) serves one room, because the guest has one mount namespace and
+  sharing the path would make it readable by every space of the machine.
+- **Not yet:** the page was not opened in the member's own desktop app (it was
+  rendered and driven against the real manager and catalog); signing in to a
+  provider from the sandbox (§5); agents that need `npm install` of their
+  dependencies (they need the installer space of §4.2); Windows and Linux have no
+  sandbox backend.

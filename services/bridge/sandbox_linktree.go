@@ -1,14 +1,18 @@
 package bridge
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
+
+	sandbox "github.com/luckylhb90/bnbloc/sandbox/protocol"
 )
 
 // A per-space mount (component.Mount.PerSpace): a guest path belongs to one
@@ -19,13 +23,20 @@ import (
 
 const (
 	// spacesDir holds the per-space trees inside the component's folder:
-	// <component folder>/.spaces/<space>/<slot>, one slot per guest path a
-	// component mounts, so a new version replaces the old tree of its slot.
+	// <component folder>/.spaces/<space>/<slot>-<source>, one slot per guest path
+	// a component mounts and one folder per source version. The source is in the
+	// name, so a new version is a new host path: the sandbox converges the space's
+	// mount to it instead of keeping a bind mount of a folder that was replaced.
 	spacesDir = ".spaces"
-	// stampSuffix names the file beside a tree that says which source it links.
-	stampSuffix = ".linked-from"
 	// maxLinkTreeEntries bounds the work and the inodes of one tree.
 	maxLinkTreeEntries = 200_000
+	// spaceTreeIdleAge is how long a space's trees may sit unused before a sweep
+	// that finds no such space removes them (a space being created has its trees
+	// before the sandbox lists it).
+	spaceTreeIdleAge = time.Hour
+	// spaceTreeSweepEvery bounds how often the bridge asks the sandbox for its
+	// spaces to sweep.
+	spaceTreeSweepEvery = 30 * time.Minute
 )
 
 // isPerSpaceTree reports a host path that is one of the per-space trees.
@@ -35,25 +46,25 @@ func isPerSpaceTree(hostPath string) bool {
 
 // perSpaceTree makes (or keeps) the space's hard-linked tree of src for one
 // slot and returns its path. src is a folder under hostRoot, immutable once
-// published (a new version is a new folder), so a tree that records src as its
-// source is current and is reused untouched; one that records another source is
-// replaced. A space has no process left from before when it is prepared (the
-// turn fence), so nothing runs from the tree that is replaced.
-// The replacement is built beside it and swapped in whole, so a failed build
-// leaves the previous tree, and the process that ran from it, as it was.
+// published (a new version is a new folder), so a tree made of src is current
+// and is reused untouched. A tree of another source of the same slot (the
+// version before) is removed once the new one is in place: a space has no
+// process left from before when it is prepared (the turn fence), so nothing runs
+// from it.
 func perSpaceTree(hostRoot, space, slot, src string) (string, error) {
 	if rel, err := filepath.Rel(hostRoot, src); err != nil || rel == "." || strings.HasPrefix(rel, "..") {
 		return "", fmt.Errorf("%s is not inside %s", src, hostRoot)
 	}
-	sum := sha256.Sum256([]byte(slot))
-	dst := filepath.Join(hostRoot, spacesDir, space, hex.EncodeToString(sum[:6])+"-"+filepath.Base(slot))
-	stamp := dst + stampSuffix
-	if got, err := os.ReadFile(stamp); err == nil && string(got) == src {
-		if st, err := os.Stat(dst); err == nil && st.IsDir() {
-			return dst, nil
-		}
+	slotSum, srcSum := sha256.Sum256([]byte(slot)), sha256.Sum256([]byte(src))
+	prefix := hex.EncodeToString(slotSum[:6]) + "-"
+	dir := filepath.Join(hostRoot, spacesDir, space)
+	dst := filepath.Join(dir, prefix+hex.EncodeToString(srcSum[:6])+"-"+filepath.Base(slot))
+	if st, err := os.Stat(dst); err == nil && st.IsDir() {
+		_ = os.Chtimes(dst, time.Now(), time.Now()) // in use: a sweep leaves it
+		_ = os.Chtimes(dir, time.Now(), time.Now())
+		return dst, nil
 	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
 	next := dst + ".new"
@@ -62,21 +73,44 @@ func perSpaceTree(hostRoot, space, slot, src string) (string, error) {
 		_ = os.RemoveAll(next)
 		return "", err
 	}
-	old := dst + ".old"
-	_ = os.RemoveAll(old)
-	if err := os.Rename(dst, old); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if err := os.Rename(next, dst); err != nil {
 		_ = os.RemoveAll(next)
 		return "", err
 	}
-	if err := os.Rename(next, dst); err != nil {
-		_ = os.Rename(old, dst)
-		return "", err
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if full := filepath.Join(dir, e.Name()); full != dst && strings.HasPrefix(e.Name(), prefix) {
+			_ = os.RemoveAll(full)
+		}
 	}
-	_ = os.RemoveAll(old)
-	if err := os.WriteFile(stamp, []byte(src), 0o644); err != nil {
-		return "", err
-	}
+	_ = os.Chtimes(dir, time.Now(), time.Now())
 	return dst, nil
+}
+
+// sweepSpaceTrees removes the trees of spaces that no longer exist: under every
+// component's folder, <component>/.spaces/<space> for a space not in live that
+// nothing has touched for idle. A tree costs no disk of its own, but it holds the
+// inodes of the versions it linked, so a deleted room would otherwise keep an
+// old agent's files for good.
+func sweepSpaceTrees(workspacesRoot string, live map[string]bool, idle time.Duration, now time.Time) (removed int) {
+	comps, _ := os.ReadDir(filepath.Join(workspacesRoot, mountsHostDir))
+	for _, c := range comps {
+		base := filepath.Join(workspacesRoot, mountsHostDir, c.Name(), spacesDir)
+		spaces, _ := os.ReadDir(base)
+		for _, sp := range spaces {
+			if live[sp.Name()] {
+				continue
+			}
+			info, err := sp.Info()
+			if err != nil || now.Sub(info.ModTime()) < idle {
+				continue
+			}
+			if os.RemoveAll(filepath.Join(base, sp.Name())) == nil {
+				removed++
+			}
+		}
+	}
+	return removed
 }
 
 // linkTree copies the folder src to dst as hard links: folders are made, files
@@ -108,4 +142,42 @@ func linkTree(src, dst string) error {
 			return fmt.Errorf("%s is not a file, a folder or a link", p)
 		}
 	})
+}
+
+// sweepTrees removes the per-space trees of spaces the sandbox no longer has,
+// at most every spaceTreeSweepEvery. It lists the spaces of every machine the
+// bridge uses and does nothing unless every list was read: a tree is never
+// removed on a guess.
+func (s *sandboxRuntime) sweepTrees(ctx context.Context) {
+	if s.cfg.MountsDir == "" || s.cfg.WorkspacesRoot == "" {
+		return
+	}
+	s.mu.Lock()
+	due := s.now().Sub(s.treesSweptAt) >= spaceTreeSweepEvery
+	if due {
+		s.treesSweptAt = s.now()
+	}
+	s.mu.Unlock()
+	if !due {
+		return
+	}
+	live := map[string]bool{}
+	for _, machine := range []string{s.cfg.Machine, s.cfg.OwnMachine} {
+		if machine == "" {
+			continue
+		}
+		spaces, err := s.client.ListSpaces(ctx, s.endpoint(), machine, sandbox.Labels{})
+		if err != nil {
+			if sandbox.ErrorCodeOf(err) == sandbox.ErrorMachineNotFound {
+				continue // a machine that does not exist holds no space
+			}
+			return
+		}
+		for _, sp := range spaces {
+			live[sp.Name] = true
+		}
+	}
+	if n := sweepSpaceTrees(s.cfg.WorkspacesRoot, live, spaceTreeIdleAge, s.now()); n > 0 {
+		slog.Info("bnbloc bridge sandbox trees of deleted spaces removed", "event", "bnbloc.bridge.sandbox_trees_swept", "count", n)
+	}
 }

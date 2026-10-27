@@ -1148,9 +1148,21 @@ func (s *suite) ports(t *testing.T) {
 	if len(s.main.Ports) != 1 {
 		t.Fatalf("no port binding on the main machine")
 	}
-	// A one-response-per-connection HTTP responder on guest :8080. Background
-	// processes must not hold the exec's stdout/stderr open.
-	s.sh(t, s.main.ID, `(while true; do printf 'HTTP/1.0 200 OK\r\nContent-Length: 8\r\n\r\nport-ok\n' | nc -l -p 8080; done </dev/null >/dev/null 2>&1 &); sleep 0.3`)
+	// A one-response-per-connection HTTP responder on guest :8080 (busybox nc,
+	// else python3: a Debian image has no netcat). Background processes must not
+	// hold the exec's stdout/stderr open.
+	s.sh(t, s.main.ID, `if command -v nc >/dev/null 2>&1; then
+  (while true; do printf 'HTTP/1.0 200 OK\r\nContent-Length: 8\r\n\r\nport-ok\n' | nc -l -p 8080; done </dev/null >/dev/null 2>&1 &)
+elif command -v python3 >/dev/null 2>&1; then
+  (python3 -c "
+import socket
+s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); s.bind(('0.0.0.0', 8080)); s.listen(8)
+while True:
+    c, _ = s.accept(); c.recv(1024); c.sendall(b'HTTP/1.0 200 OK\r\nContent-Length: 8\r\n\r\nport-ok\n'); c.close()
+" </dev/null >/dev/null 2>&1 &)
+else
+  echo NORESPONDER; exit 3
+fi; sleep 0.5`)
 	b := s.main.Ports[0]
 	url := "http://" + net.JoinHostPort(b.HostIP, strconv.Itoa(b.HostPort)) + "/"
 	var body string

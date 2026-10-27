@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/luckylhb90/bnbloc/component"
 	corepkg "github.com/luckylhb90/bnbloc/core"
@@ -452,11 +453,17 @@ func TestContributedMounts_perSpaceTreesShareFilesAndNameTheirPath(t *testing.T)
 	if got, _ := os.ReadFile(prog); !strings.Contains(string(got), "v1") {
 		t.Error("the old version's files were touched")
 	}
-	if entries, _ := os.ReadDir(filepath.Dir(na[0].HostPath)); len(entries) != 2 { // the tree and its stamp
-		t.Errorf("the space's folder holds %d entries after an update, want the tree and its stamp", len(entries))
+	if entries, _ := os.ReadDir(filepath.Dir(na[0].HostPath)); len(entries) != 1 {
+		t.Errorf("the space's folder holds %d entries after an update, want only the new version's tree", len(entries))
 	}
-	if again, _, _ := read("b-2"); len(again) != 1 || again[0] != mb[0] {
-		t.Errorf("the other space's tree changed: %+v, want %+v", again, mb)
+	// The other space follows on its own next turn: a new source is a new host
+	// path, so the sandbox converges its mount instead of keeping a bind mount of a
+	// folder that was replaced underneath it.
+	if again, _, _ := read("b-2"); len(again) != 1 || again[0].HostPath == mb[0].HostPath || !strings.Contains(again[0].HostPath, "/b-2/") {
+		t.Errorf("the other space's tree: %+v, want a new path in its own folder (was %s)", again, mb[0].HostPath)
+	}
+	if _, err := os.Stat(mb[0].HostPath); err == nil {
+		t.Error("the other space's old tree is removed once its new one is in place")
 	}
 }
 
@@ -538,5 +545,81 @@ func TestSandbox_aMountAnotherRoomHoldsIsDroppedAndThePerSpaceOnesStay(t *testin
 	}
 	if prov.turns == 0 && len(prov.workdirs) == 0 {
 		t.Error("the turn ran")
+	}
+}
+
+// The trees of a deleted room go; a room that exists, or one being created, keeps them.
+func TestSweepSpaceTreesRemovesOnlyWhatNoSpaceOwns(t *testing.T) {
+	f := newMountFixture(t)
+	v := f.folder(t, "agents", "tool/1.0")
+	os.WriteFile(filepath.Join(v, "x"), []byte("x"), 0o644)
+	trees := map[string]string{}
+	for _, sp := range []string{"live", "gone", "new"} {
+		p, err := perSpaceTree(MountsHostRoot(f.root, "agents"), sp, f.guestRoot+"/tool", v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		trees[sp] = p
+	}
+	old := time.Now().Add(-3 * time.Hour)
+	for _, sp := range []string{"live", "gone"} {
+		os.Chtimes(filepath.Dir(trees[sp]), old, old)
+	}
+	n := sweepSpaceTrees(f.root, map[string]bool{"live": true}, time.Hour, time.Now())
+	if n != 1 {
+		t.Errorf("removed %d, want the one idle space nobody owns", n)
+	}
+	if _, err := os.Stat(trees["gone"]); err == nil {
+		t.Error("the deleted room's tree is still there")
+	}
+	for _, sp := range []string{"live", "new"} {
+		if _, err := os.Stat(trees[sp]); err != nil {
+			t.Errorf("%s: its tree was removed: %v", sp, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(v, "x")); err != nil {
+		t.Error("the component's own files are never touched")
+	}
+}
+
+// The bridge sweeps on its own, rarely, and only from a list it could read.
+func TestSandbox_theBridgeSweepsTheTreesOfDeletedSpacesFromTheSandboxsList(t *testing.T) {
+	sbx := newFakeSandboxd(t)
+	sbx.caps = append(sbx.advertised(), sandbox.CapabilityReadOnlyMounts)
+	prov := &sandboxProv{supports: true}
+	prov.targets = []corepkg.Target{{ID: "c", Provider: "codex"}}
+	b, f := mountBridge(t, sbx, SandboxAll, prov)
+	v := f.folder(t, "agents", "tool/1.0")
+	var trees []string
+	for _, sp := range []string{"kept", "deleted"} {
+		p, err := perSpaceTree(MountsHostRoot(f.root, "agents"), sp, f.guestRoot+"/tool", v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		os.Chtimes(filepath.Dir(p), time.Now().Add(-5*time.Hour), time.Now().Add(-5*time.Hour))
+		trees = append(trees, p)
+	}
+	f.descriptor(t, "agents", descriptor(desc{"host": v, "guest": f.guestRoot + "/tool", "perSpace": true}))
+	rt := b.sandbox
+	sbx.listed, sbx.listFails = []string{"kept"}, true
+	rt.sweepTrees(context.Background())
+	if _, err := os.Stat(trees[1]); err != nil {
+		t.Fatal("a list that could not be read removed a tree: never on a guess")
+	}
+	rt.treesSweptAt = time.Time{}
+	sbx.listFails = false
+	rt.sweepTrees(context.Background())
+	if _, err := os.Stat(trees[1]); err == nil {
+		t.Error("the deleted space's tree stays")
+	}
+	if _, err := os.Stat(trees[0]); err != nil {
+		t.Errorf("a space the sandbox lists keeps its tree: %v", err)
+	}
+	// And not again within the interval.
+	p, _ := perSpaceTree(MountsHostRoot(f.root, "agents"), "ghost", f.guestRoot+"/tool", v)
+	os.Chtimes(filepath.Dir(p), time.Now().Add(-5*time.Hour), time.Now().Add(-5*time.Hour))
+	rt.sweepTrees(context.Background())
+	if _, err := os.Stat(p); err != nil {
+		t.Error("swept again inside the interval")
 	}
 }

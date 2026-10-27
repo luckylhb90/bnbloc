@@ -201,6 +201,9 @@ type sandboxRuntime struct {
 	// readOnlyMounts is whether the probed sandbox advertises
 	// readOnlyMounts: only then are a component's mounts offered to a guest.
 	readOnlyMounts bool
+	// treesSweptAt is when the per-space trees of deleted spaces were last
+	// looked for (sandbox_linktree.go).
+	treesSweptAt time.Time
 
 	policyMu sync.Mutex
 	policy   map[string]sandboxPolicyEntry // tenant -> cached policy
@@ -367,6 +370,7 @@ func (s *sandboxRuntime) prepare(ctx context.Context, k driveKey, owner string, 
 	// What components contribute (read-only copies, at paths the member
 	// allows) is the guest's alone: the core's path mapping is the workspace.
 	space0 := len(mounts)
+	s.sweepTrees(ctx)
 	contributed, mountEnv := s.contributedMounts(workdir, space, borrowed)
 	mounts = append(mounts, contributed...)
 	// Every drive's commands reach the services' hosts through the

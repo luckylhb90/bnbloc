@@ -70,19 +70,38 @@ declared `"perSpace": true`:
 ```
 
 - The bridge gives each space a tree of **hard links** to the files of `host`,
-  under `<component folder>/.spaces/<space>/<slot>`: no second copy on disk
-  (measured: three spaces ran one 20 MB program, 20 MB on disk), no dependence
-  on APFS clones, the same on any file system. Links are recreated as links,
-  never followed; a file that is not a file, a folder or a link refuses the tree
-  (the mount is dropped, a tree made earlier stays).
+  under `<component folder>/.spaces/<space>/<slot>-<source>`: no second copy on
+  disk (measured: three spaces ran one 20 MB program, 20 MB on disk), no
+  dependence on APFS clones, the same on any file system. Links are recreated as
+  links, never followed; a file that is not a file, a folder or a link refuses the
+  tree (the mount is dropped, a tree made earlier stays).
 - The space's guest path is `guest` + `-` + the space's name, so no two spaces
   collide. `env` (only with `perSpace`, only `BNBLOC_MOUNT_<NAME>`, one name per
   mount) is set in the space to that path: a command line says
   `$BNBLOC_MOUNT_OPENCODE/bin/opencode` and means the same in every room.
-- A tree that records `host` as its source is reused untouched; a different
-  `host` (a new version, which is a new folder: **a version folder is never
-  changed in place**) replaces the tree of that slot whole, built beside it and
-  swapped in. The space has no process left from before when it is prepared, so
-  nothing runs from the tree that goes.
-- Not yet: trees of spaces that no longer exist are not removed (they hold the
-  inodes of old versions, nothing else).
+- The source is part of the tree's name, so a new version (**a version folder is
+  never changed in place**: a new version is a new folder) is a new host path:
+  the sandbox converges the space's mount to it on the space's next turn, and the
+  old tree of that slot is removed once the new one is in place. The space has no
+  process left from before when it is prepared, so nothing runs from the tree
+  that goes. A tree made of the same source is reused untouched.
+- **Trees of deleted spaces are swept**: at most every 30 minutes the bridge lists
+  the spaces of every machine it uses and, only if every list was read, removes
+  `<component>/.spaces/<space>` for a space not listed and idle for an hour (a
+  space being created has its trees before the sandbox lists it).
+
+### Why a fixed guest path stays one room's
+
+The guest is one machine with one mount namespace: a mount is a bind mount of the
+whole machine, so a guest path can only hold one thing, and its root is owned
+0700 by the space that mounted it. Letting several spaces share one read-only
+path would mean making it readable by every space of the machine, and the bridge
+cannot promise that is safe: when no machine of its own is configured, the
+member's own runs and runs they lend to others share the machine, so an
+own-only mount would be readable by a borrowed run. A mount at a fixed path
+(local skills' skill folders) therefore serves the first room that asks; the
+others run without it (see above), and a component that needs a folder in every
+room uses `perSpace`. Sharing a path across spaces would be a Sandbox Protocol
+feature (an explicit shared, world-readable, reference-counted read-only mount,
+offered only for what is meant for everyone), not a bridge change; it is not
+built.
