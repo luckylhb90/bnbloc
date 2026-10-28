@@ -23,6 +23,9 @@ import (
 // per-channel history, artifacts, and the activity ingest endpoints the drive
 // path posts to.
 type pullGateway struct {
+	// unlisted is a channel the listing leaves out (the reader may no
+	// longer read it).
+	unlisted  string
 	mu        sync.Mutex
 	history   map[string]string // channel -> rows json (pre-rendered pages)
 	artifacts string
@@ -79,6 +82,13 @@ func newPullGateway(t *testing.T) *pullGateway {
 		attachments: map[string]testAttachment{}, downloads: map[string]int{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/rooms/r1/channels", func(w http.ResponseWriter, r *http.Request) {
+		g.mu.Lock()
+		hidden := g.unlisted
+		g.mu.Unlock()
+		if hidden == "test" {
+			fmt.Fprint(w, `{"channels":[{"channelId":"general","name":"general"}]}`)
+			return
+		}
 		fmt.Fprint(w, `{"channels":[{"channelId":"general","name":"general"},{"channelId":"test","name":"test"}]}`)
 	})
 	mux.HandleFunc("GET /v1/rooms/r1/history", func(w http.ResponseWriter, r *http.Request) {
@@ -636,6 +646,32 @@ func TestMaterializeKeepsEveryChannelApart(t *testing.T) {
 	gen, gen2 := st.Channels["general"], st2.Channels["general"]
 	if gen2.EndSeq != 14 || len(gen2.Chunks) != len(gen.Chunks)+1 || st2.Channels["test"].EndSeq != 13 || !strings.Contains(fileOf(".room/channels/general/recent.md"), "my next reply") {
 		t.Fatalf("continued pass: state %+v after %+v", st2, st)
+	}
+
+	// The reader loses a channel (a members-only section the requester is
+	// not in, channels PRD §2.1a "Leaving"): its files are blanked, nothing
+	// of it stays in the workspace, and it leaves the state and INDEX.
+	g.mu.Lock()
+	g.unlisted = "test"
+	g.mu.Unlock()
+	testChunks := st2.Channels["test"].Chunks
+	st3, _, _, err := b.materializeRoomContext(context.Background(), w, ep, "r1", "ws", "job-z", "general", 0, 0, "", self, st2, roomlog.Guidance{HasRoomFiles: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, kept := st3.Channels["test"]; kept {
+		t.Fatalf("a channel the reader lost stays in the state: %+v", st3.Channels)
+	}
+	if got := fileOf(".room/channels/test/recent.md"); got != "" {
+		t.Fatalf("the lost channel's recent.md still holds:\n%s", got)
+	}
+	for _, name := range testChunks {
+		if got := fileOf(name); got != "" {
+			t.Fatalf("the lost channel's chunk %s still holds:\n%s", name, got)
+		}
+	}
+	if idx := fileOf(".room/INDEX.md"); strings.Contains(idx, "#test") {
+		t.Fatalf("INDEX.md still lists the lost channel:\n%s", idx)
 	}
 }
 

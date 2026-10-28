@@ -287,6 +287,14 @@ func (b *Bridge) materializeRoomContext(ctx context.Context, w corepkg.Workspace
 		next.Channels[r.ch.ID] = rec
 		index = append(index, rec)
 	}
+	// A channel the previous pass wrote that this reader may not read any
+	// more (left the listing) is blanked, so nothing it cannot read stays in
+	// the workspace.
+	for id, rec := range st.Channels {
+		if _, kept := next.Channels[id]; !kept {
+			files = append(files, roomlog.ForgetChannel(rec)...)
+		}
+	}
 	records, recorded := b.roomRecordFiles(ctx, room, jobID, self, st, g, cp)
 	next.ReadmeSum, next.AppsListed, next.ContractsSum = recorded.ReadmeSum, recorded.AppsListed, recorded.ContractsSum
 	files = append(append(files, records...), roomlog.IndexFile(index))
