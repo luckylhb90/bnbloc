@@ -90,17 +90,19 @@ export function CopyButton({ text }: { text: string }) {
 }
 
 // PeopleOnlyMarker flags a member's message addressed to people only: the
-// agent reads it as room context but no reply is coming.
-function PeopleOnlyMarker() {
+// agent reads it as room context but no reply is coming. It says so in a
+// word, not an icon alone: a bare icon read as "the agent did not answer"
+// (QA 2026-10-28). `compact` is the grouped row's gutter, too narrow for it.
+function PeopleOnlyMarker({ compact = false }: { readonly compact?: boolean }) {
   return (
     <span
       data-people-only
-      title="No agent reply requested"
-      aria-label="No agent reply requested"
-      role="img"
-      className="inline-flex items-center text-[var(--color-fg-subtle)]"
+      title="Sent to people: the agent reads it but won't reply"
+      aria-label="Sent to people: the agent reads it but won't reply"
+      className="inline-flex items-center gap-1 text-[var(--color-fg-subtle)]"
     >
       <UsersIcon size={12} />
+      {!compact && <span aria-hidden="true">People</span>}
     </span>
   );
 }
@@ -455,7 +457,7 @@ export const Message = memo(function Message({
         </span>
       )}
       {grouped ? (
-        <div className="flex w-7 shrink-0 justify-center pt-1">{peopleMarker && <PeopleOnlyMarker />}</div>
+        <div className="flex w-7 shrink-0 justify-center pt-1">{peopleMarker && <PeopleOnlyMarker compact />}</div>
       ) : (
         <Avatar label={item.author} agent={isAgent} />
       )}
