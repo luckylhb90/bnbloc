@@ -26,11 +26,16 @@ import (
 // requester's, counts against their limits, runs with their rights and spends
 // their assist budget.
 //
-//	GET    /v1/rooms/{id}                    the room: its description, welcome and quick prompts
-//	PATCH  /v1/rooms/{id}                    its description only (the owner's)
+//	GET    /v1/rooms/{id}                    the room: its description, welcome, quick prompts and rules
+//	PATCH  /v1/rooms/{id}                    its description (the owner's), or its rules and recommended
+//	                                         channels (the owner's or an admin's): one of the two kinds
 //	PATCH  /v1/rooms/{id}/welcome            its welcome and quick prompts (the owner's or an admin's)
-//	GET    /v1/rooms/{id}/channels           its channels
+//	GET    /v1/rooms/{id}/channels           its channels and sections (?archived=1 the archived)
 //	POST   /v1/rooms/{id}/channels           a new channel
+//	PATCH  /v1/rooms/{id}/channels/{cid}     a channel's setup: name, purpose, rules, section, position,
+//	                                         settings (never its owner: who answers for it is the person's)
+//	POST   /v1/rooms/{id}/channels/{cid}/archive|restore
+//	                                         archive or restore a channel
 //	GET    /v1/rooms/{id}/schedules          the room's schedules
 //	POST   /v1/rooms/{id}/schedules          a new schedule: an AI task, a notice or a request to one of the room's agents
 //	DELETE /v1/rooms/{id}/schedules/{sid}    one of the requester's own
@@ -44,7 +49,10 @@ import (
 //
 // Nothing else is opened: the room's name, visibility and sync, its members,
 // a schedule that posts as the person, editing or running a schedule stay the
-// person's. A request to an agent asks one of the room's agents online now,
+// person's; so do deleting a channel, a channel's owner, the room's agreement
+// switch and channel creation policy, sections and who follows what
+// (docs/prd/2026-10-28-channels-and-threads.md §2.6: deleting is a person's
+// click, and a section's membership is consent about who reads what). A request to an agent asks one of the room's agents online now,
 // the ones the room's Schedules dialog offers the person (agentScheduleTarget). A notice goes where the person could send one
 // themselves (the room, their organization's logins, a group chat their room
 // connected), through the one notify path. Every change spends the requester's
@@ -63,7 +71,15 @@ func (p apiPath) isAgentDoor(method string) bool {
 	case "welcome":
 		return n == 4 && method == http.MethodPatch
 	case "channels":
-		return n == 4 && (get || method == http.MethodPost)
+		switch n {
+		case 4:
+			return get || method == http.MethodPost
+		case 5:
+			return method == http.MethodPatch
+		case 6:
+			return method == http.MethodPost && (p.segs[5] == "archive" || p.segs[5] == "restore")
+		}
+		return false
 	case "schedules":
 		return (n == 4 && (get || method == http.MethodPost)) || (n == 5 && method == http.MethodDelete)
 	case "groups":
@@ -72,13 +88,21 @@ func (p apiPath) isAgentDoor(method string) bool {
 	return false
 }
 
-// agentChange is what a door change is, as its audit names it.
-func (p apiPath) agentChange(method string) (action, what string) {
+// agentChange is what a door change is, as its audit names it. A room patch
+// is the description or the room's rules (agentChangeAllowed admits one
+// kind per request), told apart by its body.
+func (p apiPath) agentChange(method string, roomRules bool) (action, what string) {
 	switch {
+	case p.RoomSub == "" && roomRules:
+		return "set-rules", "the rules and recommended channels"
 	case p.RoomSub == "":
 		return "set-description", "the description"
 	case p.RoomSub == "welcome":
 		return "set-welcome", "the welcome and quick prompts"
+	case p.RoomSub == "channels" && len(p.segs) == 6:
+		return p.segs[5] + "-channel", "a channel's archive"
+	case p.RoomSub == "channels" && method == http.MethodPatch:
+		return "set-channel", "a channel's setup"
 	case p.RoomSub == "channels":
 		return "add-channel", "a channel"
 	case method == http.MethodDelete:
@@ -107,52 +131,86 @@ func (s *Service) agentDoor(w http.ResponseWriter, r *http.Request, p apiPath, c
 	if r.Method == http.MethodGet {
 		return actor.Claims, nil, true
 	}
-	if !s.agentChangeAllowed(w, r, p, actor.Claims) || !s.spend(w, actor.Claims, costBudget) {
+	roomRules, allowed := s.agentChangeAllowed(w, r, p, actor.Claims)
+	if !allowed || !s.spend(w, actor.Claims, costBudget) {
 		return caller, nil, false
 	}
-	action, what := p.agentChange(r.Method)
+	action, what := p.agentChange(r.Method, roomRules)
 	return actor.Claims, func(status int) { s.auditAgentSetup(r, actor, p.RoomID, action, what, okStatus(status)) }, true
 }
 
 // agentChangeAllowed applies the door's own limits to a change: a schedule
 // is an AI task, a notice or a request to an agent of the room the
-// requester (claims) may ask (agentScheduleTarget), and a room patch
-// changes the description only. The body is read to check and put back
-// for the proxy.
-func (s *Service) agentChangeAllowed(w http.ResponseWriter, r *http.Request, p apiPath, claims auth.Claims) bool {
-	if (p.RoomSub != "schedules" && p.RoomSub != "") || r.Method == http.MethodDelete {
-		return true
+// requester (claims) may ask (agentScheduleTarget); a room patch changes
+// the description alone, or the room's rules and recommended channels
+// (roomRules); a channel patch never names the channel's owner. The body is
+// read to check and put back for the proxy.
+func (s *Service) agentChangeAllowed(w http.ResponseWriter, r *http.Request, p apiPath, claims auth.Claims) (roomRules, ok bool) {
+	channelPatch := p.RoomSub == "channels" && r.Method == http.MethodPatch
+	if (p.RoomSub != "schedules" && p.RoomSub != "" && !channelPatch) || r.Method == http.MethodDelete {
+		return false, true
 	}
 	raw, err := io.ReadAll(io.LimitReader(r.Body, maxAgentDoorBody+1))
 	if err != nil || len(raw) > maxAgentDoorBody {
 		httpx.Error(w, "the change is too large", http.StatusRequestEntityTooLarge)
-		return false
+		return false, false
 	}
 	r.Body = io.NopCloser(bytes.NewReader(raw))
 	r.ContentLength = int64(len(raw))
 	if p.RoomSub == "" {
+		return roomPatchAllowed(w, raw)
+	}
+	if channelPatch {
 		var fields map[string]json.RawMessage
-		if json.Unmarshal(raw, &fields) != nil || len(fields) != 1 || fields["description"] == nil {
-			httpx.Error(w, "an agent changes a room's description only: its name, visibility and sync are the person's to change", http.StatusForbidden)
-			return false
+		if json.Unmarshal(raw, &fields) != nil {
+			httpx.Error(w, "invalid json body", http.StatusBadRequest)
+			return false, false
 		}
-		return true
+		if _, ok := fields["ownerId"]; ok {
+			httpx.Error(w, "an agent does not change who owns a channel: that is the person's to do in the room", http.StatusForbidden)
+			return false, false
+		}
+		return false, true
 	}
 	var in struct {
 		Recipient wire.ScheduleRecipient `json:"recipient"`
 	}
 	if json.Unmarshal(raw, &in) != nil {
 		httpx.Error(w, "invalid json body", http.StatusBadRequest)
-		return false
+		return false, false
 	}
 	switch in.Recipient.Kind {
 	case wire.ScheduleRecipientAI, wire.ScheduleRecipientNotice:
-		return true
+		return false, true
 	case wire.ScheduleRecipientAgent:
-		return s.agentScheduleTarget(w, r, claims, p.RoomID, in.Recipient)
+		return false, s.agentScheduleTarget(w, r, claims, p.RoomID, in.Recipient)
 	}
 	httpx.Error(w, `an agent schedules AI tasks, notices and requests to an agent only (recipient kind "ai", "notice" or "agent"): a schedule that posts as the person is theirs to create`, http.StatusForbidden)
-	return false
+	return false, false
+}
+
+// roomPatchAllowed admits a room patch an agent makes: the description
+// alone (the owner's), or the room's rules and recommended channels (the
+// owner's or an admin's), never both in one request, so the audit names one
+// change. The agreement switch and the channel creation policy stay the
+// person's (decision: pending owner; §2.6 names the rules and the
+// recommended channels only, and the fail-closed reading keeps the rest).
+func roomPatchAllowed(w http.ResponseWriter, raw []byte) (roomRules, ok bool) {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) != nil || len(fields) == 0 {
+		httpx.Error(w, "invalid json body", http.StatusBadRequest)
+		return false, false
+	}
+	if len(fields) == 1 && fields["description"] != nil {
+		return false, true
+	}
+	for name := range fields {
+		if name != "rules" && name != "recommendedChannels" {
+			httpx.Error(w, "an agent changes a room's description, or its rules and recommended channels: its name, visibility, sync, agreement switch and channel creation are the person's to change", http.StatusForbidden)
+			return false, false
+		}
+	}
+	return true, true
 }
 
 // agentScheduleTarget admits a request to an agent an agent schedules for

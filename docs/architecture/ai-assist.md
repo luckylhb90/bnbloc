@@ -72,7 +72,7 @@ task declares and relays the reply. Nothing else calls a model.
   gateway runs it itself (`runConsentJSON`).
 - **Output contracts** (`wire.AssistContracts`,
   docs/prd/2026-10-20-no-built-in-content.md §2.3): the platform ships no
-  assist prompt, only the 13 task names its web and gateway run
+  assist prompt, only the 16 task names its web and gateway run
   (`wire.AssistTask*`, generated into `wire.gen.ts`) and what each must
   answer: its `output`, the reply fields the caller reads with their types
   and item fields, whether it must have a gate (a caller runs it gated) and

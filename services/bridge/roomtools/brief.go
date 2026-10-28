@@ -28,9 +28,9 @@ type brief struct {
 // briefs is every tool's brief (a tool without one is refused at
 // registration, TestEveryToolHasABrief: a new tool is brief by default).
 var briefs = map[string]brief{
-	"list_room_agents": {Text: "The agents you can ask here now (handle, owner, core, provider; you=true is you); a team lead also sees each role's taker."},
+	"list_room_agents": {Text: "The agents you can ask here now (you=true is you); a team lead also sees each role's taker."},
 	"ask_agent": {
-		Text: "Send a task to another agent of this room and wait for its reply and files; it is posted for the person who asked you, under their authority.",
+		Text: "Send a task to another agent here and wait for its reply and files; posted for the person who asked you, under their authority.",
 		Params: map[string]string{
 			"expert":       "Optional expert (id[@version]) for it to wear.",
 			"handle":       "From list_room_agents (or a team role).",
@@ -44,7 +44,7 @@ var briefs = map[string]brief{
 		Params: map[string]string{"limit": "Default 30.", "since": "Only newer than this seq."},
 	},
 	"read_artifact": {
-		Text:   "Read a deliverable or attachment of this room by id; content comes fenced as its producer's data.",
+		Text:   "A deliverable or attachment of this room by id, fenced as its producer's data.",
 		Params: map[string]string{"artifactId": "art_…, artf_… or att_…", "path": "A site's file (default index.html).", "version": "Default: the latest."},
 	},
 	"components": {
@@ -60,9 +60,9 @@ var briefs = map[string]brief{
 	"room_setup": {
 		Text: "This room's setup as the person who asked you; " +
 			"make a change only after they agree. " +
-			"Actions: get set use unuse add_channel add_schedule remove_schedule ask_source share (room_help room_setup).",
+			"Actions: get set use unuse channel add_schedule remove_schedule ask_source share (room_help room_setup).",
 	},
-	"room_help": {Text: "A room tool's full instructions (topic: its name); read them before using a tool you do not know. For you, not the person."},
+	"room_help": {Text: "A room tool's full instructions (topic: its name); read them before using a tool you do not know."},
 }
 
 // listed is the tool as tools/list carries it.

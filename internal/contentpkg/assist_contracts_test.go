@@ -69,8 +69,8 @@ func TestAssistContractsAreWellFormed(t *testing.T) {
 		}
 		check("", c.Fields)
 	}
-	if len(seen) != 13 {
-		t.Errorf("%d contracts, want the 13 tasks the web and the gateway run", len(seen))
+	if len(seen) != 16 {
+		t.Errorf("%d contracts, want the 16 tasks the web and the gateway run", len(seen))
 	}
 }
 

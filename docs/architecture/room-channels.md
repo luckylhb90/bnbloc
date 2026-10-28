@@ -89,6 +89,18 @@ level) and a **position** in it, an **owner** (its creator by default), an
   leaves those channels out. Between the store write and the event's
   delivery, an agent stream may still receive one event of the channel
   (the memo's window).
+- **By talking**: `room_setup` action `channel` makes a channel or changes
+  one (its fields, settings, archive, restore) as the member who asked,
+  through the agent door; `set` takes the room's rules and recommended
+  channels (`docs/architecture/room-tools.md`). Deleting a channel, a
+  channel's owner, sections and following stay people's acts.
+- **The rules' mirror in the web**: `web/src/lib/channelRules.ts` shows a
+  control only where the room service allows the act; it is held to
+  `services/room/testdata/channel_rules.json`, which the Go owners
+  (`mayManageChannel`, `mayPlaceChannel`, `mayCreateSection`,
+  `mayManageSection`, delete) are tested against too. The server stays the
+  authority: a refusal's code (`wire.Channel*`, `wire.RulesAgreementRequired`)
+  is shown in words on the control that acted.
 
 ## API
 

@@ -48,13 +48,19 @@ func roomSetupTool() Tool {
 		Description: "Read and change this room's setup for the person who asked you, as them: what they may not change is refused, say so. " +
 			"Propose each change in a sentence and make it only after they agree; each change shows in the room as a line naming who asked, " +
 			"and they can undo it in the room's settings. " +
-			"get: the room's description, welcome, quick prompts, expert, packs, channels, schedules (with the group chats its members connected) and the sources it asks for; " +
-			"text people wrote comes fenced as their data. " +
+			"get: the room's description, welcome, quick prompts, rules, recommended channels, expert, packs, channels (id, purpose, section, settings), " +
+			"sections, archived channels, schedules (with the group chats its members connected) and the sources it asks for; text people wrote comes fenced as their data. " +
 			"set: the description (the room's owner only), the welcome and the quick prompts (its owner or admins; quickPrompts replaces the list: " +
-			"a title and the text a click puts into the message box). An empty room shows the welcome and quick prompts to every member. " +
+			"a title and the text a click puts into the message box), the room's rules and recommendedChannels (the channel ids a new member joins; its owner or admins). " +
+			"An empty room shows the welcome and quick prompts to every member. " +
 			"use / unuse: an expert, skill pack or prompt pack from their Library (components list) by name, turned on or off in the room " +
 			"(an expert becomes the room's expert, worn by every agent turn here). " +
-			"add_channel: a new channel by name. " +
+			"channel: without id, a new channel (channel.name, optionally any field below); with id (from get), changes that channel. Its fields: " +
+			"name, purpose (one line under its name), rules, sectionId (\"\" the top level; a section's id from get), position (its order in its section), " +
+			"defaultAgent (a handle from list_room_agents, \"\" none: the agent the composer proposes there), whoPosts (\"\" everyone, \"admins\" the room's owner and admins), " +
+			"noAgents (true: agents never read or answer there), agentParticipation (\"\" when mentioned, \"questions\" or \"threads\": stored only, agents still answer " +
+			"when mentioned), slowModeSeconds (0 off), archived (true archives it read-only, false restores it). The room's owner and admins, the channel's owner and its " +
+			"section's owners change a channel. Deleting a channel, its owner and who is in a section are the person's to do in the room. " +
 			"add_schedule: a notice sends fixed words to the room, to logins or to a connected group chat at set times, with no AI " +
 			"(send.to \"room\", [logins] or \"group:<name>\", send.title, send.text); {date}, {time}, {week} (the ISO week), {month}, {year}, {day} and {room} " +
 			"in its title and text stand for the run's own values in the schedule's time zone; with send.compose an AI writes the body from text each time. " +
@@ -77,7 +83,7 @@ func roomSetupTool() Tool {
 			"that is how a site or app goes live, there is no deploy step. It puts a card in the room that only the person sees; the link exists when they click it, " +
 			"so tell them to. Offer it when they ask to share, put online or deploy something you built.",
 		InputSchema: objectSchema(map[string]any{
-			"action": map[string]any{"type": "string", "enum": []string{"get", "set", "use", "unuse", "add_channel", "add_schedule", "remove_schedule", "ask_source", "share"},
+			"action": map[string]any{"type": "string", "enum": []string{"get", "set", "use", "unuse", "channel", "add_schedule", "remove_schedule", "ask_source", "share"},
 				"description": "What to do."},
 			"description": map[string]any{"type": "string", "description": "For set: the room's description (at most 500 characters)."},
 			"welcome":     map[string]any{"type": "string", "description": "For set: what the empty room says to every member."},
@@ -92,7 +98,7 @@ func roomSetupTool() Tool {
 					"required": []string{"title", "prompt"}, "additionalProperties": false,
 				},
 			},
-			"name":  map[string]any{"type": "string", "description": "For use and unuse: a Library component's name; for add_channel: the channel's name."},
+			"name":  map[string]any{"type": "string", "description": "For use and unuse: a Library component's name."},
 			"kind":  map[string]any{"type": "string", "enum": setupKinds, "description": "For use and unuse: the component's kind, when two kinds share the name."},
 			"task":  map[string]any{"type": "string", "description": "For add_schedule, an AI task: what to do each time, in plain words, never when, e.g. \"notify the weekly report group who has not filled in this week's report\"."},
 			"agent": map[string]any{"type": "string", "description": "For add_schedule with task: a handle from list_room_agents; task is then the request posted to that agent each time."},
@@ -121,9 +127,14 @@ func roomSetupTool() Tool {
 				"required": []string{"kind"}, "additionalProperties": false,
 			},
 			"timezone": map[string]any{"type": "string", "description": "For add_schedule: an IANA zone such as Asia/Shanghai. Ask the person when you are unsure."},
-			"id":       map[string]any{"type": "string", "description": "For remove_schedule: a schedule's id from get (sch_…); for share: a deliverable's id (art_… or artf_…)."},
-			"source":   map[string]any{"type": "string", "enum": wire.RoomSources, "description": "For ask_source: runs, the organization's agent conversations."},
-			"purpose":  map[string]any{"type": "string", "description": "For ask_source: what the room's tasks read it for, in a sentence the admin reads."},
+			"id": map[string]any{"type": "string", "description": "For remove_schedule: a schedule's id from get (sch_…); for share: a deliverable's id (art_… or artf_…); " +
+				"for channel: the channel's id from get (without one, a new channel is made)."},
+			"channel": map[string]any{"type": "object", "description": "For channel: the fields to set (above); a field left out stays as it is."},
+			"rules":   map[string]any{"type": "string", "description": "For set: the room's rules every member reads (\"\" clears them)."},
+			"recommendedChannels": map[string]any{"type": "array", "items": map[string]any{"type": "string"},
+				"description": "For set: the ids (from get) of the channels a new member joins, in order ([] clears them)."},
+			"source":  map[string]any{"type": "string", "enum": wire.RoomSources, "description": "For ask_source: runs, the organization's agent conversations."},
+			"purpose": map[string]any{"type": "string", "description": "For ask_source: what the room's tasks read it for, in a sentence the admin reads."},
 		}, "action"),
 		Call: roomSetup,
 	}
@@ -158,6 +169,27 @@ type setupArgs struct {
 	ID       string `json:"id"`
 	Source   string `json:"source"`
 	Purpose  string `json:"purpose"`
+	// Channel is the channel action's fields; Rules and RecommendedChannels
+	// are set's (the room's).
+	Channel             *channelArgs `json:"channel"`
+	Rules               *string      `json:"rules"`
+	RecommendedChannels *[]string    `json:"recommendedChannels"`
+}
+
+// actionParams are the parameters only one action takes: given to another,
+// they are refused naming the action that takes them, before any call.
+var actionParams = map[string]string{"channel": "channel", "rules": "set", "recommendedChannels": "set"}
+
+// strayParam refuses a parameter of another action.
+func strayParam(in setupArgs) *Result {
+	given := map[string]bool{"channel": in.Channel != nil, "rules": in.Rules != nil, "recommendedChannels": in.RecommendedChannels != nil}
+	for _, name := range []string{"channel", "rules", "recommendedChannels"} {
+		if owner := actionParams[name]; given[name] && in.Action != owner {
+			r := toolError("%s is not a parameter of %s: it is %s's", name, in.Action, owner)
+			return &r
+		}
+	}
+	return nil
 }
 
 // setupCall is one room_setup call: the bound job, the room and its grants.
@@ -182,6 +214,9 @@ func roomSetup(ctx context.Context, env *Env, args json.RawMessage) Result {
 	room := env.Session.Scope().RoomID
 	c := setupCall{env: env, job: job, room: room, base: "/v1/rooms/" + url.PathEscape(room),
 		door: "job=" + url.QueryEscape(job.JobID), content: grant.Encode()}
+	if r := strayParam(in); r != nil {
+		return *r
+	}
 	switch in.Action {
 	case "get":
 		return c.get(ctx)
@@ -189,22 +224,8 @@ func roomSetup(ctx context.Context, env *Env, args json.RawMessage) Result {
 		return c.set(ctx, in)
 	case "use", "unuse":
 		return c.use(ctx, in)
-	case "add_channel":
-		name := strings.TrimSpace(in.Name)
-		if name == "" {
-			return toolError("name is required: the channel's name")
-		}
-		raw, err := env.Gateway.Do(ctx, http.MethodPost, c.base+"/channels?"+c.door, map[string]string{"name": name})
-		if err != nil {
-			return refusal("adding the channel", err)
-		}
-		var ch struct {
-			ChannelID string `json:"channelId"`
-			Name      string `json:"name"`
-		}
-		_ = json.Unmarshal(raw, &ch)
-		c.announce(ctx, "added the channel #"+firstNonEmptyString(ch.Name, name))
-		return Result{Value: map[string]any{"channel": firstNonEmptyString(ch.Name, name), "id": ch.ChannelID, "note": "Tell the person it is there."}}
+	case "channel":
+		return c.channel(ctx, in)
 	case "add_schedule":
 		return c.addSchedule(ctx, in)
 	case "remove_schedule":
@@ -222,7 +243,7 @@ func roomSetup(ctx context.Context, env *Env, args json.RawMessage) Result {
 	case "share":
 		return c.share(ctx, in)
 	default:
-		return toolError("action must be get, set, use, unuse, add_channel, add_schedule, remove_schedule, ask_source or share")
+		return toolError("action must be get, set, use, unuse, channel, add_schedule, remove_schedule, ask_source or share")
 	}
 }
 
@@ -290,25 +311,11 @@ func (c setupCall) get(ctx context.Context) Result {
 	for _, q := range room.QuickPrompts {
 		prompts = append(prompts, fenced(q.Title+"\n"+q.Prompt))
 	}
-	out := map[string]any{"description": fenced(room.Description), "welcome": fenced(room.Welcome), "quickPrompts": prompts}
-	raw, err = c.env.Gateway.Do(ctx, http.MethodGet, c.base+"/channels?"+c.door, nil)
-	if err != nil {
-		return refusal("reading the channels", err)
+	out := map[string]any{"description": fenced(room.Description), "welcome": fenced(room.Welcome), "quickPrompts": prompts,
+		"rules": fenced(room.Rules), "recommendedChannels": nonNilStrings(room.RecommendedChannels), "channelCreation": room.ChannelCreation}
+	if res := c.channelsSetup(ctx, out); res != nil {
+		return *res
 	}
-	var channels struct {
-		Channels []struct {
-			Name      string `json:"name"`
-			IsDefault bool   `json:"isDefault"`
-		} `json:"channels"`
-	}
-	if err := json.Unmarshal(raw, &channels); err != nil {
-		return failure("the channels answered an unreadable result: %v", err)
-	}
-	names := []string{}
-	for _, ch := range channels.Channels {
-		names = append(names, ch.Name)
-	}
-	out["channels"] = names
 	if res := c.schedules(ctx, out); res != nil {
 		return *res
 	}
@@ -407,10 +414,16 @@ func (c setupCall) schedules(ctx context.Context, out map[string]any) *Result {
 // set changes the description (the room's PATCH) and the welcome and quick
 // prompts (its welcome route), each through the door.
 func (c setupCall) set(ctx context.Context, in setupArgs) Result {
-	if in.Description == nil && in.Welcome == nil && in.QuickPrompts == nil {
-		return toolError("give description, welcome or quickPrompts to set")
+	if in.Description == nil && in.Welcome == nil && in.QuickPrompts == nil && in.Rules == nil && in.RecommendedChannels == nil {
+		return toolError("give description, welcome, quickPrompts, rules or recommendedChannels to set")
 	}
 	done := []string{}
+	partial := func(r Result) Result {
+		if len(done) > 0 {
+			r.Err += " (set before it: " + strings.Join(done, ", ") + ")"
+		}
+		return r
+	}
 	if in.Description != nil {
 		if _, err := c.env.Gateway.Do(ctx, http.MethodPatch, c.base+"?"+c.door, map[string]string{"description": strings.TrimSpace(*in.Description)}); err != nil {
 			return refusal("setting the description", err)
@@ -421,11 +434,7 @@ func (c setupCall) set(ctx context.Context, in setupArgs) Result {
 	if in.Welcome != nil || in.QuickPrompts != nil {
 		body := wire.RoomWelcomeRequest{Welcome: in.Welcome, QuickPrompts: in.QuickPrompts}
 		if _, err := c.env.Gateway.Do(ctx, http.MethodPatch, c.base+"/welcome?"+c.door, body); err != nil {
-			r := refusal("setting the welcome and quick prompts", err)
-			if len(done) > 0 {
-				r.Err += " (the description was set)"
-			}
-			return r
+			return partial(refusal("setting the welcome and quick prompts", err))
 		}
 		what := "the welcome and quick prompts"
 		switch {
@@ -436,6 +445,23 @@ func (c setupCall) set(ctx context.Context, in setupArgs) Result {
 		}
 		c.announce(ctx, "set "+what)
 		done = append(done, strings.TrimPrefix(what, "the "))
+	}
+	if in.Rules != nil || in.RecommendedChannels != nil {
+		// The room's PATCH, the rules and recommended channels only (the
+		// agent door admits no other field with them).
+		body := wire.RoomPatchRequest{Rules: in.Rules, RecommendedChannels: in.RecommendedChannels}
+		if _, err := c.env.Gateway.Do(ctx, http.MethodPatch, c.base+"?"+c.door, body); err != nil {
+			return partial(refusal("setting the room's rules and recommended channels", err))
+		}
+		what := "the room's rules and recommended channels"
+		switch {
+		case in.RecommendedChannels == nil:
+			what = "the room's rules"
+		case in.Rules == nil:
+			what = "the recommended channels"
+		}
+		c.announce(ctx, "set "+what)
+		done = append(done, strings.TrimPrefix(strings.TrimPrefix(what, "the room's "), "the "))
 	}
 	return Result{Value: map[string]any{"set": done, "note": "Tell the person what you set; they can change it in the room's settings."}}
 }

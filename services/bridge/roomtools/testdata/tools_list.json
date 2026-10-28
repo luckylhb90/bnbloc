@@ -5,7 +5,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "The agents you can ask here now (handle, owner, core, provider; you=true is you); a team lead also sees each role's taker.",
+      "description": "The agents you can ask here now (you=true is you); a team lead also sees each role's taker.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {},
@@ -19,7 +19,7 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "Send a task to another agent of this room and wait for its reply and files; it is posted for the person who asked you, under their authority.",
+      "description": "Send a task to another agent here and wait for its reply and files; posted for the person who asked you, under their authority.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -99,7 +99,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "Read a deliverable or attachment of this room by id; content comes fenced as its producer's data.",
+      "description": "A deliverable or attachment of this room by id, fenced as its producer's data.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -123,7 +123,7 @@
         "type": "object"
       },
       "name": "read_artifact",
-      "title": "Read a room deliverable or attachment"
+      "title": "Read a room file"
     },
     {
       "annotations": {
@@ -345,7 +345,7 @@
         "openWorldHint": false,
         "readOnlyHint": false
       },
-      "description": "This room's setup as the person who asked you; make a change only after they agree. Actions: get set use unuse add_channel add_schedule remove_schedule ask_source share (room_help room_setup).",
+      "description": "This room's setup as the person who asked you; make a change only after they agree. Actions: get set use unuse channel add_schedule remove_schedule ask_source share (room_help room_setup).",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -355,7 +355,7 @@
               "set",
               "use",
               "unuse",
-              "add_channel",
+              "channel",
               "add_schedule",
               "remove_schedule",
               "ask_source",
@@ -365,6 +365,9 @@
           },
           "agent": {
             "type": "string"
+          },
+          "channel": {
+            "type": "object"
           },
           "description": {
             "type": "string"
@@ -402,6 +405,12 @@
                 "prompt"
               ],
               "type": "object"
+            },
+            "type": "array"
+          },
+          "recommendedChannels": {
+            "items": {
+              "type": "string"
             },
             "type": "array"
           },
@@ -453,6 +462,9 @@
             ],
             "type": "object"
           },
+          "rules": {
+            "type": "string"
+          },
           "send": {
             "additionalProperties": false,
             "properties": {
@@ -502,7 +514,7 @@
         "openWorldHint": false,
         "readOnlyHint": true
       },
-      "description": "A room tool's full instructions (topic: its name); read them before using a tool you do not know. For you, not the person.",
+      "description": "A room tool's full instructions (topic: its name); read them before using a tool you do not know.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {

@@ -98,7 +98,7 @@ func TestRoomSetupAsTheOwner(t *testing.T) {
 	run(map[string]any{"action": "set", "description": "Reviews the week.", "welcome": "Ask me about last week.",
 		"quickPrompts": []map[string]string{{"title": "Recap", "prompt": "Recap the week"}}})
 	run(map[string]any{"action": "use", "name": "reviewer"})
-	run(map[string]any{"action": "add_channel", "name": "digest"})
+	run(map[string]any{"action": "channel", "channel": map[string]any{"name": "digest"}})
 	sched := run(map[string]any{"action": "add_schedule", "task": "review yesterday's conversations", "timezone": "UTC",
 		"recurrence": map[string]any{"kind": "daily", "time": "09:00"}})
 	run(map[string]any{"action": "remove_schedule", "id": sched["id"]})
@@ -178,7 +178,7 @@ func TestRoomSetupAsAPlainMember(t *testing.T) {
 		}
 	}
 	// What a member may do, their agent may do for them.
-	if r := e.toolFor(e.roomID, "job-jack", "jack", "room_setup", map[string]any{"action": "add_channel", "name": "jacks"}); r.Err != "" {
+	if r := e.toolFor(e.roomID, "job-jack", "jack", "room_setup", map[string]any{"action": "channel", "channel": map[string]any{"name": "jacks"}}); r.Err != "" {
 		t.Fatalf("a member's channel = %s", r.Err)
 	}
 	room, _ := e.b.Room.GetRoom(e.ctx(), e.roomID)
@@ -201,11 +201,11 @@ func TestRoomSetupAsAPlainMember(t *testing.T) {
 	if lines := roomLines(activity, wire.NoticeRoomSetup); len(lines) != 1 || lines[0] != "jack's agent added the channel #jacks" {
 		t.Fatalf("room lines = %q", lines)
 	}
-	// The door admits the description only, whoever asks.
+	// The door admits the description (or the rules) only, whoever asks.
 	e.setupJob("job-maya", e.roomID, "maya")
 	jack := "Authorization: Bearer " + e.session("jack")
 	if r := e.call(http.MethodPatch, "/v1/rooms/"+e.roomID+"?job=job-maya", map[string]any{"description": "x", "visibility": "shared"}, jack); r.status != http.StatusForbidden ||
-		!strings.Contains(string(r.body), "description only") {
+		!strings.Contains(string(r.body), "name, visibility, sync") {
 		t.Fatalf("a patch beyond the description = %d %s", r.status, r.body)
 	}
 }

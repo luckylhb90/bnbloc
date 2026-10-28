@@ -1,0 +1,47 @@
+{
+  "_": "The room service's channel rules (mayManageChannel, mayPlaceChannel, mayCreateSection, mayManageSection, may delete a channel), case by case. Read by services/room/channel_rules_test.go and web/src/lib/channelRules.test.ts: the web shows a control only where the server allows the act.",
+  "manageChannel": [
+    { "role": "owner", "user": "alice", "channelOwner": "bob", "sectionOwners": [], "want": true },
+    { "role": "admin", "user": "erin", "channelOwner": "bob", "sectionOwners": [], "want": true },
+    { "role": "member", "user": "bob", "channelOwner": "bob", "sectionOwners": [], "want": true },
+    { "role": "member", "user": "carol", "channelOwner": "bob", "sectionOwners": [], "want": false },
+    { "role": "member", "user": "carol", "channelOwner": "bob", "sectionOwners": ["carol"], "want": true },
+    { "role": "member", "user": "carol", "channelOwner": "", "sectionOwners": [], "want": false },
+    { "role": "visitor", "user": "vic", "channelOwner": "vic", "sectionOwners": ["vic"], "want": false },
+    { "role": "member", "user": "Bob", "channelOwner": "bob", "sectionOwners": [], "want": false }
+  ],
+  "placeChannel": [
+    { "role": "owner", "user": "alice", "policy": "admins", "section": null, "want": true },
+    { "role": "admin", "user": "erin", "policy": "admins", "section": ["bob"], "want": true },
+    { "role": "member", "user": "bob", "policy": "anyone", "section": null, "want": true },
+    { "role": "member", "user": "bob", "policy": "anyone", "section": ["bob"], "want": true },
+    { "role": "member", "user": "bob", "policy": "anyone", "section": ["carol"], "want": false },
+    { "role": "member", "user": "bob", "policy": "", "section": null, "want": true },
+    { "role": "member", "user": "bob", "policy": "sections", "section": null, "want": false },
+    { "role": "member", "user": "bob", "policy": "sections", "section": ["bob"], "want": true },
+    { "role": "member", "user": "bob", "policy": "admins", "section": null, "want": false },
+    { "role": "member", "user": "bob", "policy": "admins", "section": ["bob"], "want": false },
+    { "role": "visitor", "user": "vic", "policy": "anyone", "section": null, "want": false }
+  ],
+  "createSection": [
+    { "role": "owner", "policy": "admins", "want": true },
+    { "role": "admin", "policy": "admins", "want": true },
+    { "role": "member", "policy": "anyone", "want": true },
+    { "role": "member", "policy": "sections", "want": true },
+    { "role": "member", "policy": "admins", "want": false },
+    { "role": "visitor", "policy": "anyone", "want": false }
+  ],
+  "manageSection": [
+    { "role": "owner", "user": "alice", "owners": [], "want": true },
+    { "role": "admin", "user": "erin", "owners": ["bob"], "want": true },
+    { "role": "member", "user": "bob", "owners": ["bob"], "want": true },
+    { "role": "member", "user": "carol", "owners": ["bob"], "want": false },
+    { "role": "visitor", "user": "vic", "owners": ["vic"], "want": false }
+  ],
+  "deleteChannel": [
+    { "role": "owner", "want": true },
+    { "role": "admin", "want": true },
+    { "role": "member", "want": false },
+    { "role": "visitor", "want": false }
+  ]
+}

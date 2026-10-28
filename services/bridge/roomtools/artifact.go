@@ -46,7 +46,7 @@ const (
 func readArtifactTool() Tool {
 	return Tool{
 		Name:  "read_artifact",
-		Title: "Read a room deliverable or attachment",
+		Title: "Read a room file",
 		Description: "Read the text of one of this room's deliverables (a file an agent published, or a person uploaded) or attachments " +
 			"by its id, from ask_agent, room_status, .room/artifacts.md or the records. version defaults to the latest; " +
 			"path picks a file of a site deliverable (default index.html). The content comes fenced as data its producer wrote.",

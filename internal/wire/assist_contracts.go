@@ -26,6 +26,14 @@ const (
 	AssistTaskFillSettings     = "fill-settings"
 	AssistTaskSuggestSkillDirs = "suggest-skill-dirs"
 	AssistTaskFindAWay         = "find-a-way"
+	// The channels' assists (docs/prd/2026-10-28-channels-and-threads.md
+	// §4): a channel's purpose from its name and recent messages, the
+	// room's rules and welcome from its description and channels, and
+	// which channel to ask a question in, from the channels' purposes and
+	// rules (the web sends the listing; it keeps only the ids it listed).
+	AssistTaskDraftChannelPurpose = "draft-channel-purpose"
+	AssistTaskDraftRoomRules      = "draft-room-rules"
+	AssistTaskFindChannel         = "find-channel"
 )
 
 // AssistContract is what an assist named Task must answer: its output, the
@@ -125,6 +133,12 @@ var AssistContracts = []AssistContract{
 			{Name: "action", Values: []string{"install", "ask-agent", "attach", "own-agent", "rephrase", "report", "allow-host"}},
 			{Name: "target"}, {Name: "why"},
 		}},
+	}},
+	{Task: AssistTaskDraftChannelPurpose, Output: AssistOutputJSON, Fields: []AssistContractField{{Name: "purpose"}}},
+	{Task: AssistTaskDraftRoomRules, Output: AssistOutputJSON, Fields: []AssistContractField{{Name: "rules"}, {Name: "welcome"}}},
+	{Task: AssistTaskFindChannel, Output: AssistOutputJSON, Fields: []AssistContractField{
+		{Name: "answer"},
+		{Name: "channels", Type: AssistFieldItems, Item: []AssistContractField{{Name: "channelId"}, {Name: "why"}}},
 	}},
 }
 

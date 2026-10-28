@@ -997,7 +997,9 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   for the person who asked it only through its job's grant, as that person, on
   routes people already use: `room_setup` reads and changes the room's setup
   through the agent door (`services/gateway/agent_door.go`: the room's
-  description only, its welcome and quick prompts, channels, schedules (an AI
+  description, or its rules and recommended channels, its welcome and quick
+  prompts, channels (made, set up, archived and restored; never deleted and
+  never their owner), schedules (an AI
   task, a notice, or a request to one of the room's agents online now,
   `agentScheduleTarget`) and group names) and the gateway's grant-honoring
   routes (content uses, sources), the person's role in the room deciding,
