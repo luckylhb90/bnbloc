@@ -75,6 +75,9 @@ export interface FeedItem {
   // Set when a scheduled prompt posted this message (its schedule id); the
   // feed renders a clock badge.
   scheduledId?: string;
+  // The service whose card decision posted this message as the member (an
+  // automatic message, not typed).
+  continuedBy?: string;
   // Set when an agent dispatched this message on its author's behalf (room
   // tools): the feed renders "maya → via jack/codex → bob/claude".
   dispatch?: DispatchAttribution;

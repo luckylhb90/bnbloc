@@ -29,7 +29,8 @@ export function ComponentCardView({ roomId, card }: { readonly roomId: string; r
       if (a.kind === "call") {
         const r = await componentPagesApi.callCard(card.component, a.page ?? "", a.query, roomId);
         if (r.open) await openExternal(r.open);
-        setState({ reply: r.text, done: r.done });
+        // The platform posted the "go on" message when it says so; the service's text says what to do by hand otherwise.
+        setState({ reply: r.continued ? `${r.text}\nYour agent was asked to go on.` : r.text, done: r.done });
         return;
       }
       await openComponentPage(card.component, a.page ?? "", a.query, roomId);

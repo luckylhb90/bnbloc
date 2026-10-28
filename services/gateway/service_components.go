@@ -492,7 +492,36 @@ func (s *Service) handleComponentCardCall(w http.ResponseWriter, r *http.Request
 	if u, err := url.Parse(reply.Open); reply.Open != "" && (err != nil || u.Scheme != "https") {
 		reply.Open = ""
 	}
+	reply.Continued = false
+	if reply.Continue != "" {
+		reply.Continued = s.continueAgent(r.Context(), claims, req, rec.Name, reply)
+	}
+	reply.Continue, reply.ContinueJob, reply.ContinueKey = "", "", ""
 	httpx.WriteJSON(w, http.StatusOK, reply)
+}
+
+// continueAgent posts a card reply's Continue message in the card's room as
+// the member (realtime's continue route: the job checks and the chat's gates
+// are there) and reports whether it was posted. A failure posts nothing and
+// is not the card's: the decision it follows stands, and the card's text
+// says what to do by hand.
+func (s *Service) continueAgent(ctx context.Context, claims auth.Claims, req wire.ComponentCardCall, name string, reply component.CardReply) bool {
+	if req.RoomID == "" || s.Backends.Realtime == "" || len(reply.Continue) > component.MaxCardContinue {
+		return false
+	}
+	raw, _ := json.Marshal(wire.ContinueRequest{Job: reply.ContinueJob, Component: name, Text: reply.Continue, Key: reply.ContinueKey})
+	base := strings.TrimRight(s.Backends.Realtime, "/")
+	resp, err := callBackend(ctx, http.MethodPost, base+"/internal/v1/rooms/"+url.PathEscape(req.RoomID)+"/continue", raw, claims.Subject, claims.Tenant)
+	if err != nil {
+		slog.Warn("card continue not posted", "component", name, "room", req.RoomID, "error", err)
+		return false
+	}
+	defer resp.Body.Close()
+	var out wire.ContinueReply
+	if resp.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(resp.Body, 4<<10)).Decode(&out) != nil {
+		return false
+	}
+	return out.Posted
 }
 
 // cardReply reads a service's answer to a card's call.

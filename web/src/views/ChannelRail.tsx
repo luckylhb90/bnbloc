@@ -125,8 +125,8 @@ export function ChannelRail({
     <div
       className={
         collapsed
-          ? "flex w-12 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-[var(--color-border)] p-1 transition-[width] duration-200 ease-out"
-          : "flex w-44 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-[var(--color-border)] p-2 transition-[width] duration-200 ease-out"
+          ? "flex w-12 shrink-0 flex-col gap-0.5 overflow-y-auto overflow-x-hidden border-r border-[var(--color-border)] p-1 transition-[width] duration-200 ease-out"
+          : "flex w-44 shrink-0 flex-col gap-0.5 overflow-y-auto overflow-x-hidden border-r border-[var(--color-border)] p-2 transition-[width] duration-200 ease-out"
       }
     >
       {loadFailed && (
@@ -184,8 +184,8 @@ export function ChannelRail({
 
 function RailButton({ icon: Icon, label, onClick }: { readonly icon: React.ComponentType<{ size?: number }>; readonly label: string; readonly onClick: () => void }) {
   return (
-    <button onClick={onClick} className="tactile flex items-center gap-2 rounded-[var(--radius)] px-2 py-1.5 text-sm text-[var(--color-fg-subtle)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-fg)]">
-      <Icon size={14} /> {label}
+    <button onClick={onClick} title={label} className="tactile flex min-w-0 items-center gap-2 rounded-[var(--radius)] px-2 py-1.5 text-sm text-[var(--color-fg-subtle)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-fg)]">
+      <Icon size={14} /> <span className="truncate">{label}</span>
     </button>
   );
 }

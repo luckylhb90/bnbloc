@@ -89,6 +89,9 @@ type ChatPost struct {
 	// (payload.dispatchedBy); the agent job it creates records the parent
 	// job and depth. Never set for a typed message.
 	Dispatched *wire.DispatchMarker
+	// Continued marks a message the platform posted as the member because a
+	// card decision of theirs lets an agent's work go on (payload.continuedFrom).
+	Continued *wire.ContinueMarker
 	// Expert asks the agent recipient to wear an expert (a content
 	// component the author may use here); the job pins its version.
 	Expert *wire.ChatExpert
@@ -211,6 +214,9 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) 
 	}
 	if p.Dispatched != nil {
 		payload["dispatchedBy"] = *p.Dispatched
+	}
+	if p.Continued != nil {
+		payload["continuedFrom"] = *p.Continued
 	}
 	if expert != nil {
 		payload["expert"] = expert.payload()

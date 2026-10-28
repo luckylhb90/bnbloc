@@ -11,6 +11,7 @@ import { shareProposalOf, type ShareProposal } from "./shareProposal.ts";
 import { componentCardOf, type ComponentCard } from "./componentCard.ts";
 import { importedEditedAtMs, importedFrom } from "./handoff.ts";
 import { scheduledMarker } from "./schedules.ts";
+import { continuedMarker } from "./continued.ts";
 import { dispatchAttribution, type DispatchAttribution } from "./dispatch.ts";
 import { expertMarker, type ExpertMarker } from "./contentComponents.ts";
 import { agentHandle, agentIdentity } from "./roomAgents.ts";
@@ -73,6 +74,10 @@ export interface RoomEvent {
   // For chat_message posted by a scheduled prompt (payload.scheduled): the
   // schedule id, so the feed can badge it.
   scheduledId?: string;
+  // For chat_message the platform posted as the member because their decision
+  // on a component's card lets an agent's work go on (payload.continuedFrom):
+  // the service, so the feed can badge it as automatic.
+  continuedBy?: string;
   // For chat_message an agent dispatched on its author's behalf (payload
   // dispatchedBy): the dispatching agent and the addressed one.
   dispatch?: DispatchAttribution;
@@ -238,6 +243,7 @@ export function normalizeRoomEvent(ev: RoomEvent, emit: (e: RoomEvent) => void):
     ev.importedFrom = importedFrom(p);
     ev.editedAtMs ??= importedEditedAtMs(p);
     ev.scheduledId = scheduledMarker(p)?.scheduleId;
+    ev.continuedBy = continuedMarker(p);
     ev.dispatch = dispatchAttribution(p);
     ev.expert = expertMarker(p);
     ev.fileRef = fileRefOf(p.fileRef);

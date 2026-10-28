@@ -103,7 +103,13 @@ func newServiceFixture(t *testing.T) *serviceFixture {
 			w.Header().Set("Set-Cookie", "s=1")
 			_, _ = w.Write([]byte("<!doctype html><title>connections</title>"))
 		case strings.HasPrefix(path, component.ServiceCardsPrefix):
-			_ = json.NewEncoder(w).Encode(component.CardReply{Text: "Allowed.", Done: true, Open: "http://plain.example.com/"})
+			reply := component.CardReply{Text: "Allowed.", Done: true, Open: "http://plain.example.com/"}
+			if r.URL.Query().Get("decision") == "continue" {
+				// A service asks the platform to continue the agent of a job (and tries to
+				// claim it already did).
+				reply.Continue, reply.ContinueJob, reply.ContinueKey, reply.Continued = "The change is allowed: run it again.", "job_held", "h1", true
+			}
+			_ = json.NewEncoder(w).Encode(reply)
 		case path == component.ServiceSendEgressPath:
 			_ = json.NewEncoder(w).Encode(component.EgressResponse{Status: http.StatusNoContent})
 		case strings.HasPrefix(path, component.ServiceCallbackPrefix):
@@ -390,5 +396,55 @@ func TestComponentCardCall(t *testing.T) {
 	}
 	if resp, _ := fx.do("olga", http.MethodPost, "/v1/my/component-cards/conn/approve", []byte(`{"roomId":"room-1"}`), http.Header{"Content-Type": {"application/json"}}); resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("outside the room = %d", resp.StatusCode)
+	}
+}
+
+// A card reply that asks to continue is carried out by realtime as the member
+// (its job checks are there): the room, the job, the text and the once-key are
+// what the service said; the card is told it happened, and the service's own
+// claim that it did is never taken. Without a room, or when realtime refuses,
+// nothing is claimed.
+func TestComponentCardContinuePostsThroughRealtime(t *testing.T) {
+	fx := newServiceFixture(t)
+	var got struct {
+		path, subject string
+		in            wire.ContinueRequest
+	}
+	answer := wire.ContinueReply{Posted: true, Sequence: 7}
+	rt := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got.path, got.subject = r.URL.Path, r.Header.Get("X-Bnbloc-User")
+		_ = json.NewDecoder(r.Body).Decode(&got.in)
+		_ = json.NewEncoder(w).Encode(answer)
+	}))
+	defer rt.Close()
+	fx.svc.Backends.Realtime = rt.URL
+	header := http.Header{"Content-Type": {"application/json"}}
+	call := func(body string) component.CardReply {
+		resp, raw := fx.do("maya", http.MethodPost, "/v1/my/component-cards/conn/approve", []byte(body), header)
+		var reply component.CardReply
+		_ = json.Unmarshal(raw, &reply)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("call = %d %s", resp.StatusCode, raw)
+		}
+		return reply
+	}
+	reply := call(`{"query":"id=h1&decision=continue","roomId":"room-1"}`)
+	if !reply.Continued || reply.Continue != "" || reply.ContinueJob != "" || reply.ContinueKey != "" {
+		t.Fatalf("reply = %+v; want continued, and the request fields not passed to the client", reply)
+	}
+	want := wire.ContinueRequest{Job: "job_held", Component: "conn", Text: "The change is allowed: run it again.", Key: "h1"}
+	if got.path != "/internal/v1/rooms/room-1/continue" || got.in != want {
+		t.Fatalf("realtime got %s %+v, want the room's continue route with %+v", got.path, got.in, want)
+	}
+	answer = wire.ContinueReply{Why: "that request is still running"}
+	if r := call(`{"query":"id=h1&decision=continue","roomId":"room-1"}`); r.Continued {
+		t.Fatalf("realtime refused and the card says continued: %+v", r)
+	}
+	got.path = ""
+	if r := call(`{"query":"id=h1&decision=continue"}`); r.Continued || got.path != "" {
+		t.Fatalf("a call without a room reached realtime or claimed it: %+v %q", r, got.path)
+	}
+	if r := call(`{"query":"id=h1&decision=allow","roomId":"room-1"}`); r.Continued {
+		t.Fatalf("a reply that asked for nothing claims continued: %+v", r)
 	}
 }

@@ -139,7 +139,7 @@ The bridge's room tools server is also the session's HTTPS proxy
   check against a claimed host: its call never goes out unauthenticated.
 - **Cards**: (the room's events carry a card to every member; the clients
   show it only to the requester, as a publish proposal) an `EgressResponse.Card` (`component.CheckCard`: plain text,
-  at most three actions: `open` a page, `call`, or `ask-again`) is posted
+  at most four actions: `open` a page, `call`, or `ask-again`) is posted
   by the bridge as a `component-card` notice under the job, shown only to
   the requester, once per job, service and card (`cardKey`). The web
   renders it (`ComponentCardView`): Open opens the page as the member; Ask
@@ -149,7 +149,14 @@ The bridge's room tools server is also the session's HTTPS proxy
   `/cards/{page}` as the member (`MemberHeader`, the room and role read
   again), and the card shows the service's `component.CardReply` (its
   text; `open`, an https address the client opens, such as a sign-in to
-  start; `done`: its actions go away).
+  start; `done`: its actions go away). A reply may ask for the member's
+  decision to **continue** the agent's work (`continue`, `continueJob`,
+  `continueKey`; docs/prd/2026-10-28-held-change-continues.md): the gateway
+  has realtime post the text in the card's room as the member, to the agent
+  of that job (a job of the room the member requested, already ended), with
+  an automatic mark, once per key (`POST /internal/v1/rooms/{room}/continue`).
+  The card is told whether it was posted (`continued`); a service's own claim
+  of it is dropped.
 
 ### Sandboxed commands
 

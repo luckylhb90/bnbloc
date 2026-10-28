@@ -20,6 +20,9 @@ type ChatMessagePayload struct {
 	Attachments []ChatAttachment  `json:"attachments,omitempty"`
 	// DispatchedBy marks a task an agent dispatched through the room tools.
 	DispatchedBy *DispatchMarker `json:"dispatchedBy,omitempty"`
+	// ContinuedFrom marks a message the platform posted as the member because
+	// their decision on a component's card lets an agent's work go on.
+	ContinuedFrom *ContinueMarker `json:"continuedFrom,omitempty"`
 	// Imported marks a row a handoff import wrote.
 	Imported *ImportedMarker `json:"imported,omitempty"`
 }

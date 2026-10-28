@@ -10,7 +10,9 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
+import { createPortal } from "react-dom";
 import { cn } from "@/lib/cn";
+import { placeSurface, preferredPlacement, sizeClasses } from "@/ui/menuPlacement";
 import { useModalLayer } from "@/ui/useModalLayer";
 
 // Menu is the shared menu-button primitive (WAI-ARIA menu button pattern):
@@ -38,43 +40,14 @@ export interface MenuTriggerProps {
 const CloseMenu = createContext<() => void>(() => {});
 
 const ITEM = '[role="menuitem"]:not([disabled])';
-// The gap kept between an open surface and the edge that clips it.
-const EDGE = 4;
-
-/** The box that clips the menu: the nearest ancestor that does not let
- *  content overflow horizontally (a dock panel), else the window. */
-function clippingBox(from: HTMLElement | null): { left: number; right: number } {
-  for (let el = from; el; el = el.parentElement) {
-    if (getComputedStyle(el).overflowX !== "visible") {
-      const r = el.getBoundingClientRect();
-      return { left: r.left, right: r.right };
-    }
-  }
-  return { left: 0, right: window.innerWidth };
-}
-
-/** Keeps an open surface inside the box that clips it, whichever side its
- *  position class anchors it to: it flips to the other edge of its trigger's
- *  box when it overflows, and is narrowed when it fits on neither. */
-function keepInside(el: HTMLElement): void {
-  el.style.left = "";
-  el.style.right = "";
-  el.style.maxWidth = "";
-  const box = clippingBox(el.parentElement);
-  let r = el.getBoundingClientRect();
-  if (r.left < box.left + EDGE) {
-    el.style.left = "0";
-    el.style.right = "auto";
-  } else if (r.right > box.right - EDGE) {
-    el.style.right = "0";
-    el.style.left = "auto";
-  } else return;
-  r = el.getBoundingClientRect();
-  if (r.left < box.left + EDGE || r.right > box.right - EDGE) el.style.maxWidth = `${Math.max(120, box.right - box.left - 2 * EDGE)}px`;
-  r = el.getBoundingClientRect();
-  // Still past an edge (a narrow box): slide along it.
-  if (r.left < box.left + EDGE) el.style.transform = `translateX(${box.left + EDGE - r.left}px)`;
-  else if (r.right > box.right - EDGE) el.style.transform = `translateX(${box.right - EDGE - r.right}px)`;
+function place(surface: HTMLElement, trigger: HTMLElement, cls: string): void {
+  surface.style.maxHeight = "";
+  surface.style.maxWidth = "";
+  const p = placeSurface(trigger.getBoundingClientRect(), { width: surface.offsetWidth, height: surface.scrollHeight }, { width: window.innerWidth, height: window.innerHeight }, preferredPlacement(cls));
+  surface.style.left = `${p.left}px`;
+  surface.style.top = `${p.top}px`;
+  surface.style.maxWidth = `${p.maxWidth}px`;
+  surface.style.maxHeight = `${p.maxHeight}px`;
 }
 
 export function Menu({
@@ -102,9 +75,21 @@ export function Menu({
   // the element to restore focus to before the menu moves focus inside.
   useModalLayer(menuRef, { open: open !== false, onEscape: close, lockScroll: false });
 
+  const positionClass = menuClassName ?? "absolute bottom-full left-0 mb-2 w-60";
   useLayoutEffect(() => {
-    if (open && menuRef.current) keepInside(menuRef.current);
-  }, [open]);
+    if (!open) return;
+    const reposition = () => {
+      if (menuRef.current && triggerRef.current) place(menuRef.current, triggerRef.current, positionClass);
+    };
+    reposition();
+    // The trigger moves with any scroll or resize; the surface follows it.
+    window.addEventListener("resize", reposition);
+    window.addEventListener("scroll", reposition, true);
+    return () => {
+      window.removeEventListener("resize", reposition);
+      window.removeEventListener("scroll", reposition, true);
+    };
+  }, [open, positionClass]);
 
   useEffect(() => {
     if (!open) return;
@@ -156,24 +141,27 @@ export function Menu({
   return (
     <div className={cn("relative", className)}>
       {trigger(triggerProps, open !== false)}
-      {open && (
-        <CloseMenu.Provider value={close}>
-          <div
-            ref={menuRef}
-            id={menuId}
-            role="menu"
-            aria-label={label}
-            tabIndex={-1}
-            onKeyDown={onMenuKey}
-            className={cn(
-              "animate-in z-50 flex flex-col overflow-y-auto rounded-[var(--radius)] border border-[var(--color-border-strong)] bg-[var(--color-elevated)] py-1 shadow-[var(--shadow-pop)] focus:outline-none",
-              menuClassName ?? "absolute bottom-full left-0 mb-2 w-60",
-            )}
-          >
-            {children}
-          </div>
-        </CloseMenu.Provider>
-      )}
+      {open &&
+        createPortal(
+          <CloseMenu.Provider value={close}>
+            <div
+              ref={menuRef}
+              id={menuId}
+              role="menu"
+              aria-label={label}
+              tabIndex={-1}
+              onKeyDown={onMenuKey}
+              style={{ position: "fixed", left: 0, top: 0 }}
+              className={cn(
+                "animate-in z-[60] flex flex-col overflow-y-auto rounded-[var(--radius)] border border-[var(--color-border-strong)] bg-[var(--color-elevated)] py-1 shadow-[var(--shadow-pop)] focus:outline-none",
+                sizeClasses(positionClass),
+              )}
+            >
+              {children}
+            </div>
+          </CloseMenu.Provider>,
+          document.body,
+        )}
     </div>
   );
 }

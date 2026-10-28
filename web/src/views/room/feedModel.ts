@@ -42,6 +42,7 @@ export function feedItemFromEvent(e: RoomEvent, subject: string | null, live: bo
     editedAtMs: e.editedAtMs,
     importedFrom: e.importedFrom,
     scheduledId: e.scheduledId,
+    continuedBy: e.continuedBy,
     dispatch: e.dispatch,
     expert: e.expert,
     fileRef: e.fileRef,

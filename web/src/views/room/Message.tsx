@@ -400,6 +400,15 @@ export const Message = memo(function Message({
                     <ClockIcon size={12} />
                   </span>
                 )}
+                {item.continuedBy && (
+                  <span
+                    data-continued
+                    title={`Sent for you after you allowed a change (${item.continuedBy})`}
+                    className="rounded-full border border-[var(--color-border)] px-1.5 text-[10px] uppercase tracking-wide"
+                  >
+                    automatic
+                  </span>
+                )}
                 {item.dispatch && <DispatchedVia author={item.author} dispatch={item.dispatch} />}
                 {item.expert && <ExpertTag expert={item.expert} />}
                 <CopyButton text={item.text} />

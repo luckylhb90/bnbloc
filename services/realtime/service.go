@@ -310,6 +310,10 @@ func (s *Service) Handler() http.Handler {
 	// gateway, posts a task for another agent on behalf of the requester of
 	// the job it is running. Room-keyed, so it runs on the room's owner.
 	mux.Handle("POST /internal/v1/rooms/{roomId}/dispatch", forMember(s.handleInternalDispatch))
+	// A card decision that lets an agent's work go on (continue.go): the
+	// gateway, signed as the member who decided it, posts their message to the
+	// agent of the job the card belongs to.
+	mux.Handle("POST /internal/v1/rooms/{roomId}/continue", forMember(s.handleInternalContinue))
 	// Interactive apps' change feeds (app_events.go): the room's app_changed
 	// events only, for the gateway, which narrows them to one app.
 	mux.Handle("GET /internal/v1/rooms/{roomId}/app-events", services("gateway")(s.handleInternalAppEvents))

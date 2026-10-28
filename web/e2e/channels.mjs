@@ -157,6 +157,27 @@ await open("owner: welcome, rail sections, rules header, settings dialog", "maya
   // The channel's settings: the default agent by key.
   await rail(page).locator('[data-channel-row="releases"]').hover();
   await page.getByRole("button", { name: "Channel options for #releases" }).click();
+  // The menu is whole on screen: not clipped by the narrow rail, and the rail
+  // does not scroll sideways (a regression seen on QA, 2026-10-28).
+  {
+    const fit = await page.evaluate(() => {
+      const m = document.querySelector('[role="menu"]');
+      const r = m.getBoundingClientRect();
+      const rail = document.querySelector("[data-channel-rail]") || m.closest("body");
+      const items = [...m.querySelectorAll('[role="menuitem"]')];
+      const hidden = items.filter((i) => {
+        const b = i.getBoundingClientRect();
+        const at = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+        return !(at && i.contains(at));
+      }).length;
+      const railEl = [...document.querySelectorAll("div")].find((d) => d.querySelector('[data-channel-row="releases"]') && getComputedStyle(d).overflowY === "auto");
+      return { inView: r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight, portalled: m.parentElement === document.body, hidden, railScrollsX: railEl ? railEl.scrollWidth > railEl.clientWidth : null };
+    });
+    ok(fit.inView && fit.hidden === 0, `the channel menu is whole on screen (${JSON.stringify(fit)})`);
+    ok(fit.portalled, "the menu is drawn above the page, outside the rail");
+    ok(fit.railScrollsX === false, "the rail does not scroll sideways");
+    await page.screenshot({ path: `${shots}/channel-menu.png` });
+  }
   await page.getByRole("menuitem", { name: "Settings, purpose and rules" }).click();
   const dlg = page.getByRole("dialog", { name: "#releases settings" });
   await dlg.waitFor();

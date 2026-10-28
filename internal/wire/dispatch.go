@@ -98,3 +98,34 @@ type AgentRunDispatch struct {
 	JobID string `json:"jobId"`
 	Depth int    `json:"depth"`
 }
+
+// ContinueMarker is payload.continuedFrom on a chat_message the platform
+// posted as a member because a card's decision of theirs (a component's card,
+// docs/prd/2026-10-28-held-change-continues.md) means the work an agent's job
+// started can go on: the job whose agent receives it. Clients badge it as
+// automatic, so nobody takes it for something the member typed.
+type ContinueMarker struct {
+	JobID string `json:"jobId"`
+	// Component is the service whose card the member decided.
+	Component string `json:"component"`
+}
+
+// ContinueRequest is realtime's POST /internal/v1/rooms/{roomId}/continue
+// (the gateway signs it as the member who decided the card): Text goes to the
+// agent of Job, which must be a job of this room the member requested and
+// that has ended. Key makes it once (the same decision twice posts once).
+type ContinueRequest struct {
+	Job       string `json:"job"`
+	Component string `json:"component"`
+	Text      string `json:"text"`
+	Key       string `json:"key"`
+}
+
+// ContinueReply says what a continue did: the posted message's sequence, or
+// Posted false with Why (nothing was posted; the allowance or decision it
+// follows stands).
+type ContinueReply struct {
+	Posted   bool   `json:"posted"`
+	Sequence int64  `json:"sequence,omitempty"`
+	Why      string `json:"why,omitempty"`
+}

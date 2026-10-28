@@ -505,10 +505,27 @@ const ServiceCardsPrefix = "/cards/"
 // CardReply is a component's answer to a card's call: the text the card
 // shows now, an https address to open (a sign-in to start), and Done when
 // the card has nothing left to do (its actions go away).
+//
+// Continue asks the platform to post a message in the card's room as the
+// member, to the agent that ran ContinueJob (a job of that room the member
+// requested, already ended): what the member's decision means for the work
+// the card interrupted ("allowed, run it again"). The platform posts it with
+// an automatic mark, once per ContinueKey, and decides nothing about its
+// meaning; any other job, an unfinished one, or a job of someone else's
+// request is refused and nothing is posted.
 type CardReply struct {
 	Text string `json:"text"`
 	Open string `json:"open,omitempty"`
 	Done bool   `json:"done,omitempty"`
+	// Continue is the message (at most MaxCardContinue bytes); ContinueJob
+	// the job whose agent receives it; ContinueKey makes the post once (a
+	// second click of the same decision posts nothing again).
+	Continue    string `json:"continue,omitempty"`
+	ContinueJob string `json:"continueJob,omitempty"`
+	ContinueKey string `json:"continueKey,omitempty"`
+	// Continued is set by the platform, never by a service: the message was
+	// posted. A service's own value is cleared.
+	Continued bool `json:"continued,omitempty"`
 }
 
 // CardAction is one button of a card.
@@ -523,7 +540,9 @@ type CardAction struct {
 const (
 	MaxCardTitle   = 120
 	MaxCardText    = 1000
-	MaxCardActions = 3
+	MaxCardActions = 4
+	// MaxCardContinue bounds a card reply's Continue message.
+	MaxCardContinue = 500
 )
 
 // CheckCard reports the first thing wrong with c, nil when it is within

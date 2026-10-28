@@ -636,10 +636,27 @@ export const ServiceCardsPrefix = "/cards/";
 // CardReply is a component's answer to a card's call: the text the card
 // shows now, an https address to open (a sign-in to start), and Done when
 // the card has nothing left to do (its actions go away).
+//
+// Continue asks the platform to post a message in the card's room as the
+// member, to the agent that ran ContinueJob (a job of that room the member
+// requested, already ended): what the member's decision means for the work
+// the card interrupted ("allowed, run it again"). The platform posts it with
+// an automatic mark, once per ContinueKey, and decides nothing about its
+// meaning; any other job, an unfinished one, or a job of someone else's
+// request is refused and nothing is posted.
 export interface CardReply {
   text: string;
   open?: string;
   done?: boolean;
+  // Continue is the message (at most MaxCardContinue bytes); ContinueJob
+  // the job whose agent receives it; ContinueKey makes the post once (a
+  // second click of the same decision posts nothing again).
+  continue?: string;
+  continueJob?: string;
+  continueKey?: string;
+  // Continued is set by the platform, never by a service: the message was
+  // posted. A service's own value is cleared.
+  continued?: boolean;
 }
 
 // CardAction is one button of a card.
@@ -653,7 +670,9 @@ export interface CardAction {
 // Card bounds.
 export const MaxCardTitle = 120;
 export const MaxCardText = 1000;
-export const MaxCardActions = 3;
+export const MaxCardActions = 4;
+// MaxCardContinue bounds a card reply's Continue message.
+export const MaxCardContinue = 500;
 
 // Page audiences.
 export const AudienceMember = "member";
@@ -3669,6 +3688,37 @@ export interface AgentRunDispatch {
   depth: number;
 }
 
+// ContinueMarker is payload.continuedFrom on a chat_message the platform
+// posted as a member because a card's decision of theirs (a component's card,
+// docs/prd/2026-10-28-held-change-continues.md) means the work an agent's job
+// started can go on: the job whose agent receives it. Clients badge it as
+// automatic, so nobody takes it for something the member typed.
+export interface ContinueMarker {
+  jobId: string;
+  // Component is the service whose card the member decided.
+  component: string;
+}
+
+// ContinueRequest is realtime's POST /internal/v1/rooms/{roomId}/continue
+// (the gateway signs it as the member who decided the card): Text goes to the
+// agent of Job, which must be a job of this room the member requested and
+// that has ended. Key makes it once (the same decision twice posts once).
+export interface ContinueRequest {
+  job: string;
+  component: string;
+  text: string;
+  key: string;
+}
+
+// ContinueReply says what a continue did: the posted message's sequence, or
+// Posted false with Why (nothing was posted; the allowance or decision it
+// follows stands).
+export interface ContinueReply {
+  posted: boolean;
+  sequence?: number;
+  why?: string;
+}
+
 // ---- wire/event_kinds.go ----
 
 // Room event kinds not declared beside their payloads.
@@ -5193,6 +5243,9 @@ export interface ChatMessagePayload {
   attachments?: ChatAttachment[];
   // DispatchedBy marks a task an agent dispatched through the room tools.
   dispatchedBy?: DispatchMarker;
+  // ContinuedFrom marks a message the platform posted as the member because
+  // their decision on a component's card lets an agent's work go on.
+  continuedFrom?: ContinueMarker;
   // Imported marks a row a handoff import wrote.
   imported?: ImportedMarker;
 }

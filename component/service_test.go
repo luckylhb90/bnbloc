@@ -58,11 +58,16 @@ func TestEgressHostsFactsAndCardsBounds(t *testing.T) {
 	if err := CheckCard(good); err != nil {
 		t.Fatal(err)
 	}
+	// A held change's card: its three decisions and a way to look.
+	four := Card{Title: "Allow a change?", Actions: []CardAction{{Kind: CardCall, Label: "a", Page: "approve"}, {Kind: CardCall, Label: "b", Page: "approve"}, {Kind: CardCall, Label: "c", Page: "approve"}, {Kind: CardOpen, Label: "d", Page: "approve"}}}
+	if err := CheckCard(four); err != nil {
+		t.Fatalf("four actions: %v", err)
+	}
 	for name, c := range map[string]Card{
 		"no title":      {},
 		"unknown kind":  {Title: "t", Actions: []CardAction{{Kind: "run", Label: "x"}}},
 		"no page":       {Title: "t", Actions: []CardAction{{Kind: CardOpen, Label: "x"}}},
-		"too many":      {Title: "t", Actions: []CardAction{{Kind: CardAskAgain, Label: "a"}, {Kind: CardAskAgain, Label: "b"}, {Kind: CardAskAgain, Label: "c"}, {Kind: CardAskAgain, Label: "d"}}},
+		"too many":      {Title: "t", Actions: []CardAction{{Kind: CardAskAgain, Label: "a"}, {Kind: CardAskAgain, Label: "b"}, {Kind: CardAskAgain, Label: "c"}, {Kind: CardAskAgain, Label: "d"}, {Kind: CardAskAgain, Label: "e"}}},
 		"label missing": {Title: "t", Actions: []CardAction{{Kind: CardAskAgain}}},
 	} {
 		if CheckCard(c) == nil {
