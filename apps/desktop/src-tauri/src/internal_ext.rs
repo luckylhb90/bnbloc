@@ -780,6 +780,14 @@ pub fn extend_core_env(
                 .to_string_lossy()
                 .into_owned(),
         );
+        // The index lists binaries of the shared store: the bridge accepts
+        // an entry only inside it.
+        if let Ok(dirs) = adapter.dirs() {
+            env.insert(
+                mcp_tools::TOOLS_STORE_ENV.into(),
+                dirs.mcp_tools().to_string_lossy().into_owned(),
+            );
+        }
         env.insert(
             component_settings::SETTINGS_DIR_ENV.into(),
             dir.join(member_dir::COMPONENT_SETTINGS_DIR)

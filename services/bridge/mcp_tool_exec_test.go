@@ -86,3 +86,73 @@ func TestToolLauncherRunsTheMaterializedBinary(t *testing.T) {
 		t.Fatalf("an unknown tool = %q, %v", out, err)
 	}
 }
+
+// The desktop keeps each member's index in the member's directory and the
+// binaries in one shared store (QA 2026-10-28: with the store unnamed, every
+// stdio tool was refused as outside the tools directory and no agent had
+// one). The store is named on its own; an index entry outside it is still
+// refused, by the turn and by the launcher alike.
+func TestToolsIndexAndStoreLiveApart(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fixture tool is a shell script")
+	}
+	if os.Getenv("BNBLOC_TEST_TOOL_LAUNCHER") == "1" {
+		os.Exit(RunMCPToolMain(strings.Split(os.Getenv("BNBLOC_TEST_TOOL_ARGS"), "\x1f")))
+	}
+	index, store := t.TempDir(), t.TempDir()
+	content := []byte("#!/bin/sh\necho \"codeword $*\"\n")
+	sum := sha256.Sum256(content)
+	sha := hex.EncodeToString(sum[:])
+	bin := filepath.Join(store, "mcp@codeword-"+sha)
+	if err := os.WriteFile(bin, content, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeIndex := func(path string) {
+		raw, _ := json.Marshal(mcpIndex{Tools: []mcpIndexEntry{{Name: "codeword", SHA256: sha, Path: path}}})
+		if err := os.WriteFile(filepath.Join(index, mcpIndexFile), raw, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeIndex(bin)
+	tool := codewordTool(sha)
+	tool.Settings, tool.RequiredBy = nil, []string{"cc_reviewer"}
+
+	b := &Bridge{cfg: Config{MCPToolsDir: index, MCPToolsStore: store}}
+	b.UseToolLauncher("/Applications/bnbloc.app/Contents/MacOS/bnbloc-bridge")
+	got, missing, _ := b.resolveMCP([]wire.ContentMCPTool{tool}, nil, "maya", "home", true)
+	if len(got.servers) != 1 || len(missing) != 0 {
+		t.Fatalf("servers %+v missing %v", got.servers, missing)
+	}
+	if args := strings.Join(got.servers[0].Args, " "); !strings.HasPrefix(args, MCPToolCommand+" --dir "+index+" --store "+store+" --name codeword --") {
+		t.Fatalf("launcher args = %q", args)
+	}
+	run := func(args ...string) (string, error) {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestToolsIndexAndStoreLiveApart$")
+		cmd.Env = append(os.Environ(), "BNBLOC_TEST_TOOL_LAUNCHER=1", "BNBLOC_TEST_TOOL_ARGS="+strings.Join(args, "\x1f"))
+		out, err := cmd.CombinedOutput()
+		return string(out), err
+	}
+	if out, err := run(got.servers[0].Args[1:]...); err != nil || strings.TrimSpace(out) != "codeword serve" {
+		t.Fatalf("launch = %q, %v", out, err)
+	}
+
+	// Without the store named, the index's directory is the store: the
+	// binary elsewhere is refused (the old desktop layout keeps working).
+	alone := &Bridge{cfg: Config{MCPToolsDir: index}}
+	if got, missing, _ := alone.resolveMCP([]wire.ContentMCPTool{tool}, nil, "maya", "home", true); len(got.servers) != 0 || len(missing) != 1 || !strings.Contains(missing[0], "outside the tools store") {
+		t.Fatalf("a binary outside the index dir with no store: servers %+v missing %v", got.servers, missing)
+	}
+
+	// An entry pointing outside the store is refused by both.
+	other := filepath.Join(t.TempDir(), "mcp@codeword-"+sha)
+	if err := os.WriteFile(other, content, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeIndex(other)
+	if got, missing, _ := b.resolveMCP([]wire.ContentMCPTool{tool}, nil, "maya", "home", true); len(got.servers) != 0 || len(missing) != 1 {
+		t.Fatalf("an entry outside the store: servers %+v missing %v", got.servers, missing)
+	}
+	if out, err := run("--dir", index, "--store", store, "--name", "codeword", "--"); err == nil || !strings.Contains(out, "outside the tools store") {
+		t.Fatalf("launcher with an entry outside the store = %q, %v", out, err)
+	}
+}

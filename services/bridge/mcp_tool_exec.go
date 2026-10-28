@@ -11,7 +11,7 @@ import (
 // The stdio tool launcher (docs/bugs/2026-10-19-tool-update-resets-sessions.md):
 // a session's profile names a stdio MCP tool as this executable,
 //
-//	bnbloc-bridge mcp-tool --dir <MCPToolsDir> --name <tool> -- <tool args>
+//	bnbloc-bridge mcp-tool --dir <MCPToolsDir> [--store <MCPToolsStore>] --name <tool> -- <tool args>
 //
 // never as the tool's binary, whose path carries its version. The profile
 // (and the session's binding checksum) then stays the same when the tool is
@@ -36,21 +36,26 @@ func (b *Bridge) toolCommand(name, path string, args []string) (string, []string
 	if b.toolLauncher == "" || dir == "" {
 		return path, append([]string(nil), args...)
 	}
-	return b.toolLauncher, append([]string{MCPToolCommand, "--dir", dir, "--name", name, "--"}, args...)
+	out := []string{MCPToolCommand, "--dir", dir}
+	if store := strings.TrimSpace(b.cfg.MCPToolsStore); store != "" {
+		out = append(out, "--store", store)
+	}
+	return b.toolLauncher, append(append(out, "--name", name, "--"), args...)
 }
 
-// materializedTool is the binary of tool name in index idx of tools dir
-// dir: the entry carrying pin ("" any: the launcher takes the one the
-// desktop verified last), inside dir, a regular file. why says what is
-// wrong otherwise. The one place a tool's binary is looked up.
-func materializedTool(dir string, idx *mcpIndex, name, pin string) (string, string) {
+// materializedTool is the binary of tool name in index idx: the entry
+// carrying pin ("" any: the launcher takes the one the desktop verified
+// last), a regular file inside store, the directory the desktop keeps the
+// binaries in (the index's own directory when it names none). why says
+// what is wrong otherwise. The one place a tool's binary is looked up.
+func materializedTool(store string, idx *mcpIndex, name, pin string) (string, string) {
 	for _, e := range idx.Tools {
 		if e.Name != name || (pin != "" && e.SHA256 != pin) {
 			continue
 		}
-		rel, err := filepath.Rel(dir, e.Path)
+		rel, err := filepath.Rel(store, e.Path)
 		if err != nil || !filepath.IsAbs(e.Path) || rel == "." || strings.HasPrefix(rel, "..") {
-			return "", "its binary is outside the tools directory"
+			return "", "its binary is outside the tools store"
 		}
 		if st, err := os.Stat(e.Path); err != nil || !st.Mode().IsRegular() {
 			return "", "not downloaded on this computer yet"
@@ -66,7 +71,8 @@ func materializedTool(dir string, idx *mcpIndex, name, pin string) (string, stri
 // code.
 func RunMCPToolMain(args []string) int {
 	fs := flag.NewFlagSet(MCPToolCommand, flag.ContinueOnError)
-	dir := fs.String("dir", "", "the desktop's tools directory")
+	dir := fs.String("dir", "", "the directory of the desktop's tools index")
+	store := fs.String("store", "", "where the desktop keeps the tools' binaries (default: --dir)")
 	name := fs.String("name", "", "the tool")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -75,8 +81,8 @@ func RunMCPToolMain(args []string) int {
 		fmt.Fprintln(os.Stderr, "bnbloc-bridge mcp-tool: --dir and --name are required")
 		return 2
 	}
-	b := &Bridge{cfg: Config{MCPToolsDir: *dir}}
-	path, why := materializedTool(*dir, b.loadMCPIndex(), *name, "")
+	b := &Bridge{cfg: Config{MCPToolsDir: *dir, MCPToolsStore: *store}}
+	path, why := materializedTool(b.mcpToolsStore(), b.loadMCPIndex(), *name, "")
 	if why != "" {
 		fmt.Fprintf(os.Stderr, "bnbloc-bridge mcp-tool: %s: %s\n", *name, why)
 		return 1

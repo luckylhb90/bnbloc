@@ -29,7 +29,7 @@ import (
 //
 //   - stdio: the binary the member's desktop materialized and verified
 //     (MCPToolsDir/index.json must carry the gateway's sha256 pin for this
-//     platform), with the tool's args; its settings' values become its
+//     platform, its binary inside MCPToolsStore), with the tool's args; its settings' values become its
 //     process environment (deliver.env) and its settings file
 //     (pkgmeta.ComponentSettingsFileEnv).
 //   - http: the tool's URL with its headers (pkgmeta.MCPHeaders). An oauth
@@ -429,7 +429,16 @@ func (b *Bridge) mcpBinary(idx *mcpIndex, t wire.ContentMCPTool) (string, string
 	if dir == "" {
 		return "", "stdio tools need the desktop app"
 	}
-	return materializedTool(dir, idx, t.Name, pin)
+	return materializedTool(b.mcpToolsStore(), idx, t.Name, pin)
+}
+
+// mcpToolsStore is where the desktop keeps the tools' binaries: the shared
+// store it names (MCPToolsStore), else the index's own directory.
+func (b *Bridge) mcpToolsStore() string {
+	if store := strings.TrimSpace(b.cfg.MCPToolsStore); store != "" {
+		return store
+	}
+	return strings.TrimSpace(b.cfg.MCPToolsDir)
 }
 
 // fitMCPToTarget drops the MCP servers the session cannot attach: none on a

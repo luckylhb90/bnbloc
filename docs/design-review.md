@@ -286,6 +286,9 @@ unnecessary.
   confined (an agent's sandbox denies writes outside the workspace). Never
   stop something (a browser, a daemon) that cannot be started again from
   the process that stops it.
+- When one side changes where it writes files another process reads, does
+  a test build that layout from the writer's own code or constants, not a
+  fixture the reader made up?
 
 *Test:* the upgrade itself, with existing state, before and after; a mixed
 deployment; the change run under the confinement it meets in use.

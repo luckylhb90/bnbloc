@@ -147,6 +147,7 @@ func main() {
 		// member's own component settings and sign-ins (never sent to the
 		// gateway).
 		MCPToolsDir:          strings.TrimSpace(config.FromEnvRaw("BNBLOC_MCP_TOOLS_DIR")),
+		MCPToolsStore:        strings.TrimSpace(config.FromEnvRaw("BNBLOC_MCP_TOOLS_STORE")),
 		ComponentSettingsDir: strings.TrimSpace(config.FromEnvRaw("BNBLOC_COMPONENT_SETTINGS_DIR")),
 		MCPSignInsDir:        strings.TrimSpace(config.FromEnvRaw("BNBLOC_MCP_SIGN_INS_DIR")),
 		// Which workspace each agent of a room uses, kept across restarts

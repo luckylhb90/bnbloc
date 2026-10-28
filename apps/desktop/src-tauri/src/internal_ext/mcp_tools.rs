@@ -49,8 +49,10 @@ mod mcp_oauth;
 pub(super) use mcp_oauth::SignIns;
 use mcp_oauth::{OAuthSpec, RefreshOutcome};
 
-/// The env var naming the tools dir the bridge reads.
+/// The env var naming the tools dir the bridge reads (the member's index).
 pub(super) const TOOLS_DIR_ENV: &str = "BNBLOC_MCP_TOOLS_DIR";
+/// The env var naming the shared store the index's binaries are in.
+pub(super) const TOOLS_STORE_ENV: &str = "BNBLOC_MCP_TOOLS_STORE";
 /// The env var naming the member's MCP sign-ins dir the bridge reads.
 pub(super) const SIGN_INS_DIR_ENV: &str = "BNBLOC_MCP_SIGN_INS_DIR";
 /// The index the bridge reads in the member's `mcp-tools` directory.

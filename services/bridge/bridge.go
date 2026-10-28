@@ -110,14 +110,17 @@ type Config struct {
 	// Sandbox is the desktop's agent sandbox (BNBLOC_SANDBOX_*): memory
 	// only, its admin token never logged nor handed to a core.
 	Sandbox SandboxConfig
-	// MCPToolsDir is where the desktop materializes stdio MCP tool binaries
-	// (index.json lists them with their sha256), ComponentSettingsDir holds
+	// MCPToolsDir holds the member's index of the stdio MCP tool binaries the
+	// desktop materialized (index.json lists them with their sha256), and
+	// MCPToolsStore the binaries themselves (the desktop's shared store; empty:
+	// the binaries lie in MCPToolsDir), ComponentSettingsDir holds
 	// the member's own component settings (mcp@<tool>.json, 0600) and
 	// MCPSignInsDir their MCP OAuth sign-ins (<tool>.json, 0600), all set by
-	// the desktop (BNBLOC_MCP_TOOLS_DIR, BNBLOC_COMPONENT_SETTINGS_DIR,
-	// BNBLOC_MCP_SIGN_INS_DIR). Empty: stdio tools, member settings and
-	// sign-ins are unavailable (mcp_tools.go).
+	// the desktop (BNBLOC_MCP_TOOLS_DIR, BNBLOC_MCP_TOOLS_STORE,
+	// BNBLOC_COMPONENT_SETTINGS_DIR, BNBLOC_MCP_SIGN_INS_DIR). Empty: stdio
+	// tools, member settings and sign-ins are unavailable (mcp_tools.go).
 	MCPToolsDir          string
+	MCPToolsStore        string
 	ComponentSettingsDir string
 	MCPSignInsDir        string
 	// StateDir is where the bridge keeps what must outlive a restart: which
