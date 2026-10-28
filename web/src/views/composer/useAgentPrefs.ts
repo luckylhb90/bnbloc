@@ -161,7 +161,8 @@ export function useAgentPrefs({
   // stored one was read, so a default never overwrites it. A change pending
   // when the composer unmounts (leaving the room or channel) is flushed
   // instead of dropped. The channel's default, while it is the pick, is not
-  // the member's choice and is not saved.
+  // the member's choice and is not saved (decision: pending owner: a saved
+  // copy would outlive a change of the channel's default).
   const isChannelDefault = !!recipient && !!channelDefaulted && agentIdentity(recipient) === channelDefaulted;
   const pick = enabled && settled && !isChannelDefault ? savedAgent(recipient, targets.find((t) => t.id === target), subject) : null;
   const snapshot = pick ? `${agentIdentity({ ...pick, core: pick.core || undefined })}/${model}/${reasoning}` : "";

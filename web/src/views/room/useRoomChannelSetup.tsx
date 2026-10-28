@@ -56,6 +56,9 @@ export function useRoomChannelSetup({
 
   const [welcomeOpen, setWelcomeOpen] = useState(false);
   // A member's first open of a room with a welcome page shows it once.
+  // decision: pending owner. "First" is remembered in this browser per
+  // member and room (lib/roomMemory), not on the server; a room with no
+  // welcome, rules or recommended channels does not open it by itself.
   const showable = !!detail && !!me && hasWelcome(detail);
   useEffect(() => {
     if (showable && !welcomeSeen(subject, roomId)) {

@@ -29,17 +29,40 @@ type channelArgs struct {
 	Position  *int    `json:"position"`
 	// DefaultAgent is a handle from list_room_agents ("" none), resolved to
 	// the agent's key (owner, core, provider) before it is stored.
-	DefaultAgent       *string `json:"defaultAgent"`
+	DefaultAgent *string `json:"defaultAgent"`
+	// The rest of the settings document, by its own field names: passed
+	// through to the room service, which validates them; what they mean
+	// (who posts, whether agents are admitted: store.ChannelAdmitsAgents)
+	// is decided there, never here.
 	WhoPosts           *string `json:"whoPosts"`
-	NoAgents           *bool   `json:"noAgents"`
+	AgentsBarred       *bool   `json:"noAgents"`
 	AgentParticipation *string `json:"agentParticipation"`
 	SlowModeSeconds    *int    `json:"slowModeSeconds"`
 	Archived           *bool   `json:"archived"`
 }
 
+// settingsOverlay is the settings fields given, by the settings document's
+// JSON names (wire.ChannelSettings).
+func (a channelArgs) settingsOverlay() map[string]any {
+	out := map[string]any{}
+	if a.WhoPosts != nil {
+		out["whoPosts"] = strings.TrimSpace(*a.WhoPosts)
+	}
+	if a.AgentsBarred != nil {
+		out["noAgents"] = *a.AgentsBarred
+	}
+	if a.AgentParticipation != nil {
+		out["agentParticipation"] = strings.TrimSpace(*a.AgentParticipation)
+	}
+	if a.SlowModeSeconds != nil {
+		out["slowModeSeconds"] = *a.SlowModeSeconds
+	}
+	return out
+}
+
 // settingsGiven reports whether a settings field is set.
 func (a channelArgs) settingsGiven() bool {
-	return a.DefaultAgent != nil || a.WhoPosts != nil || a.NoAgents != nil || a.AgentParticipation != nil || a.SlowModeSeconds != nil
+	return a.DefaultAgent != nil || len(a.settingsOverlay()) > 0
 }
 
 // changed names the fields given, in words, for the room's line.
@@ -51,7 +74,7 @@ func (a channelArgs) changed() []string {
 	}{
 		{a.Name != nil, "name"}, {a.Purpose != nil, "purpose"}, {a.Rules != nil, "rules"}, {a.SectionID != nil, "section"},
 		{a.Position != nil, "position"}, {a.DefaultAgent != nil, "default agent"}, {a.WhoPosts != nil, "who posts"},
-		{a.NoAgents != nil, "agents admitted"}, {a.AgentParticipation != nil, "agent participation"}, {a.SlowModeSeconds != nil, "slow mode"},
+		{a.AgentsBarred != nil, "agents admitted"}, {a.AgentParticipation != nil, "agent participation"}, {a.SlowModeSeconds != nil, "slow mode"},
 	} {
 		if f.set {
 			out = append(out, f.word)
@@ -215,20 +238,35 @@ func (c setupCall) channelPatch(ctx context.Context, a channelArgs, cur wire.Cha
 			s.DefaultAgent = &wire.ChannelAgent{OwnerID: target.Owner, Core: target.Core, Provider: target.Provider}
 		}
 	}
-	if a.WhoPosts != nil {
-		s.WhoPosts = strings.TrimSpace(*a.WhoPosts)
+	// The given fields over the channel's own document, by their JSON names.
+	merged, err := overlaySettings(s, a.settingsOverlay())
+	if err != nil {
+		r := failure("the channel's settings could not be read: %v", err)
+		return p, &r
 	}
-	if a.NoAgents != nil {
-		s.NoAgents = *a.NoAgents
-	}
-	if a.AgentParticipation != nil {
-		s.AgentParticipation = strings.TrimSpace(*a.AgentParticipation)
-	}
-	if a.SlowModeSeconds != nil {
-		s.SlowModeSeconds = *a.SlowModeSeconds
-	}
-	p.Settings = &s
+	p.Settings = &merged
 	return p, nil
+}
+
+// overlaySettings is s with the fields of overlay (by their JSON names)
+// set.
+func overlaySettings(s wire.ChannelSettings, overlay map[string]any) (wire.ChannelSettings, error) {
+	raw, err := json.Marshal(s)
+	if err != nil {
+		return s, err
+	}
+	doc := map[string]any{}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return s, err
+	}
+	for k, v := range overlay {
+		doc[k] = v
+	}
+	if raw, err = json.Marshal(doc); err != nil {
+		return s, err
+	}
+	var out wire.ChannelSettings
+	return out, json.Unmarshal(raw, &out)
 }
 
 // channelsSetup is the room's channels, sections and archived channels as
@@ -284,9 +322,14 @@ func (c setupCall) channelsSetup(ctx context.Context, out map[string]any) *Resul
 	return nil
 }
 
-// settingsWords is a channel's settings that differ from the default.
+// settingsWords is a channel's settings that differ from the default (the
+// document's own non-empty fields), the default agent as its handle.
 func settingsWords(s wire.ChannelSettings) map[string]any {
 	out := map[string]any{}
+	if raw, err := json.Marshal(s); err == nil {
+		_ = json.Unmarshal(raw, &out)
+	}
+	delete(out, "defaultAgent")
 	if a := s.DefaultAgent; a != nil {
 		// The handle list_room_agents and defaultAgent take: core-qualified
 		// when the agent names a core.
@@ -295,18 +338,6 @@ func settingsWords(s wire.ChannelSettings) map[string]any {
 			handle = roomlog.AgentSpeaker(a.OwnerID, core.QualifyTargetID(a.Core, a.Provider))
 		}
 		out["defaultAgent"] = handle
-	}
-	if s.WhoPosts != "" {
-		out["whoPosts"] = s.WhoPosts
-	}
-	if s.NoAgents {
-		out["noAgents"] = true
-	}
-	if s.AgentParticipation != "" {
-		out["agentParticipation"] = s.AgentParticipation
-	}
-	if s.SlowModeSeconds > 0 {
-		out["slowModeSeconds"] = s.SlowModeSeconds
 	}
 	return out
 }

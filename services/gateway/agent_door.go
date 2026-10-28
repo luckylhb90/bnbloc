@@ -166,6 +166,9 @@ func (s *Service) agentChangeAllowed(w http.ResponseWriter, r *http.Request, p a
 			httpx.Error(w, "invalid json body", http.StatusBadRequest)
 			return false, false
 		}
+		// decision: pending owner. Who answers for a channel is the person's
+		// to hand over (§2.6 lists no owner among the agent's fields; the
+		// fail-closed reading refuses it).
 		if _, ok := fields["ownerId"]; ok {
 			httpx.Error(w, "an agent does not change who owns a channel: that is the person's to do in the room", http.StatusForbidden)
 			return false, false

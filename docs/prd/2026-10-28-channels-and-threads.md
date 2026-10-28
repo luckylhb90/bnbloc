@@ -529,3 +529,43 @@ the people chat never. *Recommended.*
 - The delivery acceptance above, run with `bnbloc-loadtest` before and after.
 - `scripts/two-member-check.sh`; a resumed session across the release (a
   channel's purpose added to the records header is proven on a resumed session).
+
+## 10. Progress
+
+**Slice 1, server half** (813b7edc, 408b9df2): channel setup, sections (open),
+follows, room rules, the post gate (`docs/architecture/room-channels.md`).
+
+**Slice 1, tools and web** (this branch):
+
+- `room_setup` action `channel` (make, set up, archive, restore) and `set`'s
+  room rules and recommended channels, through the agent door; deleting a
+  channel, its owner, sections, the agreement switch and the creation policy
+  stay people's acts. `TestPromptBudgets` holds without a raise.
+- The web: the rail by section with per-member folding, the channel menu,
+  settings dialog, header and Rules sheet, the directory, the archived list,
+  sections, the welcome page, room settings' rules and channels, the
+  composer's gate (rules agreement, slow mode, archived, admins only) and C8.
+- Assist contracts `draft-channel-purpose`, `draft-room-rules`,
+  `find-channel`; their prompts belong in the default content repository and
+  are **not written yet** (until then the controls say the AI is unavailable
+  and work by hand).
+
+Not in it: a channel's purpose in the agents' records header (§2.5a) and
+the resumed-session proof that goes with it; the tidying proposals (§2.1b,
+slice 2).
+
+**Decisions pending owner, added in this half** (each marked
+`decision: pending owner` in the code):
+
+1. An agent's room patch is the description alone, or the rules and
+   recommended channels alone; the agreement switch and the channel
+   creation policy stay the person's (`roomPatchAllowed`, agent_door.go).
+2. An agent never changes a channel's owner (the door refuses `ownerId`).
+3. The welcome page opens once per member per room in this browser (not
+   stored on the server), and only for a room with a welcome, rules or
+   recommended channels.
+4. The channel's default agent, while it is the composer's pick, is not
+   saved as the member's own choice for the channel.
+5. "Join its channels" on the welcome page follows every channel of an open
+   section (C17 makes joining an open section following; the PRD does not
+   say whether that is all its channels).
