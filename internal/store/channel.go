@@ -97,6 +97,14 @@ var (
 	ErrSectionExists   = errors.New("store: section id already exists")
 )
 
+// ErrChannelGroupNotFound is returned by UpdateChannelGroup for a group the
+// member does not have; ErrChannelGroupExists by PutChannelGroup for a taken
+// id.
+var (
+	ErrChannelGroupNotFound = errors.New("store: channel group not found")
+	ErrChannelGroupExists   = errors.New("store: channel group id already exists")
+)
+
 // ChannelPatch is a partial update of a channel's setup: a nil field is left
 // as it is; Settings replaces the whole document.
 type ChannelPatch struct {
@@ -160,12 +168,36 @@ type ChannelFollow struct {
 	Starred        bool
 	Hidden         bool
 	LastPostedAtMs int64
+	// GroupID is the member's own group the channel sits in on their rail
+	// ("" none; C24).
+	GroupID string
 }
 
 // FollowMarks are the marks a follow sets; nil leaves a mark as it is.
 type FollowMarks struct {
 	Starred *bool
 	Hidden  *bool
+	// Group places the channel in one of the member's groups ("" takes it
+	// out); the caller checks the group is theirs.
+	Group *string
+}
+
+// ChannelGroup is one member's own group of their channel rail (C24): a
+// folder only they see, never a section; their follows name it.
+type ChannelGroup struct {
+	TenantID    string
+	RoomID      string
+	UserID      string
+	GroupID     string
+	Name        string
+	Position    int
+	CreatedAtMs int64
+}
+
+// ChannelGroupPatch is a partial update of a member's group.
+type ChannelGroupPatch struct {
+	Name     *string
+	Position *int
 }
 
 // ChannelAdmission is what decides whether agents may use a channel: its
@@ -240,6 +272,19 @@ type ChannelStore interface {
 	// ChannelFollowerCounts counts the followers of each followed channel of
 	// the room.
 	ChannelFollowerCounts(ctx context.Context, roomID string) (map[string]int, error)
+
+	// PutChannelGroup creates one of userID's groups (g.UserID);
+	// ErrChannelGroupExists when the id is taken.
+	PutChannelGroup(ctx context.Context, g ChannelGroup) error
+	// ChannelGroups returns userID's groups of the room by position, then
+	// created_at, then id.
+	ChannelGroups(ctx context.Context, roomID, userID string) ([]ChannelGroup, error)
+	// UpdateChannelGroup applies patch to one of userID's groups;
+	// ErrChannelGroupNotFound otherwise.
+	UpdateChannelGroup(ctx context.Context, roomID, userID, groupID string, patch ChannelGroupPatch) error
+	// DeleteChannelGroup deletes one of userID's groups and takes their
+	// channels out of it, at once. An absent group is a no-op.
+	DeleteChannelGroup(ctx context.Context, roomID, userID, groupID string) error
 	// ClaimChannelPost records userID's post in the channel at atMs and
 	// makes them follow it (posting joins, C18). With minGapMs > 0 (slow
 	// mode) the claim is refused when their last post there is less than
@@ -360,6 +405,97 @@ func channelKey(tenantID, roomID string) string { return tenantID + "\x00" + roo
 // followKey is one follow's key.
 func followKey(tenantID, roomID, channelID, userID string) string {
 	return tenantID + "\x00" + roomID + "\x00" + channelID + "\x00" + userID
+}
+
+func groupKey(tenantID, roomID, userID, groupID string) string {
+	return tenantID + "\x00" + roomID + "\x00" + userID + "\x00" + groupID
+}
+
+// sortChannelGroups orders a member's groups by position, then created_at,
+// then id (the order every store returns).
+func sortChannelGroups(gs []ChannelGroup) {
+	sort.Slice(gs, func(i, j int) bool {
+		a, b := gs[i], gs[j]
+		if a.Position != b.Position {
+			return a.Position < b.Position
+		}
+		if a.CreatedAtMs != b.CreatedAtMs {
+			return a.CreatedAtMs < b.CreatedAtMs
+		}
+		return a.GroupID < b.GroupID
+	})
+}
+
+func (s *MemoryChannel) PutChannelGroup(ctx context.Context, g ChannelGroup) error {
+	tnt, err := tenant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	s.room.mu.Lock()
+	defer s.room.mu.Unlock()
+	k := groupKey(tnt, g.RoomID, g.UserID, g.GroupID)
+	if _, ok := s.room.groups[k]; ok {
+		return ErrChannelGroupExists
+	}
+	g.TenantID = tnt
+	s.room.groups[k] = g
+	return nil
+}
+
+func (s *MemoryChannel) ChannelGroups(ctx context.Context, roomID, userID string) ([]ChannelGroup, error) {
+	tnt, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.room.mu.Lock()
+	defer s.room.mu.Unlock()
+	out := []ChannelGroup{}
+	for _, g := range s.room.groups {
+		if g.TenantID == tnt && g.RoomID == roomID && g.UserID == userID {
+			out = append(out, g)
+		}
+	}
+	sortChannelGroups(out)
+	return out, nil
+}
+
+func (s *MemoryChannel) UpdateChannelGroup(ctx context.Context, roomID, userID, groupID string, patch ChannelGroupPatch) error {
+	tnt, err := tenant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	s.room.mu.Lock()
+	defer s.room.mu.Unlock()
+	k := groupKey(tnt, roomID, userID, groupID)
+	g, ok := s.room.groups[k]
+	if !ok {
+		return ErrChannelGroupNotFound
+	}
+	if patch.Name != nil {
+		g.Name = *patch.Name
+	}
+	if patch.Position != nil {
+		g.Position = *patch.Position
+	}
+	s.room.groups[k] = g
+	return nil
+}
+
+func (s *MemoryChannel) DeleteChannelGroup(ctx context.Context, roomID, userID, groupID string) error {
+	tnt, err := tenant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	s.room.mu.Lock()
+	defer s.room.mu.Unlock()
+	delete(s.room.groups, groupKey(tnt, roomID, userID, groupID))
+	for k, f := range s.room.follows {
+		if f.TenantID == tnt && f.RoomID == roomID && f.UserID == userID && f.GroupID == groupID {
+			f.GroupID = ""
+			s.room.follows[k] = f
+		}
+	}
+	return nil
 }
 
 func (s *MemoryChannel) PutChannel(ctx context.Context, c RoomChannel) error {
@@ -642,6 +778,9 @@ func (s *MemoryChannel) FollowChannel(ctx context.Context, roomID, channelID, us
 	}
 	if marks.Hidden != nil {
 		f.Hidden = *marks.Hidden
+	}
+	if marks.Group != nil {
+		f.GroupID = *marks.Group
 	}
 	s.room.follows[k] = f
 	return nil

@@ -90,6 +90,31 @@ type RoomChannel struct {
 	Joined       bool            `json:"joined"`
 	Starred      bool            `json:"starred"`
 	Hidden       bool            `json:"hidden"`
+	// GroupID is the caller's own group the channel sits in on their rail
+	// ("" none; C24). Never another member's.
+	GroupID string `json:"groupId"`
+}
+
+// ChannelGroup is one of the caller's own groups of their channel rail
+// (docs/prd/2026-10-28-channels-and-threads.md C24): a folder only they see;
+// a channel's section is unchanged for everyone else.
+type ChannelGroup struct {
+	GroupID     string `json:"groupId"`
+	Name        string `json:"name"`
+	Position    int    `json:"position"`
+	CreatedAtMs int64  `json:"createdAtMs"`
+}
+
+// ChannelGroupCreateRequest is POST /v1/rooms/{id}/channel-groups.
+type ChannelGroupCreateRequest struct {
+	Name     string `json:"name"`
+	Position int    `json:"position,omitempty"`
+}
+
+// ChannelGroupPatchRequest is PATCH /v1/rooms/{id}/channel-groups/{groupId}.
+type ChannelGroupPatchRequest struct {
+	Name     *string `json:"name,omitempty"`
+	Position *int    `json:"position,omitempty"`
 }
 
 // Section visibilities. Slice 1 accepts only SectionOpen.
@@ -122,6 +147,8 @@ type RoomSection struct {
 type ChannelList struct {
 	Channels []RoomChannel `json:"channels"`
 	Sections []RoomSection `json:"sections"`
+	// Groups are the caller's own groups of their rail (C24).
+	Groups []ChannelGroup `json:"groups"`
 }
 
 // Query flags of GET /v1/rooms/{id}/channels.
@@ -151,10 +178,12 @@ type ChannelDirectory struct {
 
 // ChannelFollowRequest is PUT /v1/rooms/{id}/channels/{channelId}/follow:
 // the caller follows the channel (joins it) and, when given, stars or hides
-// it for themselves.
+// it for themselves, or puts it in one of their groups (GroupID: "" takes it
+// out of its group).
 type ChannelFollowRequest struct {
-	Starred *bool `json:"starred,omitempty"`
-	Hidden  *bool `json:"hidden,omitempty"`
+	Starred *bool   `json:"starred,omitempty"`
+	Hidden  *bool   `json:"hidden,omitempty"`
+	GroupID *string `json:"groupId,omitempty"`
 }
 
 // ChannelPatchRequest is PATCH /v1/rooms/{id}/channels/{channelId}: a nil

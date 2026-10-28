@@ -5,19 +5,21 @@ import {
   composerBlock,
   composerDefault,
   directoryMatches,
+  foldedChannels,
   mayCreateSection,
   mayDeleteChannel,
   mayManageChannel,
   mayManageSection,
   mayPlaceChannel,
   postRefusalOf,
+  railGroupKey,
   railGroups,
   reorderedPositions,
   sharedOrder,
   waitText,
   type DrivableAgent,
 } from "./channelRules.ts";
-import type { ChannelCreationPolicy, RoomChannel, RoomSection } from "./wire.gen.ts";
+import type { ChannelCreationPolicy, ChannelGroup, RoomChannel, RoomSection } from "./wire.gen.ts";
 
 // The fixture the room service's rules (services/room) are tested against:
 // the web answers every case alike, so a control shows only where the
@@ -47,7 +49,7 @@ test("the channel rules mirror the room service's, case by case", () => {
 
 const ch = (id: string, over: Partial<RoomChannel> = {}): RoomChannel => ({
   channelId: id, name: id, isDefault: false, createdBy: "maya", purpose: "", rules: "", sectionId: "", position: 0, ownerId: "maya",
-  settings: {}, joined: true, starred: false, hidden: false, ...over,
+  settings: {}, joined: true, starred: false, hidden: false, groupId: "", ...over,
 });
 const section = (id: string, position: number, owners: string[] = []): RoomSection => ({
   sectionId: id, name: id, position, visibility: "open", rules: "", owners, joinPolicy: "open", createdBy: "maya", createdAtMs: position,
@@ -84,6 +86,38 @@ test("the rail shows the joined channels, starred first, grouped by section, the
     keepEmpty: (s) => s.owners.includes("maya"),
   });
   assert.deepEqual(open.map((g) => g.channels.map((c) => c.channelId)), [["general", "other"], []]);
+});
+
+test("the member's own groups come after the top level and before the sections, and take their channels from them", () => {
+  const group = (id: string, position: number): ChannelGroup => ({ groupId: id, name: id, position, createdAtMs: position });
+  const groups = railGroups(
+    [
+      ch("general", { isDefault: true }),
+      ch("random"),
+      ch("mine-top", { groupId: "focus" }),
+      ch("ops-1", { sectionId: "ops", groupId: "focus", starred: true }),
+      ch("ops-2", { sectionId: "ops" }),
+      ch("stale", { sectionId: "ops", groupId: "gone" }),
+    ],
+    [section("ops", 1)],
+    { groups: [group("later", 2), group("focus", 1)] },
+  );
+  assert.deepEqual(
+    groups.map((g) => [railGroupKey(g), g.channels.map((c) => c.channelId)]),
+    [
+      ["", ["general", "random"]],
+      ["group:focus", ["ops-1", "mine-top"]],
+      ["group:later", []],
+      ["ops", ["ops-2", "stale"]],
+    ],
+  );
+});
+
+test("a folded group shows the open channel and those with unread, an unfolded one all", () => {
+  const list = [ch("a"), ch("b"), ch("c")];
+  assert.deepEqual(foldedChannels(list, false, "a", {}).map((c) => c.channelId), ["a", "b", "c"]);
+  assert.deepEqual(foldedChannels(list, true, "a", { c: 2, b: 0 }).map((c) => c.channelId), ["a", "c"]);
+  assert.deepEqual(foldedChannels(list, true, null, undefined), []);
 });
 
 test("the directory searches names and purposes, words in any order", () => {

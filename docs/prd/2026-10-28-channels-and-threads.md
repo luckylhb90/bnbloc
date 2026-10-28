@@ -628,3 +628,25 @@ slice 2).
 5. "Join its channels" on the welcome page follows every channel of an open
    section (C17 makes joining an open section following; the PRD does not
    say whether that is all its channels).
+
+**Slice 7a, personal groups (C24)**: `channel_groups` and
+`channel_follows.group_id` (migration `2026_10_channel_groups`); the
+caller's groups come with the channel list, made, renamed and deleted at
+`/v1/rooms/{id}/channel-groups`, and a channel is put in one through its
+follow (`groupId`, only the caller's own group). Deleting a group returns
+its channels to their sections; leaving a channel drops its group. The rail
+lists the top level, then the member's groups, then the room's sections,
+each foldable by one rule (`foldedChannels`: a folded one still shows the
+open channel and those with unread); a channel's menu offers "Move to …",
+"New group…" and "Remove from my group", a group's menu rename and delete.
+The agent door does not open the routes (a member's rail is theirs).
+
+**Decisions pending owner, added in slice 7a:**
+
+1. Groups are kept by any human member, a visitor included, as stars and
+   following are (the same rule as following).
+2. A member keeps at most 50 groups per room, each name up to 64
+   characters (`MaxChannelGroups`, `MaxChannelGroupName`).
+3. A member's groups are listed between the top level and the room's
+   sections (Slack lists custom sections above channels; the top level here
+   holds the default channel).

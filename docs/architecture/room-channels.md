@@ -64,6 +64,17 @@ level) and a **position** in it, an **owner** (its creator by default), an
   creating one; a new member joins the room's **recommended channels**
   (`addMember`/`redeemInvite`). Each member stars and hides channels for
   themselves; the directory lists every open channel with its followers.
+  Every member is in the default channel whether or not a follow row exists
+  (`channelView`), and cannot leave it.
+- **Personal groups** (`channel_groups`, C24): a member's own folders of
+  their rail, listed only to them (`groups` of the channel list). A follow's
+  `group_id` puts a channel in one (`PUT .../follow {groupId}`, only the
+  caller's own group; `""` takes it out); the channel's section is unchanged
+  for everyone. Deleting a group takes its channels out of it in the same
+  step; leaving a channel drops its group with the follow. The rail lists
+  the top level, then the member's groups, then the sections
+  (`railGroups`); a folded group or section shows only the open channel and
+  those with unread (`foldedChannels`, one rule for both).
 - **The room's rules** (≤ 8,000) carry a version a change of text bumps; when
   the room **requires agreeing** (C16, off by default) a member who has not
   agreed to the current version is refused a post
@@ -117,8 +128,11 @@ PATCH  /v1/rooms/{roomId}/channels/{channelId}         name, purpose, rules, sec
 POST   /v1/rooms/{roomId}/channels/{channelId}/archive — mayManageChannel; default/people → 409
 POST   /v1/rooms/{roomId}/channels/{channelId}/restore — mayManageChannel
 DELETE /v1/rooms/{roomId}/channels/{channelId}         delete — owner/admin; default/people → 409
-PUT    /v1/rooms/{roomId}/channels/{channelId}/follow  follow {starred?, hidden?} — any member (their own)
-DELETE /v1/rooms/{roomId}/channels/{channelId}/follow  unfollow
+PUT    /v1/rooms/{roomId}/channels/{channelId}/follow  follow {starred?, hidden?, groupId?} — any member (their own)
+DELETE /v1/rooms/{roomId}/channels/{channelId}/follow  unfollow (not the default channel → 409)
+POST   /v1/rooms/{roomId}/channel-groups               create {name, position?} — any member (their own)
+PATCH  /v1/rooms/{roomId}/channel-groups/{groupId}     name, position — their own (another's → 404)
+DELETE /v1/rooms/{roomId}/channel-groups/{groupId}     its channels leave the group — their own
 POST   /v1/rooms/{roomId}/sections                     create {name, rules?, position?} (open) — mayCreateSection
 PATCH  /v1/rooms/{roomId}/sections/{sectionId}         name, rules, position, owners — mayManageSection
 DELETE /v1/rooms/{roomId}/sections/{sectionId}         its channels move to the top level — mayManageSection
@@ -197,7 +211,10 @@ restores), `DeleteChannel(atMs)` (soft delete), `ChannelAdmission` (kind and
 (`PutSection`, `GetSection`, `ListSections`, `UpdateSection`,
 `DeleteSection`, which moves the section's channels to the top level in the
 same transaction); follows (`FollowChannel`, `UnfollowChannel`,
-`ChannelFollows`, `ChannelFollowerCounts`, `ClaimChannelPost`). The room
+`ChannelFollows`, `ChannelFollowerCounts`, `ClaimChannelPost`); a member's
+groups (`PutChannelGroup`, `ChannelGroups`, `UpdateChannelGroup`,
+`DeleteChannelGroup`, which takes the group's channels out of it in the
+same transaction). The room
 store holds the room's rules, version, agreement switch, recommended
 channels and creation policy, a member's `RulesAgreedVersion` and
 `AgreeRoomRules` (the current version only, in one statement). Memory and
@@ -210,4 +227,5 @@ Migrations: `2026_10_room_channels` (table + message columns + index),
 `2026_10_room_channels_audit` (audit channel column), `2026_10_channel_setup`
 (the setup columns, the room's rules columns, the member's agreed version,
 `room_sections`, `channel_follows`; an existing channel's owner is filled
-from its creator once).
+from its creator once), `2026_10_channel_groups` (`channel_groups`,
+`channel_follows.group_id`).

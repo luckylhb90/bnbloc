@@ -42,6 +42,11 @@ const (
 	MaxChannelPurpose = 250
 	MaxChannelRules   = 4000
 	MaxRoomRules      = 8000
+	// MaxChannelGroupName bounds a member's rail group's name, and
+	// MaxChannelGroups how many groups a member keeps in one room (C24;
+	// decision: pending owner, the PRD gives no bound).
+	MaxChannelGroupName = 64
+	MaxChannelGroups    = 50
 	// MaxRoomSourcePurpose bounds a room package's stated purpose for a
 	// source it asks for (sources[].purpose), in characters.
 	MaxRoomSourcePurpose = 500

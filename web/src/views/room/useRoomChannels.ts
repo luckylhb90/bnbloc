@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Channel } from "@/lib/api";
 import { channelsApi } from "@/lib/channelsApi";
-import type { RoomSection } from "@/lib/wire.gen";
+import type { ChannelGroup, RoomSection } from "@/lib/wire.gen";
 
 export interface RoomChannels {
   // null until the first load answers.
   readonly channels: Channel[] | null;
   readonly sections: readonly RoomSection[];
+  // The member's own groups of their rail (C24).
+  readonly groups: readonly ChannelGroup[];
   // The room's archived channels (the rail's "Archived" list).
   readonly archived: readonly Channel[];
   // The open channel's setup (null until known).
@@ -30,6 +32,7 @@ export function useRoomChannels(
 ): RoomChannels {
   const [channels, setChannels] = useState<Channel[] | null>(null);
   const [sections, setSections] = useState<readonly RoomSection[]>([]);
+  const [groups, setGroups] = useState<readonly ChannelGroup[]>([]);
   const [archived, setArchived] = useState<readonly Channel[]>([]);
   const [loadFailed, setLoadFailed] = useState(false);
   // The list is fetched per ROOM, never per parent render: the selection
@@ -45,6 +48,7 @@ export function useRoomChannels(
       if (mine !== generation.current) return;
       setChannels(res.channels ?? []);
       setSections(res.sections ?? []);
+      setGroups(res.groups ?? []);
       setArchived(old.channels ?? []);
       setLoadFailed(false);
     } catch {
@@ -72,5 +76,5 @@ export function useRoomChannels(
   // still has open (read-only, the composer says why).
   const current = (active && (channels?.find((c) => c.channelId === active) ?? archived.find((c) => c.channelId === active))) || null;
 
-  return { channels, sections, archived, current, loadFailed, reload };
+  return { channels, sections, groups, archived, current, loadFailed, reload };
 }

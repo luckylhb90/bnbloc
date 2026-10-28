@@ -486,6 +486,12 @@ export interface EgressHosts {
   // (docs/prd/2026-10-27-streamed-member-sends.md); otherwise such a
   // request is refused with 413.
   streams?: boolean;
+  // Paths: a host of Hosts the component handles only on some paths
+  // (path prefixes, each starting with "/"): a request to another path
+  // goes out from the member's computer as the command sent it, never
+  // seen by the component (a system other tools also call, where the
+  // component handles one API).
+  paths?: Record<string, string[]>;
 }
 
 // MaxEgressHosts bounds the hosts one component claims.
@@ -579,8 +585,8 @@ export interface EgressSend {
   // without Session neither reads nor writes one.
   session?: string;
   // Steps are a sign-in's requests the bridge sends first, in order, with
-  // the session (GET or HEAD of the request's own host, redirects not
-  // followed), reported in EgressReport.Steps. StepsOnly: the request
+  // the session (GET, HEAD or a POST of a form to the request's own host,
+  // redirects not followed), reported in EgressReport.Steps. StepsOnly: the request
   // itself is not sent yet; the component is asked again with the
   // steps' report (at most MaxEgressSignIns times for one request, not
   // counted among MaxEgressSends).
@@ -590,10 +596,14 @@ export interface EgressSend {
   endSession?: boolean;
 }
 
-// EgressStep is one sign-in request (EgressSend.Steps).
+// EgressStep is one sign-in request (EgressSend.Steps): a GET or HEAD, or
+// a POST of Body (a sign-in form: a SAML assertion to the system's ACS)
+// with Header (never Cookie: the session's cookies are the bridge's).
 export interface EgressStep {
   method: string;
   url: string;
+  header?: Record<string, string>;
+  body?: string;
 }
 
 // MaxEgressSends bounds the sends of one request (a refused sign-in is
@@ -2077,6 +2087,31 @@ export interface RoomChannel {
   joined: boolean;
   starred: boolean;
   hidden: boolean;
+  // GroupID is the caller's own group the channel sits in on their rail
+  // ("" none; C24). Never another member's.
+  groupId: string;
+}
+
+// ChannelGroup is one of the caller's own groups of their channel rail
+// (docs/prd/2026-10-28-channels-and-threads.md C24): a folder only they see;
+// a channel's section is unchanged for everyone else.
+export interface ChannelGroup {
+  groupId: string;
+  name: string;
+  position: number;
+  createdAtMs: number;
+}
+
+// ChannelGroupCreateRequest is POST /v1/rooms/{id}/channel-groups.
+export interface ChannelGroupCreateRequest {
+  name: string;
+  position?: number;
+}
+
+// ChannelGroupPatchRequest is PATCH /v1/rooms/{id}/channel-groups/{groupId}.
+export interface ChannelGroupPatchRequest {
+  name?: string;
+  position?: number;
 }
 
 // Section visibilities. Slice 1 accepts only SectionOpen.
@@ -2105,6 +2140,8 @@ export interface RoomSection {
 export interface ChannelList {
   channels: RoomChannel[];
   sections: RoomSection[];
+  // Groups are the caller's own groups of their rail (C24).
+  groups: ChannelGroup[];
 }
 
 // Query flags of GET /v1/rooms/{id}/channels.
@@ -2131,10 +2168,12 @@ export interface ChannelDirectory {
 
 // ChannelFollowRequest is PUT /v1/rooms/{id}/channels/{channelId}/follow:
 // the caller follows the channel (joins it) and, when given, stars or hides
-// it for themselves.
+// it for themselves, or puts it in one of their groups (GroupID: "" takes it
+// out of its group).
 export interface ChannelFollowRequest {
   starred?: boolean;
   hidden?: boolean;
+  groupId?: string;
 }
 
 // ChannelPatchRequest is PATCH /v1/rooms/{id}/channels/{channelId}: a nil
@@ -4545,6 +4584,11 @@ export const MaxContentTagRunes = 32;
 export const MaxChannelPurpose = 250;
 export const MaxChannelRules = 4000;
 export const MaxRoomRules = 8000;
+// MaxChannelGroupName bounds a member's rail group's name, and
+// MaxChannelGroups how many groups a member keeps in one room (C24;
+// decision: pending owner, the PRD gives no bound).
+export const MaxChannelGroupName = 64;
+export const MaxChannelGroups = 50;
 // MaxRoomSourcePurpose bounds a room package's stated purpose for a
 // source it asks for (sources[].purpose), in characters.
 export const MaxRoomSourcePurpose = 500;

@@ -353,6 +353,7 @@ type MemoryRoom struct {
 	channels map[string]map[string]RoomChannel // channelKey -> channelID -> channel
 	sections map[string]map[string]RoomSection // channelKey -> sectionID -> section
 	follows  map[string]ChannelFollow          // followKey -> follow
+	groups   map[string]ChannelGroup           // groupKey -> a member's group
 	// cascade are the memory stores DeleteRoom clears (cascadeDeleteTo).
 	cascade []roomRowsOwner
 }
@@ -367,6 +368,7 @@ func NewMemoryRoom() *MemoryRoom {
 		channels: map[string]map[string]RoomChannel{},
 		sections: map[string]map[string]RoomSection{},
 		follows:  map[string]ChannelFollow{},
+		groups:   map[string]ChannelGroup{},
 	}
 }
 
@@ -982,6 +984,11 @@ func (s *MemoryRoom) DeleteRoom(ctx context.Context, roomID string) error {
 	for k, f := range s.follows {
 		if f.TenantID == tid && f.RoomID == roomID {
 			delete(s.follows, k)
+		}
+	}
+	for k, g := range s.groups {
+		if g.TenantID == tid && g.RoomID == roomID {
+			delete(s.groups, k)
 		}
 	}
 	for k, inv := range s.invites {

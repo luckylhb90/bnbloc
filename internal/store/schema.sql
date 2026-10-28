@@ -264,8 +264,22 @@ CREATE TABLE IF NOT EXISTS channel_follows (
   starred       TINYINT(1) NOT NULL DEFAULT 0,
   hidden        TINYINT(1) NOT NULL DEFAULT 0,
   last_posted_at_ms BIGINT NOT NULL DEFAULT 0,
+  group_id      VARCHAR(64) NOT NULL DEFAULT '',
   PRIMARY KEY (tenant_id, room_id, channel_id, user_id),
   KEY idx_follow_user (tenant_id, room_id, user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- A member's own groups of their channel rail (C24): folders only they see,
+-- named and ordered by them; a follow's group_id places a channel in one.
+CREATE TABLE IF NOT EXISTS channel_groups (
+  tenant_id     VARCHAR(64) NOT NULL,
+  room_id       VARCHAR(64) NOT NULL,
+  user_id       VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  group_id      VARCHAR(64) NOT NULL,
+  name          VARCHAR(64) NOT NULL,
+  position      INT NOT NULL DEFAULT 0,
+  created_at_ms BIGINT NOT NULL,
+  PRIMARY KEY (tenant_id, room_id, user_id, group_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS rooms (

@@ -1859,6 +1859,18 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return nil
 		},
 	},
+	{
+		// A member's own groups of the channel rail
+		// (docs/prd/2026-10-28-channels-and-threads.md C24): a new table and
+		// a defaulted column the previous release never reads.
+		id: "2026_10_channel_groups",
+		run: func(ctx context.Context, db sqlConn) error {
+			if err := addColumnIfMissing(ctx, db, "channel_follows", "group_id", "VARCHAR(64) NOT NULL DEFAULT '' AFTER last_posted_at_ms"); err != nil {
+				return err
+			}
+			return createSchemaTable(ctx, db, "channel_groups")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

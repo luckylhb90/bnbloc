@@ -179,7 +179,7 @@ func channelView(c store.RoomChannel, f store.ChannelFollow) wire.RoomChannel {
 	v := wire.RoomChannel{
 		ChannelID: c.ChannelID, Name: c.Name, IsDefault: c.IsDefault, Kind: c.Kind, CreatedBy: c.CreatedBy,
 		Purpose: c.Purpose, Rules: c.Rules, SectionID: c.SectionID, Position: c.Position, OwnerID: c.OwnerID,
-		Settings: c.Settings, Joined: c.IsDefault || f.ChannelID != "", Starred: f.Starred, Hidden: f.Hidden,
+		Settings: c.Settings, Joined: c.IsDefault || f.ChannelID != "", Starred: f.Starred, Hidden: f.Hidden, GroupID: f.GroupID,
 	}
 	if c.ArchivedAtMs != nil {
 		v.ArchivedAtMs = *c.ArchivedAtMs
@@ -269,20 +269,24 @@ func (s *Service) handleListChannels(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		sections, err = s.Channels.ListSections(r.Context(), roomID)
 	}
+	user := ""
+	if member {
+		user = caller(r)
+	}
 	var follows map[string]store.ChannelFollow
 	if err == nil {
-		user := ""
-		if member {
-			user = caller(r)
-		}
 		follows, err = s.followsOf(r.Context(), roomID, user)
+	}
+	var groups []wire.ChannelGroup
+	if err == nil {
+		groups, err = s.groupsOf(r.Context(), roomID, user)
 	}
 	if err != nil {
 		obs.ServerError(w, "list channels failed", err)
 		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	out := wire.ChannelList{Channels: []wire.RoomChannel{}, Sections: []wire.RoomSection{}}
+	out := wire.ChannelList{Channels: []wire.RoomChannel{}, Sections: []wire.RoomSection{}, Groups: groups}
 	for _, c := range channels {
 		switch {
 		case c.IsPeople():
@@ -693,7 +697,8 @@ func (s *Service) handleDeleteChannel(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleFollowChannel makes the caller follow (join) a channel and, when the
-// body names them, star or hide it for themselves; follow false unfollows.
+// body names them, star or hide it for themselves or put it in one of their
+// groups (C24); follow false unfollows, which takes it out of its group.
 // Following is the caller's own order, never access: any human member of
 // the room follows, a visitor included (decision: pending owner; §2.1b
 // "personal order ... changes nothing for others"). The people chat is
@@ -723,7 +728,18 @@ func (s *Service) handleFollowChannel(follow bool) http.HandlerFunc {
 			if !httpx.DecodeOptionalJSON(w, r, maxJSONBodyBytes, &body) {
 				return
 			}
-			err = s.Channels.FollowChannel(r.Context(), roomID, ch.ChannelID, who.user, s.Now(), store.FollowMarks{Starred: body.Starred, Hidden: body.Hidden})
+			if body.GroupID != nil && *body.GroupID != "" {
+				// A channel goes only into one of the caller's own groups.
+				if found, gerr := s.ownGroup(r.Context(), roomID, who.user, *body.GroupID); gerr != nil {
+					err = gerr
+				} else if !found {
+					httpx.Error(w, "not one of your groups", http.StatusBadRequest)
+					return
+				}
+			}
+			if err == nil {
+				err = s.Channels.FollowChannel(r.Context(), roomID, ch.ChannelID, who.user, s.Now(), store.FollowMarks{Starred: body.Starred, Hidden: body.Hidden, Group: body.GroupID})
+			}
 		} else {
 			err = s.Channels.UnfollowChannel(r.Context(), roomID, ch.ChannelID, who.user)
 		}
