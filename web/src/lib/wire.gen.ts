@@ -486,6 +486,12 @@ export interface EgressHosts {
   // (docs/prd/2026-10-27-streamed-member-sends.md); otherwise such a
   // request is refused with 413.
   streams?: boolean;
+  // Paths: a host of Hosts the component handles only on some paths
+  // (path prefixes, each starting with "/"): a request to another path
+  // goes out from the member's computer as the command sent it, never
+  // seen by the component (a system other tools also call, where the
+  // component handles one API).
+  paths?: Record<string, string[]>;
 }
 
 // MaxEgressHosts bounds the hosts one component claims.
@@ -579,8 +585,8 @@ export interface EgressSend {
   // without Session neither reads nor writes one.
   session?: string;
   // Steps are a sign-in's requests the bridge sends first, in order, with
-  // the session (GET or HEAD of the request's own host, redirects not
-  // followed), reported in EgressReport.Steps. StepsOnly: the request
+  // the session (GET, HEAD or a POST of a form to the request's own host,
+  // redirects not followed), reported in EgressReport.Steps. StepsOnly: the request
   // itself is not sent yet; the component is asked again with the
   // steps' report (at most MaxEgressSignIns times for one request, not
   // counted among MaxEgressSends).
@@ -590,10 +596,14 @@ export interface EgressSend {
   endSession?: boolean;
 }
 
-// EgressStep is one sign-in request (EgressSend.Steps).
+// EgressStep is one sign-in request (EgressSend.Steps): a GET or HEAD, or
+// a POST of Body (a sign-in form: a SAML assertion to the system's ACS)
+// with Header (never Cookie: the session's cookies are the bridge's).
 export interface EgressStep {
   method: string;
   url: string;
+  header?: Record<string, string>;
+  body?: string;
 }
 
 // MaxEgressSends bounds the sends of one request (a refused sign-in is
@@ -1809,7 +1819,7 @@ export interface AssistContractField {
 }
 
 // AssistContracts are the contracts, one per task name.
-export const AssistContracts: readonly AssistContract[] = [{ task: "enhance-prompt", output: "text" }, { task: "describe-work", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "category", values: ["office", "data", "productivity", "content", "learning", "engineering", "finance", "life", "other"] }, { name: "tags", type: "list" }] }, { task: "describe-room", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "category" }, { name: "tags", type: "list" }, { name: "welcome" }, { name: "instructions" }, { name: "dependsOn", type: "items", item: [{ name: "what" }, { name: "kind", values: ["instructions", "app", "file", "tool", "schedule", "agent", "data", "other"] }, { name: "included", values: ["yes", "no"] }, { name: "why" }] }, { name: "findings", type: "items", item: [{ name: "field" }, { name: "quote" }, { name: "why", values: ["secret", "internal-link", "personal-name", "private-data"] }] }] }, { task: "draft-expert", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "instructions" }, { name: "welcome" }, { name: "quickPrompts", type: "items", item: [{ name: "title" }, { name: "prompt" }] }, { name: "tags", type: "list" }] }, { task: "draft-skill-pack", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "skills", type: "items", item: [{ name: "name" }, { name: "description" }, { name: "body" }] }, { name: "tags", type: "list" }] }, { task: "draft-prompt-pack", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "prompts", type: "items", item: [{ name: "title" }, { name: "body" }] }, { name: "tags", type: "list" }] }, { task: "plan-room", output: "json", fields: [{ name: "roomId" }, { name: "name" }, { name: "description" }, { name: "expert" }, { name: "skills", type: "list" }, { name: "firstMessage" }] }, { task: "draft-schedule", output: "json", fields: [{ name: "text" }, { name: "kind", values: ["once", "daily", "weekly", "cron"] }, { name: "time" }, { name: "days", type: "list" }, { name: "cron" }, { name: "at" }] }, { task: "explain-source-use", output: "json", fields: [{ name: "summary" }, { name: "uses", type: "list" }, { name: "mismatch" }], consent: true }, { task: "review-skill", output: "json", fields: [{ name: "findings", type: "list" }, { name: "name" }, { name: "displayName" }, { name: "description" }, { name: "tags", type: "list" }] }, { task: "fill-settings", output: "json", fields: [{ name: "values", type: "items", item: [{ name: "key" }, { name: "value" }] }, { name: "notes" }] }, { task: "suggest-skill-dirs", output: "json", fields: [{ name: "add", type: "items", item: [{ name: "path" }, { name: "why" }] }, { name: "notes" }] }, { task: "find-a-way", output: "json", fields: [{ name: "cause", values: ["access", "missing-file", "capability", "unclear", "agent-error", "other"] }, { name: "summary" }, { name: "fixes", type: "items", item: [{ name: "action", values: ["install", "ask-agent", "attach", "own-agent", "rephrase", "report", "allow-host"] }, { name: "target" }, { name: "why" }] }], gate: true }, { task: "draft-channel-purpose", output: "json", fields: [{ name: "purpose" }] }, { task: "draft-room-rules", output: "json", fields: [{ name: "rules" }, { name: "welcome" }] }, { task: "find-channel", output: "json", fields: [{ name: "answer" }, { name: "channels", type: "items", item: [{ name: "channelId" }, { name: "why" }] }] }];
+export const AssistContracts: readonly AssistContract[] = [{ task: "enhance-prompt", output: "text" }, { task: "describe-work", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "category", values: ["office", "data", "productivity", "content", "learning", "engineering", "finance", "life", "other"] }, { name: "tags", type: "list" }] }, { task: "describe-room", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "category" }, { name: "tags", type: "list" }, { name: "welcome" }, { name: "instructions" }, { name: "dependsOn", type: "items", item: [{ name: "what" }, { name: "kind", values: ["instructions", "app", "file", "tool", "schedule", "agent", "data", "other"] }, { name: "included", values: ["yes", "no"] }, { name: "why" }] }, { name: "findings", type: "items", item: [{ name: "field" }, { name: "quote" }, { name: "why", values: ["secret", "internal-link", "personal-name", "private-data"] }] }] }, { task: "draft-expert", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "instructions" }, { name: "welcome" }, { name: "quickPrompts", type: "items", item: [{ name: "title" }, { name: "prompt" }] }, { name: "tags", type: "list" }] }, { task: "draft-skill-pack", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "skills", type: "items", item: [{ name: "name" }, { name: "description" }, { name: "body" }] }, { name: "tags", type: "list" }] }, { task: "draft-prompt-pack", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "prompts", type: "items", item: [{ name: "title" }, { name: "body" }] }, { name: "tags", type: "list" }] }, { task: "plan-room", output: "json", fields: [{ name: "roomId" }, { name: "name" }, { name: "description" }, { name: "expert" }, { name: "skills", type: "list" }, { name: "firstMessage" }, { name: "sections", type: "items", item: [{ name: "name" }, { name: "rules" }] }, { name: "channels", type: "items", item: [{ name: "name" }, { name: "purpose" }, { name: "section" }] }] }, { task: "draft-schedule", output: "json", fields: [{ name: "text" }, { name: "kind", values: ["once", "daily", "weekly", "cron"] }, { name: "time" }, { name: "days", type: "list" }, { name: "cron" }, { name: "at" }] }, { task: "explain-source-use", output: "json", fields: [{ name: "summary" }, { name: "uses", type: "list" }, { name: "mismatch" }], consent: true }, { task: "review-skill", output: "json", fields: [{ name: "findings", type: "list" }, { name: "name" }, { name: "displayName" }, { name: "description" }, { name: "tags", type: "list" }] }, { task: "fill-settings", output: "json", fields: [{ name: "values", type: "items", item: [{ name: "key" }, { name: "value" }] }, { name: "notes" }] }, { task: "suggest-skill-dirs", output: "json", fields: [{ name: "add", type: "items", item: [{ name: "path" }, { name: "why" }] }, { name: "notes" }] }, { task: "find-a-way", output: "json", fields: [{ name: "cause", values: ["access", "missing-file", "capability", "unclear", "agent-error", "other"] }, { name: "summary" }, { name: "fixes", type: "items", item: [{ name: "action", values: ["install", "ask-agent", "attach", "own-agent", "rephrase", "report", "allow-host"] }, { name: "target" }, { name: "why" }] }], gate: true }, { task: "draft-channel-purpose", output: "json", fields: [{ name: "purpose" }] }, { task: "draft-room-rules", output: "json", fields: [{ name: "rules" }, { name: "welcome" }] }, { task: "find-channel", output: "json", fields: [{ name: "answer" }, { name: "channels", type: "items", item: [{ name: "channelId" }, { name: "why" }] }] }];
 
 // ---- wire/attachment_types.go ----
 
@@ -5741,12 +5751,43 @@ export interface RoomPackageFile {
   sizeBytes: number;
 }
 
+// RoomPackageSection is a section a room package makes in a new room
+// (docs/prd/2026-10-28-channels-and-threads.md C25): its name and rules,
+// open to every member (members-only sections wait for slice 2).
+export interface RoomPackageSection {
+  name: string;
+  rules?: string;
+}
+
+// RoomPackageChannelSettings are the settings a room package gives a
+// channel: who posts, whether agents are admitted and slow mode (a default
+// agent names someone's agent, which a package never does).
+export interface RoomPackageChannelSettings {
+  whoPosts?: ChannelWhoPosts;
+  noAgents?: boolean;
+  slowModeSeconds?: number;
+}
+
+// RoomPackageChannel is a channel a room package makes in a new room
+// (C25): its name, purpose and rules, the section it sits in (a section of
+// the package by name, "" for the top level) and its settings. The default
+// channel is every room's and is never listed.
+export interface RoomPackageChannel {
+  name: string;
+  purpose?: string;
+  rules?: string;
+  section?: string;
+  settings: RoomPackageChannelSettings;
+}
+
 // RoomSpec is a room package's setup on its Library view (the room
-// expert, skill packs and prompt packs are its requires). Apps are works
-// by "name@range"; AppSnapshots the apps made in the room it carries;
-// Files the room files it carries.
+// expert, skill packs and prompt packs are its requires). Sections and
+// Channels are the channel layout it makes; Apps are works by
+// "name@range"; AppSnapshots the apps made in the room it carries; Files
+// the room files it carries.
 export interface RoomSpec {
-  channels: string[];
+  sections: RoomPackageSection[];
+  channels: RoomPackageChannel[];
   schedules: RoomPackageSchedule[];
   apps: string[];
   appSnapshots: RoomAppSnapshot[];
@@ -5801,7 +5842,8 @@ export interface RoomComponentDraft {
   description: string;
   welcome: string;
   quickPrompts: RoomQuickPrompt[];
-  channels: string[];
+  sections: RoomPackageSection[];
+  channels: RoomPackageChannel[];
   schedules: RoomPackageSchedule[];
   expert?: RoomDraftPart;
   skills: RoomDraftPart[];
@@ -5827,17 +5869,22 @@ export interface RoomInclude {
 
 // RoomInstallRequest is POST /v1/content-components/{id}/create-room: the
 // version to install (default the latest) and the new room's id (one is
-// made when empty), name (default the component's) and visibility
-// ("private" by default, or "shared").
+// made when empty), name (default the component's), description (default
+// the package's), visibility ("private" by default, or "shared") and
+// whether it is readable before joining (absent: the visibility's
+// default). The new-room dialog sends its own fields here when it starts
+// from a template.
 export interface RoomInstallRequest {
   version?: string;
   roomId?: string;
   name?: string;
+  description?: string;
   visibility?: string;
+  previewable?: boolean;
 }
 
 // RoomInstallReply is what installing a room package set up: the new room,
-// From ("name@version"), its channels, the ids of its schedules (all
+// From ("name@version"), its sections and channels, the ids of its schedules (all
 // paused) and, of them, the requests to an agent that wait for the
 // installer to pick one of their agents (WaitingForAgent: each one's text
 // in a line), the room expert, the packs turned on and the apps copied in
@@ -5854,6 +5901,7 @@ export interface RoomInstallReply {
   name: string;
   componentId: string;
   from: string;
+  sections: string[];
   channels: string[];
   schedules: string[];
   waitingForAgent: string[];

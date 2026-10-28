@@ -89,7 +89,7 @@ func roomForm(d wire.RoomComponentDraft, in saveArgs) (contentpkg.Form, string) 
 		DisplayName: firstNonEmptyString(strings.TrimSpace(in.DisplayName), d.DisplayName),
 		Description: firstNonEmptyString(strings.TrimSpace(in.Description), d.Description),
 		Category:    strings.TrimSpace(in.Category), Tags: in.Tags, Welcome: d.Welcome, Instructions: strings.TrimSpace(in.Instructions),
-		Channels: d.Channels, Schedules: d.Schedules, Sources: d.Sources}
+		Sections: d.Sections, Channels: d.Channels, Schedules: d.Schedules, Sources: d.Sources}
 	for _, q := range d.QuickPrompts {
 		f.QuickPrompts = append(f.QuickPrompts, contentpkg.QuickPrompt{Title: q.Title, Prompt: q.Prompt})
 	}

@@ -628,3 +628,35 @@ slice 2).
 5. "Join its channels" on the welcome page follows every channel of an open
    section (C17 makes joining an open section following; the PRD does not
    say whether that is all its channels).
+
+**Slice 7b, templates carry the layout** (C25; this branch):
+
+- The room package's `channels` are objects (name, purpose, rules, section,
+  settings: who posts, agents admitted, slow mode) and the package has
+  `sections` (name, rules; open). The name-only shape is gone (no package
+  carried channels). The validator holds them to the room service's bounds
+  (`wire.MaxChannelPurpose`, `wire.MaxChannelRules`,
+  `wire.IsChannelWhoPosts`); `content-limits.md` lists them.
+- Capture (`draftLayout`) takes the open sections and live channels with
+  their setup; archived channels, members-only sections, a channel's
+  default agent and follows are said in `left`. Install (`installLayout`)
+  makes the sections, then each channel in its section, then its position,
+  rules and settings, through the room service's routes as the installer.
+- The new-room dialog: "Start from" lists the room templates the member may
+  use, shows the rail the picked one makes (`RoomLayoutPreview`) and
+  creates the room by its install, with the dialog's id, name,
+  description, visibility and preview switch (`RoomInstallRequest` gained
+  `description` and `previewable`). "Plan with AI" proposes sections and
+  channels too (the plan-room contract's `sections` and `channels`),
+  shown in the same preview, made through the channel routes on Create
+  (`web/src/lib/roomLayout.ts`, one owner of the layout's preview, plan
+  parse and creation). Nothing is made before Create; neither gives the
+  default channel alone.
+- Samples (team, project, release, support desk, end-to-end testing) and
+  the plan-room prompt are in the default content repository.
+
+**Decision pending owner, added in this slice** (marked in the code):
+
+1. A package's sections are at most 10 and its channels' names share the
+   80-character bound (`maxRoomSections`, `maxRoomChannelName`): the room
+   service bounds neither.

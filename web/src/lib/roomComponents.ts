@@ -14,7 +14,19 @@ import { describeRecurrence, recipientLabel } from "./schedules.ts";
 import { workNameFrom } from "./workGallery.ts";
 
 export type { RoomComponentDraft, RoomInclude, RoomInstallReply, RoomInstallRequest, RoomPackageSchedule, RoomSpec } from "./wire.gen.ts";
-import { MaxRoomCarryBytes, MaxRoomFiles, type ContentRequires, type RoomComponentDraft, type RoomDraftPart, type RoomInclude, type RoomPackageSchedule, type RoomSourceAsk, type RoomSpec } from "./wire.gen.ts";
+import {
+  MaxRoomCarryBytes,
+  MaxRoomFiles,
+  type ContentRequires,
+  type RoomComponentDraft,
+  type RoomDraftPart,
+  type RoomInclude,
+  type RoomPackageChannel,
+  type RoomPackageSchedule,
+  type RoomPackageSection,
+  type RoomSourceAsk,
+  type RoomSpec,
+} from "./wire.gen.ts";
 
 // MAX_ROOM_DESCRIPTION is a room's description bound (rooms.description):
 // a room component's description becomes the new room's.
@@ -57,7 +69,10 @@ export interface RoomSaveForm {
   tags: string;
   welcome: string;
   instructions: string;
-  channels: readonly string[];
+  // The channel layout (C25): every section is kept; a channel is ticked
+  // by its name (partKey("channel", name)).
+  sections: readonly RoomPackageSection[];
+  channels: readonly RoomPackageChannel[];
   schedules: readonly RoomPackageSchedule[];
   expert: RoomPart | null;
   skills: readonly RoomPart[];
@@ -99,6 +114,7 @@ export function roomSaveFromDraft(d: RoomComponentDraft): RoomSaveForm {
     tags: "",
     welcome: d.welcome,
     instructions: "",
+    sections: d.sections,
     channels: d.channels,
     schedules: d.schedules,
     expert: d.expert ? draftPart(d.expert) : null,
@@ -129,6 +145,7 @@ export function roomSaveFromComponent(c: ContentComponent): RoomSaveForm {
     tags: (c.tags ?? []).join(", "),
     welcome: c.welcome ?? "",
     instructions: "",
+    sections: room?.sections ?? [],
     channels: room?.channels ?? [],
     schedules: room?.schedules ?? [],
     expert: c.requires.expert ? refPart(c.requires.expert) : null,
@@ -223,7 +240,8 @@ export function roomContentForm(f: RoomSaveForm): ContentForm {
     skills: [],
     requires,
     room: {
-      channels: f.channels.filter((c) => isOn(f, partKey("channel", c))),
+      sections: [...f.sections],
+      channels: f.channels.filter((c) => isOn(f, partKey("channel", c.name))),
       schedules: f.schedules.filter((_, i) => isOn(f, partKey("schedule", i))),
       apps: f.apps.filter((p) => isOn(f, partKey("app", p.ref))).map((p) => p.ref),
       appSnapshots: carried(f, "madeApp")
@@ -261,6 +279,7 @@ export function scheduleLine(s: RoomPackageSchedule): string {
 export function roomSetupSummary(room: RoomSpec | undefined, requires: ContentRequires): string {
   const n = (count: number, one: string) => `${count} ${one}${count === 1 ? "" : "s"}`;
   const parts: string[] = [];
+  if (room?.sections.length) parts.push(n(room.sections.length, "section"));
   if (room?.channels.length) parts.push(n(room.channels.length, "channel"));
   if (room?.schedules.length) parts.push(n(room.schedules.length, "scheduled task"));
   if (requires.expert) parts.push("an expert");
@@ -280,7 +299,8 @@ export function describeRoomInput(f: RoomSaveForm): string {
   const form = roomContentForm(f);
   return JSON.stringify({
     setup: {
-      channels: form.room?.channels,
+      sections: form.room?.sections.map((s) => s.name),
+      channels: form.room?.channels.map((c) => (c.section ? `${c.section} / #${c.name}` : `#${c.name}`)),
       scheduledTasks: form.room?.schedules.map(scheduleLine),
       expert: f.expert && isOn(f, partKey("expert")) ? f.expert.label : undefined,
       skillPacks: f.skills.filter((p) => isOn(f, partKey("skill", p.ref))).map((p) => p.label),

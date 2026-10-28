@@ -128,14 +128,16 @@ type Manifest struct {
 	Context []string           `json:"context,omitempty"`
 	Gate    *wire.AssistGate   `json:"gate,omitempty"`
 
-	// Room: a room's setup (room.go): its channels by name, its scheduled
-	// tasks, its apps (works by "name@range") and the sources it asks for,
-	// each with its purpose (wire.RoomSourceAsk). Its welcome and quick prompts are the expert's
+	// Room: a room's setup (room.go): its sections and channels (each with
+	// its purpose, rules, section and settings), its scheduled tasks, its
+	// apps (works by "name@range") and the sources it asks for, each with
+	// its purpose (wire.RoomSourceAsk). Its welcome and quick prompts are the expert's
 	// fields; its room expert, skill and prompt packs are its requires.
 	// AppSnapshots and Files are the apps made in the room and the room
 	// files it carries (their bytes under apps/ and files/); INSTRUCTIONS.md
 	// holds the room's instructions.
-	Channels     []string                   `json:"channels,omitempty"`
+	Sections     []wire.RoomPackageSection  `json:"sections,omitempty"`
+	Channels     []wire.RoomPackageChannel  `json:"channels,omitempty"`
 	Schedules    []wire.RoomPackageSchedule `json:"schedules,omitempty"`
 	Apps         []string                   `json:"apps,omitempty"`
 	AppSnapshots []wire.RoomAppSnapshot     `json:"appSnapshots,omitempty"`

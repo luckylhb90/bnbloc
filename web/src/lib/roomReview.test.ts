@@ -18,7 +18,11 @@ const draft: RoomComponentDraft = {
   description: "Reviews releases with maya.",
   welcome: "",
   quickPrompts: [],
-  channels: ["reports", "acme-ops"],
+  sections: [],
+  channels: [
+    { name: "reports", settings: {} },
+    { name: "acme-ops", settings: {} },
+  ],
   schedules: [task("Post the release notes to https://wiki.acme.internal/notes.", "reports"), task("Ask jack for the numbers.", "acme-ops")],
   skills: [],
   prompts: [],

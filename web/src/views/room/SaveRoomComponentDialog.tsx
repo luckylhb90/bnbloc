@@ -330,7 +330,7 @@ function Findings({
  *  stays out of the component. */
 function RoomParts({ form, onToggle }: { readonly form: RoomSaveForm; readonly onToggle: (key: string, on: boolean) => void }) {
   const groups: [string, { key: string; label: string }[]][] = [
-    ["Channels", form.channels.map((c) => ({ key: partKey("channel", c), label: `#${c}` }))],
+    ["Channels", form.channels.map((c) => ({ key: partKey("channel", c.name), label: c.section ? `${c.section} / #${c.name}` : `#${c.name}` }))],
     ["Scheduled tasks (created paused in a new room)", form.schedules.map((s, i) => ({ key: partKey("schedule", i), label: scheduleLine(s) }))],
     ["Room expert", form.expert ? [{ key: partKey("expert"), label: form.expert.label }] : []],
     ...(

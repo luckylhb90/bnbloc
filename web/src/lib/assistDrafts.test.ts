@@ -134,6 +134,18 @@ function comp(p: Partial<ContentComponent> & Pick<ContentComponent, "id" | "name
   eq([plan.roomId, plan.name, plan.expert?.id, plan.skills.map((s) => s.id), plan.firstMessage], ["q3-review", "Q3 评审", "e1", ["s1", "s2"], "Start"], "a plan");
   eq(roomPlanFrom({ roomId: "a/b" }, experts, skills).roomId, "a-b", "an invalid id is made a slug");
   eq(roomPlanFrom({ expert: "nobody" }, experts, skills).expert, null, "an unknown expert");
+  // The layout it proposes: sections, then channels in them by name.
+  const laid = roomPlanFrom(
+    { sections: [{ name: "Work", rules: "Be brief." }], channels: [{ name: "#reports", purpose: "Weekly reports", section: "work" }, { name: "general" }, { name: "ideas", section: "Nowhere" }] },
+    experts,
+    skills,
+  ).layout;
+  eq(
+    laid,
+    { sections: [{ name: "Work", rules: "Be brief." }], channels: [{ name: "reports", purpose: "Weekly reports", section: "Work", settings: {} }, { name: "ideas", settings: {} }] },
+    "the plan's layout: the default channel dropped, an unknown section is the top level",
+  );
+  eq(roomPlanFrom({}, experts, skills).layout, { sections: [], channels: [] }, "no layout proposed");
   eq(findByName(skills, ""), null, "an empty name finds nothing");
 }
 
