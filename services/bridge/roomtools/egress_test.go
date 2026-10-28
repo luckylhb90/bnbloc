@@ -342,13 +342,13 @@ func TestSendFromHereOutsideATurn(t *testing.T) {
 		report = in.Report
 		return http.StatusOK, component.EgressResponse{Accept: true}
 	}}
-	if err := SendFromHere(context.Background(), gw, "s-1", http.MethodGet, "https://www.okx.com/api/v5/account/balance"); err != nil {
+	if err := SendFromHere(context.Background(), gw, "s-1", "connections", http.MethodGet, "https://www.okx.com/api/v5/account/balance"); err != nil {
 		t.Fatal(err)
 	}
 	if got.Get("Ok-Access-Key") != "K" || report == nil || report.Status != 401 || !strings.Contains(string(report.Body), "50113") {
 		t.Fatalf("sent %v, reported %+v", got, report)
 	}
-	if err := SendFromHere(context.Background(), gw, "nope", http.MethodGet, "https://www.okx.com/x"); err == nil {
+	if err := SendFromHere(context.Background(), gw, "nope", "connections", http.MethodGet, "https://www.okx.com/x"); err == nil {
 		t.Fatal("a refused send reported no error")
 	}
 }

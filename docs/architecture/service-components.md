@@ -120,6 +120,17 @@ The bridge's room tools server is also the session's HTTPS proxy
   with that answer. Any other service gets 413. A send, its body and its
   answer are bounded by activity (2 minutes with nothing moving), not by a
   clock; the proxy answers `Expect: 100-continue` itself.
+- **Sessions held on the member's computer**
+  (docs/prd/2026-10-28-member-held-sessions.md): a `Send` may name a
+  `Session`; the bridge then sends the cookies that host set on this
+  component's earlier sends naming it, and keeps the cookies the answer
+  sets, in memory, one jar per (component, host, name), at most 64. A
+  `Send` may carry a sign-in's `Steps` first (at most 4, `GET`/`HEAD` of the
+  request's own https host, redirects not followed), reported in
+  `EgressReport.Steps`; with `StepsOnly` the request waits for the
+  component's next answer (at most 3 sign-ins per request).
+  `EndSession` drops the session first. The command never sees a cookie;
+  the component never sees the session, only the steps' answers.
 - **The local CA** (`roomtools/egress_ca.go`): one per member directory
   (`egress-ca.pem`, its key `egress-ca.key` 0600), never sent anywhere,
   replaced 30 days before its end. Leaves last a day. Only the turn's

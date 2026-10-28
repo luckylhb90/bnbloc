@@ -444,7 +444,7 @@ func (c *roomToolsContributor) writeSandboxCA(workdir string) (caFile, bundleFil
 // (roomtools.SendFromHere); a failure is the component's to tell, here
 // only logged.
 func (b *Bridge) sendFromHere(ctx context.Context, send bridgeSend) {
-	if err := roomtools.SendFromHere(ctx, roomToolsGateway{b}, send.SendID, send.Method, send.URL); err != nil {
+	if err := roomtools.SendFromHere(ctx, roomToolsGateway{b}, send.SendID, send.Component, send.Method, send.URL); err != nil {
 		slog.Warn("bnbloc bridge send failed", "event", "bnbloc.bridge.send_failed", "send", send.SendID, "error", err)
 	}
 }
