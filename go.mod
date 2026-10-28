@@ -11,6 +11,7 @@ require (
 	github.com/coder/websocket v1.8.15
 	github.com/go-sql-driver/mysql v1.8.1
 	github.com/redis/go-redis/v9 v9.23.0
+	golang.org/x/crypto v0.45.0
 	golang.org/x/net v0.47.0
 )
 
@@ -30,6 +31,5 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/golang-jwt/jwt/v5 v5.2.1 // indirect
 	go.uber.org/atomic v1.12.0 // indirect
-	golang.org/x/crypto v0.45.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 )

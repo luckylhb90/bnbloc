@@ -135,6 +135,9 @@ func Start(cfg Config) (*Server, error) {
 		if s.ca, err = loadEgressCA(cfg.EgressDir); err != nil {
 			slog.Warn("bnbloc bridge egress proxy off: its CA could not be loaded", "event", "bnbloc.bridge.egress_ca_failed", "error", err)
 		}
+		if cfg.EgressDir != "" {
+			UseSessionsDir(cfg.EgressDir)
+		}
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc(Endpoint, s.handle)

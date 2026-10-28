@@ -1,17 +1,22 @@
 package roomtools
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
 	"io"
 	"net"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/luckylhb90/bnbloc/component"
 )
@@ -143,7 +148,7 @@ func TestEgressSessionHeldHere(t *testing.T) {
 // only a POST carries a body.
 func TestEgressStepsStayOnTheHost(t *testing.T) {
 	in := component.EgressRequest{Method: http.MethodGet, URL: "https://ci.example.com/api"}
-	jar := sessions.jar(sessionKey{"connections", "ci.example.com", "t"})
+	jar := &heldJar{Jar: sessions.jar(sessionKey{"connections", "ci.example.com", "t"}), key: sessionKey{"connections", "ci.example.com", "t"}}
 	for _, st := range []component.EgressStep{
 		{Method: http.MethodGet, URL: "https://evil.example.com/x"},
 		{Method: http.MethodPut, URL: "https://ci.example.com/x"},
@@ -163,4 +168,35 @@ func mustURL(t *testing.T, raw string) *url.URL {
 		t.Fatal(err)
 	}
 	return u
+}
+
+// Held sessions outlive a restart of the bridge: kept sealed in the
+// member directory and read back; a dropped session is gone from it too.
+func TestHeldSessionsKeptOnDisk(t *testing.T) {
+	dir := t.TempDir()
+	old := sessions
+	defer func() { sessions = old }()
+	sessions = &sessionStore{jars: map[sessionKey]*cookiejar.Jar{}, kept: map[sessionKey]map[string]keptCookie{}}
+	UseSessionsDir(dir)
+	u := mustURL(t, "https://ci.example.com/app")
+	k := sessionKey{"connections", "ci.example.com", "member:maya"}
+	j := &heldJar{Jar: sessions.jar(k), key: k}
+	cs := []*http.Cookie{{Name: "sess", Value: "S1", Path: "/", Expires: time.Now().Add(time.Hour)}}
+	j.SetCookies(u, cs)
+	sessions.remember(k, u, cs)
+	if raw, _ := os.ReadFile(filepath.Join(dir, sessionsFile)); len(raw) == 0 || bytes.Contains(raw, []byte("S1")) {
+		t.Fatalf("not kept sealed: %q", raw)
+	}
+	// A new process.
+	sessions = &sessionStore{jars: map[sessionKey]*cookiejar.Jar{}, kept: map[sessionKey]map[string]keptCookie{}}
+	UseSessionsDir(dir)
+	if got := sessions.jar(k).Cookies(u); len(got) != 1 || got[0].Value != "S1" {
+		t.Fatalf("after a restart = %v", got)
+	}
+	sessions.end(k)
+	sessions = &sessionStore{jars: map[sessionKey]*cookiejar.Jar{}, kept: map[sessionKey]map[string]keptCookie{}}
+	UseSessionsDir(dir)
+	if got := sessions.jar(k).Cookies(u); len(got) != 0 {
+		t.Fatalf("an ended session came back: %v", got)
+	}
 }

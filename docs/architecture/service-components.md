@@ -130,7 +130,11 @@ The bridge's room tools server is also the session's HTTPS proxy
   `EgressReport.Steps`; with `StepsOnly` the request waits for the
   component's next answer (at most 3 sign-ins per request).
   `EndSession` drops the session first. The command never sees a cookie;
-  the component never sees the session, only the steps' answers.
+  the component never sees the session, only the steps' answers. Sessions
+  outlive a restart of the bridge: kept in the member directory
+  (`egress-sessions.sealed`, XChaCha20-Poly1305 with
+  `egress-sessions.key` beside it, both 0600), expired cookies dropped on
+  reading; a dropped session leaves the file too.
 - **Hosts claimed on some paths** (`EgressHosts.Paths`, host → path
   prefixes): a host other tools also call, where the component handles one
   API. A request to another path of it goes out from the member's computer
