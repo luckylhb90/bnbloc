@@ -20,7 +20,7 @@ component that speaks the same two contracts. Design record and review:
         │  loopback HTTP + per-launch bearer              bnbloc.skills.provider/v1
         ▼
  plugin sidecar  (luckylhb90/bnbloc-local-skills)
-        │  copies the ticked skills into  <workspaces root>/.mounts/<plugin>/
+        │  copies the ticked skills into  <workspaces root>/.mounts/<account>/<plugin>/
         │  writes  <member>/bridge/mounts/<plugin>/mounts.json   bnbloc.sandbox.mounts/v1
         ▼
  bridge: before every sandboxed turn adds the descriptor's mounts, read-only
@@ -131,7 +131,7 @@ the package's `sidecar` block names (`core/pkgmeta`):
 |---|---|---|
 | any | the plugin's private data dir | `dataDirEnv` |
 | `skills-provider` | a fresh bearer every launch (kept by the desktop, never given to the web) | `tokenEnv` (required) |
-| `sandbox-mounts` | the descriptor file `<member>/bridge/mounts/<plugin>/mounts.json`, and the folder for the copies `<workspaces root>/.mounts/<plugin>` | `mountsEnv`, `mountRootEnv` (required together; refused without the capability) |
+| `sandbox-mounts` | the descriptor file `<member>/bridge/mounts/<plugin>/mounts.json`, and the folder for the copies `<workspaces root>/.mounts/<account>/<plugin>` (the desktop names the `<account>/` part to the bridge, `BNBLOC_SANDBOX_MOUNTS_ROOT`) | `mountsEnv`, `mountRootEnv` (required together; refused without the capability) |
 
 Such a plugin subscribes to no hook, so the hook requirement of a plugin package
 is waived when it declares one of these capabilities. Uninstalling the plugin

@@ -69,6 +69,11 @@ pub(super) const ENV_VMEXEC: &str = "BNBLOC_SANDBOX_VMEXEC";
 pub(super) const ENV_MODE: &str = "BNBLOC_SANDBOX_MODE";
 pub(super) const ENV_MACHINE: &str = "BNBLOC_SANDBOX_MACHINE";
 pub(super) const ENV_WORKSPACES_ROOT: &str = "BNBLOC_SANDBOX_WORKSPACES_ROOT";
+/// The folder that holds every component's own folder of the sandbox mounts
+/// (`<workspaces root>/.mounts/<account>`, skills_provider::mirror_root): the
+/// desktop owns the path, so it names it to the bridge instead of the bridge
+/// deriving it (it once did, without the account, and dropped every mount).
+pub(super) const ENV_MOUNTS_ROOT: &str = "BNBLOC_SANDBOX_MOUNTS_ROOT";
 pub(super) const ENV_OWN_MACHINE: &str = "BNBLOC_SANDBOX_OWN_MACHINE";
 /// The names the member lets into their own sandboxed runs (comma list).
 pub(super) const ENV_FORWARD: &str = "BNBLOC_SANDBOX_ENV";
@@ -401,6 +406,9 @@ pub(crate) struct BridgeHandoff {
     pub(crate) vmexec: PathBuf,
     pub(crate) machine: String,
     pub(crate) workspaces_root: PathBuf,
+    /// Where this account's components keep the folders their sandbox mounts
+    /// point into (`mirror_root`); None when the machine has no workspaces root.
+    pub(crate) mounts_root: Option<PathBuf>,
     /// The member's own machine, while it runs with their private hosts.
     pub(crate) own_machine: Option<String>,
     /// Where the guests reach the bridge's egress proxy (hostProxy).
@@ -427,6 +435,9 @@ pub(crate) fn bridge_env(
             ENV_WORKSPACES_ROOT.into(),
             h.workspaces_root.to_string_lossy().into_owned(),
         ));
+        if let Some(root) = &h.mounts_root {
+            env.push((ENV_MOUNTS_ROOT.into(), root.to_string_lossy().into_owned()));
+        }
         if let Some(own) = &h.own_machine {
             env.push((ENV_OWN_MACHINE.into(), own.clone()));
             if !h.private_hosts.is_empty() {
@@ -456,7 +467,7 @@ pub(super) fn bridge_fingerprint(
         return mode.as_str().to_string();
     };
     format!(
-        "{}|{}|{}|{}|{}|{}|{}|{}|{}",
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
         mode.as_str(),
         h.seq,
         h.url,
@@ -465,7 +476,11 @@ pub(super) fn bridge_fingerprint(
         h.vmexec.display(),
         forward.join(","),
         h.host_proxy.as_deref().unwrap_or_default(),
-        h.private_hosts.join(",")
+        h.private_hosts.join(","),
+        h.mounts_root
+            .as_deref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default()
     )
 }
 
@@ -1419,6 +1434,7 @@ impl Adapter {
             vmexec: launch.vmexec.clone()?,
             machine: self.machine_name().to_string(),
             workspaces_root: workspaces_root()?,
+            mounts_root: crate::internal_ext::skills_provider::mirror_root(&self.scope),
             own_machine: launch
                 .own
                 .handoff
@@ -1673,6 +1689,7 @@ mod tests {
             vmexec: PathBuf::from("/cache/sandbox/vmrt/0.1.0-abc/bnbloc-vmexec"),
             machine: MACHINE_NAME.into(),
             workspaces_root: PathBuf::from("/Users/me/bnbloc-workspaces"),
+            mounts_root: Some(PathBuf::from("/Users/me/bnbloc-workspaces/.mounts/acct")),
             own_machine: None,
             host_proxy: None,
             private_hosts: Vec::new(),
@@ -1720,6 +1737,12 @@ mod tests {
         );
         assert_eq!(env[ENV_MACHINE], "bnbloc");
         assert_eq!(env[ENV_WORKSPACES_ROOT], "/Users/me/bnbloc-workspaces");
+        // The folder the account's components keep their mount folders in, named by
+        // the desktop, which owns it; the bridge derives nothing.
+        assert_eq!(
+            env[ENV_MOUNTS_ROOT],
+            "/Users/me/bnbloc-workspaces/.mounts/acct"
+        );
         assert!(!env.contains_key(ENV_FORWARD), "no names: no variable");
         assert!(
             !env.contains_key(ENV_OWN_MACHINE),
@@ -1839,6 +1862,18 @@ mod tests {
                 })
             ),
             "the own machine appearing restarts the bridge"
+        );
+        assert_ne!(
+            fp,
+            bridge_fingerprint(
+                BridgeMode::Known(SandboxMode::Borrowed),
+                none,
+                Some(&BridgeHandoff {
+                    mounts_root: Some(PathBuf::from("/Users/me/bnbloc-workspaces/.mounts/other")),
+                    ..h.clone()
+                })
+            ),
+            "another account's mounts folder restarts the bridge"
         );
         let mut relaunched = h.clone();
         relaunched.seq += 1;

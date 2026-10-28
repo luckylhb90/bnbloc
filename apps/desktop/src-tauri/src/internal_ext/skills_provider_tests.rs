@@ -322,3 +322,34 @@ async fn a_panel_call_keeps_the_status_of_a_failure_for_the_page() {
     assert_eq!(status.as_u16(), 409);
     assert!(String::from_utf8_lossy(&body).contains("another operation"));
 }
+
+/// The folder the desktop gives a plugin for its mounts is directly under the folder it
+/// tells the bridge to read them from (`ENV_MOUNTS_ROOT`, `mirror_root`): the bridge once
+/// derived its own, without the account, and dropped every component's mount in the real
+/// app. One path, one owner.
+#[test]
+fn the_folder_a_plugin_writes_its_mounts_in_is_directly_under_the_one_the_bridge_is_told() {
+    let root = sandbox::workspaces_root().expect("a home folder");
+    let mounts_root = mirror_root("acct1234").expect("a mirror root");
+    assert_eq!(mounts_root, root.join(".mounts").join("acct1234"));
+
+    let tmp = temp("mounts-root");
+    let member = tmp.join("member");
+    let job = job_env(&spec("agent-manager", &[CAP_MOUNTS]), &member, Some(&mounts_root_in(&tmp))).unwrap();
+    let handed: Vec<PathBuf> = job
+        .env
+        .iter()
+        .filter(|(k, _)| k == "SK_MOUNT_ROOT")
+        .map(|(_, v)| v.clone())
+        .collect();
+    assert_eq!(handed, vec![mounts_root_in(&tmp).join("agent-manager")]);
+    assert_eq!(
+        handed[0].parent().unwrap(),
+        mounts_root_in(&tmp),
+        "a plugin's folder sits directly under the mounts root the bridge is told"
+    );
+}
+
+fn mounts_root_in(tmp: &Path) -> PathBuf {
+    tmp.join("workspaces/.mounts/acct1234")
+}

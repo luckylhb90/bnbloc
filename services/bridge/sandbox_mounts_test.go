@@ -3,6 +3,8 @@ package bridge
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -20,6 +22,10 @@ import (
 // component's folder under the root's .mounts.
 type mountFixture struct {
 	mountsDir, root, workdir, guestRoot string
+	// mountsRoot is where the desktop keeps the account's component folders:
+	// <workspaces root>/.mounts/<account>, with the account layer the real app has
+	// (a fixture without it hid a bug that dropped every mount).
+	mountsRoot string
 }
 
 func newMountFixture(t *testing.T) mountFixture {
@@ -28,7 +34,7 @@ func newMountFixture(t *testing.T) mountFixture {
 	if real, err := filepath.EvalSymlinks(root); err == nil {
 		root = real
 	}
-	f := mountFixture{mountsDir: t.TempDir(), root: root, workdir: filepath.Join(root, "space-1"), guestRoot: "/guest/home"}
+	f := mountFixture{mountsDir: t.TempDir(), root: root, workdir: filepath.Join(root, "space-1"), guestRoot: "/guest/home", mountsRoot: filepath.Join(root, ".mounts", "acct1234")}
 	if err := os.MkdirAll(f.workdir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +43,7 @@ func newMountFixture(t *testing.T) mountFixture {
 
 func (f mountFixture) folder(t *testing.T, component, name string) string {
 	t.Helper()
-	p := filepath.Join(MountsHostRoot(f.root, component), name)
+	p := filepath.Join(MountsHostRoot(f.mountsRoot, component), name)
 	if err := os.MkdirAll(p, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +63,7 @@ func (f mountFixture) descriptor(t *testing.T, component string, body any) {
 }
 
 func (f mountFixture) read(borrowed bool) ([]sandbox.SpaceMount, []mountDrop) {
-	m, _, d := readContributedMounts(f.mountsDir, f.root, f.workdir, "space-1", []string{f.guestRoot}, borrowed)
+	m, _, d := readContributedMounts(f.mountsDir, f.mountsRoot, f.workdir, "space-1", []string{f.guestRoot}, borrowed)
 	return m, d
 }
 
@@ -108,10 +114,10 @@ func TestContributedMounts_refusals(t *testing.T) {
 	ok := f.folder(t, "c1", "ok")
 	outside := t.TempDir()
 	// A symlink inside the component's folder that leaves it.
-	if err := os.Symlink(outside, filepath.Join(MountsHostRoot(f.root, "c1"), "escape")); err != nil {
+	if err := os.Symlink(outside, filepath.Join(MountsHostRoot(f.mountsRoot, "c1"), "escape")); err != nil {
 		t.Fatal(err)
 	}
-	file := filepath.Join(MountsHostRoot(f.root, "c1"), "afile")
+	file := filepath.Join(MountsHostRoot(f.mountsRoot, "c1"), "afile")
 	os.WriteFile(file, []byte("x"), 0o644)
 	other := f.folder(t, "c2", "theirs") // another component's folder
 	cases := []struct {
@@ -121,11 +127,11 @@ func TestContributedMounts_refusals(t *testing.T) {
 	}{
 		{"host outside the share", desc{"host": outside, "guest": f.guestRoot + "/x"}, "not inside the component's folder"},
 		{"another component's folder", desc{"host": other, "guest": f.guestRoot + "/x"}, "not inside the component's folder"},
-		{"the component's folder itself", desc{"host": MountsHostRoot(f.root, "c1"), "guest": f.guestRoot + "/x"}, "not inside the component's folder"},
+		{"the component's folder itself", desc{"host": MountsHostRoot(f.mountsRoot, "c1"), "guest": f.guestRoot + "/x"}, "not inside the component's folder"},
 		{"a dotted host path", desc{"host": ok + "/../ok", "guest": f.guestRoot + "/x"}, "not inside the component's folder"},
 		{"a relative host path", desc{"host": "ok", "guest": f.guestRoot + "/x"}, "not inside the component's folder"},
-		{"a link out of the folder", desc{"host": filepath.Join(MountsHostRoot(f.root, "c1"), "escape"), "guest": f.guestRoot + "/x"}, "leaves the component's folder"},
-		{"a missing folder", desc{"host": filepath.Join(MountsHostRoot(f.root, "c1"), "nope"), "guest": f.guestRoot + "/x"}, "missing"},
+		{"a link out of the folder", desc{"host": filepath.Join(MountsHostRoot(f.mountsRoot, "c1"), "escape"), "guest": f.guestRoot + "/x"}, "leaves the component's folder"},
+		{"a missing folder", desc{"host": filepath.Join(MountsHostRoot(f.mountsRoot, "c1"), "nope"), "guest": f.guestRoot + "/x"}, "missing"},
 		{"a file, not a folder", desc{"host": file, "guest": f.guestRoot + "/x"}, "not a folder"},
 		{"a relative guest path", desc{"host": ok, "guest": "skills/x"}, "absolute, clean"},
 		{"a dotted guest path", desc{"host": ok, "guest": f.guestRoot + "/a/../x"}, "absolute, clean"},
@@ -144,7 +150,7 @@ func TestContributedMounts_refusals(t *testing.T) {
 	}
 	// A guest folder outside the default root is fine once the member allows it.
 	f.descriptor(t, "c1", descriptor(desc{"host": ok, "guest": "/opt/skills/x"}))
-	mounts, _, _ := readContributedMounts(f.mountsDir, f.root, f.workdir, "space-1", []string{f.guestRoot, "/opt/skills"}, false)
+	mounts, _, _ := readContributedMounts(f.mountsDir, f.mountsRoot, f.workdir, "space-1", []string{f.guestRoot, "/opt/skills"}, false)
 	if len(mounts) != 1 {
 		t.Errorf("an allowed extra root: %+v", mounts)
 	}
@@ -203,7 +209,7 @@ func TestContributedMounts_descriptorProblems(t *testing.T) {
 	other := filepath.Join(f.mountsDir, "orphan")
 	os.MkdirAll(other, 0o755)
 	os.WriteFile(filepath.Join(other, mountsFileName), []byte(`{"contract":"`+SandboxMountsContract+`","mounts":[]}`), 0o644)
-	if _, d := f.read(false); len(d) != 1 || d[0].Component != "orphan" || !strings.Contains(d[0].Reason, "folder under the workspaces root is missing") {
+	if _, d := f.read(false); len(d) != 1 || d[0].Component != "orphan" || !strings.Contains(d[0].Reason, "is missing: a component's mounts must live under it") {
 		t.Errorf("no folder: %v", d)
 	}
 	// A directory that is not a component name is dropped, not read.
@@ -211,10 +217,10 @@ func TestContributedMounts_descriptorProblems(t *testing.T) {
 	if _, d := f.read(false); !slices.ContainsFunc(d, func(x mountDrop) bool { return x.Component == "Bad Name" }) {
 		t.Errorf("a bad component name: %v", d)
 	}
-	if m, e, d := readContributedMounts("", f.root, f.workdir, "space-1", nil, false); m != nil || e != nil || d != nil {
+	if m, e, d := readContributedMounts("", f.mountsRoot, f.workdir, "space-1", nil, false); m != nil || e != nil || d != nil {
 		t.Error("no mounts dir configured: nothing")
 	}
-	if m, e, d := readContributedMounts(filepath.Join(f.mountsDir, "nowhere"), f.root, f.workdir, "space-1", nil, false); m != nil || e != nil || d != nil {
+	if m, e, d := readContributedMounts(filepath.Join(f.mountsDir, "nowhere"), f.mountsRoot, f.workdir, "space-1", nil, false); m != nil || e != nil || d != nil {
 		t.Error("a mounts dir that is not there: nothing")
 	}
 }
@@ -273,7 +279,7 @@ func mountBridge(t *testing.T, sbx *fakeSandboxd, mode SandboxMode, prov corepkg
 	t.Helper()
 	gw := newSandboxGateway(t, "room-1", false)
 	f := newMountFixture(t)
-	cfg := SandboxConfig{Mode: mode, URL: sbx.srv.URL, Token: sandboxAdminToken, VMExec: "/apps/sandbox/bnbloc-vmexec", Machine: "bnbloc", WorkspacesRoot: f.root, MountsDir: f.mountsDir, MountGuestRoots: []string{f.guestRoot}}
+	cfg := SandboxConfig{Mode: mode, URL: sbx.srv.URL, Token: sandboxAdminToken, VMExec: "/apps/sandbox/bnbloc-vmexec", Machine: "bnbloc", WorkspacesRoot: f.root, MountsRoot: f.mountsRoot, MountsDir: f.mountsDir, MountGuestRoots: []string{f.guestRoot}}
 	return New(Config{GatewayBaseURL: gw.srv.URL, GatewayToken: "t", OwnerSubject: "alice", Cores: newTestCore(prov), Sandbox: cfg}), f
 }
 
@@ -395,7 +401,7 @@ func TestContributedMounts_perSpaceTreesShareFilesAndNameTheirPath(t *testing.T)
 	f.descriptor(t, "agents", descriptor(desc{"host": v1, "guest": f.guestRoot + "/agents/tool", "perSpace": true, "env": "BNBLOC_MOUNT_TOOL"}))
 
 	read := func(space string) ([]sandbox.SpaceMount, map[string]string, []mountDrop) {
-		return readContributedMounts(f.mountsDir, f.root, f.workdir, space, []string{f.guestRoot}, false)
+		return readContributedMounts(f.mountsDir, f.mountsRoot, f.workdir, space, []string{f.guestRoot}, false)
 	}
 	ma, ea, da := read("a-1")
 	mb, eb, db := read("b-2")
@@ -555,7 +561,7 @@ func TestSweepSpaceTreesRemovesOnlyWhatNoSpaceOwns(t *testing.T) {
 	os.WriteFile(filepath.Join(v, "x"), []byte("x"), 0o644)
 	trees := map[string]string{}
 	for _, sp := range []string{"live", "gone", "new"} {
-		p, err := perSpaceTree(MountsHostRoot(f.root, "agents"), sp, f.guestRoot+"/tool", v)
+		p, err := perSpaceTree(MountsHostRoot(f.mountsRoot, "agents"), sp, f.guestRoot+"/tool", v)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -565,7 +571,7 @@ func TestSweepSpaceTreesRemovesOnlyWhatNoSpaceOwns(t *testing.T) {
 	for _, sp := range []string{"live", "gone"} {
 		os.Chtimes(filepath.Dir(trees[sp]), old, old)
 	}
-	n := sweepSpaceTrees(f.root, map[string]bool{"live": true}, time.Hour, time.Now())
+	n := sweepSpaceTrees(f.mountsRoot, map[string]bool{"live": true}, time.Hour, time.Now())
 	if n != 1 {
 		t.Errorf("removed %d, want the one idle space nobody owns", n)
 	}
@@ -592,7 +598,7 @@ func TestSandbox_theBridgeSweepsTheTreesOfDeletedSpacesFromTheSandboxsList(t *te
 	v := f.folder(t, "agents", "tool/1.0")
 	var trees []string
 	for _, sp := range []string{"kept", "deleted"} {
-		p, err := perSpaceTree(MountsHostRoot(f.root, "agents"), sp, f.guestRoot+"/tool", v)
+		p, err := perSpaceTree(MountsHostRoot(f.mountsRoot, "agents"), sp, f.guestRoot+"/tool", v)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -616,10 +622,108 @@ func TestSandbox_theBridgeSweepsTheTreesOfDeletedSpacesFromTheSandboxsList(t *te
 		t.Errorf("a space the sandbox lists keeps its tree: %v", err)
 	}
 	// And not again within the interval.
-	p, _ := perSpaceTree(MountsHostRoot(f.root, "agents"), "ghost", f.guestRoot+"/tool", v)
+	p, _ := perSpaceTree(MountsHostRoot(f.mountsRoot, "agents"), "ghost", f.guestRoot+"/tool", v)
 	os.Chtimes(filepath.Dir(p), time.Now().Add(-5*time.Hour), time.Now().Add(-5*time.Hour))
 	rt.sweepTrees(context.Background())
 	if _, err := os.Stat(p); err != nil {
 		t.Error("swept again inside the interval")
+	}
+}
+
+// The bug that made every component's mount vanish in the real app: the desktop keeps a
+// component's folder at <workspaces root>/.mounts/<account>/<component>, and a bridge that
+// looked for <workspaces root>/.mounts/<component> found it missing and dropped the mount
+// without a word. The root is the desktop's to name (SandboxConfig.MountsRoot); a bridge
+// told it reads exactly there, and one that is not told keeps the plain layout.
+func TestContributedMounts_theFolderIsWhereTheDesktopSaysNotWhereTheBridgeGuesses(t *testing.T) {
+	f := newMountFixture(t)
+	host := f.folder(t, "agent-manager", "agents/tool/1.0") // <root>/.mounts/<account>/agent-manager/...
+	f.descriptor(t, "agent-manager", descriptor(desc{"host": host, "guest": f.guestRoot + "/.agents/tool", "perSpace": true, "env": "BNBLOC_MOUNT_TOOL"}))
+
+	cfg := SandboxConfig{WorkspacesRoot: f.root, MountsRoot: f.mountsRoot}
+	if cfg.mountsRoot() != filepath.Join(f.root, ".mounts", "acct1234") {
+		t.Fatalf("the root the desktop names is the one used: %q", cfg.mountsRoot())
+	}
+	mounts, _, dropped := readContributedMounts(f.mountsDir, cfg.mountsRoot(), f.workdir, "space-1", []string{f.guestRoot}, false)
+	if len(dropped) != 0 || len(mounts) != 1 {
+		t.Fatalf("told where the folders are, the mount is applied: %+v dropped %v", mounts, dropped)
+	}
+	// Not told: the plain layout, so this account's folder is not found, and the drop
+	// names the folder it looked in (the old message said only "missing").
+	plain := SandboxConfig{WorkspacesRoot: f.root}
+	if plain.mountsRoot() != filepath.Join(f.root, ".mounts") {
+		t.Fatalf("no root named: the plain layout: %q", plain.mountsRoot())
+	}
+	_, _, dropped = readContributedMounts(f.mountsDir, plain.mountsRoot(), f.workdir, "space-1", []string{f.guestRoot}, false)
+	if len(dropped) != 1 || !strings.Contains(dropped[0].Reason, filepath.Join(f.root, ".mounts", "agent-manager")) {
+		t.Fatalf("the drop says where it looked: %v", dropped)
+	}
+}
+
+// A component's mount that was not applied is said when that room's drive fails, in words,
+// instead of leaving "the agent process exited" as the only clue; the next turn that
+// applies everything clears it, and one space's drop is not another's.
+func TestSandbox_aDroppedMountIsSaidWhenThatSpacesDriveFails(t *testing.T) {
+	sbx := newFakeSandboxd(t)
+	sbx.caps = append(sbx.advertised(), sandbox.CapabilityReadOnlyMounts)
+	prov := &sandboxProv{supports: true}
+	prov.targets = []corepkg.Target{{ID: "c", Provider: "codex"}}
+	b, f := mountBridge(t, sbx, SandboxAll, prov)
+	rt := b.sandbox
+
+	// A descriptor that points outside the folder the desktop named: dropped.
+	f.descriptor(t, "agent-manager", descriptor(desc{"host": "/somewhere/else/agents/tool", "guest": f.guestRoot + "/tool", "perSpace": true}))
+	_, _ = rt.contributedMounts(f.workdir, "space-a", false)
+	note := rt.mountDropNote("space-a")
+	if !strings.Contains(note, "agent-manager") || !strings.Contains(note, "not mounted") {
+		t.Fatalf("the note names the component and what happened: %q", note)
+	}
+	if rt.mountDropNote("space-b") != "" {
+		t.Error("another space's turn is not blamed")
+	}
+	// Fixed: the next turn applies it and the note goes.
+	host := f.folder(t, "agent-manager", "agents/tool/1.0")
+	f.descriptor(t, "agent-manager", descriptor(desc{"host": host, "guest": f.guestRoot + "/tool", "perSpace": true}))
+	_, _ = rt.contributedMounts(f.workdir, "space-a", false)
+	if got := rt.mountDropNote("space-a"); got != "" {
+		t.Errorf("after a clean turn nothing is blamed: %q", got)
+	}
+	// Many drops are bounded.
+	var many []desc
+	for i := 0; i < 6; i++ {
+		many = append(many, desc{"host": "/nowhere/x", "guest": fmt.Sprintf("%s/t%d", f.guestRoot, i)})
+	}
+	f.descriptor(t, "agent-manager", descriptor(many...))
+	_, _ = rt.contributedMounts(f.workdir, "space-a", false)
+	if got := rt.mountDropNote("space-a"); !strings.Contains(got, "and 3 more") {
+		t.Errorf("a long list is cut: %q", got)
+	}
+}
+
+// End to end through fail(): the notice a member reads for a sandboxed drive that failed
+// carries the mount note, so "the agent process exited" is not the only clue.
+func TestSandbox_aFailedSandboxedDriveNamesTheMountThatWasNotApplied(t *testing.T) {
+	sbx := newFakeSandboxd(t)
+	sbx.caps = append(sbx.advertised(), sandbox.CapabilityReadOnlyMounts)
+	prov := &sandboxProv{supports: true}
+	prov.targets = []corepkg.Target{{ID: "c", Provider: "codex"}}
+	b, f := mountBridge(t, sbx, SandboxAll, prov)
+	f.descriptor(t, "agent-manager", descriptor(desc{"host": "/somewhere/else/agents/tool", "guest": f.guestRoot + "/tool", "perSpace": true}))
+	d := &drive{job: bridgeJob{RoomID: "room-1", ChannelID: "ch", JobID: "job-1", Provider: "codex"}, core: "core-a", owner: "alice"}
+	d.prepareExec = func(context.Context) (*corepkg.Execution, error) { return nil, nil }
+	space := sandboxSpaceName(d.key(), b.sandbox.cfg.Account)
+	_, _ = b.sandbox.contributedMounts(f.workdir, space, false)
+
+	g := newActivityGateway(t, "room-1")
+	b.cfg.GatewayBaseURL = g.srv.URL
+	b.fail(context.Background(), d, atStage(stageStart, errors.New("initialize: the agent process exited")), nil)
+	_, fresh := g.stored()
+	var all string
+	for _, m := range fresh {
+		raw, _ := json.Marshal(m.Payload)
+		all += string(raw) + "\n"
+	}
+	if !strings.Contains(all, "not mounted") || !strings.Contains(all, "agent-manager") {
+		t.Fatalf("the failure notice says what was not mounted: %q", all)
 	}
 }

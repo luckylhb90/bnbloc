@@ -112,6 +112,14 @@ type SandboxConfig struct {
 	// MountGuestRoots the guest folders they may mount under.
 	MountsDir       string
 	MountGuestRoots []string
+	// MountsRoot is the host folder under the workspaces root that holds every
+	// component's own folder (BNBLOC_SANDBOX_MOUNTS_ROOT): the desktop's
+	// `<workspaces root>/.mounts/<account>`, the one place it makes a component's
+	// folder and the only place a component's mount may point into. The desktop
+	// owns this path (it gives each plugin its folder under it), so the bridge
+	// never derives it. Empty: `<workspaces root>/.mounts`, for a bridge no desktop
+	// runs.
+	MountsRoot string
 	// Account names who this bridge serves (its gateway and owner,
 	// BridgeAccount): it is part of every space's name, so two accounts on one
 	// computer, with agents of one core and provider in one room, never share
@@ -205,6 +213,10 @@ type sandboxRuntime struct {
 	// treesSweptAt is when the per-space trees of deleted spaces were last
 	// looked for (sandbox_linktree.go).
 	treesSweptAt time.Time
+	// mountDrops are the component mounts the last turn of a space could not
+	// apply, by space: said in the room when that drive fails, so a missing mount
+	// is not left as a bare "the agent process exited".
+	mountDrops map[string][]string
 
 	policyMu sync.Mutex
 	policy   map[string]sandboxPolicyEntry // tenant -> cached policy

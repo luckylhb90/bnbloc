@@ -111,6 +111,7 @@ func main() {
 		WorkspacesRoot:  strings.TrimSpace(config.FromEnvRaw("BNBLOC_SANDBOX_WORKSPACES_ROOT")),
 		OwnMachine:      strings.TrimSpace(config.FromEnvRaw("BNBLOC_SANDBOX_OWN_MACHINE")),
 		MountsDir:       mountsDir,
+		MountsRoot:      strings.TrimSpace(config.FromEnvRaw("BNBLOC_SANDBOX_MOUNTS_ROOT")),
 		MountGuestRoots: mountRoots,
 		Account:         bridge.BridgeAccount(gateway, owner),
 		HostProxy:       strings.TrimSpace(config.FromEnvRaw("BNBLOC_SANDBOX_HOST_PROXY")),

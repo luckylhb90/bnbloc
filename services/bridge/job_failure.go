@@ -91,6 +91,11 @@ func (b *Bridge) fail(ctx context.Context, d *drive, err error, diagnostics map[
 		// lets its credentials in.
 		text += " " + sandboxEnvHint
 	}
+	if d.prepareExec != nil && b.sandbox != nil {
+		if note := b.sandbox.mountDropNote(sandboxSpaceName(d.key(), b.sandbox.cfg.Account)); note != "" {
+			text += " " + note
+		}
+	}
 	b.postNotice(ctx, d.ref(), wire.JobNotice{
 		Kind: driveFailureNotice(err), Text: text, Detail: agentErrorDetail(err),
 		OwnerUserID: d.owner, Provider: d.job.Provider, FailReason: string(reason),

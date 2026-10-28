@@ -59,9 +59,24 @@ func (d mountDrop) String() string {
 	return fmt.Sprintf("%s: %s -> %s: %s", d.Component, d.Host, d.Guest, d.Reason)
 }
 
-// MountsHostRoot is where a component's mounted folders must live.
-func MountsHostRoot(workspacesRoot, component string) string {
-	return filepath.Join(workspacesRoot, mountsHostDir, component)
+// DefaultMountsRoot is the folder that holds every component's own folder when
+// the desktop names none.
+func DefaultMountsRoot(workspacesRoot string) string {
+	return filepath.Join(workspacesRoot, mountsHostDir)
+}
+
+// MountsHostRoot is where a component's mounted folders must live, under root
+// (SandboxConfig.MountsRoot, or DefaultMountsRoot).
+func MountsHostRoot(root, component string) string {
+	return filepath.Join(root, component)
+}
+
+// mountsRoot is the folder that holds every component's own folder.
+func (c SandboxConfig) mountsRoot() string {
+	if c.MountsRoot != "" {
+		return c.MountsRoot
+	}
+	return DefaultMountsRoot(c.WorkspacesRoot)
 }
 
 // ParseMountRoots reads BNBLOC_SANDBOX_MOUNT_ROOTS (comma, space or newline
@@ -111,7 +126,7 @@ func selects(forWhom string, borrowed bool) (bool, bool) {
 // readContributedMounts reads every component's descriptor under mountsDir and
 // returns the read-only mounts for a turn (own or borrowed) in a workdir, and
 // what was dropped.
-func readContributedMounts(mountsDir, workspacesRoot, workdir, space string, guestRoots []string, borrowed bool) (mounts []sandbox.SpaceMount, env map[string]string, dropped []mountDrop) {
+func readContributedMounts(mountsDir, mountsRoot, workdir, space string, guestRoots []string, borrowed bool) (mounts []sandbox.SpaceMount, env map[string]string, dropped []mountDrop) {
 	if mountsDir == "" {
 		return nil, nil, nil
 	}
@@ -138,7 +153,7 @@ func readContributedMounts(mountsDir, workspacesRoot, workdir, space string, gue
 			continue
 		}
 		taken++
-		got, vars, drops := readComponentMounts(filepath.Join(mountsDir, name), name, workspacesRoot, workdir, space, guestRoots, borrowed, guests)
+		got, vars, drops := readComponentMounts(filepath.Join(mountsDir, name), name, mountsRoot, workdir, space, guestRoots, borrowed, guests)
 		mounts = append(mounts, got...)
 		for k, v := range vars {
 			if _, dup := env[k]; dup {
@@ -155,7 +170,7 @@ func readContributedMounts(mountsDir, workspacesRoot, workdir, space string, gue
 	return mounts, env, dropped
 }
 
-func readComponentMounts(dir, name, workspacesRoot, workdir, space string, guestRoots []string, borrowed bool, guests map[string]bool) (mounts []sandbox.SpaceMount, env map[string]string, dropped []mountDrop) {
+func readComponentMounts(dir, name, mountsRoot, workdir, space string, guestRoots []string, borrowed bool, guests map[string]bool) (mounts []sandbox.SpaceMount, env map[string]string, dropped []mountDrop) {
 	drop := func(host, guest, why string) { dropped = append(dropped, mountDrop{name, host, guest, why}) }
 	file := filepath.Join(dir, mountsFileName)
 	st, err := os.Lstat(file)
@@ -176,10 +191,10 @@ func readComponentMounts(dir, name, workspacesRoot, workdir, space string, guest
 		drop("", "", "the descriptor is not "+SandboxMountsContract)
 		return
 	}
-	hostRoot := MountsHostRoot(workspacesRoot, name)
+	hostRoot := MountsHostRoot(mountsRoot, name)
 	realRoot, err := filepath.EvalSymlinks(hostRoot)
 	if err != nil {
-		drop("", "", "its folder under the workspaces root is missing")
+		drop("", "", "its folder "+hostRoot+" is missing: a component's mounts must live under it")
 		return
 	}
 	for i, m := range f.Mounts {
@@ -270,10 +285,11 @@ func (s *sandboxRuntime) contributedMounts(workdir, space string, borrowed bool)
 	if s.cfg.MountsDir == "" {
 		return nil, nil
 	}
-	mounts, env, dropped := readContributedMounts(s.cfg.MountsDir, s.cfg.WorkspacesRoot, workdir, space, s.cfg.MountGuestRoots, borrowed)
+	mounts, env, dropped := readContributedMounts(s.cfg.MountsDir, s.cfg.mountsRoot(), workdir, space, s.cfg.MountGuestRoots, borrowed)
 	for _, d := range dropped {
 		slog.Warn("bnbloc bridge sandbox mount dropped", "event", "bnbloc.bridge.sandbox_mount_dropped", "mount", d.String())
 	}
+	s.recordMountDrops(space, dropped)
 	if len(mounts) == 0 {
 		return nil, nil
 	}
@@ -285,4 +301,39 @@ func (s *sandboxRuntime) contributedMounts(workdir, space string, borrowed bool)
 		return nil, nil
 	}
 	return mounts, env
+}
+
+// recordMountDrops remembers what a space's turn could not mount (replacing the
+// last turn's), so a failure of that drive can say so.
+func (s *sandboxRuntime) recordMountDrops(space string, dropped []mountDrop) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(dropped) == 0 {
+		delete(s.mountDrops, space)
+		return
+	}
+	if s.mountDrops == nil {
+		s.mountDrops = map[string][]string{}
+	}
+	lines := make([]string, 0, len(dropped))
+	for _, d := range dropped {
+		lines = append(lines, d.Component+": "+d.Reason)
+	}
+	s.mountDrops[space] = lines
+}
+
+// mountDropNote is what a failed drive of the space adds to its notice when a
+// component's mount was not applied ("" when none was): the likely reason an
+// agent a component installed in the sandbox did not start.
+func (s *sandboxRuntime) mountDropNote(space string) string {
+	s.mu.Lock()
+	lines := append([]string(nil), s.mountDrops[space]...)
+	s.mu.Unlock()
+	if len(lines) == 0 {
+		return ""
+	}
+	if len(lines) > 3 {
+		lines = append(lines[:3], fmt.Sprintf("and %d more", len(lines)-3))
+	}
+	return "Something a component put in your sandbox was not mounted, which can be why: " + strings.Join(lines, "; ") + "."
 }

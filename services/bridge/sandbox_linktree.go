@@ -92,10 +92,10 @@ func perSpaceTree(hostRoot, space, slot, src string) (string, error) {
 // nothing has touched for idle. A tree costs no disk of its own, but it holds the
 // inodes of the versions it linked, so a deleted room would otherwise keep an
 // old agent's files for good.
-func sweepSpaceTrees(workspacesRoot string, live map[string]bool, idle time.Duration, now time.Time) (removed int) {
-	comps, _ := os.ReadDir(filepath.Join(workspacesRoot, mountsHostDir))
+func sweepSpaceTrees(mountsRoot string, live map[string]bool, idle time.Duration, now time.Time) (removed int) {
+	comps, _ := os.ReadDir(mountsRoot)
 	for _, c := range comps {
-		base := filepath.Join(workspacesRoot, mountsHostDir, c.Name(), spacesDir)
+		base := filepath.Join(mountsRoot, c.Name(), spacesDir)
 		spaces, _ := os.ReadDir(base)
 		for _, sp := range spaces {
 			if live[sp.Name()] {
@@ -177,7 +177,7 @@ func (s *sandboxRuntime) sweepTrees(ctx context.Context) {
 			live[sp.Name] = true
 		}
 	}
-	if n := sweepSpaceTrees(s.cfg.WorkspacesRoot, live, spaceTreeIdleAge, s.now()); n > 0 {
+	if n := sweepSpaceTrees(s.cfg.mountsRoot(), live, spaceTreeIdleAge, s.now()); n > 0 {
 		slog.Info("bnbloc bridge sandbox trees of deleted spaces removed", "event", "bnbloc.bridge.sandbox_trees_swept", "count", n)
 	}
 }

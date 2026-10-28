@@ -16,7 +16,7 @@ state directory (in Go: `component.MountsFile`, the public contract package):
 {
   "contract": "bnbloc.sandbox.mounts/v1",
   "mounts": [
-    { "host": "<workspaces root>/.mounts/<component>/<folder>",
+    { "host": "<mounts root>/<component>/<folder>",
       "guest": "<an absolute path in the guest>",
       "for": "own" }
   ]
@@ -27,8 +27,25 @@ state directory (in Go: `component.MountsFile`, the public contract package):
 - `for` is `own` (the default: the agent's owner's own runs), `borrowed` (runs
   another member borrows) or `all`.
 - The component keeps the folders it mounts under
-  `<workspaces root>/.mounts/<component>/` (`bridge.MountsHostRoot`): the machine
+  `<mounts root>/<component>/` (`bridge.MountsHostRoot`): the machine
   has exactly one share, the workspaces root, fixed at its creation.
+- **The mounts root is the desktop's to name, not the bridge's to guess.** The
+  desktop makes each plugin's folder (`skills_provider::mirror_root`, handed to
+  the plugin as its `sidecar.mountRootEnv`) at
+  `<workspaces root>/.mounts/<account>/<plugin>`, the account layer so two
+  accounts' plugins never share a folder, and tells the bridge the folder that
+  holds them (`BNBLOC_SANDBOX_MOUNTS_ROOT`, `SandboxConfig.MountsRoot`). A bridge
+  no desktop runs falls back to `<workspaces root>/.mounts`. (The bridge once
+  derived `<workspaces root>/.mounts/<component>` itself, without the account,
+  from 2026-10-23, when the desktop gained the account layer, until 2026-10-28:
+  every component's mount was dropped in the real app, local skills' included,
+  with only a log line to show it. Every test put its folders where the bridge
+  looked. `TestSandboxPrepare_liveWithTheDesktopsFolderLayout` and the desktop's
+  `the_folder_a_plugin_writes_its_mounts_in_is_directly_under_the_one_the_bridge_is_told`
+  now pin the two sides together.)
+- A mount the bridge could not apply is not only logged: the notice of a failed
+  sandboxed drive of that space says which component's mount was not applied and
+  why.
 
 ## What the bridge does with it
 
@@ -64,7 +81,7 @@ room's space only. A folder every room needs (an agent's installed files) is
 declared `"perSpace": true`:
 
 ```
-{ "host": "<workspaces root>/.mounts/<component>/agents/opencode/2.1.4",
+{ "host": "<mounts root>/<component>/agents/opencode/2.1.4",
   "guest": "<under a guest root>/agents/opencode",
   "perSpace": true, "env": "BNBLOC_MOUNT_OPENCODE" }
 ```

@@ -115,7 +115,7 @@ func TestSandboxPrepare_livePerSpaceMounts(t *testing.T) {
 	t.Cleanup(func() { _ = c.DeleteMachine(context.Background(), admin, m.ID) })
 
 	version := func(v string) string {
-		dir := filepath.Join(MountsHostRoot(root, "agents"), "tool", v)
+		dir := filepath.Join(MountsHostRoot(DefaultMountsRoot(root), "agents"), "tool", v)
 		if err := os.MkdirAll(filepath.Join(dir, "bin"), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -206,7 +206,7 @@ func TestSandboxPrepare_liveFixedPathMountsServeEveryRoom(t *testing.T) {
 		t.Fatalf("create machine: %v", err)
 	}
 	t.Cleanup(func() { _ = c.DeleteMachine(context.Background(), admin, m.ID) })
-	skill := filepath.Join(MountsHostRoot(root, "local-skills"), "archify")
+	skill := filepath.Join(MountsHostRoot(DefaultMountsRoot(root), "local-skills"), "archify")
 	if err := os.MkdirAll(skill, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -247,5 +247,83 @@ func TestSandboxPrepare_liveFixedPathMountsServeEveryRoom(t *testing.T) {
 	// does not see the owner's through the machine either.
 	if got := run("room-d", true); strings.Contains(got, "the skill") {
 		t.Errorf("a borrowed run sees the owner's own mount: %q", got)
+	}
+}
+
+// TestSandboxPrepare_liveWithTheDesktopsFolderLayout: the manager's own install, made
+// the way the desktop gives its plugin the folder (<workspaces root>/.mounts/<account>/
+// <plugin>, the account layer included) and named to the bridge (MountsRoot), reaches a
+// room's space and runs. The bridge once looked in <root>/.mounts/<plugin>, found
+// nothing, and dropped every mount in the real app while every test (which put the
+// folders where the bridge looked) passed.
+func TestSandboxPrepare_liveWithTheDesktopsFolderLayout(t *testing.T) {
+	base := os.Getenv("SANDBOX_URL")
+	if base == "" {
+		t.Skip("SANDBOX_URL not set")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	admin := corepkg.Endpoint{BaseURL: base, Token: os.Getenv("SANDBOX_TOKEN")}
+	c := sandbox.NewClient(nil)
+	c.REST.Timeout = 3 * time.Minute
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	guestRoot := filepath.Join(root, "guest-home")
+	mountsRoot := filepath.Join(root, ".mounts", "b845953278ddb72912bb64688f4cc298") // <account>
+	stateMounts := t.TempDir()                                                       // <member>/bridge/mounts
+	name := "bridge-dl-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	m, err := c.CreateMachine(ctx, admin, sandbox.CreateMachineRequest{
+		Name: name, Image: "bnbloc.local/guest:0.1.0", MemoryMiB: 512,
+		Shares: []sandbox.Share{{Name: "workspaces", HostPath: root, GuestPath: root}},
+	})
+	if err != nil {
+		t.Fatalf("create machine: %v", err)
+	}
+	t.Cleanup(func() { _ = c.DeleteMachine(context.Background(), admin, m.ID) })
+
+	// What the desktop hands the plugin as its mount root, and what the plugin writes.
+	pluginFolder := filepath.Join(mountsRoot, "agent-manager", "agents", "tool", "1.0")
+	if err := os.MkdirAll(filepath.Join(pluginFolder, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginFolder, "bin", "tool"), []byte("#!/bin/sh\necho from-the-plugin\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(descriptor(desc{"host": pluginFolder, "guest": guestRoot + "/tool", "perSpace": true, "env": "BNBLOC_MOUNT_TOOL"}))
+	if err := os.MkdirAll(filepath.Join(stateMounts, "agent-manager"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stateMounts, "agent-manager", mountsFileName), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := SandboxConfig{Mode: SandboxBorrowed, URL: base, Token: admin.Token, VMExec: "/x/bnbloc-vmexec", Machine: name, WorkspacesRoot: root, MountsDir: stateMounts, MountGuestRoots: []string{guestRoot}}
+	run := func(cfg SandboxConfig) string {
+		rt := newSandboxRuntime(cfg)
+		if ready, reason := rt.status(ctx); !ready {
+			t.Fatalf("sandbox not ready: %s", reason)
+		}
+		exec, err := rt.prepare(ctx, driveKey{room: "room-a", core: "core-a", provider: "codex", sandboxed: true}, "job-1", "alice", nil, sandboxExecTokenTTL, false, nil)
+		if err != nil {
+			t.Fatalf("prepare: %v", err)
+		}
+		s := exec.Sandbox
+		res, err := c.SpaceRun(ctx, corepkg.Endpoint{BaseURL: base, Token: s.ExecToken}, s.Machine, s.Space, sandbox.ExecRequest{Command: []string{"sh", "-c", `"$BNBLOC_MOUNT_TOOL/bin/tool" 2>&1`}, HostWorkdir: s.Workdir})
+		if err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		out, _ := base64.StdEncoding.DecodeString(res.StdoutBase64)
+		return strings.TrimSpace(string(out))
+	}
+	// Not told where the account's folders are: the mount is dropped (the real-app bug).
+	if got := run(cfg); got == "from-the-plugin" {
+		t.Errorf("a bridge that guesses the plain layout found the plugin's folder: %q", got)
+	}
+	// Told, as the desktop does: it runs.
+	cfg.MountsRoot = mountsRoot
+	if got := run(cfg); got != "from-the-plugin" {
+		t.Errorf("with the folder the desktop names: %q, want the plugin's program to run in the room's sandbox", got)
 	}
 }
