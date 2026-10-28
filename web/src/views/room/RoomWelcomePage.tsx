@@ -93,6 +93,19 @@ export function RoomWelcomePage({
                 // listed and joins them all with one click.
                 const inside = channels.filter((c) => c.sectionId === s.sectionId);
                 const unjoined = inside.filter((c) => !c.joined || c.hidden).map((c) => c.channelId);
+                // A members-only section the member is not in shows its name
+                // (when its owners show it for joining), never its channels.
+                if (s.visibility === "members" && !s.joined) {
+                  return (
+                    <li key={s.sectionId} className="flex items-start gap-2">
+                      <div className="min-w-0 flex-1">
+                        <span className="font-medium">{s.name}</span>
+                        <span className="text-[var(--color-fg-muted)]"> · members only</span>
+                        {notes[s.sectionId] && <p role="status" className="text-xs text-[var(--color-fg-muted)]">{notes[s.sectionId]}</p>}
+                      </div>
+                    </li>
+                  );
+                }
                 return (
                   <li key={s.sectionId} className="flex items-start gap-2">
                     <div className="min-w-0 flex-1">

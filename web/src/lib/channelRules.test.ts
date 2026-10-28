@@ -15,6 +15,7 @@ import {
   railGroupKey,
   railGroups,
   reorderedPositions,
+  sectionJoin,
   sharedOrder,
   waitText,
   type DrivableAgent,
@@ -175,4 +176,15 @@ test("the composer proposes the channel's default agent by its key, else the roo
   assert.deepEqual(composerDefault({ channelDefault: { ownerId: "jack", provider: "claude" }, drivable, roomDefault }), { agent: mine, from: "room" });
   // Nothing at all: ask (no first, no online).
   assert.deepEqual(composerDefault({ channelDefault: null, drivable, roomDefault: () => null }), { agent: null, from: "ask" });
+});
+
+test("sectionJoin: what a members-only section offers a reader outside it", () => {
+  const sec = (joinPolicy: "invite" | "ask" | "open", joined = false) => ({ visibility: "members" as const, joinPolicy, joined });
+  assert.equal(sectionJoin({ role: "member" }, sec("ask")), "ask");
+  assert.equal(sectionJoin({ role: "member" }, sec("open")), "join");
+  assert.equal(sectionJoin({ role: "member" }, sec("invite")), null);
+  assert.equal(sectionJoin({ role: "admin" }, sec("invite")), "admin");
+  assert.equal(sectionJoin({ role: "member" }, sec("ask", true)), null);
+  assert.equal(sectionJoin({ role: "visitor" }, sec("open")), null);
+  assert.equal(sectionJoin({ role: "member" }, { visibility: "open", joinPolicy: "open", joined: false }), null);
 });

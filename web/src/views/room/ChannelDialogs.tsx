@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Channel } from "@/lib/api";
 import { channelsApi } from "@/lib/channelsApi";
 import { DRAFT_CHANNEL_PURPOSE, AI_UNAVAILABLE, purposeAsk, purposeOf } from "@/lib/channelAssists";
@@ -18,6 +18,8 @@ import {
   type ChannelSettings,
   type ChannelWhoPosts,
   type RoomSection,
+  type SectionJoinPolicy,
+  type SectionJoinRequest,
 } from "@/lib/wire.gen";
 import { Button } from "@/ui/Button";
 import { ConfirmDialog, Dialog } from "@/ui/Dialog";
@@ -296,9 +298,6 @@ export function ChannelSettingsDialog({
   );
 }
 
-// SectionDialog makes a section (section null) or changes one: name, rules,
-// order and owners (comma-separated member ids), and deletes it (its
-// channels move to the top level). Slice 1 makes open sections only.
 // GroupDialog makes, renames or deletes one of the member's own groups of
 // their rail (C24). Making one from a channel's menu puts that channel in
 // it. Only the member sees it; nothing changes for anyone else.
@@ -401,6 +400,11 @@ export function GroupDialog({
   );
 }
 
+// SectionDialog makes a section (section null) or changes one: name, rules,
+// order, owners (comma-separated member ids) and, for a members-only
+// section, who may join and its members and join requests (C11, C12, C17);
+// and deletes it (its channels move to the top level). Whether a section is
+// members-only is chosen when it is made.
 export function SectionDialog({
   roomId,
   section,
@@ -418,6 +422,8 @@ export function SectionDialog({
   const [rules, setRules] = useState(section?.rules ?? "");
   const [position, setPosition] = useState(String(section?.position ?? sections.length));
   const [owners, setOwners] = useState((section?.owners ?? []).join(", "));
+  const [membersOnly, setMembersOnly] = useState(section?.visibility === "members");
+  const [joinPolicy, setJoinPolicy] = useState<SectionJoinPolicy>(section?.joinPolicy ?? "invite");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -432,9 +438,20 @@ export function SectionDialog({
     try {
       if (section) {
         const list = owners.split(",").map((o) => o.trim()).filter(Boolean);
-        await channelsApi.patchSection(roomId, section.sectionId, { name: name.trim(), rules: rules.trim(), position: pos, owners: list });
+        await channelsApi.patchSection(roomId, section.sectionId, {
+          name: name.trim(),
+          rules: rules.trim(),
+          position: pos,
+          owners: list,
+          ...(section.visibility === "members" && joinPolicy !== section.joinPolicy ? { joinPolicy } : {}),
+        });
       } else {
-        await channelsApi.createSection(roomId, { name: name.trim(), rules: rules.trim(), position: pos });
+        await channelsApi.createSection(roomId, {
+          name: name.trim(),
+          rules: rules.trim(),
+          position: pos,
+          ...(membersOnly ? { visibility: "members" as const, joinPolicy } : {}),
+        });
       }
       onSaved();
     } catch (e) {
@@ -490,6 +507,27 @@ export function SectionDialog({
               <Input value={owners} onChange={(e) => setOwners(e.target.value)} />
             </Field>
           )}
+          {!section && (
+            <label className="flex items-start gap-2 text-sm">
+              <input type="checkbox" className="mt-1" checked={membersOnly} onChange={(e) => setMembersOnly(e.target.checked)} />
+              <span>
+                Members only
+                <span className="block text-xs text-[var(--color-fg-muted)]">
+                  Only its members see its channels, their messages and files. You are its first member; the room&rsquo;s owner and admins see its name and members, and read it only by joining. This can&rsquo;t be changed later.
+                </span>
+              </span>
+            </label>
+          )}
+          {(section ? section.visibility === "members" : membersOnly) && (
+            <Field label="Who may join" hint="The rest of the room sees nothing of an invite-only section; for the others they see its name, never its channels.">
+              <Select value={joinPolicy} onChange={(e) => setJoinPolicy(e.target.value as SectionJoinPolicy)} aria-label="Who may join">
+                <option value="invite">Only those its owners add</option>
+                <option value="ask">Members ask; its owners approve</option>
+                <option value="open">Any member joins</option>
+              </Select>
+            </Field>
+          )}
+          {section?.visibility === "members" && <SectionMembers roomId={roomId} section={section} onChanged={onSaved} />}
           {err && <p role="alert" className="text-sm text-[var(--color-danger)]">{err}</p>}
         </div>
       </Dialog>
@@ -503,5 +541,75 @@ export function SectionDialog({
         onConfirm={remove}
       />
     </>
+  );
+}
+
+// SectionMembers lists a members-only section's members and its open join
+// requests to those who manage it (its owners, the room's owner and admins:
+// the server answers 403 to anyone else, and the list is then left out):
+// add a member by id, remove one, approve or decline a request.
+function SectionMembers({ roomId, section, onChanged }: { readonly roomId: string; readonly section: RoomSection; readonly onChanged: () => void }) {
+  const [requests, setRequests] = useState<SectionJoinRequest[] | null>(null);
+  const [add, setAdd] = useState("");
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    let live = true;
+    channelsApi
+      .sectionRequests(roomId, section.sectionId)
+      .then((r) => live && setRequests(r.requests))
+      .catch(() => live && setRequests(null));
+    return () => {
+      live = false;
+    };
+  }, [roomId, section.sectionId]);
+  const run = async (what: string, fn: () => Promise<unknown>) => {
+    setErr("");
+    try {
+      await fn();
+      onChanged();
+    } catch (e) {
+      setErr(errorText(e, `Could not ${what}`));
+    }
+  };
+  const members = section.members ?? [];
+  return (
+    <div className="flex flex-col gap-2" data-section-members>
+      <div className="text-xs font-semibold uppercase tracking-wide text-[var(--color-fg-subtle)]">Members ({members.length})</div>
+      <ul className="flex flex-col gap-1 text-sm">
+        {members.map((m) => (
+          <li key={m} className="flex items-center gap-2">
+            <span className="min-w-0 flex-1 truncate">{m}</span>
+            {!section.owners.includes(m) && (
+              <Button size="sm" variant="ghost" onClick={() => void run("remove the member", () => channelsApi.removeSectionMember(roomId, section.sectionId, m))}>
+                Remove
+              </Button>
+            )}
+          </li>
+        ))}
+      </ul>
+      <div className="flex items-center gap-2">
+        <Input value={add} onChange={(e) => setAdd(e.target.value)} placeholder="Member id" aria-label="Add a member" />
+        <Button size="sm" variant="outline" disabled={!add.trim()} onClick={() => void run("add the member", () => channelsApi.addSectionMember(roomId, section.sectionId, add.trim()))}>
+          Add
+        </Button>
+      </div>
+      {requests && requests.length > 0 && (
+        <div className="flex flex-col gap-1" data-section-requests>
+          <div className="text-xs font-semibold uppercase tracking-wide text-[var(--color-fg-subtle)]">Asking to join</div>
+          {requests.map((q) => (
+            <div key={q.userId} className="flex items-center gap-2 text-sm">
+              <span className="min-w-0 flex-1 truncate">{q.userId}</span>
+              <Button size="sm" variant="primary" onClick={() => void run("approve the request", () => channelsApi.addSectionMember(roomId, section.sectionId, q.userId))}>
+                Approve
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => void run("decline the request", () => channelsApi.declineSectionRequest(roomId, section.sectionId, q.userId))}>
+                Decline
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+      {err && <p role="alert" className="text-sm text-[var(--color-danger)]">{err}</p>}
+    </div>
   );
 }

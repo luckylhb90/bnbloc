@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { ArchiveIcon, CaretDownIcon, CaretRightIcon, CompassIcon, FolderSimpleIcon, HashIcon, PlusIcon, StarIcon } from "@phosphor-icons/react";
 import type { Channel } from "@/lib/api";
-import { foldedChannels, mayCreateSection, mayPlaceChannel, railGroupKey, railGroups, sectionOf, sharedOrder } from "@/lib/channelRules";
+import { foldedChannels, mayCreateSection, mayPlaceChannel, railGroupKey, railGroups, sectionJoin, sectionOf, sharedOrder } from "@/lib/channelRules";
 import { foldedSections, setFoldedSections } from "@/lib/roomMemory";
 import type { RoomMembership } from "@/lib/roomRoles";
 import type { ChannelCreationPolicy, RoomSection } from "@/lib/wire.gen";
@@ -64,7 +64,7 @@ export function ChannelRail({
     setFoldedSections(subject, roomId, next);
   };
   const groups = useMemo(
-    () => railGroups(channels ?? [], sections, { active, groups: actions.groups, keepEmpty: (s) => !!me && mayPlaceChannel(me, subject, policy, s) }),
+    () => railGroups(channels ?? [], sections, { active, groups: actions.groups, keepEmpty: (s) => !!me && (mayPlaceChannel(me, subject, policy, s) || sectionJoin(me, s) !== null) }),
     [channels, sections, active, me, subject, policy, actions.groups],
   );
   const canCreateTop = !!me && mayPlaceChannel(me, subject, policy, null);
