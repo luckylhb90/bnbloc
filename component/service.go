@@ -331,6 +331,12 @@ type EgressHosts struct {
 	// (docs/prd/2026-10-27-streamed-member-sends.md); otherwise such a
 	// request is refused with 413.
 	Streams bool `json:"streams,omitempty"`
+	// Paths: a host of Hosts the component handles only on some paths
+	// (path prefixes, each starting with "/"): a request to another path
+	// goes out from the member's computer as the command sent it, never
+	// seen by the component (a system other tools also call, where the
+	// component handles one API).
+	Paths map[string][]string `json:"paths,omitempty"`
 }
 
 // MaxEgressHosts bounds the hosts one component claims.

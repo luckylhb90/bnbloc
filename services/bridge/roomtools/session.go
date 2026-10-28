@@ -139,6 +139,7 @@ type Session struct {
 	// (egress.go).
 	egress   egressHosts
 	streams  map[string]bool
+	paths    map[string][]string
 	cards    map[[2]string]bool
 	cardsJob string
 }

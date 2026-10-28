@@ -131,6 +131,12 @@ The bridge's room tools server is also the session's HTTPS proxy
   component's next answer (at most 3 sign-ins per request).
   `EndSession` drops the session first. The command never sees a cookie;
   the component never sees the session, only the steps' answers.
+- **Hosts claimed on some paths** (`EgressHosts.Paths`, host → path
+  prefixes): a host other tools also call, where the component handles one
+  API. A request to another path of it goes out from the member's computer
+  as the command sent it (its own headers and body; the answer, cookies
+  included, comes back as sent), and the component never sees it. A
+  prefix matches whole path segments.
 - **The local CA** (`roomtools/egress_ca.go`): one per member directory
   (`egress-ca.pem`, its key `egress-ca.key` 0600), never sent anywhere,
   replaced 30 days before its end. Leaves last a day. Only the turn's

@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -178,8 +179,8 @@ func serviceFactFiles(facts []serviceFacts) []roomlog.NamedFile {
 // the merged environment, and the services that take a streamed body. A
 // service that cannot be read keeps the hosts it claimed before (prev), so
 // its hosts never go out unauthenticated (and takes no streamed body).
-func (b *Bridge) egressFor(ctx context.Context, room, job string, prev map[string]string) (hosts map[string]string, env map[string]string, streams map[string]bool) {
-	hosts, env, streams = map[string]string{}, map[string]string{}, map[string]bool{}
+func (b *Bridge) egressFor(ctx context.Context, room, job string, prev map[string]string) egressClaims {
+	hosts, env, streams, paths := map[string]string{}, map[string]string{}, map[string]bool{}, map[string][]string{}
 	for _, name := range b.servicesWith(ctx, component.ServiceEgress) {
 		var h component.EgressHosts
 		err := b.turnProxyGET(ctx, name, "egress/hosts", room, job, &h)
@@ -204,6 +205,9 @@ func (b *Bridge) egressFor(ctx context.Context, room, job string, prev map[strin
 				continue
 			}
 			hosts[host] = name
+			if ps := validPaths(h.Paths[host]); len(ps) > 0 {
+				paths[host] = ps
+			}
 		}
 		for k, v := range h.Env {
 			if _, taken := env[k]; !taken && validEnvName(k) {
@@ -212,7 +216,28 @@ func (b *Bridge) egressFor(ctx context.Context, room, job string, prev map[strin
 		}
 	}
 	slog.Info("bnbloc bridge egress hosts", "event", "bnbloc.bridge.egress_hosts", "room", room, "job", job, "hosts", len(hosts))
-	return hosts, env, streams
+	return egressClaims{hosts: hosts, env: env, streams: streams, paths: paths}
+}
+
+// egressClaims are what the egress services claim for a job: host →
+// service, the merged environment, the services that take a streamed
+// body, and the hosts handled only on some paths (component.EgressHosts.Paths).
+type egressClaims struct {
+	hosts   map[string]string
+	env     map[string]string
+	streams map[string]bool
+	paths   map[string][]string
+}
+
+// validPaths keeps a claim's path prefixes that start with "/" (at most 64).
+func validPaths(in []string) []string {
+	var out []string
+	for _, p := range in {
+		if strings.HasPrefix(p, "/") && len(p) <= 256 && !strings.ContainsAny(p, "?#") && len(out) < 64 {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // validEnvName accepts a POSIX environment name that is not bnbloc's own

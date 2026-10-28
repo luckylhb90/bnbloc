@@ -234,9 +234,10 @@ func (c *roomToolsContributor) hooks(sess *roomtools.Session, egress bool, sandb
 			}
 			if egress {
 				ctx, cancel := context.WithTimeout(context.Background(), egressAskTimeout)
-				hosts, _, streams := c.b.egressFor(ctx, sess.Scope().RoomID, t.JobID, sess.EgressHosts())
+				cl := c.b.egressFor(ctx, sess.Scope().RoomID, t.JobID, sess.EgressHosts())
 				cancel()
-				sess.SetEgressHosts(hosts, streams)
+				sess.SetEgressHosts(cl.hosts, cl.streams)
+				sess.SetEgressPaths(cl.paths)
 			}
 		}, func(t TurnInfo) {
 			sess.Unbind(t.JobID)
@@ -353,9 +354,11 @@ func (c *roomToolsContributor) egressEnv(ctx context.Context, info SessionInfo, 
 		return nil, false
 	}
 	actx, cancel := context.WithTimeout(ctx, egressAskTimeout)
-	hosts, env, streams := c.b.egressFor(actx, info.RoomID, info.JobID, nil)
+	cl := c.b.egressFor(actx, info.RoomID, info.JobID, nil)
 	cancel()
-	sess.SetEgressHosts(hosts, streams)
+	hosts, env := cl.hosts, cl.env
+	sess.SetEgressHosts(hosts, cl.streams)
+	sess.SetEgressPaths(cl.paths)
 	if info.Sandboxed {
 		c.writeSandboxCA(info.Workdir)
 		return nil, true
@@ -401,7 +404,7 @@ func (c *roomToolsContributor) sandboxEgressEnv(ctx context.Context, workdir, ro
 	env := map[string]string{}
 	if job != "" {
 		actx, cancel := context.WithTimeout(ctx, egressAskTimeout)
-		_, placeholders, _ := c.b.egressFor(actx, room, job, nil)
+		placeholders := c.b.egressFor(actx, room, job, nil).env
 		cancel()
 		maps.Copy(env, placeholders)
 	}

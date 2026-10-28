@@ -67,6 +67,31 @@ func (s *Session) SetEgressHosts(hosts map[string]string, streams map[string]boo
 	s.mu.Unlock()
 }
 
+// SetEgressPaths replaces the hosts claimed only on some paths (path
+// prefixes): another path of such a host goes out as the command sent it.
+func (s *Session) SetEgressPaths(paths map[string][]string) {
+	s.mu.Lock()
+	s.paths = maps.Clone(paths)
+	s.mu.Unlock()
+}
+
+// claimsPath reports whether the service handles path on host: always,
+// unless the host is claimed only on some paths and path is under none.
+func (s *Session) claimsPath(host, path string) bool {
+	s.mu.Lock()
+	ps, partial := s.paths[host]
+	s.mu.Unlock()
+	if !partial {
+		return true
+	}
+	for _, p := range ps {
+		if path == p || strings.HasPrefix(path, strings.TrimSuffix(p, "/")+"/") {
+			return true
+		}
+	}
+	return false
+}
+
 // streamsTo reports whether service takes a streamed request body.
 func (s *Session) streamsTo(service string) bool {
 	s.mu.Lock()
@@ -359,6 +384,19 @@ func (s *Server) serveClaimed(raw net.Conn, buffered *bufio.Reader, sess *Sessio
 				return
 			}
 			req.Header.Del("Expect")
+		}
+		if !sess.claimsPath(host, req.URL.Path) {
+			// A path the service does not handle on this host: it goes out
+			// from here as the command sent it (the service never sees it).
+			_ = tconn.SetDeadline(time.Time{})
+			resp := passThrough(req, host)
+			resp.Close = req.Close
+			err := resp.Write(idleWriter{c: tconn})
+			_ = resp.Body.Close()
+			if err != nil || resp.Close {
+				return
+			}
+			continue
 		}
 		body, err := io.ReadAll(io.LimitReader(req.Body, component.MaxEgressBody+1))
 		large := len(body) > component.MaxEgressBody
@@ -701,6 +739,36 @@ func sendHere(ctx context.Context, service string, in component.EgressRequest, s
 	}
 	report := &component.EgressReport{Status: resp.StatusCode, Location: resp.Header.Get("Location"), Body: head, Steps: steps}
 	return out, report, nil
+}
+
+// passThrough sends a request to a path no service handles on a partly
+// claimed host, from this computer, as the command sent it (its own
+// headers and body, nothing added); the answer is relayed as the system
+// sent it, Set-Cookie included (the command's own session).
+func passThrough(req *http.Request, host string) *http.Response {
+	out, err := http.NewRequestWithContext(req.Context(), req.Method, "https://"+host+req.URL.RequestURI(), req.Body)
+	if err != nil {
+		return egressError(http.StatusBadRequest, err.Error())
+	}
+	out.Header = req.Header.Clone()
+	for _, h := range hopHeaders {
+		out.Header.Del(h)
+	}
+	out.ContentLength = req.ContentLength
+	resp, err := hereClient.Do(out)
+	if err != nil {
+		return egressError(http.StatusBadGateway, "this computer could not reach "+host+": "+err.Error())
+	}
+	for _, h := range hopHeaders {
+		resp.Header.Del(h)
+	}
+	if resp.ContentLength < 0 {
+		resp.TransferEncoding = []string{"chunked"}
+	} else {
+		resp.TransferEncoding = nil
+	}
+	resp.ProtoMajor, resp.ProtoMinor = 1, 1
+	return resp
 }
 
 // relayBody is a system's answer on its way to the command: its first bytes
