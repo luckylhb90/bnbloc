@@ -682,3 +682,87 @@ The agent door does not open the routes (a member's rail is theirs).
 1. A package's sections are at most 10 and its channels' names share the
    80-character bound (`maxRoomSections`, `maxRoomChannelName`): the room
    service bounds neither.
+
+**Slice 2, members-only sections** (C11-C14, C17):
+
+- `section_members` and `section_join_requests` (migration
+  `2026_10_section_members`, new tables only). A members-only section's
+  creator is its first owner and member; an owner added later becomes a
+  member. Membership routes:
+  - join (`open` at once, `ask` a request, the room's owner or admin at
+    once);
+  - leave;
+  - add/approve and remove (its owners and the room's owner and admins);
+  - list and decline requests.
+
+  Every change publishes `section_membership` and is audited
+  (`AuditKindSection`). A room admin's join is marked `admin` for the
+  section's members (C12).
+- One rule, `store.MayReadChannel` (`internal/store/channel_access.go`): the
+  reader (the person; an agent reads as the person it works for) may read a
+  channel of an open section or the top level, or of a members-only section
+  they belong to, and an agent also only where `ChannelAdmitsAgents`. Each
+  service has one owner of asking it: room `readerAccess`/`roomArtifact`,
+  realtime `channelAccess`, activity `channelReaders`. Every read path asks
+  it; `TestChannelReadsAskTheRule` (`internal/archtest`) fails a new one that
+  does not. The paths are listed in docs/architecture/room-channels.md.
+- Agents (C14): the bridge reads its channel listing and history with the
+  turn's job (`?job=`, `roomlog.AgentChannelList`), which the gateway's agent
+  door proxies as the job's requester. A borrowed agent working for someone
+  outside a section sees none of it.
+- Web:
+  - the section dialog has "Members only" (at creation), "Who may join",
+    members (add, remove) and requests (approve, decline);
+  - the section menu has join, ask and leave;
+  - the rail, directory and welcome page show what the server lists. A
+    members-only section the member is not in appears by name only, never
+    its channels.
+
+  The channels e2e covers asking, approving and making an invite-only
+  section.
+
+**Decisions pending owner, added in slice 2:**
+
+1. A members-only section is **invite-only by default** (`joinPolicy`
+   `invite`: its owners add members; the rest of the room sees nothing of
+   it). C17 names "ask" the default, but asking needs the section's name
+   shown, which C11 leaves to its owners. `ask` and `open` show the name for
+   joining, never its channels or members.
+2. A section's visibility is fixed at creation: opening a members-only
+   section would show its history to the room, and closing an open one
+   would take it from members mid-conversation.
+3. A visitor joins no members-only section (visitors are read-only).
+4. A section's only owner cannot leave it (hand it to another owner first);
+   an owner is removed by changing the owners, not as a member.
+5. A channel goes into a members-only section only from inside it: the
+   person who moves or creates it must belong to the section.
+6. A share link to a deliverable of a members-only channel, once its maker
+   published it, keeps working for its holders (sharing further is the
+   author's act, C13); attachments (unguessable ids, no channel on the row)
+   are read by any room member who holds the id.
+7. Chat attachments carry no channel on their row: whoever holds an
+   attachment id (unguessable) and is in the room can fetch it. Binding an
+   attachment to its channel is a later change.
+
+**Design review (lenses 5, 1, 11), slice 2:**
+
+- Lens 5 (one rule, one owner): one predicate, `store.MayReadChannel`; one
+  asker per service; `TestChannelReadsAskTheRule` names every function that
+  reads channel content without asking it, each exemption with its reason
+  (content the caller already holds, the author's own act, or aggregates
+  without content).
+- Lens 1 (who sees what): a non-member gets 404, never 403, on a channel or
+  an invite-only section, so neither name leaks; deliverable events reach
+  other channels' streams only for readers; search, unread, mentions,
+  notifications, plugin hooks, run listings and the handoff export are
+  filtered. Tests per path for a non-member and a member
+  (`services/room/section_members_test.go`,
+  `services/realtime/members_only_test.go`,
+  `services/activity/members_only_test.go`,
+  `internal/notify/replytoken_test.go`, `internal/roomlog`,
+  `services/gateway/agent_door_test.go`).
+- Lens 11 (rollout): the migration only adds tables; old pods ignore them.
+  During a mixed rollout an old pod still shows a members-only section's
+  channels to every member, so **create members-only sections only after
+  every room, realtime and activity pod runs this release.** Nothing on the
+  open-section path changes.
