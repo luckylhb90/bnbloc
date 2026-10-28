@@ -659,9 +659,10 @@ type claimResponse struct {
 // bridgeSend is a request the platform queued for this computer's owner:
 // a component's read, sent from here outside a turn.
 type bridgeSend struct {
-	SendID string `json:"sendId"`
-	Method string `json:"method"`
-	URL    string `json:"url"`
+	SendID    string `json:"sendId"`
+	Component string `json:"component"`
+	Method    string `json:"method"`
+	URL       string `json:"url"`
 }
 
 // jobRef identifies the claimed job a drive runs for: its id, the chat

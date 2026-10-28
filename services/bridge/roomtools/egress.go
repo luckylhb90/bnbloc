@@ -506,6 +506,7 @@ func exchange(ctx context.Context, gw Gateway, path, service, host string, in co
 			sent = nil
 		}
 	}
+	signIns := 0
 	for attempt := 0; ; attempt++ {
 		actx, cancel := context.WithTimeout(ctx, egressAsk)
 		raw, err := gw.Do(actx, http.MethodPost, path, in)
@@ -535,6 +536,22 @@ func exchange(ctx context.Context, gw Gateway, path, service, host string, in co
 			return sent, out, nil
 		}
 		drop()
+		if out.Send.StepsOnly {
+			// A sign-in first (docs/prd/2026-10-28-member-held-sessions.md):
+			// its steps are sent with the session and reported; the request
+			// itself waits for the next answer.
+			u, _ := url.Parse(in.URL)
+			if signIns++; signIns > component.MaxEgressSignIns || u == nil {
+				return nil, component.EgressResponse{}, &exchangeError{http.StatusBadGateway, "the " + service + " service kept asking to sign in again", nil}
+			}
+			steps, err := sendSteps(ctx, in, out.Send, sessionFor(service, u, out.Send))
+			if err != nil {
+				return nil, component.EgressResponse{}, &exchangeError{http.StatusBadGateway, "this computer could not sign in to " + host + ": " + err.Error(), err}
+			}
+			in.Report = &component.EgressReport{Attempt: attempt, Steps: steps}
+			attempt--
+			continue
+		}
 		if err := sendsLeft(attempt); err != nil {
 			return nil, component.EgressResponse{}, &exchangeError{http.StatusBadGateway, "the " + service + " service kept asking to send the request again", err}
 		}
@@ -543,7 +560,7 @@ func exchange(ctx context.Context, gw Gateway, path, service, host string, in co
 			// streamed body is sent once and never kept for a second send.
 			return nil, component.EgressResponse{}, &exchangeError{http.StatusBadGateway, "the " + service + " service asked to send the request again, but its body was streamed once and is not kept: run the command again", nil}
 		}
-		resp, report, err := sendHere(ctx, in, stream, out.Send)
+		resp, report, err := sendHere(ctx, service, in, stream, out.Send)
 		if err != nil {
 			return nil, component.EgressResponse{}, &exchangeError{http.StatusBadGateway, "this computer could not reach " + host + ": " + err.Error(), err}
 		}
@@ -556,7 +573,7 @@ func exchange(ctx context.Context, gw Gateway, path, service, host string, in co
 // the platform queued it for this computer's owner; the bridge runs the
 // egress protocol for it through component.SendProxyPath. Its answer is
 // the service's to read; nothing reaches an agent.
-func SendFromHere(ctx context.Context, gw Gateway, id, method, rawURL string) error {
+func SendFromHere(ctx context.Context, gw Gateway, id, service, method, rawURL string) error {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return err
@@ -564,7 +581,8 @@ func SendFromHere(ctx context.Context, gw Gateway, id, method, rawURL string) er
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	in := component.EgressRequest{Method: method, URL: u.String(), Header: map[string][]string{}}
-	sent, _, xerr := exchange(ctx, gw, component.SendProxyPath+url.PathEscape(id), "component's", u.Host, in, nil, nil)
+	// The component's name keys its sessions, as on a turn's sends.
+	sent, _, xerr := exchange(ctx, gw, component.SendProxyPath+url.PathEscape(id), service, u.Host, in, nil, nil)
 	if xerr != nil {
 		return errors.Join(errors.New(xerr.msg), xerr.cause)
 	}
@@ -603,8 +621,13 @@ var hereClient = &http.Client{
 // it ends the send) and the report for the service: the status, the
 // Location and the answer's first component.MaxEgressReportBody bytes. A
 // streamed body is the command's own, as it arrives.
-func sendHere(ctx context.Context, in component.EgressRequest, stream *streamBody, send *component.EgressSend) (*http.Response, *component.EgressReport, error) {
+func sendHere(ctx context.Context, service string, in component.EgressRequest, stream *streamBody, send *component.EgressSend) (*http.Response, *component.EgressReport, error) {
 	u, err := url.Parse(in.URL)
+	if err != nil {
+		return nil, nil, err
+	}
+	jar := sessionFor(service, u, send)
+	steps, err := sendSteps(ctx, in, send, jar)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -647,11 +670,13 @@ func sendHere(ctx context.Context, in component.EgressRequest, stream *streamBod
 	for k, v := range send.Header {
 		req.Header[http.CanonicalHeaderKey(k)] = v
 	}
+	keep := withSession(jar, req)
 	resp, err := hereClient.Do(req)
 	if err != nil {
 		cancel()
 		return nil, nil, err
 	}
+	keep(resp)
 	head := make([]byte, component.MaxEgressReportBody)
 	n, err := io.ReadFull(resp.Body, head)
 	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
@@ -674,7 +699,7 @@ func sendHere(ctx context.Context, in component.EgressRequest, stream *streamBod
 		_ = out.Body.Close()
 		out.Body, out.ContentLength = http.NoBody, 0
 	}
-	report := &component.EgressReport{Status: resp.StatusCode, Location: resp.Header.Get("Location"), Body: head}
+	report := &component.EgressReport{Status: resp.StatusCode, Location: resp.Header.Get("Location"), Body: head, Steps: steps}
 	return out, report, nil
 }
 

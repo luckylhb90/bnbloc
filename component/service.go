@@ -386,6 +386,18 @@ type EgressReport struct {
 	Status   int    `json:"status"`
 	Location string `json:"location,omitempty"`
 	Body     []byte `json:"body,omitempty"`
+	// Steps are the answers to a sign-in's steps (EgressSend.Steps), in
+	// order; a report of a StepsOnly send has only these.
+	Steps []EgressStepReport `json:"steps,omitempty"`
+}
+
+// EgressStepReport is a system's answer to one sign-in step sent from the
+// member's computer: as EgressReport, and the step's URL.
+type EgressStepReport struct {
+	URL      string `json:"url"`
+	Status   int    `json:"status"`
+	Location string `json:"location,omitempty"`
+	Body     []byte `json:"body,omitempty"`
 }
 
 // MaxEgressReportBody bounds the body a report carries.
@@ -424,11 +436,41 @@ type EgressSend struct {
 	RawQuery    string `json:"rawQuery,omitempty"`
 	Body        []byte `json:"body,omitempty"`
 	ReplaceBody bool   `json:"replaceBody,omitempty"`
+	// Session names a session the member's computer keeps for this
+	// component on the request's host (docs/prd/2026-10-28-member-held-sessions.md):
+	// the cookies that host set on the component's earlier sends naming
+	// it, sent with this request (after Remove); the answer's cookies
+	// update it. The command and the component never see them; a send
+	// without Session neither reads nor writes one.
+	Session string `json:"session,omitempty"`
+	// Steps are a sign-in's requests the bridge sends first, in order, with
+	// the session (GET or HEAD of the request's own host, redirects not
+	// followed), reported in EgressReport.Steps. StepsOnly: the request
+	// itself is not sent yet; the component is asked again with the
+	// steps' report (at most MaxEgressSignIns times for one request, not
+	// counted among MaxEgressSends).
+	Steps     []EgressStep `json:"steps,omitempty"`
+	StepsOnly bool         `json:"stepsOnly,omitempty"`
+	// EndSession drops the session first (signing in afresh).
+	EndSession bool `json:"endSession,omitempty"`
+}
+
+// EgressStep is one sign-in request (EgressSend.Steps).
+type EgressStep struct {
+	Method string `json:"method"`
+	URL    string `json:"url"`
 }
 
 // MaxEgressSends bounds the sends of one request (a refused sign-in is
 // retried once with fresh credentials).
 const MaxEgressSends = 2
+
+// Bounds of a sign-in on the member's computer: the steps of one send,
+// and the StepsOnly sends of one request.
+const (
+	MaxEgressSteps   = 4
+	MaxEgressSignIns = 3
+)
 
 // MaxEgressBody bounds an egress request's and answer's body carried in an
 // envelope (EgressRequest.Body, EgressResponse.Body). An answer the bridge
