@@ -481,6 +481,11 @@ export const MaxFactsBytes = 65536;
 export interface EgressHosts {
   hosts: string[];
   env?: Record<string, string>;
+  // Streams says the component reads EgressRequest.Streamed: only then
+  // does the bridge stream a request body larger than MaxEgressBody
+  // (docs/prd/2026-10-27-streamed-member-sends.md); otherwise such a
+  // request is refused with 413.
+  streams?: boolean;
 }
 
 // MaxEgressHosts bounds the hosts one component claims.
@@ -493,6 +498,12 @@ export interface EgressRequest {
   url: string;
   header?: Record<string, string[]>;
   body?: string;
+  // Streamed: the body is larger than MaxEgressBody and is not here (Body
+  // is empty). The component decides on the method and the URL; on Send
+  // the bridge sends the body as the command streams it, once: a second
+  // Send of a streamed request is refused. Sent only to a component whose
+  // EgressHosts said Streams.
+  streamed?: boolean;
   // Report is what the system answered a request the bridge sent itself
   // (EgressResponse.Send), asked again with the same request: Attempt
   // counts the sends (1 = the first).
@@ -502,7 +513,9 @@ export interface EgressRequest {
 // EgressReport is a system's answer to a request the bridge sent from the
 // member's computer: its status, its Location, and the start of its body
 // (at most MaxEgressReportBody), so the component can tell a refused
-// sign-in, record the call and audit it.
+// sign-in, record the call and audit it. The bridge relays the answer to
+// the command only after the component's Accept, streaming the rest of it
+// (no size limit).
 export interface EgressReport {
   attempt: number;
   status: number;
@@ -552,7 +565,10 @@ export interface EgressSend {
 // retried once with fresh credentials).
 export const MaxEgressSends = 2;
 
-// MaxEgressBody bounds an egress request's and answer's body.
+// MaxEgressBody bounds an egress request's and answer's body carried in an
+// envelope (EgressRequest.Body, EgressResponse.Body). An answer the bridge
+// sent itself streams; a larger request body streams to a component that
+// says EgressHosts.Streams.
 export const MaxEgressBody = 8388608;
 
 // Card is a component's card for one member: plain text the platform
