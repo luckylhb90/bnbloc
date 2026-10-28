@@ -273,6 +273,22 @@ origin from a request the run does not have. Same builder, same inputs.
 Evidence: commits 5e2d1b2a, e2df2b3a, 669ed853.
 Seen 2× (2026-10-15, 2026-10-16).
 
+### Keep a sign-in's result where a restart cannot lose it, and make one at a time
+
+A connection's sign-in was cached only in memory, in three processes (the
+connections component, its provider, the member's bridge). Each redeploy
+or desktop restart signed every member in again, and two requests at once
+each signed in. For a system whose sign-in is an OAuth authorization on
+another system, that was visible: within a day of releases a member hit
+the code host's reauthorization prompt and the system stopped working.
+Every new authentication path must say where its result survives a
+restart, how long it is reused, and what serializes two sign-ins for one
+person.
+
+Evidence: bnbloc-connections v0.18.0 (kept authorization, waiting on a
+sign-in under way), bnbloc 700d5ce4 (held sessions kept on disk).
+Seen 1× (2026-10-28).
+
 ### Say what the error showed, not the cause you guessed
 
 An install failed with "no such host" for the component's address. The
