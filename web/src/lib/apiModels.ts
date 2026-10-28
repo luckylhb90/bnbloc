@@ -35,16 +35,10 @@ export function joinNeedsInviteCode(room: Room | null | undefined): boolean {
   return isPreviewRoom(room) && room.visibility === "private";
 }
 // One channel of a room: a topic-scoped message stream. Members, agent
-// borrows, and files are room-level and shared across channels.
-export interface Channel {
-  channelId: string;
-  name: string;
-  isDefault: boolean;
-  // "people" for the room's people chat (human-only; agents never see it).
-  // The channel list never contains it — it is reached via peopleChat.
-  kind?: "people";
-  createdBy: string;
-}
+// borrows, and files are room-level and shared across channels. Its kind is
+// "people" for the room's people chat (human-only; agents never see it): the
+// channel list never contains it — it is reached via peopleChat.
+export type { RoomChannel as Channel } from "./wire.gen.ts";
 
 export interface TurnMetrics {
   readonly model?: string;

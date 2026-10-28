@@ -88,8 +88,8 @@ func TestContractIdenticalUpdateSucceeds(t *testing.T) {
 			t.Fatal(err)
 		}
 		for i := 0; i < 2; i++ {
-			if err := b.Channel.RenameChannel(ctx, room, ch.ChannelID, "renamed"); err != nil {
-				t.Fatalf("RenameChannel #%d: %v", i, err)
+			if err := b.Channel.UpdateChannel(ctx, room, ch.ChannelID, ChannelPatch{Name: ptr("renamed")}); err != nil {
+				t.Fatalf("UpdateChannel #%d: %v", i, err)
 			}
 		}
 		if err := b.Tenant.PutTenant(ctx, Tenant{TenantID: tid, Name: "n"}); err != nil {

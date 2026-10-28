@@ -34,6 +34,14 @@ const (
 	MaxDisplayNameRunes = 40
 	// MaxContentTagRunes bounds one content component tag, in characters.
 	MaxContentTagRunes = 32
+	// MaxChannelPurpose, MaxChannelRules and MaxRoomRules bound a channel's
+	// purpose and rules and a room's rules, in characters
+	// (docs/prd/2026-10-28-channels-and-threads.md, slice 1). A section's
+	// rules take MaxChannelRules (decision: pending owner; the PRD gives no
+	// bound for them).
+	MaxChannelPurpose = 250
+	MaxChannelRules   = 4000
+	MaxRoomRules      = 8000
 	// MaxRoomSourcePurpose bounds a room package's stated purpose for a
 	// source it asks for (sources[].purpose), in characters.
 	MaxRoomSourcePurpose = 500

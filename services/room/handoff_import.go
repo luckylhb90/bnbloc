@@ -541,7 +541,7 @@ func (s *Service) importPackage(ctx context.Context, user string, pkg *handoffPa
 		if c.ID == pkg.peopleChannel {
 			ch, err = s.Channels.EnsurePeopleChannel(ctx, roomID, user, now)
 		} else {
-			ch, err = s.createChannel(ctx, roomID, c.Name, user)
+			ch, err = s.createChannel(ctx, roomID, user, wire.ChannelCreateRequest{Name: c.Name})
 		}
 		if err != nil {
 			return res, fmt.Errorf("create channel: %w", err)

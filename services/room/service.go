@@ -187,8 +187,18 @@ func (s *Service) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/rooms/{roomId}/artifacts/{artifactId}/state", s.handleGetArtifactState)
 	mux.HandleFunc("GET /v1/rooms/{roomId}/channels", s.handleListChannels)
 	mux.HandleFunc("POST /v1/rooms/{roomId}/channels", s.handleCreateChannel)
-	mux.HandleFunc("PATCH /v1/rooms/{roomId}/channels/{channelId}", s.handleRenameChannel)
+	mux.HandleFunc("PATCH /v1/rooms/{roomId}/channels/{channelId}", s.handlePatchChannel)
 	mux.HandleFunc("DELETE /v1/rooms/{roomId}/channels/{channelId}", s.handleDeleteChannel)
+	mux.HandleFunc("POST /v1/rooms/{roomId}/channels/{channelId}/archive", s.handleArchiveChannel(true))
+	mux.HandleFunc("POST /v1/rooms/{roomId}/channels/{channelId}/restore", s.handleArchiveChannel(false))
+	mux.HandleFunc("PUT /v1/rooms/{roomId}/channels/{channelId}/follow", s.handleFollowChannel(true))
+	mux.HandleFunc("DELETE /v1/rooms/{roomId}/channels/{channelId}/follow", s.handleFollowChannel(false))
+	mux.HandleFunc("GET /v1/rooms/{roomId}/channel-directory", s.handleChannelDirectory)
+	mux.HandleFunc("POST /v1/rooms/{roomId}/sections", s.handleCreateSection)
+	mux.HandleFunc("PATCH /v1/rooms/{roomId}/sections/{sectionId}", s.handlePatchSection)
+	mux.HandleFunc("DELETE /v1/rooms/{roomId}/sections/{sectionId}", s.handleDeleteSection)
+	mux.HandleFunc("GET /v1/rooms/{roomId}/rules", s.handleGetRules)
+	mux.HandleFunc("POST /v1/rooms/{roomId}/rules/agree", s.handleAgreeRules)
 	mux.HandleFunc("GET /v1/rooms/{roomId}/people-chat", s.handleGetPeopleChat)
 	mux.HandleFunc("POST /v1/rooms/{roomId}/people-chat", s.handlePeopleChat)
 	mux.HandleFunc("GET /v1/users/{userId}/rooms", s.handleUserRooms)
@@ -343,10 +353,16 @@ func roomDetailOf(rm store.Room, memberCount int) wire.RoomDetail {
 	if prompts == nil {
 		prompts = []wire.RoomQuickPrompt{}
 	}
+	recommended := slices.Clone(rm.RecommendedChannels)
+	if recommended == nil {
+		recommended = []string{}
+	}
 	return wire.RoomDetail{
 		RoomID: rm.RoomID, Name: rm.Name, Description: rm.Description,
 		Visibility: string(rm.Visibility), Previewable: rm.Previewable, SyncMode: string(rm.SyncMode), CreatedBy: rm.CreatedBy,
 		CreatedAtMs: rm.CreatedAtMs, MemberCount: memberCount, Welcome: rm.Welcome, QuickPrompts: prompts,
+		Rules: rm.Rules, RulesVersion: rm.RulesVersion, RequireRulesAgreement: rm.RequireRulesAgreement,
+		RecommendedChannels: recommended, ChannelCreation: rm.ChannelCreationPolicy(),
 	}
 }
 
@@ -875,7 +891,10 @@ func (s *Service) handleTransferRoom(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"roomId": roomID, "owner": body.UserID})
 }
 
-// handlePatchRoom updates name/description/visibility (owner-only).
+// handlePatchRoom updates a room (wire.RoomPatchRequest): its name,
+// description, visibility, preview and sync are the owner's; its rules,
+// rules agreement, recommended channels and channel creation policy are the
+// owner's or an admin's (roomSetupPatch, room_rules.go).
 func (s *Service) handlePatchRoom(w http.ResponseWriter, r *http.Request) {
 	roomID := r.PathValue("roomId")
 	role, ok, err := s.Store.MemberRole(r.Context(), roomID, caller(r))
@@ -884,18 +903,17 @@ func (s *Service) handlePatchRoom(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if !ok || role != store.RoleOwner {
+	if !ok || !role.CanInvite() {
 		httpx.Error(w, "only the owner may edit the room", http.StatusForbidden)
 		return
 	}
-	var body struct {
-		Name        *string `json:"name"`
-		Description *string `json:"description"`
-		Visibility  *string `json:"visibility"`
-		Previewable *bool   `json:"previewable"`
-		SyncMode    *string `json:"syncMode"`
+	var body wire.RoomPatchRequest
+	if !httpx.DecodeJSON(w, r, maxRoomPatchBodyBytes, &body) {
+		return
 	}
-	if !httpx.DecodeJSON(w, r, maxJSONBodyBytes, &body) {
+	ownerOnly := body.Name != nil || body.Description != nil || body.Visibility != nil || body.Previewable != nil || body.SyncMode != nil
+	if ownerOnly && role != store.RoleOwner {
+		httpx.Error(w, "only the owner may edit the room's name, description, visibility, preview or sync", http.StatusForbidden)
 		return
 	}
 	if body.Description != nil {
@@ -912,6 +930,16 @@ func (s *Service) handlePatchRoom(w http.ResponseWriter, r *http.Request) {
 	if body.SyncMode != nil {
 		m := store.NormalizeSyncMode(*body.SyncMode)
 		patch.SyncMode = &m
+	}
+	if _, err := s.roomSetupPatch(r.Context(), roomID, body, &patch); err != nil {
+		var bad errBadRequest
+		if errors.As(err, &bad) {
+			httpx.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		obs.ServerError(w, "read channels failed", err)
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 	if err := s.Store.UpdateRoom(r.Context(), roomID, patch); err != nil {
 		if errors.Is(err, store.ErrRoomNotFound) {
@@ -1026,6 +1054,11 @@ func caller(r *http.Request) string { return svcauth.Subject(r) }
 // unbounded payload into the decoder (BE-17). Artifact bodies carry their own
 // larger caps.
 const maxJSONBodyBytes = 64 << 10
+
+// maxRoomPatchBodyBytes bounds a room patch: the room's rules
+// (wire.MaxRoomRules characters) fit even when every character is sent as a
+// JSON escape pair.
+const maxRoomPatchBodyBytes = 128 << 10
 
 // handleGetAgentPrefs returns the caller's last-selected agent for a room+
 // channel context (falling back is the client's job: room-level row, then the

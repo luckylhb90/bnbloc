@@ -42,6 +42,31 @@ type RoomDetail struct {
 	MemberCount  int               `json:"memberCount"`
 	Welcome      string            `json:"welcome"`
 	QuickPrompts []RoomQuickPrompt `json:"quickPrompts"`
+	// The room's rules and onboarding (docs/prd/2026-10-28-channels-and-
+	// threads.md §2.5a): its rules and their version, whether a member
+	// agrees before posting (C16), the channels a new member joins, and who
+	// creates channels (C15).
+	Rules                 string   `json:"rules"`
+	RulesVersion          int      `json:"rulesVersion"`
+	RequireRulesAgreement bool     `json:"requireRulesAgreement"`
+	RecommendedChannels   []string `json:"recommendedChannels"`
+	ChannelCreation       string   `json:"channelCreation" tstype:"ChannelCreationPolicy"`
+}
+
+// RoomPatchRequest is PATCH /v1/rooms/{id}: a nil field is left as it is.
+// Name, description, visibility, previewable and sync are the owner's; the
+// rules, the agreement switch, the recommended channels and the channel
+// creation policy are the owner's or an admin's.
+type RoomPatchRequest struct {
+	Name                  *string   `json:"name,omitempty"`
+	Description           *string   `json:"description,omitempty"`
+	Visibility            *string   `json:"visibility,omitempty" tstype:"RoomVisibility"`
+	Previewable           *bool     `json:"previewable,omitempty"`
+	SyncMode              *string   `json:"syncMode,omitempty" tstype:"RoomSyncMode"`
+	Rules                 *string   `json:"rules,omitempty"`
+	RequireRulesAgreement *bool     `json:"requireRulesAgreement,omitempty"`
+	RecommendedChannels   *[]string `json:"recommendedChannels,omitempty"`
+	ChannelCreation       *string   `json:"channelCreation,omitempty" tstype:"ChannelCreationPolicy"`
 }
 
 // RoomQuickPrompt is one quick prompt of a room: a title and the text a

@@ -127,6 +127,7 @@ func TestPreviewEventKinds(t *testing.T) {
 	previewed := map[string]bool{
 		KindChatMessage: true, KindAgentMessages: true, EventMessageDeleted: true, EventMessageEdited: true,
 		EventArtifactUpdated: true, EventArtifactState: true, EventMemberJoined: true, EventMemberRemoved: true, EventRoomDeleted: true,
+		EventChannelUpdated: true,
 	}
 	members := map[string]bool{
 		EventAgentJobCreated: true, EventAgentJobUpdated: true, EventAgentJobProgress: true, EventJobLiveFrame: true,

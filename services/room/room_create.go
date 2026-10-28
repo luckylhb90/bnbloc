@@ -3,6 +3,7 @@ package room
 import (
 	"context"
 	"errors"
+	"log"
 	"net/http"
 	"strings"
 
@@ -37,6 +38,7 @@ func (s *Service) createRoom(ctx context.Context, room store.Room, owner, defaul
 		Name:        defaultChannel,
 		IsDefault:   true,
 		CreatedBy:   owner,
+		OwnerID:     owner, // decision: channels PRD §2.1b (its creator by default)
 		CreatedAtMs: room.CreatedAtMs,
 	}
 	// The default channel is created in the same transaction as the room
@@ -45,6 +47,13 @@ func (s *Service) createRoom(ctx context.Context, room store.Room, owner, defaul
 	m := store.Membership{RoomID: room.RoomID, UserID: owner, Role: store.RoleOwner, JoinedAtMs: room.CreatedAtMs}
 	if err := s.Store.CreateRoomWithOwnerAndChannel(ctx, room, m, def); err != nil {
 		return store.RoomChannel{}, err
+	}
+	// The creator follows the channel they made, as for any channel
+	// (createChannel; decision: pending owner). Best effort: the room exists.
+	if s.Channels != nil {
+		if err := s.Channels.FollowChannel(ctx, room.RoomID, def.ChannelID, owner, room.CreatedAtMs, store.FollowMarks{}); err != nil {
+			log.Printf("room: room=%s: the creator's follow of the default channel failed: %v", room.RoomID, err)
+		}
 	}
 	return def, nil
 }
@@ -85,6 +94,7 @@ func (s *Service) addMember(ctx context.Context, roomID, userID string, role sto
 	}
 	if !had || prev.AgentHost {
 		s.publishMemberJoined(ctx, roomID, userID)
+		s.joinRecommended(ctx, roomID, userID)
 	}
 	return nil
 }
@@ -98,6 +108,7 @@ func (s *Service) redeemInvite(ctx context.Context, code, userID string) (store.
 		return m, err
 	}
 	s.publishMemberJoined(ctx, m.RoomID, m.UserID)
+	s.joinRecommended(ctx, m.RoomID, m.UserID)
 	return m, nil
 }
 

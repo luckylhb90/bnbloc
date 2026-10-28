@@ -50,10 +50,16 @@ func insertRoom(ctx context.Context, q interface {
 	if err != nil {
 		return err
 	}
+	recommended, err := recommendedChannelsJSON(r.RecommendedChannels)
+	if err != nil {
+		return err
+	}
 	_, err = q.ExecContext(ctx,
-		`INSERT INTO rooms (tenant_id, room_id, name, description, visibility, previewable, sync_mode, created_by, created_at_ms, welcome, quick_prompts_json)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		tid, r.RoomID, r.Name, r.Description, string(r.Visibility), r.Previewable, string(r.SyncMode), r.CreatedBy, r.CreatedAtMs, r.Welcome, prompts)
+		`INSERT INTO rooms (tenant_id, room_id, name, description, visibility, previewable, sync_mode, created_by, created_at_ms, welcome, quick_prompts_json,
+		   rules, rules_version, require_rules_agreement, recommended_channels_json, channel_creation)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		tid, r.RoomID, r.Name, r.Description, string(r.Visibility), r.Previewable, string(r.SyncMode), r.CreatedBy, r.CreatedAtMs, r.Welcome, prompts,
+		nullIfZero(r.Rules), r.RulesVersion, r.RequireRulesAgreement, recommended, r.ChannelCreationPolicy())
 	return dupAs(err, ErrRoomExists)
 }
 
@@ -68,6 +74,15 @@ func quickPromptsJSON(list []wire.RoomQuickPrompt) (sql.NullString, error) {
 		return sql.NullString{}, err
 	}
 	return sql.NullString{String: string(raw), Valid: true}, nil
+}
+
+// recommendedChannelsJSON is a room's recommended channels as
+// rooms.recommended_channels_json holds them: NULL for none.
+func recommendedChannelsJSON(ids []string) (any, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	return jsonArg(ids)
 }
 
 // CreateRoomWithOwner atomically inserts a room and its owner membership in a
@@ -194,11 +209,13 @@ func (s *MySQLRoom) GetRoom(ctx context.Context, roomID string) (Room, error) {
 	}
 	var r Room
 	var visibility, syncMode string
-	var welcome, prompts sql.NullString
+	var welcome, prompts, rules, recommended sql.NullString
 	err = s.DB.QueryRowContext(ctx,
-		`SELECT tenant_id, room_id, name, description, visibility, previewable, sync_mode, created_by, created_at_ms, welcome, quick_prompts_json
+		`SELECT tenant_id, room_id, name, description, visibility, previewable, sync_mode, created_by, created_at_ms, welcome, quick_prompts_json,
+		   rules, rules_version, require_rules_agreement, recommended_channels_json, channel_creation
 		 FROM rooms WHERE tenant_id = ? AND room_id = ? AND `+sqlNotDeleted,
-		tid, roomID).Scan(&r.TenantID, &r.RoomID, &r.Name, &r.Description, &visibility, &r.Previewable, &syncMode, &r.CreatedBy, &r.CreatedAtMs, &welcome, &prompts)
+		tid, roomID).Scan(&r.TenantID, &r.RoomID, &r.Name, &r.Description, &visibility, &r.Previewable, &syncMode, &r.CreatedBy, &r.CreatedAtMs, &welcome, &prompts,
+		&rules, &r.RulesVersion, &r.RequireRulesAgreement, &recommended, &r.ChannelCreation)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Room{}, ErrRoomNotFound
 	}
@@ -211,6 +228,12 @@ func (s *MySQLRoom) GetRoom(ctx context.Context, roomID string) (Room, error) {
 	if prompts.Valid && prompts.String != "" {
 		if err := json.Unmarshal([]byte(prompts.String), &r.QuickPrompts); err != nil {
 			return Room{}, fmt.Errorf("decode room %s quick prompts: %w", roomID, err)
+		}
+	}
+	r.Rules = rules.String
+	if recommended.Valid && recommended.String != "" {
+		if err := json.Unmarshal([]byte(recommended.String), &r.RecommendedChannels); err != nil {
+			return Room{}, fmt.Errorf("decode room %s recommended channels: %w", roomID, err)
 		}
 	}
 	return r, nil
@@ -315,19 +338,19 @@ func (s *MySQLRoom) IsMember(ctx context.Context, roomID, userID string) (bool, 
 // (e.g. a stray row planted by hand) never grants access.
 func (s *MySQLRoom) MembershipAnyTenant(ctx context.Context, roomID, userID string) (Membership, bool, error) {
 	return scanOneMembership(s.DB.QueryRowContext(ctx,
-		`SELECT m.tenant_id, m.room_id, m.user_id, m.role, m.joined_at_ms, m.agent_host FROM room_members m
+		`SELECT m.tenant_id, m.room_id, m.user_id, m.role, m.joined_at_ms, m.agent_host, m.rules_agreed_version FROM room_members m
 		 JOIN rooms r ON r.room_id = m.room_id AND r.tenant_id = m.tenant_id AND r.`+sqlNotDeleted+`
 		 WHERE m.room_id = ? AND m.user_id = ? LIMIT 1`, roomID, userID))
 }
 
 // membershipColumns is the column list scanMembership reads, in its order.
-const membershipColumns = `tenant_id, room_id, user_id, role, joined_at_ms, agent_host`
+const membershipColumns = `tenant_id, room_id, user_id, role, joined_at_ms, agent_host, rules_agreed_version`
 
 // scanMembership reads one membershipColumns row.
 func scanMembership(row rowScanner) (Membership, error) {
 	var m Membership
 	var role string
-	if err := row.Scan(&m.TenantID, &m.RoomID, &m.UserID, &role, &m.JoinedAtMs, &m.AgentHost); err != nil {
+	if err := row.Scan(&m.TenantID, &m.RoomID, &m.UserID, &role, &m.JoinedAtMs, &m.AgentHost, &m.RulesAgreedVersion); err != nil {
 		return Membership{}, err
 	}
 	m.Role = Role(role)
@@ -584,6 +607,30 @@ func (s *MySQLRoom) UpdateRoom(ctx context.Context, roomID string, patch RoomPat
 		sets = append(sets, "quick_prompts_json = ?")
 		args = append(args, prompts)
 	}
+	if patch.Rules != nil {
+		// The version moves only when the text changes, byte for byte (the
+		// memory store compares with ==; a collation would fold case and
+		// pad), and is assigned before the text (MySQL evaluates a
+		// single-table SET left to right).
+		sets = append(sets, "rules_version = rules_version + IF(CAST(COALESCE(rules, '') AS BINARY) <> CAST(? AS BINARY), 1, 0)", "rules = ?")
+		args = append(args, *patch.Rules, nullIfZero(*patch.Rules))
+	}
+	if patch.RequireRulesAgreement != nil {
+		sets = append(sets, "require_rules_agreement = ?")
+		args = append(args, *patch.RequireRulesAgreement)
+	}
+	if patch.RecommendedChannels != nil {
+		recommended, err := recommendedChannelsJSON(*patch.RecommendedChannels)
+		if err != nil {
+			return err
+		}
+		sets = append(sets, "recommended_channels_json = ?")
+		args = append(args, recommended)
+	}
+	if patch.ChannelCreation != nil {
+		sets = append(sets, "channel_creation = ?")
+		args = append(args, *patch.ChannelCreation)
+	}
 	if len(sets) == 0 {
 		// Nothing to write: still a miss when the room is not live here.
 		_, err := s.GetRoom(ctx, roomID)
@@ -707,4 +754,42 @@ func (s *MySQLRoom) RoomsForUserDetailed(ctx context.Context, userID string) ([]
 			d.IsOwner = d.Role == RoleOwner
 			return d, nil
 		}, tid, userID)
+}
+
+// AgreeRoomRules records a human member's agreement to the room's current
+// rules version, in one statement: the version is compared with the live
+// room's in the same write, so a rules change racing the agreement wins.
+func (s *MySQLRoom) AgreeRoomRules(ctx context.Context, roomID, userID string, version int) error {
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	res, err := s.DB.ExecContext(ctx,
+		`UPDATE room_members m JOIN rooms r ON r.tenant_id = m.tenant_id AND r.room_id = m.room_id AND r.`+sqlNotDeleted+`
+		 SET m.rules_agreed_version = ?
+		 WHERE m.tenant_id = ? AND m.room_id = ? AND m.user_id = ? AND m.`+sqlHumanMember+` AND r.rules_version = ?`,
+		version, tid, roomID, userID, version)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil || n > 0 {
+		return err
+	}
+	// Nothing matched: say which (the member and the room are read once
+	// more; a failed read is an error, never a guess).
+	m, ok, err := s.GetMember(ctx, roomID, userID)
+	if err != nil {
+		return err
+	}
+	if !ok || !m.Human() {
+		return ErrRoomNotFound
+	}
+	r, err := s.GetRoom(ctx, roomID)
+	if err != nil {
+		return err
+	}
+	if r.RulesVersion != version {
+		return ErrRulesChanged
+	}
+	return ErrRoomNotFound
 }

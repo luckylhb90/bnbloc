@@ -91,8 +91,8 @@ func TestPeopleChatRejectsAgentRecipient(t *testing.T) {
 		Recipient:  wire.ScheduleRecipient{Kind: wire.ScheduleRecipientAgent, OwnerID: "bob", Provider: "codex"},
 		Recurrence: wire.ScheduleRecurrence{Kind: "daily", Time: "09:00"},
 	}
-	if code, err := svc.checkScheduleSpec(dctx(), &sc, time.Now()); code != http.StatusBadRequest || !errors.Is(err, errAgentInPeopleChat) {
-		t.Fatalf("agent schedule in people chat = %d %v, want 400 errAgentInPeopleChat", code, err)
+	if code, err := svc.checkScheduleSpec(dctx(), &sc, time.Now()); code != http.StatusBadRequest || !errors.Is(err, errAgentsNotAdmitted) {
+		t.Fatalf("agent schedule in people chat = %d %v, want 400 errAgentsNotAdmitted", code, err)
 	}
 }
 

@@ -94,6 +94,10 @@ var RoomEventKinds = []EventKindSpec{
 	{Name: EventContentSaved},
 	{Name: EventContentUsesChanged},
 	{Name: EventAppChanged},
+	// A channel or section changed (bnbloc-room): room-wide, so every
+	// stream reloads the listing and agent filters forget their verdicts.
+	// A preview reads the listing too.
+	{Name: EventChannelUpdated, Preview: true},
 }
 
 var eventKinds = func() map[string]EventKindSpec {

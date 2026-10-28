@@ -19,6 +19,10 @@ type ErrorBody struct {
 	Error string `json:"error"`
 	Code  string `json:"code,omitempty"`
 	Field string `json:"field,omitempty"`
+	// RetryAfterMs is how long to wait before the same request may succeed,
+	// where a route refuses for a time (a channel's slow mode); the
+	// Retry-After header carries it in whole seconds too.
+	RetryAfterMs int64 `json:"retryAfterMs,omitempty"`
 }
 
 // ErrorText is the message of a failed response's body: the one error

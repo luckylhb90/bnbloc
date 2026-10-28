@@ -1942,6 +1942,229 @@ export interface MyBudgetReply extends BudgetPeriod {
   blockedBy?: string;
 }
 
+// ---- wire/channels.go ----
+
+// ChannelAgent is a channel's default agent, by its key (owner, core,
+// provider): what the composer proposes in the channel for a member who has
+// made no choice of their own (C8). It only proposes, never acts.
+export interface ChannelAgent {
+  ownerId: string;
+  core?: string;
+  provider: string;
+}
+
+// Who may post in a channel (ChannelSettings.WhoPosts).
+// ChannelPostersEveryone: every member who may chat (the default).
+export const ChannelPostersEveryone = "";
+// ChannelPostersAdmins: the room's owner and admins only; an agent an
+// admin asks still replies.
+export const ChannelPostersAdmins = "admins";
+
+// When a channel's default agent answers (ChannelSettings.AgentParticipation,
+// C19). Stored in slice 1; nothing acts on it yet.
+// ChannelAgentsWhenMentioned: only when addressed (today's behaviour,
+// the default).
+export const ChannelAgentsWhenMentioned = "";
+// ChannelAgentsQuestions: to every question, by the agent's own reading.
+export const ChannelAgentsQuestions = "questions";
+// ChannelAgentsThreads: to every new thread.
+export const ChannelAgentsThreads = "threads";
+
+// ChannelSettings is a channel's settings document (its owners', §2.1). The
+// zero value is today's channel: everyone posts, agents are admitted, no
+// slow mode, agents answer when mentioned.
+export interface ChannelSettings {
+  // DefaultAgent is proposed by the composer (C8); nil for none.
+  defaultAgent?: ChannelAgent;
+  whoPosts?: ChannelWhoPosts;
+  // NoAgents bars agents from the channel: they never read it or answer in
+  // it (store.ChannelAdmitsAgents). The zero value admits them.
+  noAgents?: boolean;
+  // SlowModeSeconds is the least time between two posts of one member in
+  // the channel; 0 is off. Set by the channel's owners, no platform
+  // default (C22).
+  slowModeSeconds?: number;
+  // AgentParticipation is stored only in this slice (C19).
+  agentParticipation?: ChannelAgentParticipation;
+}
+
+// RoomChannel is one channel of a room as the room service answers it
+// (list, create, patch, archive, restore). Joined, Starred and Hidden are
+// the caller's own (C18): following, not access.
+export interface RoomChannel {
+  channelId: string;
+  name: string;
+  isDefault: boolean;
+  // Kind is "people" for the room's people chat (never listed), omitted
+  // for an ordinary channel.
+  kind?: string;
+  createdBy: string;
+  purpose: string;
+  rules: string;
+  // SectionID is the channel's section, "" at the room's top level.
+  sectionId: string;
+  position: number;
+  ownerId: string;
+  archivedAtMs?: number;
+  settings: ChannelSettings;
+  joined: boolean;
+  starred: boolean;
+  hidden: boolean;
+}
+
+// Section visibilities. Slice 1 accepts only SectionOpen.
+// SectionOpen: every room member sees its channels.
+export const SectionOpen = "open";
+// SectionMembers: only its members see its channels (slice 2).
+export const SectionMembers = "members";
+
+// RoomSection is one section of a room: a named group of channels with its
+// own owners and rules (§2.1a).
+export interface RoomSection {
+  sectionId: string;
+  name: string;
+  position: number;
+  visibility: SectionVisibility;
+  rules: string;
+  owners: string[];
+  joinPolicy: string;
+  createdBy: string;
+  createdAtMs: number;
+}
+
+// ChannelList is GET /v1/rooms/{id}/channels: the room's channels (live and
+// not archived; ?archived=1 the archived ones; the people chat never) and
+// its sections.
+export interface ChannelList {
+  channels: RoomChannel[];
+  sections: RoomSection[];
+}
+
+// Query flags of GET /v1/rooms/{id}/channels.
+// ChannelListForAgents ("agents=1") lists the channels an agent may
+// read: no people chat, no channel whose settings bar agents, archived
+// ones kept (their history stays readable). The bridge's records read
+// it (roomlog.AgentChannelList); realtime's agentMayReadChannel stays
+// the enforcement.
+export const ChannelListForAgents = "agents";
+// ChannelListArchived ("archived=1") lists the archived channels only.
+export const ChannelListArchived = "archived";
+
+// ChannelDirectoryEntry is one channel of the room's directory: every open
+// channel a member may join, with how many follow it.
+export interface ChannelDirectoryEntry extends RoomChannel {
+  followers: number;
+}
+
+// ChannelDirectory is GET /v1/rooms/{id}/channel-directory.
+export interface ChannelDirectory {
+  channels: ChannelDirectoryEntry[];
+  sections: RoomSection[];
+}
+
+// ChannelFollowRequest is PUT /v1/rooms/{id}/channels/{channelId}/follow:
+// the caller follows the channel (joins it) and, when given, stars or hides
+// it for themselves.
+export interface ChannelFollowRequest {
+  starred?: boolean;
+  hidden?: boolean;
+}
+
+// ChannelPatchRequest is PATCH /v1/rooms/{id}/channels/{channelId}: a nil
+// field is left as it is; Settings replaces the whole document.
+export interface ChannelPatchRequest {
+  name?: string;
+  purpose?: string;
+  rules?: string;
+  sectionId?: string;
+  position?: number;
+  ownerId?: string;
+  settings?: ChannelSettings;
+}
+
+// ChannelCreateRequest is POST /v1/rooms/{id}/channels.
+export interface ChannelCreateRequest {
+  name: string;
+  purpose?: string;
+  sectionId?: string;
+}
+
+// SectionCreateRequest is POST /v1/rooms/{id}/sections.
+export interface SectionCreateRequest {
+  name: string;
+  rules?: string;
+  position?: number;
+  visibility?: SectionVisibility;
+}
+
+// SectionPatchRequest is PATCH /v1/rooms/{id}/sections/{sectionId}.
+export interface SectionPatchRequest {
+  name?: string;
+  rules?: string;
+  position?: number;
+  owners?: string[];
+}
+
+// Who creates channels in a room (C15): RoomDetail.ChannelCreation.
+// ChannelCreationAnyone: any member, at the top level or in a section
+// they may place channels in (the default).
+export const ChannelCreationAnyone = "anyone";
+// ChannelCreationSections: members only inside sections; the top level
+// is the owners' and admins'.
+export const ChannelCreationSections = "sections";
+// ChannelCreationAdmins: the room's owners and admins only.
+export const ChannelCreationAdmins = "admins";
+
+// RoomRulesState is GET /v1/rooms/{id}/rules: the room's rules, their
+// version, whether agreeing is required before posting (C16) and the
+// version the caller agreed to (0 = never).
+export interface RoomRulesState {
+  rules: string;
+  version: number;
+  required: boolean;
+  agreedVersion: number;
+}
+
+// RulesAgreeRequest is POST /v1/rooms/{id}/rules/agree: the version of the
+// rules the caller read and agrees to. A version that is no longer the
+// room's is refused (RulesChanged), so nobody agrees to rules they did not
+// see.
+export interface RulesAgreeRequest {
+  version: number;
+}
+
+// EventChannelUpdated (ChannelUpdatedPayload) is published by bnbloc-room on
+// every change to a channel or a section of the room (create, patch,
+// archive, restore, delete). It is room-wide: clients reload the listing,
+// and realtime's agent stream filters forget the admission verdicts they
+// memoized.
+export const EventChannelUpdated = "channel_updated";
+
+// ChannelUpdatedPayload names what changed: a channel, a section, or both
+// (a section deleted moves its channels).
+export interface ChannelUpdatedPayload {
+  channelId?: string;
+  sectionId?: string;
+}
+
+// Error codes of a channel refusal (httpx.ErrorBody.Code): a post refused by
+// the channel's setup, and the setup routes' own refusals.
+// ChannelArchived: the channel is archived (read-only until restored).
+export const ChannelArchived = "channel_archived";
+// ChannelAdminsOnly: only the room's owner and admins post here.
+export const ChannelAdminsOnly = "channel_admins_only";
+// ChannelSlowMode: the member posted here less than the channel's slow
+// mode ago; the body's retryAfterMs says how long to wait.
+export const ChannelSlowMode = "channel_slow_mode";
+// RulesAgreementRequired: the room asks members to agree to its current
+// rules before they post (C16).
+export const RulesAgreementRequired = "rules_agreement_required";
+// RulesChanged: the rules agreed to are not the room's current version.
+export const RulesChanged = "rules_changed";
+// AgentsNotAdmitted: agents are not admitted in the channel (the people
+// chat, or a channel whose settings bar them).
+export const AgentsNotAdmitted = "agents_not_admitted";
+
 // ---- wire/client_config.go ----
 
 // ClientConfig is GET /v1/public/client-config: the deployment facts a client
@@ -3386,7 +3609,7 @@ export const DispatchDepthExceeded = "depth_exceeded";
 export const DispatchFanOutExceeded = "fan_out_exceeded";
 export const DispatchSelf = "self_dispatch";
 export const DispatchCycle = "dispatch_cycle";
-export const DispatchPeopleChat = "people_chat";
+export const DispatchAgentsNotAdmitted = "agents_not_admitted";
 export const DispatchExpertUnusable = "expert_not_available";
 export const DispatchDraftUnavailable = "draft_not_available";
 export const DispatchInvalid = "invalid_dispatch";
@@ -3459,7 +3682,7 @@ export interface EventKindSpec {
 // RoomEventKinds is the registry of room event kinds. The web's
 // RoomEventKind union (and RoomEventKindValues) is generated from the Name
 // of each row: a kind registered here is a kind the web listens for.
-export const RoomEventKinds: readonly EventKindSpec[] = [{ name: "chat_message", durable: true, replay: true, channelScoped: true, preview: true }, { name: "agent_messages", durable: true, replay: true, channelScoped: true, preview: true }, { name: "agent_job_created", channelScoped: true }, { name: "agent_job_updated", channelScoped: true }, { name: "agent_job_progress", channelScoped: true }, { name: "job_live_frame", channelScoped: true }, { name: "agent_session_state" }, { name: "agent_roster" }, { name: "presence_join" }, { name: "presence_leave" }, { name: "presence_snapshot" }, { name: "presence_typing", channelScoped: true }, { name: "message_deleted", channelScoped: true, preview: true }, { name: "message_edited", channelScoped: true, preview: true }, { name: "task_updated", channelScoped: true }, { name: "artifact_updated", preview: true }, { name: "artifact_state", preview: true }, { name: "member_joined", preview: true }, { name: "member_removed", revocation: true, preview: true }, { name: "room_deleted", revocation: true, preview: true }, { name: "content_saved" }, { name: "content_uses_changed" }, { name: "app_changed" }];
+export const RoomEventKinds: readonly EventKindSpec[] = [{ name: "chat_message", durable: true, replay: true, channelScoped: true, preview: true }, { name: "agent_messages", durable: true, replay: true, channelScoped: true, preview: true }, { name: "agent_job_created", channelScoped: true }, { name: "agent_job_updated", channelScoped: true }, { name: "agent_job_progress", channelScoped: true }, { name: "job_live_frame", channelScoped: true }, { name: "agent_session_state" }, { name: "agent_roster" }, { name: "presence_join" }, { name: "presence_leave" }, { name: "presence_snapshot" }, { name: "presence_typing", channelScoped: true }, { name: "message_deleted", channelScoped: true, preview: true }, { name: "message_edited", channelScoped: true, preview: true }, { name: "task_updated", channelScoped: true }, { name: "artifact_updated", preview: true }, { name: "artifact_state", preview: true }, { name: "member_joined", preview: true }, { name: "member_removed", revocation: true, preview: true }, { name: "room_deleted", revocation: true, preview: true }, { name: "content_saved" }, { name: "content_uses_changed" }, { name: "app_changed" }, { name: "channel_updated", preview: true }];
 
 // ---- wire/events.go ----
 
@@ -4216,6 +4439,14 @@ export const MaxArtifactStateBytes = 16384;
 export const MaxDisplayNameRunes = 40;
 // MaxContentTagRunes bounds one content component tag, in characters.
 export const MaxContentTagRunes = 32;
+// MaxChannelPurpose, MaxChannelRules and MaxRoomRules bound a channel's
+// purpose and rules and a room's rules, in characters
+// (docs/prd/2026-10-28-channels-and-threads.md, slice 1). A section's
+// rules take MaxChannelRules (decision: pending owner; the PRD gives no
+// bound for them).
+export const MaxChannelPurpose = 250;
+export const MaxChannelRules = 4000;
+export const MaxRoomRules = 8000;
 // MaxRoomSourcePurpose bounds a room package's stated purpose for a
 // source it asks for (sources[].purpose), in characters.
 export const MaxRoomSourcePurpose = 500;
@@ -5720,6 +5951,31 @@ export interface RoomDetail {
   memberCount: number;
   welcome: string;
   quickPrompts: RoomQuickPrompt[];
+  // The room's rules and onboarding (docs/prd/2026-10-28-channels-and-
+  // threads.md §2.5a): its rules and their version, whether a member
+  // agrees before posting (C16), the channels a new member joins, and who
+  // creates channels (C15).
+  rules: string;
+  rulesVersion: number;
+  requireRulesAgreement: boolean;
+  recommendedChannels: string[];
+  channelCreation: ChannelCreationPolicy;
+}
+
+// RoomPatchRequest is PATCH /v1/rooms/{id}: a nil field is left as it is.
+// Name, description, visibility, previewable and sync are the owner's; the
+// rules, the agreement switch, the recommended channels and the channel
+// creation policy are the owner's or an admin's.
+export interface RoomPatchRequest {
+  name?: string;
+  description?: string;
+  visibility?: RoomVisibility;
+  previewable?: boolean;
+  syncMode?: RoomSyncMode;
+  rules?: string;
+  requireRulesAgreement?: boolean;
+  recommendedChannels?: string[];
+  channelCreation?: ChannelCreationPolicy;
 }
 
 // RoomQuickPrompt is one quick prompt of a room: a title and the text a
@@ -7293,6 +7549,14 @@ export type AssistTaskName = "enhance-prompt" | "describe-work" | "describe-room
 export const AssistTaskNameValues: readonly AssistTaskName[] = ["enhance-prompt", "describe-work", "describe-room", "draft-expert", "draft-skill-pack", "draft-prompt-pack", "plan-room", "draft-schedule", "explain-source-use", "review-skill", "fill-settings", "suggest-skill-dirs", "find-a-way"];
 export type AttachmentContent = "png" | "jpeg" | "gif" | "webp" | "pdf" | "zip" | "ole" | "text" | "isomedia" | "webm" | "mp3" | "wav" | "ogg";
 export const AttachmentContentValues: readonly AttachmentContent[] = ["png", "jpeg", "gif", "webp", "pdf", "zip", "ole", "text", "isomedia", "webm", "mp3", "wav", "ogg"];
+export type ChannelWhoPosts = "" | "admins";
+export const ChannelWhoPostsValues: readonly ChannelWhoPosts[] = ["", "admins"];
+export type ChannelAgentParticipation = "" | "questions" | "threads";
+export const ChannelAgentParticipationValues: readonly ChannelAgentParticipation[] = ["", "questions", "threads"];
+export type SectionVisibility = "open" | "members";
+export const SectionVisibilityValues: readonly SectionVisibility[] = ["open", "members"];
+export type ChannelCreationPolicy = "anyone" | "sections" | "admins";
+export const ChannelCreationPolicyValues: readonly ChannelCreationPolicy[] = ["anyone", "sections", "admins"];
 export type ComponentSettingType = "text" | "secret" | "url" | "number" | "boolean" | "choice" | "path" | "lines";
 export const ComponentSettingTypeValues: readonly ComponentSettingType[] = ["text", "secret", "url", "number", "boolean", "choice", "path", "lines"];
 export type ComponentSettingScope = "platform" | "org" | "member";
@@ -7303,8 +7567,8 @@ export type ContentSavedAction = "saved" | "submitted" | "published";
 export const ContentSavedActionValues: readonly ContentSavedAction[] = ["saved", "submitted", "published"];
 export type DecisionQuestionType = "predicate" | "choice" | "score";
 export const DecisionQuestionTypeValues: readonly DecisionQuestionType[] = ["predicate", "choice", "score"];
-export type RoomEventKind = "chat_message" | "agent_messages" | "agent_job_created" | "agent_job_updated" | "agent_job_progress" | "job_live_frame" | "agent_session_state" | "agent_roster" | "presence_join" | "presence_leave" | "presence_snapshot" | "presence_typing" | "message_deleted" | "message_edited" | "task_updated" | "artifact_updated" | "artifact_state" | "member_joined" | "member_removed" | "room_deleted" | "content_saved" | "content_uses_changed" | "app_changed";
-export const RoomEventKindValues: readonly RoomEventKind[] = ["chat_message", "agent_messages", "agent_job_created", "agent_job_updated", "agent_job_progress", "job_live_frame", "agent_session_state", "agent_roster", "presence_join", "presence_leave", "presence_snapshot", "presence_typing", "message_deleted", "message_edited", "task_updated", "artifact_updated", "artifact_state", "member_joined", "member_removed", "room_deleted", "content_saved", "content_uses_changed", "app_changed"];
+export type RoomEventKind = "chat_message" | "agent_messages" | "agent_job_created" | "agent_job_updated" | "agent_job_progress" | "job_live_frame" | "agent_session_state" | "agent_roster" | "presence_join" | "presence_leave" | "presence_snapshot" | "presence_typing" | "message_deleted" | "message_edited" | "task_updated" | "artifact_updated" | "artifact_state" | "member_joined" | "member_removed" | "room_deleted" | "content_saved" | "content_uses_changed" | "app_changed" | "channel_updated";
+export const RoomEventKindValues: readonly RoomEventKind[] = ["chat_message", "agent_messages", "agent_job_created", "agent_job_updated", "agent_job_progress", "job_live_frame", "agent_session_state", "agent_roster", "presence_join", "presence_leave", "presence_snapshot", "presence_typing", "message_deleted", "message_edited", "task_updated", "artifact_updated", "artifact_state", "member_joined", "member_removed", "room_deleted", "content_saved", "content_uses_changed", "app_changed", "channel_updated"];
 export type EventSubscriptionSource = "bnbloc/platform" | "bnbloc/room" | "bnbloc/member" | "webhook";
 export const EventSubscriptionSourceValues: readonly EventSubscriptionSource[] = ["bnbloc/platform", "bnbloc/room", "bnbloc/member", "webhook"];
 export type PlatformEventType = "platform.deployed" | "component.published" | "desktop.published";

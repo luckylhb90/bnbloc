@@ -202,9 +202,14 @@ func (s *Service) Dispatch(ctx context.Context, roomID, caller string, in wire.D
 		Expert:      in.Expert,
 		Draft:       strings.TrimSpace(in.Draft),
 	})
+	refusal, refused := isPostRefusal(err)
 	switch {
-	case errors.Is(err, errAgentInPeopleChat):
-		return reply, refuse(http.StatusBadRequest, wire.DispatchPeopleChat, "agents cannot be addressed in the people chat")
+	case refused:
+		// The channel's setup refuses the requester's post (archived, admins
+		// only, rules not agreed, slow mode): the same code a person sees.
+		return reply, refuse(refusal.status, refusal.code, "%s", refusal.msg)
+	case errors.Is(err, errAgentsNotAdmitted):
+		return reply, refuse(http.StatusBadRequest, wire.DispatchAgentsNotAdmitted, "%s", errAgentsNotAdmitted.Error())
 	case errors.Is(err, errExpertNotAvailable):
 		return reply, refuse(http.StatusBadRequest, wire.DispatchExpertUnusable, "the expert does not exist or the requester may not use it here")
 	case errors.Is(err, errDraftNotAvailable):

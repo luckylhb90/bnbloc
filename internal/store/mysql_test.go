@@ -36,13 +36,13 @@ func TestBackendsRoundTrip(t *testing.T) {
 		if got, ok := must2(b.Channel.DefaultChannel(testCtx(), chanRoom))(t); !ok || got.ChannelID != def.ChannelID || !got.IsDefault {
 			t.Fatalf("default channel after transactional create = %+v,%v want %s default", got, ok, def.ChannelID)
 		}
-		if err := b.Channel.RenameChannel(testCtx(), chanRoom, def.ChannelID, "lobby"); err != nil {
-			t.Fatalf("RenameChannel: %v", err)
+		if err := b.Channel.UpdateChannel(testCtx(), chanRoom, def.ChannelID, ChannelPatch{Name: ptr("lobby")}); err != nil {
+			t.Fatalf("UpdateChannel: %v", err)
 		}
 		if err := b.Channel.DeleteChannel(testCtx(), chanRoom, def.ChannelID, now); err != nil {
 			t.Fatalf("DeleteChannel: %v", err)
 		}
-		if err := b.Channel.RenameChannel(testCtx(), chanRoom, def.ChannelID, "zombie"); err != ErrChannelNotFound {
+		if err := b.Channel.UpdateChannel(testCtx(), chanRoom, def.ChannelID, ChannelPatch{Name: ptr("zombie")}); err != ErrChannelNotFound {
 			t.Fatalf("rename of deleted channel = %v, want ErrChannelNotFound", err)
 		}
 

@@ -1811,6 +1811,54 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return createSchemaTable(ctx, db, "bridge_sends")
 		},
 	},
+	{
+		// A channel's setup, a room's rules and onboarding, sections and
+		// channel follows (docs/prd/2026-10-28-channels-and-threads.md,
+		// slice 1). Additive: nullable or defaulted columns and new tables
+		// the previous release never reads. A channel's owner is its
+		// creator by default (§2.1b): the existing channels get theirs once,
+		// when the column is added (a rerun after a dropped ledger never
+		// rewrites an owner set since).
+		id: "2026_10_channel_setup",
+		run: func(ctx context.Context, db sqlConn) error {
+			var hadOwner int
+			if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.columns
+    WHERE table_schema = DATABASE() AND table_name = 'room_channels' AND column_name = 'owner_id'`).Scan(&hadOwner); err != nil {
+				return fmt.Errorf("inspect column room_channels.owner_id: %w", err)
+			}
+			for _, c := range []struct{ table, column, ddl string }{
+				{"room_channels", "purpose", "VARCHAR(250) NOT NULL DEFAULT '' AFTER deleted_at_ms"},
+				{"room_channels", "rules", "TEXT NULL AFTER purpose"},
+				{"room_channels", "section_id", "VARCHAR(64) NOT NULL DEFAULT '' AFTER rules"},
+				{"room_channels", "position", "INT NOT NULL DEFAULT 0 AFTER section_id"},
+				{"room_channels", "owner_id", "VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '' AFTER position"},
+				{"room_channels", "archived_at_ms", "BIGINT NULL AFTER owner_id"},
+				{"room_channels", "settings_json", "JSON NULL AFTER archived_at_ms"},
+				{"rooms", "rules", "TEXT NULL AFTER quick_prompts_json"},
+				{"rooms", "rules_version", "INT NOT NULL DEFAULT 0 AFTER rules"},
+				{"rooms", "require_rules_agreement", "TINYINT(1) NOT NULL DEFAULT 0 AFTER rules_version"},
+				{"rooms", "recommended_channels_json", "JSON NULL AFTER require_rules_agreement"},
+				{"rooms", "channel_creation", "VARCHAR(16) NOT NULL DEFAULT 'anyone' AFTER recommended_channels_json"},
+				{"room_members", "rules_agreed_version", "INT NOT NULL DEFAULT 0 AFTER agent_host"},
+			} {
+				if err := addColumnIfMissing(ctx, db, c.table, c.column, c.ddl); err != nil {
+					return err
+				}
+			}
+			if hadOwner == 0 {
+				// cross-tenant: a one-time fill of every tenant's existing channels.
+				if _, err := db.ExecContext(ctx, `UPDATE room_channels SET owner_id = created_by WHERE owner_id = ''`); err != nil {
+					return err
+				}
+			}
+			for _, t := range []string{"room_sections", "channel_follows"} {
+				if err := createSchemaTable(ctx, db, t); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

@@ -12,10 +12,10 @@ import (
 
 // TestPeopleChatRuleOwned: whether an agent may read or write a channel is
 // decided by ChannelAdmitsAgents only. A service comparing a channel's kind
-// with ChannelKindPeople itself is a second copy (the handoff import and
-// activity's reply ingest had none).
+// with ChannelKindPeople itself, or reading a channel's NoAgents setting, is
+// a second copy (the handoff import and activity's reply ingest had none).
 func TestPeopleChatRuleOwned(t *testing.T) {
-	re := regexp.MustCompile(`[!=]=\s*store\.ChannelKindPeople|store\.ChannelKindPeople\s*[!=]=|\.IsPeople\(\)`)
+	re := regexp.MustCompile(`[!=]=\s*store\.ChannelKindPeople|store\.ChannelKindPeople\s*[!=]=|\.IsPeople\(\)|\.NoAgents\b`)
 	archtest.Scan(t, archtest.Opts{Lang: archtest.Go, Roots: []string{"services", "internal", "core"}}, func(rel string, src []byte) {
 		// The store, and the room service that creates, lists and
 		// protects channels (its listing never names the people chat,
@@ -29,27 +29,35 @@ func TestPeopleChatRuleOwned(t *testing.T) {
 	})
 }
 
-type kindReader map[string]string
+type admissionReader map[string]ChannelAdmission
 
-func (k kindReader) ChannelKind(_ context.Context, _, channelID string) (string, bool, error) {
+func (k admissionReader) ChannelAdmission(_ context.Context, _, channelID string) (ChannelAdmission, bool, error) {
 	if channelID == "broken" {
-		return "", false, errors.New("db down")
+		return ChannelAdmission{}, false, errors.New("db down")
 	}
-	kind, ok := k[channelID]
-	return kind, ok, nil
+	a, ok := k[channelID]
+	return a, ok, nil
 }
 
+// TestChannelAdmitsAgents: agents are refused the people chat and a channel
+// whose settings bar them (NoAgents), admitted everywhere else; a failed
+// read refuses with the error (fail closed).
 func TestChannelAdmitsAgents(t *testing.T) {
 	ctx := context.Background()
-	r := kindReader{"people": ChannelKindPeople, "general": ""}
+	r := admissionReader{
+		"people":  {Kind: ChannelKindPeople},
+		"general": {},
+		"quiet":   {NoAgents: true},
+	}
 	for _, c := range []struct {
-		reader  ChannelKindReader
+		reader  ChannelAdmissionReader
 		channel string
 		admits  bool
 		err     bool
 	}{
 		{r, "general", true, false},
 		{r, "people", false, false},
+		{r, "quiet", false, false},
 		{r, "", true, false},
 		{nil, "people", true, false},
 		{r, "broken", false, true},

@@ -86,6 +86,10 @@ type Channel struct {
 	Name string
 }
 
+// AgentChannelsQuery is the query of the room service's channel listing for
+// agents (services/room handleListChannels reads wire.ChannelListForAgents).
+const AgentChannelsQuery = wire.ChannelListForAgents + "=1"
+
 // AgentChannels lists the ids of the channels of a room an agent may read
 // (AgentChannelList).
 func AgentChannels(ctx context.Context, fetch Fetch, room string) (channels []string, ok bool) {
@@ -97,14 +101,17 @@ func AgentChannels(ctx context.Context, fetch Fetch, room string) (channels []st
 }
 
 // AgentChannelList lists the channels of a room an agent may read: the
-// room's channel listing (GET /v1/rooms/{id}/channels), which never lists
-// the people chat, the default channel first. A listing that fails or is
+// room's channel listing for agents (GET /v1/rooms/{id}/channels?agents=1),
+// which never lists the people chat nor a channel whose settings bar agents
+// (store.ChannelAdmitsAgents) and keeps archived channels, whose history
+// stays readable; the default channel first. A listing that fails or is
 // empty yields the default channel alone (the empty id, which realtime
-// resolves to the room's default channel — never the people chat), so a
-// degraded listing narrows the read instead of failing the turn; ok reports
-// whether the listing was read and named a channel.
+// resolves to the room's default channel — never the people chat, and the
+// default channel never bars agents), so a degraded listing narrows the read
+// instead of failing the turn; ok reports whether the listing was read and
+// named a channel.
 func AgentChannelList(ctx context.Context, fetch Fetch, room string) (channels []Channel, ok bool) {
-	raw, err := fetch(ctx, "/v1/rooms/"+url.PathEscape(room)+"/channels")
+	raw, err := fetch(ctx, "/v1/rooms/"+url.PathEscape(room)+"/channels?"+AgentChannelsQuery)
 	if err != nil {
 		slog.Debug("bnbloc roomlog channel listing failed; reading the default channel",
 			"event", "bnbloc.roomlog.channels_failed", "room", room, "error", err)

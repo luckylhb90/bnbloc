@@ -182,12 +182,12 @@ func (s *Service) importRow(r *http.Request, roomID string, batch wire.RoomImpor
 		return store.RoomMessage{}, err
 	}
 	if m.Kind == wire.KindAgentMessages {
-		people, err := s.isPeopleChannel(r.Context(), roomID, channelID)
+		barred, err := s.agentsBarred(r.Context(), roomID, channelID)
 		if err != nil {
 			return store.RoomMessage{}, fmt.Errorf("%w: %v", errChannelLookup, err)
 		}
-		if people {
-			return store.RoomMessage{}, errAgentInPeopleChat
+		if barred {
+			return store.RoomMessage{}, errAgentsNotAdmitted
 		}
 	}
 	marker, err := json.Marshal(wire.ImportedMarker{

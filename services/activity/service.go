@@ -44,10 +44,11 @@ type Service struct {
 	Team  store.TeamAgentReader
 	Usage store.AgentUsageReader
 	Rooms store.RoomStore
-	// Channels reads a channel's kind, so an agent reply into the people
-	// chat is refused before it is stored (store.ChannelAdmitsAgents). nil
-	// (in-memory dev) admits every channel.
-	Channels store.ChannelKindReader
+	// Channels reads a channel's admission, so an agent reply into the
+	// people chat or a channel that bars agents is refused before it is
+	// stored (store.ChannelAdmitsAgents). nil (in-memory dev) admits every
+	// channel.
+	Channels store.ChannelAdmissionReader
 	// Runs backs the agent run records (R10); nil answers 501. Feed lets the
 	// run detail resolve the first reply's room sequence (nil = omitted).
 	Runs store.AgentRunReader
@@ -174,9 +175,10 @@ func (s *Service) handleMessages(w http.ResponseWriter, r *http.Request) {
 		}
 		p["ownerUserId"] = owner
 	}
-	// The people chat is human-only. Refuse before storing: a reply stored
-	// (and its cursor advanced) that realtime then refuses to publish would
-	// vanish without an error.
+	// Agents are not admitted in the people chat or a channel whose
+	// settings bar them. Refuse before storing: a reply stored (and its
+	// cursor advanced) that realtime then refuses to publish would vanish
+	// without an error.
 	admits, err := store.ChannelAdmitsAgents(r.Context(), s.Channels, roomID, in.ChannelID)
 	if err != nil {
 		obs.ServerError(w, "channel lookup failed", err)
@@ -184,7 +186,7 @@ func (s *Service) handleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !admits {
-		httpx.Error(w, "the people chat is for people only", http.StatusBadRequest)
+		httpx.WriteJSON(w, http.StatusBadRequest, httpx.ErrorBody{Error: "agents are not admitted in this channel", Code: wire.AgentsNotAdmitted})
 		return
 	}
 	fresh, next, err := s.Store.AppendMessages(r.Context(), roomID, in)

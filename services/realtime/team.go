@@ -206,12 +206,12 @@ func (s *Service) searchChannelKind(ctx context.Context, memo map[string]string,
 	if k, ok := memo[key]; ok {
 		return k
 	}
-	kind, _, err := s.Channels.ChannelKind(ctx, roomID, channelID)
+	a, _, err := s.Channels.ChannelAdmission(ctx, roomID, channelID)
 	if err != nil {
 		log.Printf("realtime: search: channel kind room=%s channel=%s: %v", roomID, channelID, err)
 	}
-	memo[key] = kind
-	return kind
+	memo[key] = a.Kind
+	return a.Kind
 }
 
 // handleSearch is the global search: GET /v1/search?q=&rooms=&limit=&before=.

@@ -214,7 +214,7 @@ func TestDispatchGuards(t *testing.T) {
 		}, http.StatusForbidden, wire.DispatchRequesterGone},
 		{"people chat", "jack", func(f *dispatchFixture) wire.DispatchRequest {
 			return toBob(f.parent("job_people", func(j *store.AgentJob) { j.ChannelID = f.people }).JobID)
-		}, http.StatusBadRequest, wire.DispatchPeopleChat},
+		}, http.StatusBadRequest, wire.DispatchAgentsNotAdmitted},
 		{"no recipient", "jack", func(f *dispatchFixture) wire.DispatchRequest {
 			in := toBob(f.parent("job_norecipient").JobID)
 			in.Recipient = wire.DispatchRecipient{}

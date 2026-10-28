@@ -224,7 +224,48 @@ CREATE TABLE IF NOT EXISTS room_channels (
   created_by    VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
   created_at_ms BIGINT NOT NULL,
   deleted_at_ms BIGINT NULL,
+  purpose       VARCHAR(250) NOT NULL DEFAULT '',
+  rules         TEXT NULL,
+  section_id    VARCHAR(64) NOT NULL DEFAULT '',
+  position      INT NOT NULL DEFAULT 0,
+  owner_id      VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '',
+  archived_at_ms BIGINT NULL,
+  settings_json JSON NULL,
   KEY idx_channel_room (tenant_id, room_id, deleted_at_ms)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- A room's sections: named groups of its channels with their own owners and
+-- rules (docs/prd/2026-10-28-channels-and-threads.md §2.1a). Soft-deleted;
+-- deleting one moves its channels to the room's top level.
+CREATE TABLE IF NOT EXISTS room_sections (
+  section_id    VARCHAR(64) PRIMARY KEY,
+  tenant_id     VARCHAR(64) NOT NULL,
+  room_id       VARCHAR(64) NOT NULL,
+  name          VARCHAR(255) NOT NULL,
+  position      INT NOT NULL DEFAULT 0,
+  visibility    VARCHAR(16) NOT NULL DEFAULT 'open',
+  rules         TEXT NULL,
+  owners_json   JSON NULL,
+  join_policy   VARCHAR(16) NOT NULL DEFAULT 'open',
+  created_by    VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  created_at_ms BIGINT NOT NULL,
+  deleted_at_ms BIGINT NULL,
+  KEY idx_section_room (tenant_id, room_id, deleted_at_ms)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Who follows (joined) which channel (C18): a member's rail and their own
+-- marks, never access; last_posted_at_ms is what slow mode reads.
+CREATE TABLE IF NOT EXISTS channel_follows (
+  tenant_id     VARCHAR(64) NOT NULL,
+  room_id       VARCHAR(64) NOT NULL,
+  channel_id    VARCHAR(64) NOT NULL,
+  user_id       VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  joined_at_ms  BIGINT NOT NULL,
+  starred       TINYINT(1) NOT NULL DEFAULT 0,
+  hidden        TINYINT(1) NOT NULL DEFAULT 0,
+  last_posted_at_ms BIGINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (tenant_id, room_id, channel_id, user_id),
+  KEY idx_follow_user (tenant_id, room_id, user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS rooms (
@@ -240,6 +281,11 @@ CREATE TABLE IF NOT EXISTS rooms (
   deleted_at_ms  BIGINT NULL,
   welcome        TEXT NULL,
   quick_prompts_json MEDIUMTEXT NULL,
+  rules          TEXT NULL,
+  rules_version  INT NOT NULL DEFAULT 0,
+  require_rules_agreement TINYINT(1) NOT NULL DEFAULT 0,
+  recommended_channels_json JSON NULL,
+  channel_creation VARCHAR(16) NOT NULL DEFAULT 'anyone',
   PRIMARY KEY (room_id),
   KEY idx_rooms_active_created (tenant_id, deleted_at_ms, created_at_ms)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -251,6 +297,7 @@ CREATE TABLE IF NOT EXISTS room_members (
   role           ENUM('owner','admin','member','visitor') NOT NULL,
   joined_at_ms   BIGINT NOT NULL,
   agent_host     TINYINT(1) NOT NULL DEFAULT 0,
+  rules_agreed_version INT NOT NULL DEFAULT 0,
   PRIMARY KEY (room_id, user_id),
   KEY idx_member_user (tenant_id, user_id),
   KEY idx_member_user_host (user_id, agent_host)

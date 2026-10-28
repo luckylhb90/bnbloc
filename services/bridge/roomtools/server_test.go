@@ -341,8 +341,9 @@ func newAskFixture(settleAfter int) *askFixture {
 				run.Diagnostics = map[string]any{"sessionId": "sess-bob"}
 			}
 			return 200, run
-		case method == http.MethodGet && path == "/v1/rooms/room-1/channels":
-			// The listing never names the people chat (ch_people).
+		case method == http.MethodGet && path == "/v1/rooms/room-1/channels?agents=1":
+			// The agents' listing never names the people chat (ch_people)
+			// nor a channel that bars agents; the bridge asks for it.
 			return 200, map[string]any{"channels": []any{map[string]any{"channelId": "ch_general"}, map[string]any{"channelId": "ch_design"}}}
 		case method == http.MethodGet && strings.HasPrefix(path, "/v1/rooms/room-1/history") && !strings.Contains(path, "channelId=ch_general"):
 			return 200, map[string]any{"messages": []any{}}

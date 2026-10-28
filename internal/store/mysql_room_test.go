@@ -25,6 +25,8 @@ func TestMySQLDeleteRoomRemovesEveryRoomOwnedRow(t *testing.T) {
 	seeds := map[string]string{
 		"room_messages":               `INSERT INTO room_messages (tenant_id, room_id, channel_id, seq, kind, payload_json, created_at_ms) VALUES ('org-a', '{id}', 'ch', 1, 'chat_message', '{}', 1)`,
 		"room_read_state":             `INSERT INTO room_read_state (tenant_id, room_id, channel_id, user_id, last_read_seq, updated_at_ms) VALUES ('org-a', '{id}', 'ch', 'alice', 1, 1)`,
+		"room_sections":               `INSERT INTO room_sections (section_id, tenant_id, room_id, name, created_by, created_at_ms) VALUES ('sec-{id}', 'org-a', '{id}', 'Design', 'alice', 1)`,
+		"channel_follows":             `INSERT INTO channel_follows (tenant_id, room_id, channel_id, user_id, joined_at_ms) VALUES ('org-a', '{id}', 'ch', 'alice', 1)`,
 		"room_invites":                `INSERT INTO room_invites (code, tenant_id, room_id, role, expires_at_ms, capacity, created_by) VALUES ('inv-{id}', 'org-a', '{id}', 'member', 9, 1, 'alice')`,
 		"message_tasks":               `INSERT INTO message_tasks (tenant_id, room_id, seq, status, title, created_by, created_at_ms) VALUES ('org-a', '{id}', 1, 'open', 'the message text', 'alice', 1)`,
 		"agent_sessions":              `INSERT INTO agent_sessions (tenant_id, room_id, agent_session_id, message_version) VALUES ('org-a', '{id}', 's', 1)`,

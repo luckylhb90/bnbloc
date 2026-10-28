@@ -10,9 +10,9 @@ import (
 )
 
 // openPeopleChat opens (lazily creating) a room's people chat as user.
-func (e *handoffEnv) openPeopleChat(roomID, user string) channelView {
+func (e *handoffEnv) openPeopleChat(roomID, user string) wire.RoomChannel {
 	e.t.Helper()
-	var ch channelView
+	var ch wire.RoomChannel
 	if err := json.Unmarshal(e.must(e.roomSrv, http.MethodPost, "/v1/rooms/"+roomID+"/people-chat", user, nil), &ch); err != nil {
 		e.t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func TestPeopleChatLifecycle(t *testing.T) {
 		t.Fatalf("get before open = %d, want 404", code)
 	}
 	pc := e.openPeopleChat(roomID, "bob")
-	var got channelView
+	var got wire.RoomChannel
 	if err := json.Unmarshal(e.must(e.roomSrv, http.MethodGet, "/v1/rooms/"+roomID+"/people-chat", "alice", nil), &got); err != nil || got.ChannelID != pc.ChannelID {
 		t.Fatalf("get after open = %+v %v", got, err)
 	}

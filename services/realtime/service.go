@@ -60,9 +60,11 @@ func writeChannelErr(w http.ResponseWriter, err error) {
 	httpx.Error(w, "channel lookup failed", http.StatusInternalServerError)
 }
 
-// errAgentInPeopleChat rejects an agent recipient (or an agent reply) in the
-// room's people chat: it is a human-only conversation agents never see.
-var errAgentInPeopleChat = errors.New("agents cannot be addressed in the people chat")
+// errAgentsNotAdmitted rejects an agent recipient (or an agent reply) in a
+// channel agents are not admitted in (store.ChannelAdmitsAgents): the room's
+// people chat, or a channel whose settings bar them. Its code is
+// wire.AgentsNotAdmitted.
+var errAgentsNotAdmitted = errors.New("agents are not admitted in this channel")
 
 // Service holds the realtime handler dependencies.
 type Service struct {
@@ -217,9 +219,15 @@ type ChannelStore interface {
 	DefaultChannel(ctx context.Context, roomID string) (store.RoomChannel, bool, error)
 	// ListChannels returns the room's live channels, default first.
 	ListChannels(ctx context.Context, roomID string) ([]store.RoomChannel, error)
-	// ChannelKind reads a channel's kind, reporting read failures so the
-	// people-chat guards fail closed.
-	ChannelKind(ctx context.Context, roomID, channelID string) (kind string, found bool, err error)
+	// ChannelAdmission reads what decides agents' admission to a channel
+	// (store.ChannelAdmitsAgents), reporting read failures so the guards
+	// fail closed.
+	ChannelAdmission(ctx context.Context, roomID, channelID string) (store.ChannelAdmission, bool, error)
+	// ClaimChannelPost and FollowChannel record who follows a channel:
+	// posting joins it (and is where slow mode is enforced, channel_gate.go),
+	// being mentioned joins it (C18).
+	ClaimChannelPost(ctx context.Context, roomID, channelID, userID string, atMs, minGapMs int64) (retryAfterMs int64, err error)
+	FollowChannel(ctx context.Context, roomID, channelID, userID string, atMs int64, marks store.FollowMarks) error
 }
 
 // BridgeJobStore persists durable agent jobs created from agent-directed chat.
@@ -330,87 +338,102 @@ func (s *Service) Handler() http.Handler {
 // errUnknownChannel. With no channel store (in-memory dev) an explicit id
 // passes through unvalidated and an omitted one is the room-wide stream "".
 func (s *Service) resolveChannel(ctx context.Context, roomID, channelID string) (string, error) {
+	ch, err := s.channelOf(ctx, roomID, channelID)
+	return ch.ChannelID, err
+}
+
+// channelOf is resolveChannel with the channel's record (its setup: archive
+// mark, settings), which the post gate reads. With no channel store the
+// record carries the id alone.
+func (s *Service) channelOf(ctx context.Context, roomID, channelID string) (store.RoomChannel, error) {
 	if channelID = strings.TrimSpace(channelID); channelID != "" {
-		if s.Channels != nil {
-			_, ok, err := s.Channels.GetChannel(ctx, roomID, channelID)
-			if err != nil {
-				return "", fmt.Errorf("%w: %w", errChannelLookup, err)
-			}
-			if !ok {
-				return "", errUnknownChannel
-			}
+		if s.Channels == nil {
+			return store.RoomChannel{ChannelID: channelID, RoomID: roomID}, nil
 		}
-		return channelID, nil
+		ch, ok, err := s.Channels.GetChannel(ctx, roomID, channelID)
+		if err != nil {
+			return store.RoomChannel{}, fmt.Errorf("%w: %w", errChannelLookup, err)
+		}
+		if !ok {
+			return store.RoomChannel{}, errUnknownChannel
+		}
+		return ch, nil
 	}
 	if s.Channels == nil {
-		return "", nil
+		return store.RoomChannel{RoomID: roomID}, nil
 	}
 	def, ok, err := s.Channels.DefaultChannel(ctx, roomID)
 	if err != nil {
-		return "", fmt.Errorf("%w: %w", errChannelLookup, err)
+		return store.RoomChannel{}, fmt.Errorf("%w: %w", errChannelLookup, err)
 	}
 	if !ok {
-		return "", errUnknownChannel
+		return store.RoomChannel{}, errUnknownChannel
 	}
-	return def.ChannelID, nil
+	return def, nil
 }
 
-// isPeopleChannel reports whether channelID is the room's people chat
+// agentsBarred reports whether agents are not admitted in channelID: the
+// room's people chat, or a channel whose settings bar them
 // (store.ChannelAdmitsAgents, the one rule). A read failure is returned so
-// every guard built on it fails closed (a people-chat event is never
+// every guard built on it fails closed (such a channel's event is never
 // delivered to an agent stream or a plugin because a lookup blipped).
-func (s *Service) isPeopleChannel(ctx context.Context, roomID, channelID string) (bool, error) {
-	var kinds store.ChannelKindReader
+func (s *Service) agentsBarred(ctx context.Context, roomID, channelID string) (bool, error) {
+	var r store.ChannelAdmissionReader
 	if s.Channels != nil {
-		kinds = s.Channels
+		r = s.Channels
 	}
-	admits, err := store.ChannelAdmitsAgents(ctx, kinds, roomID, channelID)
+	admits, err := store.ChannelAdmitsAgents(ctx, r, roomID, channelID)
 	return !admits, err
 }
 
-// agentMayReadChannel refuses an agent-side reader (a platform agent host)
-// the people chat, failing closed on a lookup error. It writes the error and
-// returns false when the read must not proceed.
+// agentMayReadChannel refuses an agent-side reader (a platform agent host) a
+// channel agents are not admitted in, failing closed on a lookup error. It
+// writes the error and returns false when the read must not proceed.
 func (s *Service) agentMayReadChannel(w http.ResponseWriter, ctx context.Context, roomID, channelID string) bool {
-	people, err := s.isPeopleChannel(ctx, roomID, channelID)
+	barred, err := s.agentsBarred(ctx, roomID, channelID)
 	if err != nil {
 		obs.ServerError(w, "channel lookup failed", err)
 		httpx.Error(w, "channel lookup failed", http.StatusInternalServerError)
 		return false
 	}
-	if people {
-		httpx.Error(w, "the people chat is for people only", http.StatusForbidden)
+	if barred {
+		httpx.WriteJSON(w, http.StatusForbidden, httpx.ErrorBody{Error: errAgentsNotAdmitted.Error(), Code: wire.AgentsNotAdmitted})
 		return false
 	}
 	return true
 }
 
-// peopleFilter decides, per event, whether an all-channels subscriber that
-// did not opt into the people chat (the bridge: agent streams never pass
-// includePeople=1) must skip it. A channel's kind never changes, so verdicts
-// are memoized for the stream's lifetime; a failed lookup skips the event and
-// is retried on the next one.
-type peopleFilter struct {
+// agentFilter decides, per event, whether an all-channels subscriber that is
+// not a person reading every channel (the bridge: agent streams never pass
+// includePeople=1) must skip it: an event of a channel agents are not
+// admitted in. Verdicts are memoized per channel; a channel's settings can
+// change (NoAgents), so the memo is forgotten on every channel_updated event
+// (published after the change is stored). A failed lookup skips the event
+// and is retried on the next one (fail closed).
+type agentFilter struct {
 	svc     *Service
 	ctx     context.Context
 	roomID  string
-	verdict map[string]bool // channelID -> is people chat
+	verdict map[string]bool // channelID -> agents barred
 }
 
-func (f *peopleFilter) skip(ev wire.Event) bool {
+func (f *agentFilter) skip(ev wire.Event) bool {
+	if ev.Kind == wire.EventChannelUpdated {
+		clear(f.verdict)
+	}
 	if ev.ChannelID == "" {
 		return false
 	}
-	if people, ok := f.verdict[ev.ChannelID]; ok {
-		return people
+	if barred, ok := f.verdict[ev.ChannelID]; ok {
+		return barred
 	}
-	people, err := f.svc.isPeopleChannel(f.ctx, f.roomID, ev.ChannelID)
+	barred, err := f.svc.agentsBarred(f.ctx, f.roomID, ev.ChannelID)
 	if err != nil {
-		log.Printf("realtime: room=%s channel=%s kind lookup failed; withholding event: %v", f.roomID, ev.ChannelID, err)
+		log.Printf("realtime: room=%s channel=%s admission lookup failed; withholding event: %v", f.roomID, ev.ChannelID, err)
 		return true
 	}
-	f.verdict[ev.ChannelID] = people
-	return people
+	f.verdict[ev.ChannelID] = barred
+	return barred
 }
 
 // revocation reports whether ev ends access to its room: the room was
@@ -461,15 +484,16 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	// Channel scope: a channel-scoped subscriber receives one channel (omitted
 	// resolves to the room's default; the people-chat panel names the people
-	// chat explicitly). allChannels=1 receives every channel EXCEPT the people
-	// chat, unless the subscriber also opts in with includePeople=1 — the web
-	// room view does, the bridge never does, so a people-chat event can never
-	// reach an agent's stream. Room-wide events (empty ChannelID: presence,
-	// roster, agent state) always deliver.
+	// chat explicitly). allChannels=1 receives every channel EXCEPT those
+	// agents are not admitted in (the people chat, a channel whose settings
+	// bar agents), unless the subscriber is a person who opts in with
+	// includePeople=1 — the web room view does, the bridge never does, so
+	// such a channel's event can never reach an agent's stream. Room-wide
+	// events (empty ChannelID: presence, roster, agent state) always deliver.
 	allChannels := r.URL.Query().Get("allChannels") == "1"
-	var people *peopleFilter
+	var agents *agentFilter
 	if allChannels && (r.URL.Query().Get("includePeople") != "1" || !human) {
-		people = &peopleFilter{svc: s, ctx: r.Context(), roomID: roomID, verdict: map[string]bool{}}
+		agents = &agentFilter{svc: s, ctx: r.Context(), roomID: roomID, verdict: map[string]bool{}}
 	}
 	channelID := ""
 	if !allChannels {
@@ -546,8 +570,17 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 		if !allChannels && ev.ChannelID != "" && ev.ChannelID != channelID {
 			return false
 		}
-		if people != nil && people.skip(ev) {
+		if agents != nil && agents.skip(ev) {
 			return false
+		}
+		// A one-channel stream that is not a person's was admitted to its
+		// channel when it opened; a settings change can bar agents since:
+		// the stream ends (on a failed lookup too, fail closed), and the
+		// reader reopens into the refusal.
+		if ev.Kind == wire.EventChannelUpdated && !allChannels && !human {
+			if barred, err := s.agentsBarred(ctx, roomID, channelID); err != nil || barred {
+				return true
+			}
 		}
 		// A preview reads the feed and the deliverables, not the room's agent
 		// runs, tasks, live views or rosters (wire.PreviewedKind).
@@ -706,14 +739,19 @@ func (s *Service) handleChat(w http.ResponseWriter, r *http.Request) {
 func writeChatPostErr(w http.ResponseWriter, err error) {
 	var bad errBadAttachment
 	var offline errPlatformAgentOffline
+	refusal, refused := isPostRefusal(err)
 	switch {
 	case membership.IsRefusal(err):
 		httpx.Error(w, err.Error(), http.StatusForbidden)
+	case refused:
+		writePostRefusal(w, refusal)
 	case errors.As(err, &offline):
 		writePlatformAgentOffline(w, offline)
+	case errors.Is(err, errAgentsNotAdmitted):
+		httpx.WriteJSON(w, http.StatusBadRequest, httpx.ErrorBody{Error: err.Error(), Code: wire.AgentsNotAdmitted})
 	case errors.Is(err, errMessageTooLong):
 		httpx.Error(w, err.Error(), http.StatusRequestEntityTooLarge)
-	case errors.Is(err, errEmptyMessage), errors.Is(err, errRecipientWithoutOwner), errors.Is(err, errAgentInPeopleChat), errors.As(err, &bad), errors.As(err, new(errBadFileRef)),
+	case errors.Is(err, errEmptyMessage), errors.Is(err, errRecipientWithoutOwner), errors.As(err, &bad), errors.As(err, new(errBadFileRef)),
 		errors.Is(err, errExpertNotAvailable), errors.Is(err, errExpertWithoutAgent):
 		httpx.Error(w, err.Error(), http.StatusBadRequest)
 	case errors.Is(err, errUnknownChannel):
@@ -744,14 +782,14 @@ func (s *Service) handleInternalPublish(w http.ResponseWriter, r *http.Request) 
 		s.Membership.Forget(roomID, user)
 	}
 	if ev.Kind == wire.KindAgentMessages {
-		people, err := s.isPeopleChannel(r.Context(), roomID, ev.ChannelID)
+		barred, err := s.agentsBarred(r.Context(), roomID, ev.ChannelID)
 		if err != nil {
 			obs.ServerError(w, "channel lookup failed", err)
 			httpx.Error(w, "channel lookup failed", http.StatusInternalServerError)
 			return
 		}
-		if people {
-			httpx.Error(w, errAgentInPeopleChat.Error(), http.StatusBadRequest)
+		if barred {
+			httpx.WriteJSON(w, http.StatusBadRequest, httpx.ErrorBody{Error: errAgentsNotAdmitted.Error(), Code: wire.AgentsNotAdmitted})
 			return
 		}
 	}
@@ -798,14 +836,15 @@ func (s *Service) publish(ctx context.Context, ev wire.Event, d realtime.Durable
 
 // afterPublish is the post-publish tap: plugin hook delivery and the
 // notification observer. Both are best-effort and never block the publisher.
-// The people chat never reaches plugin hooks (a plugin is agent-side code);
-// its mentions still notify members.
+// A channel agents are not admitted in (the people chat, a channel that bars
+// them) never reaches plugin hooks (a plugin is agent-side code); its
+// mentions still notify members.
 func (s *Service) afterPublish(ctx context.Context, ev wire.Event) {
 	if s.PluginHooks != nil && s.PluginHooks.Hooked(ev.Kind) {
-		people, err := s.isPeopleChannel(ctx, ev.RoomID, ev.ChannelID)
+		barred, err := s.agentsBarred(ctx, ev.RoomID, ev.ChannelID)
 		if err != nil {
-			log.Printf("realtime: room=%s channel=%s kind lookup failed; skipping plugin hooks: %v", ev.RoomID, ev.ChannelID, err)
-		} else if !people {
+			log.Printf("realtime: room=%s channel=%s admission lookup failed; skipping plugin hooks: %v", ev.RoomID, ev.ChannelID, err)
+		} else if !barred {
 			s.PluginHooks.Deliver(ctx, s.Membership, ev)
 			// Members owned by other replicas hold their plugin streams
 			// there: hand the event to every peer for its own fan-out.
@@ -940,7 +979,7 @@ func (s *Service) handleRevisions(w http.ResponseWriter, r *http.Request) {
 		if !m.IsHuman() {
 			skip, seen := people[rev.ChannelID]
 			if !seen {
-				if skip, err = s.isPeopleChannel(r.Context(), roomID, rev.ChannelID); err != nil {
+				if skip, err = s.agentsBarred(r.Context(), roomID, rev.ChannelID); err != nil {
 					obs.ServerError(w, "channel lookup failed", err)
 					httpx.Error(w, "channel lookup failed", http.StatusInternalServerError)
 					return
@@ -963,7 +1002,7 @@ func (s *Service) handleRevisions(w http.ResponseWriter, r *http.Request) {
 		if !m.IsHuman() {
 			skip, seen := people[ch]
 			if !seen {
-				if skip, err = s.isPeopleChannel(r.Context(), roomID, ch); err != nil {
+				if skip, err = s.agentsBarred(r.Context(), roomID, ch); err != nil {
 					obs.ServerError(w, "channel lookup failed", err)
 					httpx.Error(w, "channel lookup failed", http.StatusInternalServerError)
 					return

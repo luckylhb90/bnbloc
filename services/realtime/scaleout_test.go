@@ -80,7 +80,7 @@ func newCluster(t *testing.T, n int) *cluster {
 		}
 		r.svc = &Service{
 			Hub: hub, Membership: c.members, Chat: c.chat, BridgeJobs: jobs, Dispatches: jobs,
-			Schedules: c.sched, RoomRoles: schedRoles{rooms: map[string]bool{}},
+			Schedules: c.sched, RoomRoles: schedRoles{anyRoom: true},
 			PluginHooks: fix.dispatcher, Peers: NewPeers(set),
 		}
 		r.srv.Config.Handler = svcauth.Middleware(scaleoutKey, r.svc.Handler())

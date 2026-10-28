@@ -48,6 +48,8 @@ var roomOwnedTables = []roomOwnedTable{
 	byTenantRoom("room_read_state"),
 	byTenantRoom("room_invites"),
 	byTenantRoom("room_channels"),
+	byTenantRoom("room_sections"),
+	byTenantRoom("channel_follows"),
 	// A task's title is a snapshot of the message text: it must not outlive
 	// the message.
 	byTenantRoom("message_tasks"),

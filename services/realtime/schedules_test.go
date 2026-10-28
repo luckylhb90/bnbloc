@@ -52,10 +52,13 @@ func (*schedMembers) Preview(string, string) (string, bool) { return "", false }
 type schedRoles struct {
 	roles map[string]store.Role
 	rooms map[string]bool
+	// anyRoom answers every room as live (a cluster test's rooms are named
+	// at run time).
+	anyRoom bool
 }
 
 func (r schedRoles) GetRoom(_ context.Context, roomID string) (store.Room, error) {
-	if !r.rooms[roomID] {
+	if !r.rooms[roomID] && !r.anyRoom {
 		return store.Room{}, store.ErrRoomNotFound
 	}
 	return store.Room{RoomID: roomID}, nil
@@ -64,6 +67,11 @@ func (r schedRoles) GetRoom(_ context.Context, roomID string) (store.Room, error
 func (r schedRoles) MemberRole(_ context.Context, roomID, userID string) (store.Role, bool, error) {
 	role, ok := r.roles[roomID+"\x00"+userID]
 	return role, ok, nil
+}
+
+func (r schedRoles) GetMember(_ context.Context, roomID, userID string) (store.Membership, bool, error) {
+	role, ok := r.roles[roomID+"\x00"+userID]
+	return store.Membership{RoomID: roomID, UserID: userID, Role: role}, ok, nil
 }
 
 func (r schedRoles) Members(_ context.Context, roomID string) ([]store.Membership, error) {

@@ -114,14 +114,17 @@ type ChatPosted struct {
 // (the original one for a clientMsgId already seen) and the queued job.
 // Errors: a membership refusal (membership.IsRefusal), errEmptyMessage,
 // errMessageTooLong, errBadAttachment, errUnknownChannel,
-// errRecipientWithoutOwner, errAgentInPeopleChat, errPlatformAgentOffline,
-// or a persistence failure.
+// errRecipientWithoutOwner, errAgentsNotAdmitted, errPlatformAgentOffline,
+// a postRefusal of the channel gate (channel_gate.go), or a persistence
+// failure.
 //
 // The author must be a member who may chat (membership.Member.MayChat), in
-// the tenant ctx is signed for: checked here, once, so no caller (a typed
-// message, a scheduled or dispatched post) can skip it.
+// the tenant ctx is signed for, and the channel's setup must admit the post
+// (admitPost): both checked here, once, so no caller (a typed message, a
+// scheduled or dispatched post) can skip them.
 func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) {
-	if _, err := membership.RoomScope(ctx, s.Membership, p.RoomID, p.Author, membership.Chat); err != nil {
+	author, err := membership.RoomScope(ctx, s.Membership, p.RoomID, p.Author, membership.Chat)
+	if err != nil {
 		return ChatPosted{}, err
 	}
 	if len(p.Text) > maxChatTextBytes {
@@ -150,10 +153,11 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) 
 			return ChatPosted{Sequence: seq}, nil
 		}
 	}
-	channelID, err := s.resolveChannel(ctx, p.RoomID, p.ChannelID)
+	channel, err := s.channelOf(ctx, p.RoomID, p.ChannelID)
 	if err != nil {
 		return ChatPosted{}, err
 	}
+	channelID := channel.ChannelID
 	if p.Recipient != nil {
 		// The recipient owner is stored and compared exactly downstream
 		// (job owner, bridge claim, borrow checks): subjects are
@@ -165,13 +169,14 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) 
 		return ChatPosted{}, errRecipientWithoutOwner
 	}
 	if agent {
-		// The people chat is human-only: no agent is ever driven from it.
-		people, err := s.isPeopleChannel(ctx, p.RoomID, channelID)
+		// No agent is ever driven from a channel agents are not admitted in
+		// (the people chat, a channel whose settings bar them).
+		barred, err := s.agentsBarred(ctx, p.RoomID, channelID)
 		if err != nil {
 			return ChatPosted{}, fmt.Errorf("channel lookup failed: %w", err)
 		}
-		if people {
-			return ChatPosted{}, errAgentInPeopleChat
+		if barred {
+			return ChatPosted{}, errAgentsNotAdmitted
 		}
 		// A platform agent whose host is offline is refused before anything
 		// is published or queued.
@@ -181,6 +186,11 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) 
 	}
 	expert, err := s.resolveChatExpert(ctx, p, agent)
 	if err != nil {
+		return ChatPosted{}, err
+	}
+	// The channel's setup decides last, right before the post is stored: its
+	// slow-mode claim records the post.
+	if err := s.admitPost(ctx, p.RoomID, p.Author, author, channel); err != nil {
 		return ChatPosted{}, err
 	}
 	payload := map[string]any{"userId": p.Author, "text": text}
@@ -252,6 +262,8 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) 
 	}
 	posted := ChatPosted{Sequence: ev.Sequence}
 	s.pulseMessageSent(ctx, p.RoomID, ev.Sequence, agent, p.Author)
+	// decision: channels PRD C18 (being mentioned joins the channel).
+	s.joinMentioned(ctx, p.RoomID, channelID, p.Author, text)
 	if agent && s.BridgeJobs != nil {
 		coreName := strings.TrimSpace(p.Recipient.Core)
 		var model, reasoningEffort string

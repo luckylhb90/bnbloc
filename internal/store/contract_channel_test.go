@@ -62,14 +62,14 @@ func TestContractChannelStoreCRUD(t *testing.T) {
 
 		// Rename: the same name twice succeeds; a miss is ErrChannelNotFound.
 		for i := 0; i < 2; i++ {
-			if err := s.RenameChannel(ctx, room, fe, "web"); err != nil {
+			if err := s.UpdateChannel(ctx, room, fe, ChannelPatch{Name: ptr("web")}); err != nil {
 				t.Fatalf("rename #%d: %v", i, err)
 			}
 		}
 		if got, _ := must2(s.GetChannel(ctx, room, fe))(t); got.Name != "web" {
 			t.Fatalf("renamed channel = %+v", got)
 		}
-		if err := s.RenameChannel(ctx, room, uniq("nope-"), "x"); !errors.Is(err, ErrChannelNotFound) {
+		if err := s.UpdateChannel(ctx, room, uniq("nope-"), ChannelPatch{Name: ptr("x")}); !errors.Is(err, ErrChannelNotFound) {
 			t.Fatalf("rename of an unknown channel = %v", err)
 		}
 
@@ -89,17 +89,17 @@ func TestContractChannelStoreCRUD(t *testing.T) {
 		if got := channelIDs(must(s.ListChannels(ctx, room))(t)); !slices.Equal(got, []string{def, ops, late}) {
 			t.Fatalf("ListChannels after delete = %v", got)
 		}
-		if err := s.RenameChannel(ctx, room, fe, "back"); !errors.Is(err, ErrChannelNotFound) {
+		if err := s.UpdateChannel(ctx, room, fe, ChannelPatch{Name: ptr("back")}); !errors.Is(err, ErrChannelNotFound) {
 			t.Fatalf("rename of a deleted channel = %v, want ErrChannelNotFound", err)
 		}
 		if _, ok := must2(s.GetChannel(ctx, room, fe))(t); ok {
 			t.Fatal("a failed rename resurrected the channel")
 		}
-		if kind, found, err := s.ChannelKind(ctx, room, fe); err != nil || !found || kind != ChannelKindStandard {
-			t.Fatalf("ChannelKind of a deleted channel = %q %v %v; want its kind", kind, found, err)
+		if a, found, err := s.ChannelAdmission(ctx, room, fe); err != nil || !found || a.Kind != ChannelKindStandard {
+			t.Fatalf("ChannelAdmission of a deleted channel = %+v %v %v; want its kind", a, found, err)
 		}
-		if _, found, err := s.ChannelKind(ctx, room, uniq("nope-")); err != nil || found {
-			t.Fatalf("ChannelKind of an unknown channel = %v %v", found, err)
+		if _, found, err := s.ChannelAdmission(ctx, room, uniq("nope-")); err != nil || found {
+			t.Fatalf("ChannelAdmission of an unknown channel = %v %v", found, err)
 		}
 		if _, ok := must2(s.DefaultChannel(ctx, room))(t); !ok {
 			t.Fatal("the default channel must survive a sibling's deletion")
@@ -127,14 +127,23 @@ func TestContractChannelStoreTenantIsolation(t *testing.T) {
 		if _, ok := must2(s.DefaultChannel(cb, room))(t); ok {
 			t.Fatal("tenant B sees tenant A's default channel")
 		}
-		if _, found, _ := s.ChannelKind(cb, room, id); found {
-			t.Fatal("tenant B reads tenant A's channel kind")
+		if _, found, _ := s.ChannelAdmission(cb, room, id); found {
+			t.Fatal("tenant B reads tenant A's channel admission")
 		}
 		if err := s.DeleteChannel(cb, room, id, 9); err != nil {
 			t.Fatal(err)
 		}
-		if err := s.RenameChannel(cb, room, id, "hijack"); !errors.Is(err, ErrChannelNotFound) {
+		if err := s.UpdateChannel(cb, room, id, ChannelPatch{Name: ptr("hijack")}); !errors.Is(err, ErrChannelNotFound) {
 			t.Fatalf("tenant B rename = %v, want ErrChannelNotFound", err)
+		}
+		if err := s.SetChannelArchived(cb, room, id, ptr(int64(5))); !errors.Is(err, ErrChannelNotFound) {
+			t.Fatalf("tenant B archive = %v, want ErrChannelNotFound", err)
+		}
+		if err := s.FollowChannel(cb, room, id, "jack", 5, FollowMarks{}); err != nil {
+			t.Fatal(err)
+		}
+		if got := must(s.ChannelFollowerCounts(ca, room))(t); got[id] != 0 {
+			t.Fatalf("tenant B's follow counts in tenant A: %v", got)
 		}
 		if got, ok := must2(s.GetChannel(ca, room, id))(t); !ok || got.Name != "general" {
 			t.Fatalf("tenant A's channel after tenant B's writes = %+v %v", got, ok)
@@ -212,8 +221,8 @@ func TestContractChannelStorePeopleChannel(t *testing.T) {
 		if ids := channelIDs(must(s.ListChannels(ctx, room))(t)); !slices.Equal(ids, []string{def, people}) {
 			t.Fatalf("ListChannels = %v, want the default then the people chat", ids)
 		}
-		if kind, found, err := s.ChannelKind(ctx, room, people); err != nil || !found || kind != ChannelKindPeople {
-			t.Fatalf("kind(people) = %q,%v,%v", kind, found, err)
+		if a, found, err := s.ChannelAdmission(ctx, room, people); err != nil || !found || a.Kind != ChannelKindPeople {
+			t.Fatalf("admission(people) = %+v,%v,%v", a, found, err)
 		}
 		// Another room, and the same room id in another tenant, get their own.
 		other, err := s.EnsurePeopleChannel(ctx, uniq("room-"), "maya", 1)

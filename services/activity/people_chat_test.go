@@ -14,14 +14,14 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
-type kindsByChannel map[string]string
+type kindsByChannel map[string]store.ChannelAdmission
 
-func (k kindsByChannel) ChannelKind(_ context.Context, _, channelID string) (string, bool, error) {
+func (k kindsByChannel) ChannelAdmission(_ context.Context, _, channelID string) (store.ChannelAdmission, bool, error) {
 	if channelID == "broken" {
-		return "", false, errors.New("db down")
+		return store.ChannelAdmission{}, false, errors.New("db down")
 	}
-	kind, ok := k[channelID]
-	return kind, ok, nil
+	a, ok := k[channelID]
+	return a, ok, nil
 }
 
 // An agent reply into the people chat is refused BEFORE it is stored: a
@@ -32,7 +32,7 @@ func TestAgentReplyRefusedInPeopleChatBeforeAppend(t *testing.T) {
 	mem.Add("room-1", "maya")
 	st := store.NewMemory()
 	svc := &Service{Store: st, Publisher: realtime.HubPublisher{Hub: realtime.NewHub(64, 16)}, Membership: mem,
-		Channels: kindsByChannel{"ch-people": store.ChannelKindPeople, "ch-general": ""}}
+		Channels: kindsByChannel{"ch-people": {Kind: store.ChannelKindPeople}, "ch-general": {}, "ch-quiet": {NoAgents: true}}}
 	srv := httptest.NewServer(svc.Handler())
 	t.Cleanup(srv.Close)
 	reply := func(channel string) int {
@@ -45,6 +45,10 @@ func TestAgentReplyRefusedInPeopleChatBeforeAppend(t *testing.T) {
 	}
 	if code := reply("ch-people"); code != http.StatusBadRequest {
 		t.Fatalf("people chat = %d, want 400", code)
+	}
+	// A channel whose settings bar agents refuses the reply the same way.
+	if code := reply("ch-quiet"); code != http.StatusBadRequest {
+		t.Fatalf("no-agents channel = %d, want 400", code)
 	}
 	if code := reply("broken"); code != http.StatusInternalServerError {
 		t.Fatalf("failed kind read = %d, want 500", code)

@@ -63,10 +63,12 @@ type AIRunner interface {
 // RoomRoleStore reads room existence and member roles (the shared room
 // store). Schedule moderation (owner/admin pause/delete), the scheduler's
 // "room deleted" diagnosis and an event trigger's drop notice (to the
-// room's owner) use it.
+// room's owner) use it, and the channel gate reads the room's rules and a
+// member's agreement to them (channel_gate.go).
 type RoomRoleStore interface {
 	GetRoom(ctx context.Context, roomID string) (store.Room, error)
 	MemberRole(ctx context.Context, roomID, userID string) (store.Role, bool, error)
+	GetMember(ctx context.Context, roomID, userID string) (store.Membership, bool, error)
 	Members(ctx context.Context, roomID string) ([]store.Membership, error)
 }
 
@@ -276,12 +278,12 @@ func (s *Service) checkScheduleSpec(ctx context.Context, sc *wire.RoomSchedule, 
 			return http.StatusNotFound, err
 		}
 		if sc.Recipient.Kind == wire.ScheduleRecipientAgent {
-			people, err := s.isPeopleChannel(ctx, sc.RoomID, sc.ChannelID)
+			barred, err := s.agentsBarred(ctx, sc.RoomID, sc.ChannelID)
 			if err != nil {
 				return http.StatusInternalServerError, err
 			}
-			if people {
-				return http.StatusBadRequest, errAgentInPeopleChat
+			if barred {
+				return http.StatusBadRequest, errAgentsNotAdmitted
 			}
 		}
 	}

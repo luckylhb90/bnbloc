@@ -120,6 +120,34 @@ type Room struct {
 	CreatedAtMs  int64
 	Welcome      string
 	QuickPrompts []wire.RoomQuickPrompt
+	// The room's rules and onboarding (docs/prd/2026-10-28-channels-and-
+	// threads.md §2.5a): the rules text, the version a change to it bumps,
+	// whether a member agrees to the current version before posting (C16,
+	// off by default), the channels a new member joins, and who creates
+	// channels (C15, wire.ChannelCreation*; "" reads as anyone).
+	Rules                 string
+	RulesVersion          int
+	RequireRulesAgreement bool
+	RecommendedChannels   []string
+	ChannelCreation       string
+}
+
+// ChannelCreationPolicy is the room's channel creation policy, its default
+// (C15: anyone) when unset.
+func (r Room) ChannelCreationPolicy() string {
+	if r.ChannelCreation == "" {
+		return wire.ChannelCreationAnyone
+	}
+	return r.ChannelCreation
+}
+
+// RulesAgreementDue reports whether m must agree to the room's current rules
+// before posting (C16): the room requires it, it has rules (a version), and
+// m agreed to an older version or none. A room that requires agreeing but
+// never had rules (version 0) asks nothing (decision: pending owner; there
+// is nothing to agree to).
+func (r Room) RulesAgreementDue(m Membership) bool {
+	return r.RequireRulesAgreement && r.RulesVersion > 0 && m.RulesAgreedVersion < r.RulesVersion
 }
 
 // RoomWithCount augments a Room with its current member count for plaza rows.
@@ -137,6 +165,12 @@ type RoomPatch struct {
 	SyncMode     *SyncMode
 	Welcome      *string
 	QuickPrompts *[]wire.RoomQuickPrompt
+	// Rules replaces the room's rules; a text that differs from the current
+	// one bumps RulesVersion (in the same write).
+	Rules                 *string
+	RequireRulesAgreement *bool
+	RecommendedChannels   *[]string
+	ChannelCreation       *string
 }
 
 // RoomMembershipDetail is a rich per-user room row for list differentiation.
@@ -163,6 +197,9 @@ type Membership struct {
 	// events, the people chat) refuses it. Any human membership of the same
 	// user replaces it.
 	AgentHost bool
+	// RulesAgreedVersion is the version of the room's rules the member last
+	// agreed to (0 = never; C16).
+	RulesAgreedVersion int
 }
 
 // Human reports a human membership (not an agent host's): the Go side of
@@ -284,7 +321,16 @@ type RoomStore interface {
 	RoomsForUserDetailed(ctx context.Context, userID string) ([]RoomMembershipDetail, error)
 	// MemberCount returns the number of human members in a room.
 	MemberCount(ctx context.Context, roomID string) (int, error)
+	// AgreeRoomRules records that userID, a human member, agreed to version
+	// of the room's rules. ErrRulesChanged when version is not the room's
+	// current one (nobody agrees to rules they did not read), ErrRoomNotFound
+	// when the room is not live here or userID is no human member of it.
+	AgreeRoomRules(ctx context.Context, roomID, userID string, version int) error
 }
+
+// ErrRulesChanged refuses an agreement to a version of a room's rules that is
+// not its current one.
+var ErrRulesChanged = errors.New("store: the room's rules changed")
 
 // Plaza (SearchRooms) page sizes: clampLimit(limit, DefaultSearchRoomsPage,
 // MaxSearchRoomsPage) on both backends.
@@ -305,6 +351,8 @@ type MemoryRoom struct {
 	invites  map[string]Invite
 	deleted  map[string]bool                   // roomID -> soft-deleted
 	channels map[string]map[string]RoomChannel // channelKey -> channelID -> channel
+	sections map[string]map[string]RoomSection // channelKey -> sectionID -> section
+	follows  map[string]ChannelFollow          // followKey -> follow
 	// cascade are the memory stores DeleteRoom clears (cascadeDeleteTo).
 	cascade []roomRowsOwner
 }
@@ -317,6 +365,8 @@ func NewMemoryRoom() *MemoryRoom {
 		invites:  map[string]Invite{},
 		deleted:  map[string]bool{},
 		channels: map[string]map[string]RoomChannel{},
+		sections: map[string]map[string]RoomSection{},
+		follows:  map[string]ChannelFollow{},
 	}
 }
 
@@ -349,6 +399,8 @@ func (s *MemoryRoom) CreateRoom(ctx context.Context, r Room) error {
 	}
 	r.TenantID = tid
 	r.QuickPrompts = slices.Clone(r.QuickPrompts)
+	r.RecommendedChannels = slices.Clone(r.RecommendedChannels)
+	r.ChannelCreation = r.ChannelCreationPolicy()
 	s.rooms[tkey(tid, r.RoomID)] = r
 	return nil
 }
@@ -425,6 +477,8 @@ func (s *MemoryRoom) createRoomWithOwnerLocked(tid string, r Room, owner Members
 	}
 	r.TenantID = tid
 	r.QuickPrompts = slices.Clone(r.QuickPrompts)
+	r.RecommendedChannels = slices.Clone(r.RecommendedChannels)
+	r.ChannelCreation = r.ChannelCreationPolicy()
 	rk := tkey(tid, r.RoomID)
 	s.rooms[rk] = r
 	owner.TenantID = tid
@@ -502,6 +556,7 @@ func (s *MemoryRoom) GetRoom(ctx context.Context, roomID string) (Room, error) {
 	}
 	r := s.rooms[rk]
 	r.QuickPrompts = slices.Clone(r.QuickPrompts)
+	r.RecommendedChannels = slices.Clone(r.RecommendedChannels)
 	return r, nil
 }
 
@@ -522,6 +577,7 @@ func (s *MemoryRoom) AddMember(ctx context.Context, m Membership) error {
 	}
 	if cur, ok := s.members[rk][m.UserID]; ok {
 		m.JoinedAtMs = cur.JoinedAtMs
+		m.RulesAgreedVersion = cur.RulesAgreedVersion
 	}
 	m.AgentHost = false
 	return s.addMemberLocked(tid, m)
@@ -860,7 +916,47 @@ func (s *MemoryRoom) UpdateRoom(ctx context.Context, roomID string, patch RoomPa
 	if patch.QuickPrompts != nil {
 		r.QuickPrompts = slices.Clone(*patch.QuickPrompts)
 	}
+	if patch.Rules != nil {
+		if *patch.Rules != r.Rules {
+			r.RulesVersion++
+		}
+		r.Rules = *patch.Rules
+	}
+	if patch.RequireRulesAgreement != nil {
+		r.RequireRulesAgreement = *patch.RequireRulesAgreement
+	}
+	if patch.RecommendedChannels != nil {
+		r.RecommendedChannels = slices.Clone(*patch.RecommendedChannels)
+	}
+	if patch.ChannelCreation != nil {
+		r.ChannelCreation = *patch.ChannelCreation
+	}
 	s.rooms[rk] = r
+	return nil
+}
+
+// AgreeRoomRules records a human member's agreement to the room's current
+// rules version.
+func (s *MemoryRoom) AgreeRoomRules(ctx context.Context, roomID, userID string, version int) error {
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rk, ok := s.liveRoomLocked(tid, roomID)
+	if !ok {
+		return ErrRoomNotFound
+	}
+	m, ok := s.members[rk][userID]
+	if !ok || !m.Human() {
+		return ErrRoomNotFound
+	}
+	if s.rooms[rk].RulesVersion != version {
+		return ErrRulesChanged
+	}
+	m.RulesAgreedVersion = version
+	s.members[rk][userID] = m
 	return nil
 }
 
@@ -882,6 +978,12 @@ func (s *MemoryRoom) DeleteRoom(ctx context.Context, roomID string) error {
 	s.deleted[rk] = true
 	delete(s.members, rk)
 	delete(s.channels, channelKey(tid, roomID))
+	delete(s.sections, channelKey(tid, roomID))
+	for k, f := range s.follows {
+		if f.TenantID == tid && f.RoomID == roomID {
+			delete(s.follows, k)
+		}
+	}
 	for k, inv := range s.invites {
 		if inv.TenantID == tid && inv.RoomID == roomID {
 			delete(s.invites, k)

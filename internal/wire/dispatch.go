@@ -78,18 +78,18 @@ type DispatchReply struct {
 // Dispatch refusal codes: the JSON body of a refused dispatch is
 // {"code": <code>, "error": <message>}.
 const (
-	DispatchParentNotFound   = "parent_not_found"
-	DispatchParentNotRunning = "parent_not_running"
-	DispatchNotParentBridge  = "not_parent_bridge"
-	DispatchRequesterGone    = "requester_not_member"
-	DispatchDepthExceeded    = "depth_exceeded"
-	DispatchFanOutExceeded   = "fan_out_exceeded"
-	DispatchSelf             = "self_dispatch"
-	DispatchCycle            = "dispatch_cycle"
-	DispatchPeopleChat       = "people_chat"
-	DispatchExpertUnusable   = "expert_not_available"
-	DispatchDraftUnavailable = "draft_not_available"
-	DispatchInvalid          = "invalid_dispatch"
+	DispatchParentNotFound    = "parent_not_found"
+	DispatchParentNotRunning  = "parent_not_running"
+	DispatchNotParentBridge   = "not_parent_bridge"
+	DispatchRequesterGone     = "requester_not_member"
+	DispatchDepthExceeded     = "depth_exceeded"
+	DispatchFanOutExceeded    = "fan_out_exceeded"
+	DispatchSelf              = "self_dispatch"
+	DispatchCycle             = "dispatch_cycle"
+	DispatchAgentsNotAdmitted = AgentsNotAdmitted
+	DispatchExpertUnusable    = "expert_not_available"
+	DispatchDraftUnavailable  = "draft_not_available"
+	DispatchInvalid           = "invalid_dispatch"
 )
 
 // AgentRunDispatch is a run's dispatch origin: the parent job and the hop

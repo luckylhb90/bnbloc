@@ -163,10 +163,10 @@ func (e *handoffEnv) history(roomID, user, channelID string) []wire.FeedMessage 
 	return page.Messages
 }
 
-func (e *handoffEnv) channels(roomID, user string) []channelView {
+func (e *handoffEnv) channels(roomID, user string) []wire.RoomChannel {
 	e.t.Helper()
 	var out struct {
-		Channels []channelView `json:"channels"`
+		Channels []wire.RoomChannel `json:"channels"`
 	}
 	_ = json.Unmarshal(e.must(e.roomSrv, http.MethodGet, "/v1/rooms/"+roomID+"/channels", user, nil), &out)
 	return out.Channels
@@ -202,7 +202,7 @@ func seedRoom(e *handoffEnv) (roomID string, deletedSeq int64) {
 	e.must(e.roomSrv, http.MethodPost, "/v1/rooms", "alice", map[string]any{"roomId": roomID, "name": "Launch plan", "description": "Q4 launch"})
 	e.must(e.roomSrv, http.MethodPost, "/v1/rooms/"+roomID+"/members", "alice", map[string]any{"userId": "bob", "role": "member"})
 	e.must(e.roomSrv, http.MethodPost, "/v1/rooms/"+roomID+"/members", "alice", map[string]any{"userId": "jack", "role": "admin"})
-	var side channelView
+	var side wire.RoomChannel
 	_ = json.Unmarshal(e.must(e.roomSrv, http.MethodPost, "/v1/rooms/"+roomID+"/channels", "bob", map[string]any{"name": "design"}), &side)
 
 	att := e.upload(roomID, "alice", "mock.png", "image/png", pngBytes)
