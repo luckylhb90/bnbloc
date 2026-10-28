@@ -185,7 +185,7 @@ func TestE2EConnections(t *testing.T) {
 	if claimed["httpbin.org"] == "" || claimed["postman-echo.com"] == "" {
 		t.Fatalf("hosts = %+v", hosts)
 	}
-	sess.SetEgressHosts(claimed)
+	sess.SetEgressHosts(claimed, nil)
 	env := srv.EgressEnv(token, "")
 	curl := func(args ...string) (int, string) {
 		t.Helper()
@@ -278,7 +278,7 @@ func e2eSandboxed(t *testing.T, gwc gatewayClient, claimed map[string]string, ep
 	defer srv.Close()
 	_, sess, _ := srv.Open(roomtools.Scope{RoomID: "room-1", Owner: "maya", TenantID: tenant.Default, Provider: "codex"})
 	sess.Bind(roomtools.Job{JobID: "job-1", RequesterUserID: "maya", ChannelID: "main", MessageSeq: 1})
-	sess.SetEgressHosts(claimed)
+	sess.SetEgressHosts(claimed, nil)
 	alias := strings.Repeat("e2ealias", 6)
 	if err := srv.AliasEgress(alias, sess); err != nil {
 		t.Fatal(err)
