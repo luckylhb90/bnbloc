@@ -74,7 +74,7 @@ func taskTitle(text string, seq int64) string {
 }
 
 func (s *Service) handleListTasks(w http.ResponseWriter, r *http.Request) {
-	roomID, _, _, ok := s.room(w, r, membership.AnyMember)
+	roomID, userID, m, ok := s.room(w, r, membership.AnyMember)
 	if !ok || !s.tasksReady(w) {
 		return
 	}
@@ -84,7 +84,16 @@ func (s *Service) handleListTasks(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, "task read failed", http.StatusInternalServerError)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"tasks": tasks})
+	// A task's title snapshots its message: only a reader of the message's
+	// channel sees it (store.MayReadChannel).
+	access := &channelAccess{svc: s, ctx: r.Context(), roomID: roomID, reader: readerOf(userID, m)}
+	shown := tasks[:0:0]
+	for _, t := range tasks {
+		if access.mayRead(t.ChannelID) {
+			shown = append(shown, t)
+		}
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"tasks": shown})
 }
 
 // handlePutTask marks a persisted message as a task or toggles its status
@@ -92,7 +101,7 @@ func (s *Service) handleListTasks(w http.ResponseWriter, r *http.Request) {
 // snapshots the message's title, author and channel; later puts change only
 // the status. The change is announced with a transient task_updated event.
 func (s *Service) handlePutTask(w http.ResponseWriter, r *http.Request) {
-	roomID, userID, _, ok := s.room(w, r, membership.AnyMember)
+	roomID, userID, m, ok := s.room(w, r, membership.AnyMember)
 	if !ok || !s.tasksReady(w) {
 		return
 	}
@@ -119,6 +128,11 @@ func (s *Service) handlePutTask(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, "task read failed", http.StatusInternalServerError)
 		return
 	}
+	access := &channelAccess{svc: s, ctx: ctx, roomID: roomID, reader: readerOf(userID, m)}
+	if found && !access.mayRead(task.ChannelID) {
+		httpx.Error(w, "message not found", http.StatusNotFound)
+		return
+	}
 	if !found {
 		msg, exists, err := s.Chat.GetRoomMessage(ctx, roomID, seq)
 		if err != nil {
@@ -126,7 +140,7 @@ func (s *Service) handlePutTask(w http.ResponseWriter, r *http.Request) {
 			httpx.Error(w, "message read failed", http.StatusInternalServerError)
 			return
 		}
-		if !exists {
+		if !exists || !access.mayRead(msg.ChannelID) {
 			httpx.Error(w, "message not found", http.StatusNotFound)
 			return
 		}
@@ -157,13 +171,24 @@ func (s *Service) handlePutTask(w http.ResponseWriter, r *http.Request) {
 
 // handleDeleteTask unmarks a message (any room member).
 func (s *Service) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
-	roomID, _, _, ok := s.room(w, r, membership.AnyMember)
+	roomID, userID, m, ok := s.room(w, r, membership.AnyMember)
 	if !ok || !s.tasksReady(w) {
 		return
 	}
 	seq := parseInt(r.PathValue("seq"))
 	if seq <= 0 {
 		httpx.Error(w, "invalid message", http.StatusBadRequest)
+		return
+	}
+	task, found, err := s.Tasks.GetMessageTask(r.Context(), roomID, seq)
+	if err != nil {
+		obs.ServerError(w, "task read failed", err)
+		httpx.Error(w, "task read failed", http.StatusInternalServerError)
+		return
+	}
+	access := &channelAccess{svc: s, ctx: r.Context(), roomID: roomID, reader: readerOf(userID, m)}
+	if found && !access.mayRead(task.ChannelID) {
+		httpx.Error(w, "message is not a task", http.StatusNotFound)
 		return
 	}
 	removed, err := s.Tasks.DeleteMessageTask(r.Context(), roomID, seq)
@@ -176,7 +201,7 @@ func (s *Service) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, "message is not a task", http.StatusNotFound)
 		return
 	}
-	s.publishTaskUpdated(r.Context(), roomID, "", wire.TaskUpdatedPayload{Seq: seq, Removed: true}, time.Now().UnixMilli())
+	s.publishTaskUpdated(r.Context(), roomID, task.ChannelID, wire.TaskUpdatedPayload{Seq: seq, Removed: true}, time.Now().UnixMilli())
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -274,7 +299,11 @@ func (s *Service) handleSearch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		kinds := map[string]string{} // room\x00channel -> channel kind
+		readers := s.searchReaders(ctx, userID, member)
 		for _, m := range msgs {
+			if !readers.mayRead(m.RoomID, m.ChannelID) {
+				continue
+			}
 			resp.Results = append(resp.Results, wire.SearchResult{
 				Kind:        wire.SearchMessage,
 				RoomID:      m.RoomID,
@@ -296,7 +325,11 @@ func (s *Service) handleSearch(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			log.Printf("realtime: search artifacts: %v", err)
 		}
+		readers := s.searchReaders(ctx, userID, member)
 		for _, a := range arts {
+			if !readers.mayRead(a.RoomID, a.ChannelID) {
+				continue
+			}
 			resp.Results = append(resp.Results, wire.SearchResult{
 				Kind:         wire.SearchArtifact,
 				RoomID:       a.RoomID,

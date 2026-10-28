@@ -253,6 +253,30 @@ CREATE TABLE IF NOT EXISTS room_sections (
   KEY idx_section_room (tenant_id, room_id, deleted_at_ms)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- Who belongs to a members-only section (C11-C14, C17): read access to its
+-- channels, never following. Open sections have no rows here.
+CREATE TABLE IF NOT EXISTS section_members (
+  tenant_id     VARCHAR(64) NOT NULL,
+  room_id       VARCHAR(64) NOT NULL,
+  section_id    VARCHAR(64) NOT NULL,
+  user_id       VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  added_by      VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  joined_at_ms  BIGINT NOT NULL,
+  PRIMARY KEY (tenant_id, room_id, section_id, user_id),
+  KEY idx_section_member_user (tenant_id, room_id, user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- A member's request to join an "ask" section (C17): its owners approve or
+-- decline; one open request per member and section.
+CREATE TABLE IF NOT EXISTS section_join_requests (
+  tenant_id       VARCHAR(64) NOT NULL,
+  room_id         VARCHAR(64) NOT NULL,
+  section_id      VARCHAR(64) NOT NULL,
+  user_id         VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  requested_at_ms BIGINT NOT NULL,
+  PRIMARY KEY (tenant_id, room_id, section_id, user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- Who follows (joined) which channel (C18): a member's rail and their own
 -- marks, never access; last_posted_at_ms is what slow mode reads.
 CREATE TABLE IF NOT EXISTS channel_follows (

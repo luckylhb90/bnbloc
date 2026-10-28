@@ -126,12 +126,7 @@ func (s *Service) shareArtifact(w http.ResponseWriter, r *http.Request) (store.A
 		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
 		return store.Artifact{}, false
 	}
-	art, err := s.Artifacts.GetArtifact(r.Context(), r.PathValue("artifactId"))
-	if err != nil || art.RoomID != roomID {
-		httpx.Error(w, "artifact not found", http.StatusNotFound)
-		return store.Artifact{}, false
-	}
-	return art, true
+	return s.roomArtifact(w, r, roomID, r.PathValue("artifactId"))
 }
 
 // handleCreateShare mints a link (wire.ShareCreateRequest: version 0 =

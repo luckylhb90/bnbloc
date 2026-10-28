@@ -425,7 +425,14 @@ func (s *Service) handleRoomAgentJobs(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, "list agent jobs failed", http.StatusInternalServerError)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, wire.AgentJobsReply{Jobs: store.AgentJobViews(jobs)})
+	readers := s.channelReaders(r)
+	shown := jobs[:0:0]
+	for _, j := range jobs {
+		if readers.mayRead(roomID, j.ChannelID) {
+			shown = append(shown, j)
+		}
+	}
+	httpx.WriteJSON(w, http.StatusOK, wire.AgentJobsReply{Jobs: store.AgentJobViews(shown)})
 }
 
 // handleMyAgents returns the CALLER's own bridge-advertised agents across all

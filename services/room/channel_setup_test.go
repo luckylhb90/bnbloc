@@ -244,7 +244,8 @@ func TestChannelListForAgents(t *testing.T) {
 func TestSectionsAndCreationPolicy(t *testing.T) {
 	e := newSetupEnv(t)
 	var sec wire.RoomSection
-	e.call(http.MethodPost, "/v1/rooms/room-1/sections", "carol", map[string]any{"name": "Design", "visibility": "members"}, http.StatusBadRequest, nil)
+	e.call(http.MethodPost, "/v1/rooms/room-1/sections", "carol", map[string]any{"name": "Design", "visibility": "secret"}, http.StatusBadRequest, nil)
+	e.call(http.MethodPost, "/v1/rooms/room-1/sections", "carol", map[string]any{"name": "Design", "joinPolicy": "ask"}, http.StatusBadRequest, nil)
 	e.call(http.MethodPost, "/v1/rooms/room-1/sections", "vic", map[string]any{"name": "Design"}, http.StatusForbidden, nil)
 	e.call(http.MethodPost, "/v1/rooms/room-1/sections", "carol", map[string]any{"name": "Design"}, http.StatusOK, &sec)
 	if sec.Visibility != wire.SectionOpen || len(sec.Owners) != 1 || sec.Owners[0] != "carol" {

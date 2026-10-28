@@ -10,12 +10,13 @@ import {
   FolderSimplePlusIcon,
   GearIcon,
   PencilSimpleIcon,
+  SignInIcon,
   SignOutIcon,
   StarIcon,
   TrashIcon,
 } from "@phosphor-icons/react";
 import type { Channel } from "@/lib/api";
-import { mayDeleteChannel, mayManageChannel, mayManageSection } from "@/lib/channelRules";
+import { mayDeleteChannel, mayManageChannel, mayManageSection, sectionJoin } from "@/lib/channelRules";
 import type { RoomMembership } from "@/lib/roomRoles";
 import type { ChannelGroup, RoomSection } from "@/lib/wire.gen";
 import { Menu, MenuGroup, MenuItem } from "@/ui/Menu";
@@ -45,6 +46,10 @@ export interface ChannelActions {
   readonly archive: (c: Channel, archived: boolean) => void;
   readonly remove: (c: Channel) => void;
   readonly editSection: (s: RoomSection) => void;
+  // A members-only section's membership (C17): join (at once, as a request,
+  // or as the room's admin, which its members are told) and leave.
+  readonly joinSection: (s: RoomSection) => void;
+  readonly leaveSection: (s: RoomSection) => void;
   // A channel's last action's outcome, said on its row until the next one
   // (a refusal in the server's words).
   readonly note: (channelId: string) => string;
@@ -159,7 +164,11 @@ export function ChannelMenu({
 // its deletion, for its owners and the room's owner and admins.
 export function SectionMenu({ section, actions }: { readonly section: RoomSection; readonly actions: ChannelActions }) {
   const me = actions.me;
-  if (!me || !mayManageSection(me, actions.subject, section)) return null;
+  if (!me) return null;
+  const manage = mayManageSection(me, actions.subject, section);
+  const join = sectionJoin(me, section);
+  const leave = section.visibility === "members" && section.joined && !(section.owners.length === 1 && section.owners[0] === actions.subject);
+  if (!manage && !join && !leave) return null;
   return (
     <Menu
       label={section.name}
@@ -170,9 +179,21 @@ export function SectionMenu({ section, actions }: { readonly section: RoomSectio
         </button>
       )}
     >
-      <MenuItem icon={GearIcon} onSelect={() => actions.editSection(section)}>
-        Section settings
-      </MenuItem>
+      {join && (
+        <MenuItem icon={SignInIcon} onSelect={() => actions.joinSection(section)}>
+          {join === "ask" ? "Ask to join" : "Join section"}
+        </MenuItem>
+      )}
+      {leave && (
+        <MenuItem icon={SignOutIcon} onSelect={() => actions.leaveSection(section)}>
+          Leave section
+        </MenuItem>
+      )}
+      {manage && (
+        <MenuItem icon={GearIcon} onSelect={() => actions.editSection(section)}>
+          {section.visibility === "members" ? "Settings and members" : "Section settings"}
+        </MenuItem>
+      )}
     </Menu>
   );
 }

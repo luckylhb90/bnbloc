@@ -26,6 +26,13 @@ const DefaultQueueSize = 512
 type Observer struct {
 	Emitter    *Emitter
 	Membership membership.Reader
+	// MayRead says whether a member may read a channel of a room
+	// (store.MayReadChannel, which realtime owns): a mention notifies only
+	// a reader of its channel (C11: a members-only section's message never
+	// reaches anyone else through a notification). Nil reads every channel
+	// (a deployment without channels). It is called on the Run goroutine,
+	// in the event's tenant.
+	MayRead func(ctx context.Context, roomID, channelID, userID string) bool
 
 	queue   chan observation
 	dropped atomic.Int64
@@ -186,6 +193,16 @@ func (o *Observer) events(obs observation) []Event {
 	return nil
 }
 
+// mayRead asks MayRead (nil: every channel) in the observation's tenant.
+func (o *Observer) mayRead(obs observation, userID string) bool {
+	if o.MayRead == nil || obs.channelID == "" {
+		return true
+	}
+	ctx, cancel := context.WithTimeout(tenant.NewContext(context.Background(), obs.tenantID), 5*time.Second)
+	defer cancel()
+	return o.MayRead(ctx, obs.roomID, obs.channelID, userID)
+}
+
 // mentionEvents notifies the room members a human message @-mentions. A
 // candidate counts only when it names a member of the room; the author is
 // never notified about their own message.
@@ -198,7 +215,7 @@ func (o *Observer) mentionEvents(obs observation) []Event {
 		if c == obs.author {
 			continue
 		}
-		if membership.HumanMember(o.Membership, obs.roomID, c) {
+		if membership.HumanMember(o.Membership, obs.roomID, c) && o.mayRead(obs, c) {
 			recipients = append(recipients, c)
 		}
 	}

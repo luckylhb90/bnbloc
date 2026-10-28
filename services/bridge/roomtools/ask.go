@@ -264,7 +264,7 @@ func replyText(ctx context.Context, env *Env, run wire.AgentRun) string {
 	}
 	sessionID, _ := run.Diagnostics["sessionId"].(string)
 	entries, _, err := roomlog.History(ctx, gatewayFetch(env), env.Session.Scope().RoomID, roomlog.HistoryQuery{
-		Only: run.ChannelID, After: start - 1,
+		Only: run.ChannelID, After: start - 1, Job: env.Session.current().JobID,
 		PageRows: replyHistoryPage, Pages: replyHistoryPages, MaxRows: replyHistoryPage * replyHistoryPages,
 	})
 	if err != nil {

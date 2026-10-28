@@ -64,13 +64,14 @@ func readRoom(ctx context.Context, env *Env, args json.RawMessage) Result {
 	// A channel is a context boundary: the agent reads the conversation it
 	// is answering in (the others' records are in .room/channels/).
 	room := env.Session.Scope().RoomID
-	list, listed := roomlog.AgentChannelList(ctx, gatewayFetch(env), room)
+	job := env.Session.current().JobID
+	list, listed := roomlog.AgentChannelList(ctx, gatewayFetch(env), room, job)
 	own, ok := roomlog.ChannelOf(list, env.Session.current().ChannelID)
 	if listed && !ok {
 		return toolError("the conversation you are answering in is not one you may read")
 	}
 	entries, _, err := roomlog.History(ctx, gatewayFetch(env), room, roomlog.HistoryQuery{
-		Only: own.ID, After: in.Since, PageRows: pageRows, Pages: pages, MaxRows: readHistoryPages * readHistoryPageMax,
+		Only: own.ID, After: in.Since, PageRows: pageRows, Pages: pages, MaxRows: readHistoryPages * readHistoryPageMax, Job: job,
 	})
 	if err != nil {
 		return refusal("reading the room", err)

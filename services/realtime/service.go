@@ -228,6 +228,11 @@ type ChannelStore interface {
 	// being mentioned joins it (C18).
 	ClaimChannelPost(ctx context.Context, roomID, channelID, userID string, atMs, minGapMs int64) (retryAfterMs int64, err error)
 	FollowChannel(ctx context.Context, roomID, channelID, userID string, atMs int64, marks store.FollowMarks) error
+	// ListSections and MemberSections are what store.LoadChannelAccess
+	// reads: who may read which channel (store.MayReadChannel,
+	// channel_access.go).
+	ListSections(ctx context.Context, roomID string) ([]store.RoomSection, error)
+	MemberSections(ctx context.Context, roomID, userID string) ([]string, error)
 }
 
 // BridgeJobStore persists durable agent jobs created from agent-directed chat.
@@ -250,6 +255,13 @@ func (s *Service) Handler() http.Handler {
 	}
 	if s.PluginHooks == nil {
 		s.PluginHooks = NewPluginHookDispatcher(nil, nil, nil)
+	}
+	if s.PluginHooks.mayRead == nil {
+		s.PluginHooks.mayRead = s.memberMayReadChannel
+	}
+	// A mention notifies only a reader of its channel (store.MayReadChannel).
+	if s.Notifications != nil && s.Notifications.Observer != nil && s.Notifications.Observer.MayRead == nil {
+		s.Notifications.Observer.MayRead = s.memberMayReadChannel
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/rooms/{roomId}/events", s.handleEvents)
@@ -499,6 +511,14 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 	if allChannels && (r.URL.Query().Get("includePeople") != "1" || !human) {
 		agents = &agentFilter{svc: s, ctx: r.Context(), roomID: roomID, verdict: map[string]bool{}}
 	}
+	// Members-only sections (store.MayReadChannel): the stream delivers a
+	// channel's events only to a reader of the channel, re-checked when a
+	// channel or a section's membership changes (the event that changes
+	// it is delivered first, then the next event of the section is not).
+	readers, ok := s.newReaderFilter(w, r, roomID, userID, m)
+	if !ok {
+		return
+	}
 	channelID := ""
 	if !allChannels {
 		var err error
@@ -507,6 +527,10 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !human && !s.agentMayReadChannel(w, r.Context(), roomID, channelID) {
+			return
+		}
+		if !readers.mayRead(channelID) {
+			httpx.Error(w, errUnknownChannel.Error(), http.StatusNotFound)
 			return
 		}
 	}
@@ -571,11 +595,18 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 	// ended (member removed / room deleted): the client has been told why, so
 	// the stream closes rather than running until it reconnects.
 	write := func(ev wire.Event) (revoked bool) {
-		if !allChannels && ev.ChannelID != "" && ev.ChannelID != channelID {
+		readers.observe(ev)
+		if !allChannels && ev.ChannelID != "" && ev.ChannelID != channelID && !wire.CrossChannelKind(ev.Kind) {
 			return false
 		}
 		if agents != nil && agents.skip(ev) {
 			return false
+		}
+		if ev.ChannelID != "" && !readers.mayRead(ev.ChannelID) {
+			// A one-channel stream whose channel the reader no longer
+			// reads (they left its section, or it moved into one) ends:
+			// its reader reopens into the refusal.
+			return !allChannels && ev.ChannelID == channelID
 		}
 		// A one-channel stream that is not a person's was admitted to its
 		// channel when it opened; a settings change can bar agents since:
@@ -907,11 +938,11 @@ func (s *Service) durable(ctx context.Context, ev wire.Event, author, clientMsgI
 // to the room's default channel when omitted.
 // Rows are wire.FeedMessage, the internal feed read's row (writeFeedPage).
 func (s *Service) handleHistory(w http.ResponseWriter, r *http.Request) {
-	roomID, _, m, ok := s.room(w, r, membership.Read)
+	roomID, userID, m, ok := s.room(w, r, membership.Read)
 	if !ok {
 		return
 	}
-	s.writeHistory(w, r, roomID, m.IsHuman())
+	s.writeHistory(w, r, roomID, m.IsHuman(), readerOf(userID, m))
 }
 
 // handleInternalHistory is the history page for the gateway's consented
@@ -925,13 +956,14 @@ func (s *Service) handleInternalHistory(w http.ResponseWriter, r *http.Request) 
 		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	s.writeHistory(w, r, roomID, false)
+	// The consented reader is no member: it reads no members-only section.
+	s.writeHistory(w, r, roomID, false, store.Reader{Agent: true})
 }
 
 // writeHistory is the one history read: the page of roomID's channel the
 // query names, for a person (human) or a reader the people chat is closed
 // to (an agent, a consented read).
-func (s *Service) writeHistory(w http.ResponseWriter, r *http.Request, roomID string, human bool) {
+func (s *Service) writeHistory(w http.ResponseWriter, r *http.Request, roomID string, human bool, reader store.Reader) {
 	if s.Chat == nil {
 		writeFeedPage(w, nil)
 		return
@@ -949,6 +981,11 @@ func (s *Service) writeHistory(w http.ResponseWriter, r *http.Request, roomID st
 	if !human && !s.agentMayReadChannel(w, r.Context(), roomID, channelID) {
 		return
 	}
+	access := &channelAccess{svc: s, ctx: r.Context(), roomID: roomID, reader: reader}
+	if !access.mayRead(channelID) {
+		httpx.Error(w, errUnknownChannel.Error(), http.StatusNotFound)
+		return
+	}
 	msgs, err := s.Chat.RoomHistory(r.Context(), roomID, channelID, before, limit)
 	if err != nil {
 		obs.ServerError(w, "history read failed", err)
@@ -962,7 +999,7 @@ func (s *Service) writeHistory(w http.ResponseWriter, r *http.Request, roomID st
 // ?after= (ms), oldest first (wire.RevisionsPage); an agent's listing omits
 // the people chat's. The bridge rewrites its agents' records with it.
 func (s *Service) handleRevisions(w http.ResponseWriter, r *http.Request) {
-	roomID, _, m, ok := s.room(w, r, membership.AnyMember)
+	roomID, userID, m, ok := s.room(w, r, membership.AnyMember)
 	if !ok {
 		return
 	}
@@ -978,8 +1015,12 @@ func (s *Service) handleRevisions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page.LatestMs = latest
+	access := &channelAccess{svc: s, ctx: r.Context(), roomID: roomID, reader: readerOf(userID, m)}
 	people := map[string]bool{}
 	for _, rev := range revs {
+		if !access.mayRead(rev.ChannelID) {
+			continue
+		}
 		if !m.IsHuman() {
 			skip, seen := people[rev.ChannelID]
 			if !seen {
@@ -1003,6 +1044,9 @@ func (s *Service) handleRevisions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for ch, seq := range retained {
+		if !access.mayRead(ch) {
+			continue
+		}
 		if !m.IsHuman() {
 			skip, seen := people[ch]
 			if !seen {
@@ -1071,7 +1115,7 @@ func (s *Service) handleMarkRead(w http.ResponseWriter, r *http.Request) {
 // author check is enforced in the store; a non-author (or missing) message
 // yields 403 and nothing is broadcast. Deletion is excluded from history.
 func (s *Service) handleDeleteMessage(w http.ResponseWriter, r *http.Request) {
-	roomID, userID, _, ok := s.room(w, r, membership.AnyMember)
+	roomID, userID, m, ok := s.room(w, r, membership.AnyMember)
 	if !ok {
 		return
 	}
@@ -1086,6 +1130,12 @@ func (s *Service) handleDeleteMessage(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		obs.ServerError(w, "delete failed", err)
 		httpx.Error(w, "delete failed", http.StatusInternalServerError)
+		return
+	}
+	// A message of a channel the caller may not read does not exist for
+	// them (store.MayReadChannel, C11).
+	if channelID != "" && !s.memberMayRead(r.Context(), roomID, userID, m, channelID) {
+		httpx.Error(w, "message not found", http.StatusNotFound)
 		return
 	}
 	deleted, err := s.Chat.DeleteRoomMessage(r.Context(), roomID, seq, userID, time.Now().UnixMilli())
@@ -1117,7 +1167,7 @@ func (s *Service) handleDeleteMessage(w http.ResponseWriter, r *http.Request) {
 // author check and delete guard are enforced in the store; a non-author,
 // missing, or deleted message yields 403 and nothing is broadcast.
 func (s *Service) handleEditMessage(w http.ResponseWriter, r *http.Request) {
-	roomID, userID, _, ok := s.room(w, r, membership.AnyMember)
+	roomID, userID, m, ok := s.room(w, r, membership.AnyMember)
 	if !ok {
 		return
 	}
@@ -1147,6 +1197,12 @@ func (s *Service) handleEditMessage(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		obs.ServerError(w, "edit failed", err)
 		httpx.Error(w, "edit failed", http.StatusInternalServerError)
+		return
+	}
+	// A message of a channel the caller may not read does not exist for
+	// them (store.MayReadChannel, C11).
+	if channelID != "" && !s.memberMayRead(r.Context(), roomID, userID, m, channelID) {
+		httpx.Error(w, "message not found", http.StatusNotFound)
 		return
 	}
 	now := time.Now().UnixMilli()
@@ -1229,7 +1285,11 @@ func (s *Service) handleUnread(w http.ResponseWriter, r *http.Request) {
 					log.Printf("realtime: unread room=%s user=%s: channels: %v", roomID, userID, err)
 					continue
 				}
+				access := &channelAccess{svc: s, ctx: ctx, roomID: roomID, reader: readerOf(userID, m)}
 				for _, ch := range channels {
+					if !access.mayRead(ch.ChannelID) {
+						continue
+					}
 					n, err := s.Chat.UnreadCount(ctx, roomID, ch.ChannelID, userID)
 					if err != nil || n == 0 {
 						continue

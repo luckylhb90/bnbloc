@@ -23,6 +23,9 @@ import (
 // per-channel history, artifacts, and the activity ingest endpoints the drive
 // path posts to.
 type pullGateway struct {
+	// unlisted is a channel the listing leaves out (the reader may no
+	// longer read it).
+	unlisted  string
 	mu        sync.Mutex
 	history   map[string]string // channel -> rows json (pre-rendered pages)
 	artifacts string
@@ -79,6 +82,13 @@ func newPullGateway(t *testing.T) *pullGateway {
 		attachments: map[string]testAttachment{}, downloads: map[string]int{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/rooms/r1/channels", func(w http.ResponseWriter, r *http.Request) {
+		g.mu.Lock()
+		hidden := g.unlisted
+		g.mu.Unlock()
+		if hidden == "test" {
+			fmt.Fprint(w, `{"channels":[{"channelId":"general","name":"general"}]}`)
+			return
+		}
 		fmt.Fprint(w, `{"channels":[{"channelId":"general","name":"general"},{"channelId":"test","name":"test"}]}`)
 	})
 	mux.HandleFunc("GET /v1/rooms/r1/history", func(w http.ResponseWriter, r *http.Request) {
@@ -637,6 +647,32 @@ func TestMaterializeKeepsEveryChannelApart(t *testing.T) {
 	if gen2.EndSeq != 14 || len(gen2.Chunks) != len(gen.Chunks)+1 || st2.Channels["test"].EndSeq != 13 || !strings.Contains(fileOf(".room/channels/general/recent.md"), "my next reply") {
 		t.Fatalf("continued pass: state %+v after %+v", st2, st)
 	}
+
+	// The reader loses a channel (a members-only section the requester is
+	// not in, channels PRD §2.1a "Leaving"): its files are blanked, nothing
+	// of it stays in the workspace, and it leaves the state and INDEX.
+	g.mu.Lock()
+	g.unlisted = "test"
+	g.mu.Unlock()
+	testChunks := st2.Channels["test"].Chunks
+	st3, _, _, err := b.materializeRoomContext(context.Background(), w, ep, "r1", "ws", "job-z", "general", 0, 0, "", self, st2, roomlog.Guidance{HasRoomFiles: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, kept := st3.Channels["test"]; kept {
+		t.Fatalf("a channel the reader lost stays in the state: %+v", st3.Channels)
+	}
+	if got := fileOf(".room/channels/test/recent.md"); got != "" {
+		t.Fatalf("the lost channel's recent.md still holds:\n%s", got)
+	}
+	for _, name := range testChunks {
+		if got := fileOf(name); got != "" {
+			t.Fatalf("the lost channel's chunk %s still holds:\n%s", name, got)
+		}
+	}
+	if idx := fileOf(".room/INDEX.md"); strings.Contains(idx, "#test") {
+		t.Fatalf("INDEX.md still lists the lost channel:\n%s", idx)
+	}
 }
 
 // driveTextDelta is the push model: same semantics as pull, inline delivery.
@@ -656,7 +692,7 @@ func TestDriveTextDeltaFreshWindow(t *testing.T) {
 	b := New(Config{GatewayBaseURL: g.srv.URL, GatewayToken: "t", OwnerSubject: "maya"})
 
 	st := roomlog.CtxState{}
-	prompt := b.driveTextDelta(context.Background(), "r1", "maya", "agent-a", 12, "", roomlog.Now{From: "maya", Text: "do the thing"}, &st, true)
+	prompt := b.driveTextDelta(context.Background(), "r1", "maya", "agent-a", "", 12, "", roomlog.Now{From: "maya", Text: "do the thing"}, &st, true)
 
 	if !strings.Contains(prompt, "person asks") {
 		t.Fatalf("the channel's earlier message must inject:\n%s", prompt)
@@ -688,7 +724,7 @@ func TestDriveTextDeltaFollowUpOnlyDelta(t *testing.T) {
 	b := New(Config{GatewayBaseURL: g.srv.URL, GatewayToken: "t", OwnerSubject: "maya"})
 
 	st := roomlog.CtxState{}
-	_ = b.driveTextDelta(context.Background(), "r1", "maya", "agent-a", 12, "", roomlog.Now{From: "maya", Text: "do the thing"}, &st, true)
+	_ = b.driveTextDelta(context.Background(), "r1", "maya", "agent-a", "", 12, "", roomlog.Now{From: "maya", Text: "do the thing"}, &st, true)
 
 	// New activity since the last push: a person question, a peer reply in
 	// this channel, THIS session's own reply, and another channel's line.
@@ -697,7 +733,7 @@ func TestDriveTextDeltaFollowUpOnlyDelta(t *testing.T) {
 	g.addAgentRow("general", 22, "maya", "agent-a", "my own this-session reply")
 	g.addAgentRow("test", 23, "maya", "opencode", "elsewhere")
 	g.addChatRow("general", 24, "jack", "next instruction")
-	second := b.driveTextDelta(context.Background(), "r1", "maya", "agent-a", 24, "", roomlog.Now{From: "maya", Text: "next instruction"}, &st, false)
+	second := b.driveTextDelta(context.Background(), "r1", "maya", "agent-a", "", 24, "", roomlog.Now{From: "maya", Text: "next instruction"}, &st, false)
 
 	if !strings.Contains(second, "New room messages since your last turn") {
 		t.Fatalf("follow-up must be framed as a delta:\n%s", second)
@@ -717,7 +753,7 @@ func TestDriveTextDeltaFollowUpOnlyDelta(t *testing.T) {
 
 	// Nothing new: the instruction alone, under the marker naming its
 	// sender (the requester when the history does not hold it).
-	third := b.driveTextDelta(context.Background(), "r1", "maya", "agent-a", 0, "", roomlog.Now{From: "maya", Text: "nothing new at all"}, &st, false)
+	third := b.driveTextDelta(context.Background(), "r1", "maya", "agent-a", "", 0, "", roomlog.Now{From: "maya", Text: "nothing new at all"}, &st, false)
 	if third != "[now — from maya]\nnothing new at all" {
 		t.Fatalf("empty delta must send the instruction alone, got:\n%s", third)
 	}
@@ -732,7 +768,7 @@ func TestNowSenderIsTheJobsMessage(t *testing.T) {
 	g.addChatRow("general", 31, "maya", "continue")
 	b := New(Config{GatewayBaseURL: g.srv.URL, GatewayToken: "t", OwnerSubject: "jack"})
 	st := roomlog.CtxState{}
-	prompt := b.driveTextDelta(context.Background(), "r1", "jack", "agent-a", 30, "general", roomlog.Now{From: "jack", Text: "continue"}, &st, true)
+	prompt := b.driveTextDelta(context.Background(), "r1", "jack", "agent-a", "", 30, "general", roomlog.Now{From: "jack", Text: "continue"}, &st, true)
 	if !strings.HasSuffix(prompt, "[now — from jack]\ncontinue") {
 		t.Fatalf("the turn must name jack (seq 30), got:\n%s", prompt)
 	}

@@ -159,8 +159,15 @@ func (s *Service) writeRuns(w http.ResponseWriter, r *http.Request, scope string
 		return
 	}
 	v := s.runViewer(r, scope)
+	readers := s.channelReaders(r)
 	out := wire.AgentRunsReply{Scope: scope, Runs: make([]wire.AgentRun, 0, len(jobs))}
 	for _, j := range jobs {
+		// A run's request and reply are its channel's: the caller sees it
+		// only when they read that channel (store.MayReadChannel). The
+		// cursor below still follows the page as read.
+		if !readers.mayRead(j.RoomID, j.ChannelID) {
+			continue
+		}
 		out.Runs = append(out.Runs, v.record(j, false))
 	}
 	if n := len(jobs); n > 0 && n == q.PageSize() {
@@ -193,6 +200,10 @@ func (s *Service) handleRoomRun(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		obs.ServerError(w, "read run failed", err)
 		httpx.Error(w, "read run failed", http.StatusInternalServerError)
+		return
+	}
+	if !s.channelReaders(r).mayRead(roomID, j.ChannelID) {
+		httpx.Error(w, "run not found", http.StatusNotFound)
 		return
 	}
 	run := s.runViewer(r, wire.RunScopeRoom).record(j, true)

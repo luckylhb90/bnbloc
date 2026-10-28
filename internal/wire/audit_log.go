@@ -53,6 +53,10 @@ const (
 	// AuditKindNetwork: the platform's server egress saved (the mode and
 	// the hosts).
 	AuditKindNetwork = "network"
+	// AuditKindSection: a members-only section's membership changed (name
+	// = the room; the detail names the section and the member; the actor
+	// who let them in or out). A room admin's join is one (C12).
+	AuditKindSection = "section"
 )
 
 // AuditLogEntry is one normalized audit record. ID is unique across sources

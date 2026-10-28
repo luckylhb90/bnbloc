@@ -197,15 +197,32 @@ func (s *Service) handleListArtifacts(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	readable, ok := s.artifactChannels(w, r, roomID)
+	if !ok {
+		return
+	}
 	arts, err := s.Artifacts.ListArtifacts(r.Context(), q)
 	if err != nil {
 		obs.ServerError(w, "list artifacts failed", err)
 		httpx.Error(w, "list artifacts failed", http.StatusInternalServerError)
 		return
 	}
-	resp := wire.ArtifactList{Artifacts: store.ArtifactViews(arts), MaxBytes: s.artifactMaxBytes()}
-	if len(arts) == q.Limit {
-		resp.NextCursor = artifactCursor(arts[len(arts)-1])
+	// The cursor follows the page as read, so paging still advances past a
+	// page whose artifacts are all of channels the reader may not read.
+	full := len(arts) == q.Limit
+	var next string
+	if full {
+		next = artifactCursor(arts[len(arts)-1])
+	}
+	shown := arts[:0:0]
+	for _, a := range arts {
+		if readable(a.ChannelID) {
+			shown = append(shown, a)
+		}
+	}
+	resp := wire.ArtifactList{Artifacts: store.ArtifactViews(shown), MaxBytes: s.artifactMaxBytes()}
+	if full {
+		resp.NextCursor = next
 	}
 	httpx.WriteJSON(w, http.StatusOK, resp)
 }
@@ -231,7 +248,19 @@ func (s *Service) handleArtifactAnchors(w http.ResponseWriter, r *http.Request) 
 		httpx.Error(w, "list artifact anchors failed", http.StatusInternalServerError)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"anchors": anchors})
+	// An anchor names a message of a channel; the reader sees it only when
+	// they read the artifact (roomArtifact's rule).
+	readable, ok := s.artifactChannels(w, r, roomID)
+	if !ok {
+		return
+	}
+	shown := anchors[:0:0]
+	for _, a := range anchors {
+		if art, err := s.Artifacts.GetArtifact(r.Context(), a.ArtifactID); err == nil && readable(art.ChannelID) {
+			shown = append(shown, a)
+		}
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"anchors": shown})
 }
 
 // parseArtifactQuery reads the list filters and paging cursor.
@@ -293,12 +322,11 @@ func parseArtifactCursor(w http.ResponseWriter, raw string) (updatedMs int64, id
 
 func (s *Service) handleGetArtifact(w http.ResponseWriter, r *http.Request) {
 	roomID := r.PathValue("roomId")
-	if !s.authorizeArtifactRead(w, r, roomID) {
+	if !s.requireRead(w, r, roomID) {
 		return
 	}
-	art, err := s.Artifacts.GetArtifact(r.Context(), r.PathValue("artifactId"))
-	if err != nil {
-		httpx.Error(w, "artifact not found", http.StatusNotFound)
+	art, ok := s.roomArtifact(w, r, roomID, r.PathValue("artifactId"))
+	if !ok {
 		return
 	}
 	versions, err := s.Artifacts.ListArtifactVersions(r.Context(), art.ArtifactID, 50)
@@ -312,12 +340,11 @@ func (s *Service) handleGetArtifact(w http.ResponseWriter, r *http.Request) {
 
 func (s *Service) handleGetArtifactVersion(w http.ResponseWriter, r *http.Request) {
 	roomID := r.PathValue("roomId")
-	if !s.authorizeArtifactRead(w, r, roomID) {
+	if !s.requireRead(w, r, roomID) {
 		return
 	}
-	art, err := s.Artifacts.GetArtifact(r.Context(), r.PathValue("artifactId"))
-	if err != nil {
-		httpx.Error(w, "artifact not found", http.StatusNotFound)
+	art, ok := s.roomArtifact(w, r, roomID, r.PathValue("artifactId"))
+	if !ok {
 		return
 	}
 	version, perr := strconv.Atoi(strings.TrimSpace(r.PathValue("version")))
@@ -346,9 +373,8 @@ func (s *Service) handlePublishVersion(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, "caller is not a member of room", http.StatusForbidden)
 		return
 	}
-	art, err := s.Artifacts.GetArtifact(r.Context(), r.PathValue("artifactId"))
-	if err != nil || art.RoomID != roomID {
-		httpx.Error(w, "artifact not found", http.StatusNotFound)
+	art, ok := s.roomArtifact(w, r, roomID, r.PathValue("artifactId"))
+	if !ok {
 		return
 	}
 	if mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mt == "multipart/form-data" {
@@ -434,12 +460,56 @@ func (s *Service) authorizeArtifactRead(w http.ResponseWriter, r *http.Request, 
 	if !s.requireRead(w, r, roomID) {
 		return false
 	}
-	art, err := s.Artifacts.GetArtifact(r.Context(), r.PathValue("artifactId"))
+	_, ok := s.roomArtifact(w, r, roomID, r.PathValue("artifactId"))
+	return ok
+}
+
+// roomArtifact is the ONE read of an artifact of the room for a request:
+// the artifact, when it is the room's and its channel is one the request's
+// reader may read (C13: a deliverable of a members-only channel is read
+// only by those who read the channel); 404 otherwise, as for no such
+// artifact. The caller has checked the room itself.
+func (s *Service) roomArtifact(w http.ResponseWriter, r *http.Request, roomID, artifactID string) (store.Artifact, bool) {
+	art, err := s.Artifacts.GetArtifact(r.Context(), artifactID)
 	if err != nil || art.RoomID != roomID {
 		httpx.Error(w, "artifact not found", http.StatusNotFound)
-		return false
+		return store.Artifact{}, false
 	}
-	return true
+	readable, ok := s.artifactChannels(w, r, roomID)
+	if !ok {
+		return store.Artifact{}, false
+	}
+	if !readable(art.ChannelID) {
+		httpx.Error(w, "artifact not found", http.StatusNotFound)
+		return store.Artifact{}, false
+	}
+	return art, true
+}
+
+// artifactChannels answers which channels' artifacts the request's reader
+// may read (MayReadChannel): an artifact of no channel ("") or of a channel
+// that is gone is the room's (read by anyone in it).
+func (s *Service) artifactChannels(w http.ResponseWriter, r *http.Request, roomID string) (func(channelID string) bool, bool) {
+	access, ok := s.readerAccess(w, r, roomID)
+	if !ok {
+		return nil, false
+	}
+	if !access.HasMembersOnly() {
+		return func(string) bool { return true }, true
+	}
+	channels, err := s.Channels.ListChannels(r.Context(), roomID)
+	if err != nil {
+		obs.ServerError(w, "list channels failed", err)
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
+		return nil, false
+	}
+	barred := map[string]bool{}
+	for _, c := range channels {
+		if !access.MayReadChannel(c) {
+			barred[c.ChannelID] = true
+		}
+	}
+	return func(channelID string) bool { return !barred[channelID] }, true
 }
 
 // publishArtifactEvent tells the room's subscribers (web panels, bridges) that
@@ -473,15 +543,17 @@ func (s *Service) publishArtifactEventReason(ctx context.Context, art store.Arti
 		Reason:         reason,
 		SourceJobID:    sourceJob,
 	}
-	// Artifact events deliver room-wide (empty ChannelID): the Docs panel is a
-	// room-scoped surface, so a viewer sitting in another channel must still
-	// see version bumps the moment they land — channel-filtering them makes a
-	// watched artifact look frozen until the 30s list poll happens to fire.
+	// Artifact events reach every stream of the room (the Docs panel is a
+	// room-scoped surface: a viewer in another channel must still see a
+	// version land), yet name the artifact's channel: realtime delivers them
+	// across channels (wire.CrossChannelKind) to the readers of that channel
+	// only (C13: a members-only channel's deliverable is its readers').
 	s.Publisher.Publish(ctx, wire.Event{
-		RoomID:   art.RoomID,
-		Kind:     wire.EventArtifactUpdated,
-		Payload:  payload,
-		AtUnixMs: art.UpdatedAtMs,
+		RoomID:    art.RoomID,
+		ChannelID: art.ChannelID,
+		Kind:      wire.EventArtifactUpdated,
+		Payload:   payload,
+		AtUnixMs:  art.UpdatedAtMs,
 	})
 }
 
@@ -533,9 +605,8 @@ func (s *Service) handleArtifactState(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, "artifactId and state (<=16KiB) required", http.StatusBadRequest)
 		return
 	}
-	art, err := s.Artifacts.GetArtifact(r.Context(), body.ArtifactID)
-	if err != nil || art.RoomID != roomID {
-		httpx.Error(w, "artifact not found", http.StatusNotFound)
+	art, ok := s.roomArtifact(w, r, roomID, body.ArtifactID)
+	if !ok {
 		return
 	}
 	if s.Publisher == nil {
@@ -553,8 +624,9 @@ func (s *Service) handleArtifactState(w http.ResponseWriter, r *http.Request) {
 	// by any later poll. A member running the artifact from any channel must
 	// receive every gesture.
 	s.Publisher.Publish(r.Context(), wire.Event{
-		RoomID: roomID,
-		Kind:   wire.EventArtifactState,
+		RoomID:    roomID,
+		ChannelID: art.ChannelID,
+		Kind:      wire.EventArtifactState,
 		Payload: map[string]any{
 			"artifactId": body.ArtifactID,
 			"actor":      userID,
@@ -577,9 +649,7 @@ func (s *Service) handleGetArtifactState(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	artifactID := strings.TrimSpace(r.PathValue("artifactId"))
-	art, err := s.Artifacts.GetArtifact(r.Context(), artifactID)
-	if err != nil || art.RoomID != roomID {
-		httpx.Error(w, "artifact not found", http.StatusNotFound)
+	if _, ok := s.roomArtifact(w, r, roomID, artifactID); !ok {
 		return
 	}
 	snap, ok := s.liveStates.get(artifactID)

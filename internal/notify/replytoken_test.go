@@ -127,3 +127,23 @@ func TestReplyClientMsgIDIsStableAndScoped(t *testing.T) {
 		}
 	}
 }
+
+// A mention notifies only a reader of its channel (Observer.MayRead, which
+// realtime sets from store.MayReadChannel): a member named in a members-only
+// section's channel they do not belong to is not told (channels PRD C11).
+func TestMentionNotifiesReadersOnly(t *testing.T) {
+	f := newFixture(t)
+	f.install(t, "n1", fakeNotifier(t, nil).URL+"/hook", "")
+	o := NewObserver(f.emitter, fakeMembership{"r1/bob": true, "r1/carol": true}, 8)
+	o.MayRead = func(_ context.Context, roomID, channelID, userID string) bool {
+		return !(channelID == "ch_secret" && userID == "bob")
+	}
+	o.Observe(tctx(), wire.Event{RoomID: "r1", ChannelID: "ch_secret", Sequence: 9, Kind: "chat_message", Payload: map[string]any{"userId": "alice", "text": "@bob @carol look"}})
+	for len(o.queue) > 0 {
+		o.process(context.Background(), <-o.queue)
+	}
+	events := o.mentionEvents(observation{tenantID: "t", kind: "chat_message", roomID: "r1", channelID: "ch_secret", seq: 9, author: "alice", text: "@bob @carol look"})
+	if len(events) != 1 || len(events[0].Recipients) != 1 || events[0].Recipients[0] != "carol" {
+		t.Fatalf("mention recipients = %+v, want carol only", events)
+	}
+}

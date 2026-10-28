@@ -24,11 +24,19 @@ function world(me) {
       { channelId: "ch_rel", name: "releases", isDefault: false, createdBy: "maya", purpose: "Ship notes", rules: "Notes only.", sectionId: "sec_ops", position: 0, ownerId: "maya", settings: { whoPosts: "admins" } },
       { channelId: "ch_rand", name: "random", isDefault: false, createdBy: "jack", purpose: "Anything else", rules: "", sectionId: "", position: 1, ownerId: "jack", settings: {} },
       { channelId: "ch_slow", name: "busy", isDefault: false, createdBy: "maya", purpose: "", rules: "", sectionId: "", position: 2, ownerId: "maya", settings: { slowModeSeconds: 30 } },
+      { channelId: "ch_budget", name: "budget", isDefault: false, createdBy: "maya", purpose: "Next year's numbers", rules: "", sectionId: "sec_board", position: 0, ownerId: "maya", settings: {} },
     ],
-    sections: [{ sectionId: "sec_ops", name: "Ops", position: 0, visibility: "open", rules: "Ops rules", owners: ["maya"], joinPolicy: "open", createdBy: "maya", createdAtMs: 1 }],
+    sections: [
+      { sectionId: "sec_ops", name: "Ops", position: 0, visibility: "open", rules: "Ops rules", owners: ["maya"], joinPolicy: "open", createdBy: "maya", createdAtMs: 1 },
+      // A members-only section (slice 2): maya is its member; jack is not,
+      // and sees its name only because it takes requests ("ask").
+      { sectionId: "sec_board", name: "Board", position: 1, visibility: "members", rules: "", owners: ["maya"], joinPolicy: "ask", createdBy: "maya", createdAtMs: 2 },
+    ],
+    sectionMembers: { sec_board: ["maya"] },
+    sectionRequests: { sec_board: [] },
     // maya has no follow of #general (a room older than follows): every
     // member is in the default channel all the same.
-    follows: { maya: { ch_rel: {}, ch_slow: {} }, jack: { ch_gen: {}, ch_rand: {} } },
+    follows: { maya: { ch_rel: {}, ch_slow: {}, ch_budget: {} }, jack: { ch_gen: {}, ch_rand: {} } },
     agreed: { maya: 1, jack: 0 },
     // Each member's own groups of their rail (C24).
     groups: { maya: [], jack: [] },
@@ -38,7 +46,13 @@ function world(me) {
   const role = roles[me];
   const admin = role === "owner" || role === "admin";
   const manage = (c) => admin || c.ownerId === me || (s.sections.find((x) => x.sectionId === c.sectionId)?.owners ?? []).includes(me);
-  return { s, view, role, admin, manage };
+  // The server's rule (store.MayReadChannel / MayKnowSection), mirrored.
+  const inSection = (id) => (s.sectionMembers[id] ?? []).includes(me);
+  const reads = (c) => { const sec = s.sections.find((x) => x.sectionId === c.sectionId); return !sec || sec.visibility !== "members" || inSection(sec.sectionId); };
+  const knownSections = () => s.sections
+    .filter((x) => x.visibility !== "members" || inSection(x.sectionId) || admin || x.joinPolicy !== "invite")
+    .map((x) => (x.visibility !== "members" ? x : { ...x, joined: inSection(x.sectionId), members: inSection(x.sectionId) || admin ? s.sectionMembers[x.sectionId] : undefined }));
+  return { s, view, role, admin, manage, reads, knownSections };
 }
 
 async function open(name, me, body) {
@@ -61,7 +75,34 @@ async function open(name, me, body) {
     if (p === "/v1/rooms/r1/shared-agents") return json([{ targetId: "shared-agent:nimbus:claude", ownerUserId: "jack", provider: "nimbus:claude", allowedModels: [], hasQuota: false }]);
     if (p === "/v1/rooms/r1/channels" && m === "GET") {
       const archived = u.searchParams.get("archived") === "1";
-      return json({ channels: s.channels.filter((c) => !!c.archivedAtMs === archived).map(w.view), sections: s.sections, groups: s.groups[me] });
+      return json({ channels: s.channels.filter((c) => !!c.archivedAtMs === archived && w.reads(c)).map(w.view), sections: w.knownSections(), groups: s.groups[me] });
+    }
+    if (p === "/v1/rooms/r1/sections" && m === "POST") {
+      const b = body();
+      const sec = { sectionId: "sec_" + b.name.toLowerCase(), name: b.name, position: b.position ?? 0, visibility: b.visibility || "open", rules: b.rules || "", owners: [me], joinPolicy: b.joinPolicy || (b.visibility === "members" ? "invite" : "open"), createdBy: me, createdAtMs: Date.now() };
+      s.sections.push(sec);
+      s.created = sec;
+      if (sec.visibility === "members") { s.sectionMembers[sec.sectionId] = [me]; s.sectionRequests[sec.sectionId] = []; }
+      return json(sec);
+    }
+    const sm = p.match(/^\/v1\/rooms\/r1\/sections\/([^/]+)(?:\/(join|members|requests)(?:\/([^/]+))?)?$/);
+    if (sm) {
+      const sec = s.sections.find((x) => x.sectionId === sm[1]);
+      if (!sec) return json({ error: "section not found" }, 404);
+      const owner = w.admin || sec.owners.includes(me);
+      if (sm[2] === "join" && m === "POST") {
+        if (sec.joinPolicy === "open" || owner) { s.sectionMembers[sec.sectionId].push(me); return json({ joined: true }); }
+        s.sectionRequests[sec.sectionId].push({ userId: me, requestedAtMs: Date.now() });
+        return json({ requested: true });
+      }
+      if (sm[2] === "requests" && m === "GET") return owner ? json({ requests: s.sectionRequests[sec.sectionId] }) : json({ error: "forbidden" }, 403);
+      if (sm[2] === "members" && m === "POST") {
+        const u = body().userId;
+        s.sectionMembers[sec.sectionId].push(u);
+        s.sectionRequests[sec.sectionId] = s.sectionRequests[sec.sectionId].filter((q) => q.userId !== u);
+        return json(sec);
+      }
+      if (m === "PATCH") { Object.assign(sec, body()); return json(sec); }
     }
     if (p === "/v1/rooms/r1/channel-groups" && m === "POST") {
       const b = body();
@@ -87,7 +128,7 @@ async function open(name, me, body) {
       s.channels.push(c); s.follows[me][c.channelId] = {};
       return json(w.view(c));
     }
-    if (p === "/v1/rooms/r1/channel-directory") return json({ channels: s.channels.filter((c) => !c.archivedAtMs).map((c) => ({ ...w.view(c), followers: 1 })), sections: s.sections });
+    if (p === "/v1/rooms/r1/channel-directory") return json({ channels: s.channels.filter((c) => !c.archivedAtMs && w.reads(c)).map((c) => ({ ...w.view(c), followers: 1 })), sections: w.knownSections() });
     const cm = p.match(/^\/v1\/rooms\/r1\/channels\/([^/]+)(?:\/(\w+))?$/);
     if (cm) {
       const c = s.channels.find((x) => x.channelId === cm[1]);
@@ -165,7 +206,7 @@ await open("owner: welcome, rail sections, rules header, settings dialog", "maya
   await page.getByRole("button", { name: "Start", exact: true }).click();
   // The rail: the top level first, then Ops; random (not joined) is not there.
   const names = await rail(page).locator("[data-channel-row]").evaluateAll((els) => els.map((e) => e.getAttribute("data-channel-row")));
-  ok(JSON.stringify(names) === JSON.stringify(["general", "busy", "releases"]), `the rail lists the joined channels by section: ${names}`);
+  ok(JSON.stringify(names) === JSON.stringify(["general", "busy", "releases", "budget"]), `the rail lists the joined channels by section (Board, members only, is hers): ${names}`);
   ok((await rail(page).locator('[data-rail-section="Ops"]').count()) === 1, "the Ops section is a group");
   // Open #releases: purpose and rules.
   await rail(page).locator('[data-channel-row="releases"] button').first().click();
@@ -332,5 +373,56 @@ await open("member: rules agreement, admins-only, slow mode, a refusal on its ro
   ok(/Could not archive it: only the room's owner/.test(await rail(page).locator('[data-channel-row="random"]').getByRole("status").innerText()), "a refusal is said on the row that acted, in the server's words");
 });
 
+// Members-only sections (slice 2): jack, not in Board, sees its name for
+// asking and never its channel; he asks; maya approves in the section's
+// dialog; jack then reads #budget. maya makes an invite-only section.
+await open("member: a members-only section shows its name, never its channels; asking to join", "jack", async ({ page, s }) => {
+  await page.locator("[data-room-welcome]").waitFor({ timeout: 5000 });
+  const wt = await page.locator("[data-room-welcome]").innerText();
+  ok(/Board/.test(wt) && /members only/.test(wt) && !/budget/.test(wt), "the welcome page names the section, members only, and none of its channels");
+  await page.getByRole("button", { name: "Start", exact: true }).click();
+  ok((await rail(page).locator('[data-channel-row="budget"]').count()) === 0, "the rail holds none of its channels");
+  await page.getByRole("button", { name: "Browse channels" }).click();
+  const dir = page.getByRole("dialog", { name: "Browse channels" });
+  await dir.waitFor();
+  ok(!/budget/.test(await dir.innerText()), "the directory lists none of its channels");
+  await page.keyboard.press("Escape");
+  // The section's menu offers asking to join.
+  await rail(page).locator('[data-rail-section="Board"]').hover().catch(() => {});
+  const board = rail(page).locator('[data-rail-section="Board"]');
+  if ((await board.count()) === 0) {
+    ok(false, "a section taking requests is listed (empty) so its menu offers asking");
+    return;
+  }
+  await page.getByRole("button", { name: "Section options for Board" }).click();
+  await page.getByRole("menuitem", { name: "Ask to join" }).click();
+  await page.waitForTimeout(600);
+  ok(s.sectionRequests.sec_board.some((q) => q.userId === "jack"), "asking files his request");
+});
+
+await open("owner: approves a request in the section's dialog; makes an invite-only section", "maya", async ({ page, s }) => {
+  s.sectionRequests.sec_board = [{ userId: "jack", requestedAtMs: 1 }];
+  await page.locator("[data-room-welcome]").waitFor({ timeout: 5000 });
+  await page.getByRole("button", { name: "Start", exact: true }).click();
+  await rail(page).locator('[data-rail-section="Board"]').hover();
+  await page.getByRole("button", { name: "Section options for Board" }).click();
+  await page.getByRole("menuitem", { name: "Settings and members" }).click();
+  const dlg = page.getByRole("dialog", { name: "Section Board" });
+  await dlg.locator("[data-section-requests]").waitFor({ timeout: 5000 });
+  ok(/maya/.test(await dlg.locator("[data-section-members]").innerText()), "the dialog lists the section's members");
+  await dlg.getByRole("button", { name: "Approve" }).click();
+  await page.waitForTimeout(600);
+  ok(s.sectionMembers.sec_board.includes("jack") && s.sectionRequests.sec_board.length === 0, "approving adds him and closes the request");
+  await page.screenshot({ path: `${shots}/6-members.png` });
+  if (await page.getByRole("dialog", { name: "Section Board" }).count()) await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "New section" }).click();
+  const make = page.getByRole("dialog", { name: "New section" });
+  await make.getByPlaceholder("Design team").fill("Hiring");
+  await make.getByRole("checkbox").check();
+  ok((await make.getByLabel("Who may join").inputValue()) === "invite", "a members-only section is invite-only by default");
+  await make.getByRole("button", { name: "Create section" }).click();
+  await page.waitForTimeout(600);
+  ok(s.created?.visibility === "members" && s.created?.joinPolicy === "invite", `the section is made members-only, invite: ${JSON.stringify(s.created)}`);
+});
 console.log(failures ? `${failures} FAILED` : "all passed");
 process.exit(failures ? 1 : 0);

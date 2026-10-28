@@ -53,12 +53,58 @@ level) and a **position** in it, an **owner** (its creator by default), an
   `channel_archived`), leave the default listing (`?archived=1` lists them),
   keep their history and stay in the agents' listing; a restore reopens them.
 - **Sections** (`room_sections`) are named groups with owners and rules.
-  Slice 1 makes open sections only. Deleting one moves its channels to the
+  A section is open or members-only (below). Deleting one moves its channels to the
   top level. Who makes one and who places a channel where is the room's
   **channel creation** policy (`anyone` default, `sections`, `admins`, C15):
   `mayCreateSection` and `mayPlaceChannel` (the room's owner and admins
   anywhere; a member at the top level under `anyone`, and in a section they
   own).
+- **Members-only sections** (slice 2; C11-C14, C17): `section_members`
+  holds who belongs, `section_join_requests` who asked. Join policy
+  `invite` (default: the section's owners add members; nobody else sees it),
+  `ask` (its name is shown for joining; its owners approve) or `open` (its
+  name is shown; any member joins). The creator is the first owner and
+  member. The room's owners and admins see every members-only section's
+  name and members and read it only by joining. Their join is announced
+  (`section_membership`, `admin`) and audited (`AuditKindSection`).
+  Visibility is fixed at creation. The agent door never opens the
+  membership routes.
+- **Who may read a channel** has one rule, `store.MayReadChannel`
+  (`internal/store/channel_access.go`): the top level and open sections for
+  every reader in the room, a members-only section for its members, and
+  for an agent also `ChannelAdmitsAgents`. The reader is a person. An agent
+  reads as the person it works for: the bridge reads its listing and
+  history with the turn's job (`?job=`), which the gateway proxies as the
+  job's requester. Each service asks it through one owner, and every read
+  path asks:
+  - room service (`readerAccess`, `roomArtifact`, `newReadableIn`):
+    - the channel listing (`?agents=1` included) and directory;
+    - a channel's own routes (404 when not readable);
+    - sections (`knownSections`, `liveSection`);
+    - placing or moving a channel into a members-only section;
+    - deliverables: list, anchors, detail, versions, content, files,
+      thumbnails, live state, share-link creation, My apps;
+    - the handoff export (filtered by the exporter's access).
+  - realtime (`channelAccess`, `memberMayRead`):
+    - the event stream, re-scoped on `channel_updated` and
+      `section_membership`; deliverable events name their channel and
+      reach other channels' streams only for its readers
+      (`wire.CrossChannelKind`);
+    - history, the consented history, and revisions (and their
+      `retainedFrom`);
+    - posting (`PostChat`: typed, scheduled, dispatched) and a post's file
+      reference;
+    - edit, delete, tasks and unread;
+    - schedules (creating one in a channel, and listing);
+    - global search (messages and deliverables);
+    - mention notifications (`notify.Observer.MayRead`), joining by
+      mention, and plugin hooks.
+  - activity (`channelReaders`): run listings and records, and the room's
+    job rows.
+
+  `TestChannelReadsAskTheRule` (`internal/archtest`) fails when a
+  function in these services reads channel content without asking the rule
+  or an exemption that says why.
 - **Following** (`channel_follows`, C18): what a member's rail shows, never
   access. Posting and being mentioned join a channel (realtime), so does
   creating one; a new member joins the room's **recommended channels**
@@ -133,9 +179,15 @@ DELETE /v1/rooms/{roomId}/channels/{channelId}/follow  unfollow (not the default
 POST   /v1/rooms/{roomId}/channel-groups               create {name, position?} — any member (their own)
 PATCH  /v1/rooms/{roomId}/channel-groups/{groupId}     name, position — their own (another's → 404)
 DELETE /v1/rooms/{roomId}/channel-groups/{groupId}     its channels leave the group — their own
-POST   /v1/rooms/{roomId}/sections                     create {name, rules?, position?} (open) — mayCreateSection
+POST   /v1/rooms/{roomId}/sections                     create {name, rules?, position?, visibility?, joinPolicy?} — mayCreateSection
 PATCH  /v1/rooms/{roomId}/sections/{sectionId}         name, rules, position, owners — mayManageSection
 DELETE /v1/rooms/{roomId}/sections/{sectionId}         its channels move to the top level — mayManageSection
+POST   /v1/rooms/{roomId}/sections/{sectionId}/join    join (open), ask (ask); the room's owner/admin joins any — members-only
+DELETE /v1/rooms/{roomId}/sections/{sectionId}/join    leave (not the only owner)
+POST   /v1/rooms/{roomId}/sections/{sectionId}/members {userId}: add, or approve a request — mayManageSection
+DELETE /v1/rooms/{roomId}/sections/{sectionId}/members/{userId}  remove (not an owner) — mayManageSection
+GET    /v1/rooms/{roomId}/sections/{sectionId}/requests          open requests — mayManageSection
+DELETE /v1/rooms/{roomId}/sections/{sectionId}/requests/{userId} decline — mayManageSection
 PATCH  /v1/rooms/{roomId}                              rules, requireRulesAgreement, recommendedChannels, channelCreation — owner/admin
 GET    /v1/rooms/{roomId}/rules                        the rules, their version, required, the caller's agreed version
 POST   /v1/rooms/{roomId}/rules/agree                  {version}: the current version only (409 rules_changed)
@@ -228,4 +280,5 @@ Migrations: `2026_10_room_channels` (table + message columns + index),
 (the setup columns, the room's rules columns, the member's agreed version,
 `room_sections`, `channel_follows`; an existing channel's owner is filled
 from its creator once), `2026_10_channel_groups` (`channel_groups`,
-`channel_follows.group_id`).
+`channel_follows.group_id`), `2026_10_section_members`
+(`section_members`, `section_join_requests`).

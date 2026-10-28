@@ -250,3 +250,16 @@ export function composerDefault<A extends DrivableAgent>(input: {
   const room = input.roomDefault();
   return room ? { agent: room, from: "room" } : { agent: null, from: "ask" };
 }
+
+/** sectionJoin is what a members-only section offers a reader who is not
+ *  in it (C11, C17): "join" (open: at once), "ask" (a request its owners
+ *  approve), "admin" (the room's owner or an admin: joins at once, which
+ *  its members are told, C12) or null (an open section, or already in it).
+ *  The server lists a members-only section only to those who may know it. */
+export function sectionJoin(me: RoomMembership | null, sec: Pick<RoomSection, "visibility" | "joinPolicy" | "joined">): "join" | "ask" | "admin" | null {
+  if (!me || sec.visibility !== "members" || sec.joined || !mayChat(me)) return null;
+  if (canInvite(me)) return "admin";
+  if (sec.joinPolicy === "open") return "join";
+  if (sec.joinPolicy === "ask") return "ask";
+  return null;
+}

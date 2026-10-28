@@ -219,7 +219,7 @@ func (b *Bridge) roomRecordFiles(ctx context.Context, room, jobID string, self r
 // partial write never advertises files that do not exist). State is only
 // advanced on full success, so a failed pass retries cleanly next turn.
 func (b *Bridge) materializeRoomContext(ctx context.Context, w corepkg.WorkspaceFileWriter, ep corepkg.Endpoint, room, workspaceID, jobID, channelID string, seen, msgSeq int64, now string, self roomlog.Producer, st roomlog.CtxState, g roomlog.Guidance, cp *deliverableCopier) (next roomlog.CtxState, own []roomlog.Entry, from string, err error) {
-	list, _ := roomlog.AgentChannelList(ctx, b.gatewayGET, room)
+	list, _ := roomlog.AgentChannelList(ctx, b.gatewayGET, room, jobID)
 	ownCh, ok := roomlog.ChannelOf(list, channelID)
 	if !ok {
 		ownCh = list[0]
@@ -239,7 +239,7 @@ func (b *Bridge) materializeRoomContext(ctx context.Context, w corepkg.Workspace
 		if ch.ID == ownCh.ID && seen > 0 && seen < after {
 			after = seen
 		}
-		entries, complete, err := roomlog.History(ctx, b.gatewayGET, room, roomlog.HistoryQuery{Only: ch.ID, After: after})
+		entries, complete, err := roomlog.History(ctx, b.gatewayGET, room, roomlog.HistoryQuery{Only: ch.ID, After: after, Job: jobID})
 		if err != nil {
 			return st, nil, "", err
 		}
@@ -275,7 +275,7 @@ func (b *Bridge) materializeRoomContext(ctx context.Context, w corepkg.Workspace
 		// under their names: no file keeps the old text.
 		for _, name := range roomlog.ChunksHolding(r.rec, st.Revised[r.ch.ID]) {
 			first, last, _ := roomlog.ChunkRange(name)
-			entries, _, err := roomlog.History(ctx, b.gatewayGET, room, roomlog.HistoryQuery{Only: r.ch.ID, After: first - 1, Before: last + 1, MaxRows: 2 * chunkRereadRows})
+			entries, _, err := roomlog.History(ctx, b.gatewayGET, room, roomlog.HistoryQuery{Only: r.ch.ID, After: first - 1, Before: last + 1, MaxRows: 2 * chunkRereadRows, Job: jobID})
 			if err != nil {
 				return st, nil, "", err
 			}
@@ -286,6 +286,14 @@ func (b *Bridge) materializeRoomContext(ctx context.Context, w corepkg.Workspace
 		files = append(files, chFiles...)
 		next.Channels[r.ch.ID] = rec
 		index = append(index, rec)
+	}
+	// A channel the previous pass wrote that this reader may not read any
+	// more (left the listing) is blanked, so nothing it cannot read stays in
+	// the workspace.
+	for id, rec := range st.Channels {
+		if _, kept := next.Channels[id]; !kept {
+			files = append(files, roomlog.ForgetChannel(rec)...)
+		}
 	}
 	records, recorded := b.roomRecordFiles(ctx, room, jobID, self, st, g, cp)
 	next.ReadmeSum, next.AppsListed, next.ContractsSum = recorded.ReadmeSum, recorded.AppsListed, recorded.ContractsSum
@@ -372,7 +380,7 @@ func (b *Bridge) channelReset(ctx context.Context, room, channelID string, rs *r
 		return false
 	}
 	if channelID == "" {
-		list, _ := roomlog.AgentChannelList(ctx, b.gatewayGET, room)
+		list, _ := roomlog.AgentChannelList(ctx, b.gatewayGET, room, "")
 		channelID = list[0].ID
 	}
 	return st.Resets[channelID] > rs.ctx.StartedMs
@@ -383,7 +391,7 @@ func (b *Bridge) channelReset(ctx context.Context, room, channelID string, rs *r
 // pass resolves it).
 func (b *Bridge) guidanceChannel(ctx context.Context, room, channelID string) string {
 	if channelID == "" {
-		list, _ := roomlog.AgentChannelList(ctx, b.gatewayGET, room)
+		list, _ := roomlog.AgentChannelList(ctx, b.gatewayGET, room, "")
 		channelID = list[0].ID
 	}
 	return roomlog.GuidanceChannel(channelID)
@@ -405,7 +413,7 @@ func (b *Bridge) drivePrompt(ctx context.Context, d *drive, workspaceID string, 
 	now := roomlog.Now{From: b.personLabel(ctx, d.job.RequesterUserID), Text: text, Attachments: toPromptAttachments(atts.delivered), Undelivered: atts.undelivered, Edit: d.edit.line()}
 	entry, ok := b.coreEntry(d.core)
 	if d.caps.writer == nil || !ok {
-		return b.driveTextDelta(ctx, room, owner, provider, d.job.MessageSeq, d.job.ChannelID, now, st, fresh)
+		return b.driveTextDelta(ctx, room, owner, provider, d.job.JobID, d.job.MessageSeq, d.job.ChannelID, now, st, fresh)
 	}
 	w, ep := d.caps.writer, entry.endpoint
 	// The tree is the workspace's: a session continues what the workspace
@@ -434,7 +442,7 @@ func (b *Bridge) drivePrompt(ctx context.Context, d *drive, workspaceID string, 
 	if err != nil {
 		slog.Warn("bnbloc bridge room-context materialization failed; falling back to pushed context",
 			"event", "bnbloc.bridge.roomctx_failed", "room", room, "core", d.core, "error", err)
-		return b.driveTextDelta(ctx, room, owner, provider, d.job.MessageSeq, d.job.ChannelID, now, st, fresh)
+		return b.driveTextDelta(ctx, room, owner, provider, d.job.JobID, d.job.MessageSeq, d.job.ChannelID, now, st, fresh)
 	}
 	shared.setRoomState(newSt)
 	b.workspaces.roomStateWritten(d.key(), workspaceID)
@@ -575,19 +583,19 @@ func agentSpeakerLabel(owner, provider string) string {
 // the moment it is fetched, including rows then filtered out — the agent
 // authored the self replies, and the instruction is delivered as [now]
 // (now.From is the sender when the history does not name it).
-func (b *Bridge) driveTextDelta(ctx context.Context, room, owner, provider string, msgSeq int64, channelID string, now roomlog.Now, st *roomlog.CtxState, fresh bool) string {
+func (b *Bridge) driveTextDelta(ctx context.Context, room, owner, provider, jobID string, msgSeq int64, channelID string, now roomlog.Now, st *roomlog.CtxState, fresh bool) string {
 	if st == nil {
 		return roomlog.ComposeDelta(nil, now, roomlog.Options{})
 	}
 	self := agentSpeakerLabel(owner, provider)
 	// A channel is a context boundary: the session reads its own channel
 	// (docs/prd/2026-10-14-multi-member-rooms.md).
-	list, _ := roomlog.AgentChannelList(ctx, b.gatewayGET, room)
+	list, _ := roomlog.AgentChannelList(ctx, b.gatewayGET, room, jobID)
 	own, ok := roomlog.ChannelOf(list, channelID)
 	if !ok {
 		own = list[0]
 	}
-	entries, _, err := roomlog.History(ctx, b.gatewayGET, room, roomlog.HistoryQuery{Only: own.ID, After: st.PushSeenSeq, MaxRows: b.recentRows})
+	entries, _, err := roomlog.History(ctx, b.gatewayGET, room, roomlog.HistoryQuery{Only: own.ID, After: st.PushSeenSeq, MaxRows: b.recentRows, Job: jobID})
 	if err != nil {
 		slog.Debug("bnbloc bridge room-context unavailable, sending the message alone",
 			"event", "bnbloc.bridge.context_unavailable", "room", room, "error", err)

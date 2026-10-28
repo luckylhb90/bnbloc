@@ -117,14 +117,34 @@ type ChannelGroupPatchRequest struct {
 	Position *int    `json:"position,omitempty"`
 }
 
-// Section visibilities. Slice 1 accepts only SectionOpen.
+// Section visibilities.
 //
 //wire:union SectionVisibility
 const (
 	// SectionOpen: every room member sees its channels.
 	SectionOpen = "open"
-	// SectionMembers: only its members see its channels (slice 2).
+	// SectionMembers: only its members see its channels (C11): a member of
+	// the room who is not one sees nothing of it; the room's owners and
+	// admins see its name and members and read it only by joining (C12).
 	SectionMembers = "members"
+)
+
+// How a member joins a members-only section (C11, C17).
+//
+//wire:union SectionJoinPolicy
+const (
+	// SectionJoinInvite: the section's owners add its members; a member of
+	// the room who is not one sees nothing of it (C11's default; the
+	// default for a members-only section, decision: pending owner: C17
+	// names "ask" the default, but asking needs the section's name shown,
+	// which C11 leaves to its owners).
+	SectionJoinInvite = "invite"
+	// SectionJoinAsk: its name is shown to the room for joining (never its
+	// channels or members); a member asks, the section's owners approve.
+	SectionJoinAsk = "ask"
+	// SectionJoinOpen: its name is shown for joining; any room member joins
+	// at once (for an open section joining is only following).
+	SectionJoinOpen = "open"
 )
 
 // RoomSection is one section of a room: a named group of channels with its
@@ -136,9 +156,65 @@ type RoomSection struct {
 	Visibility  string   `json:"visibility" tstype:"SectionVisibility"`
 	Rules       string   `json:"rules"`
 	Owners      []string `json:"owners"`
-	JoinPolicy  string   `json:"joinPolicy"`
+	JoinPolicy  string   `json:"joinPolicy" tstype:"SectionJoinPolicy"`
 	CreatedBy   string   `json:"createdBy"`
 	CreatedAtMs int64    `json:"createdAtMs"`
+	// Members are a members-only section's members (who reads it), listed
+	// to those who may know the section exists; empty for an open one.
+	Members []string `json:"members,omitempty"`
+	// Joined: the reader is a member of this members-only section (an
+	// admin who has not joined sees it but not its channels).
+	Joined bool `json:"joined,omitempty"`
+}
+
+// SectionRequests is GET /v1/rooms/{id}/sections/{sectionId}/requests: a
+// members-only section's open join requests, for those who approve them
+// (its owners and the room's owners and admins).
+type SectionRequests struct {
+	Requests []SectionJoinRequest `json:"requests"`
+}
+
+// SectionJoinRequest is one member's open request to join a section.
+type SectionJoinRequest struct {
+	UserID        string `json:"userId"`
+	RequestedAtMs int64  `json:"requestedAtMs"`
+}
+
+// SectionJoinReply is POST /v1/rooms/{id}/sections/{sectionId}/join: whether
+// the caller joined at once ("open") or asked (Requested, "ask").
+type SectionJoinReply struct {
+	Joined    bool `json:"joined"`
+	Requested bool `json:"requested"`
+}
+
+// SectionMemberRequest is POST /v1/rooms/{id}/sections/{sectionId}/members:
+// the section's owners (and the room's owners and admins) add a member of
+// the room, or approve their request.
+type SectionMemberRequest struct {
+	UserID string `json:"userId"`
+}
+
+// EventSectionMembership (SectionMembershipPayload) is published by
+// bnbloc-room when a member joins or leaves a members-only section, is
+// added or removed, or asks to join: room-wide, so clients reload the
+// listing and realtime's streams re-scope at once (a stream that read the
+// section's channels for that member stops delivering them). Joining by a
+// room owner or admin is said to the section's members (C12): Admin marks
+// it.
+const EventSectionMembership = "section_membership"
+
+// SectionMembershipPayload names the section, the member and what happened.
+type SectionMembershipPayload struct {
+	SectionID string `json:"sectionId"`
+	UserID    string `json:"userId"`
+	// Action is "joined", "left", "added", "removed", "requested" or
+	// "declined".
+	Action string `json:"action"`
+	// By is who acted (the member themself, or an owner).
+	By string `json:"by"`
+	// Admin: the member is one of the room's owners or admins (C12: their
+	// joining is shown to the section's members).
+	Admin bool `json:"admin,omitempty"`
 }
 
 // ChannelList is GET /v1/rooms/{id}/channels: the room's channels (live and
@@ -205,20 +281,27 @@ type ChannelCreateRequest struct {
 	SectionID string `json:"sectionId,omitempty"`
 }
 
-// SectionCreateRequest is POST /v1/rooms/{id}/sections.
+// SectionCreateRequest is POST /v1/rooms/{id}/sections. A members-only
+// section's creator is its first owner and member; JoinPolicy defaults to
+// "invite" for one (C11).
 type SectionCreateRequest struct {
 	Name       string `json:"name"`
 	Rules      string `json:"rules,omitempty"`
 	Position   int    `json:"position,omitempty"`
 	Visibility string `json:"visibility,omitempty" tstype:"SectionVisibility"`
+	JoinPolicy string `json:"joinPolicy,omitempty" tstype:"SectionJoinPolicy"`
 }
 
-// SectionPatchRequest is PATCH /v1/rooms/{id}/sections/{sectionId}.
+// SectionPatchRequest is PATCH /v1/rooms/{id}/sections/{sectionId}. A
+// section's visibility is fixed at creation (decision: pending owner):
+// opening a members-only section would show its history to the room, and
+// closing an open one would take it from members mid-conversation.
 type SectionPatchRequest struct {
-	Name     *string   `json:"name,omitempty"`
-	Rules    *string   `json:"rules,omitempty"`
-	Position *int      `json:"position,omitempty"`
-	Owners   *[]string `json:"owners,omitempty"`
+	Name       *string   `json:"name,omitempty"`
+	Rules      *string   `json:"rules,omitempty"`
+	Position   *int      `json:"position,omitempty"`
+	Owners     *[]string `json:"owners,omitempty"`
+	JoinPolicy *string   `json:"joinPolicy,omitempty" tstype:"SectionJoinPolicy"`
 }
 
 // Who creates channels in a room (C15): RoomDetail.ChannelCreation.

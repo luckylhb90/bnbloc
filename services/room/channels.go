@@ -155,6 +155,16 @@ func (s *Service) liveChannel(w http.ResponseWriter, r *http.Request, roomID str
 		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return store.RoomChannel{}, nil, false
 	}
+	// A channel of a members-only section the caller is not in does not
+	// exist for them (C11): 404, as for no such channel.
+	access, ok := s.readerAccess(w, r, roomID)
+	if !ok {
+		return store.RoomChannel{}, nil, false
+	}
+	if !access.MayReadChannel(ch) {
+		httpx.Error(w, "channel not found", http.StatusNotFound)
+		return store.RoomChannel{}, nil, false
+	}
 	return ch, sec, true
 }
 
@@ -286,6 +296,10 @@ func (s *Service) handleListChannels(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	access, ok := s.readerAccess(w, r, roomID)
+	if !ok {
+		return
+	}
 	out := wire.ChannelList{Channels: []wire.RoomChannel{}, Sections: []wire.RoomSection{}, Groups: groups}
 	for _, c := range channels {
 		switch {
@@ -294,19 +308,43 @@ func (s *Service) handleListChannels(w http.ResponseWriter, r *http.Request) {
 		case forAgents:
 			// decision: channels PRD §2.1 ("agents admitted ... a channel
 			// agents never read") and C10 (an archived channel's history
-			// stays readable, so an agent's records keep it).
-			if !c.Admission().Admits() {
+			// stays readable, so an agent's records keep it). An agent
+			// reads as the person it works for (C14): the reader asserted
+			// with its job, else nobody's members-only section.
+			if !c.Admission().Admits() || !access.MayReadChannel(c) {
 				continue
 			}
+		case !access.MayReadChannel(c):
+			continue
 		case archived != c.Archived():
 			continue
 		}
 		out.Channels = append(out.Channels, channelView(c, follows[c.ChannelID]))
 	}
-	for _, sec := range sections {
-		out.Sections = append(out.Sections, sectionView(sec))
-	}
+	out.Sections = s.knownSections(r.Context(), roomID, sections, access)
 	httpx.WriteJSON(w, http.StatusOK, out)
+}
+
+// knownSections projects the sections the reader may know (C11, C12): every
+// open one; a members-only one for its members, the room's owners and
+// admins (with its members: who reads it) and, by name alone, the room's
+// people when its owners show it for joining.
+func (s *Service) knownSections(ctx context.Context, roomID string, sections []store.RoomSection, access store.ChannelAccess) []wire.RoomSection {
+	out := []wire.RoomSection{}
+	for _, sec := range sections {
+		if !access.MayKnowSection(sec) {
+			continue
+		}
+		v := sectionView(sec)
+		if sec.MembersOnly() {
+			if access.MayKnowMembers(sec) {
+				v.Members = s.sectionMemberIDs(ctx, roomID, sec.SectionID)
+			}
+			v.Joined = access.MaySeeSection(sec.SectionID)
+		}
+		out = append(out, v)
+	}
+	return out
 }
 
 // handleChannelDirectory lists every open channel of the room a member may
@@ -341,16 +379,18 @@ func (s *Service) handleChannelDirectory(w http.ResponseWriter, r *http.Request)
 		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	access, ok := s.readerAccess(w, r, roomID)
+	if !ok {
+		return
+	}
 	out := wire.ChannelDirectory{Channels: []wire.ChannelDirectoryEntry{}, Sections: []wire.RoomSection{}}
 	for _, c := range channels {
-		if c.IsPeople() || c.Archived() {
+		if c.IsPeople() || c.Archived() || !access.MayReadChannel(c) {
 			continue
 		}
 		out.Channels = append(out.Channels, wire.ChannelDirectoryEntry{RoomChannel: channelView(c, follows[c.ChannelID]), Followers: counts[c.ChannelID]})
 	}
-	for _, sec := range sections {
-		out.Sections = append(out.Sections, sectionView(sec))
-	}
+	out.Sections = s.knownSections(r.Context(), roomID, sections, access)
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
@@ -452,8 +492,19 @@ func (s *Service) targetSection(w http.ResponseWriter, r *http.Request, roomID, 
 		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return nil, false
 	}
-	if !ok {
+	access, okAccess := s.readerAccess(w, r, roomID)
+	if !okAccess {
+		return nil, false
+	}
+	if !ok || !access.MayKnowSection(sec) {
 		httpx.Error(w, "no such section in this room", http.StatusBadRequest)
+		return nil, false
+	}
+	// A channel goes into a members-only section only from inside it
+	// (decision: channels PRD C11/C13: a channel moved in by someone who
+	// cannot read it would take its content where they put it unseen).
+	if !access.MaySeeSection(sec.SectionID) {
+		httpx.Error(w, "join the section to put a channel in it", http.StatusForbidden)
 		return nil, false
 	}
 	return &sec, true
@@ -574,6 +625,15 @@ func (s *Service) channelPatch(r *http.Request, roomID string, who channelCaller
 			}
 			if target != "" && sec == nil {
 				return p, http.StatusBadRequest, errBadRequest("no such section in this room")
+			}
+			if sec != nil && sec.MembersOnly() {
+				access, err := s.memberAccess(r.Context(), roomID, who)
+				if err != nil {
+					return p, http.StatusInternalServerError, err
+				}
+				if !access.MaySeeSection(sec.SectionID) {
+					return p, http.StatusForbidden, errBadRequest("join the section to put a channel in it")
+				}
 			}
 			room, err := s.Store.GetRoom(r.Context(), roomID)
 			if err != nil {

@@ -74,6 +74,9 @@ type HistoryQuery struct {
 	// Pages bounds the pages read per channel (0 = until the boundary or
 	// the channel's start).
 	Pages int
+	// Job is the turn's job, whose requester's readable channels the read
+	// covers (AgentChannelList); "" reads as the bridge's owner.
+	Job string
 }
 
 // ErrChannelNotReadable: HistoryQuery.Only names a channel no agent may read
@@ -93,7 +96,7 @@ const AgentChannelsQuery = wire.ChannelListForAgents + "=1"
 // AgentChannels lists the ids of the channels of a room an agent may read
 // (AgentChannelList).
 func AgentChannels(ctx context.Context, fetch Fetch, room string) (channels []string, ok bool) {
-	list, ok := AgentChannelList(ctx, fetch, room)
+	list, ok := AgentChannelList(ctx, fetch, room, "")
 	for _, c := range list {
 		channels = append(channels, c.ID)
 	}
@@ -110,8 +113,19 @@ func AgentChannels(ctx context.Context, fetch Fetch, room string) (channels []st
 // default channel never bars agents), so a degraded listing narrows the read
 // instead of failing the turn; ok reports whether the listing was read and
 // named a channel.
-func AgentChannelList(ctx context.Context, fetch Fetch, room string) (channels []Channel, ok bool) {
-	raw, err := fetch(ctx, "/v1/rooms/"+url.PathEscape(room)+"/channels?"+AgentChannelsQuery)
+//
+// job is the turn's job ("" none): the listing is read with its grant
+// (?job=), so the gateway reads it as the job's requester and it names only
+// the channels that person may read (store.MayReadChannel, C14: an agent
+// reads as the person it works for, never as the bridge's owner; a
+// borrowed agent working for someone outside a members-only section sees
+// none of it). Without a job (no turn) the listing is the owner's.
+func AgentChannelList(ctx context.Context, fetch Fetch, room, job string) (channels []Channel, ok bool) {
+	q := AgentChannelsQuery
+	if job != "" {
+		q += "&job=" + url.QueryEscape(job)
+	}
+	raw, err := fetch(ctx, "/v1/rooms/"+url.PathEscape(room)+"/channels?"+q)
 	if err != nil {
 		slog.Debug("bnbloc roomlog channel listing failed; reading the default channel",
 			"event", "bnbloc.roomlog.channels_failed", "room", room, "error", err)
@@ -164,7 +178,7 @@ func ChannelOf(list []Channel, id string) (Channel, bool) {
 // stops globally at q.MaxRows rows; complete reports whether every channel
 // was fully covered (false: the cap truncated the read, keeping the newest).
 func History(ctx context.Context, fetch Fetch, room string, q HistoryQuery) (entries []Entry, complete bool, err error) {
-	channels, listed := AgentChannelList(ctx, fetch, room)
+	channels, listed := AgentChannelList(ctx, fetch, room, q.Job)
 	if q.Only != "" {
 		only, found := ChannelOf(channels, q.Only)
 		if !listed || !found {

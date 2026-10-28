@@ -216,6 +216,24 @@ func RewriteChunk(name string, entries []Entry) NamedFile {
 	return NamedFile{Name: name, Content: rangeContent(first, last, kept)}
 }
 
+// ForgetChannel blanks the files of a channel's records the workspace holds
+// (its recent.md and every chunk), for a channel the reader may no longer
+// read (it left the agent's listing: a members-only section the requester
+// is not in, an agents-barred switch): the next pass must not leave text the
+// requester cannot read in the workspace (docs/prd/2026-10-28-channels-and-
+// threads.md §2.1a "Leaving"). A core writes files but cannot remove them,
+// so each one is written empty under its name.
+func ForgetChannel(rec ChannelRecords) []NamedFile {
+	if rec.Dir == "" {
+		return nil
+	}
+	files := []NamedFile{{Name: rec.Dir + "/recent.md", Content: ""}}
+	for _, name := range rec.Chunks {
+		files = append(files, NamedFile{Name: name, Content: ""})
+	}
+	return files
+}
+
 // GuidanceChannel is how the session guidance names a channel's records
 // (Guidance.Channel): its directory under .room/.
 func GuidanceChannel(id string) string {

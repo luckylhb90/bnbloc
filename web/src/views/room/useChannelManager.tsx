@@ -78,6 +78,22 @@ export function useChannelManager({
       showArchived: () => setOpen({ kind: "archived" }),
       settings: (c) => setOpen({ kind: "settings", channel: c }),
       editSection: (s) => setOpen({ kind: "section", section: s }),
+      joinSection: (s) =>
+        void channelsApi
+          .joinSection(roomId, s.sectionId)
+          .then((r) => {
+            toast.success(r.joined ? `You joined ${s.name}` : `You asked to join ${s.name}: its owners decide`);
+            return reload();
+          })
+          .catch((e) => toast.error(errorText(e, `Could not join ${s.name}`))),
+      leaveSection: (s) =>
+        void channelsApi
+          .leaveSection(roomId, s.sectionId)
+          .then(() => {
+            toast.success(`You left ${s.name}: its channels are no longer yours to read`);
+            return reload();
+          })
+          .catch((e) => toast.error(errorText(e, `Could not leave ${s.name}`))),
       move: (c, siblings, step) =>
         void act(c, "move it", async () => {
           for (const p of reorderedPositions(siblings, c.channelId, step)) await channelsApi.patch(roomId, p.channelId, { position: p.position });
@@ -93,7 +109,7 @@ export function useChannelManager({
       remove: (c) => setOpen({ kind: "delete", channel: c }),
       note: (id) => notes[id] ?? "",
     }),
-    [me, subject, roomId, act, notes, channels.groups],
+    [me, subject, roomId, act, notes, channels.groups, reload, toast],
   );
 
   const close = () => setOpen(null);
