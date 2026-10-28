@@ -125,6 +125,21 @@ a section for their team or subject and create channels inside it.
   owners, or the room's owners for the top level, and the room says so.
 - **Personal order**: each member stars, hides and folds channels and sections
   for themselves; it changes nothing for others.
+- **Two shared levels, never more** (C23): a room has sections and channels;
+  a channel's own work goes into threads (§2.2). A section is never nested in
+  a section: every level a reader passes would carry rules, owners and read
+  access (`MayReadChannel`) of its own, and a member, an agent's records and
+  the directory would all have to walk it. What people ask a deeper level for
+  is met elsewhere:
+  - **"My own corner of the team's channels"** is the member's **personal
+    groups** (C24): folders of the rail that only the member sees, named and
+    filled by them (any channel they joined, from any section), folded and
+    ordered by them. Slack's custom sections; nothing changes for anyone else.
+  - **"Somewhere each colleague works"** is a channel per person in the team's
+    section, owned by that person (a channel owner, §2.1b), its pieces of work
+    as threads.
+  - **"My agent's private work"** is the member's own room, linked to the team
+    room (the flows record's links), not a level inside the team room.
 - **Tidying, by AI, decided by people**: on request, or as a room's scheduled
   task (content), the AI lists channels with no activity for a long time, with
   no purpose, outside any section, or overlapping another, and proposes
@@ -257,6 +272,29 @@ The switches a channel gains, beyond §2.1:
   the recommended channels; the AI answers "where do I ask about X?" from the
   channels' purposes.
 
+### 2.5b A new room starts with its channels: room templates
+
+Creating a room offers to start from a **room template** (C25): a room package
+(docs/prd/2026-10-20-rooms-as-components.md) that carries a whole channel
+layout, not only channel names:
+
+- the package's `channels` become entries with a name, purpose, rules, section
+  and settings (who posts, agents admitted, slow mode), and the package gains
+  `sections` (name, rules, visibility; members-only ones with slice 2). The
+  channel list is objects only: no package carries channels yet, so the
+  name-only shape is replaced, not kept beside it;
+- the create dialog lists the templates the member may use (their own, the
+  organization's, the platform's samples) with a preview of the rail it makes;
+  "Plan with AI" (the `plan-room` assist) proposes the sections and channels
+  for the room's stated goal, from a template or from scratch, shown as that
+  same preview, and nothing is made until the member creates the room;
+- with no template and no plan the room has its default channel alone, as
+  today: the platform names no layout;
+- samples (a team, a project, a release, a support desk, an end-to-end testing
+  room) are content in the default content repository, copied and changed
+  like any package; "Save as template" captures a room's layout back into a
+  package (the existing room capture, now with sections and settings).
+
 ### 2.6 Set up by talking
 
 `room_setup` gains one action, `channel` (one sentence brief; rules in
@@ -291,6 +329,9 @@ holds (`TestPromptBudgets`): the action fits by shortening.
 | `room_setup channel` | Platform | The agent door: acts as the member | Nothing |
 | Purpose drafting, thread titles, archive summaries, catch-up, split and section suggestions | Assists (AI) | Proposals a person accepts | The prompts (content) |
 | Conventions (when to thread, what a release channel is) | Content | A use case | Everything |
+| Personal groups of the rail (C24) | Platform (web, member's own data) | A member's own preferences | Nothing |
+| Room template layout: sections and channel setup in a room package (C25) | Platform (the package contract) | The content kind contract | Nothing |
+| Template samples (team, project, release, support, E2E) and the layout a plan proposes | Content; Assist (AI) | Use cases; proposals a person accepts | Everything; the prompt |
 
 Name test: the platform's new nouns are purpose, rules, section, owner,
 thread, follower, reaction, pin, draft, lane, posting style, tag, status,
@@ -493,6 +534,19 @@ the organization's retention policy; no platform default value. *Recommended.*
 creator; agents through `room_setup` as such a member; the default channel and
 the people chat never. *Recommended.*
 
+**C23. How deep sections go.** Two shared levels: sections and channels, then
+threads. No section inside a section (§2.1b). *Recommended; accepted by the
+owner 2026-10-28.*
+
+**C24. Personal groups.** A member's own folders of the rail, kept on the
+server with their other channel marks (so every device shows them), never
+shown to anyone else, never changing a channel's section. *Recommended;
+accepted by the owner 2026-10-28.*
+
+**C25. A new room's channels.** From a room template (a room package with
+sections and channel setup) or an AI plan the member reviews; none by default
+beyond the default channel. *Recommended; accepted by the owner 2026-10-28.*
+
 ## 8. Build order (each a slice of §2, nothing replaced later)
 
 1. **Manage, configure, welcome**: rename, delete and archive controls; purpose,
@@ -516,6 +570,11 @@ the people chat never. *Recommended.*
    suggestions, translation.
 6. **Channel experts** (C9); tabs; feed of a source; retention per channel;
    following a channel from another room (with the flows record's links).
+7. **Templates and personal groups** (C23–C25): personal groups of the rail;
+   sections and channel setup in room packages, the create dialog's template
+   picker and preview, "Plan with AI" proposing the layout, capture with
+   sections; samples in the default content repository. Can run before
+   slice 2: it touches neither read access nor threads.
 
 ## 9. Verification
 
