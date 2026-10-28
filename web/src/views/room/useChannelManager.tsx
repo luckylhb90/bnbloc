@@ -4,12 +4,12 @@ import { channelsApi } from "@/lib/channelsApi";
 import { reorderedPositions } from "@/lib/channelRules";
 import { errorText } from "@/lib/errors";
 import type { RoomMembership } from "@/lib/roomRoles";
-import type { RoomSection } from "@/lib/wire.gen";
+import type { ChannelGroup, RoomSection } from "@/lib/wire.gen";
 import { ConfirmDialog } from "@/ui/Dialog";
 import { useToast } from "@/ui/Toast";
 import type { RoomAgent } from "@/views/composer/types";
 import type { ChannelActions } from "@/views/room/ChannelMenu";
-import { ChannelSettingsDialog, CreateChannelDialog, SectionDialog } from "@/views/room/ChannelDialogs";
+import { ChannelSettingsDialog, CreateChannelDialog, GroupDialog, SectionDialog } from "@/views/room/ChannelDialogs";
 import { ArchivedChannelsDialog, ChannelDirectoryDialog } from "@/views/room/ChannelDirectory";
 import type { RoomChannels } from "@/views/room/useRoomChannels";
 
@@ -17,6 +17,7 @@ type Open =
   | { readonly kind: "create" }
   | { readonly kind: "settings"; readonly channel: Channel }
   | { readonly kind: "section"; readonly section: RoomSection | null }
+  | { readonly kind: "group"; readonly group: ChannelGroup | null; readonly channel: Channel | null }
   | { readonly kind: "directory" }
   | { readonly kind: "archived" }
   | { readonly kind: "delete"; readonly channel: Channel }
@@ -83,12 +84,16 @@ export function useChannelManager({
         }),
       mark: (c, marks) => void act(c, marks.hidden ? "hide it" : "star it", () => channelsApi.follow(roomId, c.channelId, marks), marks.hidden ? `#${c.name} is hidden: find it in Browse channels` : undefined),
       leave: (c) => void act(c, "leave it", () => channelsApi.unfollow(roomId, c.channelId), `You left #${c.name}: find it in Browse channels`),
+      groups: channels.groups,
+      group: (c, groupId) => void act(c, groupId ? "move it to your group" : "take it out of your group", () => channelsApi.follow(roomId, c.channelId, { groupId })),
+      newGroup: (c) => setOpen({ kind: "group", group: null, channel: c }),
+      editGroup: (g) => setOpen({ kind: "group", group: g, channel: null }),
       archive: (c, archived) =>
         void act(c, archived ? "archive it" : "restore it", () => channelsApi.archive(roomId, c.channelId, archived), archived ? `Archived #${c.name}: it is read-only, under Archived` : `Restored #${c.name}`),
       remove: (c) => setOpen({ kind: "delete", channel: c }),
       note: (id) => notes[id] ?? "",
     }),
-    [me, subject, roomId, act, notes],
+    [me, subject, roomId, act, notes, channels.groups],
   );
 
   const close = () => setOpen(null);
@@ -131,6 +136,20 @@ export function useChannelManager({
         roomId={roomId}
         section={open.section}
         sections={channels.sections}
+        onClose={close}
+        onSaved={() => {
+          close();
+          void reload();
+        }}
+      />
+    );
+  } else if (open?.kind === "group") {
+    dialogs = (
+      <GroupDialog
+        roomId={roomId}
+        group={open.group}
+        channel={open.channel}
+        groups={channels.groups}
         onClose={close}
         onSaved={() => {
           close();

@@ -9,10 +9,12 @@ import type { RoomMembership } from "@/lib/roomRoles";
 import { displayNameOf } from "@/lib/useDisplayName";
 import {
   ChannelAgentParticipationValues,
+  MaxChannelGroupName,
   MaxChannelPurpose,
   MaxChannelRules,
   type ChannelAgentParticipation,
   type ChannelCreationPolicy,
+  type ChannelGroup,
   type ChannelSettings,
   type ChannelWhoPosts,
   type RoomSection,
@@ -297,6 +299,108 @@ export function ChannelSettingsDialog({
 // SectionDialog makes a section (section null) or changes one: name, rules,
 // order and owners (comma-separated member ids), and deletes it (its
 // channels move to the top level). Slice 1 makes open sections only.
+// GroupDialog makes, renames or deletes one of the member's own groups of
+// their rail (C24). Making one from a channel's menu puts that channel in
+// it. Only the member sees it; nothing changes for anyone else.
+export function GroupDialog({
+  roomId,
+  group,
+  channel,
+  groups,
+  onClose,
+  onSaved,
+}: {
+  readonly roomId: string;
+  readonly group: ChannelGroup | null;
+  readonly channel: Channel | null;
+  readonly groups: readonly ChannelGroup[];
+  readonly onClose: () => void;
+  readonly onSaved: () => void;
+}) {
+  const [name, setName] = useState(group?.name ?? "");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const save = async () => {
+    if (!name.trim()) {
+      setErr("Name is required");
+      return;
+    }
+    setBusy(true);
+    setErr("");
+    try {
+      if (group) {
+        await channelsApi.patchGroup(roomId, group.groupId, { name: name.trim() });
+      } else {
+        const made = await channelsApi.createGroup(roomId, { name: name.trim(), position: groups.length });
+        if (channel) await channelsApi.follow(roomId, channel.channelId, { groupId: made.groupId });
+      }
+      onSaved();
+    } catch (e) {
+      setErr(errorText(e, group ? "Could not rename the group" : "Could not make the group"));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const remove = async () => {
+    if (!group) return;
+    try {
+      await channelsApi.removeGroup(roomId, group.groupId);
+      onSaved();
+    } catch (e) {
+      setErr(errorText(e, "Could not delete the group"));
+    }
+  };
+  return (
+    <>
+      <Dialog
+        open
+        onClose={onClose}
+        title={group ? `Your group ${group.name}` : "New group"}
+        description={group ? undefined : `Your own folder of channels${channel ? `, starting with #${channel.name}` : ""}. Only you see it; the room's sections stay as they are for everyone.`}
+        footer={
+          <>
+            {group && (
+              <Button variant="ghost" className="mr-auto text-[var(--color-danger)]" onClick={() => setConfirmDelete(true)}>
+                Delete group
+              </Button>
+            )}
+            <Button variant="ghost" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button variant="primary" onClick={() => void save()} disabled={busy || !name.trim()}>
+              {busy ? "Saving…" : group ? "Save" : "Make group"}
+            </Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-4">
+          <Field label="Name">
+            <Input
+              autoFocus
+              maxLength={MaxChannelGroupName}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && void save()}
+              placeholder="My work"
+            />
+          </Field>
+          {err && <p role="alert" className="text-sm text-[var(--color-danger)]">{err}</p>}
+        </div>
+      </Dialog>
+      <ConfirmDialog
+        open={confirmDelete}
+        danger
+        title={`Delete your group ${group?.name ?? ""}?`}
+        description="Its channels go back to their sections on your list; nothing else changes."
+        confirmLabel="Delete group"
+        onClose={() => setConfirmDelete(false)}
+        onConfirm={remove}
+      />
+    </>
+  );
+}
+
 export function SectionDialog({
   roomId,
   section,

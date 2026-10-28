@@ -30,9 +30,11 @@ function world(me) {
     // member is in the default channel all the same.
     follows: { maya: { ch_rel: {}, ch_slow: {} }, jack: { ch_gen: {}, ch_rand: {} } },
     agreed: { maya: 1, jack: 0 },
+    // Each member's own groups of their rail (C24).
+    groups: { maya: [], jack: [] },
     chats: [], patches: [], lastPost: {},
   };
-  const view = (c) => ({ ...c, joined: c.isDefault || !!s.follows[me][c.channelId], starred: !!s.follows[me][c.channelId]?.starred, hidden: !!s.follows[me][c.channelId]?.hidden });
+  const view = (c) => ({ ...c, joined: c.isDefault || !!s.follows[me][c.channelId], starred: !!s.follows[me][c.channelId]?.starred, hidden: !!s.follows[me][c.channelId]?.hidden, groupId: s.follows[me][c.channelId]?.groupId ?? "" });
   const role = roles[me];
   const admin = role === "owner" || role === "admin";
   const manage = (c) => admin || c.ownerId === me || (s.sections.find((x) => x.sectionId === c.sectionId)?.owners ?? []).includes(me);
@@ -59,7 +61,25 @@ async function open(name, me, body) {
     if (p === "/v1/rooms/r1/shared-agents") return json([{ targetId: "shared-agent:nimbus:claude", ownerUserId: "jack", provider: "nimbus:claude", allowedModels: [], hasQuota: false }]);
     if (p === "/v1/rooms/r1/channels" && m === "GET") {
       const archived = u.searchParams.get("archived") === "1";
-      return json({ channels: s.channels.filter((c) => !!c.archivedAtMs === archived).map(w.view), sections: s.sections });
+      return json({ channels: s.channels.filter((c) => !!c.archivedAtMs === archived).map(w.view), sections: s.sections, groups: s.groups[me] });
+    }
+    if (p === "/v1/rooms/r1/channel-groups" && m === "POST") {
+      const b = body();
+      const g = { groupId: "grp_" + (s.groups[me].length + 1), name: b.name.trim(), position: b.position ?? 0, createdAtMs: Date.now() };
+      s.groups[me].push(g);
+      return json(g);
+    }
+    const gm = p.match(/^\/v1\/rooms\/r1\/channel-groups\/([^/]+)$/);
+    if (gm) {
+      const g = s.groups[me].find((x) => x.groupId === gm[1]);
+      if (m === "DELETE") {
+        s.groups[me] = s.groups[me].filter((x) => x !== g);
+        for (const f of Object.values(s.follows[me])) if (f.groupId === gm[1]) f.groupId = "";
+        return route.fulfill({ status: 204 });
+      }
+      if (!g) return json({ error: "group not found" }, 404);
+      Object.assign(g, body());
+      return json(g);
     }
     if (p === "/v1/rooms/r1/channels" && m === "POST") {
       const b = body();
@@ -220,6 +240,37 @@ await open("owner: welcome, rail sections, rules header, settings dialog", "maya
   await rail(page).getByRole("button", { name: "Archived (1)" }).waitFor({ timeout: 5000 });
   ok((await rail(page).locator('[data-channel-row="busy"]').count()) === 0, "an archived channel leaves the rail and is under Archived");
   await page.screenshot({ path: `${shots}/3-rail.png` });
+  // A group of her own (C24): made from #releases' menu, it takes #releases
+  // out of Ops on her rail only, folds, and stays after a reload.
+  await rail(page).locator('[data-channel-row="releases"]').hover();
+  await page.getByRole("button", { name: "Channel options for #releases" }).click();
+  await page.getByRole("menuitem", { name: "New group…" }).click();
+  const gd = page.getByRole("dialog", { name: "New group" });
+  await gd.getByLabel("Name").fill("My work");
+  await gd.getByRole("button", { name: "Make group" }).click();
+  await gd.waitFor({ state: "detached", timeout: 5000 });
+  const mine = rail(page).locator('[data-rail-group="My work"]');
+  await mine.locator('[data-channel-row="releases"]').waitFor({ timeout: 5000 });
+  ok((await rail(page).locator('[data-rail-section="Ops"] [data-channel-row="releases"]').count()) === 0, "#releases moved from Ops into her group");
+  ok(s.follows.maya.ch_rel?.groupId === "grp_1", `the group is stored on her follow: ${JSON.stringify(s.follows.maya.ch_rel)}`);
+  const order = await rail(page).locator("[data-rail-group], [data-rail-section]").evaluateAll((els) => els.map((e) => e.getAttribute("data-rail-group") || e.getAttribute("data-rail-section") || "top"));
+  ok(order.indexOf("My work") >= 0 && order.indexOf("My work") < order.indexOf("Ops"), `her groups come before the room's sections: ${order}`);
+  // Open another channel, then fold the group: #releases goes from view.
+  await rail(page).locator('[data-channel-row="general"] button').first().click();
+  const fold = mine.getByRole("button", { name: "My work", exact: true });
+  await fold.click();
+  ok((await fold.getAttribute("aria-expanded")) === "false" && (await mine.locator('[data-channel-row="releases"]').count()) === 0, "the folded group hides its channels");
+  await fold.click();
+  await page.reload({ waitUntil: "load" });
+  await rail(page).locator('[data-rail-group="My work"] [data-channel-row="releases"]').waitFor({ timeout: 20000 });
+  ok(true, "a reload keeps her group and its channel");
+  // Out of the group: back in Ops.
+  await rail(page).locator('[data-channel-row="releases"]').hover();
+  await page.getByRole("button", { name: "Channel options for #releases" }).click();
+  await page.getByRole("menuitem", { name: "Remove from my group" }).click();
+  await rail(page).locator('[data-rail-section="Ops"] [data-channel-row="releases"]').waitFor({ timeout: 5000 });
+  ok(true, "removed from her group, #releases is back in Ops");
+  await page.screenshot({ path: `${shots}/4-groups.png` });
 });
 
 await open("member: rules agreement, admins-only, slow mode, a refusal on its row", "jack", async ({ page, s }) => {

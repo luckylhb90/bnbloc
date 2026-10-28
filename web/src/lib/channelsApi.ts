@@ -8,6 +8,9 @@ import type {
   ChannelCreateRequest,
   ChannelDirectory,
   ChannelFollowRequest,
+  ChannelGroup,
+  ChannelGroupCreateRequest,
+  ChannelGroupPatchRequest,
   ChannelList,
   ChannelPatchRequest,
   RoomChannel,
@@ -35,6 +38,10 @@ export const channelsApi = {
   createSection: (roomId: string, body: SectionCreateRequest) => req<RoomSection>(roomPath(roomId, "sections"), json("POST", body)),
   patchSection: (roomId: string, sectionId: string, body: SectionPatchRequest) => req<RoomSection>(roomPath(roomId, "sections", sectionId), json("PATCH", body)),
   removeSection: (roomId: string, sectionId: string) => req<void>(roomPath(roomId, "sections", sectionId), { method: "DELETE", as: "none" }),
+  /** The member's own groups of their rail (C24): only they see them. */
+  createGroup: (roomId: string, body: ChannelGroupCreateRequest) => req<ChannelGroup>(roomPath(roomId, "channel-groups"), json("POST", body)),
+  patchGroup: (roomId: string, groupId: string, body: ChannelGroupPatchRequest) => req<ChannelGroup>(roomPath(roomId, "channel-groups", groupId), json("PATCH", body)),
+  removeGroup: (roomId: string, groupId: string) => req<void>(roomPath(roomId, "channel-groups", groupId), { method: "DELETE", as: "none" }),
   rules: (roomId: string) => req<RoomRulesState>(roomPath(roomId, "rules")),
   agree: (roomId: string, version: number) => req<RoomRulesState>(roomPath(roomId, "rules", "agree"), json("POST", { version })),
   /** The room's rules, agreement switch, recommended channels and creation

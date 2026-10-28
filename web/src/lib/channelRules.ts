@@ -21,6 +21,7 @@ import {
   RulesAgreementRequired,
   RulesChanged,
   type ChannelCreationPolicy,
+  type ChannelGroup,
   type RoomChannel,
   type RoomSection,
 } from "./wire.gen.ts";
@@ -82,23 +83,30 @@ export function sectionOf(ch: Pick<RoomChannel, "sectionId">, sections: readonly
 
 // ---- The rail ----
 
-/** One group of the rail: the top level (section null) or a section. */
+/** One group of the rail: the top level (section and group null), one of the
+ *  member's own groups (C24), or a section. */
 export interface RailGroup {
   readonly section: RoomSection | null;
+  readonly group: ChannelGroup | null;
   readonly channels: readonly RoomChannel[];
 }
 
 /** railGroups is what a member's rail shows: the channels they joined (C18;
  *  the active one even when not joined, so the open channel is never
  *  missing), hidden ones left out, starred first then by position then by
- *  name, grouped by open section, the top level first, sections by their
- *  position. A section with no channel for the member is still listed when
- *  keepEmpty says so (its owner may add channels there). The default
- *  channel leads the top level. */
+ *  name. The top level comes first (the default channel leads it), then the
+ *  member's own groups (C24) by their position, then the room's open
+ *  sections by theirs, as Slack lists custom sections above channels
+ *  (decision: pending owner, the PRD does not place them). A
+ *  channel in one of the member's groups shows there and not in its section
+ *  (for them only); a channel naming a group they no longer have shows where
+ *  it would without one. Every group of the member is listed, empty or not
+ *  (they made it to fill); a section with no channel for the member only
+ *  when keepEmpty says so (its owner may add channels there). */
 export function railGroups(
   channels: readonly RoomChannel[],
   sections: readonly RoomSection[],
-  opts: { readonly active?: string | null; readonly keepEmpty?: (s: RoomSection) => boolean } = {},
+  opts: { readonly active?: string | null; readonly keepEmpty?: (s: RoomSection) => boolean; readonly groups?: readonly ChannelGroup[] } = {},
 ): RailGroup[] {
   const shown = channels.filter((c) => c.channelId === opts.active || (c.joined && !c.hidden));
   const order = (a: RoomChannel, b: RoomChannel) =>
@@ -107,15 +115,40 @@ export function railGroups(
     a.position - b.position ||
     a.name.localeCompare(b.name) ||
     a.channelId.localeCompare(b.channelId);
+  const groups = [...(opts.groups ?? [])].sort((a, b) => a.position - b.position || a.createdAtMs - b.createdAtMs || a.groupId.localeCompare(b.groupId));
+  const mine = new Set(groups.map((g) => g.groupId));
+  const grouped = (c: RoomChannel) => !!c.groupId && mine.has(c.groupId);
   const known = new Set(sections.map((s) => s.sectionId));
-  const top = shown.filter((c) => !c.sectionId || !known.has(c.sectionId)).sort(order);
-  const out: RailGroup[] = [{ section: null, channels: top }];
+  const top = shown.filter((c) => !grouped(c) && (!c.sectionId || !known.has(c.sectionId))).sort(order);
+  const out: RailGroup[] = [{ section: null, group: null, channels: top }];
+  for (const g of groups) out.push({ section: null, group: g, channels: shown.filter((c) => c.groupId === g.groupId).sort(order) });
   const sorted = [...sections].sort((a, b) => a.position - b.position || a.createdAtMs - b.createdAtMs || a.sectionId.localeCompare(b.sectionId));
   for (const s of sorted) {
-    const inSection = shown.filter((c) => c.sectionId === s.sectionId).sort(order);
-    if (inSection.length > 0 || opts.keepEmpty?.(s)) out.push({ section: s, channels: inSection });
+    const inSection = shown.filter((c) => !grouped(c) && c.sectionId === s.sectionId).sort(order);
+    if (inSection.length > 0 || opts.keepEmpty?.(s)) out.push({ section: s, group: null, channels: inSection });
   }
   return out;
+}
+
+/** railGroupKey is a rail group's key for folding: "" the top level, the
+ *  section's id, or "group:" and the member's group id (a group and a
+ *  section never share a key). */
+export function railGroupKey(g: Pick<RailGroup, "section" | "group">): string {
+  return g.group ? `group:${g.group.groupId}` : (g.section?.sectionId ?? "");
+}
+
+/** foldedChannels is what a folded rail group still shows, as Slack does: the
+ *  channel being read and those with unread messages, so folding never
+ *  hides where the member is or what is waiting. An unfolded group shows
+ *  all its channels. The one rule for sections and the member's groups. */
+export function foldedChannels<C extends Pick<RoomChannel, "channelId">>(
+  channels: readonly C[],
+  folded: boolean,
+  active: string | null,
+  unread: Readonly<Record<string, number>> | undefined,
+): readonly C[] {
+  if (!folded) return channels;
+  return channels.filter((c) => c.channelId === active || (unread?.[c.channelId] ?? 0) > 0);
 }
 
 /** directoryMatches filters the channel directory by a search over names and

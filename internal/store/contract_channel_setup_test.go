@@ -287,6 +287,87 @@ func TestContractChannelStoreFollows(t *testing.T) {
 	})
 }
 
+// A member's groups (C24) are theirs alone; a follow names one, and the
+// group's delete takes its channels out of it; the room's delete takes all.
+func TestContractChannelStoreGroups(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) {
+		ctx := tenantCtx(uniq("t-grp-"))
+		s := b.Channel
+		room := newContractRoom(t, ctx, b, "maya")
+		g1, g2 := uniq("g1-"), uniq("g2-")
+		for _, g := range []ChannelGroup{
+			{RoomID: room, UserID: "maya", GroupID: g1, Name: "Mine", Position: 1, CreatedAtMs: 10},
+			{RoomID: room, UserID: "maya", GroupID: g2, Name: "Later", Position: 0, CreatedAtMs: 20},
+			{RoomID: room, UserID: "jack", GroupID: uniq("gj-"), Name: "Jack's", CreatedAtMs: 30},
+		} {
+			if err := s.PutChannelGroup(ctx, g); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := s.PutChannelGroup(ctx, ChannelGroup{RoomID: room, UserID: "maya", GroupID: g1, Name: "Again", CreatedAtMs: 40}); !errors.Is(err, ErrChannelGroupExists) {
+			t.Fatalf("a taken id = %v", err)
+		}
+		got := must(s.ChannelGroups(ctx, room, "maya"))(t)
+		if len(got) != 2 || got[0].GroupID != g2 || got[1].GroupID != g1 || got[1].Name != "Mine" {
+			t.Fatalf("maya's groups = %+v (by position, never jack's)", got)
+		}
+		if err := s.UpdateChannelGroup(ctx, room, "maya", g1, ChannelGroupPatch{Name: ptr("Focus"), Position: ptr(-1)}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.UpdateChannelGroup(ctx, room, "jack", g1, ChannelGroupPatch{Name: ptr("Taken")}); !errors.Is(err, ErrChannelGroupNotFound) {
+			t.Fatalf("another member's group = %v", err)
+		}
+		if err := s.UpdateChannelGroup(ctx, room, "maya", g1, ChannelGroupPatch{}); err != nil {
+			t.Fatalf("an empty patch of an existing group = %v", err)
+		}
+		if got := must(s.ChannelGroups(ctx, room, "maya"))(t); got[0].GroupID != g1 || got[0].Name != "Focus" {
+			t.Fatalf("after the patch = %+v", got)
+		}
+
+		a, c := uniq("a-"), uniq("c-")
+		if err := s.FollowChannel(ctx, room, a, "maya", 10, FollowMarks{Group: ptr(g1)}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.FollowChannel(ctx, room, c, "maya", 10, FollowMarks{Group: ptr(g1), Starred: ptr(true)}); err != nil {
+			t.Fatal(err)
+		}
+		// A repeat that names no group keeps it.
+		if err := s.FollowChannel(ctx, room, a, "maya", 20, FollowMarks{Hidden: ptr(false)}); err != nil {
+			t.Fatal(err)
+		}
+		byID := map[string]ChannelFollow{}
+		for _, f := range must(s.ChannelFollows(ctx, room, "maya"))(t) {
+			byID[f.ChannelID] = f
+		}
+		if byID[a].GroupID != g1 || byID[c].GroupID != g1 || !byID[c].Starred {
+			t.Fatalf("follows = %+v", byID)
+		}
+		if err := s.DeleteChannelGroup(ctx, room, "maya", g1); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.DeleteChannelGroup(ctx, room, "maya", g1); err != nil {
+			t.Fatalf("a second delete = %v", err)
+		}
+		for _, f := range must(s.ChannelFollows(ctx, room, "maya"))(t) {
+			if f.GroupID != "" || (f.ChannelID == c && !f.Starred) {
+				t.Fatalf("after the group's delete = %+v", f)
+			}
+		}
+		if got := must(s.ChannelGroups(ctx, room, "maya"))(t); len(got) != 1 || got[0].GroupID != g2 {
+			t.Fatalf("groups after delete = %+v", got)
+		}
+		if got := must(s.ChannelGroups(tenantCtx(uniq("t-grp-b-")), room, "maya"))(t); len(got) != 0 {
+			t.Fatalf("tenant B reads groups: %+v", got)
+		}
+		if err := b.Room.DeleteRoom(ctx, room); err != nil {
+			t.Fatal(err)
+		}
+		if got := must(s.ChannelGroups(ctx, room, "maya"))(t); len(got) != 0 {
+			t.Fatalf("groups after the room's delete = %+v", got)
+		}
+	})
+}
+
 func TestContractRoomStoreRules(t *testing.T) {
 	forEachBackend(t, func(t *testing.T, b *Backends) {
 		ctx := tenantCtx(uniq("t-rules-"))

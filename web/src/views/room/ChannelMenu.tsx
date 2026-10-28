@@ -5,7 +5,11 @@ import {
   ArrowUpIcon,
   DotsThreeVerticalIcon,
   EyeSlashIcon,
+  FolderSimpleIcon,
+  FolderSimpleMinusIcon,
+  FolderSimplePlusIcon,
   GearIcon,
+  PencilSimpleIcon,
   SignOutIcon,
   StarIcon,
   TrashIcon,
@@ -13,7 +17,7 @@ import {
 import type { Channel } from "@/lib/api";
 import { mayDeleteChannel, mayManageChannel, mayManageSection } from "@/lib/channelRules";
 import type { RoomMembership } from "@/lib/roomRoles";
-import type { RoomSection } from "@/lib/wire.gen";
+import type { ChannelGroup, RoomSection } from "@/lib/wire.gen";
 import { Menu, MenuGroup, MenuItem } from "@/ui/Menu";
 import { cn } from "@/lib/cn";
 
@@ -32,6 +36,12 @@ export interface ChannelActions {
   readonly move: (c: Channel, siblings: readonly Channel[], step: -1 | 1) => void;
   readonly mark: (c: Channel, marks: { readonly starred?: boolean; readonly hidden?: boolean }) => void;
   readonly leave: (c: Channel) => void;
+  // The member's own groups of their rail (C24): put a channel in one (""
+  // takes it out), make one for it, rename or delete one.
+  readonly groups: readonly ChannelGroup[];
+  readonly group: (c: Channel, groupId: string) => void;
+  readonly newGroup: (c: Channel | null) => void;
+  readonly editGroup: (g: ChannelGroup) => void;
   readonly archive: (c: Channel, archived: boolean) => void;
   readonly remove: (c: Channel) => void;
   readonly editSection: (s: RoomSection) => void;
@@ -91,6 +101,23 @@ export function ChannelMenu({
             </MenuItem>
           )}
         </MenuGroup>
+        {c.joined && (
+          <MenuGroup label="Your groups">
+            {actions.groups.map((g) => (
+              <MenuItem key={g.groupId} icon={FolderSimpleIcon} current={c.groupId === g.groupId} onSelect={() => c.groupId !== g.groupId && actions.group(c, g.groupId)}>
+                Move to {g.name}
+              </MenuItem>
+            ))}
+            <MenuItem icon={FolderSimplePlusIcon} onSelect={() => actions.newGroup(c)}>
+              New group…
+            </MenuItem>
+            {!!c.groupId && actions.groups.some((g) => g.groupId === c.groupId) && (
+              <MenuItem icon={FolderSimpleMinusIcon} onSelect={() => actions.group(c, "")}>
+                Remove from my group
+              </MenuItem>
+            )}
+          </MenuGroup>
+        )}
         {manage && (
           <MenuGroup label="Channel">
             <MenuItem icon={GearIcon} onSelect={() => actions.settings(c)}>
@@ -145,6 +172,27 @@ export function SectionMenu({ section, actions }: { readonly section: RoomSectio
     >
       <MenuItem icon={GearIcon} onSelect={() => actions.editSection(section)}>
         Section settings
+      </MenuItem>
+    </Menu>
+  );
+}
+
+// GroupMenu is the menu of one of the member's own groups (C24): rename or
+// delete it (in its dialog). Only they see the group, so it is always theirs.
+export function GroupMenu({ group, actions }: { readonly group: ChannelGroup; readonly actions: ChannelActions }) {
+  if (!actions.me) return null;
+  return (
+    <Menu
+      label={group.name}
+      menuClassName="absolute right-0 top-full mt-1 w-52"
+      trigger={(props, open) => (
+        <button {...props} aria-label={`Group options for ${group.name}`} title="Group options" className={kebab(open)}>
+          <DotsThreeVerticalIcon size={14} weight="bold" />
+        </button>
+      )}
+    >
+      <MenuItem icon={PencilSimpleIcon} onSelect={() => actions.editGroup(group)}>
+        Rename or delete
       </MenuItem>
     </Menu>
   );

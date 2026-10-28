@@ -421,18 +421,106 @@ func (m *MySQLChannel) FollowChannel(ctx context.Context, roomID, channelID, use
 	// The key carries the tenant, so the upsert never touches another
 	// tenant's row; a repeat keeps the first joined_at_ms.
 	update := "joined_at_ms = joined_at_ms"
-	args := []any{tnt, roomID, channelID, userID, atMs, marks.Starred != nil && *marks.Starred, marks.Hidden != nil && *marks.Hidden}
+	group := ""
+	if marks.Group != nil {
+		group = *marks.Group
+	}
+	args := []any{tnt, roomID, channelID, userID, atMs, marks.Starred != nil && *marks.Starred, marks.Hidden != nil && *marks.Hidden, group}
 	if marks.Starred != nil {
 		update += ", starred = VALUES(starred)"
 	}
 	if marks.Hidden != nil {
 		update += ", hidden = VALUES(hidden)"
 	}
+	if marks.Group != nil {
+		update += ", group_id = VALUES(group_id)"
+	}
 	_, err = m.DB.ExecContext(ctx, `
-INSERT INTO channel_follows (tenant_id, room_id, channel_id, user_id, joined_at_ms, starred, hidden)
-VALUES (?, ?, ?, ?, ?, ?, ?)
+INSERT INTO channel_follows (tenant_id, room_id, channel_id, user_id, joined_at_ms, starred, hidden, group_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 ON DUPLICATE KEY UPDATE `+update, args...)
 	return err
+}
+
+func (m *MySQLChannel) PutChannelGroup(ctx context.Context, g ChannelGroup) error {
+	tnt, err := tenant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = m.DB.ExecContext(ctx, `
+INSERT INTO channel_groups (tenant_id, room_id, user_id, group_id, name, position, created_at_ms)
+VALUES (?, ?, ?, ?, ?, ?, ?)`, tnt, g.RoomID, g.UserID, g.GroupID, g.Name, g.Position, g.CreatedAtMs)
+	return dupAs(err, ErrChannelGroupExists)
+}
+
+func (m *MySQLChannel) ChannelGroups(ctx context.Context, roomID, userID string) ([]ChannelGroup, error) {
+	tnt, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out, err := queryAll(ctx, m.DB, `
+SELECT tenant_id, room_id, user_id, group_id, name, position, created_at_ms FROM channel_groups
+WHERE tenant_id = ? AND room_id = ? AND user_id = ?
+ORDER BY position ASC, created_at_ms ASC, group_id ASC`, func(sc rowScanner) (ChannelGroup, error) {
+		var g ChannelGroup
+		err := sc.Scan(&g.TenantID, &g.RoomID, &g.UserID, &g.GroupID, &g.Name, &g.Position, &g.CreatedAtMs)
+		return g, err
+	}, tnt, roomID, userID)
+	if out == nil && err == nil {
+		out = []ChannelGroup{}
+	}
+	return out, err
+}
+
+func (m *MySQLChannel) UpdateChannelGroup(ctx context.Context, roomID, userID, groupID string, patch ChannelGroupPatch) error {
+	tnt, err := tenant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	// A no-op patch still answers whether the group exists: the update
+	// rewrites the name with itself.
+	sets, args := []string{"name = name"}, []any{}
+	if patch.Name != nil {
+		sets, args = append(sets, "name = ?"), append(args, *patch.Name)
+	}
+	if patch.Position != nil {
+		sets, args = append(sets, "position = ?"), append(args, *patch.Position)
+	}
+	var n int
+	if err := m.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM channel_groups WHERE tenant_id = ? AND room_id = ? AND user_id = ? AND group_id = ?`,
+		tnt, roomID, userID, groupID).Scan(&n); err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrChannelGroupNotFound
+	}
+	args = append(args, tnt, roomID, userID, groupID)
+	_, err = m.DB.ExecContext(ctx, `UPDATE channel_groups SET `+strings.Join(sets, ", ")+`
+WHERE tenant_id = ? AND room_id = ? AND user_id = ? AND group_id = ?`, args...)
+	return err
+}
+
+// DeleteChannelGroup deletes the group and takes the member's channels out
+// of it in one transaction.
+func (m *MySQLChannel) DeleteChannelGroup(ctx context.Context, roomID, userID, groupID string) error {
+	tnt, err := tenant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	tx, err := m.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM channel_groups WHERE tenant_id = ? AND room_id = ? AND user_id = ? AND group_id = ?`,
+		tnt, roomID, userID, groupID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE channel_follows SET group_id = ''
+WHERE tenant_id = ? AND room_id = ? AND user_id = ? AND group_id = ?`, tnt, roomID, userID, groupID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (m *MySQLChannel) UnfollowChannel(ctx context.Context, roomID, channelID, userID string) error {
@@ -451,10 +539,10 @@ func (m *MySQLChannel) ChannelFollows(ctx context.Context, roomID, userID string
 		return nil, err
 	}
 	out, err := queryAll(ctx, m.DB, `
-SELECT tenant_id, room_id, channel_id, user_id, joined_at_ms, starred, hidden, last_posted_at_ms FROM channel_follows
+SELECT tenant_id, room_id, channel_id, user_id, joined_at_ms, starred, hidden, last_posted_at_ms, group_id FROM channel_follows
 WHERE tenant_id = ? AND room_id = ? AND user_id = ? ORDER BY channel_id`, func(sc rowScanner) (ChannelFollow, error) {
 		var f ChannelFollow
-		err := sc.Scan(&f.TenantID, &f.RoomID, &f.ChannelID, &f.UserID, &f.JoinedAtMs, &f.Starred, &f.Hidden, &f.LastPostedAtMs)
+		err := sc.Scan(&f.TenantID, &f.RoomID, &f.ChannelID, &f.UserID, &f.JoinedAtMs, &f.Starred, &f.Hidden, &f.LastPostedAtMs, &f.GroupID)
 		return f, err
 	}, tnt, roomID, userID)
 	if out == nil && err == nil {

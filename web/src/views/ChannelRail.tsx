@@ -1,17 +1,18 @@
 import { useMemo, useState } from "react";
-import { ArchiveIcon, CaretDownIcon, CaretRightIcon, CompassIcon, HashIcon, PlusIcon, StarIcon } from "@phosphor-icons/react";
+import { ArchiveIcon, CaretDownIcon, CaretRightIcon, CompassIcon, FolderSimpleIcon, HashIcon, PlusIcon, StarIcon } from "@phosphor-icons/react";
 import type { Channel } from "@/lib/api";
-import { mayCreateSection, mayPlaceChannel, railGroups, sharedOrder } from "@/lib/channelRules";
+import { foldedChannels, mayCreateSection, mayPlaceChannel, railGroupKey, railGroups, sectionOf, sharedOrder } from "@/lib/channelRules";
 import { foldedSections, setFoldedSections } from "@/lib/roomMemory";
 import type { RoomMembership } from "@/lib/roomRoles";
 import type { ChannelCreationPolicy, RoomSection } from "@/lib/wire.gen";
 import { cn } from "@/lib/cn";
-import { ChannelMenu, SectionMenu, type ChannelActions } from "@/views/room/ChannelMenu";
+import { ChannelMenu, GroupMenu, SectionMenu, type ChannelActions } from "@/views/room/ChannelMenu";
 
 // ChannelRail is the in-room left rail (docs/prd/2026-10-28-channels-and-
-// threads.md §2.1b, C18): the channels the member joined, starred first,
-// grouped by the room's open sections (top level first; a member folds a
-// section for themselves), each with its unread badge and, on hover, a menu
+// threads.md §2.1b, C18, C24): the channels the member joined, starred first,
+// the top level, then the member's own groups (only they see them), then the
+// room's open sections; a member folds a group or a section for themselves.
+// Each channel has its unread badge and, on hover, a menu
 // of what the member may do with it; "Browse channels" opens the directory
 // (every open channel, to join), and the archived channels are one click
 // away. Selecting a channel re-scopes the feed; the parent threads the id
@@ -63,8 +64,8 @@ export function ChannelRail({
     setFoldedSections(subject, roomId, next);
   };
   const groups = useMemo(
-    () => railGroups(channels ?? [], sections, { active, keepEmpty: (s) => !!me && mayPlaceChannel(me, subject, policy, s) }),
-    [channels, sections, active, me, subject, policy],
+    () => railGroups(channels ?? [], sections, { active, groups: actions.groups, keepEmpty: (s) => !!me && mayPlaceChannel(me, subject, policy, s) }),
+    [channels, sections, active, me, subject, policy, actions.groups],
   );
   const canCreateTop = !!me && mayPlaceChannel(me, subject, policy, null);
   const canSection = !!me && mayCreateSection(me, policy);
@@ -138,31 +139,44 @@ export function ChannelRail({
         <span className="px-2 py-1 text-xs text-[var(--color-fg-subtle)]">…</span>
       ) : (
         groups.map((g) => {
-          const id = g.section?.sectionId ?? "";
-          const isFolded = !!g.section && folded.includes(id);
-          // A folded section still shows the channel being read and those
-          // with unread messages (Slack's fold), so folding never hides
-          // where the member is or what is waiting.
-          const visible = isFolded ? g.channels.filter((c) => c.channelId === active || (unreadByChannel?.[c.channelId] ?? 0) > 0) : g.channels;
+          const id = railGroupKey(g);
+          const header = g.group ?? g.section;
+          const isFolded = !!header && folded.includes(id);
+          const visible = foldedChannels(g.channels, isFolded, active, unreadByChannel);
+          // A channel in one of the member's groups keeps its section's
+          // menu (moving, settings): the group is only where it sits.
+          const sectionFor = (c: Channel) => (g.group ? sectionOf(c, sections) : g.section);
+          const name = g.group?.name ?? g.section?.name ?? "";
+          const title = g.group ? `${name}: your own group, only you see it` : g.section?.rules ? `${name}: ${g.section.rules}` : name;
           return (
-            <div key={id || "top"} data-rail-section={g.section?.name ?? ""} className="flex flex-col gap-0.5">
-              {g.section && !collapsed && (
+            <div
+              key={id || "top"}
+              data-rail-section={g.section?.name ?? ""}
+              data-rail-group={g.group?.name ?? undefined}
+              className="flex flex-col gap-0.5"
+            >
+              {header && !collapsed && (
                 <div className="group mt-2 flex items-center">
                   <button
                     type="button"
                     onClick={() => toggleFold(id)}
                     aria-expanded={!isFolded}
-                    title={g.section.rules ? `${g.section.name}: ${g.section.rules}` : g.section.name}
+                    title={title}
                     className="tactile flex min-w-0 flex-1 items-center gap-1 px-1 py-1 text-[0.7rem] font-semibold uppercase tracking-wide text-[var(--color-fg-subtle)] hover:text-[var(--color-fg)]"
                   >
                     {isFolded ? <CaretRightIcon size={11} /> : <CaretDownIcon size={11} />}
-                    <span className="truncate">{g.section.name}</span>
+                    {g.group && <FolderSimpleIcon size={11} aria-hidden="true" className="shrink-0" />}
+                    <span className="truncate">{name}</span>
                   </button>
-                  {me && <SectionMenu section={g.section} actions={actions} />}
+                  {me && g.group && <GroupMenu group={g.group} actions={actions} />}
+                  {me && g.section && <SectionMenu section={g.section} actions={actions} />}
                 </div>
               )}
-              {g.section && collapsed && <div className="my-1 h-px bg-[var(--color-border)]" aria-hidden="true" />}
-              {visible.map((c) => row(c, g.section))}
+              {header && collapsed && <div className="my-1 h-px bg-[var(--color-border)]" aria-hidden="true" />}
+              {visible.map((c) => row(c, sectionFor(c)))}
+              {g.group && !collapsed && !isFolded && g.channels.length === 0 && (
+                <span className="px-2 py-1 text-xs text-[var(--color-fg-subtle)]">Empty: use a channel’s menu to move it here</span>
+              )}
             </div>
           );
         })
