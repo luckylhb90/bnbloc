@@ -29,6 +29,67 @@ tenant → room (workspace) → channel (message stream)
   without `includePeople=1`, never addressed to an agent, and never fed to
   plugin hooks (`docs/prd/2026-10-08-ui-nav-composer-people-chat.md` §3).
 
+## Setup (docs/prd/2026-10-28-channels-and-threads.md, slice 1)
+
+A channel holds its own setup: a **purpose** (≤ 250 characters) and
+**rules** (≤ 4,000), a **section** (`sectionId`, `""` = the room's top
+level) and a **position** in it, an **owner** (its creator by default), an
+**archive** mark and a **settings** document (`wire.ChannelSettings`, the
+`settings_json` column):
+
+| Setting | Values | Enforced by |
+|---|---|---|
+| `defaultAgent` | `{ownerId, core, provider}` or none | nothing yet: what the composer proposes (C8) |
+| `whoPosts` | `""` everyone, `"admins"` the room's owner and admins | realtime's channel gate |
+| `noAgents` | false (agents admitted) / true | `store.ChannelAdmitsAgents` (below) |
+| `slowModeSeconds` | 0 off; the owners' value, no default (C22) | realtime's channel gate |
+| `agentParticipation` | `""` when mentioned, `"questions"`, `"threads"` | stored only (C19) |
+
+- **Who changes it** (`mayManageChannel`, `services/room/channels.go`): the
+  room's owner and admins, the channel's owner, the owners of its section
+  (C10). The default channel keeps its name, is never archived or deleted
+  and never bars agents; the people chat is not configurable.
+- **Archived** channels are read-only (every post refused,
+  `channel_archived`), leave the default listing (`?archived=1` lists them),
+  keep their history and stay in the agents' listing; a restore reopens them.
+- **Sections** (`room_sections`) are named groups with owners and rules.
+  Slice 1 makes open sections only. Deleting one moves its channels to the
+  top level. Who makes one and who places a channel where is the room's
+  **channel creation** policy (`anyone` default, `sections`, `admins`, C15):
+  `mayCreateSection` and `mayPlaceChannel` (the room's owner and admins
+  anywhere; a member at the top level under `anyone`, and in a section they
+  own).
+- **Following** (`channel_follows`, C18): what a member's rail shows, never
+  access. Posting and being mentioned join a channel (realtime), so does
+  creating one; a new member joins the room's **recommended channels**
+  (`addMember`/`redeemInvite`). Each member stars and hides channels for
+  themselves; the directory lists every open channel with its followers.
+- **The room's rules** (≤ 8,000) carry a version a change of text bumps; when
+  the room **requires agreeing** (C16, off by default) a member who has not
+  agreed to the current version is refused a post
+  (`rules_agreement_required`) until `POST .../rules/agree {version}`.
+- **The channel gate** (`admitPost`, `services/realtime/channel_gate.go`) is
+  the one owner of "may this member post here now", asked by `PostChat` for
+  every post (typed, scheduled, dispatched), after the membership check and
+  before anything is stored: archived, admins-only, rules agreement, then the
+  slow-mode claim (`ClaimChannelPost`: one write that refuses within the
+  interval with `retryAfterMs` and a `Retry-After` header, and records the
+  post, which joins). Each refusal has a stable code (`wire.Channel*`,
+  `wire.RulesAgreementRequired`).
+- **Agents admitted** has one rule, `store.ChannelAdmitsAgents`: never the
+  people chat, never a channel whose settings say `noAgents`. Every agent
+  path asks it (agent recipients, agent replies in realtime and activity,
+  the handoff import, plugin hooks, agent streams, history and revisions
+  for agent readers). A setting can change, so every change to a channel
+  or section publishes the room-wide `channel_updated` event (after the
+  store write); realtime's agent stream filter forgets its memoized verdicts
+  on it (failing closed on a lookup error), and an agent host's one-channel
+  stream ends when its channel bars agents. The bridge's channel listing
+  (`roomlog.AgentChannelList`) asks `GET .../channels?agents=1`, which
+  leaves those channels out. Between the store write and the event's
+  delivery, an agent stream may still receive one event of the channel
+  (the memo's window).
+
 ## API
 
 All channel endpoints require room membership (same gate as the other room
@@ -36,12 +97,24 @@ endpoints). `channelId` on existing endpoints is optional and defaults to the
 room's default channel, so pre-channel callers are unaffected.
 
 ```
-GET    /v1/rooms/{roomId}/channels                  list (default first)
-POST   /v1/rooms/{roomId}/channels                  create {name}     — any member
-PATCH  /v1/rooms/{roomId}/channels/{channelId}      rename {name}     — owner/admin or creator; default/people → 409
-DELETE /v1/rooms/{roomId}/channels/{channelId}      delete            — owner/admin; default/people → 409
-GET    /v1/rooms/{roomId}/people-chat               the people chat   — 404 until first opened
-POST   /v1/rooms/{roomId}/people-chat               open (create once) — any member, idempotent
+GET    /v1/rooms/{roomId}/channels                     wire.ChannelList: channels (not archived; ?archived=1 the archived;
+                                                       ?agents=1 the agents may read) + sections, with the caller's joined/starred/hidden
+GET    /v1/rooms/{roomId}/channel-directory            every open channel with its followers
+POST   /v1/rooms/{roomId}/channels                     create {name, purpose?, sectionId?} — where mayPlaceChannel lets the caller
+PATCH  /v1/rooms/{roomId}/channels/{channelId}         name, purpose, rules, sectionId, position, ownerId, settings — mayManageChannel
+POST   /v1/rooms/{roomId}/channels/{channelId}/archive — mayManageChannel; default/people → 409
+POST   /v1/rooms/{roomId}/channels/{channelId}/restore — mayManageChannel
+DELETE /v1/rooms/{roomId}/channels/{channelId}         delete — owner/admin; default/people → 409
+PUT    /v1/rooms/{roomId}/channels/{channelId}/follow  follow {starred?, hidden?} — any member (their own)
+DELETE /v1/rooms/{roomId}/channels/{channelId}/follow  unfollow
+POST   /v1/rooms/{roomId}/sections                     create {name, rules?, position?} (open) — mayCreateSection
+PATCH  /v1/rooms/{roomId}/sections/{sectionId}         name, rules, position, owners — mayManageSection
+DELETE /v1/rooms/{roomId}/sections/{sectionId}         its channels move to the top level — mayManageSection
+PATCH  /v1/rooms/{roomId}                              rules, requireRulesAgreement, recommendedChannels, channelCreation — owner/admin
+GET    /v1/rooms/{roomId}/rules                        the rules, their version, required, the caller's agreed version
+POST   /v1/rooms/{roomId}/rules/agree                  {version}: the current version only (409 rules_changed)
+GET    /v1/rooms/{roomId}/people-chat                  the people chat   — 404 until first opened
+POST   /v1/rooms/{roomId}/people-chat                  open (create once) — any member, idempotent
 ```
 
 Existing endpoints gained an optional channel selector:
@@ -103,12 +176,26 @@ default-first. The web channel rail consumes the per-channel list.
 ## Store
 
 `ChannelStore` (`internal/store/channel.go`): `PutChannel`, `GetChannel`,
-`ListChannels` (default first, then created_at), `DefaultChannel`,
-`RenameChannel` (liveness-conditional; resurrecting a soft-deleted channel is
-impossible), `DeleteChannel(atMs)` (soft delete). Memory and MySQL impls; both
-tenant-scoped. MySQL room creation, owner membership, and default channel are
-one `sql.Tx` — a room can never exist without its default channel.
+`ListChannels` (default first, then position, then created_at; archived
+channels included, the callers filter), `DefaultChannel`, `UpdateChannel`
+(a patch, liveness-conditional; resurrecting a soft-deleted channel is
+impossible), `SetChannelArchived` (archive keeps its first time; nil
+restores), `DeleteChannel(atMs)` (soft delete), `ChannelAdmission` (kind and
+`noAgents`, deleted rows included, read failures reported); sections
+(`PutSection`, `GetSection`, `ListSections`, `UpdateSection`,
+`DeleteSection`, which moves the section's channels to the top level in the
+same transaction); follows (`FollowChannel`, `UnfollowChannel`,
+`ChannelFollows`, `ChannelFollowerCounts`, `ClaimChannelPost`). The room
+store holds the room's rules, version, agreement switch, recommended
+channels and creation policy, a member's `RulesAgreedVersion` and
+`AgreeRoomRules` (the current version only, in one statement). Memory and
+MySQL impls with one contract suite; both tenant-scoped. MySQL room
+creation, owner membership, and default channel are one `sql.Tx` — a room
+can never exist without its default channel.
 
 Migrations: `2026_10_room_channels` (table + message columns + index),
 `2026_10_room_channels_read_state` (per-channel cursor PK),
-`2026_10_room_channels_audit` (audit channel column).
+`2026_10_room_channels_audit` (audit channel column), `2026_10_channel_setup`
+(the setup columns, the room's rules columns, the member's agreed version,
+`room_sections`, `channel_follows`; an existing channel's owner is filled
+from its creator once).

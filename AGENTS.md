@@ -666,9 +666,15 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `s.streamRoom` / `s.roomCaller` (`TestRoomPreambleOwned`). A person gains
   a membership only through `addMember` or `redeemInvite` (room_create.go),
   which announce `member_joined` (`TestJoinsAnnounced`). Whether an agent
-  may read or write a channel is `store.ChannelAdmitsAgents` (fail closed),
+  may read or write a channel is `store.ChannelAdmitsAgents` (fail closed:
+  never the people chat, never a channel whose settings say `noAgents`),
   checked by every agent ingest, the handoff import and activity before it
-  stores a reply included (`TestPeopleChatRuleOwned`).
+  stores a reply included (`TestPeopleChatRuleOwned`). A channel's settings
+  change, so every channel or section change publishes `channel_updated`,
+  on which realtime's agent stream filters forget their verdicts. Whether a
+  member may post in a channel now (archived, admins only, rules agreement,
+  slow mode) is realtime's `admitPost`, asked by `PostChat` only
+  (`docs/architecture/room-channels.md`, "Setup").
 - **Room membership has one owner: `internal/membership`.** A backend checks
   a request with `membership.RoomScope(ctx, dir, room, user, need)`: fail
   closed (a nil directory refuses), in the room's own tenant (the room
