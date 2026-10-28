@@ -61,3 +61,30 @@ func TestArtifactRunnerFrameAncestors(t *testing.T) {
 		t.Fatalf("Content-Security-Policy = %q, want frame-ancestors 'self'", csp)
 	}
 }
+
+// A hashed file the build does not have is a 404, never index.html: a page
+// of a newer build asking an older pod for its chunk must not get HTML a
+// service worker would keep as that chunk
+// (docs/bugs/2026-10-28-cached-html-as-chunk.md). Client routes still get
+// the page.
+func TestMissingAssetIsNotThePage(t *testing.T) {
+	rec := httptest.NewRecorder()
+	Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/assets/Gone-AbCdEf12.js", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("missing asset: status %d, want 404", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "<!doctype") || strings.Contains(rec.Body.String(), "<html") {
+		t.Fatalf("missing asset answered with a page: %q", rec.Body.String())
+	}
+	if cc := rec.Header().Get("Cache-Control"); cc != "no-store" {
+		t.Fatalf("missing asset Cache-Control = %q, want no-store", cc)
+	}
+	if _, err := fs.Stat(files, "static/index.html"); err != nil {
+		t.Skip("web bundle not built into webui/static")
+	}
+	rec = httptest.NewRecorder()
+	Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/some/client/route", nil))
+	if rec.Code != http.StatusOK || !strings.Contains(strings.ToLower(rec.Body.String()), "<!doctype html") {
+		t.Fatalf("client route: status %d, body %.60q", rec.Code, rec.Body.String())
+	}
+}

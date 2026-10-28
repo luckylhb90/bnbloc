@@ -25,7 +25,7 @@
 //               own fetch of index.html (not a navigation).
 // Bump SHELL_VERSION when the caching scheme changes: activate drops every
 // other bnbloc cache.
-var SHELL_VERSION = "v1";
+var SHELL_VERSION = "v2";
 var SHELL_CACHE = "bnbloc-shell-" + SHELL_VERSION;
 var CACHE_PREFIX = "bnbloc-";
 
@@ -58,6 +58,14 @@ function staleCaches(names) {
 
 function isShellPage(res) {
   return !!res && res.ok && res.type === "basic" && (res.headers.get("content-type") || "").indexOf("text/html") === 0;
+}
+
+// isAsset reports a response that may stand for a hashed file: same-origin,
+// ok and not a page. A page under an asset's name (an older gateway's SPA
+// fallback for a chunk it did not have) is never cached, nor served from a
+// cache that kept one (docs/bugs/2026-10-28-cached-html-as-chunk.md).
+function isAsset(res) {
+  return !!res && res.ok && res.type === "basic" && (res.headers.get("content-type") || "").indexOf("text/html") !== 0;
 }
 
 // primeShell stores a fresh index.html. When it names a different build than
@@ -97,8 +105,11 @@ function primeShell(fresh) {
           return Promise.all(
             wanted.map(function (u) {
               return cache.match(u).then(function (hit) {
-                // Mid-deploy 404s are skipped; the page fetches them later.
-                return hit || cache.add(u).catch(function () {});
+                if (hit && isAsset(hit)) return undefined;
+                // Mid-deploy misses are skipped; the page fetches them later.
+                return fetch(u).then(function (res) {
+                  return isAsset(res) ? cache.put(u, res) : undefined;
+                }).catch(function () {});
               });
             }),
           );
@@ -129,13 +140,12 @@ function pageResponse(event) {
 function assetResponse(req) {
   return caches.open(SHELL_CACHE).then(function (cache) {
     return cache.match(req).then(function (hit) {
-      return (
-        hit ||
-        fetch(req).then(function (res) {
-          if (res.ok && res.type === "basic") cache.put(req, res.clone()).catch(function () {});
-          return res;
-        })
-      );
+      if (hit && isAsset(hit)) return hit;
+      if (hit) cache.delete(req).catch(function () {});
+      return fetch(req).then(function (res) {
+        if (isAsset(res)) cache.put(req, res.clone()).catch(function () {});
+        return res;
+      });
     });
   });
 }

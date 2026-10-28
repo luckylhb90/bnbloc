@@ -79,6 +79,55 @@ test("shellAssets lists the entry assets of a built index.html", () => {
   assert.deepEqual(JSON.parse(JSON.stringify(context.shellAssets("404 page not found"))), []);
 });
 
+// A page under an asset's name (an older pod's SPA fallback for a chunk it
+// does not have, during a rolling deploy) is never cached, and one a cache
+// kept from before is dropped and fetched again
+// (docs/bugs/2026-10-28-cached-html-as-chunk.md).
+test("assets: a page under an asset's name is never cached or served from cache", async () => {
+  const resp = (type, body) => ({
+    ok: true,
+    type: "basic",
+    body,
+    headers: { get: (h) => (h.toLowerCase() === "content-type" ? type : null) },
+    clone() {
+      return this;
+    },
+  });
+  const store = new Map();
+  const deleted = [];
+  const cache = {
+    match: async (r) => store.get(typeof r === "string" ? r : r.url),
+    put: async (r, res) => void store.set(typeof r === "string" ? r : r.url, res),
+    delete: async (r) => void deleted.push(typeof r === "string" ? r : r.url),
+  };
+  let network = resp("text/html; charset=utf-8", "<!doctype html>");
+  const self = { addEventListener: () => {}, registration: { scope: SCOPE }, location: { origin: new URL(SCOPE).origin } };
+  const context = vm.createContext({
+    self,
+    URL,
+    Promise,
+    caches: { open: async () => cache },
+    fetch: async () => network,
+  });
+  vm.runInContext(WORKER, context);
+  const req = { url: SCOPE + "assets/Room-Ab12.js", method: "GET", mode: "cors" };
+
+  // The network answers a page: it is passed on, not stored.
+  assert.equal((await context.assetResponse(req)).body, "<!doctype html>");
+  assert.equal(store.size, 0);
+  // The real chunk is stored and then served from the cache.
+  network = resp("text/javascript; charset=utf-8", "export{}");
+  assert.equal((await context.assetResponse(req)).body, "export{}");
+  network = resp("text/html", "<!doctype html>");
+  assert.equal((await context.assetResponse(req)).body, "export{}");
+  // A page a cache kept from before is dropped and the chunk fetched again.
+  store.set(req.url, resp("text/html", "<!doctype html>"));
+  network = resp("text/javascript", "export{}");
+  assert.equal((await context.assetResponse(req)).body, "export{}");
+  assert.deepEqual(deleted, [req.url]);
+  assert.equal(context.SHELL_VERSION, "v2");
+});
+
 test("activate drops older shell caches and nothing else", () => {
   const { context } = loadWorker();
   const stale = context.staleCaches(["bnbloc-shell-v0", context.SHELL_CACHE, "other-app-cache"]);

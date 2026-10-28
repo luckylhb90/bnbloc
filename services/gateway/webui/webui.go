@@ -12,6 +12,7 @@ import (
 	"mime"
 	"net/http"
 	"path"
+	"strings"
 
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 )
@@ -39,6 +40,15 @@ func Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		isIndex := r.URL.Path == "/" || r.URL.Path == "/index.html"
 		if _, statErr := fs.Stat(sub, trimLeadingSlash(r.URL.Path)); statErr != nil && r.URL.Path != "/" {
+			if strings.HasPrefix(r.URL.Path, "/assets/") {
+				// A missing hashed file is an error, never the page: during a
+				// rolling deploy a new page's chunk can reach an old pod, and
+				// index.html under a .js name was cached by the service worker
+				// as that chunk (docs/bugs/2026-10-28-cached-html-as-chunk.md).
+				w.Header().Set("Cache-Control", "no-store")
+				http.NotFound(w, r)
+				return
+			}
 			// SPA fallback: serve index.html for unknown client routes.
 			r = r.Clone(r.Context())
 			r.URL.Path = "/"
