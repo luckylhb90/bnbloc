@@ -56,9 +56,27 @@ func (e *appGW) reviewRoom() {
 	if r := e.call(http.MethodPut, "/v1/content-uses", wire.ContentUseRequest{Scope: wire.ContentUseRoomExpert, RoomID: e.roomID, ComponentID: expert}, e.as("maya")); r.status != http.StatusNoContent {
 		e.t.Fatalf("room expert = %d %s", r.status, r.body)
 	}
+	// The layout: #reports in the open section Work with its purpose,
+	// rules and settings (its default agent is maya's: not captured), and
+	// #private in a members-only section (not captured).
+	workSec, inner := ids.New("sec_"), ids.New("sec_")
+	for _, sec := range []store.RoomSection{
+		{SectionID: workSec, TenantID: e.tenant, RoomID: e.roomID, Name: "Work", Visibility: wire.SectionOpen, Rules: "One thread per review.", Owners: []string{"maya"}, CreatedBy: "maya", CreatedAtMs: 1},
+		{SectionID: inner, TenantID: e.tenant, RoomID: e.roomID, Name: "Leads", Position: 1, Visibility: wire.SectionMembers, Owners: []string{"maya"}, CreatedBy: "maya", CreatedAtMs: 1},
+	} {
+		if err := e.b.Channel.PutSection(e.ctx(), sec); err != nil {
+			e.t.Fatal(err)
+		}
+	}
 	reports := ids.New("ch_")
-	if err := e.b.Channel.PutChannel(e.ctx(), store.RoomChannel{ChannelID: reports, TenantID: e.tenant, RoomID: e.roomID, Name: "reports", CreatedBy: "maya", CreatedAtMs: 1}); err != nil {
-		e.t.Fatal(err)
+	for _, ch := range []store.RoomChannel{
+		{ChannelID: reports, TenantID: e.tenant, RoomID: e.roomID, Name: "reports", Purpose: "The week's reports.", Rules: "One report a post.", SectionID: workSec, CreatedBy: "maya", CreatedAtMs: 1,
+			Settings: wire.ChannelSettings{WhoPosts: wire.ChannelPostersAdmins, SlowModeSeconds: 30, DefaultAgent: &wire.ChannelAgent{OwnerID: "maya", Provider: "codex"}}},
+		{ChannelID: ids.New("ch_"), TenantID: e.tenant, RoomID: e.roomID, Name: "private", SectionID: inner, CreatedBy: "maya", CreatedAtMs: 1},
+	} {
+		if err := e.b.Channel.PutChannel(e.ctx(), ch); err != nil {
+			e.t.Fatal(err)
+		}
 	}
 	daily := wire.ScheduleRecurrence{Kind: wire.RecurDaily, Time: "09:00"}
 	e.schedule(e.roomID, reports, "Summarize yesterday.", wire.ScheduleRecipient{Kind: wire.ScheduleRecipientAI}, daily)
@@ -113,8 +131,13 @@ func TestRoomComponentDraft(t *testing.T) {
 		!slices.Equal(d.Sources, []wire.RoomSourceAsk{reviewAsk}) {
 		t.Fatalf("draft start and sources = %q %+v %+v", d.Welcome, d.QuickPrompts, d.Sources)
 	}
-	if d.Name != "r" || d.DisplayName != "r" || !slices.Equal(d.Channels, []string{"reports"}) {
-		t.Fatalf("draft = %+v", d)
+	if d.Name != "r" || d.DisplayName != "r" || !slices.Equal(d.Channels, []wire.RoomPackageChannel{reportsChannel}) ||
+		!slices.Equal(d.Sections, []wire.RoomPackageSection{{Name: "Work", Rules: "One thread per review."}}) {
+		t.Fatalf("draft layout = %+v %+v", d.Sections, d.Channels)
+	}
+	if !slices.ContainsFunc(d.Left, func(l string) bool { return strings.Contains(l, "#private") }) ||
+		!slices.ContainsFunc(d.Left, func(l string) bool { return strings.Contains(l, "default agent of #reports") }) {
+		t.Fatalf("left = %v", d.Left)
 	}
 	kinds := map[string]wire.RoomPackageSchedule{}
 	for _, sc := range d.Schedules {
@@ -193,6 +216,11 @@ func TestInstalledRequestWaitsForAnAgent(t *testing.T) {
 	}
 }
 
+// reportsChannel is #reports as a package holds it: its default agent
+// (someone's) left out.
+var reportsChannel = wire.RoomPackageChannel{Name: "reports", Purpose: "The week's reports.", Rules: "One report a post.", Section: "Work",
+	Settings: wire.RoomPackageChannelSettings{WhoPosts: wire.ChannelPostersAdmins, SlowModeSeconds: 30}}
+
 // reviewAsk is the runs source a review package asks for.
 var reviewAsk = wire.RoomSourceAsk{Name: wire.RoomSourceRuns, Purpose: "Judge whether the week's conversations reached their goal."}
 
@@ -200,7 +228,7 @@ var reviewAsk = wire.RoomSourceAsk{Name: wire.RoomSourceRuns, Purpose: "Judge wh
 // ticked) as a room package, with the runs source asked for.
 func roomForm(d wire.RoomComponentDraft, name string) contentpkg.Form {
 	f := contentpkg.Form{Kind: "room", Name: name, DisplayName: "Weekly review", Description: "Reviews the week.",
-		Welcome: "Turn the daily summary on.", Channels: d.Channels, Schedules: d.Schedules, Sources: []wire.RoomSourceAsk{reviewAsk},
+		Welcome: "Turn the daily summary on.", Sections: d.Sections, Channels: d.Channels, Schedules: d.Schedules, Sources: []wire.RoomSourceAsk{reviewAsk},
 		QuickPrompts: []contentpkg.QuickPrompt{{Title: "Weekly recap", Ref: "review-prompts/recap"}, {Title: "Misses", Prompt: "What failed this week?"}}}
 	if d.Expert != nil {
 		f.Requires.Expert = d.Expert.Ref
@@ -264,7 +292,7 @@ func TestCreateRoomFromComponent(t *testing.T) {
 	if r.status != http.StatusCreated || json.Unmarshal(r.body, &got) != nil {
 		t.Fatalf("create-room = %d %s", r.status, r.body)
 	}
-	if got.RoomID != "jacks-review" || got.From != "weekly-review@1.0.0" || !slices.Equal(got.Channels, []string{"reports"}) || got.Expert != "Reviewer" ||
+	if got.RoomID != "jacks-review" || got.From != "weekly-review@1.0.0" || !slices.Equal(got.Channels, []string{"reports"}) || !slices.Equal(got.Sections, []string{"Work"}) || got.Expert != "Reviewer" ||
 		!slices.Equal(got.Sources, []wire.RoomSourceAsk{reviewAsk}) || len(got.Apps) != 1 || len(got.Schedules) != 3 ||
 		!slices.Equal(got.WaitingForAgent, []string{"Status?"}) {
 		t.Fatalf("reply = %+v", got)
@@ -284,10 +312,21 @@ func TestCreateRoomFromComponent(t *testing.T) {
 		t.Fatal("the package's author was added to the installer's room")
 	}
 	channels, _ := e.b.Channel.ListChannels(e.ctx(), "jacks-review")
+	sections, _ := e.b.Channel.ListSections(e.ctx(), "jacks-review")
+	if len(sections) != 1 || sections[0].Name != "Work" || sections[0].Rules != "One thread per review." || sections[0].Visibility != wire.SectionOpen ||
+		!slices.Equal(sections[0].Owners, []string{"jack"}) {
+		t.Fatalf("the new room's sections = %+v", sections)
+	}
 	reports := ""
 	for _, c := range channels {
 		if c.Name == "reports" {
 			reports = c.ChannelID
+			// The package's setup, made as jack: his channel, in Work, no
+			// default agent.
+			if c.Purpose != reportsChannel.Purpose || c.Rules != reportsChannel.Rules || c.SectionID != sections[0].SectionID || c.OwnerID != "jack" ||
+				c.Settings != (wire.ChannelSettings{WhoPosts: wire.ChannelPostersAdmins, SlowModeSeconds: 30}) {
+				t.Fatalf("#reports in the new room = %+v", c)
+			}
 		}
 	}
 	scheds, _ := e.b.Schedules.ListSchedules(e.ctx(), "jacks-review")

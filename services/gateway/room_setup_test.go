@@ -282,7 +282,7 @@ func TestSaveRoomComponentThroughRoomTools(t *testing.T) {
 	}
 	v, _ := e.b.ContentComponents.GetContentComponentVersion(e.ctx(), c.ID, "1.0.0")
 	var m contentpkg.Manifest
-	if err := json.Unmarshal(v.ManifestJSON, &m); err != nil || m.Welcome != text || m.Requires.Expert != "reviewer@^1" || len(m.Schedules) != 3 || !slices.Equal(m.Channels, []string{"reports"}) {
+	if err := json.Unmarshal(v.ManifestJSON, &m); err != nil || m.Welcome != text || m.Requires.Expert != "reviewer@^1" || len(m.Schedules) != 3 || !slices.Equal(m.Channels, []wire.RoomPackageChannel{reportsChannel}) || len(m.Sections) != 1 {
 		t.Fatalf("the package = %+v, %v", m, err)
 	}
 

@@ -47,7 +47,7 @@ export function roomPackageTexts(f: RoomSaveForm): Record<string, string> {
   f.schedules.forEach((s, i) => {
     if (isOn(f, partKey("schedule", i))) out[`schedule:${i}`] = s.text;
   });
-  for (const c of f.channels) if (isOn(f, partKey("channel", c))) out[`channel:${c}`] = c;
+  for (const c of f.channels) if (isOn(f, partKey("channel", c.name))) out[`channel:${c.name}`] = [c.name, c.purpose, c.rules].filter(Boolean).join(": ");
   for (const s of f.sources) out[`source:${s.name}`] = s.purpose;
   return out;
 }

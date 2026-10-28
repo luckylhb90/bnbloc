@@ -35,7 +35,8 @@ const draft: RoomComponentDraft = {
   description: "Reviews the week.",
   welcome: "Turn the summary on.",
   quickPrompts: [{ title: "Recap", prompt: "Recap the week" }],
-  channels: ["reports", "notes"],
+  sections: [{ name: "Work" }],
+  channels: [{ name: "reports", section: "Work", settings: {} }, { name: "notes", settings: {} }],
   schedules: [aiTask, notice],
   expert: { id: "cc_e", name: "reviewer", displayName: "Reviewer", version: "1.2.0", ref: "reviewer@^1" },
   skills: [{ id: "cc_s", name: "charts", version: "2.0.0", ref: "charts@^2" }],
@@ -61,12 +62,12 @@ const draft: RoomComponentDraft = {
   eq([form.welcome, form.quickPrompts], ["Turn the summary on.", [{ title: "Recap", prompt: "Recap the week" }]], "the room's welcome and quick prompts");
   eq(roomSaveFromDraft({ ...draft, sources: [{ name: "runs", purpose: "Judge outcomes." }] }).sources, [{ name: "runs", purpose: "Judge outcomes." }], "the room's asks");
   eq(form.requires, { expert: "reviewer@^1", skills: ["charts@^2"], prompts: ["review-prompts@^1"], mcp: [{ name: "browser" }], permissions: ["mcp.stdio"] }, "requires: the tools its runs had too");
-  eq(form.room, { channels: ["reports", "notes"], schedules: [aiTask, notice], apps: ["lunch-poll@^1"], appSnapshots: [], files: [], sources: [] }, "room setup");
+  eq(form.room, { sections: [{ name: "Work" }], channels: [{ name: "reports", section: "Work", settings: {} }, { name: "notes", settings: {} }], schedules: [aiTask, notice], apps: ["lunch-poll@^1"], appSnapshots: [], files: [], sources: [] }, "room setup");
   const asked = roomContentForm({ ...f, sources: [{ name: "runs", purpose: " Judge outcomes. " }] });
   const payload = formPayload({ ...asked, welcome: " Hi " });
   eq(
     [payload.kind, payload.welcome, payload.channels, payload.apps, payload.sources, (payload.requires as Record<string, unknown>).expert, "instructions" in payload],
-    ["room", "Hi", ["reports", "notes"], ["lunch-poll@^1"], [{ name: "runs", purpose: "Judge outcomes." }], "reviewer@^1", false],
+    ["room", "Hi", [{ name: "reports", section: "Work", settings: {} }, { name: "notes", settings: {} }], ["lunch-poll@^1"], [{ name: "runs", purpose: "Judge outcomes." }], "reviewer@^1", false],
     "the payload is a room package's: no instructions",
   );
 }
@@ -80,7 +81,7 @@ const draft: RoomComponentDraft = {
   f = toggleRoomPart(f, partKey("schedule", 1), false);
   f = toggleRoomPart(f, partKey("channel", "notes"), false);
   const form = roomContentForm(f);
-  eq([form.requires.expert, form.requires.skills, form.room?.schedules, form.room?.channels], [undefined, [], [aiTask], ["reports"]], "unticked parts stay out");
+  eq([form.requires.expert, form.requires.skills, form.room?.schedules, form.room?.channels.map((c) => c.name)], [undefined, [], [aiTask], ["reports"]], "unticked parts stay out");
   const dropped = toggleRoomPart(f, partKey("channel", "reports"), false);
   assert((roomSaveProblem(dropped) ?? "").includes("#reports"), "a kept schedule in a dropped channel is refused");
   eq(roomSaveProblem(toggleRoomPart(dropped, partKey("schedule", 0), false)), null, "dropping the schedule too saves");
@@ -104,7 +105,7 @@ const draft: RoomComponentDraft = {
     welcome: "Hello",
     quickPrompts: [{ title: "Plan", prompt: "Plan it." }],
     requires: { expert: "reviewer@^1", prompts: ["review-prompts@^1"], mcp: [{ name: "browser" }], permissions: ["mcp.stdio"] },
-    room: { channels: ["reports"], schedules: [aiTask], apps: [], appSnapshots: [{ title: "Board", dir: "apps/board" }], files: [{ name: "faq.md", path: "files/faq.md", sizeBytes: 9 }], sources: [{ name: "runs", purpose: "Judge outcomes." }] },
+    room: { sections: [], channels: [{ name: "reports", settings: {} }], schedules: [aiTask], apps: [], appSnapshots: [{ title: "Board", dir: "apps/board" }], files: [{ name: "faq.md", path: "files/faq.md", sizeBytes: 9 }], sources: [{ name: "runs", purpose: "Judge outcomes." }] },
   } as unknown as ContentComponent;
   const form = roomContentForm(roomSaveFromComponent(c));
   eq(
@@ -117,8 +118,8 @@ const draft: RoomComponentDraft = {
 // The summary.
 eq(roomSetupSummary(undefined, {}), "An empty room", "nothing set up");
 eq(
-  roomSetupSummary({ channels: ["a"], schedules: [aiTask, notice], apps: ["x@^1"], appSnapshots: [{ title: "b", dir: "apps/b" }], files: [{ name: "f", path: "files/f", sizeBytes: 1 }], sources: [] }, { expert: "e@^1", skills: ["s@^1"], prompts: ["p@^1"] }),
-  "1 channel · 2 scheduled tasks · an expert · 2 packs · 2 apps · 1 file",
+  roomSetupSummary({ sections: [{ name: "S" }], channels: [{ name: "a", section: "S", settings: {} }], schedules: [aiTask, notice], apps: ["x@^1"], appSnapshots: [{ title: "b", dir: "apps/b" }], files: [{ name: "f", path: "files/f", sizeBytes: 1 }], sources: [] }, { expert: "e@^1", skills: ["s@^1"], prompts: ["p@^1"] }),
+  "1 section · 1 channel · 2 scheduled tasks · an expert · 2 packs · 2 apps · 1 file",
   "summary",
 );
 
@@ -181,7 +182,7 @@ eq(
     kind: "room",
     name: "desk",
     requires: {},
-    room: { channels: [], schedules: [], apps: [], appSnapshots: [{ title: "Board", dir: "apps/board" }], files: [{ name: "faq.md", path: "files/faq.md", sizeBytes: 9 }], sources: [] },
+    room: { sections: [], channels: [], schedules: [], apps: [], appSnapshots: [{ title: "Board", dir: "apps/board" }], files: [{ name: "faq.md", path: "files/faq.md", sizeBytes: 9 }], sources: [] },
   } as unknown as ContentComponent;
   const f = roomSaveFromComponent(c);
   eq([roomContentForm(f).room?.appSnapshots, roomContentForm(f).room?.files], [[{ title: "Board", dir: "apps/board" }], [{ name: "faq.md", path: "files/faq.md", sizeBytes: 9 }]], "kept by folder and path");

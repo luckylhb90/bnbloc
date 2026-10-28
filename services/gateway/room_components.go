@@ -85,7 +85,8 @@ func (s *Service) roomDraft(ctx context.Context, claims auth.Claims, roomID stri
 	}
 	title := firstNonEmpty(room.Name, roomID)
 	d := wire.RoomComponentDraft{RoomID: roomID, Name: firstNonEmpty(contentpkg.NameFrom(title), "room"), DisplayName: title,
-		Description: room.Description, Welcome: room.Welcome, QuickPrompts: room.QuickPrompts, Channels: []string{}, Schedules: []wire.RoomPackageSchedule{},
+		Description: room.Description, Welcome: room.Welcome, QuickPrompts: room.QuickPrompts,
+		Sections: []wire.RoomPackageSection{}, Channels: []wire.RoomPackageChannel{}, Schedules: []wire.RoomPackageSchedule{},
 		Skills: []wire.RoomDraftPart{}, Prompts: []wire.RoomDraftPart{}, Apps: []wire.RoomDraftPart{}, MadeApps: []wire.RoomDraftDeliverable{},
 		Files: []wire.RoomDraftDeliverable{}, Tools: []wire.RoomDraftTool{}, Sources: []wire.RoomSourceAsk{}, Left: []string{}}
 	if d.QuickPrompts == nil {
@@ -94,22 +95,9 @@ func (s *Service) roomDraft(ctx context.Context, claims auth.Claims, roomID stri
 	if err := s.draftSources(ctx, claims, roomID, &d); err != nil {
 		return d, err
 	}
-	var channels struct {
-		Channels []struct {
-			ChannelID string `json:"channelId"`
-			Name      string `json:"name"`
-			IsDefault bool   `json:"isDefault"`
-		} `json:"channels"`
-	}
-	if err := s.roomBackendDo(ctx, backendHTTP, http.MethodGet, path+"/channels", "", nil, claims.Subject, claims.Tenant, &channels); err != nil {
+	names, err := s.draftLayout(ctx, claims, roomID, &d)
+	if err != nil {
 		return d, err
-	}
-	names := map[string]string{} // channel id -> name, the default channel's ""
-	for _, c := range channels.Channels {
-		if !c.IsDefault {
-			names[c.ChannelID] = c.Name
-			d.Channels = append(d.Channels, c.Name)
-		}
 	}
 	if err := s.draftSchedules(ctx, claims, roomID, names, &d); err != nil {
 		return d, err
@@ -128,6 +116,56 @@ func (s *Service) roomDraft(ctx context.Context, claims auth.Claims, roomID stri
 	d.Left = append(d.Left, "members and their agents: a room package names no people, whoever installs it invites them",
 		"the data of its apps: an app is copied with a fresh, empty data space")
 	return d, nil
+}
+
+// draftLayout captures the room's channel layout (C25): its open sections
+// and its live channels but the default one, each channel with its
+// purpose, rules, section (by name) and the settings a package holds (who
+// posts, agents admitted, slow mode). Archived channels, members-only
+// sections and their channels, a channel's default agent (someone's agent)
+// and every member's following are not captured; what was left is said in
+// Left. It returns the captured channels' names by id (the default
+// channel's "").
+func (s *Service) draftLayout(ctx context.Context, claims auth.Claims, roomID string, d *wire.RoomComponentDraft) (map[string]string, error) {
+	var list wire.ChannelList
+	if err := s.roomBackendDo(ctx, backendHTTP, http.MethodGet, "/v1/rooms/"+url.PathEscape(roomID)+"/channels", "", nil, claims.Subject, claims.Tenant, &list); err != nil {
+		return nil, err
+	}
+	sections := map[string]string{} // section id -> name, open ones only
+	membersOnly := map[string]bool{}
+	for _, sec := range list.Sections {
+		if sec.Visibility != wire.SectionOpen {
+			membersOnly[sec.SectionID] = true
+			continue
+		}
+		sections[sec.SectionID] = sec.Name
+		d.Sections = append(d.Sections, wire.RoomPackageSection{Name: sec.Name, Rules: sec.Rules})
+	}
+	names := map[string]string{}
+	var private, agents []string
+	for _, c := range list.Channels {
+		if c.IsDefault {
+			continue
+		}
+		if membersOnly[c.SectionID] {
+			private = append(private, "#"+c.Name)
+			continue
+		}
+		if c.Settings.DefaultAgent != nil {
+			agents = append(agents, "#"+c.Name)
+		}
+		names[c.ChannelID] = c.Name
+		d.Channels = append(d.Channels, wire.RoomPackageChannel{Name: c.Name, Purpose: c.Purpose, Rules: c.Rules, Section: sections[c.SectionID],
+			Settings: store.PackageChannelSettings(c.Settings)})
+	}
+	if len(private) > 0 {
+		d.Left = append(d.Left, "the members-only sections and their channels ("+strings.Join(private, ", ")+"): a package makes open sections only")
+	}
+	if len(agents) > 0 {
+		d.Left = append(d.Left, "the default agent of "+strings.Join(agents, ", ")+": a package names no one's agent, the installer sets their own")
+	}
+	d.Left = append(d.Left, "archived channels and who follows each channel")
+	return names, nil
 }
 
 // draftSchedules captures the room's AI tasks, notices to its members and
@@ -304,14 +342,18 @@ func (s *Service) installRoom(ctx context.Context, claims auth.Claims, c store.C
 	m := pkg.Manifest
 	roomID := firstNonEmpty(in.RoomID, ids.New("room-"))
 	reply = wire.RoomInstallReply{RoomID: roomID, Name: firstNonEmpty(in.Name, m.DisplayName, c.Name), ComponentID: c.ID, From: c.Name + "@" + v.Version,
-		Channels: []string{}, Schedules: []string{}, WaitingForAgent: []string{}, Enabled: []string{}, Apps: []string{}, MadeApps: []string{}, Files: []string{}, Skipped: []string{},
+		Sections: []string{}, Channels: []string{}, Schedules: []string{}, WaitingForAgent: []string{}, Enabled: []string{}, Apps: []string{}, MadeApps: []string{}, Files: []string{}, Skipped: []string{},
 		Sources: []wire.RoomSourceAsk{}, Tools: []string{}, ToolsToAdd: []string{}}
 	prompts, err := s.roomQuickPrompts(ctx, claims, m, &reply)
 	if err != nil {
 		return reply, err
 	}
-	create, _ := json.Marshal(map[string]any{"roomId": roomID, "name": reply.Name, "description": m.Description, "visibility": in.Visibility,
-		"welcome": m.Welcome, "quickPrompts": prompts})
+	body := map[string]any{"roomId": roomID, "name": reply.Name, "description": firstNonEmpty(strings.TrimSpace(in.Description), m.Description), "visibility": in.Visibility,
+		"welcome": m.Welcome, "quickPrompts": prompts}
+	if in.Previewable != nil {
+		body["previewable"] = *in.Previewable
+	}
+	create, _ := json.Marshal(body)
 	if err := s.roomBackendCall(ctx, http.MethodPost, "/v1/rooms", claims.Subject, claims.Tenant, create); err != nil {
 		return reply, err
 	}
@@ -336,19 +378,9 @@ func (s *Service) installRoom(ctx context.Context, claims auth.Claims, c store.C
 			}
 		}
 	}()
-	channelIDs := map[string]string{}
-	for _, name := range m.Channels {
-		var ch struct {
-			ChannelID string `json:"channelId"`
-			Name      string `json:"name"`
-		}
-		body, _ := json.Marshal(map[string]string{"name": name})
-		if err := s.roomBackendDo(ctx, backendHTTP, http.MethodPost, "/v1/rooms/"+url.PathEscape(roomID)+"/channels", "application/json", body,
-			claims.Subject, claims.Tenant, &ch); err != nil {
-			return reply, fmt.Errorf("create channel %q: %w", name, err)
-		}
-		channelIDs[strings.ToLower(name)] = ch.ChannelID
-		reply.Channels = append(reply.Channels, ch.Name)
+	channelIDs, err := s.installLayout(ctx, claims, roomID, m.Sections, m.Channels, &reply)
+	if err != nil {
+		return reply, err
 	}
 	if err := s.installSchedules(ctx, claims, roomID, m.Schedules, channelIDs, &reply); err != nil {
 		return reply, err
@@ -406,6 +438,52 @@ func (s *Service) roomQuickPrompts(ctx context.Context, claims auth.Claims, m co
 		out = append(out, wire.RoomQuickPrompt{Title: firstNonEmpty(q.Title, ref.Prompt.Title), Prompt: ref.Prompt.Body})
 	}
 	return out, nil
+}
+
+// installLayout makes the package's channel layout in the new room (C25)
+// as the installer, through the room service's own routes and checks:
+// each section (open), then each channel with its purpose in its section,
+// then the channel's position (the package's order), rules and settings
+// (the installer owns the new room, so the routes allow it). It returns the
+// channels' ids by lower-cased name, for the schedules.
+func (s *Service) installLayout(ctx context.Context, claims auth.Claims, roomID string, sections []wire.RoomPackageSection, channels []wire.RoomPackageChannel, reply *wire.RoomInstallReply) (map[string]string, error) {
+	base := "/v1/rooms/" + url.PathEscape(roomID)
+	sectionIDs := map[string]string{}
+	for i, sec := range sections {
+		var made wire.RoomSection
+		body, _ := json.Marshal(wire.SectionCreateRequest{Name: sec.Name, Rules: sec.Rules, Position: i, Visibility: wire.SectionOpen})
+		if err := s.roomBackendDo(ctx, backendHTTP, http.MethodPost, base+"/sections", "application/json", body, claims.Subject, claims.Tenant, &made); err != nil {
+			return nil, fmt.Errorf("create section %q: %w", sec.Name, err)
+		}
+		sectionIDs[strings.ToLower(sec.Name)] = made.SectionID
+		reply.Sections = append(reply.Sections, made.Name)
+	}
+	channelIDs := map[string]string{}
+	for i, c := range channels {
+		var ch wire.RoomChannel
+		body, _ := json.Marshal(wire.ChannelCreateRequest{Name: c.Name, Purpose: c.Purpose, SectionID: sectionIDs[strings.ToLower(c.Section)]})
+		if err := s.roomBackendDo(ctx, backendHTTP, http.MethodPost, base+"/channels", "application/json", body, claims.Subject, claims.Tenant, &ch); err != nil {
+			return nil, fmt.Errorf("create channel %q: %w", c.Name, err)
+		}
+		channelIDs[strings.ToLower(c.Name)] = ch.ChannelID
+		reply.Channels = append(reply.Channels, ch.Name)
+		// The package's order is the channels' shared order (position).
+		set, position := c.Settings, i
+		patch := wire.ChannelPatchRequest{Position: &position}
+		if c.Rules != "" {
+			patch.Rules = &c.Rules
+		}
+		if set != (wire.RoomPackageChannelSettings{}) {
+			settings := store.PackagedChannelSettings(set)
+			patch.Settings = &settings
+		}
+		body, _ = json.Marshal(patch)
+		if err := s.roomBackendDo(ctx, backendHTTP, http.MethodPatch, base+"/channels/"+url.PathEscape(ch.ChannelID), "application/json", body,
+			claims.Subject, claims.Tenant, nil); err != nil {
+			return nil, fmt.Errorf("set up channel %q: %w", c.Name, err)
+		}
+	}
+	return channelIDs, nil
 }
 
 // installSchedules creates the package's schedules in the room, disabled,

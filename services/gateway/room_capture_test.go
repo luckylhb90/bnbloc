@@ -238,7 +238,7 @@ func TestCreateRoomFromComponentIsAtomic(t *testing.T) {
 	board := e.pollSite()
 	faq := e.roomFile(e.roomID, "faq.md", "text/markdown", "# FAQ\n")
 	big := e.roomFile(e.roomID, "big.txt", "text/plain", strings.Repeat("x", 4096))
-	f := contentpkg.Form{Kind: "room", Name: "doomed-desk", Instructions: "Answer tickets.", Channels: []string{"reports"},
+	f := contentpkg.Form{Kind: "room", Name: "doomed-desk", Instructions: "Answer tickets.", Channels: []wire.RoomPackageChannel{{Name: "reports"}},
 		Schedules: []wire.RoomPackageSchedule{{Channel: "reports", Text: "Summarize.", Recipient: wire.ScheduleRecipient{Kind: wire.ScheduleRecipientAI},
 			Recurrence: wire.ScheduleRecurrence{Kind: wire.RecurDaily, Time: "09:00"}, Timezone: "UTC"}}}
 	r := e.call(http.MethodPost, "/v1/content-components", map[string]any{"form": f, "include": wire.RoomInclude{RoomID: e.roomID, Apps: []string{board}, Files: []string{faq, big}}}, e.as("maya"))

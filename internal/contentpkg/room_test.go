@@ -28,7 +28,8 @@ func roomBundle(t *testing.T, extra map[string]any, files map[string]string) []b
 	m := map[string]any{"kind": KindRoom, "name": "weekly-review", "version": "1.0.0", "displayName": "Weekly review",
 		"description": "Reviews the week's work.", "welcome": "Turn the schedule on to start.",
 		"quickPrompts": []map[string]any{{"title": "Plan", "prompt": "Plan the week."}, {"ref": "review-prompts/recap"}},
-		"channels":     []string{"reports"}, "schedules": []map[string]any{aiTask()},
+		"sections":     []map[string]any{{"name": "Work", "rules": "One thread per review."}},
+		"channels":     []map[string]any{chanOf("reports", "Work")}, "schedules": []map[string]any{aiTask()},
 		"requires": map[string]any{"expert": "reviewer@^1", "skills": []string{"charts@^2"}, "prompts": []string{"review-prompts@^1"}},
 		"apps":     []string{"triage-board@^1"}, "sources": []map[string]any{runsAsk()}}
 	for k, v := range extra {
@@ -59,7 +60,8 @@ func TestRoomPackageValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	spec := p.Manifest.RoomSpec()
-	if spec == nil || spec.Channels[0] != "reports" || spec.Schedules[0].Recipient.Kind != wire.ScheduleRecipientAI ||
+	if spec == nil || spec.Channels[0].Name != "reports" || spec.Channels[0].Section != "Work" || spec.Channels[0].Settings.SlowModeSeconds != 30 ||
+		spec.Sections[0] != (wire.RoomPackageSection{Name: "Work", Rules: "One thread per review."}) || spec.Schedules[0].Recipient.Kind != wire.ScheduleRecipientAI ||
 		spec.Apps[0] != "triage-board@^1" || spec.Sources[0] != (wire.RoomSourceAsk{Name: wire.RoomSourceRuns, Purpose: "Judge whether conversations reached their goal."}) || p.Manifest.Requires.Expert != "reviewer@^1" {
 		t.Fatalf("room spec = %+v (requires %+v)", spec, p.Manifest.Requires)
 	}
@@ -126,10 +128,21 @@ func TestRoomPackageValidation(t *testing.T) {
 		})}, nil, "recurs"},
 		{"no timezone", map[string]any{"schedules": with("timezone", func(s map[string]any) { delete(s, "timezone") })}, nil, "timezone"},
 		{"a channel not listed", map[string]any{"schedules": with("channel", func(s map[string]any) { s["channel"] = "elsewhere" })}, nil, "not one of the package's channels"},
-		{"the default channel listed", map[string]any{"channels": []string{"General"}}, nil, "every room has it"},
-		{"a channel twice", map[string]any{"channels": []string{"reports", "Reports"}}, nil, "twice"},
-		{"a padded channel", map[string]any{"channels": []string{" reports"}}, nil, "surrounding spaces"},
-		{"too many channels", map[string]any{"channels": names("c", maxRoomChannels+1), "schedules": nil}, nil, "at most"},
+		{"the default channel listed", map[string]any{"channels": []map[string]any{chanOf("General", "")}}, nil, "every room has it"},
+		{"a channel twice", map[string]any{"channels": []map[string]any{chanOf("reports", ""), chanOf("Reports", "")}}, nil, "twice"},
+		{"a padded channel", map[string]any{"channels": []map[string]any{chanOf(" reports", "")}}, nil, "surrounding spaces"},
+		{"too many channels", map[string]any{"channels": chans(names("c", maxRoomChannels+1)), "schedules": nil}, nil, "at most"},
+		{"a channel by name alone", map[string]any{"channels": []string{"reports"}}, nil, "channels"},
+		{"a channel in a section not made", map[string]any{"channels": []map[string]any{chanOf("reports", "Elsewhere")}}, nil, "not one of the package's sections"},
+		{"a purpose past its bound", map[string]any{"channels": []map[string]any{{"name": "reports", "purpose": strings.Repeat("p", wire.MaxChannelPurpose+1)}}}, nil, "longer than"},
+		{"a purpose on two lines", map[string]any{"channels": []map[string]any{{"name": "reports", "purpose": "a\nb"}}}, nil, "one line"},
+		{"channel rules past their bound", map[string]any{"channels": []map[string]any{{"name": "reports", "rules": strings.Repeat("r", wire.MaxChannelRules+1)}}}, nil, "longer than"},
+		{"an unknown poster", map[string]any{"channels": []map[string]any{{"name": "reports", "settings": map[string]any{"whoPosts": "owners"}}}}, nil, "whoPosts"},
+		{"a negative slow mode", map[string]any{"channels": []map[string]any{{"name": "reports", "settings": map[string]any{"slowModeSeconds": -1}}}}, nil, "slowModeSeconds"},
+		{"a section twice", map[string]any{"sections": []map[string]any{{"name": "Work"}, {"name": "work"}}}, nil, "twice"},
+		{"a padded section", map[string]any{"sections": []map[string]any{{"name": "Work "}}, "channels": nil, "schedules": nil}, nil, "surrounding spaces"},
+		{"section rules past their bound", map[string]any{"sections": []map[string]any{{"name": "Work", "rules": strings.Repeat("r", wire.MaxChannelRules+1)}}}, nil, "longer than"},
+		{"too many sections", map[string]any{"sections": sects(names("s", maxRoomSections+1)), "channels": nil, "schedules": nil}, nil, "at most"},
 		{"an unknown source", map[string]any{"sources": []map[string]any{{"name": "mail", "purpose": "x"}}}, nil, "source \"mail\""},
 		{"a source twice", map[string]any{"sources": []map[string]any{runsAsk(), runsAsk()}}, nil, "twice"},
 		{"a source without its purpose", map[string]any{"sources": []map[string]any{{"name": wire.RoomSourceRuns, "purpose": " "}}}, nil, "say its purpose"},
@@ -153,6 +166,24 @@ func TestRoomPackageValidation(t *testing.T) {
 	}
 }
 
+// chanOf is a package channel in a section ("" the top level), with a
+// purpose, rules and slow mode.
+func chanOf(name, section string) map[string]any {
+	return map[string]any{"name": name, "purpose": "The week's reports.", "rules": "One report a post.", "section": section,
+		"settings": map[string]any{"slowModeSeconds": 30}}
+}
+
+// chans and sects are package channels and sections by name.
+func chans(ns []string) []map[string]any {
+	out := make([]map[string]any, len(ns))
+	for i, n := range ns {
+		out[i] = map[string]any{"name": n}
+	}
+	return out
+}
+
+func sects(ns []string) []map[string]any { return chans(ns) }
+
 // names are n distinct names with a prefix.
 func names(prefix string, n int) []string {
 	out := make([]string, n)
@@ -166,7 +197,8 @@ func names(prefix string, n int) []string {
 // from a manifest or a form.
 func TestRoomFieldsOnlyInRoomPackages(t *testing.T) {
 	for _, extra := range []map[string]any{
-		{"channels": []string{"reports"}},
+		{"channels": []map[string]any{chanOf("reports", "")}},
+		{"sections": []map[string]any{{"name": "Work"}}},
 		{"sources": []map[string]any{runsAsk()}},
 		{"apps": []string{"board@^1"}},
 		{"schedules": []map[string]any{aiTask()}},
@@ -176,7 +208,7 @@ func TestRoomFieldsOnlyInRoomPackages(t *testing.T) {
 			t.Errorf("an assist with %v: err = %v", extra, err)
 		}
 	}
-	f := Form{Kind: "expert", Name: "x", Instructions: "Do it.", Channels: []string{"reports"}}
+	f := Form{Kind: "expert", Name: "x", Instructions: "Do it.", Channels: []wire.RoomPackageChannel{{Name: "reports"}}}
 	if _, _, err := Build(f, "1.0.0", Options{}, nil); err == nil || !strings.Contains(err.Error(), "belong to a room package") {
 		t.Errorf("an expert form with channels: err = %v", err)
 	}
@@ -185,7 +217,8 @@ func TestRoomFieldsOnlyInRoomPackages(t *testing.T) {
 // The form lays a room package out as its manifest alone.
 func TestRoomPackageFromForm(t *testing.T) {
 	f := Form{Kind: "room", Name: "weekly-review", Description: "Reviews the week.", Welcome: " Hello ",
-		Requires: Requires{Expert: "reviewer@^1"}, Channels: []string{" reports "}, Sources: []wire.RoomSourceAsk{{Name: wire.RoomSourceRuns, Purpose: " Review outcomes. "}},
+		Requires: Requires{Expert: "reviewer@^1"}, Sections: []wire.RoomPackageSection{{Name: " Work ", Rules: " Be brief. "}},
+		Channels: []wire.RoomPackageChannel{{Name: " reports ", Purpose: " The reports. ", Section: " Work ", Settings: wire.RoomPackageChannelSettings{WhoPosts: wire.ChannelPostersAdmins}}}, Sources: []wire.RoomSourceAsk{{Name: wire.RoomSourceRuns, Purpose: " Review outcomes. "}},
 		Schedules: []wire.RoomPackageSchedule{{Text: "Go.", Recipient: wire.ScheduleRecipient{Kind: wire.ScheduleRecipientAI},
 			Recurrence: wire.ScheduleRecurrence{Kind: wire.RecurDaily, Time: "09:00"}, Timezone: "UTC", Channel: "reports"}}}
 	p, _, err := Build(f, "1.0.0", Options{}, nil)
@@ -195,7 +228,8 @@ func TestRoomPackageFromForm(t *testing.T) {
 	if got := p.Bundle.Paths(); len(got) != 1 || got[0] != ManifestFile {
 		t.Fatalf("files = %v", got)
 	}
-	if m := p.Manifest; m.Welcome != "Hello" || m.Channels[0] != "reports" || m.Requires.Expert != "reviewer@^1" || len(m.Schedules) != 1 || m.Sources[0].Purpose != "Review outcomes." {
+	if m := p.Manifest; m.Welcome != "Hello" || m.Channels[0] != (wire.RoomPackageChannel{Name: "reports", Purpose: "The reports.", Section: "Work", Settings: wire.RoomPackageChannelSettings{WhoPosts: wire.ChannelPostersAdmins}}) ||
+		m.Sections[0] != (wire.RoomPackageSection{Name: "Work", Rules: "Be brief."}) || m.Requires.Expert != "reviewer@^1" || len(m.Schedules) != 1 || m.Sources[0].Purpose != "Review outcomes." {
 		t.Fatalf("manifest = %+v", m)
 	}
 	f.Instructions = "Be a reviewer."

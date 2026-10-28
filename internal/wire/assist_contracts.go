@@ -106,6 +106,12 @@ var AssistContracts = []AssistContract{
 	}},
 	{Task: AssistTaskPlanRoom, Output: AssistOutputJSON, Fields: []AssistContractField{
 		{Name: "roomId"}, {Name: "name"}, {Name: "description"}, {Name: "expert"}, {Name: "skills", Type: AssistFieldList}, {Name: "firstMessage"},
+		// The channel layout it proposes (docs/prd/2026-10-28-channels-and-
+		// threads.md C25), in a room package's shape: sections, then
+		// channels each in a section by name ("" the top level). The web
+		// shows it before anything is made.
+		{Name: "sections", Type: AssistFieldItems, Item: []AssistContractField{{Name: "name"}, {Name: "rules"}}},
+		{Name: "channels", Type: AssistFieldItems, Item: []AssistContractField{{Name: "name"}, {Name: "purpose"}, {Name: "section"}}},
 	}},
 	{Task: AssistTaskDraftSchedule, Output: AssistOutputJSON, Fields: []AssistContractField{
 		{Name: "text"},

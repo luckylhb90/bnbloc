@@ -22,7 +22,7 @@ servers content requires, see "MCP tool components"):
 | Prompt pack | `bnbloc.prompt.package/v1` | `component.json` (its `prompts`), optional `README.md` (see "Prompt packs") |
 | Work | `bnbloc.work.package/v1` | `component.json` (`type`, `file`, `recipe`), a site folder (`index.html` at the root or `dist/index.html`) or one file at the root, optional cover (`cover.png`, `.webp`, `.jpg` or `.jpeg`), `README.md` and the recipe's `references/` (see "Works") |
 | Assist | `bnbloc.assist.package/v1` | `component.json` (`output`, `fields`, `context`), `INSTRUCTIONS.md` (the task's system prompt), optional `README.md` (see [AI assist](ai-assist.md)) |
-| Room | `bnbloc.room.package/v1` | `component.json` (`welcome`, `quickPrompts`, `channels`, `schedules`, `apps`, `appSnapshots`, `files`, `sources`, `requires.expert`), optional `README.md` and `INSTRUCTIONS.md`, the apps made in the room under `apps/<name>/` and its files under `files/` (see "Room packages") |
+| Room | `bnbloc.room.package/v1` | `component.json` (`welcome`, `quickPrompts`, `sections`, `channels`, `schedules`, `apps`, `appSnapshots`, `files`, `sources`, `requires.expert`), optional `README.md` and `INSTRUCTIONS.md`, the apps made in the room under `apps/<name>/` and its files under `files/` (see "Room packages") |
 
 A package is a plain ustar bundle (`internal/tarbundle`, limit profile
 `tarbundle.ContentLimits`: 8 MiB, 512 files; a prompt pack's own profile,
@@ -247,8 +247,15 @@ skew, and a later release drops it).
   `README.md`, and what it carries, below): `description` (the envelope's, within a room's
   bound: it becomes the room's description), `welcome` and `quickPrompts`
   (an expert's rules: text, or a ref to a prompt of a required pack),
-  `channels` (names, never the default channel, unique regardless of
-  case), `schedules` (`wire.RoomPackageSchedule`: `channel`, `text`,
+  the channel layout the new room starts with
+  (docs/prd/2026-10-28-channels-and-threads.md C25): `sections`
+  (`wire.RoomPackageSection`: `name`, `rules`; open sections, at most 10)
+  and `channels` (`wire.RoomPackageChannel`: `name`, never the default
+  channel, unique regardless of case; `purpose` and `rules` within the room
+  service's bounds `wire.MaxChannelPurpose` / `wire.MaxChannelRules`;
+  `section`, one of the package's by name, "" the top level; `settings`:
+  `whoPosts`, `noAgents`, `slowModeSeconds`, never a default agent, which
+  names someone's agent), `schedules` (`wire.RoomPackageSchedule`: `channel`, `text`,
   `recipient`, `recurrence`, `timezone`), `requires.expert` (the room
   expert, one `name@range`), `requires.skills`/`prompts` (packs turned on
   in the room), `requires.mcp` (as for any content), `apps` (works by
@@ -342,7 +349,11 @@ skew, and a later release drops it).
   room's owner or an admin, `roomEditorClaims`;
   `services/gateway/room_components.go`) reads the room through the
   backends' own routes as that member: its name and description, its
-  channels, its schedules (realtime) that a package may hold, the room
+  channel layout (`draftLayout`: its open sections and live channels but
+  the default one, each with its purpose, rules, section and the settings
+  a package holds; archived channels, members-only sections, a channel's
+  default agent and who follows what are said in `left`), its schedules
+  (realtime) that a package may hold, the room
   expert and the room's skill and prompt packs (each one the member can
   see, at the version in effect, as `name@^major`, `contentpkg.MajorRef`),
   and its apps that came from a work (the app's `app-copy` use names the
@@ -383,7 +394,11 @@ skew, and a later release drops it).
   (`wire.RoomInstallRequest`, room creation's permission; a room package
   visible to the caller) makes the room through the same routes a member's
   clicks take, as the installer: `POST /v1/rooms` (the package's
-  description), its channels, its schedules through realtime's
+  description, or the request's own `description` and `previewable`: the
+  new-room dialog's), its layout (`installLayout`: each section, open and
+  owned by the installer, then each channel in its section with its
+  purpose, then its position, rules and settings by `PATCH …/channels/{id}`),
+  its schedules through realtime's
   `POST …/schedules` with `enabled: false` (owned by the installer;
   realtime checks them), the room expert, skill and prompt packs resolved
   for the installer (`contentuse.Resolve`, the `name@range` rule) and

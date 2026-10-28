@@ -193,7 +193,9 @@ packages". What the slice decided, against the code:
   `component.json` alone (and an optional `README.md`) with the room's
   `description` (the envelope's, within a room's 500 characters: it
   becomes the room's), `welcome` and `quickPrompts` (an expert's rules),
-  `channels`, `schedules`, `requires.expert` / `skills` / `prompts` /
+  `channels` (since docs/prd/2026-10-28-channels-and-threads.md C25 the
+  layout: `sections`, and channels with their purpose, rules, section and
+  settings), `schedules`, `requires.expert` / `skills` / `prompts` /
   `mcp`, `apps` (works by `name@range`) and `sources`
   (`wire.RoomSources`, today `runs`). Its bounds are rows of
   `contentpkg.Limits()` (so the builder's format skill lists them).

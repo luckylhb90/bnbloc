@@ -202,6 +202,7 @@ export function formPayload(f: ContentForm): Record<string, unknown> {
     // A room's instructions (INSTRUCTIONS.md) become its expert where it
     // is installed.
     if (f.instructions.trim()) out.instructions = f.instructions.trim();
+    if (room?.sections.length) out.sections = room.sections;
     if (room?.channels.length) out.channels = room.channels;
     if (room?.schedules.length) out.schedules = room.schedules;
     if (room?.apps.length) out.apps = room.apps;

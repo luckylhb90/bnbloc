@@ -1,6 +1,7 @@
 import { cleanTags, splitList, tagProblem, type ContentComponent, type ContentForm, type ContentFormSkill } from "./contentComponents.ts";
 import { emptyPromptDraft, slugify, syncVariables, uniqueId, type PromptDraft, type PromptPackForm } from "./promptPacks.ts";
 import { roomIdProblem } from "./roomId.ts";
+import { layoutFromPlan, type RoomLayout } from "./roomLayout.ts";
 import type { RecurrenceForm } from "./schedules.ts";
 import { AssistTaskDraftExpert, AssistTaskDraftPromptPack, AssistTaskDraftSchedule, AssistTaskDraftSkillPack, AssistTaskPlanRoom, MaxAssistItems, MaxAssistText, type AssistJSONReply, type ContentQuickPrompt } from "./wire.gen.ts";
 
@@ -216,6 +217,8 @@ export interface RoomPlan {
   readonly expert: ContentComponent | null;
   readonly skills: readonly ContentComponent[];
   readonly firstMessage: string;
+  // The sections and channels it proposes (C25), held to a package's rules.
+  readonly layout: RoomLayout;
 }
 
 /** findByName matches a component the model named: its name, else its
@@ -228,7 +231,8 @@ export function findByName(list: readonly ContentComponent[], raw: string): Cont
 
 /** roomPlanFrom is a plan-room reply: the room id (a valid one, else ""),
  *  name, description, the expert and skill packs found in the member's
- *  library (experts / skills, what they can use), and the first message. */
+ *  library (experts / skills, what they can use), the first message and
+ *  the channel layout (layoutFromPlan). */
 export function roomPlanFrom(fields: Fields, experts: readonly ContentComponent[], skills: readonly ContentComponent[]): RoomPlan {
   const rawId = fieldText(fields, "roomId");
   const roomId = rawId && !roomIdProblem(rawId) ? rawId : slugify(rawId);
@@ -245,6 +249,7 @@ export function roomPlanFrom(fields: Fields, experts: readonly ContentComponent[
     expert: expert && expert.kind === "expert" ? expert : null,
     skills: picked,
     firstMessage: fieldText(fields, "firstMessage"),
+    layout: layoutFromPlan(fieldItems(fields, "sections"), fieldItems(fields, "channels")),
   };
 }
 

@@ -17,7 +17,9 @@ import (
 // room's setup, saved from a room and installed as a new room its
 // installer owns (the gateway's room_components.go). component.json holds
 // all of it: the room's description (the envelope's, within a room's
-// bound), its welcome and quick prompts, its channels by name, its
+// bound), its welcome and quick prompts, its sections and channels (each
+// channel with its purpose, rules, section and settings: the layout the
+// new room starts with, docs/prd/2026-10-28-channels-and-threads.md C25), its
 // scheduled tasks (AI tasks, notices to the room's members and requests to
 // an agent without the agent, created disabled on install; a request waits
 // for the installer to pick one of their agents), the room expert and the skill and prompt packs it
@@ -36,6 +38,10 @@ const (
 	// package's description becomes the room's.
 	maxRoomDescription = 500
 	maxRoomChannels    = 20
+	// maxRoomSections bounds a package's sections, and maxRoomChannelName
+	// a channel's and a section's name (decision: pending owner; the room
+	// service bounds neither).
+	maxRoomSections    = 10
 	maxRoomChannelName = 80
 	maxRoomSchedules   = 20
 	// MaxRoomApps bounds a package's apps: works and apps made in the room
@@ -99,7 +105,11 @@ func validateRoom(p *Package) error {
 	if err := checkStart(m); err != nil {
 		return err
 	}
-	channels, err := checkRoomChannels(m.Channels)
+	sections, err := checkRoomSections(m.Sections)
+	if err != nil {
+		return err
+	}
+	channels, err := checkRoomChannels(m.Channels, sections)
 	if err != nil {
 		return err
 	}
@@ -117,30 +127,96 @@ func validateRoom(p *Package) error {
 	return CheckRoomSources(m.Sources)
 }
 
-// checkRoomChannels: names as they are shown (trimmed, one line, bounded),
-// unique regardless of case, never the default channel. It returns the
-// set of lower-cased names.
-func checkRoomChannels(names []string) (map[string]bool, error) {
-	if len(names) > maxRoomChannels {
-		return nil, fmt.Errorf("at most %d channels", maxRoomChannels)
+// checkRoomName: a channel's or section's name as it is shown (trimmed,
+// one line, bounded), unique in its list regardless of case. It returns
+// the lower-cased name.
+func checkRoomName(what, name string, seen map[string]bool) (string, error) {
+	key := strings.ToLower(name)
+	switch {
+	case name == "" || name != strings.TrimSpace(name):
+		return "", fmt.Errorf("%s %q: a name without surrounding spaces", what, name)
+	case seen[key]:
+		return "", fmt.Errorf("%s %q is listed twice", what, name)
+	}
+	if err := checkText(what+" "+name, name, maxRoomChannelName, true); err != nil {
+		return "", err
+	}
+	return key, nil
+}
+
+// checkRoomSections: open sections (C25), each named once, its rules
+// within a channel's rules bound (wire.MaxChannelRules, the room service's
+// for a section). It returns the set of lower-cased names.
+func checkRoomSections(sections []wire.RoomPackageSection) (map[string]bool, error) {
+	if len(sections) > maxRoomSections {
+		return nil, fmt.Errorf("at most %d sections", maxRoomSections)
 	}
 	seen := map[string]bool{}
-	for _, c := range names {
-		key := strings.ToLower(c)
-		switch {
-		case c == "" || c != strings.TrimSpace(c):
-			return nil, fmt.Errorf("channel %q: a name without surrounding spaces", c)
-		case key == defaultChannel:
-			return nil, fmt.Errorf("channel %q: every room has it; list only the others", c)
-		case seen[key]:
-			return nil, fmt.Errorf("channel %q is listed twice", c)
+	for _, s := range sections {
+		key, err := checkRoomName("section", s.Name, seen)
+		if err != nil {
+			return nil, err
 		}
-		if err := checkText("channel "+c, c, maxRoomChannelName, true); err != nil {
+		if err := checkText("section "+s.Name+" rules", s.Rules, wire.MaxChannelRules, false); err != nil {
 			return nil, err
 		}
 		seen[key] = true
 	}
 	return seen, nil
+}
+
+// checkRoomChannels: each channel named once, never the default channel,
+// its purpose and rules within the room service's bounds
+// (wire.MaxChannelPurpose, wire.MaxChannelRules), in a section the
+// package makes ("" the top level), with settings the room service takes
+// (wire.IsChannelWhoPosts, slow mode not negative). It returns the set of
+// lower-cased names.
+func checkRoomChannels(channels []wire.RoomPackageChannel, sections map[string]bool) (map[string]bool, error) {
+	if len(channels) > maxRoomChannels {
+		return nil, fmt.Errorf("at most %d channels", maxRoomChannels)
+	}
+	seen := map[string]bool{}
+	for _, c := range channels {
+		key, err := checkRoomName("channel", c.Name, seen)
+		if err != nil {
+			return nil, err
+		}
+		if key == defaultChannel {
+			return nil, fmt.Errorf("channel %q: every room has it; list only the others", c.Name)
+		}
+		if err := checkText("channel "+c.Name+" purpose", c.Purpose, wire.MaxChannelPurpose, true); err != nil {
+			return nil, err
+		}
+		if err := checkText("channel "+c.Name+" rules", c.Rules, wire.MaxChannelRules, false); err != nil {
+			return nil, err
+		}
+		if c.Section != "" && !sections[strings.ToLower(c.Section)] {
+			return nil, fmt.Errorf("channel %q: section %q is not one of the package's sections", c.Name, c.Section)
+		}
+		if !wire.IsChannelWhoPosts(c.Settings.WhoPosts) {
+			return nil, fmt.Errorf("channel %q: settings.whoPosts is \"\" (everyone) or %q", c.Name, wire.ChannelPostersAdmins)
+		}
+		if c.Settings.SlowModeSeconds < 0 {
+			return nil, fmt.Errorf("channel %q: settings.slowModeSeconds is not negative (0 is off)", c.Name)
+		}
+		seen[key] = true
+	}
+	return seen, nil
+}
+
+// cleanRoomLayout trims the layout a form wrote (names, texts, a channel's
+// section), as the room service trims what it stores.
+func cleanRoomLayout(sections []wire.RoomPackageSection, channels []wire.RoomPackageChannel) ([]wire.RoomPackageSection, []wire.RoomPackageChannel) {
+	var outS []wire.RoomPackageSection
+	for _, s := range sections {
+		outS = append(outS, wire.RoomPackageSection{Name: strings.TrimSpace(s.Name), Rules: strings.TrimSpace(s.Rules)})
+	}
+	var outC []wire.RoomPackageChannel
+	for _, c := range channels {
+		outC = append(outC, wire.RoomPackageChannel{Name: strings.TrimSpace(c.Name), Purpose: strings.TrimSpace(c.Purpose), Rules: strings.TrimSpace(c.Rules),
+			Section: strings.TrimSpace(c.Section), Settings: c.Settings})
+	}
+	return outS, outC
 }
 
 // ScheduleMisfit is why a room's schedule is not one a package holds
@@ -270,9 +346,7 @@ func roomFromForm(f Form, base *Package, m *Manifest, files map[string][]byte) e
 	}
 	m.Welcome = strings.TrimSpace(f.Welcome)
 	m.QuickPrompts = f.QuickPrompts
-	for _, c := range f.Channels {
-		m.Channels = append(m.Channels, strings.TrimSpace(c))
-	}
+	m.Sections, m.Channels = cleanRoomLayout(f.Sections, f.Channels)
 	m.Schedules = f.Schedules
 	m.Apps = f.Apps
 	for _, src := range f.Sources {
@@ -287,15 +361,18 @@ func (m Manifest) RoomSpec() *wire.RoomSpec {
 	if m.Kind != KindRoom {
 		return nil
 	}
-	out := &wire.RoomSpec{Channels: m.Channels, Schedules: m.Schedules, Apps: m.Apps, AppSnapshots: m.AppSnapshots, Files: m.Files, Sources: m.Sources}
+	out := &wire.RoomSpec{Sections: m.Sections, Channels: m.Channels, Schedules: m.Schedules, Apps: m.Apps, AppSnapshots: m.AppSnapshots, Files: m.Files, Sources: m.Sources}
 	if out.AppSnapshots == nil {
 		out.AppSnapshots = []wire.RoomAppSnapshot{}
 	}
 	if out.Files == nil {
 		out.Files = []wire.RoomPackageFile{}
 	}
+	if out.Sections == nil {
+		out.Sections = []wire.RoomPackageSection{}
+	}
 	if out.Channels == nil {
-		out.Channels = []string{}
+		out.Channels = []wire.RoomPackageChannel{}
 	}
 	if out.Schedules == nil {
 		out.Schedules = []wire.RoomPackageSchedule{}

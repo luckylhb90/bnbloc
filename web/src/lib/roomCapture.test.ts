@@ -17,6 +17,7 @@ const draft: RoomComponentDraft = {
   description: "",
   welcome: "",
   quickPrompts: [],
+  sections: [],
   channels: [],
   schedules: [],
   skills: [],

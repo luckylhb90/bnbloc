@@ -50,12 +50,43 @@ type RoomPackageFile struct {
 	SizeBytes int64  `json:"sizeBytes"`
 }
 
+// RoomPackageSection is a section a room package makes in a new room
+// (docs/prd/2026-10-28-channels-and-threads.md C25): its name and rules,
+// open to every member (members-only sections wait for slice 2).
+type RoomPackageSection struct {
+	Name  string `json:"name"`
+	Rules string `json:"rules,omitempty"`
+}
+
+// RoomPackageChannelSettings are the settings a room package gives a
+// channel: who posts, whether agents are admitted and slow mode (a default
+// agent names someone's agent, which a package never does).
+type RoomPackageChannelSettings struct {
+	WhoPosts        string `json:"whoPosts,omitempty" tstype:"ChannelWhoPosts"`
+	NoAgents        bool   `json:"noAgents,omitempty"`
+	SlowModeSeconds int    `json:"slowModeSeconds,omitempty"`
+}
+
+// RoomPackageChannel is a channel a room package makes in a new room
+// (C25): its name, purpose and rules, the section it sits in (a section of
+// the package by name, "" for the top level) and its settings. The default
+// channel is every room's and is never listed.
+type RoomPackageChannel struct {
+	Name     string                     `json:"name"`
+	Purpose  string                     `json:"purpose,omitempty"`
+	Rules    string                     `json:"rules,omitempty"`
+	Section  string                     `json:"section,omitempty"`
+	Settings RoomPackageChannelSettings `json:"settings"`
+}
+
 // RoomSpec is a room package's setup on its Library view (the room
-// expert, skill packs and prompt packs are its requires). Apps are works
-// by "name@range"; AppSnapshots the apps made in the room it carries;
-// Files the room files it carries.
+// expert, skill packs and prompt packs are its requires). Sections and
+// Channels are the channel layout it makes; Apps are works by
+// "name@range"; AppSnapshots the apps made in the room it carries; Files
+// the room files it carries.
 type RoomSpec struct {
-	Channels     []string              `json:"channels"`
+	Sections     []RoomPackageSection  `json:"sections"`
+	Channels     []RoomPackageChannel  `json:"channels"`
 	Schedules    []RoomPackageSchedule `json:"schedules"`
 	Apps         []string              `json:"apps"`
 	AppSnapshots []RoomAppSnapshot     `json:"appSnapshots"`
@@ -110,7 +141,8 @@ type RoomComponentDraft struct {
 	Description  string                 `json:"description"`
 	Welcome      string                 `json:"welcome"`
 	QuickPrompts []RoomQuickPrompt      `json:"quickPrompts"`
-	Channels     []string               `json:"channels"`
+	Sections     []RoomPackageSection   `json:"sections"`
+	Channels     []RoomPackageChannel   `json:"channels"`
 	Schedules    []RoomPackageSchedule  `json:"schedules"`
 	Expert       *RoomDraftPart         `json:"expert,omitempty"`
 	Skills       []RoomDraftPart        `json:"skills"`
@@ -136,17 +168,22 @@ type RoomInclude struct {
 
 // RoomInstallRequest is POST /v1/content-components/{id}/create-room: the
 // version to install (default the latest) and the new room's id (one is
-// made when empty), name (default the component's) and visibility
-// ("private" by default, or "shared").
+// made when empty), name (default the component's), description (default
+// the package's), visibility ("private" by default, or "shared") and
+// whether it is readable before joining (absent: the visibility's
+// default). The new-room dialog sends its own fields here when it starts
+// from a template.
 type RoomInstallRequest struct {
-	Version    string `json:"version,omitempty"`
-	RoomID     string `json:"roomId,omitempty"`
-	Name       string `json:"name,omitempty"`
-	Visibility string `json:"visibility,omitempty"`
+	Version     string `json:"version,omitempty"`
+	RoomID      string `json:"roomId,omitempty"`
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+	Visibility  string `json:"visibility,omitempty"`
+	Previewable *bool  `json:"previewable,omitempty"`
 }
 
 // RoomInstallReply is what installing a room package set up: the new room,
-// From ("name@version"), its channels, the ids of its schedules (all
+// From ("name@version"), its sections and channels, the ids of its schedules (all
 // paused) and, of them, the requests to an agent that wait for the
 // installer to pick one of their agents (WaitingForAgent: each one's text
 // in a line), the room expert, the packs turned on and the apps copied in
@@ -163,6 +200,7 @@ type RoomInstallReply struct {
 	Name            string          `json:"name"`
 	ComponentID     string          `json:"componentId"`
 	From            string          `json:"from"`
+	Sections        []string        `json:"sections"`
 	Channels        []string        `json:"channels"`
 	Schedules       []string        `json:"schedules"`
 	WaitingForAgent []string        `json:"waitingForAgent"`

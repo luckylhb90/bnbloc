@@ -43,7 +43,8 @@ type Form struct {
 	// Requires. AppSnapshots and Files are the ones the edited version
 	// carries that the form keeps; Captured what the save took from the
 	// room.
-	Channels     []string                   `json:"channels,omitempty"`
+	Sections     []wire.RoomPackageSection  `json:"sections,omitempty"`
+	Channels     []wire.RoomPackageChannel  `json:"channels,omitempty"`
 	Schedules    []wire.RoomPackageSchedule `json:"schedules,omitempty"`
 	Apps         []string                   `json:"apps,omitempty"`
 	AppSnapshots []wire.RoomAppSnapshot     `json:"appSnapshots,omitempty"`
@@ -78,7 +79,7 @@ func Build(f Form, version string, opts Options, base *Package) (*Package, []byt
 	if spec.Kind != KindPrompt && f.EveryRoom {
 		return nil, nil, errEveryRoom
 	}
-	if spec.Kind != KindRoom && (len(f.Channels)+len(f.Schedules)+len(f.Apps)+len(f.AppSnapshots)+len(f.Files)+len(f.Sources) > 0 || f.Captured != nil) {
+	if spec.Kind != KindRoom && (len(f.Sections)+len(f.Channels)+len(f.Schedules)+len(f.Apps)+len(f.AppSnapshots)+len(f.Files)+len(f.Sources) > 0 || f.Captured != nil) {
 		return nil, nil, errRoomFields
 	}
 	m := Manifest{

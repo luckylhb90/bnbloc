@@ -200,6 +200,20 @@ type ChannelGroupPatch struct {
 	Position *int
 }
 
+// PackageChannelSettings is what of a channel's settings a room package
+// holds (capture: who posts, agents admitted, slow mode; never a default
+// agent, which names someone's), and PackagedChannelSettings the settings a
+// package's channel is given (install): the one copy of the settings
+// document between a room and a package, kept here beside the rule that
+// reads its agents switch (ChannelAdmitsAgents).
+func PackageChannelSettings(s wire.ChannelSettings) wire.RoomPackageChannelSettings {
+	return wire.RoomPackageChannelSettings{WhoPosts: s.WhoPosts, NoAgents: s.NoAgents, SlowModeSeconds: s.SlowModeSeconds}
+}
+
+func PackagedChannelSettings(s wire.RoomPackageChannelSettings) wire.ChannelSettings {
+	return wire.ChannelSettings{WhoPosts: s.WhoPosts, NoAgents: s.NoAgents, SlowModeSeconds: s.SlowModeSeconds}
+}
+
 // ChannelAdmission is what decides whether agents may use a channel: its
 // kind (the people chat never admits them) and its settings' NoAgents.
 type ChannelAdmission struct {
