@@ -74,9 +74,17 @@ func (s *Service) handleExportRoom(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Disposition", httpx.ContentDisposition("attachment",
 		packageSegment(roomID)+"-handoff-"+time.UnixMilli(now).UTC().Format("20060102")+".zip"))
+	// The package holds what the exporter reads (C12: a room admin reads
+	// a members-only section only by joining it).
+	access, err := s.memberAccess(r.Context(), roomID, channelCaller{user: user, role: role})
+	if err != nil {
+		obs.ServerError(w, "read channel access failed", err)
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	zw := zip.NewWriter(w)
 	ex := &roomExporter{
-		svc: s, ctx: r.Context(), user: user, room: rm, zw: zw, now: now,
+		svc: s, ctx: r.Context(), user: user, room: rm, zw: zw, now: now, access: access,
 		attSeen: map[string]bool{}, agents: map[string]*wire.RoomExportAgent{}, sessions: map[string]*wire.RoomExportAgentSession{},
 	}
 	if err := ex.run(first); err != nil {
@@ -99,6 +107,10 @@ type roomExporter struct {
 	zw   *zip.Writer
 	now  int64
 
+	// access is what the exporter may read (MayReadChannel): rows and
+	// artifacts of a channel they may not read are left out.
+	access         store.ChannelAccess
+	readable       map[string]bool // channel id -> the exporter may read it
 	channels       []store.RoomChannel
 	channelNames   map[string]string
 	peopleChannels map[string]bool
@@ -132,10 +144,15 @@ func (e *roomExporter) run(first []wire.FeedMessage) error {
 	if err != nil {
 		return fmt.Errorf("channels: %w", err)
 	}
-	e.channels = channels
 	e.channelNames = map[string]string{}
 	e.peopleChannels = map[string]bool{}
-	for _, c := range e.channels {
+	e.readable = map[string]bool{"": true} // the legacy room-wide stream
+	for _, c := range channels {
+		if !e.access.MayReadChannel(c) {
+			continue
+		}
+		e.channels = append(e.channels, c)
+		e.readable[c.ChannelID] = true
 		e.channelNames[c.ChannelID] = c.Name
 		if c.IsPeople() {
 			e.peopleChannels[c.ChannelID] = true
@@ -179,10 +196,13 @@ func (e *roomExporter) eachFeed(first []wire.FeedMessage, bound int64, fn func(w
 			if bound > 0 && m.Sequence > bound {
 				return nil
 			}
+			after = m.Sequence
+			if !e.readable[m.ChannelID] {
+				continue
+			}
 			if err := fn(m); err != nil {
 				return err
 			}
-			after = m.Sequence
 		}
 		if len(page) < handoffFeedPage {
 			return nil
@@ -426,7 +446,11 @@ func (e *roomExporter) writeArtifacts() (int, error) {
 		if err != nil {
 			return 0, err
 		}
-		arts = append(arts, page...)
+		for _, a := range page {
+			if e.readable[a.ChannelID] {
+				arts = append(arts, a)
+			}
+		}
 		if len(page) < q.Limit {
 			break
 		}

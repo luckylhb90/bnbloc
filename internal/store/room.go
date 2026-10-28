@@ -354,6 +354,10 @@ type MemoryRoom struct {
 	sections map[string]map[string]RoomSection // channelKey -> sectionID -> section
 	follows  map[string]ChannelFollow          // followKey -> follow
 	groups   map[string]ChannelGroup           // groupKey -> a member's group
+	// sectionMembers and sectionRequests: a members-only section's members
+	// and open join requests (sectionMemberKey).
+	sectionMembers  map[string]SectionMember
+	sectionRequests map[string]SectionJoinRequest
 	// cascade are the memory stores DeleteRoom clears (cascadeDeleteTo).
 	cascade []roomRowsOwner
 }
@@ -369,6 +373,9 @@ func NewMemoryRoom() *MemoryRoom {
 		sections: map[string]map[string]RoomSection{},
 		follows:  map[string]ChannelFollow{},
 		groups:   map[string]ChannelGroup{},
+
+		sectionMembers:  map[string]SectionMember{},
+		sectionRequests: map[string]SectionJoinRequest{},
 	}
 }
 
@@ -989,6 +996,16 @@ func (s *MemoryRoom) DeleteRoom(ctx context.Context, roomID string) error {
 	for k, g := range s.groups {
 		if g.TenantID == tid && g.RoomID == roomID {
 			delete(s.groups, k)
+		}
+	}
+	for k, m := range s.sectionMembers {
+		if m.TenantID == tid && m.RoomID == roomID {
+			delete(s.sectionMembers, k)
+		}
+	}
+	for k, q := range s.sectionRequests {
+		if q.TenantID == tid && q.RoomID == roomID {
+			delete(s.sectionRequests, k)
 		}
 	}
 	for k, inv := range s.invites {

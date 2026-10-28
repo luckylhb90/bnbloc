@@ -135,7 +135,7 @@ func TestRoomComponentDraft(t *testing.T) {
 		!slices.Equal(d.Sections, []wire.RoomPackageSection{{Name: "Work", Rules: "One thread per review."}}) {
 		t.Fatalf("draft layout = %+v %+v", d.Sections, d.Channels)
 	}
-	if !slices.ContainsFunc(d.Left, func(l string) bool { return strings.Contains(l, "#private") }) ||
+	if !slices.ContainsFunc(d.Left, func(l string) bool { return strings.Contains(l, "(Leads)") }) ||
 		!slices.ContainsFunc(d.Left, func(l string) bool { return strings.Contains(l, "default agent of #reports") }) {
 		t.Fatalf("left = %v", d.Left)
 	}

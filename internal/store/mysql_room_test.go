@@ -27,6 +27,8 @@ func TestMySQLDeleteRoomRemovesEveryRoomOwnedRow(t *testing.T) {
 		"room_read_state":             `INSERT INTO room_read_state (tenant_id, room_id, channel_id, user_id, last_read_seq, updated_at_ms) VALUES ('org-a', '{id}', 'ch', 'alice', 1, 1)`,
 		"room_sections":               `INSERT INTO room_sections (section_id, tenant_id, room_id, name, created_by, created_at_ms) VALUES ('sec-{id}', 'org-a', '{id}', 'Design', 'alice', 1)`,
 		"channel_follows":             `INSERT INTO channel_follows (tenant_id, room_id, channel_id, user_id, joined_at_ms) VALUES ('org-a', '{id}', 'ch', 'alice', 1)`,
+		"section_members":             `INSERT INTO section_members (tenant_id, room_id, section_id, user_id, added_by, joined_at_ms) VALUES ('org-a', '{id}', 'sec-{id}', 'alice', 'alice', 1)`,
+		"section_join_requests":       `INSERT INTO section_join_requests (tenant_id, room_id, section_id, user_id, requested_at_ms) VALUES ('org-a', '{id}', 'sec-{id}', 'bob', 1)`,
 		"channel_groups":              `INSERT INTO channel_groups (tenant_id, room_id, user_id, group_id, name, created_at_ms) VALUES ('org-a', '{id}', 'alice', 'grp-{id}', 'Mine', 1)`,
 		"room_invites":                `INSERT INTO room_invites (code, tenant_id, room_id, role, expires_at_ms, capacity, created_by) VALUES ('inv-{id}', 'org-a', '{id}', 'member', 9, 1, 'alice')`,
 		"message_tasks":               `INSERT INTO message_tasks (tenant_id, room_id, seq, status, title, created_by, created_at_ms) VALUES ('org-a', '{id}', 1, 'open', 'the message text', 'alice', 1)`,

@@ -342,9 +342,8 @@ func (s *Service) artifactVersion(w http.ResponseWriter, r *http.Request, allow 
 	if !allow(w, r, roomID) {
 		return store.Artifact{}, store.ArtifactVersion{}, false
 	}
-	art, err := s.Artifacts.GetArtifact(r.Context(), r.PathValue("artifactId"))
-	if err != nil || art.RoomID != roomID {
-		httpx.Error(w, "artifact not found", http.StatusNotFound)
+	art, ok := s.roomArtifact(w, r, roomID, r.PathValue("artifactId"))
+	if !ok {
 		return store.Artifact{}, store.ArtifactVersion{}, false
 	}
 	version, err := strconv.Atoi(strings.TrimSpace(r.PathValue("version")))

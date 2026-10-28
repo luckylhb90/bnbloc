@@ -65,6 +65,9 @@ type PluginHookDispatcher struct {
 	pending   map[string]pendingDelivery
 	seq       atomic.Uint64
 	dropped   atomic.Int64
+	// mayRead says whether a member may read a channel (the service's
+	// store.MayReadChannel); nil reads every channel.
+	mayRead func(ctx context.Context, roomID, channelID, userID string) bool
 }
 
 const (
@@ -430,7 +433,10 @@ func (d *PluginHookDispatcher) fanOut(item pluginEvent) {
 			if !probed {
 				// A platform agent host's membership is not the member's
 				// own room: its desktop's plugins get no events from it.
-				isMember = membership.HumanMember(item.members, item.ev.RoomID, st.subject)
+				// A channel's event goes to a reader of the channel only
+				// (store.MayReadChannel, C11).
+				isMember = membership.HumanMember(item.members, item.ev.RoomID, st.subject) &&
+					(d.mayRead == nil || d.mayRead(ctx, item.ev.RoomID, item.ev.ChannelID, st.subject))
 				memberOf[st.subject] = isMember
 			}
 			if !isMember {

@@ -1906,6 +1906,10 @@ export const AuditKindEvent = "event";
 // AuditKindNetwork: the platform's server egress saved (the mode and
 // the hosts).
 export const AuditKindNetwork = "network";
+// AuditKindSection: a members-only section's membership changed (name
+// = the room; the detail names the section and the member; the actor
+// who let them in or out). A room admin's join is one (C12).
+export const AuditKindSection = "section";
 
 // AuditLogEntry is one normalized audit record. ID is unique across sources
 // ("<source>:<row id>"). Name is the record's subject (component name, member
@@ -2114,11 +2118,27 @@ export interface ChannelGroupPatchRequest {
   position?: number;
 }
 
-// Section visibilities. Slice 1 accepts only SectionOpen.
+// Section visibilities.
 // SectionOpen: every room member sees its channels.
 export const SectionOpen = "open";
-// SectionMembers: only its members see its channels (slice 2).
+// SectionMembers: only its members see its channels (C11): a member of
+// the room who is not one sees nothing of it; the room's owners and
+// admins see its name and members and read it only by joining (C12).
 export const SectionMembers = "members";
+
+// How a member joins a members-only section (C11, C17).
+// SectionJoinInvite: the section's owners add its members; a member of
+// the room who is not one sees nothing of it (C11's default; the
+// default for a members-only section, decision: pending owner: C17
+// names "ask" the default, but asking needs the section's name shown,
+// which C11 leaves to its owners).
+export const SectionJoinInvite = "invite";
+// SectionJoinAsk: its name is shown to the room for joining (never its
+// channels or members); a member asks, the section's owners approve.
+export const SectionJoinAsk = "ask";
+// SectionJoinOpen: its name is shown for joining; any room member joins
+// at once (for an open section joining is only following).
+export const SectionJoinOpen = "open";
 
 // RoomSection is one section of a room: a named group of channels with its
 // own owners and rules (§2.1a).
@@ -2129,9 +2149,65 @@ export interface RoomSection {
   visibility: SectionVisibility;
   rules: string;
   owners: string[];
-  joinPolicy: string;
+  joinPolicy: SectionJoinPolicy;
   createdBy: string;
   createdAtMs: number;
+  // Members are a members-only section's members (who reads it), listed
+  // to those who may know the section exists; empty for an open one.
+  members?: string[];
+  // Joined: the reader is a member of this members-only section (an
+  // admin who has not joined sees it but not its channels).
+  joined?: boolean;
+}
+
+// SectionRequests is GET /v1/rooms/{id}/sections/{sectionId}/requests: a
+// members-only section's open join requests, for those who approve them
+// (its owners and the room's owners and admins).
+export interface SectionRequests {
+  requests: SectionJoinRequest[];
+}
+
+// SectionJoinRequest is one member's open request to join a section.
+export interface SectionJoinRequest {
+  userId: string;
+  requestedAtMs: number;
+}
+
+// SectionJoinReply is POST /v1/rooms/{id}/sections/{sectionId}/join: whether
+// the caller joined at once ("open") or asked (Requested, "ask").
+export interface SectionJoinReply {
+  joined: boolean;
+  requested: boolean;
+}
+
+// SectionMemberRequest is POST /v1/rooms/{id}/sections/{sectionId}/members:
+// the section's owners (and the room's owners and admins) add a member of
+// the room, or approve their request.
+export interface SectionMemberRequest {
+  userId: string;
+}
+
+// EventSectionMembership (SectionMembershipPayload) is published by
+// bnbloc-room when a member joins or leaves a members-only section, is
+// added or removed, or asks to join: room-wide, so clients reload the
+// listing and realtime's streams re-scope at once (a stream that read the
+// section's channels for that member stops delivering them). Joining by a
+// room owner or admin is said to the section's members (C12): Admin marks
+// it.
+export const EventSectionMembership = "section_membership";
+
+// SectionMembershipPayload names the section, the member and what happened.
+export interface SectionMembershipPayload {
+  sectionId: string;
+  userId: string;
+  // Action is "joined", "left", "added", "removed", "requested" or
+  // "declined".
+  action: string;
+  // By is who acted (the member themself, or an owner).
+  by: string;
+  // Admin: the member is one of the room's owners or admins (C12: their
+  // joining is shown to the section's members).
+  admin?: boolean;
 }
 
 // ChannelList is GET /v1/rooms/{id}/channels: the room's channels (live and
@@ -2195,20 +2271,27 @@ export interface ChannelCreateRequest {
   sectionId?: string;
 }
 
-// SectionCreateRequest is POST /v1/rooms/{id}/sections.
+// SectionCreateRequest is POST /v1/rooms/{id}/sections. A members-only
+// section's creator is its first owner and member; JoinPolicy defaults to
+// "invite" for one (C11).
 export interface SectionCreateRequest {
   name: string;
   rules?: string;
   position?: number;
   visibility?: SectionVisibility;
+  joinPolicy?: SectionJoinPolicy;
 }
 
-// SectionPatchRequest is PATCH /v1/rooms/{id}/sections/{sectionId}.
+// SectionPatchRequest is PATCH /v1/rooms/{id}/sections/{sectionId}. A
+// section's visibility is fixed at creation (decision: pending owner):
+// opening a members-only section would show its history to the room, and
+// closing an open one would take it from members mid-conversation.
 export interface SectionPatchRequest {
   name?: string;
   rules?: string;
   position?: number;
   owners?: string[];
+  joinPolicy?: SectionJoinPolicy;
 }
 
 // Who creates channels in a room (C15): RoomDetail.ChannelCreation.
@@ -3808,6 +3891,12 @@ export interface EventKindSpec {
   // ChannelScoped kinds carry the channelId of the message or channel they
   // concern; a single-channel stream receives them only for its channel.
   channelScoped?: boolean;
+  // CrossChannel kinds name the channel they belong to (a deliverable's)
+  // yet reach every stream of the room, a one-channel stream included,
+  // whose reader may read that channel (store.MayReadChannel): a room-wide
+  // surface (the Docs panel) that still keeps a members-only channel's
+  // content to its readers (C13).
+  crossChannel?: boolean;
   // Preview kinds reach a preview's stream (a person reading a shared room
   // they have not joined, docs/prd/2026-10-22-shared-room-preview.md): the
   // kinds that match what a preview may read over REST, the feed and the
@@ -3819,7 +3908,7 @@ export interface EventKindSpec {
 // RoomEventKinds is the registry of room event kinds. The web's
 // RoomEventKind union (and RoomEventKindValues) is generated from the Name
 // of each row: a kind registered here is a kind the web listens for.
-export const RoomEventKinds: readonly EventKindSpec[] = [{ name: "chat_message", durable: true, replay: true, channelScoped: true, preview: true }, { name: "agent_messages", durable: true, replay: true, channelScoped: true, preview: true }, { name: "agent_job_created", channelScoped: true }, { name: "agent_job_updated", channelScoped: true }, { name: "agent_job_progress", channelScoped: true }, { name: "job_live_frame", channelScoped: true }, { name: "agent_session_state" }, { name: "agent_roster" }, { name: "presence_join" }, { name: "presence_leave" }, { name: "presence_snapshot" }, { name: "presence_typing", channelScoped: true }, { name: "message_deleted", channelScoped: true, preview: true }, { name: "message_edited", channelScoped: true, preview: true }, { name: "task_updated", channelScoped: true }, { name: "artifact_updated", preview: true }, { name: "artifact_state", preview: true }, { name: "member_joined", preview: true }, { name: "member_removed", revocation: true, preview: true }, { name: "room_deleted", revocation: true, preview: true }, { name: "content_saved" }, { name: "content_uses_changed" }, { name: "app_changed" }, { name: "channel_updated", preview: true }];
+export const RoomEventKinds: readonly EventKindSpec[] = [{ name: "chat_message", durable: true, replay: true, channelScoped: true, preview: true }, { name: "agent_messages", durable: true, replay: true, channelScoped: true, preview: true }, { name: "agent_job_created", channelScoped: true }, { name: "agent_job_updated", channelScoped: true }, { name: "agent_job_progress", channelScoped: true }, { name: "job_live_frame", channelScoped: true }, { name: "agent_session_state" }, { name: "agent_roster" }, { name: "presence_join" }, { name: "presence_leave" }, { name: "presence_snapshot" }, { name: "presence_typing", channelScoped: true }, { name: "message_deleted", channelScoped: true, preview: true }, { name: "message_edited", channelScoped: true, preview: true }, { name: "task_updated", channelScoped: true }, { name: "artifact_updated", crossChannel: true, preview: true }, { name: "artifact_state", crossChannel: true, preview: true }, { name: "member_joined", preview: true }, { name: "member_removed", revocation: true, preview: true }, { name: "room_deleted", revocation: true, preview: true }, { name: "content_saved" }, { name: "content_uses_changed" }, { name: "app_changed" }, { name: "channel_updated", preview: true }, { name: "section_membership" }];
 
 // ---- wire/events.go ----
 
@@ -7738,6 +7827,8 @@ export type ChannelAgentParticipation = "" | "questions" | "threads";
 export const ChannelAgentParticipationValues: readonly ChannelAgentParticipation[] = ["", "questions", "threads"];
 export type SectionVisibility = "open" | "members";
 export const SectionVisibilityValues: readonly SectionVisibility[] = ["open", "members"];
+export type SectionJoinPolicy = "invite" | "ask" | "open";
+export const SectionJoinPolicyValues: readonly SectionJoinPolicy[] = ["invite", "ask", "open"];
 export type ChannelCreationPolicy = "anyone" | "sections" | "admins";
 export const ChannelCreationPolicyValues: readonly ChannelCreationPolicy[] = ["anyone", "sections", "admins"];
 export type ComponentSettingType = "text" | "secret" | "url" | "number" | "boolean" | "choice" | "path" | "lines";
@@ -7750,8 +7841,8 @@ export type ContentSavedAction = "saved" | "submitted" | "published";
 export const ContentSavedActionValues: readonly ContentSavedAction[] = ["saved", "submitted", "published"];
 export type DecisionQuestionType = "predicate" | "choice" | "score";
 export const DecisionQuestionTypeValues: readonly DecisionQuestionType[] = ["predicate", "choice", "score"];
-export type RoomEventKind = "chat_message" | "agent_messages" | "agent_job_created" | "agent_job_updated" | "agent_job_progress" | "job_live_frame" | "agent_session_state" | "agent_roster" | "presence_join" | "presence_leave" | "presence_snapshot" | "presence_typing" | "message_deleted" | "message_edited" | "task_updated" | "artifact_updated" | "artifact_state" | "member_joined" | "member_removed" | "room_deleted" | "content_saved" | "content_uses_changed" | "app_changed" | "channel_updated";
-export const RoomEventKindValues: readonly RoomEventKind[] = ["chat_message", "agent_messages", "agent_job_created", "agent_job_updated", "agent_job_progress", "job_live_frame", "agent_session_state", "agent_roster", "presence_join", "presence_leave", "presence_snapshot", "presence_typing", "message_deleted", "message_edited", "task_updated", "artifact_updated", "artifact_state", "member_joined", "member_removed", "room_deleted", "content_saved", "content_uses_changed", "app_changed", "channel_updated"];
+export type RoomEventKind = "chat_message" | "agent_messages" | "agent_job_created" | "agent_job_updated" | "agent_job_progress" | "job_live_frame" | "agent_session_state" | "agent_roster" | "presence_join" | "presence_leave" | "presence_snapshot" | "presence_typing" | "message_deleted" | "message_edited" | "task_updated" | "artifact_updated" | "artifact_state" | "member_joined" | "member_removed" | "room_deleted" | "content_saved" | "content_uses_changed" | "app_changed" | "channel_updated" | "section_membership";
+export const RoomEventKindValues: readonly RoomEventKind[] = ["chat_message", "agent_messages", "agent_job_created", "agent_job_updated", "agent_job_progress", "job_live_frame", "agent_session_state", "agent_roster", "presence_join", "presence_leave", "presence_snapshot", "presence_typing", "message_deleted", "message_edited", "task_updated", "artifact_updated", "artifact_state", "member_joined", "member_removed", "room_deleted", "content_saved", "content_uses_changed", "app_changed", "channel_updated", "section_membership"];
 export type EventSubscriptionSource = "bnbloc/platform" | "bnbloc/room" | "bnbloc/member" | "webhook";
 export const EventSubscriptionSourceValues: readonly EventSubscriptionSource[] = ["bnbloc/platform", "bnbloc/room", "bnbloc/member", "webhook"];
 export type PlatformEventType = "platform.deployed" | "component.published" | "desktop.published";

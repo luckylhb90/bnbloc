@@ -48,6 +48,7 @@ func main() {
 		Usage:    backends.AgentUsage(),
 		Rooms:    backends.Room,
 		Channels: backends.Channel,
+		Access:   backends.Channel,
 		// Room agent catalogs: an agent-host member contributes only the
 		// room's platform agents (platform grants + policy, shared DB).
 		Grants:   backends.Grant,

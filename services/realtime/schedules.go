@@ -171,7 +171,7 @@ func writeScheduleErr(w http.ResponseWriter, err error) {
 }
 
 func (s *Service) handleListSchedules(w http.ResponseWriter, r *http.Request) {
-	roomID, _, _, ok := s.room(w, r, membership.AnyMember)
+	roomID, userID, m, ok := s.room(w, r, membership.AnyMember)
 	if !ok || !s.schedulesReady(w) {
 		return
 	}
@@ -180,7 +180,15 @@ func (s *Service) handleListSchedules(w http.ResponseWriter, r *http.Request) {
 		writeScheduleErr(w, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"schedules": list})
+	// A schedule's text belongs to its channel: listed to its readers only.
+	access := &channelAccess{svc: s, ctx: r.Context(), roomID: roomID, reader: readerOf(userID, m)}
+	shown := list[:0:0]
+	for _, sc := range list {
+		if access.mayRead(sc.ChannelID) {
+			shown = append(shown, sc)
+		}
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"schedules": shown})
 }
 
 func (s *Service) handleCreateSchedule(w http.ResponseWriter, r *http.Request) {
@@ -285,6 +293,12 @@ func (s *Service) checkScheduleSpec(ctx context.Context, sc *wire.RoomSchedule, 
 			if barred {
 				return http.StatusBadRequest, errAgentsNotAdmitted
 			}
+		}
+		// A schedule posts (or reads, for an AI task) as its creator: a
+		// channel they may not read is no channel of theirs (C11). Its runs
+		// are held to the same rule when they post (PostChat).
+		if sc.CreatedBy != "" && !s.memberMayReadChannel(ctx, sc.RoomID, sc.ChannelID, sc.CreatedBy) {
+			return http.StatusNotFound, errUnknownChannel
 		}
 	}
 	if err := planNextRun(sc, now); err != nil {

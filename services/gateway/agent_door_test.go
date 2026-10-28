@@ -96,6 +96,15 @@ func TestAgentDoorSchedulesAsTheRequester(t *testing.T) {
 	if got, _ := back.last(); got.subject != "maya" || got.method != http.MethodGet {
 		t.Fatalf("list backend saw %+v", got)
 	}
+	// The agents' channel listing (the bridge's records) is read as the
+	// job's requester: the channels maya may read, never jack's own
+	// members-only sections (channels PRD C14).
+	if code, _ := g.do("jack", http.MethodGet, "/v1/rooms/room-1/channels?agents=1&job=job-maya", "", nil); code != http.StatusOK {
+		t.Fatalf("channels = %d", code)
+	}
+	if got, _ := back.last(); got.subject != "maya" || got.path != "/v1/rooms/room-1/channels" || got.query != "agents=1" {
+		t.Fatalf("the agents' listing backend saw %+v", got)
+	}
 	if code, _ := g.do("jack", http.MethodGet, "/v1/rooms/room-1/groups?job=job-maya", "", nil); code != http.StatusOK {
 		t.Fatalf("groups = %d", code)
 	}

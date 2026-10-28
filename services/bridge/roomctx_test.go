@@ -656,7 +656,7 @@ func TestDriveTextDeltaFreshWindow(t *testing.T) {
 	b := New(Config{GatewayBaseURL: g.srv.URL, GatewayToken: "t", OwnerSubject: "maya"})
 
 	st := roomlog.CtxState{}
-	prompt := b.driveTextDelta(context.Background(), "r1", "maya", "agent-a", 12, "", roomlog.Now{From: "maya", Text: "do the thing"}, &st, true)
+	prompt := b.driveTextDelta(context.Background(), "r1", "maya", "agent-a", "", 12, "", roomlog.Now{From: "maya", Text: "do the thing"}, &st, true)
 
 	if !strings.Contains(prompt, "person asks") {
 		t.Fatalf("the channel's earlier message must inject:\n%s", prompt)
@@ -688,7 +688,7 @@ func TestDriveTextDeltaFollowUpOnlyDelta(t *testing.T) {
 	b := New(Config{GatewayBaseURL: g.srv.URL, GatewayToken: "t", OwnerSubject: "maya"})
 
 	st := roomlog.CtxState{}
-	_ = b.driveTextDelta(context.Background(), "r1", "maya", "agent-a", 12, "", roomlog.Now{From: "maya", Text: "do the thing"}, &st, true)
+	_ = b.driveTextDelta(context.Background(), "r1", "maya", "agent-a", "", 12, "", roomlog.Now{From: "maya", Text: "do the thing"}, &st, true)
 
 	// New activity since the last push: a person question, a peer reply in
 	// this channel, THIS session's own reply, and another channel's line.
@@ -697,7 +697,7 @@ func TestDriveTextDeltaFollowUpOnlyDelta(t *testing.T) {
 	g.addAgentRow("general", 22, "maya", "agent-a", "my own this-session reply")
 	g.addAgentRow("test", 23, "maya", "opencode", "elsewhere")
 	g.addChatRow("general", 24, "jack", "next instruction")
-	second := b.driveTextDelta(context.Background(), "r1", "maya", "agent-a", 24, "", roomlog.Now{From: "maya", Text: "next instruction"}, &st, false)
+	second := b.driveTextDelta(context.Background(), "r1", "maya", "agent-a", "", 24, "", roomlog.Now{From: "maya", Text: "next instruction"}, &st, false)
 
 	if !strings.Contains(second, "New room messages since your last turn") {
 		t.Fatalf("follow-up must be framed as a delta:\n%s", second)
@@ -717,7 +717,7 @@ func TestDriveTextDeltaFollowUpOnlyDelta(t *testing.T) {
 
 	// Nothing new: the instruction alone, under the marker naming its
 	// sender (the requester when the history does not hold it).
-	third := b.driveTextDelta(context.Background(), "r1", "maya", "agent-a", 0, "", roomlog.Now{From: "maya", Text: "nothing new at all"}, &st, false)
+	third := b.driveTextDelta(context.Background(), "r1", "maya", "agent-a", "", 0, "", roomlog.Now{From: "maya", Text: "nothing new at all"}, &st, false)
 	if third != "[now — from maya]\nnothing new at all" {
 		t.Fatalf("empty delta must send the instruction alone, got:\n%s", third)
 	}
@@ -732,7 +732,7 @@ func TestNowSenderIsTheJobsMessage(t *testing.T) {
 	g.addChatRow("general", 31, "maya", "continue")
 	b := New(Config{GatewayBaseURL: g.srv.URL, GatewayToken: "t", OwnerSubject: "jack"})
 	st := roomlog.CtxState{}
-	prompt := b.driveTextDelta(context.Background(), "r1", "jack", "agent-a", 30, "general", roomlog.Now{From: "jack", Text: "continue"}, &st, true)
+	prompt := b.driveTextDelta(context.Background(), "r1", "jack", "agent-a", "", 30, "general", roomlog.Now{From: "jack", Text: "continue"}, &st, true)
 	if !strings.HasSuffix(prompt, "[now — from jack]\ncontinue") {
 		t.Fatalf("the turn must name jack (seq 30), got:\n%s", prompt)
 	}

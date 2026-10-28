@@ -68,7 +68,19 @@ func (s *Service) handleMyApps(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := wire.MyAppList{Apps: make([]wire.MyApp, 0, len(apps))}
+	readable := s.newReadableIn(ctx, user)
 	for _, a := range apps {
+		// An app of a members-only channel is listed to its readers only
+		// (store.MayReadChannel, C13); the cursor follows the page as read.
+		may, err := readable.mayRead(a.RoomID, a.ChannelID)
+		if err != nil {
+			obs.ServerError(w, "read channel access failed", err)
+			httpx.Error(w, "read channel access failed", http.StatusInternalServerError)
+			return
+		}
+		if !may {
+			continue
+		}
 		app, err := s.myApp(ctx, a, names[a.RoomID])
 		if err != nil {
 			obs.ServerError(w, "read app failed", err)

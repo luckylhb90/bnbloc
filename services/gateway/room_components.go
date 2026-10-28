@@ -143,12 +143,16 @@ func (s *Service) draftLayout(ctx context.Context, claims auth.Claims, roomID st
 	}
 	names := map[string]string{}
 	var private, agents []string
+	for _, sec := range list.Sections {
+		if membersOnly[sec.SectionID] {
+			private = append(private, sec.Name)
+		}
+	}
 	for _, c := range list.Channels {
 		if c.IsDefault {
 			continue
 		}
 		if membersOnly[c.SectionID] {
-			private = append(private, "#"+c.Name)
 			continue
 		}
 		if c.Settings.DefaultAgent != nil {
@@ -159,7 +163,7 @@ func (s *Service) draftLayout(ctx context.Context, claims auth.Claims, roomID st
 			Settings: store.PackageChannelSettings(c.Settings)})
 	}
 	if len(private) > 0 {
-		d.Left = append(d.Left, "the members-only sections and their channels ("+strings.Join(private, ", ")+"): a package makes open sections only")
+		d.Left = append(d.Left, "the members-only sections ("+strings.Join(private, ", ")+") and their channels: a package makes open sections only")
 	}
 	if len(agents) > 0 {
 		d.Left = append(d.Left, "the default agent of "+strings.Join(agents, ", ")+": a package names no one's agent, the installer sets their own")

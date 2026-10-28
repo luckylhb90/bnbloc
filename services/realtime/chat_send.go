@@ -141,7 +141,11 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) 
 	if text == "" && len(attachments) == 0 {
 		return ChatPosted{}, errEmptyMessage
 	}
-	fileRef, err := s.resolveFileRef(ctx, p.RoomID, p.FileRef)
+	fileRef, err := s.resolveFileRef(ctx, p.RoomID, p.FileRef, func(channelID string) bool {
+		// A deliverable of a channel the author may not read is none of
+		// theirs to name (C13).
+		return s.memberMayRead(ctx, p.RoomID, p.Author, author, channelID)
+	})
 	if err != nil {
 		return ChatPosted{}, err
 	}
@@ -161,6 +165,13 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) 
 		return ChatPosted{}, err
 	}
 	channelID := channel.ChannelID
+	// Only a reader of the channel posts in it (store.MayReadChannel): a
+	// members-only section's channel does not exist for anyone else (C11),
+	// whatever posts (typed, scheduled as its creator, dispatched for its
+	// requester).
+	if !s.memberMayRead(ctx, p.RoomID, p.Author, author, channelID) {
+		return ChatPosted{}, errUnknownChannel
+	}
 	if p.Recipient != nil {
 		// The recipient owner is stored and compared exactly downstream
 		// (job owner, bridge claim, borrow checks): subjects are
@@ -369,7 +380,7 @@ func (s *Service) selectionMask(ctx context.Context, roomID string, sel *wire.Fi
 // of the room's deliverables (never a web app: its snapshot is not a file
 // an agent edits), at a version it has (0 = its current one), named as its
 // file. nil for none.
-func (s *Service) resolveFileRef(ctx context.Context, roomID string, ref *wire.FileRef) (*wire.FileRef, error) {
+func (s *Service) resolveFileRef(ctx context.Context, roomID string, ref *wire.FileRef, readable func(channelID string) bool) (*wire.FileRef, error) {
 	if ref == nil {
 		return nil, nil
 	}
@@ -378,7 +389,7 @@ func (s *Service) resolveFileRef(ctx context.Context, roomID string, ref *wire.F
 		return nil, errBadFileRef{"fileRef names no deliverable"}
 	}
 	art, err := s.Artifacts.GetArtifact(ctx, id)
-	if errors.Is(err, store.ErrArtifactNotFound) || (err == nil && art.RoomID != roomID) {
+	if errors.Is(err, store.ErrArtifactNotFound) || (err == nil && (art.RoomID != roomID || !readable(art.ChannelID))) {
 		return nil, errBadFileRef{"the file is not one of this room's deliverables (it may have been deleted)"}
 	}
 	if err != nil {

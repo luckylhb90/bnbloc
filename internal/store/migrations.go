@@ -1871,6 +1871,21 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return createSchemaTable(ctx, db, "channel_groups")
 		},
 	},
+	{
+		// Members-only sections (docs/prd/2026-10-28-channels-and-threads.md
+		// slice 2, C11-C14, C17): who belongs to one and who asked to join.
+		// New tables only; the previous release never reads them, and a
+		// members-only section exists only once this release made one.
+		id: "2026_10_section_members",
+		run: func(ctx context.Context, db sqlConn) error {
+			for _, t := range []string{"section_members", "section_join_requests"} {
+				if err := createSchemaTable(ctx, db, t); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

@@ -134,7 +134,7 @@ func (s *Service) joinMentioned(ctx context.Context, roomID, channelID, author, 
 		return
 	}
 	for _, c := range notify.MentionCandidates(text) {
-		if c == author || !membership.HumanMember(s.Membership, roomID, c) {
+		if c == author || !membership.HumanMember(s.Membership, roomID, c) || !s.memberMayReadChannel(ctx, roomID, channelID, c) {
 			continue
 		}
 		if err := s.Channels.FollowChannel(ctx, roomID, channelID, c, s.now().UnixMilli(), store.FollowMarks{}); err != nil {

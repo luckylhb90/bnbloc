@@ -49,6 +49,11 @@ type Service struct {
 	// stored (store.ChannelAdmitsAgents). nil (in-memory dev) admits every
 	// channel.
 	Channels store.ChannelAdmissionReader
+	// Access reads who may read which channel (store.MayReadChannel): run
+	// records and job rows of a members-only section's channel are listed
+	// to its readers only (C11). nil (in-memory dev) has no members-only
+	// sections.
+	Access ChannelAccessReader
 	// Runs backs the agent run records (R10); nil answers 501. Feed lets the
 	// run detail resolve the first reply's room sequence (nil = omitted).
 	Runs store.AgentRunReader

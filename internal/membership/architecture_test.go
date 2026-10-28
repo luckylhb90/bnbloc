@@ -48,6 +48,12 @@ func TestNoMembershipFailOpen(t *testing.T) {
 		// roles before the request has a room tenant; backends re-check with
 		// RoomScope.
 		"services/gateway/tenant_scope.go": "roomMember",
+		// Who may read a channel for a background reader or a cross-room
+		// listing (a notification, a run listing across rooms): the room
+		// role decides which members-only sections' names they know, never
+		// whether they are in the room, which the caller checked.
+		"services/realtime/channel_access.go": "memberMayReadChannel",
+		"services/activity/channel_access.go": "memberOf",
 	}
 	roleOwners := []string{"internal/store/", "internal/membership/", "services/room/"}
 	var problems []string

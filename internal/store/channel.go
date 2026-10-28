@@ -149,10 +149,11 @@ func (s RoomSection) cloned() RoomSection {
 
 // SectionPatch is a partial update of a section.
 type SectionPatch struct {
-	Name     *string
-	Rules    *string
-	Position *int
-	Owners   *[]string
+	Name       *string
+	Rules      *string
+	Position   *int
+	Owners     *[]string
+	JoinPolicy *string
 }
 
 // ChannelFollow is one member's following of a channel (membership as
@@ -306,6 +307,10 @@ type ChannelStore interface {
 	// nothing is written. The check and the write are one step, so two
 	// concurrent posts cannot both pass.
 	ClaimChannelPost(ctx context.Context, roomID, channelID, userID string, atMs, minGapMs int64) (retryAfterMs int64, err error)
+
+	// SectionMembershipStore: who belongs to the room's members-only
+	// sections (channel_access.go).
+	SectionMembershipStore
 }
 
 // ChannelAdmissionReader is the read ChannelAdmitsAgents needs.
@@ -747,6 +752,9 @@ func (s *MemoryChannel) UpdateSection(ctx context.Context, roomID, sectionID str
 	}
 	if patch.Owners != nil {
 		sec.Owners = *patch.Owners
+	}
+	if patch.JoinPolicy != nil {
+		sec.JoinPolicy = *patch.JoinPolicy
 	}
 	room[sectionID] = sec.cloned()
 	return nil

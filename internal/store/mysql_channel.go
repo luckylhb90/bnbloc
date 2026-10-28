@@ -368,6 +368,9 @@ func (m *MySQLChannel) UpdateSection(ctx context.Context, roomID, sectionID stri
 		}
 		sets, args = append(sets, "owners_json = ?"), append(args, owners)
 	}
+	if patch.JoinPolicy != nil {
+		sets, args = append(sets, "join_policy = ?"), append(args, *patch.JoinPolicy)
+	}
 	if len(sets) == 0 {
 		if _, ok, err := m.GetSection(ctx, roomID, sectionID); err != nil || !ok {
 			if err == nil {

@@ -57,6 +57,12 @@ type EventKindSpec struct {
 	// ChannelScoped kinds carry the channelId of the message or channel they
 	// concern; a single-channel stream receives them only for its channel.
 	ChannelScoped bool `json:"channelScoped,omitempty"`
+	// CrossChannel kinds name the channel they belong to (a deliverable's)
+	// yet reach every stream of the room, a one-channel stream included,
+	// whose reader may read that channel (store.MayReadChannel): a room-wide
+	// surface (the Docs panel) that still keeps a members-only channel's
+	// content to its readers (C13).
+	CrossChannel bool `json:"crossChannel,omitempty"`
 	// Preview kinds reach a preview's stream (a person reading a shared room
 	// they have not joined, docs/prd/2026-10-22-shared-room-preview.md): the
 	// kinds that match what a preview may read over REST, the feed and the
@@ -86,8 +92,8 @@ var RoomEventKinds = []EventKindSpec{
 	{Name: EventMessageDeleted, ChannelScoped: true, Preview: true},
 	{Name: EventMessageEdited, ChannelScoped: true, Preview: true},
 	{Name: EventTaskUpdated, ChannelScoped: true},
-	{Name: EventArtifactUpdated, Preview: true},
-	{Name: EventArtifactState, Preview: true},
+	{Name: EventArtifactUpdated, CrossChannel: true, Preview: true},
+	{Name: EventArtifactState, CrossChannel: true, Preview: true},
 	{Name: EventMemberJoined, Preview: true},
 	{Name: EventMemberRemoved, Revocation: true, Preview: true},
 	{Name: EventRoomDeleted, Revocation: true, Preview: true},
@@ -98,6 +104,10 @@ var RoomEventKinds = []EventKindSpec{
 	// stream reloads the listing and agent filters forget their verdicts.
 	// A preview reads the listing too.
 	{Name: EventChannelUpdated, Preview: true},
+	// A members-only section's membership changed (bnbloc-room):
+	// room-wide, so listings reload and realtime re-scopes the member's
+	// streams at once (C11: never shown to a preview).
+	{Name: EventSectionMembership},
 }
 
 var eventKinds = func() map[string]EventKindSpec {
@@ -116,6 +126,10 @@ func LookupEventKind(name string) (EventKindSpec, bool) {
 
 // PersistedFeedKind reports whether kind is a durable room-feed kind.
 func PersistedFeedKind(kind string) bool { return eventKinds[kind].Durable }
+
+// CrossChannelKind reports whether kind reaches a one-channel stream of
+// another channel (EventKindSpec.CrossChannel).
+func CrossChannelKind(kind string) bool { return eventKinds[kind].CrossChannel }
 
 // PreviewedKind reports whether a preview's stream carries kind.
 func PreviewedKind(kind string) bool { return eventKinds[kind].Preview }

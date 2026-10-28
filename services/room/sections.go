@@ -1,7 +1,9 @@
 package room
 
 import (
+	"context"
 	"errors"
+	"log"
 	"net/http"
 	"slices"
 	"strings"
@@ -15,15 +17,23 @@ import (
 )
 
 // A room's sections (docs/prd/2026-10-28-channels-and-threads.md §2.1a):
-// named groups of channels with their own owners and rules. Slice 1 makes
-// open sections only (every room member sees their channels); members-only
-// sections come with their membership (slice 2).
+// named groups of channels with their own owners and rules, open (every
+// room member reads their channels) or members-only (only their members do;
+// slice 2, C11-C14, C17).
 //
-//	POST   /v1/rooms/{roomId}/sections               wire.SectionCreateRequest → wire.RoomSection
-//	PATCH  /v1/rooms/{roomId}/sections/{sectionId}   wire.SectionPatchRequest → wire.RoomSection
-//	DELETE /v1/rooms/{roomId}/sections/{sectionId}   its channels move to the top level
+//	POST   /v1/rooms/{roomId}/sections                          wire.SectionCreateRequest → wire.RoomSection
+//	PATCH  /v1/rooms/{roomId}/sections/{sectionId}              wire.SectionPatchRequest → wire.RoomSection
+//	DELETE /v1/rooms/{roomId}/sections/{sectionId}              its channels move to the top level
+//	POST   /v1/rooms/{roomId}/sections/{sectionId}/join         → wire.SectionJoinReply (open: joined; ask: requested)
+//	DELETE /v1/rooms/{roomId}/sections/{sectionId}/join         the caller leaves
+//	POST   /v1/rooms/{roomId}/sections/{sectionId}/members      wire.SectionMemberRequest: add, or approve a request
+//	DELETE /v1/rooms/{roomId}/sections/{sectionId}/members/{userId}  remove a member
+//	GET    /v1/rooms/{roomId}/sections/{sectionId}/requests     wire.SectionRequests
+//	DELETE /v1/rooms/{roomId}/sections/{sectionId}/requests/{userId} decline a request
 //
-// The sections are listed with the channels (GET .../channels).
+// The sections are listed with the channels (GET .../channels), as the
+// reader may know them (knownSections). A section's membership is people's:
+// the agent door never opens these routes (§2.6).
 
 // mayCreateSection is the ONE rule of who makes a section: the room's owner
 // and admins, and any member who may chat while the room's channel creation
@@ -81,10 +91,17 @@ func (s *Service) handleCreateSection(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, "name is required", http.StatusBadRequest)
 		return
 	}
-	// decision: channels PRD §8 slice 1 (open sections only; members-only
-	// ones need their membership and MayReadChannel, slice 2).
-	if v := strings.TrimSpace(body.Visibility); v != "" && v != wire.SectionOpen {
-		httpx.Error(w, "only open sections can be made yet", http.StatusBadRequest)
+	visibility := strings.TrimSpace(body.Visibility)
+	if visibility == "" {
+		visibility = wire.SectionOpen
+	}
+	if visibility != wire.SectionOpen && visibility != wire.SectionMembers {
+		httpx.Error(w, "visibility is open or members", http.StatusBadRequest)
+		return
+	}
+	join, err := sectionJoinPolicy(visibility, body.JoinPolicy)
+	if err != nil {
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	rules, err := channelText(&body.Rules, wire.MaxChannelRules, "rules")
@@ -103,27 +120,92 @@ func (s *Service) handleCreateSection(w http.ResponseWriter, r *http.Request) {
 	}
 	sec := store.RoomSection{
 		SectionID: ids.New("sec_"), TenantID: tenant.FromContext(r.Context()), RoomID: roomID, Name: name,
-		Position: body.Position, Visibility: wire.SectionOpen, Rules: rules, Owners: []string{who.user},
-		// decision: channels PRD C17 (joining an open section is only
-		// following).
-		JoinPolicy: "open", CreatedBy: who.user, CreatedAtMs: s.Now(),
+		Position: body.Position, Visibility: visibility, Rules: rules, Owners: []string{who.user},
+		JoinPolicy: join, CreatedBy: who.user, CreatedAtMs: s.Now(),
 	}
 	if err := s.Channels.PutSection(r.Context(), sec); err != nil {
 		obs.ServerError(w, "create section failed", err)
 		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	// A members-only section's creator is its first member: they read
+	// what they made (C12 keeps the room's admins out until they join).
+	if sec.MembersOnly() {
+		if err := s.Channels.AddSectionMember(r.Context(), store.SectionMember{RoomID: roomID, SectionID: sec.SectionID,
+			UserID: who.user, AddedBy: who.user, JoinedAtMs: sec.CreatedAtMs}); err != nil {
+			obs.ServerError(w, "add the section's creator failed", err)
+			httpx.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
 	s.publishChannelUpdated(r.Context(), roomID, "", sec.SectionID)
-	httpx.WriteJSON(w, http.StatusOK, sectionView(sec))
+	s.writeSection(w, r, roomID, sec)
 }
 
-// liveSection reads the path's section, answering 404 itself.
+// sectionJoinPolicy is a section's join policy (C17): an open section's is
+// "open" (joining is following); a members-only one's is the request's, or
+// "ask" by default.
+func sectionJoinPolicy(visibility, requested string) (string, error) {
+	requested = strings.TrimSpace(requested)
+	if visibility != wire.SectionMembers {
+		if requested != "" && requested != wire.SectionJoinOpen {
+			return "", errBadRequest("an open section is joined by following its channels")
+		}
+		return wire.SectionJoinOpen, nil
+	}
+	switch requested {
+	case "":
+		return wire.SectionJoinInvite, nil
+	case wire.SectionJoinInvite, wire.SectionJoinAsk, wire.SectionJoinOpen:
+		return requested, nil
+	}
+	return "", errBadRequest("joinPolicy is invite, ask or open")
+}
+
+// writeSection answers one section as the caller may know it.
+func (s *Service) writeSection(w http.ResponseWriter, r *http.Request, roomID string, sec store.RoomSection) {
+	access, ok := s.readerAccess(w, r, roomID)
+	if !ok {
+		return
+	}
+	out := s.knownSections(r.Context(), roomID, []store.RoomSection{sec}, access)
+	if len(out) == 0 {
+		httpx.Error(w, "section not found", http.StatusNotFound)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, out[0])
+}
+
+// sectionMemberIDs lists a members-only section's members (who reads it);
+// a failed read lists none (the listing still answers; fail closed).
+func (s *Service) sectionMemberIDs(ctx context.Context, roomID, sectionID string) []string {
+	members, err := s.Channels.SectionMembers(ctx, roomID, sectionID)
+	if err != nil {
+		log.Printf("room: room=%s section=%s: members read failed: %v", roomID, sectionID, err)
+		return []string{}
+	}
+	out := make([]string, 0, len(members))
+	for _, m := range members {
+		out = append(out, m.UserID)
+	}
+	return out
+}
+
+// liveSection reads the path's section, answering 404 itself: also for a
+// members-only section the caller may not know exists (C11).
 func (s *Service) liveSection(w http.ResponseWriter, r *http.Request, roomID string) (store.RoomSection, bool) {
 	sec, ok, err := s.Channels.GetSection(r.Context(), roomID, r.PathValue("sectionId"))
 	if err != nil {
 		obs.ServerError(w, "read section failed", err)
 		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return store.RoomSection{}, false
+	}
+	if ok {
+		access, okAccess := s.readerAccess(w, r, roomID)
+		if !okAccess {
+			return store.RoomSection{}, false
+		}
+		ok = access.MayKnowSection(sec)
 	}
 	if !ok {
 		httpx.Error(w, "section not found", http.StatusNotFound)
@@ -175,6 +257,14 @@ func (s *Service) handlePatchSection(w http.ResponseWriter, r *http.Request) {
 		}
 		patch.Owners = &owners
 	}
+	if body.JoinPolicy != nil {
+		join, err := sectionJoinPolicy(sec.Visibility, *body.JoinPolicy)
+		if err != nil {
+			httpx.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		patch.JoinPolicy = &join
+	}
 	if err := s.Channels.UpdateSection(r.Context(), roomID, sec.SectionID, patch); err != nil {
 		if errors.Is(err, store.ErrSectionNotFound) {
 			httpx.Error(w, "section not found", http.StatusNotFound)
@@ -184,12 +274,23 @@ func (s *Service) handlePatchSection(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	// A members-only section's owners read it (they answer for it): an
+	// owner added who is not a member becomes one.
+	if sec.MembersOnly() && patch.Owners != nil {
+		for _, o := range *patch.Owners {
+			if !sec.IsOwner(o) {
+				if err := s.addSectionMember(r.Context(), roomID, sec, o, who); err != nil {
+					log.Printf("room: room=%s section=%s: the new owner %s was not made a member: %v", roomID, sec.SectionID, o, err)
+				}
+			}
+		}
+	}
 	s.publishChannelUpdated(r.Context(), roomID, "", sec.SectionID)
 	sec, ok = s.liveSection(w, r, roomID)
 	if !ok {
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, sectionView(sec))
+	s.writeSection(w, r, roomID, sec)
 }
 
 // handleDeleteSection deletes a section; its channels move to the room's
