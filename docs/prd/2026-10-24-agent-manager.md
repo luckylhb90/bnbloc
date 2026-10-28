@@ -651,3 +651,76 @@ store at its real kind of place (`~/Library/Application Support/…/agents/<id>/
   VM (needs the sandbox service running); the routing hook does not depend on where
   the binary sits, but that is a reading of the code, not a run. Codex's adapter has
   no routing in the core yet, as before.
+
+### 7d. A Python agent: installed from wheels, here and in the sandbox (2026-10-29)
+
+Hermes was the one agent the manager could only show the member how to install (a
+`curl … | bash` line) and could not put in the sandbox ("installs with a script").
+Its ACP also needs an extra package that the installer script's default does not
+bring, so a Hermes found on a computer often could not run in a room at all
+(`hermes acp` prints "ACP dependencies not installed", which is also what it prints
+when the package is there at a version it does not support).
+
+**Decision: a second install method, `pip`, that installs wheels and nothing else.**
+
+- **Resolve, then download, then install offline.** pip's own resolver, in a dry run
+  with `--only-binary=:all:`, names the closure (the package, its extras and every
+  dependency) with each wheel's sha256. A dependency with no wheel for the platform
+  fails the install before anything is downloaded; nothing is ever built. The wheels
+  are downloaded with `--require-hashes`, a virtual environment is made in the
+  version's own folder, and they are installed into it offline (`--no-index
+  --find-links --require-hashes --no-deps`). No code of the package runs while it is
+  installed: the guarantee `npm --ignore-scripts` gives, the reason a signed catalog
+  can offer it, and the thing a curl-bash line never could.
+- **pip does not read the member's setup.** `PIP_*`, `PYTHONPATH` and `pip.conf` are
+  ignored; the index is the Python Package Index or the service's mirror setting.
+- **Built where it stays.** A virtual environment writes its own path into its
+  commands, so one built beside the final folder and renamed runs nothing (found by
+  the first real install, which reported no version). The folder is made at its
+  final name with an `.installing` marker that a finished install removes; a crash
+  leaves a marker that the next start sweeps, and the page never offers a folder
+  that has one.
+- **The newest version is read from the index, and only one that has a wheel is
+  offered** (an sdist-only release is not installable here), with the organization's
+  hold applied as for npm.
+- **The sandbox build is the same package.** Wheels are chosen for the guest (Linux,
+  glibc, its `python3.13`, the stable ABI), fetched and checked the same way, and
+  **unpacked by the manager** (a wheel is a zip; unpacking is what pip does for one),
+  so nothing of the package runs on the member's computer in either placement. The
+  unpacker refuses what could run code or leave the folder: a `.pth` file (it runs at
+  every interpreter start), a `scripts` or `headers` part, a link, an absolute or
+  parent path. A small launcher runs the guest's python on the unpacked packages and
+  sets the variable the package reads for its bundled data (the catalog names it:
+  Hermes reads `HERMES_BUNDLED_LOCALES`), because the ACP core gives a guest agent no
+  environment and pip's own data scheme (the environment's prefix) does not exist in
+  this layout.
+
+Checked against the real index, the real agent and a real Linux guest (the sandbox
+service started on its own port with its own data directory, the machine's egress
+off): **Hermes 0.19.0 with its `acp` extra** (63 wheels, 139 MB unpacked, no `.pth`)
+installs on the computer and reports its version, and the sandbox build, run through
+the launcher in the guest, completed an ACP session and a tool turn that wrote a file
+into the room's folder. The model reached the agent through a host port opened for
+that machine (section 7e).
+
+- Catalog: `install.method: pip` with `extras` and a `python` range; `latest.from:
+  pypi`; `sandbox.method: pip` with the guest's `python` and `dataEnv`. A Hermes
+  already on the computer (the git installer's, a package manager's) stays "found,
+  installed by you" and is never touched; to move it the member removes it first, as
+  for every agent that lives in one place. Not done: updating a found Hermes by this
+  method (its own `hermes update` stays its updater).
+- Not verified: Windows (the paths and the interpreter lookup are written for it, not
+  run), Python 3.14 (the newest Hermes does not support it), an organization's mirror
+  with its own certificate authority.
+
+### 7e. What the sandbox run showed about models (2026-10-29)
+
+An agent in the sandbox needs a model, and the sandbox has no network of its own. The
+run in 7d reached a model through a host loopback port opened for that machine
+(`hostPorts`, the Sandbox Protocol's `hostProxy`: the guest reaches that one port at
+`host.microsandbox.internal`, and `127.0.0.1` and the internet stay refused). It worked,
+and it is **not** a design: a port answers any process in the guest, any other space of
+the machine and any borrowed run, with no credential. The design is
+`docs/prd/2026-10-27-model-credentials.md` (the bridge claims the model host for an own
+run only and the guest holds a placeholder); a sandbox agent works with the models it
+can sign in to or with free models until its bridge half is built.

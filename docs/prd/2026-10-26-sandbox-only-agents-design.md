@@ -386,7 +386,7 @@ Each is an experiment like the first, on the real sandbox, not a reading.
 | S3 | A key agent through `secrets`: the placeholder works against a real model host, the value is never visible in the guest (`env`, `/proc`, the agent's config) | sign-in §5 |
 | S4 | **Done 2026-10-26, half answered (§3.5):** an `allowlist` machine refuses every unlisted host (github, example.com, a raw IP), but also **fails the listed one**: `registry.npmjs.org` answered a TLS error for curl and npm could not install. How a listed HTTPS host is let through is not known. | the installer's allowlist is the safety of the script method |
 | S5 | The core's "program gone" test and `in-use.json` with guest paths through the mount table | a conversation must not be lost (the agent manager's §2.4a) |
-| S6 | Hermes's installer in the installer space completes within the home's capacity (it did not finish in 25 minutes in the experiment: a large git checkout over the VM network) | §3.4's claim |
+| S6 | Hermes's installer in the installer space completes within the home's capacity (it did not finish in 25 minutes in the experiment: a large git checkout over the VM network) | §3.4's claim. **Superseded for Hermes (2026-10-29):** it is published as wheels, so the manager installs it without any script (`2026-10-24-agent-manager.md` §7d); the installer-space script method stays for an agent that has only a script |
 | S8 | A device-code login runs as a manager operation in the guest and its URL and code reach the page; the token file it writes is readable only in that space | §5, the third way |
 | S7 | The sandbox's two machines (own, shared): the store visible on both as a read-only mount for `own`, and absent for borrowed | D2 |
 
