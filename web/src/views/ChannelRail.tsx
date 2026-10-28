@@ -139,7 +139,11 @@ export function ChannelRail({
       ) : (
         groups.map((g) => {
           const id = g.section?.sectionId ?? "";
-          const isFolded = !!g.section && folded.includes(id) && !g.channels.some((c) => c.channelId === active);
+          const isFolded = !!g.section && folded.includes(id);
+          // A folded section still shows the channel being read and those
+          // with unread messages (Slack's fold), so folding never hides
+          // where the member is or what is waiting.
+          const visible = isFolded ? g.channels.filter((c) => c.channelId === active || (unreadByChannel?.[c.channelId] ?? 0) > 0) : g.channels;
           return (
             <div key={id || "top"} data-rail-section={g.section?.name ?? ""} className="flex flex-col gap-0.5">
               {g.section && !collapsed && (
@@ -158,7 +162,7 @@ export function ChannelRail({
                 </div>
               )}
               {g.section && collapsed && <div className="my-1 h-px bg-[var(--color-border)]" aria-hidden="true" />}
-              {!isFolded && g.channels.map((c) => row(c, g.section))}
+              {visible.map((c) => row(c, g.section))}
             </div>
           );
         })

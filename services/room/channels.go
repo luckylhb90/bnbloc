@@ -172,12 +172,14 @@ func (s *Service) sectionOf(ctx context.Context, roomID, sectionID string) (*sto
 }
 
 // channelView is the one projection of a channel for a caller (their
-// following of it, f; zero for none).
+// following of it, f; zero for none). Every member is in the default
+// channel: it cannot be left, so it is joined whether or not a follow was
+// ever written (a room older than follows has none).
 func channelView(c store.RoomChannel, f store.ChannelFollow) wire.RoomChannel {
 	v := wire.RoomChannel{
 		ChannelID: c.ChannelID, Name: c.Name, IsDefault: c.IsDefault, Kind: c.Kind, CreatedBy: c.CreatedBy,
 		Purpose: c.Purpose, Rules: c.Rules, SectionID: c.SectionID, Position: c.Position, OwnerID: c.OwnerID,
-		Settings: c.Settings, Joined: f.ChannelID != "", Starred: f.Starred, Hidden: f.Hidden,
+		Settings: c.Settings, Joined: c.IsDefault || f.ChannelID != "", Starred: f.Starred, Hidden: f.Hidden,
 	}
 	if c.ArchivedAtMs != nil {
 		v.ArchivedAtMs = *c.ArchivedAtMs
@@ -709,6 +711,10 @@ func (s *Service) handleFollowChannel(follow bool) http.HandlerFunc {
 		}
 		if ch.IsPeople() {
 			httpx.Error(w, "the people chat is not followed", http.StatusConflict)
+			return
+		}
+		if !follow && ch.IsDefault {
+			httpx.Error(w, "every member is in the room's default channel: hide it from your list instead", http.StatusConflict)
 			return
 		}
 		var err error

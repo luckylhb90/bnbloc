@@ -349,6 +349,14 @@ func TestFollowAndDirectory(t *testing.T) {
 		t.Fatalf("after leaving = %+v", got)
 	}
 	e.call(http.MethodPut, path, "mallory", nil, http.StatusForbidden, nil)
+
+	// Every member is in the default channel, followed or not (QA
+	// 2026-10-28: a room's default channel left the rail as soon as another
+	// channel was opened), and it cannot be left.
+	if c := byChannel(e.list("erin", "").Channels)[e.def]; !c.Joined {
+		t.Fatalf("the default channel for a member with no follow = %+v", c)
+	}
+	e.call(http.MethodDelete, "/v1/rooms/room-1/channels/"+e.def+"/follow", "carol", nil, http.StatusConflict, nil)
 }
 
 // The room's rules, recommended channels and creation policy are the

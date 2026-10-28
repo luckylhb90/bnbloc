@@ -26,11 +26,13 @@ function world(me) {
       { channelId: "ch_slow", name: "busy", isDefault: false, createdBy: "maya", purpose: "", rules: "", sectionId: "", position: 2, ownerId: "maya", settings: { slowModeSeconds: 30 } },
     ],
     sections: [{ sectionId: "sec_ops", name: "Ops", position: 0, visibility: "open", rules: "Ops rules", owners: ["maya"], joinPolicy: "open", createdBy: "maya", createdAtMs: 1 }],
-    follows: { maya: { ch_gen: {}, ch_rel: {}, ch_slow: {} }, jack: { ch_gen: {}, ch_rand: {} } },
+    // maya has no follow of #general (a room older than follows): every
+    // member is in the default channel all the same.
+    follows: { maya: { ch_rel: {}, ch_slow: {} }, jack: { ch_gen: {}, ch_rand: {} } },
     agreed: { maya: 1, jack: 0 },
     chats: [], patches: [], lastPost: {},
   };
-  const view = (c) => ({ ...c, joined: !!s.follows[me][c.channelId], starred: !!s.follows[me][c.channelId]?.starred, hidden: !!s.follows[me][c.channelId]?.hidden });
+  const view = (c) => ({ ...c, joined: c.isDefault || !!s.follows[me][c.channelId], starred: !!s.follows[me][c.channelId]?.starred, hidden: !!s.follows[me][c.channelId]?.hidden });
   const role = roles[me];
   const admin = role === "owner" || role === "admin";
   const manage = (c) => admin || c.ownerId === me || (s.sections.find((x) => x.sectionId === c.sectionId)?.owners ?? []).includes(me);
@@ -154,6 +156,15 @@ await open("owner: welcome, rail sections, rules header, settings dialog", "maya
   const st = await sheet.innerText();
   ok(/Be kind\./.test(st) && /Ops rules/.test(st) && /Notes only\./.test(st), "the Rules sheet has the room's, the section's and the channel's rules");
   await page.keyboard.press("Escape");
+  // The default channel stays in the rail while another channel is open.
+  ok((await rail(page).locator('[data-channel-row="general"]').count()) === 1, "#general stays in the rail when another channel is open");
+  // A section folds while one of its channels is open: the open one stays,
+  // its caret says folded, and unfolding brings the rest back.
+  const ops = rail(page).getByRole("button", { name: "Ops", exact: true });
+  await ops.click();
+  ok((await ops.getAttribute("aria-expanded")) === "false" && (await rail(page).locator('[data-channel-row="releases"]').count()) === 1, "Ops folds while #releases is open, which stays shown");
+  await ops.click();
+  ok((await ops.getAttribute("aria-expanded")) === "true", "Ops unfolds");
   // The channel's settings: the default agent by key.
   await rail(page).locator('[data-channel-row="releases"]').hover();
   await page.getByRole("button", { name: "Channel options for #releases" }).click();
