@@ -444,8 +444,8 @@ type EgressSend struct {
 	// without Session neither reads nor writes one.
 	Session string `json:"session,omitempty"`
 	// Steps are a sign-in's requests the bridge sends first, in order, with
-	// the session (GET or HEAD of the request's own host, redirects not
-	// followed), reported in EgressReport.Steps. StepsOnly: the request
+	// the session (GET, HEAD or a POST of a form to the request's own host,
+	// redirects not followed), reported in EgressReport.Steps. StepsOnly: the request
 	// itself is not sent yet; the component is asked again with the
 	// steps' report (at most MaxEgressSignIns times for one request, not
 	// counted among MaxEgressSends).
@@ -455,10 +455,14 @@ type EgressSend struct {
 	EndSession bool `json:"endSession,omitempty"`
 }
 
-// EgressStep is one sign-in request (EgressSend.Steps).
+// EgressStep is one sign-in request (EgressSend.Steps): a GET or HEAD, or
+// a POST of Body (a sign-in form: a SAML assertion to the system's ACS)
+// with Header (never Cookie: the session's cookies are the bridge's).
 type EgressStep struct {
-	Method string `json:"method"`
-	URL    string `json:"url"`
+	Method string            `json:"method"`
+	URL    string            `json:"url"`
+	Header map[string]string `json:"header,omitempty"`
+	Body   []byte            `json:"body,omitempty"`
 }
 
 // MaxEgressSends bounds the sends of one request (a refused sign-in is

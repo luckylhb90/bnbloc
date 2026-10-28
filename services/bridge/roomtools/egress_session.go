@@ -1,6 +1,7 @@
 package roomtools
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -97,7 +98,12 @@ func withSession(jar *cookiejar.Jar, req *http.Request) func(*http.Response) {
 }
 
 // errBadStep: a sign-in step outside what a step may be.
-var errBadStep = errors.New("a sign-in step must be a GET or HEAD of the request's own https host")
+var errBadStep = errors.New("a sign-in step must be a GET, HEAD or POST of the request's own https host")
+
+// stepMethod reports a method a sign-in step may use.
+func stepMethod(m string) bool {
+	return m == http.MethodGet || m == http.MethodHead || m == http.MethodPost
+}
 
 // sendSteps sends a sign-in's steps from this computer with the session,
 // in order, redirects not followed, and reports each answer.
@@ -115,14 +121,19 @@ func sendSteps(ctx context.Context, in component.EgressRequest, send *component.
 	out := make([]component.EgressStepReport, 0, len(send.Steps))
 	for _, st := range send.Steps {
 		u, err := url.Parse(st.URL)
-		if err != nil || u.Scheme != "https" || !strings.EqualFold(u.Host, host.Host) || (st.Method != http.MethodGet && st.Method != http.MethodHead) {
+		if err != nil || u.Scheme != "https" || !strings.EqualFold(u.Host, host.Host) || !stepMethod(st.Method) || (len(st.Body) > 0 && st.Method != http.MethodPost) {
 			return nil, errBadStep
 		}
-		req, err := http.NewRequestWithContext(ctx, st.Method, u.String(), nil)
+		req, err := http.NewRequestWithContext(ctx, st.Method, u.String(), bytes.NewReader(st.Body))
 		if err != nil {
 			return nil, err
 		}
 		req.Header.Set("Accept", "*/*")
+		for k, v := range st.Header {
+			if !strings.EqualFold(k, "Cookie") && !strings.EqualFold(k, "Host") {
+				req.Header.Set(k, v)
+			}
+		}
 		keep := withSession(jar, req)
 		resp, err := hereClient.Do(req)
 		if err != nil {

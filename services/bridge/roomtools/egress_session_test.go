@@ -139,13 +139,15 @@ func TestEgressSessionHeldHere(t *testing.T) {
 	}
 }
 
-// A sign-in step is a GET or HEAD of the request's own https host.
+// A sign-in step is a GET, HEAD or POST of the request's own https host;
+// only a POST carries a body.
 func TestEgressStepsStayOnTheHost(t *testing.T) {
 	in := component.EgressRequest{Method: http.MethodGet, URL: "https://ci.example.com/api"}
 	jar := sessions.jar(sessionKey{"connections", "ci.example.com", "t"})
 	for _, st := range []component.EgressStep{
 		{Method: http.MethodGet, URL: "https://evil.example.com/x"},
-		{Method: http.MethodPost, URL: "https://ci.example.com/x"},
+		{Method: http.MethodPut, URL: "https://ci.example.com/x"},
+		{Method: http.MethodGet, URL: "https://ci.example.com/x", Body: []byte("a=1")},
 		{Method: http.MethodGet, URL: "http://ci.example.com/x"},
 	} {
 		if _, err := sendSteps(context.Background(), in, &component.EgressSend{Steps: []component.EgressStep{st}}, jar); err == nil {
