@@ -3,6 +3,8 @@ import { api } from "@/lib/api";
 import { restoreAgent, savedAgent } from "@/lib/agentPrefs";
 import { defaultRoomRecipient, type PlatformChoice } from "@/lib/platformAgents";
 import { agentIdentity } from "@/lib/roomAgents";
+import { composerDefault } from "@/lib/channelRules";
+import type { ChannelAgent } from "@/lib/wire.gen";
 import type { LocalAgent } from "@/lib/useLocalAgent";
 import type { RoomAgent } from "@/views/composer/types";
 
@@ -39,6 +41,7 @@ export function useAgentPrefs({
   roomAgents,
   subject,
   offered,
+  channelDefault,
 }: {
   readonly roomId: string;
   readonly channelId: string | null | undefined;
@@ -50,6 +53,8 @@ export function useAgentPrefs({
   // The platform agents the organization offers (in the room or not): the
   // default of a member with no agent of their own when the room has none.
   readonly offered?: readonly PlatformChoice[];
+  // The channel's default agent (its settings, C8), by its key.
+  readonly channelDefault?: ChannelAgent | null;
 }): AgentPrefs {
   const [recipient, setRecipient] = useState<RoomAgent | null>(null);
   const [peopleOnly, setPeopleOnly] = useState(false);
@@ -62,6 +67,12 @@ export function useAgentPrefs({
     () => ({ ...localAgent, target, core: targets.find((t) => t.id === target)?.core || "", setTarget: setOwnTarget }),
     [localAgent, targets, target],
   );
+
+  const channelKey = channelDefault ? agentIdentity({ ownerId: channelDefault.ownerId, core: channelDefault.core || undefined, provider: channelDefault.provider }) : "";
+  // The identity of the channel's default agent while it is the pick: a
+  // default is not the member's choice, so it is not saved as theirs (the
+  // channel's owners may change it later).
+  const [channelDefaulted, setChannelDefaulted] = useState("");
 
   // Restore once per channel visit. It re-runs while the roster populates
   // (nothing to match against yet), stops once restored, and never clobbers
@@ -81,7 +92,11 @@ export function useAgentPrefs({
       try {
         const ch = channelId ?? "";
         let p = await api.getAgentPrefs(roomId, ch);
-        if (!p.found && ch) p = await api.getAgentPrefs(roomId, "");
+        // C8: no choice of the member's for this channel: the channel's
+        // default agent (when the room lists it for them) comes before
+        // their room-level pick, which is the room's default.
+        const channelFirst = composerDefault({ channelDefault, drivable: roomAgents, roomDefault: () => null }).from === "channel";
+        if (!p.found && ch && !channelFirst) p = await api.getAgentPrefs(roomId, "");
         if (cancelled || restored.current) return;
         restored.current = true; // landed (or nothing stored): stop retrying
         restoredFor.current = channelId;
@@ -111,7 +126,8 @@ export function useAgentPrefs({
     return () => {
       cancelled = true;
     };
-  }, [enabled, roomId, channelId, roomAgents, targets, subject]);
+    // channelDefault is channelKey's identity.
+  }, [enabled, roomId, channelId, roomAgents, targets, subject, channelKey]);
 
   // A member with no agent of their own here (browser-only, nothing stored for
   // this room) lands on a default instead of "No local agent": their own
@@ -119,20 +135,35 @@ export function useAgentPrefs({
   // a new room's is empty for a few seconds, and a stored pick read later
   // replaces the default (restore, above).
   const rosterEmpty = roomAgents.length === 0;
+  // decision: channels PRD C8. The member's own choice for the channel is
+  // the stored pick (restored above, it replaces a default); else the
+  // channel's default agent when it is one the room lists for the member
+  // (own, borrowed with a grant, or a platform agent of the room), by its
+  // key; else the room's default as before; else the picker asks. It is a
+  // default for an empty pick only: the member sees it in the picker
+  // before anything is sent.
   useEffect(() => {
     if (!enabled || recipient || peopleOnly || !(settled || rosterEmpty)) return;
-    const fallback = defaultRoomRecipient(roomAgents, targets.length > 0 || !!target, offered);
+    const { agent: fallback, from } = composerDefault({
+      channelDefault,
+      drivable: roomAgents,
+      roomDefault: () => defaultRoomRecipient(roomAgents, targets.length > 0 || !!target, offered),
+    });
     if (fallback) {
       defaulted.current = !settled;
+      setChannelDefaulted(from === "channel" ? agentIdentity(fallback) : "");
       setRecipient(fallback);
     }
-  }, [enabled, settled, rosterEmpty, recipient, peopleOnly, roomAgents, offered, targets.length, target]);
+    // channelDefault is channelKey's identity.
+  }, [enabled, settled, rosterEmpty, recipient, peopleOnly, roomAgents, offered, targets.length, target, channelKey]);
 
   // Save the pick (debounced; best-effort, never blocks sending) once the
   // stored one was read, so a default never overwrites it. A change pending
   // when the composer unmounts (leaving the room or channel) is flushed
-  // instead of dropped.
-  const pick = enabled && settled ? savedAgent(recipient, targets.find((t) => t.id === target), subject) : null;
+  // instead of dropped. The channel's default, while it is the pick, is not
+  // the member's choice and is not saved.
+  const isChannelDefault = !!recipient && !!channelDefaulted && agentIdentity(recipient) === channelDefaulted;
+  const pick = enabled && settled && !isChannelDefault ? savedAgent(recipient, targets.find((t) => t.id === target), subject) : null;
   const snapshot = pick ? `${agentIdentity({ ...pick, core: pick.core || undefined })}/${model}/${reasoning}` : "";
   const lastSaved = useRef("");
   const pendingSave = useRef<{ readonly flush: () => void } | null>(null);

@@ -21,7 +21,7 @@ import { useLocalAgent } from "@/lib/useLocalAgent";
 import { useToast } from "@/ui/Toast";
 import type { ChatRecipient, FeedItem } from "@/views/room/types";
 import { DismissibleLayer, PreviewDock, RoomRail, type RailSurface } from "@/views/room/RoomLayout";
-import { useRoomChannels } from "@/views/room/useRoomChannels";
+import { useRoomChannelSetup } from "@/views/room/useRoomChannelSetup";
 import { MyMessagesNav } from "@/views/room/RoomNav";
 import { RoomJoinCard } from "@/views/room/RoomJoinCard";
 import { RoomHeader, RoomSearchBar } from "@/views/room/RoomHeader";
@@ -49,7 +49,7 @@ import { HandoffBanner } from "@/views/room/HandoffBanner";
 import { useHandoffExport } from "@/views/room/useHandoffExport";
 import { canInvite, mayChat, readOnlyInRoom } from "@/lib/roomRoles";
 import { can } from "@/lib/permissions";
-import { EventMemberJoined, EventMemberRemoved } from "@/lib/wire.gen";
+import { EventChannelUpdated, EventMemberJoined, EventMemberRemoved } from "@/lib/wire.gen";
 import { DesktopConnectBanner } from "@/views/DesktopConnect";
 import { useRoomData } from "@/views/room/useRoomData";
 import { useRoomFeed } from "@/views/room/useRoomFeed";
@@ -237,6 +237,13 @@ export function RoomView({
       data.reloadMembers();
       return;
     }
+    // A channel or a section of the room changed (anyone's change, an
+    // agent's too): the listing reloads, and the room's setup (its rules,
+    // recommended channels) with it.
+    if (e.kind === EventChannelUpdated) {
+      void roomChannels.reload();
+      return;
+    }
     if (applyAppChanged(roomId, e)) return;
     if (e.kind === CONTENT_USES_CHANGED) {
       contentUsesChanged.emit(roomId);
@@ -260,6 +267,12 @@ export function RoomView({
     [],
   );
 
+  // The room's channels: the listing, the rail's actions and dialogs, the
+  // open channel's header, the composer's gate and the welcome page.
+  const selectRef = useRef<(id: string) => void>(() => {});
+  const chan = useRoomChannelSetup({ roomId, subject, room, me, roomAgents, channelId, epoch: channelsEpoch, onSelect: (id) => selectRef.current(id) });
+  const roomChannels = chan.channels;
+
   // What fits a request the member sent, shown under it while the agent works. It sends
   // through the room's own send; the send reports accepted messages to it.
   const sendRef = useRef<(text: string, opts: SendOptions) => Promise<boolean>>(async () => false);
@@ -274,6 +287,7 @@ export function RoomView({
     onQuotaExhausted,
     onPlatformOffline: data.platform.refresh,
     onSent: suggestion.observe,
+    onGate: chan.gate.refused,
   });
   sendRef.current = send;
   // Never a dead end: a card under a reply that left the member's own
@@ -421,7 +435,7 @@ export function RoomView({
   );
   // Channel list + default-channel selection belong to the room, not to the
   // rail that renders them (a narrow room's rail drawer is unmounted).
-  const roomChannels = useRoomChannels(roomId, channelsEpoch, channelId, selectChannel);
+  selectRef.current = selectChannel;
   const closeDialog = useCallback(() => setDialog(null), []);
   // The people chat: a human-only side conversation agents never see. Docked
   // beside the timeline on a wide room, a full-screen sheet otherwise, its
@@ -479,6 +493,10 @@ export function RoomView({
   const rail = (
     <RoomRail
       roomId={roomId}
+      subject={subject}
+      me={member ? me : null}
+      policy={room && !isPreviewRoom(room) ? room.channelCreation : ""}
+      actions={chan.actions}
       activeChannel={channelId}
       channels={roomChannels}
       onSelectChannel={selectChannel}
@@ -566,6 +584,7 @@ export function RoomView({
         onShowMembers={() => setDialog("members")}
         onShowSettings={() => setDialog("settings")}
         onConfirmLeave={() => setDialog("leave")}
+        onShowWelcome={chan.openWelcome}
         onExportHandoff={canManageRoom ? () => void handoffExport.run() : undefined}
         exportingBytes={handoffExport.exporting ? handoffExport.progressBytes : null}
         onSaveComponent={canManageRoom ? () => setSavingComponent(true) : undefined}
@@ -626,6 +645,7 @@ export function RoomView({
           </div>
         ) : (
           <div data-room-chat-column className="@container relative flex min-w-0 flex-1 basis-0 flex-col">
+            {chan.header}
             {team.strip}
             {feed.length > 0 && <FeedLayoutSwitch layout={feedLayout.layout} onChange={feedLayout.setLayout} />}
             <div
@@ -699,6 +719,8 @@ export function RoomView({
               modelCatalogs={data.modelCatalogs}
               working={activity.working.size}
               fileContext={roomFileContext}
+              channelDefault={roomChannels.current?.settings?.defaultAgent ?? null}
+              gate={chan.gate}
             />
           </div>
         )}
@@ -748,6 +770,7 @@ export function RoomView({
 
       {room && feed.length > 0 && <MyMessagesNav items={feed} />}
       {team.dialogs}
+      {chan.dialogs}
 
       <RoomDialogs
         roomId={roomId}

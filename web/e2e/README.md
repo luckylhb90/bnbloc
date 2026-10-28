@@ -73,6 +73,20 @@ does (the default channel resolving the first time is not another conversation,
 BNBLOC_E2E_URL=http://localhost:5173 node web/e2e/composer-draft.mjs
 ```
 
+## Channels set up and used as a member does (`channels.mjs`)
+
+Channels slice 1 (docs/prd/2026-10-28-channels-and-threads.md) against a
+mocked room that refuses what the room service refuses: the welcome page on a
+first open, the rail grouped by section, the Rules sheet, a channel's settings
+saving its default agent by key, the directory's search and join, archiving,
+the rules agreement before a first post (the message is sent once agreed),
+an admins-only channel's disabled composer, slow mode's wait, and a refused
+menu action said on its row.
+
+```sh
+BNBLOC_E2E_URL=http://localhost:5173 node web/e2e/channels.mjs
+```
+
 ## An agent's offer of a link (`share-proposal.mjs`)
 
 The card an agent puts in the room (`room_setup` `share`) is seen only by the

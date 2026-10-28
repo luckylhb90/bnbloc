@@ -1,3 +1,4 @@
+import { channelsApi } from "@/lib/channelsApi";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -63,8 +64,8 @@ export function StandalonePreview({ roomId, artifactId }: { roomId: string; arti
   const [channelsEpoch, setChannelsEpoch] = useState(0);
   useEffect(() => {
     let cancelled = false;
-    api
-      .channels(roomId)
+    channelsApi
+      .list(roomId)
       .then((r) => !cancelled && setChannelId((r.channels.find((c) => c.isDefault) ?? r.channels[0])?.channelId ?? null))
       .catch(() => {});
     return () => {

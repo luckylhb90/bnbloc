@@ -40,6 +40,11 @@ export const StorageKey = {
   feedOpenBlocks: "bnbloc.feedOpenBlocks",
   // Per-member and per-room state.
   welcomeDismissed: "bnbloc.welcomeDismissed",
+  // The channel rail's sections a member folded, per member and room
+  // (views/room/ChannelRail.tsx), and the rooms whose welcome page the
+  // member has seen (views/room/RoomWelcomePage.tsx).
+  foldedSections: "bnbloc.foldedSections",
+  roomWelcomeSeen: "bnbloc.roomWelcomeSeen",
   desktopHintDismissed: "bnbloc.desktopHint.dismissed",
   onboarding: "bnbloc.onboarding.v1",
   workshopRoom: "bnbloc.workshopRoom",

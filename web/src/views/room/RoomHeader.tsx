@@ -12,6 +12,7 @@ import {
   SquaresFourIcon,
   ClockIcon,
   ListChecksIcon,
+  DoorOpenIcon,
 } from "@phosphor-icons/react";
 import type { Room } from "@/lib/api";
 import type { Stage } from "@/lib/capability";
@@ -45,6 +46,7 @@ export function RoomHeader({
   onShowMembers,
   onShowSettings,
   onConfirmLeave,
+  onShowWelcome,
   onExportHandoff,
   exportingBytes,
   borrowBadge = 0,
@@ -72,6 +74,8 @@ export function RoomHeader({
   readonly onShowMembers: () => void;
   readonly onShowSettings: () => void;
   readonly onConfirmLeave: () => void;
+  // Opens the room's welcome page: rules, recommended channels, sections.
+  readonly onShowWelcome?: () => void;
   // Owner/admin only: download the room's handoff package. exportingBytes is
   // the running download size while an export is in flight (null otherwise).
   readonly onExportHandoff?: () => void;
@@ -175,6 +179,11 @@ export function RoomHeader({
               {peopleChatUnread > 9 ? "9+" : peopleChatUnread}
             </span>
           )}
+        </Button>
+      )}
+      {onShowWelcome && (
+        <Button variant="ghost" size="icon" title="Welcome, rules and channels" aria-label="Room welcome page" onClick={onShowWelcome} className="tap">
+          <DoorOpenIcon size={18} />
         </Button>
       )}
       {room && <RoomLinkButton roomId={roomId} visibility={room.visibility} previewable={room.previewable} />}

@@ -160,18 +160,21 @@ export async function errorDetail(res: Response): Promise<string> {
   return (await errorBody(res)).message;
 }
 
-// errorBody is errorDetail with the request field the body names, when it
-// names one ({"error": …, "field": "<key>"}: a refused component setting).
-export async function errorBody(res: Response): Promise<{ readonly message: string; readonly field: string }> {
+// errorBody is errorDetail with what else the one error body names: the
+// request field ({"error": …, "field": "<key>"}: a refused component
+// setting), the refusal's code and how long to wait (a channel's slow mode).
+export async function errorBody(res: Response): Promise<{ readonly message: string; readonly field: string; readonly code: string; readonly retryAfterMs: number }> {
   const text = (await res.text().catch(() => "")).trim();
   try {
     const parsed: unknown = JSON.parse(text);
     if (parsed && typeof parsed === "object" && "error" in parsed && typeof parsed.error === "string" && parsed.error) {
-      return { message: parsed.error, field: "field" in parsed && typeof parsed.field === "string" ? parsed.field : "" };
+      const str = (k: string) => (k in parsed && typeof (parsed as Record<string, unknown>)[k] === "string" ? ((parsed as Record<string, unknown>)[k] as string) : "");
+      const wait = "retryAfterMs" in parsed && typeof parsed.retryAfterMs === "number" ? Math.max(0, parsed.retryAfterMs) : 0;
+      return { message: parsed.error, field: str("field"), code: str("code"), retryAfterMs: wait };
     }
   } catch {
     // not the error body
   }
-  return { message: statusText(res.status), field: "" };
+  return { message: statusText(res.status), field: "", code: "", retryAfterMs: 0 };
 }
 

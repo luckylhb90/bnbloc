@@ -2599,7 +2599,15 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   - an agent's handle and identity: `lib/roomAgents.ts` (`agentHandle`,
     `parseAgentHandle`, `agentIdentity`, `sameAgent`, `groupByCore`; exact
     owner/core/provider, rule 9); the composer's recipient precedence:
-    `views/composer/recipient.ts`;
+    `views/composer/recipient.ts`; the agent a channel proposes for an empty
+    pick (C8: the channel's default by its key, else the room's, else ask):
+    `composerDefault` in `lib/channelRules.ts`;
+  - a room's channels (docs/architecture/room-channels.md): what the rail
+    shows and in which order (`railGroups`), who may change what (the room
+    service's rules mirrored, held to `services/room/testdata/channel_rules.json`)
+    and a post refusal's code in words, `lib/channelRules.ts`; the routes,
+    `lib/channelsApi.ts`; the composer's gate (rules agreement, slow mode,
+    archived, admins only), `views/room/useChannelGate.tsx`;
   - shared server state: `useQuery` keyed only by `queryKey(name, {subject,
     tenant})` / `publicQueryKey` (rule M10), cleared at sign-out and tenant
     switch; the shared lists in `lib/queries.ts` (`useMyAgents`,

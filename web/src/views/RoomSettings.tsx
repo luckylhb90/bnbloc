@@ -13,6 +13,7 @@ import { displayNameOf } from "@/lib/useDisplayName";
 import { EmailInput } from "@/views/UserName";
 import { RoomContentSection } from "@/views/room/RoomContentSection";
 import { RoomWelcomeSection } from "@/views/room/RoomWelcomeSection";
+import { RoomRulesSection } from "@/views/room/RoomRulesSection";
 import { RoomOptInSection } from "@/views/room/RoomOptInSection";
 import { errorText } from "@/lib/errors";
 
@@ -203,6 +204,8 @@ export function RoomSettings({
         )}
 
         <RoomWelcomeSection room={room} canEdit={canInvite(me)} onChanged={onChanged} />
+
+        {canInvite(me) && <RoomRulesSection room={room} onChanged={onChanged} />}
 
         <RoomContentSection roomId={room.roomId} canEdit={canInvite(me)} />
 

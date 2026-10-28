@@ -4,6 +4,9 @@ import { cn } from "@/lib/cn";
 import type { JobLive } from "@/lib/jobLive";
 import { ChannelRail } from "@/views/ChannelRail";
 import type { RoomChannels } from "@/views/room/useRoomChannels";
+import type { ChannelActions } from "@/views/room/ChannelMenu";
+import type { RoomMembership } from "@/lib/roomRoles";
+import type { ChannelCreationPolicy } from "@/lib/wire.gen";
 import { LazyPreviewWorkbench } from "@/views/workbench/LazyWorkbench";
 import type { Workbench } from "@/views/workbench/useWorkbench";
 import type { DockStyle } from "@/lib/useDock";
@@ -72,6 +75,10 @@ export function DismissibleLayer({
 
 export function RoomRail({
   roomId,
+  subject,
+  me,
+  policy,
+  actions,
   activeChannel,
   channels,
   unreadByChannel,
@@ -83,6 +90,10 @@ export function RoomRail({
   onSelectPanel,
 }: {
   readonly roomId: string;
+  readonly subject: string | null;
+  readonly me: RoomMembership | null;
+  readonly policy: ChannelCreationPolicy | "";
+  readonly actions: ChannelActions;
   readonly activeChannel: string | null;
   readonly channels: RoomChannels;
   readonly unreadByChannel: Record<string, number>;
@@ -143,8 +154,14 @@ export function RoomRail({
       {panel === "chat" && (
         <ChannelRail
           roomId={roomId}
+          subject={subject}
+          me={me}
+          policy={policy}
+          actions={actions}
           active={activeChannel}
           channels={channels.channels}
+          sections={channels.sections}
+          archivedCount={channels.archived.length}
           loadFailed={channels.loadFailed}
           reload={channels.reload}
           onSelect={onSelectChannel}

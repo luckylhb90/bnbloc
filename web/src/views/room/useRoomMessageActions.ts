@@ -11,6 +11,7 @@ import { type ChatRecipient, type FeedItem, type OutgoingMessage, nextFeedId } f
 import { displayNameOf } from "@/lib/useDisplayName";
 import type { ChatExpert, ExpertMarker } from "@/lib/contentComponents";
 import { errorText, statusText } from "@/lib/errors";
+import { postRefusalOf } from "@/lib/channelRules";
 
 export interface SendOptions {
   readonly peopleOnly: boolean;
@@ -52,6 +53,7 @@ export function useRoomMessageActions({
   onQuotaExhausted,
   onPlatformOffline,
   onSent,
+  onGate,
 }: {
   readonly roomId: string;
   readonly channelId: string | null;
@@ -68,6 +70,9 @@ export function useRoomMessageActions({
   // The room took a message the member sent (not a retry, not an edit): what the
   // composer's suggestion (useSentRequestSuggestion) reads once the agent has started.
   readonly onSent?: (sent: { readonly text: string; readonly toAgent: boolean; readonly expertId?: string; readonly clientMsgId: string; readonly recipient: RoomAgent | null }) => void;
+  // The channel's gate refused a post (useChannelGate.refused): null when
+  // it was not the gate; else whether to send it again.
+  readonly onGate?: (e: unknown) => Promise<boolean> | null;
 }): RoomMessageActions {
   const toast = useToast();
 
@@ -99,7 +104,7 @@ export function useRoomMessageActions({
   // deliver posts one outgoing message for the row `localId` and records the
   // server's sequence on success. The row stays pending until the stream echo
   // confirms it (feedModel.applyIncoming / ackSent).
-  const deliver = useCallback(
+  const deliver: (localId: number, clientMsgId: string, out: OutgoingMessage) => Promise<Delivery> = useCallback(
     async (localId: number, clientMsgId: string, out: OutgoingMessage): Promise<Delivery> => {
       try {
         const { sequence } = await api.sendChat(roomId, out, clientMsgId);
@@ -107,6 +112,18 @@ export function useRoomMessageActions({
         onboardingEvents.emit({ kind: "message_sent", roomId, source: "action", seq: sequence, toAgent: !!out.recipient });
         return "accepted";
       } catch (e) {
+        // The channel's gate (archived, admins only, the rules, slow mode):
+        // the composer says why; after the member agrees to the rules the
+        // same message goes again (the same clientMsgId), else it is not
+        // kept and the draft stays.
+        const gated = onGate?.(e);
+        if (gated) return (await gated) ? deliver(localId, clientMsgId, out) : "rejected";
+        // A surface without the gate's strip (the people chat) says it in
+        // the server's words, never as "join this room".
+        if (e instanceof ApiError && postRefusalOf({ code: e.code })) {
+          toast.error(errorText(e, "Not sent"));
+          return "rejected";
+        }
         const status = e instanceof ApiError ? e.status : 0;
         if (status === 403) {
           toast.info("Join this room to chat");
@@ -137,7 +154,7 @@ export function useRoomMessageActions({
         return "failed";
       }
     },
-    [roomId, setFeed, setRoom, onStaleChannel, onPlatformOffline, toast],
+    [roomId, setFeed, setRoom, onStaleChannel, onPlatformOffline, onGate, toast],
   );
 
   const send = useCallback(

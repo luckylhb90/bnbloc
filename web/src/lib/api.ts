@@ -126,7 +126,7 @@ export async function req<T>(
   const res = await (anonymous ? anonymousFetch : authedFetch)(url, { ...init, headers });
   if (!res.ok) {
     const body = await errorBody(res);
-    throw new ApiError(res.status, body.message, body.field);
+    throw new ApiError(res.status, body.message, body.field, body.code, body.retryAfterMs);
   }
   switch (as) {
     case "none":
@@ -633,21 +633,7 @@ export const api = {
     });
   },
 
-  // Room channels: list (default first), create (any member), rename
-  // (owner/admin or creator; the default channel is immutable), delete
-  // (owner/admin; the default channel is undeletable).
-  channels: (roomId: string) =>
-    req<{ channels: Channel[] }>(roomPath(roomId, "channels")),
-  createChannel: (roomId: string, name: string) =>
-    req<Channel>(roomPath(roomId, "channels"), {
-      method: "POST",
-      body: JSON.stringify({ name }),
-    }),
-  renameChannel: (roomId: string, channelId: string, name: string) =>
-    req<Channel>(
-      roomPath(roomId, "channels", channelId),
-      { method: "PATCH", body: JSON.stringify({ name }) },
-    ),
+  // A room's channels, sections, directory and rules: lib/channelsApi.ts.
   // The room's people chat: a human-only side conversation agents never see.
   // peopleChat reads it (404 until a member first opens it); openPeopleChat
   // creates it on first open (idempotent, any member).
@@ -655,11 +641,6 @@ export const api = {
     req<Channel>(roomPath(roomId, "people-chat")),
   openPeopleChat: (roomId: string) =>
     req<Channel>(roomPath(roomId, "people-chat"), { method: "POST" }),
-  deleteChannel: (roomId: string, channelId: string) =>
-    req<{ deleted: boolean }>(
-      roomPath(roomId, "channels", channelId),
-      { method: "DELETE" },
-    ),
   transferOwner: (id: string, userId: string) =>
     req<void>(roomPath(id, "transfer"), {
       method: "POST",

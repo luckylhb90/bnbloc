@@ -1,3 +1,4 @@
+import { channelsApi } from "@/lib/channelsApi";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Select } from "@/ui/Select";
 import {
@@ -11,7 +12,7 @@ import {
   TrashIcon,
   WarningIcon,
 } from "@phosphor-icons/react";
-import { api, ApiError, type Channel } from "@/lib/api";
+import { ApiError, type Channel } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { sameUser } from "@/lib/format";
 import {
@@ -116,8 +117,8 @@ export function SchedulesDialog({
 
   useEffect(() => {
     reload();
-    api
-      .channels(roomId)
+    channelsApi
+      .list(roomId)
       .then((r) => setChannels(r.channels ?? []))
       .catch(() => setChannels([]));
   }, [roomId, reload]);

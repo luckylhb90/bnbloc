@@ -19,6 +19,7 @@ import { offeredChoice } from "@/lib/agentPrefs";
 import { NO_ROOM_CATALOGS, resolveModelCatalog, type RoomModelCatalogs } from "@/lib/agentCatalogs";
 import { PLATFORM_OFFLINE_MESSAGE, platformAddQuestion, routeSend, samePlatformAgent, type PlatformChoice } from "@/lib/platformAgents";
 import { useAgentPrefs } from "@/views/composer/useAgentPrefs";
+import type { ChannelAgent } from "@/lib/wire.gen";
 import { isImeKey, isSubmitEnter } from "@/lib/keys";
 import { useDismissOnOutside } from "@/ui/useDismissOnOutside";
 import { Button } from "@/ui/Button";
@@ -80,6 +81,7 @@ export function Composer({
   fileContext,
   feed,
   pick,
+  channelDefault,
 }: {
   roomId: string;
   channelId?: string | null;
@@ -107,6 +109,9 @@ export function Composer({
   // A prompt to insert (a suggestion handed over from the room); a new
   // nonce inserts it again.
   pick?: { readonly choice: PromptChoice; readonly nonce: number };
+  // The channel's default agent (C8: proposed when the member made no
+  // choice of their own here).
+  channelDefault?: ChannelAgent | null;
   // The channel's rows: the context meter reads the addressed agent's newest
   // reply that reports how full its conversation is.
   feed?: readonly FeedItem[];
@@ -132,7 +137,7 @@ export function Composer({
   // model + reasoning tuning ("" = the provider default; changed only by the
   // member's own pick, see offeredChoice).
   const { agent, recipient, setRecipient, peopleOnly: peopleOnlyPref, setPeopleOnly, model, setModel, reasoning, setReasoning } =
-    useAgentPrefs({ roomId, channelId, enabled: !people, agent: localAgent, roomAgents, subject: subject ?? null, offered: platformAgents?.choices });
+    useAgentPrefs({ roomId, channelId, enabled: !people, agent: localAgent, roomAgents, subject: subject ?? null, offered: platformAgents?.choices, channelDefault });
   // A file panel always asks an agent (its sends name the file to change).
   const peopleOnly = variant === "file" ? false : peopleOnlyPref;
   // The welcome card's new room opens with its platform agent selected.

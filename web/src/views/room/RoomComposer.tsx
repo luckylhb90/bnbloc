@@ -14,6 +14,8 @@ import type { RoomPlatformAgents } from "@/views/room/useRoomPlatformAgents";
 import type { RoomModelCatalogs } from "@/lib/agentCatalogs";
 import { showStarterPrompts } from "@/lib/onboarding";
 import { useDisplayNames } from "@/lib/useDisplayName";
+import type { ChannelAgent } from "@/lib/wire.gen";
+import type { ChannelGate } from "@/views/room/useChannelGate";
 
 // RoomComposer is the room footer: the join panel (when previewing an unjoined
 // room), a read-only note (a visitor: lib/roomRoles mayChat), or the
@@ -40,6 +42,8 @@ export function RoomComposer({
   fileContext,
   pick,
   threadLength,
+  channelDefault,
+  gate,
 }: {
   // Set while the person is only reading the room (a preview): how they join.
   readonly join?: { readonly needsCode: boolean; readonly joining: boolean; readonly onJoin: (code?: string) => void };
@@ -71,6 +75,10 @@ export function RoomComposer({
   // The length of the conversation the starters are for, when it is not
   // the feed (a file panel's thread).
   readonly threadLength?: number;
+  // The channel's default agent (C8) and its gate (why it refused a post,
+  // or why the member cannot post here now): useChannelGate.
+  readonly channelDefault?: ChannelAgent | null;
+  readonly gate?: Pick<ChannelGate, "blocked" | "strip">;
 }) {
   // Stable inputs for the composer's mention list and references.
   const members = useMemo(
@@ -111,8 +119,13 @@ export function RoomComposer({
         <p className="px-4 py-3 text-sm text-[var(--color-fg-muted)]">
           You can follow this room, but your role here is read-only: you can't post or ask agents.
         </p>
+      ) : gate?.blocked ? (
+        <p data-composer-blocked role="status" className="px-4 py-3 text-sm text-[var(--color-fg-muted)]">
+          {gate.blocked}
+        </p>
       ) : (
         <>
+          {gate?.strip}
           <TypingLine typers={Object.keys(typingUsers).filter((u) => !isSelf(u, subject))} />
           <Composer
             roomId={roomId}
@@ -131,6 +144,7 @@ export function RoomComposer({
             fileContext={fileContext}
             pick={pick}
             feed={feed}
+            channelDefault={channelDefault}
           />
         </>
       )}

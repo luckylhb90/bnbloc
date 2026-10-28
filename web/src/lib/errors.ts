@@ -12,10 +12,17 @@
 export class ApiError extends Error {
   readonly status: number;
   readonly field: string;
-  constructor(status: number, message: string, field = "") {
+  // The refusal's stable code where the route defines one (a channel's
+  // setup refusing a post: wire.Channel*, wire.RulesAgreementRequired), and
+  // how long to wait before the same request may succeed (slow mode).
+  readonly code: string;
+  readonly retryAfterMs: number;
+  constructor(status: number, message: string, field = "", code = "", retryAfterMs = 0) {
     super(message);
     this.status = status;
     this.field = field;
+    this.code = code;
+    this.retryAfterMs = retryAfterMs;
   }
 }
 
