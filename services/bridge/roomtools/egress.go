@@ -757,6 +757,7 @@ func passThrough(req *http.Request, host string) *http.Response {
 	out.ContentLength = req.ContentLength
 	resp, err := hereClient.Do(out)
 	if err != nil {
+		obs.ServerError(nil, "egress pass-through: "+host, err)
 		return egressError(http.StatusBadGateway, "this computer could not reach "+host+": "+err.Error())
 	}
 	for _, h := range hopHeaders {
