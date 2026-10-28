@@ -36,13 +36,14 @@ pub(super) const MCP_SIGN_INS_DIR: &str = "mcp-sign-ins";
 /// bridge reads at spawn (`<member>/core-manifests/<core>.json`). What a
 /// catalog decides is the member's; the binaries it points to are shared.
 pub(super) const CORE_MANIFESTS_DIR: &str = "core-manifests";
-/// The index of a member's materialized MCP tools
-/// (`<member>/mcp-tools/index.json`), which lists binaries of the shared,
-/// content-addressed store by absolute path.
-pub(super) const MCP_TOOLS_INDEX_DIR: &str = "mcp-tools";
-/// Retired settings dirs: under the app config dir (member-unkeyed) and
-/// under each member dir, deleted at startup (remove_retired_dirs).
-const RETIRED_SETTINGS_DIRS: [&str; 2] = ["plugin-settings", "mcp-settings"];
+/// Where member indexes of materialized MCP tools live under the app cache
+/// dir (mcp_tools_index_dir).
+const MCP_TOOLS_INDEXES_DIR: &str = "mcp-tool-indexes";
+/// Retired dirs: under the app config dir (member-unkeyed) and under each
+/// member dir, deleted at startup (remove_retired_dirs). "mcp-tools" held a
+/// member's tools index, which a confined agent could not read (it moved to
+/// the cache, mcp_tools_index_dir).
+const RETIRED_SETTINGS_DIRS: [&str; 3] = ["plugin-settings", "mcp-settings", "mcp-tools"];
 /// A member's sandbox data dirs (`<member>/sandbox/<name>`: VM disks).
 pub(super) const SANDBOX_DATA_DIR: &str = "sandbox";
 /// A plugin's private data dir (`<member>/plugin-data/<plugin>`), for a
@@ -91,6 +92,22 @@ pub(crate) fn member_dir(
             .join(MEMBERS_DIR)
             .join(account.digest(&[tenant])),
     )
+}
+
+/// The directory of `member`'s index of materialized MCP tools
+/// (`index.json`, the shared store's binaries by absolute path): the member
+/// directory's own path, from the app config dir, under the app cache dir.
+/// Not in the member directory: a stdio tool is started by the agent's CLI,
+/// which runs confined, and confinement denies reading the app's config and
+/// data dirs (they hold sign-ins), never its cache. The index holds no
+/// secret. None for a member directory outside `config_dir`.
+pub(super) fn mcp_tools_index_dir(
+    config_dir: &Path,
+    cache_dir: &Path,
+    member: &Path,
+) -> Option<PathBuf> {
+    let rel = member.strip_prefix(config_dir).ok()?;
+    Some(cache_dir.join(MCP_TOOLS_INDEXES_DIR).join(rel))
 }
 
 /// The subject (`sub`) and tenant (`tenant`) a gateway session token names
@@ -273,6 +290,25 @@ mod tests {
         assert_eq!(member_dir(config, "file:///x", "maya", "t1"), None);
         assert_eq!(member_dir(config, gw, " ", "t1"), None);
         assert_eq!(member_dir(config, gw, "maya", ""), None);
+    }
+
+    // The tools index is read by the launcher inside the agent's
+    // confinement, which denies the app's config dir: it lives under the
+    // cache dir, at the member directory's own relative path (QA 2026-10-28:
+    // in the member directory no confined agent could start a stdio tool).
+    #[test]
+    fn the_tools_index_is_under_the_cache_dir() {
+        let config = Path::new("/home/maya/.config/app");
+        let cache = Path::new("/home/maya/.cache/app");
+        let member = member_dir(config, "https://gw.example.com", "maya", "t1").unwrap();
+        let index = mcp_tools_index_dir(config, cache, &member).unwrap();
+        assert!(index.starts_with(cache.join(MCP_TOOLS_INDEXES_DIR)));
+        assert!(index.ends_with(member.strip_prefix(config).unwrap()));
+        assert!(!index.starts_with(config));
+        assert_eq!(
+            mcp_tools_index_dir(config, cache, Path::new("/elsewhere/m")),
+            None
+        );
     }
 
     #[test]

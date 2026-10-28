@@ -62,6 +62,11 @@ impl Dirs {
         &self.config
     }
 
+    /// The app cache dir: what a confined agent may read (no secret).
+    pub(crate) fn cache(&self) -> &Path {
+        &self.cache
+    }
+
     /// The app data dir (only the unkeyed state of earlier builds is
     /// removed from it, member_dir::remove_unkeyed_dirs).
     pub(crate) fn data(&self) -> &Path {

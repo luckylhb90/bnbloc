@@ -49,7 +49,9 @@ mod mcp_oauth;
 pub(super) use mcp_oauth::SignIns;
 use mcp_oauth::{OAuthSpec, RefreshOutcome};
 
-/// The env var naming the tools dir the bridge reads (the member's index).
+/// The env var naming the tools dir the bridge reads (the member's index,
+/// under the app cache dir: the launcher reads it from inside the agent's
+/// confinement).
 pub(super) const TOOLS_DIR_ENV: &str = "BNBLOC_MCP_TOOLS_DIR";
 /// The env var naming the shared store the index's binaries are in.
 pub(super) const TOOLS_STORE_ENV: &str = "BNBLOC_MCP_TOOLS_STORE";
@@ -257,6 +259,13 @@ pub(super) fn collect_garbage(dir: &Path, keep: &HashSet<String>) {
 }
 
 impl Adapter {
+    /// Where `member`'s tools index is kept (member_dir::mcp_tools_index_dir):
+    /// what the manager writes and the bridge is told (TOOLS_DIR_ENV).
+    pub(super) fn mcp_tools_index_dir(&self, member: &Path) -> Option<PathBuf> {
+        let dirs = self.dirs().ok()?;
+        crate::internal_ext::member_dir::mcp_tools_index_dir(dirs.config(), dirs.cache(), member)
+    }
+
     /// The directory holding the signed-in member's MCP sign-ins
     /// (member_dir).
     pub(super) fn mcp_sign_ins_dir(&self) -> Result<PathBuf, String> {
@@ -311,7 +320,7 @@ impl Adapter {
         // lists are in the shared store.
         let index_dir = self
             .session_scope(&gateway)
-            .map(|(_, member)| member.join(crate::internal_ext::member_dir::MCP_TOOLS_INDEX_DIR));
+            .and_then(|(_, member)| self.mcp_tools_index_dir(&member));
         let mut entries = Vec::new();
         for tool in &tools {
             if tool.transport != "stdio" {
