@@ -30,7 +30,8 @@ import { FeedLayoutSwitch } from "@/views/room/FeedLayoutSwitch";
 import { useFeedLayout } from "@/views/room/useFeedLayout";
 import { RoomComposer } from "@/views/room/RoomComposer";
 import { PeopleChatDock, PeopleChatPanel } from "@/views/room/PeopleChatPanel";
-import { ThreadPanel } from "@/views/room/ThreadPanel";
+import { RoomForum, RoomThreadPanel } from "@/views/room/RoomThreads";
+import { isForum } from "@/lib/forum";
 import { useRoomThreads } from "@/views/room/useRoomThreads";
 import { usePeopleChat } from "@/views/room/usePeopleChat";
 import { shareComposerRef } from "@/lib/team";
@@ -470,6 +471,8 @@ export function RoomView({
   // takes the people chat's place: one side panel at a time).
   const threads = useRoomThreads({ roomId, channelId, joinedGen, enabled: member, unreadByChannel });
   threadsRef.current = threads;
+  // A forum channel (every post a thread, §2.1c) shows its threads, not a feed.
+  const forumChannel = roomChannels.current && isForum(roomChannels.current.settings) ? roomChannels.current : null;
   const openThreadPanel = useCallback(
     (rootSeq: number) => {
       closePeoplePanelRef.current();
@@ -513,10 +516,13 @@ export function RoomView({
     [member, readOnly, team.extras, threads.byRoot, openThreadPanel],
   );
   const threadPanel = (th: NonNullable<typeof threads.open>) => (
-    <ThreadPanel
+    <RoomThreadPanel
       key={th.channelId}
       roomId={roomId}
       thread={th}
+      channelId={channelId}
+      channel={roomChannels.current}
+      feed={feed}
       subject={subject}
       joinedGen={joinedGen}
       agent={agent}
@@ -524,10 +530,6 @@ export function RoomView({
       members={data.members}
       online={online}
       mayPost={member && !readOnly}
-      root={th.thread?.parentId === channelId ? feed.find((m) => m.seq === th.thread?.rootSeq) : undefined}
-      sendToParent={async (parentId, rootSeq, text) => {
-        await api.sendChat(roomId, { text, recipient: null, channelId: parentId, attachmentIds: [], replyTo: rootSeq }, crypto.randomUUID());
-      }}
       onChanged={() => {
         threads.reload();
         void roomChannels.reload();
@@ -708,6 +710,17 @@ export function RoomView({
           <div data-room-chat-column className="@container relative flex min-w-0 flex-1 basis-0 flex-col">
             {chan.header}
             {team.strip}
+            {forumChannel ? (
+              <RoomForum
+                roomId={roomId}
+                channel={forumChannel}
+                threads={threads}
+                unreadByChannel={unreadByChannel}
+                mayPost={member && !readOnly && !chan.gate.blocked}
+                beforeOpen={closePeoplePanelRef.current}
+              />
+            ) : (
+              <>
             {feed.length > 0 && <FeedLayoutSwitch layout={feedLayout.layout} onChange={feedLayout.setLayout} />}
             <div
               ref={scroller.scrollRef}
@@ -783,6 +796,8 @@ export function RoomView({
               channelDefault={roomChannels.current?.settings?.defaultAgent ?? null}
               gate={chan.gate}
             />
+              </>
+            )}
           </div>
         )}
         {peopleChat.open && peopleChat.channelId && peopleDocked && (

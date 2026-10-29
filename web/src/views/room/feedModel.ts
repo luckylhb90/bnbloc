@@ -55,6 +55,7 @@ export function feedItemFromEvent(e: RoomEvent, subject: string | null, live: bo
     sourceSeq: e.sourceSeq,
     peopleOnly: e.kind === "chat_message" && e.toAgent === false ? true : undefined,
     ...(e.replyTo ? { replyTo: e.replyTo } : {}),
+    ...(e.agentAuto ? { agentAuto: true } : {}),
     status: self ? "sent" : undefined,
     animate: live && author === "agent" ? true : undefined,
   };

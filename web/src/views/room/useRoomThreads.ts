@@ -11,6 +11,12 @@ export interface RoomThreads {
   readonly byRoot: ReadonlyMap<number, ThreadSummary>;
   // The threads the member follows, unread first (the rail's Threads entry).
   readonly followed: readonly RoomChannel[];
+  // The current channel's threads as channels (a forum's list and board).
+  readonly channelThreads: readonly RoomChannel[];
+  // Open a thread the caller already has (a forum's row or card).
+  readonly openChannel: (thread: RoomChannel) => void;
+  // Reload, then open the thread of that id once listed (a forum's new post).
+  readonly reloadAndOpen: (threadId: string) => void;
   // The thread open in the side panel (null: none).
   readonly open: RoomChannel | null;
   readonly openThread: (rootSeq: number) => void;
@@ -42,6 +48,8 @@ export function useRoomThreads({
 }): RoomThreads {
   const toast = useToast();
   const [summaries, setSummaries] = useState<ThreadSummary[]>([]);
+  const [channelThreads, setChannelThreads] = useState<RoomChannel[]>([]);
+  const [pendingOpen, setPendingOpen] = useState<string | null>(null);
   const [followedList, setFollowedList] = useState<RoomChannel[]>([]);
   const [open, setOpen] = useState<RoomChannel | null>(null);
   const [gen, setGen] = useState(0);
@@ -49,15 +57,21 @@ export function useRoomThreads({
   useEffect(() => {
     if (!enabled || !channelId) {
       setSummaries([]);
+      setChannelThreads([]);
       return;
     }
     let cancelled = false;
     channelsApi.threads(roomId, { parent: channelId }).then(
       (r) => {
-        if (!cancelled) setSummaries(r.threads.map(summaryOf).filter((s): s is ThreadSummary => s !== null));
+        if (cancelled) return;
+        setSummaries(r.threads.map(summaryOf).filter((s): s is ThreadSummary => s !== null));
+        setChannelThreads(r.threads);
       },
       () => {
-        if (!cancelled) setSummaries([]);
+        if (!cancelled) {
+          setSummaries([]);
+          setChannelThreads([]);
+        }
       },
     );
     return () => {
@@ -114,6 +128,23 @@ export function useRoomThreads({
   );
 
   const close = useCallback(() => setOpen(null), []);
+  const openChannel = useCallback((thread: RoomChannel) => setOpen(thread), []);
+  const reloadAndOpen = useCallback(
+    (threadId: string) => {
+      setPendingOpen(threadId);
+      reload();
+    },
+    [reload],
+  );
+  // A forum's new post: its thread opens once the reloaded list has it.
+  useEffect(() => {
+    if (!pendingOpen) return;
+    const th = channelThreads.find((t) => t.channelId === pendingOpen);
+    if (th) {
+      setOpen(th);
+      setPendingOpen(null);
+    }
+  }, [pendingOpen, channelThreads]);
 
   const applyEvent = useCallback(
     (e: RoomEvent) => {
@@ -122,12 +153,18 @@ export function useRoomThreads({
       setSummaries((cur) => mergeSummary(cur, s));
       setOpen((cur) => (cur && cur.channelId === s.threadId ? { ...cur, name: s.title, thread: s.info, archivedAtMs: s.archived ? cur.archivedAtMs || Date.now() : undefined } : cur));
       setFollowedList((cur) => cur.map((t) => (t.channelId === s.threadId ? { ...t, name: s.title, thread: s.info } : t)));
+      setChannelThreads((cur) => {
+        const known = cur.some((t) => t.channelId === s.threadId);
+        // A thread opened by someone else: the list reloads to have it.
+        if (!known && s.info.parentId === channelId) setGen((g) => g + 1);
+        return cur.map((t) => (t.channelId === s.threadId ? { ...t, name: s.title, thread: s.info } : t));
+      });
     },
-    [],
+    [channelId],
   );
 
   const byRoot = useMemo(() => threadsByRoot(channelId ?? "", summaries), [channelId, summaries]);
   const followed = useMemo(() => followedOrder(followedList, unreadByChannel), [followedList, unreadByChannel]);
 
-  return { byRoot, followed, open, openThread, openById, close, reload, applyEvent };
+  return { byRoot, followed, channelThreads, open, openThread, openById, openChannel, reloadAndOpen, close, reload, applyEvent };
 }

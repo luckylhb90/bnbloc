@@ -391,6 +391,11 @@ export const Message = memo(function Message({
               <>
                 <TaskBadge item={item} />
                 {peopleMarker && <PeopleOnlyMarker />}
+                {item.agentAuto && (
+                  <span data-agent-auto title="This channel's agent answers every new thread: it was asked automatically. Stop its run from the room's runs if it is not needed.">
+                    Asked automatically
+                  </span>
+                )}
                 <span title={exactTime(item.createdAtMs)}>
                   {relativeTime(item.createdAtMs)}
                 </span>
@@ -483,6 +488,11 @@ export const Message = memo(function Message({
               </span>
             ) : null}
             {peopleMarker && <PeopleOnlyMarker />}
+            {item.agentAuto && (
+              <span data-agent-auto className="text-[0.68rem] text-[var(--color-fg-subtle)]" title="This channel's agent answers every new thread: it was asked automatically.">
+                Asked automatically
+              </span>
+            )}
             <CopyButton text={item.text} />
             {canAsk && onAskAgent && <AskAgentButton item={item} onAskAgent={onAskAgent} />}
             <MessageExtraActions item={item} />

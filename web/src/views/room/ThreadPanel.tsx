@@ -6,6 +6,10 @@ import type { LocalAgent } from "@/lib/useLocalAgent";
 import type { RoomAccessEnd } from "@/lib/roomGone";
 import { AI_UNAVAILABLE, DRAFT_THREAD_TITLE, SUMMARIZE_THREAD } from "@/lib/channelAssists";
 import { closingSummary, rootLine, summaryOf, threadAssistText } from "@/lib/threads";
+import { isForum } from "@/lib/forum";
+import { MaxThreadTags, type ChannelSettings } from "@/lib/wire.gen";
+import { Select } from "@/ui/Select";
+import { cn } from "@/lib/cn";
 import { AssistButton } from "@/views/AssistButton";
 import { useChannelAssist } from "@/views/room/useChannelAssist";
 import { useRoomStream } from "@/lib/useRoomStream";
@@ -45,6 +49,7 @@ export function ThreadPanel({
   members,
   online,
   mayPost,
+  parentSettings,
   root,
   onChanged,
   sendToParent,
@@ -62,6 +67,8 @@ export function ThreadPanel({
   // The member may post in the parent channel (and so here): rename,
   // archive and the composer depend on it.
   readonly mayPost: boolean;
+  // The parent channel's settings: a forum's tags and statuses (C20).
+  readonly parentSettings?: ChannelSettings;
   // The root message as the parent channel's feed holds it (undefined when
   // that feed does not have it loaded): shown above the replies, so the
   // thread reads as it was asked.
@@ -143,6 +150,13 @@ export function ThreadPanel({
     await channelsApi.archive(roomId, channelId, true).then(onChanged, (e: unknown) => toast.error(errorText(e, "Could not close the thread")));
   };
 
+  // A forum thread's marks (C20): set by any member who may post.
+  const forum = isForum(parentSettings);
+  const info = thread.thread;
+  const mark = (body: Parameters<typeof channelsApi.markThread>[2]) =>
+    channelsApi.markThread(roomId, channelId, body).then(onChanged, (e: unknown) => toast.error(errorText(e, "Could not mark the thread")));
+  const replies = feed.filter((m) => m.seq != null && m.text);
+
   return (
     <section aria-label={`Thread: ${thread.name}`} data-thread-panel={channelId} className="@container flex h-full min-h-0 flex-col bg-[var(--color-surface)]">
       <header className="pad-safe pad-safe-t flex items-center gap-2 border-b border-[var(--color-border)] px-3 py-2 [--pad-safe-x:0.75rem] [--pad-safe-y:0.5rem]">
@@ -202,6 +216,60 @@ export function ThreadPanel({
           <XIcon size={18} />
         </button>
       </header>
+      {forum && (
+        <div data-thread-marks className="flex flex-wrap items-center gap-2 border-b border-[var(--color-border)] px-3 py-2 text-xs">
+          {(parentSettings?.statuses?.length ?? 0) > 0 && (
+            <Select
+              aria-label="Status"
+              disabled={!mayPost || archived}
+              value={info?.status ?? ""}
+              onChange={(e) => void mark({ status: e.target.value })}
+              className="h-7 w-auto text-xs"
+            >
+              <option value="">No status</option>
+              {parentSettings!.statuses!.map((st) => (
+                <option key={st.id} value={st.id}>
+                  {st.name}
+                </option>
+              ))}
+            </Select>
+          )}
+          {(parentSettings?.tags ?? []).map((t) => {
+            const on = (info?.tags ?? []).includes(t.id);
+            return (
+              <button
+                key={t.id}
+                type="button"
+                aria-pressed={on}
+                disabled={!mayPost || archived || (!on && (info?.tags?.length ?? 0) >= MaxThreadTags)}
+                onClick={() => void mark({ tags: on ? (info?.tags ?? []).filter((x) => x !== t.id) : [...(info?.tags ?? []), t.id] })}
+                className={cn(
+                  "tactile rounded-full border px-2 py-0.5",
+                  on ? "border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-fg)]" : "border-[var(--color-border)] text-[var(--color-fg-subtle)]",
+                )}
+              >
+                {t.name}
+              </button>
+            );
+          })}
+          {replies.length > 0 && (
+            <Select
+              aria-label="Answer"
+              disabled={!mayPost || archived}
+              value={String(info?.answeredSeq ?? 0)}
+              onChange={(e) => void mark({ answeredSeq: Number(e.target.value) })}
+              className="h-7 w-auto max-w-48 text-xs"
+            >
+              <option value="0">Not answered</option>
+              {replies.map((m) => (
+                <option key={m.seq} value={String(m.seq)}>
+                  Answer: {m.author}: {m.text.slice(0, 40)}
+                </option>
+              ))}
+            </Select>
+          )}
+        </div>
+      )}
       <div ref={scroller.scrollRef} onScroll={scroller.onScroll} className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
         <div ref={scroller.contentRef}>
           {root && (

@@ -3,6 +3,7 @@ import type { Channel } from "@/lib/api";
 import { channelsApi } from "@/lib/channelsApi";
 import { DRAFT_CHANNEL_PURPOSE, AI_UNAVAILABLE, purposeAsk, purposeOf } from "@/lib/channelAssists";
 import { mayPlaceChannel, sectionOf } from "@/lib/channelRules";
+import { isForum, linesOf, statusesFromLines, tagsFromLines } from "@/lib/forum";
 import { errorText } from "@/lib/errors";
 import { agentByIdentity, agentHandle, agentIdentity } from "@/lib/roomAgents";
 import type { RoomMembership } from "@/lib/roomRoles";
@@ -12,6 +13,7 @@ import {
   MaxChannelGroupName,
   MaxChannelPurpose,
   MaxChannelRules,
+  MaxPostTemplate,
   type ChannelAgentParticipation,
   type ChannelCreationPolicy,
   type ChannelGroup,
@@ -158,6 +160,9 @@ export function ChannelSettingsDialog({
   const [sectionId, setSectionId] = useState(sectionOf(c, sections) ? c.sectionId : "");
   const [s, setS] = useState<ChannelSettings>(c.settings ?? {});
   const [slow, setSlow] = useState(String(c.settings?.slowModeSeconds ?? 0));
+  // A forum's vocabulary, one name a line (lib/forum: ids from names).
+  const [tagLines, setTagLines] = useState(linesOf(c.settings?.tags));
+  const [statusLines, setStatusLines] = useState(linesOf(c.settings?.statuses));
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const draft = useChannelAssist(DRAFT_CHANNEL_PURPOSE, "draft a purpose");
@@ -184,7 +189,13 @@ export function ChannelSettingsDialog({
         purpose: purpose.trim(),
         rules: rules.trim(),
         ...(sectionId !== c.sectionId ? { sectionId } : {}),
-        settings: { ...s, slowModeSeconds: seconds },
+        settings: {
+          ...s,
+          slowModeSeconds: seconds,
+          ...(isForum(s)
+            ? { tags: tagsFromLines(tagLines, c.settings?.tags), statuses: statusesFromLines(statusLines, c.settings?.statuses) }
+            : { tags: undefined, statuses: undefined, postTemplate: undefined }),
+        },
       });
       onSaved();
     } catch (e) {
@@ -282,7 +293,45 @@ export function ChannelSettingsDialog({
           </div>
           <Switch checked={!s.noAgents} disabled={c.isDefault} ariaLabel="Agents admitted" onChange={(on) => setS((x) => ({ ...x, noAgents: !on }))} />
         </div>
-        <Field label="Agent participation" hint="Stored for now: until a later version, the channel's agent answers when mentioned, whatever this says.">
+        <Field label="Posts" hint={isForum(s) ? "Every post opens a titled thread; the channel lists its threads." : "A feed of messages."}>
+          <Segment<"" | "threads">
+            value={isForum(s) ? "threads" : ""}
+            onChange={(v) => setS((x) => ({ ...x, postingStyle: v || undefined }))}
+            options={[
+              { value: "", label: "Messages" },
+              { value: "threads", label: "Every post a thread" },
+            ]}
+          />
+        </Field>
+        {isForum(s) && (
+          <>
+            <Field label="Tags" hint="One a line. Anyone who posts tags a thread with them; the list filters by them.">
+              <Textarea rows={3} value={tagLines} onChange={(e) => setTagLines(e.target.value)} placeholder={"Bug\nFeature\nQuestion"} />
+            </Field>
+            <Field label="Statuses" hint="One a line, in board order. Anyone who posts moves a thread between them.">
+              <Textarea rows={3} value={statusLines} onChange={(e) => setStatusLines(e.target.value)} placeholder={"Open\nIn progress\nDone"} />
+            </Field>
+            <Field label="Post template" hint="What a new post starts from.">
+              <Textarea
+                rows={4}
+                maxLength={MaxPostTemplate}
+                value={s.postTemplate ?? ""}
+                onChange={(e) => setS((x) => ({ ...x, postTemplate: e.target.value || undefined }))}
+                placeholder={"What happened:\n\nSteps:\n\nExpected:"}
+              />
+            </Field>
+          </>
+        )}
+        <Field
+          label="Agent participation"
+          hint={
+            s.agentParticipation === "threads"
+              ? "The channel's default agent answers every new thread once, marked automatic; anyone can stop it."
+              : s.agentParticipation === "questions"
+                ? "Stored for now: the agent answers when mentioned until a later version."
+                : "The channel's agent answers when mentioned."
+          }
+        >
           <Segment<ChannelAgentParticipation>
             value={(s.agentParticipation ?? "") as ChannelAgentParticipation}
             onChange={(v) => setS((x) => ({ ...x, agentParticipation: v }))}

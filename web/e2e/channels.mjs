@@ -253,7 +253,7 @@ await open("owner: welcome, rail sections, rules header, settings dialog", "maya
   await page.getByRole("menuitem", { name: "Settings, purpose and rules" }).click();
   const dlg = page.getByRole("dialog", { name: "#releases settings" });
   await dlg.waitFor();
-  ok(/Stored for now: until a later version, the channel's agent answers when mentioned/.test(await dlg.innerText()), "agent participation says it is stored only");
+  ok(/The channel's agent answers when mentioned\./.test(await dlg.innerText()), "agent participation says what the current choice does");
   ok(/AI suggestions are unavailable here; fill it in by hand/.test(await dlg.innerText()), "the purpose's AI says it is unavailable (no model)");
   await dlg.getByLabel("Default agent").selectOption({ label: "nimbus/jack/claude (jack)" });
   await dlg.getByRole("spinbutton").fill("15");
