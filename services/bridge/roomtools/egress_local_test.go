@@ -307,6 +307,7 @@ func TestRelayStreamsAndReportsOnce(t *testing.T) {
 	r := newLocalRig(t)
 	release := make(chan struct{})
 	r.system = func(w http.ResponseWriter, req *http.Request) {
+		time.Sleep(80 * time.Millisecond) // the model thinks before its head
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = io.WriteString(w, "data: one\n\n")
 		w.(http.Flusher).Flush()
@@ -339,6 +340,9 @@ func TestRelayStreamsAndReportsOnce(t *testing.T) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	u := r.reports[0]
+	if u.Millis < 50 {
+		t.Fatalf("the time reported (%d ms) leaves out the wait for the model", u.Millis)
+	}
 	if u.Host != modelHost || u.Status != 200 || u.Bytes != int64(len("data: one\n\n")+len("data: two\n\n")) || u.Error != "" {
 		t.Fatalf("usage = %+v", u)
 	}

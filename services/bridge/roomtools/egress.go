@@ -844,7 +844,7 @@ func sendHere(ctx context.Context, service string, in component.EgressRequest, s
 		req.Header[http.CanonicalHeaderKey(k)] = v
 	}
 	keep := withSession(jar, req)
-	client := hereClient
+	client, began := hereClient, time.Now()
 	if send.Relay {
 		client = relayClient
 	}
@@ -855,7 +855,7 @@ func sendHere(ctx context.Context, service string, in component.EgressRequest, s
 	}
 	keep(resp)
 	if send.Relay {
-		return relayAnswer(resp, cancel, in, send, h), nil, nil
+		return relayAnswer(resp, cancel, in, send, h, began), nil, nil
 	}
 	head := make([]byte, component.MaxEgressReportBody)
 	n, err := io.ReadFull(resp.Body, head)

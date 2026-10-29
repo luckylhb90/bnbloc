@@ -57,27 +57,37 @@ func emptyGateway(t *testing.T) *httptest.Server {
 	return srv
 }
 
-// A provider on this computer is asked about the member's own run, and about
-// no other (borrowed, platform, or a run wearing someone else's scripts):
-// the claim is the member's alone.
-func TestLocalProviderServesOnlyTheMembersOwnRun(t *testing.T) {
+// A provider on this computer is asked about the member's own run in the
+// sandbox, and about no other (a host run, borrowed, platform, or a run
+// wearing someone else's scripts): the claim is the member's alone.
+func TestLocalProviderServesOnlyTheMembersOwnSandboxedRun(t *testing.T) {
 	state := t.TempDir()
 	asked := providerOnThisComputer(t, state)
 	gw := emptyGateway(t)
-	b := New(Config{GatewayBaseURL: gw.URL, GatewayToken: "t", OwnerSubject: "maya", StateDir: state})
+	ln, _ := net.Listen("tcp", "127.0.0.1:0")
+	port := ln.Addr().(*net.TCPAddr).Port
+	_ = ln.Close()
+	b := New(Config{GatewayBaseURL: gw.URL, GatewayToken: "t", OwnerSubject: "maya", StateDir: state,
+		Sandbox: SandboxConfig{HostProxy: fmt.Sprintf("host.vm.internal:%d", port)}})
 	stop, err := b.EnableRoomTools("/opt/bnbloc/bnbloc-bridge")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer stop()
 	c := b.sessionContributors()[0]
-	info := SessionInfo{RoomID: "room-1", Owner: "maya", Core: "core-a", Provider: "codex", JobID: "job-1", RequesterUserID: "maya", Drive: component.DriveOwn, OwnRun: true}
-	part, err := c.ContributeSession(context.Background(), info)
+	own := SessionInfo{RoomID: "room-1", Owner: "maya", Core: "core-a", Provider: "codex", JobID: "job-1", RequesterUserID: "maya", Drive: component.DriveOwn, OwnRun: true}
+
+	// An own run on the host: its agent holds its own credentials; no proxy,
+	// no question to the provider.
+	hostPart, err := c.ContributeSession(context.Background(), own)
+	if err != nil || hostPart.Env != nil || len(asked()) != 0 {
+		t.Fatalf("host run: env %v, asked %v, %v", hostPart.Env, asked(), err)
+	}
+
+	own.Sandboxed, own.Workdir = true, t.TempDir()
+	part, err := c.ContributeSession(context.Background(), own)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if part.Env["MODEL_API_KEY"] != "placeholder-key-000" || part.Env["HTTPS_PROXY"] == "x" || !strings.HasPrefix(part.Env["HTTPS_PROXY"], "http://bnbloc:") {
-		t.Fatalf("env = %v (the placeholder, over the proxy's own)", part.Env)
 	}
 	if got := asked(); len(got) != 1 || !strings.Contains(got[0], "/egress/hosts drive=own job=job-1 core=core-a provider=codex") {
 		t.Fatalf("asked = %v", got)

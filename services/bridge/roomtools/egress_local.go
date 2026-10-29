@@ -259,7 +259,7 @@ func ProviderTurnOf(sc Scope, job Job) component.ProviderTurn {
 	return component.ProviderTurn{
 		Turn: component.Turn{Org: sc.TenantID, Room: sc.RoomID, Channel: job.ChannelID, Job: job.JobID,
 			Requester: job.RequesterUserID, AgentOwner: sc.Owner, Drive: component.DriveOwn},
-		Core: sc.Core, Provider: sc.Provider,
+		Core: sc.Core, Provider: sc.Provider, Sandboxed: true,
 	}
 }
 

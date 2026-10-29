@@ -17,7 +17,7 @@ package component
 //
 // The bridge reads it at each turn. The provider is untrusted by the agent
 // and by the platform's other parts: the bridge only asks a provider about
-// the member's own runs (Turn.Drive is DriveOwn), accepts no host it cannot
+// the member's own runs in the sandbox (Turn.Drive is DriveOwn), accepts no host it cannot
 // claim as a service could (ValidEgressHost), and never sends it a body.
 
 // EgressProviderContract names the descriptor of a local egress provider.
@@ -57,6 +57,10 @@ type ProviderTurn struct {
 	Turn
 	Core     string `json:"core,omitempty"`
 	Provider string `json:"provider,omitempty"`
+	// Sandboxed is always true today: a provider is asked about the member's
+	// own runs in the sandbox only (the agent of a host run holds its own
+	// credentials).
+	Sandboxed bool `json:"sandboxed,omitempty"`
 }
 
 // EgressUsage is what a relayed request did, for the provider's counters

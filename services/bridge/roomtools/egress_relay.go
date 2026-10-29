@@ -89,8 +89,9 @@ func scrub(b []byte, values []string) []byte {
 }
 
 // relayAnswer turns a system's answer into the command's: the head now, the body
-// as it arrives. cancel ends the request's context (the body's Close).
-func relayAnswer(resp *http.Response, cancel context.CancelFunc, in component.EgressRequest, send *component.EgressSend, h exchangeHooks) *http.Response {
+// as it arrives. cancel ends the request's context (the body's Close); began
+// is when the request went out, so the time reported includes the wait.
+func relayAnswer(resp *http.Response, cancel context.CancelFunc, in component.EgressRequest, send *component.EgressSend, h exchangeHooks, began time.Time) *http.Response {
 	values := scrubValues(send)
 	out := &http.Response{StatusCode: resp.StatusCode, ProtoMajor: 1, ProtoMinor: 1, Header: http.Header{}, ContentLength: resp.ContentLength}
 	for k, vs := range resp.Header {
@@ -104,8 +105,7 @@ func relayAnswer(resp *http.Response, cancel context.CancelFunc, in component.Eg
 			out.Header[k][i] = string(scrub([]byte(v), values))
 		}
 	}
-	start := time.Now()
-	rb := &relayUsage{resp: resp, cancel: cancel, in: in, h: h, start: start}
+	rb := &relayUsage{resp: resp, cancel: cancel, in: in, h: h, start: began}
 	var body io.Reader = resp.Body
 	if resp.StatusCode >= 400 {
 		// An error body is buffered (at most 64 KiB) and scrubbed whole: a

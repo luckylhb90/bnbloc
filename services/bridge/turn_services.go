@@ -242,17 +242,19 @@ func (b *Bridge) egressFor(ctx context.Context, room, job string, prev map[strin
 	return egressClaims{hosts: hosts, env: env, streams: streams, paths: paths, local: local}
 }
 
-// hasEgress reports whether this session may have the egress proxy: an
-// organization declares an egress service, or a program on this computer
-// announced a local provider.
-func (b *Bridge) hasEgress(ctx context.Context) bool {
-	return len(b.servicesWith(ctx, component.ServiceEgress)) > 0 || len(b.localProviders(ctx)) > 0
+// hasEgress reports whether a session may have the egress proxy: an
+// organization declares an egress service, or (a sandboxed session only) a
+// provider on this computer exists. A host session of the member's own never
+// goes through a local provider: its agent holds its own credentials.
+func (b *Bridge) hasEgress(ctx context.Context, sandboxed bool) bool {
+	return len(b.servicesWith(ctx, component.ServiceEgress)) > 0 || (sandboxed && len(b.localProviders(ctx)) > 0)
 }
 
-// ownTurn is the turn a local provider is told about, or nil when the job is
-// not the member's own run (providers are never asked then).
-func ownTurn(scope roomtools.Scope, job roomtools.Job) *component.ProviderTurn {
-	if !job.OwnRun {
+// ownTurn is the turn a local provider is told about, or nil unless the job
+// is the member's own run in the sandbox (providers are never asked for any
+// other run).
+func ownTurn(scope roomtools.Scope, job roomtools.Job, sandboxed bool) *component.ProviderTurn {
+	if !job.OwnRun || !sandboxed {
 		return nil
 	}
 	t := roomtools.ProviderTurnOf(scope, job)

@@ -235,7 +235,7 @@ func (c *roomToolsContributor) hooks(sess *roomtools.Session, egress bool, sandb
 			}
 			if egress {
 				ctx, cancel := context.WithTimeout(context.Background(), egressAskTimeout)
-				cl := c.b.egressFor(ctx, sess.Scope().RoomID, t.JobID, sess.EgressHosts(), ownTurn(sess.Scope(), job))
+				cl := c.b.egressFor(ctx, sess.Scope().RoomID, t.JobID, sess.EgressHosts(), ownTurn(sess.Scope(), job, sandboxWorkdir != ""))
 				cancel()
 				sess.SetLocalProviders(cl.local)
 				sess.SetEgressHosts(cl.hosts, cl.streams)
@@ -349,14 +349,14 @@ func (c *roomToolsContributor) egressEnv(ctx context.Context, info SessionInfo, 
 		return nil, false
 	}
 	proxy := c.srv.EgressEnv(token, "")
-	if proxy == nil || !c.b.hasEgress(ctx) {
+	if proxy == nil || !c.b.hasEgress(ctx, info.Sandboxed) {
 		return nil, false
 	}
 	if info.Sandboxed && (!c.srv.ProxyListening() || info.Workdir == "" || c.srv.AliasEgress(c.egressAlias(info.Workdir), sess) != nil) {
 		return nil, false
 	}
 	actx, cancel := context.WithTimeout(ctx, egressAskTimeout)
-	cl := c.b.egressFor(actx, info.RoomID, info.JobID, nil, ownTurn(roomToolsScope(info), roomtools.Job{JobID: info.JobID, RequesterUserID: info.RequesterUserID, ChannelID: info.ChannelID, OwnRun: info.OwnRun}))
+	cl := c.b.egressFor(actx, info.RoomID, info.JobID, nil, ownTurn(roomToolsScope(info), roomtools.Job{JobID: info.JobID, RequesterUserID: info.RequesterUserID, ChannelID: info.ChannelID, OwnRun: info.OwnRun}, info.Sandboxed))
 	cancel()
 	hosts, env := cl.hosts, cl.env
 	sess.SetLocalProviders(cl.local)
@@ -397,7 +397,7 @@ const sandboxEgressDir = ".room/egress"
 // with the workspace's alias bearer, and the CA files, copied into the
 // workspace. nil: none.
 func (c *roomToolsContributor) sandboxEgressEnv(ctx context.Context, workdir, room, job string, own *component.ProviderTurn) map[string]string {
-	if !c.b.hasEgress(ctx) {
+	if !c.b.hasEgress(ctx, true) {
 		return nil
 	}
 	caFile, bundleFile, ok := c.writeSandboxCA(workdir)

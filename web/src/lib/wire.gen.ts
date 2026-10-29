@@ -75,6 +75,10 @@ export const EgressProviderReportPath = "/egress/report";
 export interface ProviderTurn extends Turn {
   core?: string;
   provider?: string;
+  // Sandboxed is always true today: a provider is asked about the member's
+  // own runs in the sandbox only (the agent of a host run holds its own
+  // credentials).
+  sandboxed?: boolean;
 }
 
 // EgressUsage is what a relayed request did, for the provider's counters

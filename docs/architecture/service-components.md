@@ -158,9 +158,11 @@ The bridge's room tools server is also the session's HTTPS proxy
   services, so the claim, the card, the 503 between turns and the exchange are
   the service path's own. It is asked (`GET /egress/hosts`, `POST /egress/request`
   with no body, `POST /egress/report`) with the bridge-attested
-  `component.ProviderTurn` in `X-Bnbloc-Turn`, **only for the member's own run**
-  (`drive.ownRun`: the requester is the agent's owner, not a platform agent, and
-  not forced into the sandbox by someone else's scripts): any other run claims
+  `component.ProviderTurn` in `X-Bnbloc-Turn`, **only for the member's own run in
+  the sandbox** (`drive.ownRun`: the requester is the agent's owner, not a
+  platform agent, and not forced into the sandbox by someone else's scripts; an
+  agent on the host holds its own credentials and never goes through a local
+  provider): any other run claims
   nothing from it and a left-over claim answers 503. Its host claims go
   through `ValidEgressHost` like a service's.
   - **Relay** (`EgressSend.Relay`): the answer's head goes to the command at
