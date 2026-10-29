@@ -30,6 +30,8 @@ import { FeedLayoutSwitch } from "@/views/room/FeedLayoutSwitch";
 import { useFeedLayout } from "@/views/room/useFeedLayout";
 import { RoomComposer } from "@/views/room/RoomComposer";
 import { PeopleChatDock, PeopleChatPanel } from "@/views/room/PeopleChatPanel";
+import { ThreadPanel } from "@/views/room/ThreadPanel";
+import { useRoomThreads } from "@/views/room/useRoomThreads";
 import { usePeopleChat } from "@/views/room/usePeopleChat";
 import { shareComposerRef } from "@/lib/team";
 import { RoomDialogs } from "@/views/room/RoomDialogs";
@@ -203,6 +205,7 @@ export function RoomView({
   // the roster, then the feed) without resubscribing.
   const dispatch = useRef<(e: RoomEvent) => void>(() => {});
   const activityRef = useRef<ReturnType<typeof useRoomActivity> | null>(null);
+  const threadsRef = useRef<ReturnType<typeof useRoomThreads> | null>(null);
   const stream = useRoomStream({
     roomId,
     subject,
@@ -225,6 +228,7 @@ export function RoomView({
   const { clearFilesBadge } = activity;
   dispatch.current = (e) => {
     deadEnd.observe(e);
+    threadsRef.current?.applyEvent(e);
     if (team.applyEvent(e)) return;
     if (activity.applyEvent(e)) return;
     if (e.kind === "agent_roster") {
@@ -461,9 +465,23 @@ export function RoomView({
     unreadByChannel,
   });
   const peopleUnread = peopleChat.channelId ? unreadByChannel[peopleChat.channelId] ?? 0 : 0;
+  // Threads (channels PRD §2.2): the current channel's root lines, the
+  // followed threads of the rail and the thread the side panel shows (it
+  // takes the people chat's place: one side panel at a time).
+  const threads = useRoomThreads({ roomId, channelId, joinedGen, enabled: member, unreadByChannel });
+  threadsRef.current = threads;
+  const openThreadPanel = useCallback(
+    (rootSeq: number) => {
+      closePeoplePanelRef.current();
+      threads.openThread(rootSeq);
+    },
+    [threads],
+  );
   const peopleDocked = roomStage === "wide";
   const { refreshUnread } = stream;
   const { closePanel: closePeoplePanel } = peopleChat;
+  const closePeoplePanelRef = useRef(closePeoplePanel);
+  closePeoplePanelRef.current = closePeoplePanel;
   const closePeopleChat = useCallback(() => {
     closePeoplePanel();
     refreshUnread();
@@ -490,6 +508,32 @@ export function RoomView({
     divertJump: peopleChat.divertJump,
   });
 
+  const threadExtras = useMemo(
+    () => (member && !readOnly ? { ...team.extras, threadsByRoot: threads.byRoot, onOpenThread: openThreadPanel } : { ...team.extras, threadsByRoot: threads.byRoot }),
+    [member, readOnly, team.extras, threads.byRoot, openThreadPanel],
+  );
+  const threadPanel = (th: NonNullable<typeof threads.open>) => (
+    <ThreadPanel
+      key={th.channelId}
+      roomId={roomId}
+      thread={th}
+      subject={subject}
+      joinedGen={joinedGen}
+      agent={agent}
+      roomAgents={roomAgents}
+      members={data.members}
+      online={online}
+      mayPost={member && !readOnly}
+      root={th.thread?.parentId === channelId ? feed.find((m) => m.seq === th.thread?.rootSeq) : undefined}
+      onChanged={() => {
+        threads.reload();
+        void roomChannels.reload();
+      }}
+      onClose={threads.close}
+      onGone={leaveGoneRoom}
+    />
+  );
+
   const rail = (
     <RoomRail
       roomId={roomId}
@@ -506,6 +550,12 @@ export function RoomView({
       collapsed={railCollapsed}
       surface={railSurface}
       onSelectPanel={selectPanel}
+      threads={threads.followed}
+      activeThread={threads.open?.channelId ?? null}
+      onOpenThread={(id) => {
+        closePeoplePanelRef.current();
+        threads.openById(id);
+      }}
     />
   );
   // A file's Ask AI panel (workbench) and the file in front of the room:
@@ -591,7 +641,15 @@ export function RoomView({
         onShowSchedules={member ? () => setShowSchedules(true) : undefined}
         onShowRuns={member ? () => setShowRuns(true) : undefined}
         onTogglePeopleChat={
-          member ? () => (peopleChat.open ? closePeopleChat() : peopleChat.openPanel()) : undefined
+          member
+            ? () => {
+                if (peopleChat.open) closePeopleChat();
+                else {
+                  threads.close();
+                  peopleChat.openPanel();
+                }
+              }
+            : undefined
         }
         peopleChatOpen={peopleChat.open}
         peopleChatUnread={peopleUnread}
@@ -655,7 +713,7 @@ export function RoomView({
               className="min-w-0 flex-1 overflow-y-auto px-4 py-4 @5xl:px-6 @5xl:py-6"
             >
               <div ref={scroller.contentRef}>
-                <MessageExtrasProvider value={team.extras}>
+                <MessageExtrasProvider value={threadExtras}>
                 <JobProgressProvider value={activity.jobProgress}>
                 <JobLiveProvider value={liveRoom}>
                 <DeadEndProvider value={deadEnd.room}>
@@ -726,6 +784,12 @@ export function RoomView({
         )}
         {peopleChat.open && peopleChat.channelId && peopleDocked && (
           <PeopleChatDock>{peoplePanel(peopleChat.channelId)}</PeopleChatDock>
+        )}
+        {threads.open && !peopleChat.open && peopleDocked && <PeopleChatDock>{threadPanel(threads.open)}</PeopleChatDock>}
+        {threads.open && !peopleChat.open && !peopleDocked && (
+          <DismissibleLayer label="Thread" closeLabel="Close the thread" onClose={threads.close} surfaceClassName="flex h-full w-full flex-col">
+            {threadPanel(threads.open)}
+          </DismissibleLayer>
         )}
         {(dockIsInline || dockIsOverlay) && dockPanel}
         {peopleChat.open && peopleChat.channelId && !peopleDocked && (

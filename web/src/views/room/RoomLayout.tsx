@@ -7,6 +7,7 @@ import type { RoomChannels } from "@/views/room/useRoomChannels";
 import type { ChannelActions } from "@/views/room/ChannelMenu";
 import type { RoomMembership } from "@/lib/roomRoles";
 import type { ChannelCreationPolicy } from "@/lib/wire.gen";
+import type { Channel } from "@/lib/api";
 import { LazyPreviewWorkbench } from "@/views/workbench/LazyWorkbench";
 import type { Workbench } from "@/views/workbench/useWorkbench";
 import type { DockStyle } from "@/lib/useDock";
@@ -87,6 +88,9 @@ export function RoomRail({
   collapsed,
   surface,
   onSelectChannel,
+  threads,
+  activeThread,
+  onOpenThread,
   onSelectPanel,
 }: {
   readonly roomId: string;
@@ -103,6 +107,10 @@ export function RoomRail({
   readonly surface: RailSurface;
   readonly onSelectChannel: (channelId: string) => void;
   readonly onSelectPanel: (panel: "chat" | "artifacts") => void;
+  // The followed threads and the side panel's (channels PRD §2.2).
+  readonly threads?: readonly Channel[];
+  readonly activeThread?: string | null;
+  readonly onOpenThread?: (threadId: string) => void;
 }) {
   return (
     <div
@@ -167,6 +175,9 @@ export function RoomRail({
           onSelect={onSelectChannel}
           unreadByChannel={unreadByChannel}
           collapsed={collapsed}
+          threads={threads}
+          activeThread={activeThread}
+          onOpenThread={onOpenThread}
         />
       )}
     </div>

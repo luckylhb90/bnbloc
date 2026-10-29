@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { ArchiveIcon, CaretDownIcon, CaretRightIcon, CompassIcon, FolderSimpleIcon, HashIcon, PlusIcon, StarIcon } from "@phosphor-icons/react";
+import { ArchiveIcon, CaretDownIcon, CaretRightIcon, ChatsCircleIcon, CompassIcon, FolderSimpleIcon, HashIcon, PlusIcon, StarIcon } from "@phosphor-icons/react";
 import type { Channel } from "@/lib/api";
 import { foldedChannels, mayCreateSection, mayPlaceChannel, railGroupKey, railGroups, sectionJoin, sectionOf, sharedOrder } from "@/lib/channelRules";
 import { foldedSections, setFoldedSections } from "@/lib/roomMemory";
@@ -32,6 +32,9 @@ export function ChannelRail({
   unreadByChannel,
   collapsed = false,
   actions,
+  threads = [],
+  activeThread = null,
+  onOpenThread,
 }: {
   roomId: string;
   subject: string | null;
@@ -56,6 +59,11 @@ export function ChannelRail({
   // pattern). Active/unread state stays readable on the icon alone.
   collapsed?: boolean;
   actions: ChannelActions;
+  // The threads the member follows, unread first (lib/threads followedOrder),
+  // the one open in the side panel, and opening one (channels PRD §2.2).
+  threads?: readonly Channel[];
+  activeThread?: string | null;
+  onOpenThread?: (threadId: string) => void;
 }) {
   const [folded, setFolded] = useState<string[]>(() => foldedSections(subject, roomId));
   const toggleFold = (id: string) => {
@@ -180,6 +188,35 @@ export function ChannelRail({
             </div>
           );
         })
+      )}
+      {!collapsed && threads.length > 0 && onOpenThread && (
+        <div data-rail-threads className="mt-2 flex flex-col gap-0.5">
+          <div className="flex items-center gap-1 px-1 py-1 text-[0.7rem] font-semibold uppercase tracking-wide text-[var(--color-fg-subtle)]">
+            <ChatsCircleIcon size={11} /> <span>Threads</span>
+          </div>
+          {threads.map((t) => {
+            const unread = unreadByChannel?.[t.channelId] ?? 0;
+            const on = t.channelId === activeThread;
+            return (
+              <button
+                key={t.channelId}
+                data-thread-row={t.name}
+                onClick={() => onOpenThread(t.channelId)}
+                title={t.name}
+                className={cn(
+                  "tactile flex min-w-0 items-center gap-2 rounded-[var(--radius)] px-2 py-1.5 text-sm",
+                  on ? "bg-[var(--color-elevated)] font-medium text-[var(--color-fg)]" : unread > 0 ? "font-medium text-[var(--color-fg)] hover:bg-[var(--color-surface-2)]" : "text-[var(--color-fg-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-fg)]",
+                )}
+              >
+                <ChatsCircleIcon size={14} className="shrink-0 opacity-70" />
+                <span className="flex-1 truncate text-left">{t.name}</span>
+                {unread > 0 && !on && (
+                  <span className="shrink-0 rounded-full bg-[var(--color-accent)] px-1.5 text-[11px] font-semibold leading-5 text-[var(--color-accent-fg,#04120c)]">{unread > 99 ? "99+" : unread}</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
       )}
       {!collapsed && me && (
         <div className="mt-2 flex flex-col gap-0.5 border-t border-[var(--color-border)] pt-2">
