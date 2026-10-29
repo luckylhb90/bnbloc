@@ -173,6 +173,14 @@ The bridge's room tools server is also the session's HTTPS proxy
     400, its body (at most 64 KiB), so a provider that echoes the key does not
     hand it to the agent. `RemoveQuery` removes credentials an agent put in the
     query.
+  - **A core as a provider**: a core whose discovery advertises the capability
+    `egressProvider` serves the same paths at its own loopback address, with its
+    endpoint's bearer, and is a provider named after the core (a descriptor of
+    the same name wins). A provider's `Send` may name `To`, a loopback address
+    that takes the request in place of the named host (a route held on this
+    computer that authenticates for its caller); an organization's service
+    cannot. Release order: the platform first (an older bridge or CLI rejects a
+    package that declares the capability as unknown), then the core.
   - **Upgrade**: a request with `Upgrade` to a claimed host is answered `426`
     and never sent (a client that opens a WebSocket first falls back to HTTPS
     at once, and nothing carries the credential).

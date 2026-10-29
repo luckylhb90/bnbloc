@@ -110,6 +110,13 @@ const (
 	// execution descriptor (ExecutionRefresher), so its exec token is
 	// renewed while a turn runs instead of outliving it.
 	CapabilityExecutionRefresh Capability = "executionRefresh"
+	// CapabilityEgressProvider: the core's own loopback address is also a
+	// local egress provider (component.EgressProviderHostsPath and the
+	// paths beside it): the bridge asks it, for the member's own runs, which
+	// hosts it handles and what to do with each request. A core that holds a
+	// credential or a route for model calls offers it without a descriptor
+	// file.
+	CapabilityEgressProvider Capability = "egressProvider"
 	// CapabilityDiscover (Discoverer) marks a core that locates its own
 	// daemon without an explicit endpoint (a manifest's discover clause). It
 	// does not depend on an endpoint: callers ask As with a zero Endpoint.

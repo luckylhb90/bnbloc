@@ -116,6 +116,21 @@ func ReadLocalProviders(dir string) (out []*LocalProvider, dropped []ProviderDro
 	return out, dropped
 }
 
+// CoreProvider is a core's own address as a local provider: a core that
+// advertises core.CapabilityEgressProvider serves the provider paths at its
+// endpoint, with the endpoint's bearer. Its address is held to the same
+// loopback rule as a descriptor's.
+func CoreProvider(name, baseURL, token string) (*LocalProvider, error) {
+	if !localName.MatchString(name) {
+		return nil, errors.New("not a provider name")
+	}
+	u, err := loopbackURL(baseURL)
+	if err != nil {
+		return nil, err
+	}
+	return &LocalProvider{Name: name, url: u, token: token}, nil
+}
+
 // loopbackURL accepts an http address on this computer with a port, and
 // nothing else: a provider is local, never a way to reach another host.
 func loopbackURL(raw string) (*url.URL, error) {

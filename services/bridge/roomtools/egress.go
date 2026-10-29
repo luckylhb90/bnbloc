@@ -582,6 +582,7 @@ func (s *Server) egressRoundTrip(sess *Session, host, service string, req *http.
 			return egressError(http.StatusServiceUnavailable, "the request to "+host+" was not sent: "+serviceLabel(service)+" does not serve this run")
 		}
 		ask = lp.ask(sess.providerTurn(job))
+		hooks.local = true
 		hooks.onUsage = func(u component.EgressUsage) { lp.report(sess.providerTurn(job), u) }
 	}
 	sent, out, xerr := exchange(context.Background(), ask, service, host, in, stream, hooks)
@@ -619,6 +620,9 @@ type asker func(ctx context.Context, in component.EgressRequest) ([]byte, error)
 type exchangeHooks struct {
 	onCard  func(component.Card)
 	onUsage func(component.EgressUsage)
+	// local: the component is a provider on this computer, the only kind
+	// whose Send may name To.
+	local bool
 }
 
 // exchangeError is why an exchange ended without the service's answer:
@@ -774,6 +778,16 @@ func sendHere(ctx context.Context, service string, in component.EgressRequest, s
 	u, err := url.Parse(in.URL)
 	if err != nil {
 		return nil, nil, err
+	}
+	if send.To != "" {
+		if !h.local {
+			return nil, nil, errors.New("only a provider on this computer may send a request to another address")
+		}
+		to, err := loopbackURL(send.To)
+		if err != nil {
+			return nil, nil, fmt.Errorf("the address to send to: %w", err)
+		}
+		u.Scheme, u.Host = to.Scheme, to.Host
 	}
 	jar := sessionFor(service, u, send)
 	steps, err := sendSteps(ctx, in, send, jar)

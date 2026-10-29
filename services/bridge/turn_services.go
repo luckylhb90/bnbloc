@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/component"
+	corepkg "github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/internal/roomlog"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 	"github.com/luckylhb90/bnbloc/services/bridge/roomtools"
@@ -198,7 +199,7 @@ func (b *Bridge) egressFor(ctx context.Context, room, job string, prev map[strin
 	// Providers on this computer are asked about the member's own run only:
 	// any other run claims nothing from them and never reaches them.
 	if own != nil {
-		for _, p := range b.localProviders() {
+		for _, p := range b.localProviders(ctx) {
 			local = append(local, p)
 			sources = append(sources, source{p.Service(), func() (component.EgressHosts, error) { return p.Hosts(ctx, *own) }})
 		}
@@ -245,7 +246,7 @@ func (b *Bridge) egressFor(ctx context.Context, room, job string, prev map[strin
 // organization declares an egress service, or a program on this computer
 // announced a local provider.
 func (b *Bridge) hasEgress(ctx context.Context) bool {
-	return len(b.servicesWith(ctx, component.ServiceEgress)) > 0 || len(b.localProviders()) > 0
+	return len(b.servicesWith(ctx, component.ServiceEgress)) > 0 || len(b.localProviders(ctx)) > 0
 }
 
 // ownTurn is the turn a local provider is told about, or nil when the job is
@@ -258,9 +259,11 @@ func ownTurn(scope roomtools.Scope, job roomtools.Job) *component.ProviderTurn {
 	return &t
 }
 
-// localProviders reads the providers on this computer (what a program
-// announced under the state directory, component.EgressProviderContract).
-func (b *Bridge) localProviders() []*roomtools.LocalProvider {
+// localProviders are the providers on this computer: what a program
+// announced under the state directory (component.EgressProviderContract),
+// and every core that advertises core.CapabilityEgressProvider (its own
+// address, a name a descriptor of the same name does not replace).
+func (b *Bridge) localProviders(ctx context.Context) []*roomtools.LocalProvider {
 	dir := b.cfg.EgressProvidersDir
 	if dir == "" && b.cfg.StateDir != "" {
 		dir = filepath.Join(b.cfg.StateDir, "egress-providers")
@@ -268,6 +271,29 @@ func (b *Bridge) localProviders() []*roomtools.LocalProvider {
 	ps, dropped := roomtools.ReadLocalProviders(dir)
 	for _, d := range dropped {
 		slog.Warn("bnbloc bridge egress provider dropped", "event", "bnbloc.bridge.egress_provider_dropped", "provider", d.String())
+	}
+	taken := map[string]bool{}
+	for _, p := range ps {
+		taken[p.Name] = true
+	}
+	b.mu.Lock()
+	names := make([]string, 0, len(b.cores))
+	for name := range b.cores {
+		names = append(names, name)
+	}
+	b.mu.Unlock()
+	sort.Strings(names)
+	for _, name := range names {
+		e, ok := b.coreEntry(name)
+		if !ok || taken[name] || len(ps) >= component.MaxEgressProviders || !corepkg.Supports(ctx, e.provider, e.endpoint, corepkg.CapabilityEgressProvider) {
+			continue
+		}
+		p, err := roomtools.CoreProvider(name, e.endpoint.BaseURL, e.endpoint.Token)
+		if err != nil {
+			slog.Warn("bnbloc bridge egress provider dropped", "event", "bnbloc.bridge.egress_provider_dropped", "provider", name+": "+err.Error())
+			continue
+		}
+		ps = append(ps, p)
 	}
 	return ps
 }

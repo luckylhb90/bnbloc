@@ -507,3 +507,87 @@ func waitFor(t *testing.T, ok func() bool) {
 	}
 	t.Fatal("timed out")
 }
+
+// A local provider's Send may name To: a held route on this computer takes
+// the request in place of the host the agent named (the path and query are
+// kept), so the route's own credential applies and the agent holds none. A
+// Send that names a non-loopback address, or one from an organization's
+// service, is refused and nothing is sent.
+func TestSendToAnotherAddressIsForLocalProvidersOnLoopback(t *testing.T) {
+	r := newLocalRig(t)
+	var mu sync.Mutex
+	var routeSaw []string
+	route := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		mu.Lock()
+		routeSaw = append(routeSaw, req.URL.RequestURI()+" tags="+req.Header.Get("X-Litellm-Tags")+" auth="+req.Header.Get("Authorization"))
+		mu.Unlock()
+		_, _ = io.WriteString(w, "from the route")
+	}))
+	defer route.Close()
+	r.mu.Lock()
+	r.answer = func(component.EgressRequest) component.EgressResponse {
+		return component.EgressResponse{Send: &component.EgressSend{To: route.URL, Remove: []string{"Authorization"},
+			Header: map[string][]string{"X-Litellm-Tags": {"app_name=hermes"}}, Relay: true}}
+	}
+	r.mu.Unlock()
+	// The route is plain http: the relay client of the rig dials the model
+	// host's TLS listener, so point it at whatever the request names.
+	relayClient = &http.Client{Transport: &http.Transport{DisableKeepAlives: true}}
+	r.turn(ownJob)
+	resp, err := r.post(`{}`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	mu.Lock()
+	defer mu.Unlock()
+	// The path and the agent's own query are kept; the route's tag is set and
+	// the agent's credential is gone.
+	if string(b) != "from the route" || len(routeSaw) != 1 || !strings.HasPrefix(routeSaw[0], "/v1/chat/completions?") || !strings.HasSuffix(routeSaw[0], " tags=app_name=hermes auth=") {
+		t.Fatalf("answer %q, the route saw %v", b, routeSaw)
+	}
+
+	for _, to := range []string{"http://10.0.0.5:8080", "https://example.com", "http://127.0.0.1"} {
+		r.mu.Lock()
+		r.answer = func(component.EgressRequest) component.EgressResponse {
+			return component.EgressResponse{Send: &component.EgressSend{To: to, Relay: true}}
+		}
+		r.mu.Unlock()
+		resp, err := r.post(`{}`, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadGateway || !strings.Contains(string(body), "address to send to") {
+			t.Fatalf("to %s: %d %s", to, resp.StatusCode, body)
+		}
+	}
+	if len(routeSaw) != 1 {
+		t.Fatalf("the route saw %v", routeSaw)
+	}
+}
+
+// An organization's service may not redirect a request to an address on this
+// computer: To is for local providers only.
+func TestSendToIsRefusedFromAnOrganizationService(t *testing.T) {
+	var routeHits int
+	route := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { routeHits++ }))
+	defer route.Close()
+	gw := &fakeGateway{handle: func(method, path string, body []byte) (int, any) {
+		return http.StatusOK, component.EgressResponse{Send: &component.EgressSend{To: route.URL}}
+	}}
+	srv, token, sess := startServer(t, gw)
+	sess.SetEgressHosts(map[string]string{"wiki.example.com": "connections"}, nil)
+	sess.Bind(Job{JobID: "job-1"})
+	resp, err := proxyClient(t, srv, token, nil).Get("https://wiki.example.com/x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadGateway || !strings.Contains(string(b), "only a provider on this computer") || routeHits != 0 {
+		t.Fatalf("%d %s (route hit %d times)", resp.StatusCode, b, routeHits)
+	}
+}

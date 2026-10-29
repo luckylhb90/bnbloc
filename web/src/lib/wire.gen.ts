@@ -630,6 +630,12 @@ export interface EgressResponse {
 // one request).
 export interface EgressSend {
   remove?: string[];
+  // To sends the request to another base address instead of the host the
+  // command named: scheme, host and port of an http(s) URL on this
+  // computer (loopback), the request's path and query kept. Only a local
+  // provider's Send may name it (a route held on this computer that
+  // authenticates for its caller); from a service it is refused.
+  to?: string;
   // RemoveQuery are query parameters removed first, as Remove does
   // headers (a credential an agent put in the query).
   removeQuery?: string[];

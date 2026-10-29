@@ -31,6 +31,9 @@ const (
 	CapabilitySteer           = string(core.CapabilitySteer)
 	CapabilityWriteFile       = string(core.CapabilityWriteFile)
 	CapabilityDeleteWorkspace = string(core.CapabilityDeleteWorkspace)
+	// CapabilityEgressProvider: the daemon's address also serves the local
+	// egress provider paths (component.EgressProviderHostsPath...).
+	CapabilityEgressProvider = string(core.CapabilityEgressProvider)
 	// CapabilitySandboxExec: the core honors the `execution` descriptor on
 	// session create / input (CLI on the host, shell commands in a sandbox
 	// space). See Execution.
@@ -64,7 +67,7 @@ const (
 var Capabilities = []string{
 	CapabilityInterrupt, CapabilitySteer, CapabilityWriteFile, CapabilityDeleteWorkspace, CapabilitySandboxExec,
 	CapabilitySessionFiles, CapabilitySessionFileBytes, CapabilityAgentProfile, CapabilityDiscover,
-	CapabilityTurnActivity, CapabilityExecutionRefresh,
+	CapabilityTurnActivity, CapabilityExecutionRefresh, CapabilityEgressProvider,
 }
 
 // KnownCapability reports whether name is a Core Protocol capability.

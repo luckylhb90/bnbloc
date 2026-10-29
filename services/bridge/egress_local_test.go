@@ -174,3 +174,48 @@ func TestOwnRunIsTheMembersOwnAndNothingForeign(t *testing.T) {
 }
 
 func nopExec(context.Context) (*corepkg.Execution, error) { return nil, nil }
+
+// reportingCore is a core that says which optional capabilities it offers.
+type reportingCore struct {
+	*fakeCoreProvider
+	caps map[corepkg.Capability]bool
+}
+
+func (c reportingCore) Supports(_ context.Context, _ corepkg.Endpoint, cap corepkg.Capability) bool {
+	return c.caps[cap]
+}
+
+// A core that advertises egressProvider is a provider at its own address
+// (with its endpoint's bearer), with no descriptor file; a descriptor of the
+// same name wins; a core that does not advertise it, or whose address is not
+// on this computer, is not asked.
+func TestACoreThatAdvertisesEgressProviderIsAProvider(t *testing.T) {
+	var mu sync.Mutex
+	var saw []string
+	core := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		saw = append(saw, r.URL.Path+" auth="+r.Header.Get("Authorization"))
+		mu.Unlock()
+		_ = json.NewEncoder(w).Encode(component.EgressHosts{Hosts: []string{"api.model.example.com"}})
+	}))
+	defer core.Close()
+	gw := emptyGateway(t)
+	b := New(Config{GatewayBaseURL: gw.URL, GatewayToken: "t", OwnerSubject: "maya", StateDir: t.TempDir()})
+	b.cores = map[string]coreEntry{
+		"core-a": {provider: reportingCore{&fakeCoreProvider{}, map[corepkg.Capability]bool{corepkg.CapabilityEgressProvider: true}}, endpoint: corepkg.Endpoint{BaseURL: core.URL, Token: "core-token"}},
+		"core-b": {provider: reportingCore{&fakeCoreProvider{}, nil}, endpoint: corepkg.Endpoint{BaseURL: core.URL}},
+		"core-c": {provider: reportingCore{&fakeCoreProvider{}, map[corepkg.Capability]bool{corepkg.CapabilityEgressProvider: true}}, endpoint: corepkg.Endpoint{BaseURL: "http://10.1.2.3:9"}},
+	}
+	ps := b.localProviders(context.Background())
+	if len(ps) != 1 || ps[0].Service() != "local:core-a" {
+		t.Fatalf("providers = %v", ps)
+	}
+	if _, err := ps[0].Hosts(context.Background(), component.ProviderTurn{}); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(saw) != 1 || saw[0] != "/egress/hosts auth=Bearer core-token" {
+		t.Fatalf("the core saw %v", saw)
+	}
+}
