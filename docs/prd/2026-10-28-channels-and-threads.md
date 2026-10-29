@@ -766,3 +766,41 @@ The agent door does not open the routes (a member's rail is theirs).
   channels to every member, so **create members-only sections only after
   every room, realtime and activity pod runs this release.** Nothing on the
   open-section path changes.
+
+**Slice 3a, threads** (C1-C4; posting style, tags, statuses, templates,
+mark answered and presets are slice 3b):
+
+- A thread is a channel of kind `thread` with its parent, root message and
+  activity (migration `2026_10_channel_threads`, only adds; a unique key
+  holds one thread per root). Realtime opens it (`POST .../threads`, it
+  holds the root; opening again returns it), anyone who may post in the
+  parent opens one; a visitor does not. Its readers are its parent's: the
+  rule (`MayReadChannel`) reads the parent's section, so a thread of a
+  members-only channel is the section's. `store.Listed` is the one rule of
+  what a room's channels are: never the people chat, never a thread (rail,
+  directory, agents' listing, templates).
+- A post in a thread answers its root unless it names another message of
+  the thread (`replyTo`, quoted as it read); a reply counts on the root
+  (replies, last reply, participants) and the parent's stream is told
+  (`thread_updated`). History, unread, typing, search and agent jobs work
+  in it as in any channel (tested).
+- Followers (C4): the opener and the root's author, then whoever posts or
+  is mentioned; a thread's unread is its followers' only; the rail's
+  Threads entry lists the followed ones, unread first.
+- An agent answering in a thread has a session of its own (the session key
+  is per channel) whose records hold the root first, then the thread; the
+  parent stays a separate file (§9's check, `roomctx` tests).
+- The web: "Reply in thread" on a message, the root's thread line, the side
+  panel (the root above the replies, the thread's own feed, stream and
+  composer; one side panel at a time with the people chat), renaming,
+  following and closing from its header. Closing (C3) posts the
+  `summarize-thread` summary to the parent as a reply to the root, then the
+  thread is read-only; `draft-thread-title` suggests a title. Both prompts
+  are content (`bnbloc-default-content`, packages `draft-thread-title`,
+  `summarize-thread`); with no model the controls say the AI is
+  unavailable and a thread closes without a summary.
+- Tests: room and realtime handler tests (a non-member of a members-only
+  parent sees none of its threads), the store on MySQL, `web/e2e/threads.mjs`.
+- Rollout (lens 11): an old room pod lists a thread among the channels until
+  every pod runs this release (it does not know the kind): open threads only
+  after the rollout, as for members-only sections.
