@@ -775,6 +775,8 @@ export const api = {
       readonly expert?: { readonly id: string; readonly version?: string };
       // The room file the message is about (the workbench's Ask AI panel).
       readonly fileRef?: FileRef;
+      // The message this one answers (channels PRD §2.3).
+      readonly replyTo?: number;
     },
     clientMsgId: string,
   ) =>
@@ -788,6 +790,7 @@ export const api = {
         ...(message.recipient ? { recipient: message.recipient } : {}),
         ...(message.attachmentIds.length > 0 ? { attachmentIds: message.attachmentIds } : {}),
         ...(message.recipient && message.expert ? { expert: message.expert } : {}),
+        ...(message.replyTo ? { replyTo: message.replyTo } : {}),
         ...(message.fileRef
           ? {
               fileRef: {

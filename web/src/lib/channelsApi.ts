@@ -22,11 +22,18 @@ import type {
   SectionJoinReply,
   SectionPatchRequest,
   SectionRequests,
+  ThreadList,
+  ThreadOpenRequest,
 } from "./wire.gen.ts";
 
 const json = (method: string, body: unknown) => ({ method, body: JSON.stringify(body) });
 
 export const channelsApi = {
+  /** Open (or get) the thread of a message (realtime: it holds the root). */
+  openThread: (roomId: string, body: ThreadOpenRequest) => req<RoomChannel>(roomPath(roomId, "threads"), json("POST", body)),
+  /** The threads the caller may read: one channel's, or the ones they follow. */
+  threads: (roomId: string, q: { readonly parent?: string; readonly followed?: boolean }) =>
+    req<ThreadList>(`${roomPath(roomId, "channel-threads")}?${q.parent ? `parent=${encodeURIComponent(q.parent)}` : ""}${q.followed ? `${q.parent ? "&" : ""}followed=1` : ""}`),
   /** The open channels and the sections; archived: the archived channels. */
   list: (roomId: string, archived = false) => req<ChannelList>(`${roomPath(roomId, "channels")}${archived ? "?archived=1" : ""}`),
   directory: (roomId: string) => req<ChannelDirectory>(roomPath(roomId, "channel-directory")),

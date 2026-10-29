@@ -3,6 +3,8 @@
 // history endpoint (they share the {kind, payload, sequence, atUnixMs}
 // shape) into feed-ready events. Pure (no browser APIs), so it is
 // unit-tested; sse.ts owns the live subscription.
+import { replyRefOf } from "./threads.ts";
+import type { ReplyRef, ThreadUpdatedPayload } from "./wire.gen.ts";
 import type { ChatAttachment, TurnMetrics } from "./api";
 import type { TaskUpdate } from "./teamModels";
 import { NoticeComponentCard, NoticePublishProposal, NoticeShareProposal, type FileRef, type RoomEventKind } from "./wire.gen.ts";
@@ -112,6 +114,10 @@ export interface RoomEvent {
   // recipient with a provider). False is a people-only message — agents
   // still read it as room context, they just do not reply.
   toAgent?: boolean;
+  // For chat_message answering another message (payload.replyTo).
+  replyTo?: ReplyRef;
+  // For thread_updated: a thread of the event's channel (its root's line).
+  threadUpdate?: ThreadUpdatedPayload;
 }
 
 function isChatAttachment(value: unknown): value is ChatAttachment {
@@ -247,6 +253,7 @@ export function normalizeRoomEvent(ev: RoomEvent, emit: (e: RoomEvent) => void):
     ev.dispatch = dispatchAttribution(p);
     ev.expert = expertMarker(p);
     ev.fileRef = fileRefOf(p.fileRef);
+    ev.replyTo = replyRefOf(p.replyTo);
     const recipient = p.recipient as { provider?: unknown } | undefined;
     ev.toAgent = typeof recipient?.provider === "string" && recipient.provider !== "";
   } else if (ev.kind === "agent_session_state") {
@@ -276,6 +283,8 @@ export function normalizeRoomEvent(ev: RoomEvent, emit: (e: RoomEvent) => void):
     if (typeof p.userId === "string") ev.removedUser = p.userId;
   } else if (ev.kind === "task_updated") {
     if (typeof p.seq === "number") ev.taskUpdate = p as unknown as TaskUpdate;
+  } else if (ev.kind === "thread_updated") {
+    if (typeof p.threadId === "string" && p.thread && typeof p.thread === "object") ev.threadUpdate = p as unknown as ThreadUpdatedPayload;
   } else if (ev.kind === "message_deleted") {
     if (typeof p.sequence === "number") ev.deletedSeq = p.sequence;
   } else if (ev.kind === "message_edited") {

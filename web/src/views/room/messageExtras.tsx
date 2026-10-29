@@ -1,5 +1,6 @@
 import { createContext, useContext } from "react";
-import { BookmarkSimpleIcon, CheckSquareIcon, ListChecksIcon } from "@phosphor-icons/react";
+import { ArrowBendUpLeftIcon, BookmarkSimpleIcon, ChatsCircleIcon, CheckSquareIcon, ListChecksIcon } from "@phosphor-icons/react";
+import { rootLine, type ThreadSummary } from "@/lib/threads";
 import type { MessageTask, TaskStatus } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import type { FeedItem } from "@/views/room/types";
@@ -13,6 +14,14 @@ import { FindAWayButton } from "@/views/room/DeadEndCard";
 // they are; only these small components re-render when tasks change.
 export interface MessageExtras {
   readonly taskBySeq: ReadonlyMap<number, MessageTask>;
+  // Threads (channels PRD §2.2): the threads of this feed's channel by their
+  // root's sequence, and opening one (a message's "Reply in thread", a
+  // root's line). Absent where threads do not open (the people chat, a
+  // thread's own panel).
+  readonly threadsByRoot?: ReadonlyMap<number, ThreadSummary>;
+  readonly onOpenThread?: (rootSeq: number) => void;
+  // A reply's quote jumps to the message it answers.
+  readonly onJumpTo?: (seq: number) => void;
   readonly onSaveAsPrompt: (item: FeedItem) => void;
   readonly onMarkTask: (seq: number) => void;
   readonly onUnmarkTask: (seq: number) => void;
@@ -69,8 +78,72 @@ export function MessageExtraActions({ item, floating }: { item: FeedItem; floati
       >
         <ListChecksIcon size={12} weight={task ? "bold" : "regular"} />
       </button>
+      {extras.onOpenThread && !extras.threadsByRoot?.has(seq) && (
+        <button
+          type="button"
+          data-reply-in-thread
+          onClick={() => extras.onOpenThread?.(seq)}
+          title="Reply in thread"
+          aria-label="Reply in thread"
+          className={iconButton}
+        >
+          <ChatsCircleIcon size={12} />
+        </button>
+      )}
       <FindAWayButton item={item} />
     </span>
+  );
+}
+
+// ThreadLine is a thread's line under its root: how many replies, who
+// wrote, closed or not; it opens the thread.
+export function ThreadLine({ item, className }: { item: FeedItem; className?: string }) {
+  const extras = useContext(MessageExtrasContext);
+  const seq = persistedSeq(item);
+  const thread = seq == null ? undefined : extras?.threadsByRoot?.get(seq);
+  if (!thread || !extras?.onOpenThread || seq == null) return null;
+  return (
+    <button
+      type="button"
+      data-thread-line={thread.threadId}
+      onClick={() => extras.onOpenThread?.(seq)}
+      className={cn(
+        "tactile flex items-center gap-1.5 rounded-[var(--radius)] px-1.5 py-0.5 text-xs font-medium text-[var(--color-accent)] hover:bg-[var(--color-accent-soft)]",
+        className,
+      )}
+      title={`Open the thread "${thread.title}"`}
+    >
+      <ChatsCircleIcon size={14} />
+      <span>{rootLine(thread)}</span>
+    </button>
+  );
+}
+
+// ReplyQuote is the message a reply answers, as it read then (§2.3); it
+// jumps to it when the feed holds it.
+export function ReplyQuote({ item, className }: { item: FeedItem; className?: string }) {
+  const extras = useContext(MessageExtrasContext);
+  const author = useDisplayName(item.replyTo?.author ?? "");
+  const ref = item.replyTo;
+  if (!ref) return null;
+  return (
+    <button
+      type="button"
+      data-reply-quote={ref.seq}
+      onClick={() => extras?.onJumpTo?.(ref.seq)}
+      disabled={!extras?.onJumpTo}
+      className={cn(
+        "tactile flex max-w-full items-start gap-1.5 border-l-2 border-[var(--color-border-strong)] pl-2 text-left text-xs text-[var(--color-fg-subtle)] enabled:hover:text-[var(--color-fg)]",
+        className,
+      )}
+      title="The message this answers"
+    >
+      <ArrowBendUpLeftIcon size={12} className="mt-0.5 shrink-0" />
+      <span className="min-w-0 truncate">
+        {ref.author && <span className="font-medium">{author || ref.author}: </span>}
+        {ref.excerpt ?? `message ${ref.seq}`}
+      </span>
+    </button>
   );
 }
 

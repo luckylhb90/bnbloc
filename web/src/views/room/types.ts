@@ -1,4 +1,5 @@
 import type { ChatAttachment, TurnMetrics } from "@/lib/api";
+import type { ReplyRef } from "../../lib/wire.gen.ts";
 import type { AgentOptions } from "@/views/composer/types";
 import type { DispatchAttribution } from "@/lib/dispatch";
 import type { ChatExpert, ExpertMarker } from "@/lib/contentComponents";
@@ -32,6 +33,8 @@ export interface OutgoingMessage {
   readonly expert?: ChatExpert;
   // The room file the message is about (the workbench's Ask AI panel).
   readonly fileRef?: FileRef;
+  // The message this one answers (a thread's root, by default in a thread).
+  readonly replyTo?: number;
 }
 
 export interface FeedItem {
@@ -108,6 +111,8 @@ export interface FeedItem {
   // A member's message addressed to people only (no agent recipient): no
   // agent reply is coming. Agents still read it as room context.
   peopleOnly?: boolean;
+  // The message this one answers (payload.replyTo): shown as a quote.
+  replyTo?: ReplyRef;
 }
 
 // Case-insensitive self match. The agent (author "agent") and other members

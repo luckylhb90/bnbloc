@@ -25,7 +25,7 @@ import { useDisplayName } from "@/lib/useDisplayName";
 import { MessageBody } from "@/views/room/MessageBody";
 import { ThinkingDisclosure } from "@/views/room/ThinkingDisclosure";
 import { TurnMetricsFooter } from "@/views/room/TurnMetricsFooter";
-import { MessageExtraActions, TaskBadge } from "@/views/room/messageExtras";
+import { MessageExtraActions, TaskBadge, ReplyQuote, ThreadLine } from "@/views/room/messageExtras";
 import { dispatchLine, type DispatchAttribution } from "@/lib/dispatch";
 import { ExpertTag } from "@/views/room/ExpertTag";
 import { FileRefTag } from "@/views/room/FileRefTag";
@@ -330,6 +330,7 @@ export const Message = memo(function Message({
           </div>
         ) : (
           <div className="flex max-w-[80%] min-w-0 flex-col items-end gap-2">
+            <ReplyQuote item={item} />
             {item.text && (
               <div
                 className={
@@ -345,6 +346,7 @@ export const Message = memo(function Message({
             )}
             <MessageAttachments roomId={roomId} attachments={item.attachments} />
             <FileRefTag roomId={roomId} fileRef={item.fileRef} />
+            <ThreadLine item={item} />
           </div>
         )}
         {!editing && (
@@ -486,10 +488,12 @@ export const Message = memo(function Message({
         {isAgent && item.thinking ? (
           <ThinkingDisclosure thinking={item.thinking} metrics={item.metrics} />
         ) : null}
+        <ReplyQuote item={item} className="mb-1" />
         <MessageBody text={shown} markdown={isAgent} />
         {isAgent && item.metrics ? <TurnMetricsFooter metrics={item.metrics} /> : null}
         <MessageAttachments roomId={roomId} attachments={item.attachments} className="mt-2" />
         <FileRefTag roomId={roomId} fileRef={item.fileRef} className="mt-1" />
+        <ThreadLine item={item} className="mt-1 -ml-1.5" />
         {isAgent && <DeadEndCard item={item} />}
       </div>
     </div>

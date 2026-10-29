@@ -54,6 +54,7 @@ export function feedItemFromEvent(e: RoomEvent, subject: string | null, live: bo
     jobId: e.jobId,
     sourceSeq: e.sourceSeq,
     peopleOnly: e.kind === "chat_message" && e.toAgent === false ? true : undefined,
+    ...(e.replyTo ? { replyTo: e.replyTo } : {}),
     status: self ? "sent" : undefined,
     animate: live && author === "agent" ? true : undefined,
   };
@@ -174,10 +175,12 @@ export function outgoingMessage(
   attachmentIds: readonly string[] = [],
   expert?: ChatExpert,
   fileRef?: FileRef,
+  replyTo?: number,
 ): OutgoingMessage {
   return {
     ...(recipient && expert ? { expert } : {}),
     ...(fileRef ? { fileRef } : {}),
+    ...(replyTo ? { replyTo } : {}),
     text,
     recipient: recipient
       ? {

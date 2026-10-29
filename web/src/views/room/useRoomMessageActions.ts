@@ -24,6 +24,8 @@ export interface SendOptions {
   readonly expertMarker?: ExpertMarker;
   // The room file the message is about (the workbench's Ask AI panel).
   readonly fileRef?: FileRef;
+  // The message this one answers (a thread's root, in a thread panel).
+  readonly replyTo?: number;
 }
 
 export interface RoomMessageActions {
@@ -159,7 +161,7 @@ export function useRoomMessageActions({
 
   const send = useCallback(
     async (text: string, opts: SendOptions): Promise<boolean> => {
-      const out = outgoingMessage(text, opts.peopleOnly ? null : opts.recipient, channelId, opts.attachmentIds, opts.expert, opts.fileRef);
+      const out = outgoingMessage(text, opts.peopleOnly ? null : opts.recipient, channelId, opts.attachmentIds, opts.expert, opts.fileRef, opts.replyTo);
       if (out.borrow && out.recipient && !(await ensureBorrow(out.recipient))) return false;
       const localId = nextFeedId();
       const clientMsgId = crypto.randomUUID();
