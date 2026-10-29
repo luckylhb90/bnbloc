@@ -39,6 +39,37 @@ const (
 	ChannelAgentsThreads = "threads"
 )
 
+// How a channel takes posts (ChannelSettings.PostingStyle, §2.1c): a feed of
+// messages, or every top-level post a titled thread (a forum).
+//
+//wire:union ChannelPostingStyle
+const (
+	// ChannelPostMessages: a feed of messages (the default).
+	ChannelPostMessages = ""
+	// ChannelPostThreads: every top-level post opens a thread whose root it
+	// is; the channel lists its threads.
+	ChannelPostThreads = "threads"
+)
+
+// IsChannelPostingStyle is the one validation of a posting style.
+func IsChannelPostingStyle(v string) bool {
+	return v == ChannelPostMessages || v == ChannelPostThreads
+}
+
+// ChannelTag is one tag a channel's owners define for its threads (C20).
+type ChannelTag struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Color string `json:"color,omitempty"`
+}
+
+// ChannelStatus is one status a channel's owners define for its threads
+// (C20): the board's columns, in order.
+type ChannelStatus struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 // IsChannelWhoPosts and IsChannelAgentParticipation are the one validation
 // of a channel's settings values (the web reads the generated
 // ChannelWhoPostsValues and ChannelAgentParticipationValues unions).
@@ -64,9 +95,24 @@ type ChannelSettings struct {
 	// the channel; 0 is off. Set by the channel's owners, no platform
 	// default (C22).
 	SlowModeSeconds int `json:"slowModeSeconds,omitempty"`
-	// AgentParticipation is stored only in this slice (C19).
+	// AgentParticipation is when the channel's default agent answers (C19):
+	// "threads" asks it once in every new thread; "questions" is stored only.
 	AgentParticipation string `json:"agentParticipation,omitempty" tstype:"ChannelAgentParticipation"`
+	// PostingStyle is how the channel takes posts (§2.1c): messages, or
+	// every top-level post a thread (a forum, ChannelSettings.Forum).
+	PostingStyle string `json:"postingStyle,omitempty" tstype:"ChannelPostingStyle"`
+	// Tags and Statuses are the channel's owners' vocabulary for its
+	// threads (C20): a thread carries tags and one status (ThreadInfo).
+	Tags     []ChannelTag    `json:"tags,omitempty"`
+	Statuses []ChannelStatus `json:"statuses,omitempty"`
+	// PostTemplate is what a new post in a forum starts from in the
+	// composer (fields to fill).
+	PostTemplate string `json:"postTemplate,omitempty"`
 }
+
+// Forum reports whether a channel of these settings takes every top-level
+// post as a thread (PostingStyle threads): the one rule of "a forum".
+func (s ChannelSettings) Forum() bool { return s.PostingStyle == ChannelPostThreads }
 
 // RoomChannel is one channel of a room as the room service answers it
 // (list, create, patch, archive, restore). Joined, Starred and Hidden are
@@ -111,6 +157,34 @@ type ThreadInfo struct {
 	Replies       int      `json:"replies"`
 	LastReplyAtMs int64    `json:"lastReplyAtMs,omitempty"`
 	Participants  []string `json:"participants"`
+	// Tags and Status are ids of the parent's ChannelSettings.Tags and
+	// Statuses (C20); AnsweredSeq is the reply marked as its answer (0
+	// none).
+	Tags        []string `json:"tags,omitempty"`
+	Status      string   `json:"status,omitempty"`
+	AnsweredSeq int64    `json:"answeredSeq,omitempty"`
+}
+
+// ThreadMarkRequest is PATCH /v1/rooms/{id}/channel-threads/{threadId}: a
+// thread's tags, status and answer, set by a member who may post in its
+// parent (C20). A nil field is left as it is; AnsweredSeq 0 clears it.
+type ThreadMarkRequest struct {
+	Tags        *[]string `json:"tags,omitempty"`
+	Status      *string   `json:"status,omitempty"`
+	AnsweredSeq *int64    `json:"answeredSeq,omitempty"`
+}
+
+// ThreadPostRequest is POST /v1/rooms/{id}/threads/post: a new post in a
+// forum channel (ChannelSettings.Forum), stored as the root of a new thread
+// titled Title (the post's first words when empty) and tagged Tags.
+type ThreadPostRequest struct {
+	ChannelID     string   `json:"channelId"`
+	Title         string   `json:"title,omitempty"`
+	Text          string   `json:"text"`
+	ClientMsgID   string   `json:"clientMsgId,omitempty"`
+	AtUnixMs      int64    `json:"atUnixMs,omitempty"`
+	AttachmentIDs []string `json:"attachmentIds,omitempty"`
+	Tags          []string `json:"tags,omitempty"`
 }
 
 // ThreadOpenRequest is POST /v1/rooms/{id}/threads: open (or get) the

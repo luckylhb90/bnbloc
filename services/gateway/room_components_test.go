@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -324,7 +325,7 @@ func TestCreateRoomFromComponent(t *testing.T) {
 			// The package's setup, made as jack: his channel, in Work, no
 			// default agent.
 			if c.Purpose != reportsChannel.Purpose || c.Rules != reportsChannel.Rules || c.SectionID != sections[0].SectionID || c.OwnerID != "jack" ||
-				c.Settings != (wire.ChannelSettings{WhoPosts: wire.ChannelPostersAdmins, SlowModeSeconds: 30}) {
+				!reflect.DeepEqual(c.Settings, wire.ChannelSettings{WhoPosts: wire.ChannelPostersAdmins, SlowModeSeconds: 30}) {
 				t.Fatalf("#reports in the new room = %+v", c)
 			}
 		}

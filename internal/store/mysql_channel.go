@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/luckylhb90/bnbloc/internal/tenant"
@@ -27,7 +28,7 @@ var _ ChannelStore = (*MySQLChannel)(nil)
 // channelSettingsJSON is a channel's settings as room_channels.settings_json
 // holds them: NULL for the zero document.
 func channelSettingsJSON(s wire.ChannelSettings) (any, error) {
-	if s == (wire.ChannelSettings{}) {
+	if reflect.DeepEqual(s, wire.ChannelSettings{}) {
 		return nil, nil
 	}
 	return jsonArg(s)
@@ -67,14 +68,20 @@ func (m *MySQLChannel) PutChannel(ctx context.Context, c RoomChannel) error {
 	if err != nil {
 		return err
 	}
+	tags, err := threadParticipantsJSON(c.Thread.Tags)
+	if err != nil {
+		return err
+	}
 	_, err = m.DB.ExecContext(ctx, `
 INSERT INTO room_channels (channel_id, tenant_id, room_id, name, is_default, kind, created_by, created_at_ms, deleted_at_ms,
   purpose, rules, section_id, position, owner_id, archived_at_ms, settings_json,
-  parent_id, root_seq, thread_root, thread_replies, thread_last_reply_at_ms, thread_participants_json)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  parent_id, root_seq, thread_root, thread_replies, thread_last_reply_at_ms, thread_participants_json,
+  thread_tags_json, thread_status, thread_answered_seq)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		c.ChannelID, c.TenantID, c.RoomID, c.Name, c.IsDefault, c.Kind, c.CreatedBy, c.CreatedAtMs, c.DeletedAtMs,
 		c.Purpose, nullIfZero(c.Rules), c.SectionID, c.Position, c.OwnerID, c.ArchivedAtMs, settings,
-		c.ParentID, c.RootSeq, root, c.Thread.Replies, c.Thread.LastReplyAtMs, participants)
+		c.ParentID, c.RootSeq, root, c.Thread.Replies, c.Thread.LastReplyAtMs, participants,
+		tags, c.Thread.Status, c.Thread.AnsweredSeq)
 	if isDupEntry(err) && root != nil && strings.Contains(err.Error(), "uq_channel_thread_root") {
 		return ErrThreadExists
 	}
@@ -157,6 +164,40 @@ WHERE tenant_id = ? AND room_id = ? AND channel_id = ? AND `+sqlNotDeleted+` FOR
 	if _, err := tx.ExecContext(ctx, `UPDATE room_channels
 SET thread_replies = ?, thread_last_reply_at_ms = ?, thread_participants_json = ?
 WHERE tenant_id = ? AND room_id = ? AND channel_id = ?`, c.Thread.Replies, c.Thread.LastReplyAtMs, participants, tnt, roomID, threadID); err != nil {
+		return RoomChannel{}, err
+	}
+	return c, tx.Commit()
+}
+
+// MarkThread reads and writes the thread's marks under a row lock, in a
+// transaction, as NoteThreadReply does its counts.
+func (m *MySQLChannel) MarkThread(ctx context.Context, roomID, threadID string, marks ThreadMarks) (RoomChannel, error) {
+	tnt, err := tenant.Require(ctx)
+	if err != nil {
+		return RoomChannel{}, err
+	}
+	tx, err := m.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return RoomChannel{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	c, err := scanChannelRow(tx.QueryRowContext(ctx, `
+SELECT `+channelColumns+` FROM room_channels
+WHERE tenant_id = ? AND room_id = ? AND channel_id = ? AND `+sqlNotDeleted+` FOR UPDATE`, tnt, roomID, threadID))
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && !c.IsThread()) {
+		return RoomChannel{}, ErrChannelNotFound
+	}
+	if err != nil {
+		return RoomChannel{}, err
+	}
+	c.Thread = markThread(c.Thread, marks)
+	tags, err := threadParticipantsJSON(c.Thread.Tags)
+	if err != nil {
+		return RoomChannel{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE room_channels
+SET thread_tags_json = ?, thread_status = ?, thread_answered_seq = ?
+WHERE tenant_id = ? AND room_id = ? AND channel_id = ?`, tags, c.Thread.Status, c.Thread.AnsweredSeq, tnt, roomID, threadID); err != nil {
 		return RoomChannel{}, err
 	}
 	return c, tx.Commit()
@@ -329,7 +370,8 @@ func (m *MySQLChannel) scanChannel(ctx context.Context, query string, args ...an
 // channelColumns is the column list scanChannelRow reads, in order.
 const channelColumns = "channel_id, tenant_id, room_id, name, is_default, kind, created_by, created_at_ms, deleted_at_ms, " +
 	"purpose, rules, section_id, position, owner_id, archived_at_ms, settings_json, " +
-	"parent_id, root_seq, thread_replies, thread_last_reply_at_ms, thread_participants_json"
+	"parent_id, root_seq, thread_replies, thread_last_reply_at_ms, thread_participants_json, " +
+	"thread_tags_json, thread_status, thread_answered_seq"
 
 // EnsurePeopleChannel inserts the room's people chat under its derived id
 // unless that row exists (INSERT IGNORE on the primary key), then reads it
@@ -379,10 +421,11 @@ SELECT kind, settings_json FROM room_channels WHERE tenant_id = ? AND room_id = 
 
 func scanChannelRow(sc rowScanner) (RoomChannel, error) {
 	var c RoomChannel
-	var rules, settings, participants sql.NullString
+	var rules, settings, participants, tags sql.NullString
 	err := sc.Scan(&c.ChannelID, &c.TenantID, &c.RoomID, &c.Name, &c.IsDefault, &c.Kind, &c.CreatedBy, &c.CreatedAtMs, &c.DeletedAtMs,
 		&c.Purpose, &rules, &c.SectionID, &c.Position, &c.OwnerID, &c.ArchivedAtMs, &settings,
-		&c.ParentID, &c.RootSeq, &c.Thread.Replies, &c.Thread.LastReplyAtMs, &participants)
+		&c.ParentID, &c.RootSeq, &c.Thread.Replies, &c.Thread.LastReplyAtMs, &participants,
+		&tags, &c.Thread.Status, &c.Thread.AnsweredSeq)
 	if err != nil {
 		return c, err
 	}
@@ -390,6 +433,11 @@ func scanChannelRow(sc rowScanner) (RoomChannel, error) {
 	if participants.Valid && participants.String != "" {
 		if err := json.Unmarshal([]byte(participants.String), &c.Thread.Participants); err != nil {
 			return c, fmt.Errorf("decode thread participants: %w", err)
+		}
+	}
+	if tags.Valid && tags.String != "" {
+		if err := json.Unmarshal([]byte(tags.String), &c.Thread.Tags); err != nil {
+			return c, fmt.Errorf("decode thread tags: %w", err)
 		}
 	}
 	c.Settings, err = decodeChannelSettings(settings)

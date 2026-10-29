@@ -1911,6 +1911,25 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return addIndexIfMissing(ctx, db, "room_channels", "uq_channel_thread_root", "ADD UNIQUE KEY uq_channel_thread_root (tenant_id, room_id, thread_root)")
 		},
 	},
+	{
+		// A thread's marks in a forum channel (docs/prd/2026-10-28-channels-
+		// and-threads.md §2.1c, C20): tags, status and the reply marked as
+		// its answer. Only adds defaulted or nullable columns the previous
+		// release never reads.
+		id: "2026_10_thread_marks",
+		run: func(ctx context.Context, db sqlConn) error {
+			for _, c := range []struct{ column, ddl string }{
+				{"thread_tags_json", "JSON NULL AFTER thread_participants_json"},
+				{"thread_status", "VARCHAR(64) NOT NULL DEFAULT '' AFTER thread_tags_json"},
+				{"thread_answered_seq", "BIGINT NOT NULL DEFAULT 0 AFTER thread_status"},
+			} {
+				if err := addColumnIfMissing(ctx, db, "room_channels", c.column, c.ddl); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

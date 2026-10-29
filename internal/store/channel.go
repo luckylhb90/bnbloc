@@ -66,6 +66,34 @@ type ThreadStats struct {
 	Replies       int
 	LastReplyAtMs int64
 	Participants  []string
+	// Tags, Status and AnsweredSeq are the thread's marks in a forum (C20):
+	// ids of its parent's settings' tags and statuses, and the reply marked
+	// as its answer (0 none). Set by MarkThread.
+	Tags        []string
+	Status      string
+	AnsweredSeq int64
+}
+
+// ThreadMarks is a partial update of a thread's marks (MarkThread): a nil
+// field is left as it is.
+type ThreadMarks struct {
+	Tags        *[]string
+	Status      *string
+	AnsweredSeq *int64
+}
+
+// markThread is the one change MarkThread makes to a thread's stats.
+func markThread(t ThreadStats, m ThreadMarks) ThreadStats {
+	if m.Tags != nil {
+		t.Tags = append([]string(nil), (*m.Tags)...)
+	}
+	if m.Status != nil {
+		t.Status = *m.Status
+	}
+	if m.AnsweredSeq != nil {
+		t.AnsweredSeq = *m.AnsweredSeq
+	}
+	return t
 }
 
 // MaxThreadParticipants bounds the participants a thread keeps (the root
@@ -102,6 +130,9 @@ func (c RoomChannel) cloned() RoomChannel {
 		c.Settings.DefaultAgent = &cp
 	}
 	c.Thread.Participants = append([]string(nil), c.Thread.Participants...)
+	c.Thread.Tags = append([]string(nil), c.Thread.Tags...)
+	c.Settings.Tags = slices.Clone(c.Settings.Tags)
+	c.Settings.Statuses = slices.Clone(c.Settings.Statuses)
 	return c
 }
 
@@ -133,7 +164,8 @@ func (c RoomChannel) ThreadInfo() wire.ThreadInfo {
 	if p == nil {
 		p = []string{}
 	}
-	return wire.ThreadInfo{ParentID: c.ParentID, RootSeq: c.RootSeq, Replies: c.Thread.Replies, LastReplyAtMs: c.Thread.LastReplyAtMs, Participants: p}
+	return wire.ThreadInfo{ParentID: c.ParentID, RootSeq: c.RootSeq, Replies: c.Thread.Replies, LastReplyAtMs: c.Thread.LastReplyAtMs, Participants: p,
+		Tags: slices.Clone(c.Thread.Tags), Status: c.Thread.Status, AnsweredSeq: c.Thread.AnsweredSeq}
 }
 
 func (c RoomChannel) ThreadUpdated() wire.ThreadUpdatedPayload {
@@ -354,6 +386,9 @@ type ChannelStore interface {
 	// NoteThreadReply counts one reply in a live thread (noteThreadReply);
 	// a channel that is no thread is left as it is.
 	NoteThreadReply(ctx context.Context, roomID, threadID, author string, atMs int64) (RoomChannel, error)
+	// MarkThread sets a live thread's marks (markThread);
+	// ErrChannelNotFound for no such live thread.
+	MarkThread(ctx context.Context, roomID, threadID string, marks ThreadMarks) (RoomChannel, error)
 	// ChannelAdmission returns what decides whether agents may use a
 	// channel of the room, soft-deleted or not; found=false when no such
 	// channel exists. Unlike GetChannel it reports read failures, so a
@@ -696,6 +731,22 @@ func (s *MemoryChannel) NoteThreadReply(ctx context.Context, roomID, threadID, a
 		return c.cloned(), nil
 	}
 	c.Thread = noteThreadReply(c.Thread, author, atMs)
+	room[threadID] = c.cloned()
+	return c.cloned(), nil
+}
+
+func (s *MemoryChannel) MarkThread(ctx context.Context, roomID, threadID string, marks ThreadMarks) (RoomChannel, error) {
+	tnt, err := tenant.Require(ctx)
+	if err != nil {
+		return RoomChannel{}, err
+	}
+	s.room.mu.Lock()
+	defer s.room.mu.Unlock()
+	room, c, ok := s.liveChannelLocked(tnt, roomID, threadID)
+	if !ok || !c.IsThread() {
+		return RoomChannel{}, ErrChannelNotFound
+	}
+	c.Thread = markThread(c.Thread, marks)
 	room[threadID] = c.cloned()
 	return c.cloned(), nil
 }

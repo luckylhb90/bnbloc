@@ -47,6 +47,16 @@ const (
 	// decision: pending owner, the PRD gives no bound).
 	MaxChannelGroupName = 64
 	MaxChannelGroups    = 50
+	// A forum's vocabulary (C20): at most MaxChannelTags tags and
+	// MaxChannelStatuses statuses, each name at most MaxChannelTagName
+	// characters, a thread at most MaxThreadTags tags; a post template at
+	// most MaxPostTemplate characters (decision: pending owner, the PRD
+	// gives no bounds).
+	MaxChannelTags     = 30
+	MaxChannelStatuses = 12
+	MaxChannelTagName  = 32
+	MaxThreadTags      = 8
+	MaxPostTemplate    = 4000
 	// MaxRoomSourcePurpose bounds a room package's stated purpose for a
 	// source it asks for (sources[].purpose), in characters.
 	MaxRoomSourcePurpose = 500

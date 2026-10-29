@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"reflect"
 	"slices"
 	"testing"
 
@@ -38,7 +39,7 @@ func TestContractChannelStoreThreads(t *testing.T) {
 		}
 		got, ok := must2(s.ThreadOfRoot(ctx, room, parent, 7))(t)
 		if !ok || got.ChannelID != thr.ChannelID || !got.IsThread() || got.Listed() || got.ParentID != parent || got.RootSeq != 7 ||
-			got.SectionID != "sec-a" || got.Settings != (wire.ChannelSettings{}) || got.Name != "the login bug" {
+			got.SectionID != "sec-a" || !reflect.DeepEqual(got.Settings, wire.ChannelSettings{}) || got.Name != "the login bug" {
 			t.Fatalf("thread of root = %+v, %v", got, ok)
 		}
 		if _, ok := must2(s.ThreadOfRoot(ctx, room, other, 7))(t); ok {
@@ -93,6 +94,23 @@ func TestContractChannelStoreThreads(t *testing.T) {
 		}
 		if l := must(s.ListThreads(ctx, room, ""))(t); len(l) != 2 {
 			t.Fatalf("every thread = %v", ids(l))
+		}
+		// A thread's marks in a forum (C20): tags, status, the answer; a
+		// nil field is left as it is; a channel that is no thread is none.
+		tags, status, answered := []string{"bug", "ios"}, "open", int64(12)
+		if c, err := s.MarkThread(ctx, room, thr2.ChannelID, ThreadMarks{Tags: &tags, Status: &status}); err != nil || !slices.Equal(c.Thread.Tags, tags) || c.Thread.Status != "open" {
+			t.Fatalf("marked = %+v, %v", c.Thread, err)
+		}
+		done := "done"
+		if _, err := s.MarkThread(ctx, room, thr2.ChannelID, ThreadMarks{Status: &done, AnsweredSeq: &answered}); err != nil {
+			t.Fatal(err)
+		}
+		got, _ = must2(s.GetChannel(ctx, room, thr2.ChannelID))(t)
+		if info := got.ThreadInfo(); !slices.Equal(info.Tags, tags) || info.Status != "done" || info.AnsweredSeq != 12 {
+			t.Fatalf("a thread's marks read back = %+v", info)
+		}
+		if _, err := s.MarkThread(ctx, room, other, ThreadMarks{Status: &done}); !errors.Is(err, ErrChannelNotFound) {
+			t.Fatalf("marking a channel that is no thread = %v", err)
 		}
 		// A deleted thread frees its root for a new one.
 		if err := s.DeleteChannel(ctx, room, thr.ChannelID, 200); err != nil {
