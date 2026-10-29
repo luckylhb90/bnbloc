@@ -71,6 +71,20 @@ func TestThreadsOpenReplyAndCount(t *testing.T) {
 	if got := historyTexts(t, srv, "alice", "?channelId="+th.ChannelID); len(got) != 1 || got[0] != "I can reproduce it" {
 		t.Fatalf("thread history = %v", got)
 	}
+	// A post in a thread that names nothing answers the root (§2.2).
+	var hist struct {
+		Messages []struct {
+			Payload struct {
+				ReplyTo *wire.ReplyRef `json:"replyTo"`
+			} `json:"payload"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal([]byte(channelGet(t, srv, "/v1/rooms/room-1/history?channelId="+th.ChannelID, "alice")), &hist); err != nil {
+		t.Fatal(err)
+	}
+	if len(hist.Messages) != 1 || hist.Messages[0].Payload.ReplyTo == nil || hist.Messages[0].Payload.ReplyTo.Seq != root {
+		t.Fatalf("a thread post's replyTo = %+v, want the root %d", hist.Messages[0].Payload.ReplyTo, root)
+	}
 	if got := historyTexts(t, srv, "alice", "?channelId=ch_a"); len(got) != 1 {
 		t.Fatalf("parent history = %v", got)
 	}

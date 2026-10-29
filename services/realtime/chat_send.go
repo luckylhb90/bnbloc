@@ -104,7 +104,8 @@ type ChatPost struct {
 	FileRef *wire.FileRef
 	// ReplyTo is the sequence of the message this one answers (§2.3): a
 	// live message of the same channel, or of a thread's parent when it is
-	// the thread's root. Completed (author, excerpt) on post.
+	// the thread's root. Completed (author, excerpt) on post. In a thread it
+	// is the root when the post names none (§2.2: a thread answers its root).
 	ReplyTo int64
 }
 
@@ -224,8 +225,12 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) 
 	if fileRef != nil {
 		payload["fileRef"] = *fileRef
 	}
-	if p.ReplyTo > 0 {
-		ref, err := s.replyRef(ctx, p.RoomID, channel, p.ReplyTo)
+	replyTo := p.ReplyTo
+	if replyTo == 0 && channel.IsThread() {
+		replyTo = channel.RootSeq
+	}
+	if replyTo > 0 {
+		ref, err := s.replyRef(ctx, p.RoomID, channel, replyTo)
 		if err != nil {
 			return ChatPosted{}, err
 		}
