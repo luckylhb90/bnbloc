@@ -743,7 +743,10 @@ func (s *MySQLChat) UnreadCount(ctx context.Context, roomID, channelID, userID s
 //     retention index, and without the forced index the primary key is read
 //     for the whole room.
 //
-// Both subqueries run only for the channels that pass the one before.
+// Both subqueries run only for the channels that pass the one before. A
+// thread counts only for its followers (channels PRD C4), as the per-channel
+// unread does. (The in-memory store has no channel table and counts every
+// channel: dev only.)
 func (s *MySQLChat) UnreadRooms(ctx context.Context, userID string, roomIDs []string, max int) (int, error) {
 	tid, err := tenant.Require(ctx)
 	if err != nil {
@@ -758,7 +761,7 @@ func (s *MySQLChat) UnreadRooms(ctx context.Context, userID string, roomIDs []st
 	for _, id := range roomIDs {
 		args = append(args, id)
 	}
-	args = append(args, max)
+	args = append(args, userID, max)
 	var n int
 	err = s.DB.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM (
@@ -766,6 +769,8 @@ func (s *MySQLChat) UnreadRooms(ctx context.Context, userID string, roomIDs []st
 		   LEFT JOIN room_read_state rs ON rs.tenant_id = c.tenant_id AND rs.room_id = c.room_id
 		        AND rs.channel_id = c.channel_id AND rs.user_id = ?
 		   WHERE c.tenant_id = ? AND c.room_id IN (`+marks+`) AND c.`+sqlNotDeleted+`
+		     AND (c.kind <> 'thread' OR EXISTS (SELECT 1 FROM channel_follows f
+		          WHERE f.tenant_id = c.tenant_id AND f.room_id = c.room_id AND f.channel_id = c.channel_id AND f.user_id = ?))
 		     AND (SELECT MAX(m.seq) FROM room_messages m
 		          WHERE m.room_id = c.room_id AND m.channel_id = c.channel_id) > COALESCE(rs.last_read_seq, 0)
 		     AND (SELECT 1 FROM room_messages m FORCE INDEX (idx_room_channel_seq)

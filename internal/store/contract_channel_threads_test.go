@@ -106,3 +106,38 @@ func TestContractChannelStoreThreads(t *testing.T) {
 		}
 	})
 }
+
+// The rooms with unread news count a thread only for its followers (C4),
+// as the per-channel unread does. The MySQL query reads the channel table;
+// the in-memory chat has none and counts every channel (dev only).
+func TestContractUnreadRoomsThreadsForFollowers(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) {
+		if b.DB == nil {
+			t.Skip("the in-memory chat counts every channel")
+		}
+		tid := uniq("t-thr-unread-")
+		ctx := tenantCtx(tid)
+		room := newContractRoom(t, ctx, b, "maya")
+		parent := uniq("p-")
+		if err := b.Channel.PutChannel(ctx, RoomChannel{ChannelID: parent, RoomID: room, Name: "releases", CreatedBy: "maya", CreatedAtMs: 1}); err != nil {
+			t.Fatal(err)
+		}
+		p, _ := must2(b.Channel.GetChannel(ctx, room, parent))(t)
+		th := ThreadOf(p, uniq("th-"), 1, "t", "maya", 2)
+		if err := b.Channel.PutChannel(ctx, th); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.Chat.AppendRoomMessages(ctx, []RoomMessage{chatRow(tid, room, th.ChannelID, 5, "in the thread")}); err != nil {
+			t.Fatal(err)
+		}
+		if n := must(b.Chat.UnreadRooms(ctx, "jack", []string{room}, 10))(t); n != 0 {
+			t.Fatalf("a non-follower's unread rooms = %d, want 0", n)
+		}
+		if err := b.Channel.FollowChannel(ctx, room, th.ChannelID, "jack", 3, FollowMarks{}); err != nil {
+			t.Fatal(err)
+		}
+		if n := must(b.Chat.UnreadRooms(ctx, "jack", []string{room}, 10))(t); n != 1 {
+			t.Fatalf("a follower's unread rooms = %d, want 1", n)
+		}
+	})
+}
