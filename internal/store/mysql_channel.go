@@ -59,13 +59,107 @@ func (m *MySQLChannel) PutChannel(ctx context.Context, c RoomChannel) error {
 	}
 	// A plain insert: channel_id is the whole key (no tenant), so an upsert
 	// could rewrite another tenant's channel.
+	var root any
+	if c.IsThread() && c.DeletedAtMs == nil {
+		root = threadRoot(c.ParentID, c.RootSeq)
+	}
+	participants, err := threadParticipantsJSON(c.Thread.Participants)
+	if err != nil {
+		return err
+	}
 	_, err = m.DB.ExecContext(ctx, `
 INSERT INTO room_channels (channel_id, tenant_id, room_id, name, is_default, kind, created_by, created_at_ms, deleted_at_ms,
-  purpose, rules, section_id, position, owner_id, archived_at_ms, settings_json)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  purpose, rules, section_id, position, owner_id, archived_at_ms, settings_json,
+  parent_id, root_seq, thread_root, thread_replies, thread_last_reply_at_ms, thread_participants_json)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		c.ChannelID, c.TenantID, c.RoomID, c.Name, c.IsDefault, c.Kind, c.CreatedBy, c.CreatedAtMs, c.DeletedAtMs,
-		c.Purpose, nullIfZero(c.Rules), c.SectionID, c.Position, c.OwnerID, c.ArchivedAtMs, settings)
+		c.Purpose, nullIfZero(c.Rules), c.SectionID, c.Position, c.OwnerID, c.ArchivedAtMs, settings,
+		c.ParentID, c.RootSeq, root, c.Thread.Replies, c.Thread.LastReplyAtMs, participants)
+	if isDupEntry(err) && root != nil && strings.Contains(err.Error(), "uq_channel_thread_root") {
+		return ErrThreadExists
+	}
 	return dupAs(err, ErrChannelExists)
+}
+
+// threadRoot is thread_root: one value per (parent, root message).
+func threadRoot(parentID string, rootSeq int64) string {
+	return fmt.Sprintf("%s:%d", parentID, rootSeq)
+}
+
+// threadParticipantsJSON is thread_participants_json (NULL for none).
+func threadParticipantsJSON(p []string) (any, error) {
+	if len(p) == 0 {
+		return nil, nil
+	}
+	return jsonArg(p)
+}
+
+func (m *MySQLChannel) ThreadOfRoot(ctx context.Context, roomID, parentID string, rootSeq int64) (RoomChannel, bool, error) {
+	tnt, err := tenant.Require(ctx)
+	if err != nil {
+		return RoomChannel{}, false, err
+	}
+	return m.scanChannel(ctx, `
+SELECT `+channelColumns+` FROM room_channels
+WHERE tenant_id = ? AND room_id = ? AND thread_root = ? AND `+sqlNotDeleted,
+		tnt, roomID, threadRoot(parentID, rootSeq))
+}
+
+func (m *MySQLChannel) ListThreads(ctx context.Context, roomID, parentID string) ([]RoomChannel, error) {
+	tnt, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	q, args := `
+SELECT `+channelColumns+` FROM room_channels
+WHERE tenant_id = ? AND room_id = ? AND kind = ? AND `+sqlNotDeleted, []any{tnt, roomID, ChannelKindThread}
+	if parentID != "" {
+		q += ` AND parent_id = ?`
+		args = append(args, parentID)
+	}
+	out, err := queryAll(ctx, m.DB, q, scanChannelRow, args...)
+	if err != nil {
+		return nil, err
+	}
+	sortThreads(out)
+	return out, nil
+}
+
+// NoteThreadReply reads and writes the thread's stats under a row lock, in
+// a transaction, so two concurrent replies keep both counts and authors.
+func (m *MySQLChannel) NoteThreadReply(ctx context.Context, roomID, threadID, author string, atMs int64) (RoomChannel, error) {
+	tnt, err := tenant.Require(ctx)
+	if err != nil {
+		return RoomChannel{}, err
+	}
+	tx, err := m.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return RoomChannel{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	c, err := scanChannelRow(tx.QueryRowContext(ctx, `
+SELECT `+channelColumns+` FROM room_channels
+WHERE tenant_id = ? AND room_id = ? AND channel_id = ? AND `+sqlNotDeleted+` FOR UPDATE`, tnt, roomID, threadID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return RoomChannel{}, ErrChannelNotFound
+	}
+	if err != nil {
+		return RoomChannel{}, err
+	}
+	if !c.IsThread() {
+		return c, nil
+	}
+	c.Thread = noteThreadReply(c.Thread, author, atMs)
+	participants, err := threadParticipantsJSON(c.Thread.Participants)
+	if err != nil {
+		return RoomChannel{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE room_channels
+SET thread_replies = ?, thread_last_reply_at_ms = ?, thread_participants_json = ?
+WHERE tenant_id = ? AND room_id = ? AND channel_id = ?`, c.Thread.Replies, c.Thread.LastReplyAtMs, participants, tnt, roomID, threadID); err != nil {
+		return RoomChannel{}, err
+	}
+	return c, tx.Commit()
 }
 
 func (m *MySQLChannel) GetChannel(ctx context.Context, roomID, channelID string) (RoomChannel, bool, error) {
@@ -112,7 +206,7 @@ func (m *MySQLChannel) DeleteChannel(ctx context.Context, roomID, channelID stri
 	// Soft delete only; deleting an absent or already-deleted channel is a
 	// no-op, matching the memory store.
 	_, err = m.DB.ExecContext(ctx, `
-UPDATE room_channels SET deleted_at_ms = ?
+UPDATE room_channels SET deleted_at_ms = ?, thread_root = NULL
 WHERE tenant_id = ? AND room_id = ? AND channel_id = ? AND `+sqlNotDeleted,
 		atMs, tnt, roomID, channelID)
 	return err
@@ -166,12 +260,37 @@ func (m *MySQLChannel) UpdateChannel(ctx context.Context, roomID, channelID stri
 		return nil
 	}
 	args = append(args, tnt, roomID, channelID)
-	res, err := m.DB.ExecContext(ctx, `UPDATE room_channels SET `+strings.Join(sets, ", ")+`
+	tx, err := m.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.ExecContext(ctx, `UPDATE room_channels SET `+strings.Join(sets, ", ")+`
 WHERE tenant_id = ? AND room_id = ? AND channel_id = ? AND `+sqlNotDeleted, args...)
 	if err != nil {
 		return err
 	}
-	return requireMatched(res, ErrChannelNotFound)
+	if err := requireMatched(res, ErrChannelNotFound); err != nil {
+		return err
+	}
+	// Its threads follow it (ThreadOf): the same section, the same agents
+	// switch, in the same transaction.
+	if patch.SectionID != nil || patch.Settings != nil {
+		c, err := scanChannelRow(tx.QueryRowContext(ctx, `
+SELECT `+channelColumns+` FROM room_channels WHERE tenant_id = ? AND room_id = ? AND channel_id = ?`, tnt, roomID, channelID))
+		if err != nil {
+			return err
+		}
+		settings, err := channelSettingsJSON(threadSettings(c.Settings))
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE room_channels SET section_id = ?, settings_json = ?
+WHERE tenant_id = ? AND room_id = ? AND parent_id = ? AND kind = ?`, c.SectionID, settings, tnt, roomID, channelID, ChannelKindThread); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // SetChannelArchived archives (keeping the first time) or restores a live
@@ -209,7 +328,8 @@ func (m *MySQLChannel) scanChannel(ctx context.Context, query string, args ...an
 
 // channelColumns is the column list scanChannelRow reads, in order.
 const channelColumns = "channel_id, tenant_id, room_id, name, is_default, kind, created_by, created_at_ms, deleted_at_ms, " +
-	"purpose, rules, section_id, position, owner_id, archived_at_ms, settings_json"
+	"purpose, rules, section_id, position, owner_id, archived_at_ms, settings_json, " +
+	"parent_id, root_seq, thread_replies, thread_last_reply_at_ms, thread_participants_json"
 
 // EnsurePeopleChannel inserts the room's people chat under its derived id
 // unless that row exists (INSERT IGNORE on the primary key), then reads it
@@ -259,13 +379,19 @@ SELECT kind, settings_json FROM room_channels WHERE tenant_id = ? AND room_id = 
 
 func scanChannelRow(sc rowScanner) (RoomChannel, error) {
 	var c RoomChannel
-	var rules, settings sql.NullString
+	var rules, settings, participants sql.NullString
 	err := sc.Scan(&c.ChannelID, &c.TenantID, &c.RoomID, &c.Name, &c.IsDefault, &c.Kind, &c.CreatedBy, &c.CreatedAtMs, &c.DeletedAtMs,
-		&c.Purpose, &rules, &c.SectionID, &c.Position, &c.OwnerID, &c.ArchivedAtMs, &settings)
+		&c.Purpose, &rules, &c.SectionID, &c.Position, &c.OwnerID, &c.ArchivedAtMs, &settings,
+		&c.ParentID, &c.RootSeq, &c.Thread.Replies, &c.Thread.LastReplyAtMs, &participants)
 	if err != nil {
 		return c, err
 	}
 	c.Rules = rules.String
+	if participants.Valid && participants.String != "" {
+		if err := json.Unmarshal([]byte(participants.String), &c.Thread.Participants); err != nil {
+			return c, fmt.Errorf("decode thread participants: %w", err)
+		}
+	}
 	c.Settings, err = decodeChannelSettings(settings)
 	return c, err
 }

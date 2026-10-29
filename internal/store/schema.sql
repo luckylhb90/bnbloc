@@ -231,7 +231,18 @@ CREATE TABLE IF NOT EXISTS room_channels (
   owner_id      VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '',
   archived_at_ms BIGINT NULL,
   settings_json JSON NULL,
-  KEY idx_channel_room (tenant_id, room_id, deleted_at_ms)
+  -- A thread (kind 'thread'): the channel and message it was opened from,
+  -- and its activity. thread_root is "<parent>:<root seq>" while the thread
+  -- is live (NULL once deleted), so a message has at most one live thread.
+  parent_id     VARCHAR(64) NOT NULL DEFAULT '',
+  root_seq      BIGINT NOT NULL DEFAULT 0,
+  thread_root   VARCHAR(96) NULL,
+  thread_replies INT NOT NULL DEFAULT 0,
+  thread_last_reply_at_ms BIGINT NOT NULL DEFAULT 0,
+  thread_participants_json JSON NULL,
+  KEY idx_channel_room (tenant_id, room_id, deleted_at_ms),
+  KEY idx_channel_parent (tenant_id, room_id, parent_id),
+  UNIQUE KEY uq_channel_thread_root (tenant_id, room_id, thread_root)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- A room's sections: named groups of its channels with their own owners and

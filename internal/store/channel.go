@@ -45,16 +45,51 @@ type RoomChannel struct {
 	OwnerID      string
 	ArchivedAtMs *int64
 	Settings     wire.ChannelSettings
+	// A thread (Kind ChannelKindThread, docs/prd/2026-10-28-channels-and-
+	// threads.md §2.2, C1) is a channel opened from one message: ParentID is
+	// the channel it was opened in and RootSeq that message's sequence ("" and
+	// 0 for any other channel). Its section and its agents switch are its
+	// parent's, kept so by the store (UpdateChannel), so who may read a
+	// thread is who may read its parent, by the one rule (MayReadChannel).
+	ParentID string
+	RootSeq  int64
+	// Thread is a thread's activity (its replies, the last one's time and the
+	// people who wrote in it), kept by NoteThreadReply; zero for any other
+	// channel.
+	Thread ThreadStats
 }
+
+// ThreadStats is what a thread's root message shows of it (§2.2): how many
+// replies, when the last came and who wrote in it (people, oldest first,
+// at most MaxThreadParticipants).
+type ThreadStats struct {
+	Replies       int
+	LastReplyAtMs int64
+	Participants  []string
+}
+
+// MaxThreadParticipants bounds the participants a thread keeps (the root
+// shows a few; the followers are who is told).
+const MaxThreadParticipants = 20
 
 // Channel kinds. The kind is fixed at creation.
 const (
 	ChannelKindStandard = ""
 	ChannelKindPeople   = "people"
+	ChannelKindThread   = "thread"
 )
 
 // IsPeople reports whether c is the room's people chat.
 func (c RoomChannel) IsPeople() bool { return c.Kind == ChannelKindPeople }
+
+// IsThread reports whether c is a thread (§2.2): never listed as a channel
+// of the room, only under its parent and to its followers.
+func (c RoomChannel) IsThread() bool { return c.Kind == ChannelKindThread }
+
+// Listed reports whether c is one of the room's channels as the rail, the
+// directory and a room package see them: never the people chat, never a
+// thread. The one rule of what "a channel of the room" is.
+func (c RoomChannel) Listed() bool { return !c.IsPeople() && !c.IsThread() }
 
 // Archived reports whether c is archived (read-only until restored).
 func (c RoomChannel) Archived() bool { return c.ArchivedAtMs != nil }
@@ -66,7 +101,39 @@ func (c RoomChannel) cloned() RoomChannel {
 		cp := *a
 		c.Settings.DefaultAgent = &cp
 	}
+	c.Thread.Participants = append([]string(nil), c.Thread.Participants...)
 	return c
+}
+
+// ThreadOf is the thread a member opens from message rootSeq of parent:
+// a channel of kind thread in the parent's section with the parent's agents
+// switch (its only setting), named by title. The one construction of a
+// thread, so its readers are always its parent's.
+func ThreadOf(parent RoomChannel, id string, rootSeq int64, title, creator string, atMs int64) RoomChannel {
+	return RoomChannel{
+		ChannelID: id, TenantID: parent.TenantID, RoomID: parent.RoomID, Name: title, Kind: ChannelKindThread,
+		CreatedBy: creator, OwnerID: creator, CreatedAtMs: atMs, SectionID: parent.SectionID,
+		Settings: threadSettings(parent.Settings), ParentID: parent.ChannelID, RootSeq: rootSeq,
+	}
+}
+
+// threadSettings is what of a parent's settings its threads carry: whether
+// agents are admitted (ChannelAdmitsAgents reads a thread as it reads any
+// channel). Who posts and slow mode are the parent's own.
+func threadSettings(parent wire.ChannelSettings) wire.ChannelSettings {
+	return wire.ChannelSettings{NoAgents: parent.NoAgents}
+}
+
+// noteThreadReply is the one change NoteThreadReply makes to a thread's
+// stats: one more reply at atMs, author (a person, "" for an agent) among
+// the participants.
+func noteThreadReply(t ThreadStats, author string, atMs int64) ThreadStats {
+	t.Replies++
+	t.LastReplyAtMs = max(t.LastReplyAtMs, atMs)
+	if author != "" && !slices.Contains(t.Participants, author) && len(t.Participants) < MaxThreadParticipants {
+		t.Participants = append(append([]string(nil), t.Participants...), author)
+	}
+	return t
 }
 
 // PeopleChannelName is the display name stored on a room's people chat.
@@ -89,6 +156,10 @@ var ErrChannelNotFound = errors.New("store: channel not found")
 // ErrChannelExists is returned by PutChannel when the channel id is already
 // taken, in any room of any tenant.
 var ErrChannelExists = errors.New("store: channel id already exists")
+
+// ErrThreadExists is returned by PutChannel for a thread of a message that
+// already has one (one thread per root message, §2.2).
+var ErrThreadExists = errors.New("store: the message already has a thread")
 
 // ErrSectionNotFound is returned by UpdateSection for an absent or deleted
 // section; ErrSectionExists by PutSection for a taken section id.
@@ -228,7 +299,8 @@ type ChannelAdmission struct {
 // context carries none.
 type ChannelStore interface {
 	// PutChannel creates a channel; ErrChannelExists when the id is taken
-	// (channel ids are global, so it never rewrites an existing row).
+	// (channel ids are global, so it never rewrites an existing row);
+	// ErrThreadExists for a second thread of one root message.
 	PutChannel(ctx context.Context, c RoomChannel) error
 	// GetChannel returns a live (not deleted, archived or not) channel by id
 	// within a room, found=false when absent or soft-deleted.
@@ -246,7 +318,8 @@ type ChannelStore interface {
 	DeleteChannel(ctx context.Context, roomID, channelID string, atMs int64) error
 	// UpdateChannel applies patch to a live channel, returning
 	// ErrChannelNotFound when it is absent or soft-deleted — unlike
-	// PutChannel, it never resurrects a deleted row.
+	// PutChannel, it never resurrects a deleted row. A parent's new section
+	// or agents switch reaches its threads in the same step (ThreadOf).
 	UpdateChannel(ctx context.Context, roomID, channelID string, patch ChannelPatch) error
 	// SetChannelArchived archives a live channel at *atMs (an archived one
 	// keeps its first time) or, with nil, restores it; ErrChannelNotFound
@@ -256,6 +329,15 @@ type ChannelStore interface {
 	// creator, at atMs) when absent. Idempotent and race-free: concurrent
 	// callers get the same channel.
 	EnsurePeopleChannel(ctx context.Context, roomID, creator string, atMs int64) (RoomChannel, error)
+	// ThreadOfRoot returns the live thread opened from message rootSeq of
+	// parentID, found=false when it has none.
+	ThreadOfRoot(ctx context.Context, roomID, parentID string, rootSeq int64) (RoomChannel, bool, error)
+	// ListThreads returns the live threads of parentID ("" every channel's),
+	// newest activity first.
+	ListThreads(ctx context.Context, roomID, parentID string) ([]RoomChannel, error)
+	// NoteThreadReply counts one reply in a live thread (noteThreadReply);
+	// a channel that is no thread is left as it is.
+	NoteThreadReply(ctx context.Context, roomID, threadID, author string, atMs int64) (RoomChannel, error)
 	// ChannelAdmission returns what decides whether agents may use a
 	// channel of the room, soft-deleted or not; found=false when no such
 	// channel exists. Unlike GetChannel it reports read failures, so a
@@ -358,6 +440,18 @@ func sortChannels(out []RoomChannel) {
 		}
 		if out[i].CreatedAtMs != out[j].CreatedAtMs {
 			return out[i].CreatedAtMs < out[j].CreatedAtMs
+		}
+		return out[i].ChannelID < out[j].ChannelID
+	})
+}
+
+// sortThreads is the one thread order: newest activity (its last reply, or
+// its opening) first, then id.
+func sortThreads(out []RoomChannel) {
+	at := func(c RoomChannel) int64 { return max(c.Thread.LastReplyAtMs, c.CreatedAtMs) }
+	sort.Slice(out, func(i, j int) bool {
+		if at(out[i]) != at(out[j]) {
+			return at(out[i]) > at(out[j])
 		}
 		return out[i].ChannelID < out[j].ChannelID
 	})
@@ -529,7 +623,65 @@ func (s *MemoryChannel) PutChannel(ctx context.Context, c RoomChannel) error {
 			return ErrChannelExists
 		}
 	}
+	if c.IsThread() {
+		for _, o := range s.room.channels[channelKey(tnt, c.RoomID)] {
+			if o.IsThread() && o.ParentID == c.ParentID && o.RootSeq == c.RootSeq && o.DeletedAtMs == nil {
+				return ErrThreadExists
+			}
+		}
+	}
 	return s.room.putChannelLocked(tnt, c.cloned())
+}
+
+func (s *MemoryChannel) ThreadOfRoot(ctx context.Context, roomID, parentID string, rootSeq int64) (RoomChannel, bool, error) {
+	tnt, err := tenant.Require(ctx)
+	if err != nil {
+		return RoomChannel{}, false, err
+	}
+	s.room.mu.Lock()
+	defer s.room.mu.Unlock()
+	for _, c := range s.room.channels[channelKey(tnt, roomID)] {
+		if c.IsThread() && c.ParentID == parentID && c.RootSeq == rootSeq && c.DeletedAtMs == nil {
+			return c.cloned(), true, nil
+		}
+	}
+	return RoomChannel{}, false, nil
+}
+
+func (s *MemoryChannel) ListThreads(ctx context.Context, roomID, parentID string) ([]RoomChannel, error) {
+	tnt, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.room.mu.Lock()
+	defer s.room.mu.Unlock()
+	out := []RoomChannel{}
+	for _, c := range s.room.channels[channelKey(tnt, roomID)] {
+		if c.IsThread() && c.DeletedAtMs == nil && (parentID == "" || c.ParentID == parentID) {
+			out = append(out, c.cloned())
+		}
+	}
+	sortThreads(out)
+	return out, nil
+}
+
+func (s *MemoryChannel) NoteThreadReply(ctx context.Context, roomID, threadID, author string, atMs int64) (RoomChannel, error) {
+	tnt, err := tenant.Require(ctx)
+	if err != nil {
+		return RoomChannel{}, err
+	}
+	s.room.mu.Lock()
+	defer s.room.mu.Unlock()
+	room, c, ok := s.liveChannelLocked(tnt, roomID, threadID)
+	if !ok {
+		return RoomChannel{}, ErrChannelNotFound
+	}
+	if !c.IsThread() {
+		return c.cloned(), nil
+	}
+	c.Thread = noteThreadReply(c.Thread, author, atMs)
+	room[threadID] = c.cloned()
+	return c.cloned(), nil
 }
 
 func (s *MemoryChannel) GetChannel(ctx context.Context, roomID, channelID string) (RoomChannel, bool, error) {
@@ -617,6 +769,13 @@ func (s *MemoryChannel) UpdateChannel(ctx context.Context, roomID, channelID str
 	}
 	applyChannelPatch(&c, patch)
 	room[channelID] = c.cloned()
+	// Its threads follow it: the same section, the same agents switch.
+	for id, t := range room {
+		if t.IsThread() && t.ParentID == channelID {
+			t.SectionID, t.Settings = c.SectionID, threadSettings(c.Settings)
+			room[id] = t
+		}
+	}
 	return nil
 }
 

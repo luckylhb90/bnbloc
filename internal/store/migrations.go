@@ -1886,6 +1886,31 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return nil
 		},
 	},
+	{
+		// Threads (docs/prd/2026-10-28-channels-and-threads.md §2.2, C1): a
+		// thread is a channel of kind 'thread' with its parent channel, root
+		// message and activity. Only adds: defaulted or nullable columns the
+		// previous release never reads, and two indexes.
+		id: "2026_10_channel_threads",
+		run: func(ctx context.Context, db sqlConn) error {
+			for _, c := range []struct{ column, ddl string }{
+				{"parent_id", "VARCHAR(64) NOT NULL DEFAULT '' AFTER settings_json"},
+				{"root_seq", "BIGINT NOT NULL DEFAULT 0 AFTER parent_id"},
+				{"thread_root", "VARCHAR(96) NULL AFTER root_seq"},
+				{"thread_replies", "INT NOT NULL DEFAULT 0 AFTER thread_root"},
+				{"thread_last_reply_at_ms", "BIGINT NOT NULL DEFAULT 0 AFTER thread_replies"},
+				{"thread_participants_json", "JSON NULL AFTER thread_last_reply_at_ms"},
+			} {
+				if err := addColumnIfMissing(ctx, db, "room_channels", c.column, c.ddl); err != nil {
+					return err
+				}
+			}
+			if err := addIndexIfMissing(ctx, db, "room_channels", "idx_channel_parent", "ADD KEY idx_channel_parent (tenant_id, room_id, parent_id)"); err != nil {
+				return err
+			}
+			return addIndexIfMissing(ctx, db, "room_channels", "uq_channel_thread_root", "ADD UNIQUE KEY uq_channel_thread_root (tenant_id, room_id, thread_root)")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes
