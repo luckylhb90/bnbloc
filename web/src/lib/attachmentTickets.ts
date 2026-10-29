@@ -23,11 +23,29 @@ export interface AttachmentTicketCache {
   url(session: string, roomId: string, attachmentId: string): Promise<string>;
 }
 
+// TicketStore keeps minted tickets across page loads (sessionStorage in the
+// app): a reload does not mint again what it already holds, so an
+// attachment's image shows at once instead of after a round trip each
+// (QA 2026-10-29: images arrived one by one after a refresh). A ticket is
+// already bound to the session that minted it (the key), and reads one file
+// for minutes: the tab's own storage is no wider than its memory.
+export interface TicketStore {
+  load(): Record<string, AttachmentTicket>;
+  save(all: Record<string, AttachmentTicket>): void;
+}
+
 export function createAttachmentTicketCache(
   mint: (roomId: string, attachmentId: string) => Promise<AttachmentTicket>,
   now: () => number = Date.now,
+  store?: TicketStore,
 ): AttachmentTicketCache {
-  const tickets = new Map<string, AttachmentTicket>();
+  const tickets = new Map<string, AttachmentTicket>(Object.entries(store?.load() ?? {}));
+  const persist = () => {
+    if (!store) return;
+    const live: Record<string, AttachmentTicket> = {};
+    for (const [k, t] of tickets) if (fresh(t)) live[k] = t;
+    store.save(live);
+  };
   const inflight = new Map<string, Promise<string>>();
   const keyOf = (session: string, roomId: string, attachmentId: string) => `${session}\n${roomId}\n${attachmentId}`;
   const fresh = (t: AttachmentTicket | undefined) => !!t && t.expiresAtMs - ATTACHMENT_TICKET_SLACK_MS > now();
@@ -45,6 +63,7 @@ export function createAttachmentTicketCache(
         p = mint(roomId, attachmentId)
           .then((minted) => {
             tickets.set(key, minted);
+            persist();
             return minted.url;
           })
           .finally(() => inflight.delete(key));

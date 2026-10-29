@@ -38,6 +38,9 @@ export const StorageKey = {
   // The request blocks a member opened in a room's feed, per member and
   // room (sessionStorage, views/room/FeedRequestBlock.tsx).
   feedOpenBlocks: "bnbloc.feedOpenBlocks",
+  // Attachment tickets minted this session, so a reload shows images at once
+  // (sessionStorage, lib/attachmentTickets.ts).
+  attachmentTickets: "bnbloc.attachmentTickets",
   // Per-member and per-room state.
   welcomeDismissed: "bnbloc.welcomeDismissed",
   // The channel rail's sections a member folded, per member and room

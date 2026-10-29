@@ -40,3 +40,20 @@ async function testFailedMintIsRetried(): Promise<void> {
 
 await testTicketsAreReusedUntilNearExpiryAndKeyedBySession();
 await testFailedMintIsRetried();
+await testTicketsSurviveAReload();
+
+// A reload keeps the tickets it holds: no mint for an attachment shown before.
+async function testTicketsSurviveAReload(): Promise<void> {
+  let saved: Record<string, { url: string; expiresAtMs: number }> = {};
+  const store = { load: () => saved, save: (all: typeof saved) => void (saved = all) };
+  let minted = 0;
+  const mint = async (roomId: string, id: string) => {
+    minted++;
+    return { url: `/v1/rooms/${roomId}/attachments/${id}?ticket=t${minted}`, expiresAtMs: Date.now() + 15 * 60_000 };
+  };
+  const first = createAttachmentTicketCache(mint, Date.now, store);
+  const u = await first.url("s1", "r", "a");
+  const afterReload = createAttachmentTicketCache(mint, Date.now, store);
+  assert(afterReload.cached("s1", "r", "a") === u && minted === 1, "a reloaded page reuses the ticket it held");
+  assert(afterReload.cached("s2", "r", "a") === null, "another session's ticket is not reused after a reload");
+}

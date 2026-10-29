@@ -3,13 +3,27 @@ import { api } from "@/lib/api";
 import { createAttachmentTicketCache } from "@/lib/attachmentTickets";
 import { apiUrl } from "@/lib/config";
 import { getToken } from "@/lib/session";
+import { StorageKey, readStored, writeStored } from "@/lib/storageKeys";
 
 // One ticket cache for the app: every rendering of an attachment (the feed,
 // the people chat, the lightbox) shares its tickets.
-const tickets = createAttachmentTicketCache(async (roomId, attachmentId) => {
-  const t = await api.attachmentTicket(roomId, attachmentId);
-  return { url: apiUrl(t.url), expiresAtMs: t.expiresAtMs };
-});
+const tickets = createAttachmentTicketCache(
+  async (roomId, attachmentId) => {
+    const t = await api.attachmentTicket(roomId, attachmentId);
+    return { url: apiUrl(t.url), expiresAtMs: t.expiresAtMs };
+  },
+  Date.now,
+  {
+    load: () => {
+      try {
+        return JSON.parse(readStored(StorageKey.attachmentTickets, "session") || "{}");
+      } catch {
+        return {};
+      }
+    },
+    save: (all) => writeStored(StorageKey.attachmentTickets, Object.keys(all).length ? JSON.stringify(all) : "", "session"),
+  },
+);
 
 const session = () => getToken() ?? "";
 
