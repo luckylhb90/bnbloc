@@ -45,9 +45,13 @@ func isPerSpaceTree(hostPath string) bool {
 }
 
 // perSpaceTree makes (or keeps) the space's hard-linked tree of src for one
-// slot and returns its path. src is a folder under hostRoot, immutable once
-// published (a new version is a new folder), so a tree made of src is current
-// and is reused untouched. A tree of another source of the same slot (the
+// slot and returns its path. src is a folder under hostRoot that a publisher
+// does not change in place (a new version is a new folder), so a tree made of src
+// is current and is reused untouched. But a folder can be replaced under the same
+// path (the same version removed and installed again with other files), and a
+// tree made of the folder before would then serve the old files for good: the
+// source's identity (see sourceStamp) is part of the tree's name, so a replaced
+// folder gets a new tree. A tree of another source of the same slot (the
 // version before) is removed once the new one is in place: a space has no
 // process left from before when it is prepared (the turn fence), so nothing runs
 // from it.
@@ -55,7 +59,11 @@ func perSpaceTree(hostRoot, space, slot, src string) (string, error) {
 	if rel, err := filepath.Rel(hostRoot, src); err != nil || rel == "." || strings.HasPrefix(rel, "..") {
 		return "", fmt.Errorf("%s is not inside %s", src, hostRoot)
 	}
-	slotSum, srcSum := sha256.Sum256([]byte(slot)), sha256.Sum256([]byte(src))
+	st, err := os.Stat(src)
+	if err != nil {
+		return "", err
+	}
+	slotSum, srcSum := sha256.Sum256([]byte(slot)), sha256.Sum256([]byte(sourceStamp(src, st)))
 	prefix := hex.EncodeToString(slotSum[:6]) + "-"
 	dir := filepath.Join(hostRoot, spacesDir, space)
 	dst := filepath.Join(dir, prefix+hex.EncodeToString(srcSum[:6])+"-"+filepath.Base(slot))
@@ -85,6 +93,14 @@ func perSpaceTree(hostRoot, space, slot, src string) (string, error) {
 	}
 	_ = os.Chtimes(dir, time.Now(), time.Now())
 	return dst, nil
+}
+
+// sourceStamp names a source folder for a tree: its path and the moment its
+// own entries last changed. A folder installed again is a new folder with new
+// entries, so its stamp differs even at the same path; one nobody touches keeps
+// its stamp, so its trees are reused.
+func sourceStamp(src string, st fs.FileInfo) string {
+	return fmt.Sprintf("%s\x00%d", src, st.ModTime().UnixNano())
 }
 
 // sweepSpaceTrees removes the trees of spaces that no longer exist: under every

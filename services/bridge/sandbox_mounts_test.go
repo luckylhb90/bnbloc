@@ -727,3 +727,50 @@ func TestSandbox_aFailedSandboxedDriveNamesTheMountThatWasNotApplied(t *testing.
 		t.Fatalf("the failure notice says what was not mounted: %q", all)
 	}
 }
+
+// A source folder installed again under the same path (the same version removed and put back
+// with other files: a missing dependency added) is a different source. A tree reused by path
+// alone would serve the room the files of the first install for as long as the room lives; the
+// room of the reported case kept running Hermes without the package the reinstall had added.
+func TestContributedMounts_aSourceReinstalledAtTheSamePathGetsANewTree(t *testing.T) {
+	f := newMountFixture(t)
+	src := f.folder(t, "agents", "tool/1.0")
+	if err := os.MkdirAll(filepath.Join(src, "site"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(src, "site", "base"), []byte("1"), 0o644)
+	f.descriptor(t, "agents", descriptor(desc{"host": src, "guest": f.guestRoot + "/agents/tool", "perSpace": true, "env": "BNBLOC_MOUNT_TOOL"}))
+	read := func() []sandbox.SpaceMount {
+		m, _, d := readContributedMounts(f.mountsDir, f.mountsRoot, f.workdir, "a-1", []string{f.guestRoot}, false)
+		if len(d) != 0 || len(m) != 1 {
+			t.Fatalf("mounts %+v dropped %v", m, d)
+		}
+		return m
+	}
+	first := read()
+	if again := read(); again[0] != first[0] {
+		t.Fatalf("an untouched source changed its tree: %+v then %+v", first, again)
+	}
+
+	// The same path, installed again with one more package.
+	if err := os.RemoveAll(src); err != nil {
+		t.Fatal(err)
+	}
+	os.MkdirAll(filepath.Join(src, "site"), 0o755)
+	os.WriteFile(filepath.Join(src, "site", "base"), []byte("1"), 0o644)
+	os.WriteFile(filepath.Join(src, "site", "added"), []byte("2"), 0o644)
+	later := time.Now().Add(time.Hour) // a file system with coarse stamps must not hide the change
+	if err := os.Chtimes(src, later, later); err != nil {
+		t.Fatal(err)
+	}
+	second := read()
+	if second[0].HostPath == first[0].HostPath {
+		t.Fatal("the reinstalled source kept the tree of the first install")
+	}
+	if _, err := os.Stat(filepath.Join(second[0].HostPath, "site", "added")); err != nil {
+		t.Errorf("the room's tree lacks what the reinstall added: %v", err)
+	}
+	if _, err := os.Stat(first[0].HostPath); err == nil {
+		t.Error("the tree of the first install was left beside the new one")
+	}
+}
