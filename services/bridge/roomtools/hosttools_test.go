@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -296,5 +297,104 @@ func TestAHostToolIsRefusedOnceTheTurnHasEnded(t *testing.T) {
 	sess.Bind(Job{JobID: "job-2", RequesterUserID: "maya"})
 	if code, _ := toolPost(t, srv, token, "mailer", callReq, nil); code != 200 {
 		t.Fatalf("the next turn = %d", code)
+	}
+}
+
+// guestServer is a server whose proxy port is up, as the sandbox opens it to a guest: the
+// guest names it by an alias, not by the loopback address the server itself listens on.
+func guestServer(t *testing.T) (*Server, string, *Session, *fakeHostTool) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+	_, port, _ := net.SplitHostPort(addr)
+	srv, err := Start(Config{Gateway: &fakeGateway{handle: func(string, string, []byte) (int, any) { return 200, map[string]any{} }},
+		ProxyAddr: addr, GuestHost: "host.vm.internal:" + port})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = srv.Close() })
+	token, sess, err := srv.Open(Scope{RoomID: "room-1", Owner: "jack", Core: "acme", Provider: "codex"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool := &fakeHostTool{}
+	sess.AttachHostTool("mailer", tool)
+	return srv, token, sess, tool
+}
+
+// guestPost sends what an agent in the guest sends: to the proxy port, under the name the guest
+// has for the host (the Host header), with the session's bearer.
+func guestPost(t *testing.T, srv *Server, token, path, body string) (int, string) {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodPost, "http://"+srv.proxyLn.Addr().String()+path, strings.NewReader(body))
+	req.Host = srv.cfg.GuestHost
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(raw)
+}
+
+// An agent that runs in the sandbox reaches its room tools and its host-placed tools on the one
+// host port the sandbox opens to it, by the name the guest has for the host. Without this such an
+// agent was handed 127.0.0.1:<port>, which is its own loopback: dsh stops its whole session on an
+// MCP server it cannot connect to ("mcp-client(media-tools): initial connection or tool
+// synchronization failed"), so the agent could not start at all.
+func TestAGuestReachesItsToolsOnTheProxyPort(t *testing.T) {
+	srv, token, sess, tool := guestServer(t)
+	if got := srv.GuestURL(ToolsPath + "/mailer"); got != "http://"+srv.cfg.GuestHost+ToolsPath+"/mailer" {
+		t.Fatalf("GuestURL = %q", got)
+	}
+	sess.Bind(Job{JobID: "job-1", RequesterUserID: "jack", ChannelID: "ch"})
+	if code, body := guestPost(t, srv, token, ToolsPath+"/mailer", initReq); code != 200 || !strings.Contains(body, `"mailer"`) {
+		t.Fatalf("a guest's initialize of its host tool = %d %s", code, body)
+	}
+	if code, body := guestPost(t, srv, token, ToolsPath+"/mailer", callReq); code != 200 || !strings.Contains(body, "sent") || tool.calls.Load() == 0 {
+		t.Fatalf("a guest's call of its host tool = %d %s", code, body)
+	}
+	if code, body := guestPost(t, srv, token, Endpoint, initReq); code != 200 || !strings.Contains(body, `"result"`) {
+		t.Fatalf("a guest's initialize of the room tools = %d %s", code, body)
+	}
+	// The bearer is still what decides.
+	if code, _ := guestPost(t, srv, "", ToolsPath+"/mailer", initReq); code != http.StatusUnauthorized {
+		t.Errorf("no bearer = %d, want 401", code)
+	}
+	if code, _ := guestPost(t, srv, "not-a-session", Endpoint, initReq); code != http.StatusUnauthorized {
+		t.Errorf("a wrong bearer = %d, want 401", code)
+	}
+}
+
+// The guest's port serves the tools and the proxy, nothing else: not the room relay (it carries
+// the room's credentials to the tools the bridge runs), and not under any other name for the host.
+func TestTheGuestsPortDoesNotServeTheRelayOrAForeignHost(t *testing.T) {
+	srv, token, _, _ := guestServer(t)
+	if code, _ := guestPost(t, srv, token, RelayPath+"/v1/anything", `{}`); code != http.StatusNotFound {
+		t.Errorf("the room relay on the guest's port = %d, want 404", code)
+	}
+	req, _ := http.NewRequest(http.MethodPost, "http://"+srv.proxyLn.Addr().String()+Endpoint, strings.NewReader(initReq))
+	req.Host = "evil.example.com"
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("a request addressed to another host = %d, want 403 (DNS rebinding)", resp.StatusCode)
+	}
+	// And it says nothing about the guest when the port is not up.
+	plain, _, _ := startServer(t, &fakeGateway{handle: func(string, string, []byte) (int, any) { return 200, map[string]any{} }})
+	if got := plain.GuestURL(Endpoint); got != "" {
+		t.Errorf("GuestURL without a proxy port = %q, want none", got)
 	}
 }

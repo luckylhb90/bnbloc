@@ -125,7 +125,7 @@ func TestContentHostToolsAndPrivateDirs(t *testing.T) {
 		relayed: []string{"mailer", "browser"},
 		host:    map[string][]string{"mailer": {"acme/mail", "acme/mail-cache"}, "plain": {"x"}},
 	}}
-	tools, rest := c.hostTools(c.relayedMCP())
+	tools, rest := c.hostTools(c.relayedMCP(), false)
 	if len(tools) != 1 || tools[0].Server.Name != "mailer" || !tools[0].Relayed {
 		t.Fatalf("tools = %+v (an http server is never started on the host)", tools)
 	}
@@ -481,5 +481,29 @@ func TestBindingSumFollowsHostPlacement(t *testing.T) {
 	}
 	if host.bindingSum() != same.bindingSum() {
 		t.Error("equal content got different sums")
+	}
+}
+
+// A tool's program is a build for this computer. An agent that runs inside the sandbox cannot start
+// it as its own child, whatever the package declares (media-tools declares no placement), so in the
+// guest every stdio tool is a host tool: the bridge starts it, the agent reaches it as an MCP server.
+func TestAGuestAgentsStdioToolsAreAllHostTools(t *testing.T) {
+	c := &jobContent{mcp: jobMCP{
+		servers: []corepkg.MCPServer{{Name: "media-tools", Type: corepkg.MCPStdio, Command: "/store/media-tools"}, {Name: "plain", Type: corepkg.MCPHTTP, URL: "https://x.example"}},
+		relayed: []string{"media-tools"},
+	}}
+	if tools, _ := c.hostTools(c.relayedMCP(), false); len(tools) != 0 {
+		t.Fatalf("an agent on this computer: %+v, want its tools to stay with it", tools)
+	}
+	tools, rest := c.hostTools(c.relayedMCP(), true)
+	if len(tools) != 1 || tools[0].Server.Name != "media-tools" || !tools[0].Relayed {
+		t.Fatalf("a guest agent: %+v, want media-tools as a relayed host tool (an http server is never started here)", tools)
+	}
+	if len(rest) != 0 {
+		t.Errorf("relayed without the host tool = %v: the host start gives it the relay itself", rest)
+	}
+	// What a host tool keeps private is read-denied to the agent: none for a tool that declared none.
+	if dirs, err := c.hostPrivateDirs(); dirs != nil || err != nil {
+		t.Errorf("private dirs = %v, %v", dirs, err)
 	}
 }

@@ -515,13 +515,13 @@ func (c *jobContent) relayedMCP() []string {
 // own children would have been started (command, arguments, environment):
 // the tool host starts them instead of the agent
 // (docs/prd/2026-10-22-host-run-mcp-tools.md).
-func (c *jobContent) hostServers() []corepkg.MCPServer {
-	if c == nil || len(c.mcp.host) == 0 {
+func (c *jobContent) hostServers(all bool) []corepkg.MCPServer {
+	if c == nil || (len(c.mcp.host) == 0 && !all) {
 		return nil
 	}
 	var out []corepkg.MCPServer
 	for _, s := range c.mcp.servers {
-		if _, ok := c.mcp.host[s.Name]; ok && s.Transport() == corepkg.MCPStdio {
+		if _, ok := c.mcp.host[s.Name]; (ok || all) && s.Transport() == corepkg.MCPStdio {
 			out = append(out, s)
 		}
 	}
@@ -530,8 +530,11 @@ func (c *jobContent) hostServers() []corepkg.MCPServer {
 
 // hostTools are the session's host-placed tools, and relayed without them: a
 // host tool gets the room relay when it is started, not through the profile.
-func (c *jobContent) hostTools(relayed []string) ([]HostTool, []string) {
-	servers := c.hostServers()
+// inGuest: the agent runs inside the sandbox, where a tool's program (a build for
+// this computer) cannot start, so every stdio tool is a host tool, whatever its
+// package declares.
+func (c *jobContent) hostTools(relayed []string, inGuest bool) ([]HostTool, []string) {
+	servers := c.hostServers(inGuest)
 	if len(servers) == 0 {
 		return nil, relayed
 	}
@@ -553,7 +556,7 @@ func (c *jobContent) hostPrivateDirs() ([]string, error) {
 		return nil, nil
 	}
 	var rel []string
-	for _, s := range c.hostServers() {
+	for _, s := range c.hostServers(false) {
 		rel = append(rel, c.mcp.host[s.Name]...)
 	}
 	if len(rel) == 0 {

@@ -162,12 +162,19 @@ func Start(cfg Config) (*Server, error) {
 			slog.Warn("bnbloc bridge egress proxy for sandboxed commands off: its address is taken", "event", "bnbloc.bridge.egress_proxy_listen_failed", "addr", cfg.ProxyAddr, "error", err)
 		} else {
 			s.proxyLn = pln
+			// What a guest may reach here: the HTTPS proxy, and its own agent's room
+			// tools and host-placed tools (each behind the session's bearer). Not the
+			// room relay, which carries the room's credentials to the tools the
+			// bridge starts on the host.
+			guestMux := http.NewServeMux()
+			guestMux.HandleFunc(Endpoint, s.handle)
+			guestMux.HandleFunc(ToolsPath+"/", s.handleHostTool)
 			s.proxySrv = &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.Method != http.MethodConnect {
-					http.Error(w, "this address is an HTTPS proxy only", http.StatusMethodNotAllowed)
+				if r.Method == http.MethodConnect {
+					s.handleConnect(w, r)
 					return
 				}
-				s.handleConnect(w, r)
+				guestMux.ServeHTTP(w, r)
 			}), ReadHeaderTimeout: 10 * time.Second}
 			go func() { _ = s.proxySrv.Serve(pln) }()
 		}
@@ -193,6 +200,21 @@ func (s *Server) Addr() string { return s.ln.Addr().String() }
 
 // URL is the MCP endpoint agents are given.
 func (s *Server) URL() string { return "http://" + s.ln.Addr().String() + Endpoint }
+
+// GuestURL is path on the server as an agent inside the sandbox reaches it ("" when
+// it cannot: the proxy port is not up, or the guests' name for it is not known).
+func (s *Server) GuestURL(path string) string {
+	if s.proxyLn == nil || s.cfg.GuestHost == "" {
+		return ""
+	}
+	return "http://" + s.cfg.GuestHost + path
+}
+
+// hostAllowed is the DNS-rebinding check on a request's Host: this server's own
+// loopback address, or the name a guest reaches the proxy port by.
+func (s *Server) hostAllowed(host string) bool {
+	return loopbackHost(host) || (s.cfg.GuestHost != "" && strings.EqualFold(host, s.cfg.GuestHost))
+}
 
 // Close stops the server and revokes every session.
 func (s *Server) Close() error {
@@ -347,7 +369,7 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	// DNS rebinding: a browser page must never reach the loopback server.
 	// An Origin (browsers set one) must be loopback, and the Host must be
 	// the address the server listens on.
-	if !loopbackOrigin(r.Header.Get("Origin")) || !loopbackHost(r.Host) {
+	if !loopbackOrigin(r.Header.Get("Origin")) || !s.hostAllowed(r.Host) {
 		writeRPCError(w, http.StatusForbidden, nil, codeInvalidRequest, "forbidden origin", nil)
 		return
 	}

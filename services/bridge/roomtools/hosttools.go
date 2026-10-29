@@ -88,7 +88,7 @@ var handshake = map[string]bool{
 }
 
 func (s *Server) handleHostTool(w http.ResponseWriter, r *http.Request) {
-	if !loopbackOrigin(r.Header.Get("Origin")) || !loopbackHost(r.Host) {
+	if !loopbackOrigin(r.Header.Get("Origin")) || !s.hostAllowed(r.Host) {
 		writeRPCError(w, http.StatusForbidden, nil, codeInvalidRequest, "forbidden origin", nil)
 		return
 	}

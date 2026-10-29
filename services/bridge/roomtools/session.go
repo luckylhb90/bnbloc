@@ -51,6 +51,12 @@ type Config struct {
 	// ProxyAddr is a loopback address the proxy alone also listens on: the
 	// host port a sandbox opens to its guests (BNBLOC_SANDBOX_HOST_PROXY).
 	ProxyAddr string
+	// GuestHost is that port as a guest names it ("<host alias>:<port>",
+	// BNBLOC_SANDBOX_HOST_PROXY). The same port serves a guest agent its room tools
+	// (/mcp) and the host-placed tools (/tools/<name>): a guest cannot reach this
+	// server's own loopback address, and the proxy port is the one host port its
+	// machine opens. The room relay is never on it.
+	GuestHost string
 	// PrivateHosts are the hosts a sandboxed command's tunnel may reach at
 	// a private address (the member's own, BNBLOC_SANDBOX_PRIVATE_HOSTS);
 	// every other sandboxed tunnel reaches only public addresses.

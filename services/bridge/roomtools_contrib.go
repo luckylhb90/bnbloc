@@ -44,7 +44,7 @@ func (b *Bridge) EnableRoomTools(shimCommand string) (stop func(), err error) {
 	if port := b.cfg.Sandbox.hostProxyPort(); port != "" {
 		proxyAddr = net.JoinHostPort("127.0.0.1", port)
 	}
-	srv, err := roomtools.Start(roomtools.Config{Gateway: roomToolsGateway{b}, GatewayBaseURL: b.cfg.GatewayBaseURL, Addr: st.Addr, Names: b.displayNames, EgressDir: b.cfg.StateDir, ProxyAddr: proxyAddr, PrivateHosts: b.cfg.Sandbox.PrivateHosts})
+	srv, err := roomtools.Start(roomtools.Config{Gateway: roomToolsGateway{b}, GatewayBaseURL: b.cfg.GatewayBaseURL, Addr: st.Addr, Names: b.displayNames, EgressDir: b.cfg.StateDir, ProxyAddr: proxyAddr, GuestHost: b.cfg.Sandbox.HostProxy, PrivateHosts: b.cfg.Sandbox.PrivateHosts})
 	if err != nil {
 		return nil, err
 	}
@@ -170,6 +170,23 @@ func hostToolEnv(tool HostTool, relayURL, token string) []string {
 	return env
 }
 
+// agentURL is the address an agent is given for path on the room tools server: the
+// server's own loopback address, or, for an agent that runs inside the sandbox
+// (its loopback is its own), the guest-facing address of the proxy port. An agent
+// that runs on this computer with only its commands in the sandbox keeps the
+// loopback one. An error when the agent is in the guest and that port is not up: a
+// loopback address would only fail inside the agent, and an agent that stops on a
+// tool it cannot reach (dsh does) takes the whole session with it.
+func (c *roomToolsContributor) agentURL(info SessionInfo, path, loopback string) (string, error) {
+	if !info.InGuest {
+		return loopback, nil
+	}
+	if u := c.srv.GuestURL(path); u != "" {
+		return u, nil
+	}
+	return "", fmt.Errorf("the room tools are not reachable from the sandbox (the sandbox's host proxy port is not set up)")
+}
+
 // attachHostTools starts (on first use) and fronts the session's host-placed
 // tools on the server: one process per tool and session, in the session's
 // working directory.
@@ -186,7 +203,10 @@ func (c *roomToolsContributor) attachHostTools(sess *roomtools.Session, info Ses
 // tool's endpoint on the room tools server under the tool's own name, over http
 // when the agent accepts it, else through the stdio shim.
 func (c *roomToolsContributor) hostToolServer(info SessionInfo, name, token string) (corepkg.MCPServer, error) {
-	url := c.srv.HostToolURL(name)
+	url, err := c.agentURL(info, roomtools.ToolsPath+"/"+name, c.srv.HostToolURL(name))
+	if err != nil {
+		return corepkg.MCPServer{}, err
+	}
 	switch {
 	case (corepkg.Target{MCPTransports: info.MCPTransports}).TransportSupported(corepkg.MCPHTTP):
 		return corepkg.MCPServer{Name: name, Type: corepkg.MCPHTTP, URL: url,
@@ -284,14 +304,18 @@ func roomToolsScope(info SessionInfo) roomtools.Scope {
 // dropped.
 func (c *roomToolsContributor) ContributeSession(ctx context.Context, info SessionInfo) (SessionContribution, error) {
 	server := corepkg.MCPServer{Name: roomtools.ServerName}
+	url, err := c.agentURL(info, roomtools.Endpoint, c.srv.URL())
+	if err != nil {
+		return SessionContribution{}, err
+	}
 	switch {
 	case (corepkg.Target{MCPTransports: info.MCPTransports}).TransportSupported(corepkg.MCPHTTP):
 		server.Type = corepkg.MCPHTTP
-		server.URL = c.srv.URL()
+		server.URL = url
 	case c.shimCommand != "":
 		server.Type = corepkg.MCPStdio
 		server.Command = c.shimCommand
-		server.Args = []string{"roomtools-stdio", "--url", c.srv.URL()}
+		server.Args = []string{"roomtools-stdio", "--url", url}
 	default:
 		return SessionContribution{}, fmt.Errorf("room tools: the %s agent accepts no http MCP server and no stdio shim is available", info.Provider)
 	}

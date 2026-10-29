@@ -38,6 +38,10 @@ type SessionInfo struct {
 	Core      string
 	Provider  string
 	Sandboxed bool
+	// InGuest: the agent itself runs inside the sandbox (a guest-only agent), not on
+	// this computer with only its commands sent there. What the agent is given to
+	// reach on this computer has to be an address the guest can reach.
+	InGuest bool
 	// MCPTransports are the MCP transports the target's agent accepts
 	// (core.Target.MCPTransports; empty = stdio only): contribute a server
 	// of a transport the agent can reach.

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -230,5 +231,99 @@ func TestRoomRelayCallHasNoFixedLimit(t *testing.T) {
 	defer cancel()
 	if err := call(ctx, true); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("the tool call's end must end the relayed call: %v", err)
+	}
+}
+
+// An agent that runs inside the sandbox cannot reach this computer's loopback (its own is the
+// guest's), so it is handed the proxy port by the name its guest has for the host; an agent on this
+// computer whose commands only run in the sandbox keeps the loopback address. dsh stops its whole
+// session on an MCP server it cannot reach, so a loopback address in the guest meant no session at all.
+func TestRoomToolsAGuestAgentIsHandedAnAddressItCanReach(t *testing.T) {
+	g := newActivityGateway(t, "room-1")
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := ln.Addr().String()
+	_ = ln.Close()
+	_, port, _ := net.SplitHostPort(proxy)
+	guestHost := "host.vm.internal:" + port
+	b := New(Config{GatewayBaseURL: g.srv.URL, GatewayToken: "t", OwnerSubject: "alice", StateDir: t.TempDir(),
+		Sandbox: SandboxConfig{HostProxy: guestHost}})
+	// hostProxyPort reads the port from the guest's name; the proxy listens where the bridge says.
+	stop, err := b.EnableRoomTools("/opt/bnbloc/bnbloc-bridge")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	c := b.sessionContributors()[0]
+	base := SessionInfo{RoomID: "room-1", ChannelID: "ch", Owner: "alice", Core: "core-a", Provider: "dsh", JobID: "job-1", RequesterUserID: "alice",
+		MCPTransports: []string{corepkg.MCPStdio, corepkg.MCPHTTP}}
+
+	// On this computer, commands in the sandbox: the loopback address.
+	onHost := base
+	onHost.Sandboxed = true
+	part, err := c.ContributeSession(context.Background(), onHost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u := part.MCPServers[0].URL; !strings.HasPrefix(u, "http://127.0.0.1:") {
+		t.Errorf("an agent on this computer is handed %q, want the loopback address", u)
+	}
+
+	// In the guest: the proxy port, by the guest's name for the host, for the room tools...
+	inGuest := base
+	inGuest.Sandboxed, inGuest.InGuest = true, true
+	part, err = c.ContributeSession(context.Background(), inGuest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u := part.MCPServers[0].URL; u != "http://"+guestHost+roomtools.Endpoint {
+		t.Errorf("a guest agent's room tools = %q, want http://%s%s", u, guestHost, roomtools.Endpoint)
+	}
+	// ...and over the stdio shim, for an agent that takes no http server.
+	stdioOnly := inGuest
+	stdioOnly.MCPTransports = nil
+	part, err = c.ContributeSession(context.Background(), stdioOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := part.MCPServers[0].Args; len(a) < 3 || a[2] != "http://"+guestHost+roomtools.Endpoint {
+		t.Errorf("a guest agent's shim is given %v, want the guest address", a)
+	}
+	// ...and for each host-placed tool.
+	withTool := inGuest
+	withTool.HostTools = []HostTool{{Server: mailerServer()}}
+	part, err = c.ContributeSession(context.Background(), withTool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, s := range part.MCPServers {
+		if s.Name == "mailer" {
+			found = true
+			if s.URL != "http://"+guestHost+roomtools.ToolsPath+"/mailer" {
+				t.Errorf("a guest agent's host tool = %q", s.URL)
+			}
+		}
+	}
+	if !found {
+		t.Error("the host tool was not handed to the guest agent")
+	}
+}
+
+// Where the guest cannot reach the host at all (the sandbox has no host proxy), a guest agent is
+// handed no room tools rather than an address that cannot work.
+func TestRoomToolsAGuestAgentWithNoHostPortGetsNoUnreachableAddress(t *testing.T) {
+	g := newActivityGateway(t, "room-1")
+	b := New(Config{GatewayBaseURL: g.srv.URL, GatewayToken: "t", OwnerSubject: "alice"})
+	stop, err := b.EnableRoomTools("/opt/bnbloc/bnbloc-bridge")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	info := SessionInfo{RoomID: "room-1", ChannelID: "ch", Owner: "alice", Core: "core-a", Provider: "dsh", JobID: "job-1", RequesterUserID: "alice", Sandboxed: true, InGuest: true}
+	if _, err := b.sessionContributors()[0].ContributeSession(context.Background(), info); err == nil {
+		t.Fatal("a guest agent with no host port was handed an address anyway")
 	}
 }
