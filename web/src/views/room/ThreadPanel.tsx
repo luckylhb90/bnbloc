@@ -233,6 +233,7 @@ export function ThreadPanel({
             onEdit={editOwnMessage}
             onCancelJob={noop}
             onOpenArtifactInFiles={noop}
+            emptyText="No replies yet. Reply below to start the thread."
           />
         </div>
       </div>

@@ -64,6 +64,7 @@ export function MessageFeed({
   agentReady = false,
   preview = false,
   layout = FeedLayoutTime,
+  emptyText,
 }: {
   readonly loaded: boolean;
   readonly roomId: string;
@@ -107,6 +108,9 @@ export function MessageFeed({
   readonly preview?: boolean;
   // How the member reads the feed (useFeedLayout): By time or By request.
   readonly layout?: FeedLayout;
+  // What an empty feed says instead of the room's empty state (a thread with
+  // no replies yet: it is not a room, and its root is shown above it).
+  readonly emptyText?: string;
 }) {
   // A turn's cards sit under its last reply (their sourceSeq is the request).
   const deliverablesAfter = useMemo(
@@ -123,6 +127,9 @@ export function MessageFeed({
     );
   }
   const empty = feed.length === 0 && working.size === 0 ? feedEmptyKind({ people, preview, agentReady }) : null;
+  if (emptyText && feed.length === 0 && working.size === 0) {
+    return <p className="mt-6 text-center text-sm text-[var(--color-fg-subtle)]">{emptyText}</p>;
+  }
   if (people && feed.length === 0) {
     return (
       <div className="mx-auto mt-10 flex max-w-xs flex-col items-center gap-1 text-center text-sm text-[var(--color-fg-muted)]">

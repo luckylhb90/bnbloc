@@ -16,7 +16,12 @@ const me = "maya";
 const s = {
   room: { roomId: "r1", name: "Team", description: "", visibility: "private", previewable: false, syncMode: "none", createdBy: "maya", createdAtMs: 1, memberCount: 2, channelCreation: "anyone", welcome: "", quickPrompts: [], rules: "", rulesVersion: 0, requireRulesAgreement: false, recommendedChannels: [] },
   channels: [{ channelId: "ch_gen", name: "general", isDefault: true, createdBy: "maya", purpose: "", rules: "", sectionId: "", position: 0, ownerId: "maya", settings: {} }],
-  history: { ch_gen: [{ sequence: 7, kind: "chat_message", atUnixMs: Date.now() - 60000, channelId: "ch_gen", payload: { text: "Should we ship on Friday?", userId: "jack", clientMsgId: "c7" } }] },
+  history: {
+    ch_gen: [
+      { sequence: 6, kind: "agent_messages", atUnixMs: Date.now() - 90000, channelId: "ch_gen", payload: { agentSessionId: "s", messages: [{ seq: 1, payload: { role: "assistant", notice: "job-failed", jobId: "j1", provider: "hermes", ownerUserId: "maya", text: "The hermes agent could not be reached: create session: create session: core protocol: core_unavailable: hermes: session/new: Internal error (code -32603): the provider package is required for this provider." }, createdAtUnixMs: Date.now() - 90000 }] } },
+      { sequence: 7, kind: "chat_message", atUnixMs: Date.now() - 60000, channelId: "ch_gen", payload: { text: "Should we ship on Friday?", userId: "jack", clientMsgId: "c7" } },
+    ],
+  },
   threads: [],
   follows: {},
   chats: [],
@@ -24,7 +29,7 @@ const s = {
 const threadView = (t) => ({ ...t, joined: !!s.follows[t.channelId] });
 
 const browser = await chromium.launch(process.env.CHROME ? { executablePath: process.env.CHROME } : {});
-const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
 await ctx.route("**/v1/**", async (route) => {
   const req = route.request();
   const u = new URL(req.url());
@@ -107,6 +112,15 @@ try {
   ok((await panel.getByRole("heading").innerText()).includes("Should we ship on Friday?"), "the panel is titled from the root");
   ok((await page.locator("[data-rail-threads] [data-thread-row]").count()) === 1, "the rail lists the followed thread");
   ok((await panel.locator("[data-thread-root]").innerText()).includes("Should we ship on Friday?"), "the panel shows the root above the replies");
+  ok(/No replies yet/.test(await panel.innerText()) && !/This room is quiet/.test(await panel.innerText()), "an empty thread says it has no replies, not that the room is quiet");
+  // A long notice in the narrowed feed reads at full width under its label,
+  // not in a column a few words wide.
+  const notice = page.locator("[data-notice-text]").first();
+  await notice.waitFor({ timeout: 5000 });
+  const nb = await notice.boundingBox();
+  const fb = await page.locator("[data-room-chat-column]").boundingBox();
+  ok(nb && fb && nb.width > fb.width * 0.6, `a long notice uses the feed's width: ${Math.round(nb?.width ?? 0)}px of ${Math.round(fb?.width ?? 0)}px`);
+  await page.screenshot({ path: `${shots}/threads-narrow.png` });
 
   // No agent in this room: the reply goes to people (the composer's toggle).
   await panel.getByRole("radio", { name: /Send to people/ }).click();

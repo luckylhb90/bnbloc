@@ -238,19 +238,26 @@ export const Message = memo(function Message({
       ) : (
         <FlagIcon size={12} className="shrink-0" />
       );
+    // Who and when on one line, the text below it at full width: a long
+    // notice beside the label wrapped into a column a few words wide
+    // (QA 2026-10-29, a narrow feed beside the thread panel).
     const line = (
-      <div className="flex min-w-0 items-center gap-1.5">
-        {icon}
-        {/* By display name like every other agent row: never the raw
-            owner id (privacy mode, web M15). */}
-        <ActorLabel actor={item.agentLabel || "Agent"} className="shrink-0" />
-        <span className="min-w-0 break-words">{item.text}</span>
-        {item.createdAtMs ? (
-          <span className="shrink-0 text-[0.68rem] text-[var(--color-fg-subtle)]" title={exactTime(item.createdAtMs)}>
-            {relativeTime(item.createdAtMs)}
-          </span>
-        ) : null}
-      </div>
+      <>
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+          {icon}
+          {/* By display name like every other agent row: never the raw
+              owner id (privacy mode, web M15). */}
+          <ActorLabel actor={item.agentLabel || "Agent"} className="shrink-0" />
+          {item.createdAtMs ? (
+            <span className="shrink-0 text-[0.68rem] text-[var(--color-fg-subtle)]" title={exactTime(item.createdAtMs)}>
+              {relativeTime(item.createdAtMs)}
+            </span>
+          ) : null}
+        </div>
+        <span data-notice-text className="min-w-0 break-words pl-[18px] [overflow-wrap:anywhere]">
+          {item.text}
+        </span>
+      </>
     );
     return (
       <div id={`msg-${item.id}`} data-notice={item.notice} className="ml-10 mt-1 flex min-w-0 flex-col gap-1 text-xs text-[var(--color-fg-muted)]">
