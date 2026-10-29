@@ -525,6 +525,9 @@ export function RoomView({
       online={online}
       mayPost={member && !readOnly}
       root={th.thread?.parentId === channelId ? feed.find((m) => m.seq === th.thread?.rootSeq) : undefined}
+      sendToParent={async (parentId, rootSeq, text) => {
+        await api.sendChat(roomId, { text, recipient: null, channelId: parentId, attachmentIds: [], replyTo: rootSeq }, crypto.randomUUID());
+      }}
       onChanged={() => {
         threads.reload();
         void roomChannels.reload();

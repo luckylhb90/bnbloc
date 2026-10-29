@@ -6,11 +6,27 @@
 // saving it, and a suggested channel is one the web listed (any other id is
 // dropped, never guessed). With no model, every control works by hand.
 import { fieldText } from "./assistDrafts.ts";
-import { AssistTaskDraftChannelPurpose, AssistTaskDraftRoomRules, AssistTaskFindChannel, MaxAssistText, MaxChannelPurpose, MaxRoomRules, type AssistJSONReply, type RoomChannel } from "./wire.gen.ts";
+import {
+  AssistTaskDraftChannelPurpose,
+  AssistTaskDraftRoomRules,
+  AssistTaskDraftThreadTitle,
+  AssistTaskFindChannel,
+  AssistTaskSummarizeThread,
+  MaxAssistText,
+  MaxChannelPurpose,
+  MaxRoomRules,
+  type AssistJSONReply,
+  type RoomChannel,
+} from "./wire.gen.ts";
 
 export const DRAFT_CHANNEL_PURPOSE = AssistTaskDraftChannelPurpose;
 export const DRAFT_ROOM_RULES = AssistTaskDraftRoomRules;
 export const FIND_CHANNEL = AssistTaskFindChannel;
+// Threads (§2.2): a title drafted from the root and first replies, and the
+// summary a closing thread posts to its root (lib/threads builds the text
+// and reads the answer).
+export const DRAFT_THREAD_TITLE = AssistTaskDraftThreadTitle;
+export const SUMMARIZE_THREAD = AssistTaskSummarizeThread;
 
 /** What the web says where an assist's button would be when no model is
  *  set up for the member (or the task is missing): the controls work by

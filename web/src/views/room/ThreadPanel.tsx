@@ -4,7 +4,10 @@ import { channelsApi } from "@/lib/channelsApi";
 import { errorText } from "@/lib/errors";
 import type { LocalAgent } from "@/lib/useLocalAgent";
 import type { RoomAccessEnd } from "@/lib/roomGone";
-import { rootLine, summaryOf } from "@/lib/threads";
+import { AI_UNAVAILABLE, DRAFT_THREAD_TITLE, SUMMARIZE_THREAD } from "@/lib/channelAssists";
+import { closingSummary, rootLine, summaryOf, threadAssistText } from "@/lib/threads";
+import { AssistButton } from "@/views/AssistButton";
+import { useChannelAssist } from "@/views/room/useChannelAssist";
 import { useRoomStream } from "@/lib/useRoomStream";
 import type { RoomChannel } from "@/lib/wire.gen";
 import { ConfirmDialog } from "@/ui/Dialog";
@@ -44,6 +47,7 @@ export function ThreadPanel({
   mayPost,
   root,
   onChanged,
+  sendToParent,
   onClose,
   onGone,
 }: {
@@ -64,6 +68,9 @@ export function ThreadPanel({
   readonly root?: FeedItem;
   // The thread's title, following or archive changed (the room reloads).
   readonly onChanged: () => void;
+  // Post a message to the parent channel answering its root (the closing
+  // summary): the room view's send, scoped to the parent.
+  readonly sendToParent: (parentId: string, rootSeq: number, text: string) => Promise<void>;
   readonly onClose: () => void;
   readonly onGone: (reason: RoomAccessEnd) => void;
 }) {
@@ -90,6 +97,19 @@ export function ThreadPanel({
   const requestDelete = useCallback((item: FeedItem) => (item.seq == null ? void deleteOwnMessage(item) : setConfirmDelete(item)), [deleteOwnMessage]);
 
   const [title, setTitle] = useState<string | null>(null);
+  const draftTitle = useChannelAssist(DRAFT_THREAD_TITLE, "suggest a title");
+  const summarize = useChannelAssist(SUMMARIZE_THREAD, "summarize the thread");
+  // The thread as its assists read it: the root, then the replies.
+  const assistText = () =>
+    threadAssistText(thread.name, [
+      ...(root ? [{ author: root.author, text: root.text }] : []),
+      ...feed.filter((m) => m.seq != null).map((m) => ({ author: m.author, text: m.text })),
+    ]);
+  const suggestTitle = async () => {
+    const fields = await draftTitle.run({ text: assistText(), roomId });
+    const t = typeof fields?.title === "string" ? fields.title.trim() : "";
+    if (t) setTitle(t.slice(0, 120));
+  };
   const [confirmArchive, setConfirmArchive] = useState(false);
   const archived = (thread.archivedAtMs ?? 0) > 0;
   const summary = summaryOf(thread);
@@ -104,8 +124,24 @@ export function ThreadPanel({
     const call = thread.joined ? channelsApi.unfollow(roomId, channelId) : channelsApi.follow(roomId, channelId);
     call.then(onChanged, (e: unknown) => toast.error(errorText(e, "Could not change following")));
   };
-  const archive = () =>
-    channelsApi.archive(roomId, channelId, true).then(onChanged, (e: unknown) => toast.error(errorText(e, "Could not close the thread")));
+  // Closing (C3): the AI's summary is posted to the parent as a reply to the
+  // root ("decided: …; open: …"), then the thread becomes read-only. With no
+  // model it closes without one, and says so.
+  const archive = async () => {
+    const thread0 = thread.thread;
+    if (summarize.available && thread0) {
+      const fields = await summarize.run({ text: assistText(), roomId });
+      const text = fields ? closingSummary(fields) : "";
+      if (text) {
+        await sendToParent(thread0.parentId, thread0.rootSeq, `Thread "${thread.name}" closed.\n\n${text}`).catch((e: unknown) =>
+          toast.error(errorText(e, "Could not post the thread's summary")),
+        );
+      }
+    } else if (!summarize.available) {
+      toast.info(`${AI_UNAVAILABLE} The thread closes without a summary.`);
+    }
+    await channelsApi.archive(roomId, channelId, true).then(onChanged, (e: unknown) => toast.error(errorText(e, "Could not close the thread")));
+  };
 
   return (
     <section aria-label={`Thread: ${thread.name}`} data-thread-panel={channelId} className="@container flex h-full min-h-0 flex-col bg-[var(--color-surface)]">
@@ -113,6 +149,7 @@ export function ThreadPanel({
         <ChatsCircleIcon size={18} className="shrink-0 text-[var(--color-accent)]" />
         <div className="min-w-0 flex-1">
           {title !== null ? (
+            <div className="flex items-center gap-1">
             <input
               autoFocus
               aria-label="Thread title"
@@ -126,6 +163,15 @@ export function ThreadPanel({
               }}
               className="w-full rounded-[var(--radius)] bg-[var(--color-surface-2)] px-2 py-1 text-sm font-semibold outline-none"
             />
+            {draftTitle.available && (
+              <AssistButton
+                label="Suggest a title"
+                state={draftTitle.state}
+                onRun={() => void suggestTitle()}
+                className="shrink-0"
+              />
+            )}
+            </div>
           ) : (
             <h2 className="truncate text-sm font-semibold">{thread.name}</h2>
           )}

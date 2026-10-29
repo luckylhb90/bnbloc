@@ -2392,6 +2392,12 @@ export interface ChannelList {
 export const ChannelListForAgents = "agents";
 // ChannelListArchived ("archived=1") lists the archived channels only.
 export const ChannelListArchived = "archived";
+// ChannelListThread ("thread=<id>", with agents=1) adds that thread to
+// the agents' listing when the reader may read it: the turn's own
+// conversation when it is a thread (threads are never listed among the
+// room's channels, §2.2). The thread's root is a message of its parent,
+// whose records stay their own.
+export const ChannelListThread = "thread";
 
 // ChannelDirectoryEntry is one channel of the room's directory: every open
 // channel a member may join, with how many follow it.
