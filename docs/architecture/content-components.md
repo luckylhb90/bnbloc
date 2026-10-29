@@ -23,6 +23,7 @@ servers content requires, see "MCP tool components"):
 | Work | `bnbloc.work.package/v1` | `component.json` (`type`, `file`, `recipe`), a site folder (`index.html` at the root or `dist/index.html`) or one file at the root, optional cover (`cover.png`, `.webp`, `.jpg` or `.jpeg`), `README.md` and the recipe's `references/` (see "Works") |
 | Assist | `bnbloc.assist.package/v1` | `component.json` (`output`, `fields`, `context`), `INSTRUCTIONS.md` (the task's system prompt), optional `README.md` (see [AI assist](ai-assist.md)) |
 | Room | `bnbloc.room.package/v1` | `component.json` (`welcome`, `quickPrompts`, `sections`, `channels`, `schedules`, `apps`, `appSnapshots`, `files`, `sources`, `requires.expert`), optional `README.md` and `INSTRUCTIONS.md`, the apps made in the room under `apps/<name>/` and its files under `files/` (see "Room packages") |
+| Channel preset | `bnbloc.channel-preset.package/v1` | `component.json` (`channel`: `purpose`, `rules`, `settings`; optional `requires.expert`), optional `README.md` (see "Channel presets") |
 
 A package is a plain ustar bundle (`internal/tarbundle`, limit profile
 `tarbundle.ContentLimits`: 8 MiB, 512 files; a prompt pack's own profile,
@@ -440,6 +441,33 @@ skew, and a later release drops it).
 - **Where they appear.** The Library's Rooms tab (`RoomsTab`: view, new
   version, share, publish, delete, "Create a room"), and Plaza's "New
   room" → "From a room component…".
+
+## Channel presets
+
+A kind of channel as content (docs/prd/2026-10-28-channels-and-threads.md
+§2.1c): a forum, a help desk, a tracker. No kind of channel is named in
+the platform.
+
+- **The manifest** (`contentpkg/channel_preset.go`): `channel` holds the
+  purpose, the rules and the settings document a channel's owners would
+  set, and `requires.expert` optionally names the expert its agent wears.
+  The settings are the channel route's document by key: the ones the room
+  service knows are checked by its rules (`wire.IsChannelWhoPosts`,
+  `IsChannelAgentParticipation`), the switches it is gaining (posting
+  style, tags, statuses, a post template) by shape and bound. A default
+  agent (a person's) and an unknown key are refused.
+- **Applying** is one `PATCH /v1/rooms/{id}/channels/{channelId}` with the
+  preset's purpose, rules and its settings merged over the channel's
+  (`web/src/lib/channelPresets.ts`), shown first as what changes and undone
+  by a PATCH back. The room service decides what each setting does: a key
+  it learns needs no change here.
+- **Saving** a channel as a preset is the ordinary content save (`kind:
+  "channel-preset"`), from the channel's menu; it keeps purpose, rules and
+  settings, never the default agent.
+- **Where they appear.** A channel's menu ("Apply a preset…", "Save as
+  preset") and New channel ("Start from a preset"); the presets listed are
+  the ones the member may use (`GET /v1/content-components?kind=channel-preset`).
+  The `draft-channel-preset` assist drafts one from a sentence.
 
 ## Prompt packs
 

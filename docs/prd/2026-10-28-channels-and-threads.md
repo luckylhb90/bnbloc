@@ -170,11 +170,17 @@ The switches a channel gains, beyond §2.1:
 | **Retention** within the organization's policy | Messages older than the channel's setting are removed (the existing retention mechanism, per channel) | an **ephemeral** chat |
 | **Live** (the live-channel record) and **voice** (the voice record) | A low-latency session for a shared file or app; a voice room with an AI transcript | a **co-editing** or **huddle** channel |
 
-- A **channel preset** (`bnbloc.channel.preset/v1`, a content kind) holds the
+- A **channel preset** (`bnbloc.channel-preset.package/v1`, a content kind) holds the
   switches, the purpose and rules text, the default expert, the tabs (by app
   package), the post template, the tags and statuses, and its scheduled tasks;
   applying one sets a channel up in one step and is undoable. Samples (forum,
   help desk, announcements, tracker, log, Q&A) live in their own repository.
+  **The preset and the switches meet at the settings keys**: a preset's
+  `channel.settings` is the channel route's settings document by key
+  (`whoPosts`, `noAgents`, `slowModeSeconds`, `agentParticipation`,
+  `postingStyle`, `tags`, `statuses`, `postTemplate`), applied by one PATCH,
+  so the room service stays the one owner of what a setting means and a key
+  it learns needs no change to the kind.
 - **Channel membership and a directory**: a member's rail shows the channels
   they **joined**; every open channel can be found in the room's channel
   directory (search by name and purpose, with activity and owner) and joined in
@@ -804,3 +810,50 @@ mark answered and presets are slice 3b):
 - Rollout (lens 11): an old room pod lists a thread among the channels until
   every pod runs this release (it does not know the kind): open threads only
   after the rollout, as for members-only sections.
+
+**Slice 3b, channel presets** (§2.1c; the switches themselves are their own
+change, and the two meet at the settings keys):
+
+- The content kind `bnbloc.channel-preset.package/v1`
+  (`contentpkg/channel_preset.go`): `component.json` holds `channel`
+  (purpose, rules, settings) and optionally `requires.expert`, beside an
+  optional README. The settings the room service knows today are checked by
+  its own rules (`wire.IsChannelWhoPosts`, `IsChannelAgentParticipation`,
+  slow mode within six hours); the coming switches (`postingStyle`, `tags`,
+  `statuses`, `postTemplate`) by shape and bound only; a default agent and
+  unknown keys are refused. The limits table lists its bounds. A preset is no
+  content use: nothing in it reaches an agent until it is applied.
+- Applying is one PATCH of the channel route (`lib/channelPresets.ts`
+  `applyPatch`: the preset's keys over the channel's settings, so its default
+  agent and keys the preset does not name stay), shown first as a diff of
+  what changes, undone by a second PATCH back (the toast's Undo). From a
+  channel's menu ("Apply a preset…", "Save as preset", its managers) and from
+  New channel ("Start from a preset": made, then applied by the same apply).
+  Save as preset captures purpose, rules and settings, never the default
+  agent (a person's), into the member's Library through the content save
+  route.
+- AI: `draft-channel-preset` (contract: purpose, rules, settings) drafts a
+  preset from a sentence, shown in the same preview; its prompt and the six
+  samples (forum, help desk, announcements, tracker, log, Q&A) are content in
+  `bnbloc-default-content`.
+- Tests: the validator (`channel_preset_test.go`), the gateway save and list
+  (`channel_presets_test.go`), the web's diff, apply, undo and capture
+  (`channelPresets.test.ts`), `web/e2e/channel-presets.mjs`.
+- Design review: lens 7, one owner (the room service decides a setting; the
+  kind checks only what it can without it, and the web's apply and undo are
+  one hook); lens 9, external contracts (the kind's manifest is a public
+  shape, additive from here on); lens 14, placement (the kind and its
+  validator are platform; every preset, including the six samples and the
+  assist's prompt, is content).
+
+**Decisions pending owner, slice 3b:**
+
+1. A preset never carries a default agent (a person's agent), and Save as
+   preset drops it.
+2. Slow mode in a preset is at most six hours; at most 30 tags and 12
+   statuses; a post template at most 4000 characters (the room service
+   bounds none of them yet).
+3. Applying and saving presets are offered to a channel's managers only (the
+   ones who may change its setup).
+4. A preset's `requires.expert` is validated but not applied yet: a
+   channel's expert (C9) is slice 6.
