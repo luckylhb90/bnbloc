@@ -281,15 +281,17 @@ func TestRoomToolsAGuestAgentIsHandedAnAddressItCanReach(t *testing.T) {
 	if u := part.MCPServers[0].URL; u != "http://"+guestHost+roomtools.Endpoint {
 		t.Errorf("a guest agent's room tools = %q, want http://%s%s", u, guestHost, roomtools.Endpoint)
 	}
-	// ...and over the stdio shim, for an agent that takes no http server.
-	stdioOnly := inGuest
-	stdioOnly.MCPTransports = nil
-	part, err = c.ContributeSession(context.Background(), stdioOnly)
+	// ...whatever transports are known of it: a guest-only agent's are unknown until its first session
+	// has run, and the stdio shim is this computer's program, which does not exist in the guest.
+	// dsh stopped its whole session on that shim ("initial connection or tool synchronization failed").
+	unknown := inGuest
+	unknown.MCPTransports = nil
+	part, err = c.ContributeSession(context.Background(), unknown)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a := part.MCPServers[0].Args; len(a) < 3 || a[2] != "http://"+guestHost+roomtools.Endpoint {
-		t.Errorf("a guest agent's shim is given %v, want the guest address", a)
+	if s := part.MCPServers[0]; s.Transport() != corepkg.MCPHTTP || s.URL != "http://"+guestHost+roomtools.Endpoint {
+		t.Errorf("a guest agent of unknown transports is given %+v, want the http guest address, never the shim", s)
 	}
 	// ...and for each host-placed tool.
 	withTool := inGuest
@@ -325,5 +327,35 @@ func TestRoomToolsAGuestAgentWithNoHostPortGetsNoUnreachableAddress(t *testing.T
 	info := SessionInfo{RoomID: "room-1", ChannelID: "ch", Owner: "alice", Core: "core-a", Provider: "dsh", JobID: "job-1", RequesterUserID: "alice", Sandboxed: true, InGuest: true}
 	if _, err := b.sessionContributors()[0].ContributeSession(context.Background(), info); err == nil {
 		t.Fatal("a guest agent with no host port was handed an address anyway")
+	}
+}
+
+// The tools the bridge serves reach a guest-only agent through the sandbox's host port. When there
+// is none, the run goes on without them and says so in the run record: not silently.
+func TestAGuestOnlyAgentWithNoHostPortHasItsMissingToolsReported(t *testing.T) {
+	b := New(Config{GatewayBaseURL: "http://127.0.0.1:1", GatewayToken: "t", OwnerSubject: "alice"})
+	b.targetCache = map[string][]corepkg.Target{"core-a": {{ID: "dsh", Provider: "dsh", RequiresSandbox: true}, {ID: "codex", Provider: "codex"}}}
+	drive := func(target string) *drive {
+		return &drive{job: job("job-1", "alice"), owner: "alice", core: "core-a", target: target, content: &jobContent{}}
+	}
+	if got := b.guestToolsUnreachable(drive("dsh")); !strings.Contains(got, "no host port") {
+		t.Errorf("a guest-only agent with no host port: reason %q, want it said", got)
+	}
+	if got := b.guestToolsUnreachable(drive("codex")); got != "" {
+		t.Errorf("an agent on this computer: reason %q, want none (its tools are at its own loopback)", got)
+	}
+	b.cfg.Sandbox = SandboxConfig{HostProxy: "host.vm.internal:41234"}
+	if got := b.guestToolsUnreachable(drive("dsh")); got != "" {
+		t.Errorf("a guest-only agent with a host port: reason %q, want none", got)
+	}
+	// And bindTarget puts it in the run's missing list, where the room reads it.
+	b.cfg.Sandbox = SandboxConfig{}
+	d := drive("dsh")
+	d.job.Provider = "dsh"
+	if r := b.bindTarget(context.Background(), d); r != nil {
+		t.Fatalf("bindTarget refused: %+v", r)
+	}
+	if len(d.content.missing) != 1 || !strings.Contains(d.content.missing[0], "room tools") {
+		t.Errorf("missing = %v, want the tools named as left out", d.content.missing)
 	}
 }

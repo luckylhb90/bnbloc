@@ -170,6 +170,17 @@ func hostToolEnv(tool HostTool, relayURL, token string) []string {
 	return env
 }
 
+// acceptsHTTP says whether the session is given its servers over http. An agent
+// inside the sandbox always is: the stdio shim is this computer's program, which
+// that agent cannot start (its path does not exist in the guest), and a guest-only
+// agent's transports are unknown until its first session has run. An agent that
+// takes no http server is told so by the ACP core (a server it cannot be given is
+// dropped, with a note the agent and the room see), never given a command that
+// fails inside it.
+func acceptsHTTP(info SessionInfo) bool {
+	return info.InGuest || (corepkg.Target{MCPTransports: info.MCPTransports}).TransportSupported(corepkg.MCPHTTP)
+}
+
 // agentURL is the address an agent is given for path on the room tools server: the
 // server's own loopback address, or, for an agent that runs inside the sandbox
 // (its loopback is its own), the guest-facing address of the proxy port. An agent
@@ -208,7 +219,7 @@ func (c *roomToolsContributor) hostToolServer(info SessionInfo, name, token stri
 		return corepkg.MCPServer{}, err
 	}
 	switch {
-	case (corepkg.Target{MCPTransports: info.MCPTransports}).TransportSupported(corepkg.MCPHTTP):
+	case acceptsHTTP(info):
 		return corepkg.MCPServer{Name: name, Type: corepkg.MCPHTTP, URL: url,
 			Headers: []corepkg.NameValue{{Name: "Authorization", Value: "Bearer " + token}}}, nil
 	case c.shimCommand != "":
@@ -309,7 +320,7 @@ func (c *roomToolsContributor) ContributeSession(ctx context.Context, info Sessi
 		return SessionContribution{}, err
 	}
 	switch {
-	case (corepkg.Target{MCPTransports: info.MCPTransports}).TransportSupported(corepkg.MCPHTTP):
+	case acceptsHTTP(info):
 		server.Type = corepkg.MCPHTTP
 		server.URL = url
 	case c.shimCommand != "":

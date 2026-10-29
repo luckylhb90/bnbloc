@@ -375,7 +375,23 @@ func (b *Bridge) bindTarget(ctx context.Context, d *drive) *refusal {
 	if len(d.content.mcp.servers) > 0 {
 		d.content.fitMCPToTarget(d.caps.profile, b.targetTransports(d.core, d.target, d.job.Provider))
 	}
+	if why := b.guestToolsUnreachable(d); why != "" {
+		// Said, not skipped: the run goes on without the bridge's tools, and the room's run
+		// record names what was left out and why.
+		d.content.missing = append(d.content.missing, "room tools and host-run MCP tools ("+why+")")
+	}
 	return nil
+}
+
+// guestToolsUnreachable says why an agent that runs only in the sandbox cannot be given
+// the tools the bridge serves ("" when it can, or when the agent is not in the sandbox).
+// Such an agent reaches this computer only through the host port the sandbox opens to
+// it; without that port its tools have no address it could use.
+func (b *Bridge) guestToolsUnreachable(d *drive) string {
+	if !b.targetRequiresSandbox(d.core, d.target, d.job.Provider) || b.cfg.Sandbox.hostProxyPort() != "" {
+		return ""
+	}
+	return "the sandbox has no host port for them"
 }
 
 // driveTurn is stage 7: report the job running, then drive it.
