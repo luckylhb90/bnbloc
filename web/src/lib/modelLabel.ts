@@ -21,3 +21,10 @@ export function prettyModel(id: string): string {
     .replace(/^GPT (\d)/, "GPT-$1")
     .replace(/(\S)\[([^\]]*)\]$/, "$1 [$2]");
 }
+
+// modelLabel is the label the picker shows for a model: the name its agent gave it when
+// there is one, else prettyModel's rendering of the id. The platform names no model.
+export function modelLabel(id: string, names?: Readonly<Record<string, string>>): string {
+  const name = names?.[id]?.trim();
+  return name ? name : prettyModel(id);
+}

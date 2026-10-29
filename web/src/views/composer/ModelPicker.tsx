@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { CaretDownIcon, SlidersHorizontalIcon } from "@phosphor-icons/react";
 import { cn } from "@/lib/cn";
 import { useDismissOnOutside } from "@/ui/useDismissOnOutside";
-import { prettyModel } from "@/lib/modelLabel";
+import { modelLabel } from "@/lib/modelLabel";
 
 // Marker is the selected-row indicator. It leads the row and always takes its
 // width, so labels line up and it can never be pushed out of a narrow window
@@ -25,6 +25,7 @@ function Marker({ active }: { active: boolean }) {
 // "inherit the agent's default"; the default row shows what that resolves to.
 export function ModelPicker({
   models,
+  modelNames,
   reasonings,
   model,
   reasoning,
@@ -34,6 +35,7 @@ export function ModelPicker({
   onPickReasoning,
 }: {
   models: string[];
+  modelNames?: Readonly<Record<string, string>>;
   reasonings: string[];
   model: string;
   reasoning: string;
@@ -56,11 +58,11 @@ export function ModelPicker({
   const effReasoning =
     reasoning ||
     (reasonings.includes(defaultReasoning) ? defaultReasoning : "");
-  const modelLabel = effModel ? prettyModel(effModel) : "Default model";
+  const modelText = effModel ? modelLabel(effModel, modelNames) : "Default model";
   const reasoningLabel = effReasoning
     ? effReasoning.charAt(0).toUpperCase() + effReasoning.slice(1)
     : "";
-  const label = reasoningLabel ? `${modelLabel} · ${reasoningLabel}` : modelLabel;
+  const label = reasoningLabel ? `${modelText} · ${reasoningLabel}` : modelText;
 
   const defaultRow = (
     activeWhenEmpty: string,
@@ -77,7 +79,7 @@ export function ModelPicker({
       )}
     >
       <Marker active={!activeWhenEmpty} />
-      <span className="min-w-0 flex-1 break-words font-medium text-[var(--color-fg)]">
+      <span className="min-w-0 flex-1 font-medium text-[var(--color-fg)]">
         Default{suffix}
       </span>
     </button>
@@ -104,14 +106,14 @@ export function ModelPicker({
       </button>
 
       {open && (
-        <div className="animate-in absolute bottom-full right-0 z-20 mb-2 w-60 max-w-[calc(100vw-1rem)] @md:left-0 @md:right-auto overflow-hidden rounded-[var(--radius)] border border-[var(--color-border-strong)] bg-[var(--color-elevated)] shadow-[var(--shadow-pop)]">
+        <div className="animate-in absolute bottom-full right-0 z-20 mb-2 w-max min-w-60 max-w-[calc(100vw-1rem)] overflow-hidden rounded-[var(--radius)] border border-[var(--color-border-strong)] bg-[var(--color-elevated)] shadow-[var(--shadow-pop)]">
           {models.length > 0 && (
             <>
               <div className="border-b border-[var(--color-border)] px-3 py-2 text-xs font-medium uppercase tracking-wide text-[var(--color-fg-subtle)]">
                 Model
               </div>
               <div className="max-h-56 overflow-y-auto py-1">
-                {defaultRow(model, () => onPickModel(""), defaultModel ? ` · ${prettyModel(defaultModel)}` : "")}
+                {defaultRow(model, () => onPickModel(""), defaultModel ? ` · ${modelLabel(defaultModel, modelNames)}` : "")}
                 {models.map((m) => {
                   const active = m === model;
                   return (
@@ -126,8 +128,8 @@ export function ModelPicker({
                       )}
                     >
                       <Marker active={active} />
-                      <span className="min-w-0 flex-1 break-words font-medium text-[var(--color-fg)]">
-                        {prettyModel(m)}
+                      <span className="min-w-0 flex-1 font-medium text-[var(--color-fg)]" title={m}>
+                        {modelLabel(m, modelNames)}
                       </span>
                     </button>
                   );

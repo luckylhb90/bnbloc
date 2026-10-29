@@ -7,7 +7,11 @@ package wire
 
 // AgentModelOptions is one agent's model catalog as its core reports it.
 type AgentModelOptions struct {
-	Models           []string            `json:"models,omitempty"`
+	Models []string `json:"models,omitempty"`
+	// ModelNames maps a model id to the display name its agent gives it, for the
+	// models that have one; the composer shows it and falls back to its own rendering
+	// of the id for the rest.
+	ModelNames       map[string]string   `json:"modelNames,omitempty"`
 	ReasoningEfforts []string            `json:"reasoningEfforts,omitempty"`
 	ReasoningByModel map[string][]string `json:"reasoningByModel,omitempty"`
 	DefaultModel     string              `json:"defaultModel,omitempty"`

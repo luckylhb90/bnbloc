@@ -636,6 +636,7 @@ func (b *Bridge) heartbeatAgents() []heartbeatAgent {
 		for _, t := range b.cachedTargets(name) {
 			models, _ := json.Marshal(map[string]any{
 				"models":           t.Models,
+				"modelNames":       t.ModelNames,
 				"reasoningEfforts": t.ReasoningEfforts,
 				"reasoningByModel": t.ReasoningByModel,
 				"defaultModel":     t.DefaultModel,

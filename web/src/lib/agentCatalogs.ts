@@ -17,6 +17,9 @@ export interface ModelCatalog {
   readonly core?: string;
   readonly provider: string;
   readonly models?: string[];
+  // The display name an agent gives a model, by id; a model with none is shown by
+  // modelLabel's own rendering of its id.
+  readonly modelNames?: Record<string, string>;
   readonly reasoningEfforts?: string[];
   readonly reasoningByModel?: Record<string, string[]>;
   readonly defaultModel?: string;

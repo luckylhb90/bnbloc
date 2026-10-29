@@ -852,6 +852,7 @@ export function Composer({
             {!people && !peopleOnly && (modelChoices.length > 0 || reasoningChoices.length > 0) && (
               <ModelPicker
                 models={modelChoices}
+                modelNames={effTarget?.modelNames}
                 reasonings={reasoningChoices}
                 model={offeredModel}
                 reasoning={offeredReasoning}

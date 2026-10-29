@@ -400,7 +400,7 @@ func TestHeartbeatPostsCurrentAgentCapabilities(t *testing.T) {
 		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
 	defer srv.Close()
-	prov := &recordingProv{targets: []corepkg.Target{{ID: "local:codex", Provider: "codex", Models: []string{"gpt-5.5"}, ReasoningEfforts: []string{"low", "high"}}, {ID: "local:cursor", Provider: "cursor"}}}
+	prov := &recordingProv{targets: []corepkg.Target{{ID: "local:codex", Provider: "codex", Models: []string{"gpt-5.5"}, ModelNames: map[string]string{"gpt-5.5": "GPT 5.5"}, ReasoningEfforts: []string{"low", "high"}}, {ID: "local:cursor", Provider: "cursor"}}}
 	b := New(Config{GatewayBaseURL: srv.URL, GatewayToken: "t", OwnerSubject: "alice", Tenant: "tenant-a", ServeAllOwners: true, DisabledProviders: map[string]bool{"core-a/cursor": true}, Cores: newTestCore(prov)})
 
 	b.refreshTargets(context.Background())
@@ -418,6 +418,13 @@ func TestHeartbeatPostsCurrentAgentCapabilities(t *testing.T) {
 	}
 	if !strings.Contains(string(got.Agents[0].ModelOptions), "gpt-5.5") || !strings.Contains(string(got.Agents[0].ModelOptions), "high") {
 		t.Fatalf("model options = %s", got.Agents[0].ModelOptions)
+	}
+	// The display name an agent gives a model is advertised with the models (the composer shows it).
+	var opts struct {
+		ModelNames map[string]string `json:"modelNames"`
+	}
+	if json.Unmarshal(got.Agents[0].ModelOptions, &opts) != nil || opts.ModelNames["gpt-5.5"] != "GPT 5.5" {
+		t.Fatalf("the model names are not advertised: %s", got.Agents[0].ModelOptions)
 	}
 	if got.Agents[1].Provider != "cursor" || !got.Agents[1].Disabled {
 		t.Fatalf("disabled cursor agent = %+v", got.Agents[1])

@@ -227,3 +227,39 @@ func readBodyString(t *testing.T, resp *http.Response) string {
 	raw, _ := io.ReadAll(resp.Body)
 	return string(raw)
 }
+
+type namedModelsProvider struct{ fakeCoreProvider }
+
+func (p namedModelsProvider) ListTargets(context.Context, core.Endpoint) ([]core.Target, error) {
+	return []core.Target{{ID: "local:agent", Provider: "agent", Models: []string{"p/m-1", "p/m-2"}, ModelNames: map[string]string{"p/m-1": "Model One"}, DefaultModel: "p/m-1"}}, nil
+}
+
+// The display names a core gives its models reach the member in the local-agent targets answer
+// (the gateway rebuilds the model fields, so a new field has to be carried by it).
+func TestLocalAgentTargets_carriesTheModelNames(t *testing.T) {
+	const name = "named-models-core"
+	provider := namedModelsProvider{fakeCoreProvider{name: name}}
+	if err := core.Reregister(name, func() core.Provider { return provider }, core.CoreExtension{Backend: core.BackendSidecar}); err != nil {
+		t.Fatalf("reregister: %v", err)
+	}
+	t.Cleanup(func() { _ = core.Unregister(name) })
+	room := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }))
+	defer room.Close()
+	gw := newGateway(t, room.URL)
+	gw.PlatformSettings = store.NewMemoryPlatformSettings()
+	gw.Cores = []coreset.Entry{{Name: name, Provider: provider, Endpoint: core.Endpoint{BaseURL: "http://127.0.0.1:9999"}, Explicit: true}}
+	srv := httptest.NewServer(gw.Handler())
+	defer srv.Close()
+	token, _ := login(t, srv, "good")
+	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/v1/local-agent/targets", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	raw := readBodyString(t, resp)
+	if !strings.Contains(raw, `"modelNames":{"p/m-1":"Model One"}`) {
+		t.Fatalf("the model names are not in the targets answer: %s", raw)
+	}
+}

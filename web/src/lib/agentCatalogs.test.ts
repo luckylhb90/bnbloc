@@ -126,3 +126,15 @@ testPlatformAgentUsesTheHostCatalogUnrestricted();
 testPlatformDefaultModelIsThePickersDefault();
 testRestrictKeepsAnAuthorizedDefault();
 testRefreshKeyFollowsTheAgentSet();
+
+// The names an agent gives its models travel with the catalog: a borrower's list is
+// narrowed to the authorized models and keeps the names of the ones left.
+{
+  const named: RoomAgentCatalog[] = [
+    { ownerUserId: "alice", core: "acme", provider: "codex", online: true, modelOptions: { models: ["m1", "m2"], modelNames: { m1: "Model One", m2: "Model Two" }, defaultModel: "m1" } },
+  ];
+  const room: RoomModelCatalogs = { catalogs: named, grants: [{ ownerUserId: "alice", provider: "acme:codex", allowedModels: ["m2"] } as never] };
+  const got = resolveModelCatalog({ pick: { ownerId: "alice", core: "acme", provider: "codex" }, subject: "bob", localTargets: [], selectedTargetId: "", room });
+  assert(got?.modelNames?.m2 === "Model Two", "the borrower's catalog keeps the names");
+  assert(JSON.stringify(got?.models) === JSON.stringify(["m2"]), "and is still narrowed to the grant");
+}

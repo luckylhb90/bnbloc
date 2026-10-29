@@ -65,7 +65,7 @@ func newCatalogEnv(t *testing.T) *catalogEnv {
 		}
 	}
 	catalog := func(models ...string) json.RawMessage {
-		raw, _ := json.Marshal(map[string]any{"models": models, "defaultModel": models[0], "reasoningEfforts": nil})
+		raw, _ := json.Marshal(map[string]any{"models": models, "modelNames": map[string]string{models[0]: "Name of " + models[0]}, "defaultModel": models[0], "reasoningEfforts": nil})
 		return raw
 	}
 	advertise("b-alice", "alice", store.BridgeAgent{Core: "acme", Provider: "codex", ModelOptionsJSON: catalog("gpt-5", "o3"), LastSeenAtMs: now})
@@ -153,6 +153,10 @@ func TestRoomAgentCatalogsOwnerKeyedAndHostScoped(t *testing.T) {
 	for _, a := range out.Agents {
 		if !a.Online || a.ModelOptions == nil || a.ModelOptions.DefaultModel != a.ModelOptions.Models[0] {
 			t.Fatalf("row %+v: want online with the advertised catalog", a)
+		}
+		// The display names an agent gave its models are advertised with them.
+		if first := a.ModelOptions.Models[0]; a.ModelOptions.ModelNames[first] != "Name of "+first {
+			t.Fatalf("row %+v: the model names did not reach the member", a)
 		}
 	}
 }

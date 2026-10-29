@@ -485,6 +485,11 @@ type Target struct {
 	ID       string
 	Provider string
 	Models   []string // selectable model ids, in the core's own order
+	// ModelNames maps a model id to the display name its agent gives it ("Claude Haiku
+	// 4.5 (latest)"), for the models that have one. A client shows a name when there is
+	// one and falls back to its own rendering of the id when there is not: a core that
+	// gives none is unchanged.
+	ModelNames map[string]string
 	// ReasoningEfforts is the target-level reasoning ladder used when a model has
 	// no entry in ReasoningByModel (a uniform ladder). Empty = no reasoning.
 	ReasoningEfforts []string

@@ -754,3 +754,29 @@ func TestSteerOutcomeValid(t *testing.T) {
 		}
 	}
 }
+
+// A daemon's display names for its models travel in the target (additive field) and a target
+// without them is read as before.
+func TestTargetsCarryTheModelNamesTheDaemonGives(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/core/v1/targets" {
+			_, _ = w.Write([]byte(`{"targets":[{"id":"a","provider":"a","models":["m1","m2"],"modelNames":{"m1":"Model One"}},{"id":"b","provider":"b","models":["x"]}]}`))
+			return
+		}
+		writeDiscover(w)
+	}))
+	defer srv.Close()
+	got, err := NewClient("c", nil).ListTargets(context.Background(), core.Endpoint{BaseURL: srv.URL})
+	if err != nil || len(got) != 2 {
+		t.Fatalf("targets = %+v, %v", got, err)
+	}
+	if got[0].ModelNames["m1"] != "Model One" || len(got[0].ModelNames) != 1 {
+		t.Errorf("names = %v", got[0].ModelNames)
+	}
+	if got[1].ModelNames != nil {
+		t.Errorf("a target with no names has %v", got[1].ModelNames)
+	}
+	if w := WireTargets(got); w[0].ModelNames["m1"] != "Model One" {
+		t.Errorf("the names are lost on the way back out: %v", w[0].ModelNames)
+	}
+}

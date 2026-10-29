@@ -862,6 +862,10 @@ export const MountForValues: readonly MountFor[] = ["own", "borrowed", "all"];
 // AgentModelOptions is one agent's model catalog as its core reports it.
 export interface AgentModelOptions {
   models?: string[];
+  // ModelNames maps a model id to the display name its agent gives it, for the
+  // models that have one; the composer shows it and falls back to its own rendering
+  // of the id for the rest.
+  modelNames?: Record<string, string>;
   reasoningEfforts?: string[];
   reasoningByModel?: Record<string, string[]>;
   defaultModel?: string;

@@ -247,6 +247,7 @@ func (s *Service) handleLocalAgentTargets(w http.ResponseWriter, r *http.Request
 				Core:     q.entry.Name,
 				AgentModelOptions: wire.AgentModelOptions{
 					Models:           t.Models,
+					ModelNames:       t.ModelNames,
 					ReasoningEfforts: t.ReasoningEfforts,
 					ReasoningByModel: t.ReasoningByModel,
 					DefaultModel:     t.DefaultModel,

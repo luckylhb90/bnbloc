@@ -417,9 +417,12 @@ func (e *Execution) Core() (*core.Execution, error) {
 
 // Target is one selectable agent target on the wire (see core.Target).
 type Target struct {
-	ID               string              `json:"id"`
-	Provider         string              `json:"provider"`
-	Models           []string            `json:"models,omitempty"`
+	ID       string   `json:"id"`
+	Provider string   `json:"provider"`
+	Models   []string `json:"models,omitempty"`
+	// ModelNames maps a model id to its display name, for the models that have one
+	// (additive: a client that does not know the field reads everything else as before).
+	ModelNames       map[string]string   `json:"modelNames,omitempty"`
 	ReasoningEfforts []string            `json:"reasoningEfforts,omitempty"`
 	ReasoningByModel map[string][]string `json:"reasoningByModel,omitempty"`
 	DefaultModel     string              `json:"defaultModel,omitempty"`
@@ -740,7 +743,7 @@ func WireTargets(ts []core.Target) []Target {
 	out := make([]Target, 0, len(ts))
 	for _, t := range ts {
 		out = append(out, Target{ID: t.ID, Provider: t.Provider, Models: t.Models, ReasoningEfforts: t.ReasoningEfforts,
-			ReasoningByModel: t.ReasoningByModel, DefaultModel: t.DefaultModel, DefaultReasoning: t.DefaultReasoning, MCPTransports: t.MCPTransports, RequiresSandbox: t.RequiresSandbox})
+			ModelNames: t.ModelNames, ReasoningByModel: t.ReasoningByModel, DefaultModel: t.DefaultModel, DefaultReasoning: t.DefaultReasoning, MCPTransports: t.MCPTransports, RequiresSandbox: t.RequiresSandbox})
 	}
 	return out
 }
@@ -749,7 +752,7 @@ func (r ListTargetsResponse) Core() []core.Target {
 	out := make([]core.Target, 0, len(r.Targets))
 	for _, t := range r.Targets {
 		out = append(out, core.Target{ID: t.ID, Provider: t.Provider, Models: t.Models, ReasoningEfforts: t.ReasoningEfforts,
-			ReasoningByModel: t.ReasoningByModel, DefaultModel: t.DefaultModel, DefaultReasoning: t.DefaultReasoning, MCPTransports: t.MCPTransports, RequiresSandbox: t.RequiresSandbox})
+			ModelNames: t.ModelNames, ReasoningByModel: t.ReasoningByModel, DefaultModel: t.DefaultModel, DefaultReasoning: t.DefaultReasoning, MCPTransports: t.MCPTransports, RequiresSandbox: t.RequiresSandbox})
 	}
 	return out
 }
