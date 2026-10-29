@@ -1,6 +1,6 @@
 import { DRAFT_EXPERT, DRAFT_PROMPT_PACK, DRAFT_SCHEDULE, DRAFT_SKILL_PACK, PLAN_ROOM } from "./assistDrafts.ts";
 import { assistRevision, assistTask, createSSEParser, DESCRIBE_ROOM, DESCRIBE_WORK, ENHANCE_PROMPT, refineJSON, workDraftPatch, type SSEEvent } from "./assistModel.ts";
-import { DRAFT_CHANNEL_PURPOSE, DRAFT_ROOM_RULES, DRAFT_THREAD_TITLE, FIND_CHANNEL, SUMMARIZE_THREAD } from "./channelAssists.ts";
+import { DRAFT_CHANNEL_PRESET, DRAFT_CHANNEL_PURPOSE, DRAFT_ROOM_RULES, DRAFT_THREAD_TITLE, FIND_CHANNEL, SUMMARIZE_THREAD } from "./channelAssists.ts";
 import { FIND_A_WAY } from "./deadEnd.ts";
 import { EXPLAIN_SOURCE_USE } from "./roomSources.ts";
 import { FILL_SETTINGS } from "./settingsFill.ts";
@@ -86,7 +86,7 @@ eq(parse(["event: delta\n\ndata: y\n\n"]), [{ event: "message", data: "y" }], "a
 {
   const web = [ENHANCE_PROMPT, DESCRIBE_WORK, DESCRIBE_ROOM, DRAFT_EXPERT, DRAFT_SKILL_PACK, DRAFT_PROMPT_PACK, PLAN_ROOM, DRAFT_SCHEDULE,
     EXPLAIN_SOURCE_USE, REVIEW_SKILL, FILL_SETTINGS, SUGGEST_SKILL_DIRS, FIND_A_WAY, DRAFT_CHANNEL_PURPOSE, DRAFT_ROOM_RULES, FIND_CHANNEL,
-    DRAFT_THREAD_TITLE, SUMMARIZE_THREAD];
+    DRAFT_THREAD_TITLE, SUMMARIZE_THREAD, DRAFT_CHANNEL_PRESET];
   eq([...web].sort(), [...AssistTaskNameValues].sort(), "the web's tasks are the contracts' names");
   eq(AssistContracts.map((c) => c.task).sort(), [...AssistTaskNameValues].sort(), "one contract per task");
 }

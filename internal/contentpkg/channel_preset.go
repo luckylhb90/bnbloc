@@ -28,7 +28,7 @@ import (
 // until it is applied to a channel.
 
 // KindChannelPreset is the channel preset kind.
-const KindChannelPreset = "bnbloc.channel.preset/v1"
+const KindChannelPreset = "bnbloc.channel-preset.package/v1"
 
 // Bounds of a channel preset.
 const (

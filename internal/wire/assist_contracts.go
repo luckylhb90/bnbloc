@@ -40,6 +40,11 @@ const (
 	// text; the member posts what they accept.
 	AssistTaskDraftThreadTitle = "draft-thread-title"
 	AssistTaskSummarizeThread  = "summarize-thread"
+	// A channel preset from a sentence (§2.1c, §4): the purpose, rules and
+	// settings of the kind of channel described ("a help desk the agent
+	// answers first"); the web shows it as a preset's preview and the member
+	// applies or saves what they accept.
+	AssistTaskDraftChannelPreset = "draft-channel-preset"
 )
 
 // AssistContract is what an assist named Task must answer: its output, the
@@ -149,6 +154,7 @@ var AssistContracts = []AssistContract{
 	{Task: AssistTaskDraftChannelPurpose, Output: AssistOutputJSON, Fields: []AssistContractField{{Name: "purpose"}}},
 	{Task: AssistTaskDraftRoomRules, Output: AssistOutputJSON, Fields: []AssistContractField{{Name: "rules"}, {Name: "welcome"}}},
 	{Task: AssistTaskDraftThreadTitle, Output: AssistOutputJSON, Fields: []AssistContractField{{Name: "title"}}},
+	{Task: AssistTaskDraftChannelPreset, Output: AssistOutputJSON, Fields: []AssistContractField{{Name: "purpose"}, {Name: "rules"}, {Name: "settings"}}},
 	{Task: AssistTaskSummarizeThread, Output: AssistOutputJSON, Fields: []AssistContractField{
 		{Name: "decided", Type: AssistFieldList}, {Name: "open", Type: AssistFieldList}, {Name: "summary"},
 	}},

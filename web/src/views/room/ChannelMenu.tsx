@@ -3,12 +3,14 @@ import {
   ArrowCounterClockwiseIcon,
   ArrowDownIcon,
   ArrowUpIcon,
+  BookmarkSimpleIcon,
   DotsThreeVerticalIcon,
   EyeSlashIcon,
   FolderSimpleIcon,
   FolderSimpleMinusIcon,
   FolderSimplePlusIcon,
   GearIcon,
+  MagicWandIcon,
   PencilSimpleIcon,
   SignInIcon,
   SignOutIcon,
@@ -34,6 +36,10 @@ export interface ChannelActions {
   readonly browse: () => void;
   readonly showArchived: () => void;
   readonly settings: (c: Channel) => void;
+  // Channel presets (§2.1c): apply one to the channel, or save the channel
+  // as one in the member's Library.
+  readonly applyPreset: (c: Channel) => void;
+  readonly savePreset: (c: Channel) => void;
   readonly move: (c: Channel, siblings: readonly Channel[], step: -1 | 1) => void;
   readonly mark: (c: Channel, marks: { readonly starred?: boolean; readonly hidden?: boolean }) => void;
   readonly leave: (c: Channel) => void;
@@ -127,6 +133,12 @@ export function ChannelMenu({
           <MenuGroup label="Channel">
             <MenuItem icon={GearIcon} onSelect={() => actions.settings(c)}>
               Settings, purpose and rules
+            </MenuItem>
+            <MenuItem icon={MagicWandIcon} onSelect={() => actions.applyPreset(c)}>
+              Apply a preset…
+            </MenuItem>
+            <MenuItem icon={BookmarkSimpleIcon} onSelect={() => actions.savePreset(c)}>
+              Save as preset
             </MenuItem>
             {at > 0 && (
               <MenuItem icon={ArrowUpIcon} onSelect={() => actions.move(c, siblings, -1)}>

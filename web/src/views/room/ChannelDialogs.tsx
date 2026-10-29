@@ -13,6 +13,7 @@ import {
   MaxChannelPurpose,
   MaxChannelRules,
   type ChannelAgentParticipation,
+  type ChannelPreset,
   type ChannelCreationPolicy,
   type ChannelGroup,
   type ChannelSettings,
@@ -29,6 +30,8 @@ import { Select } from "@/ui/Select";
 import { AssistButton } from "@/views/AssistButton";
 import type { RoomAgent } from "@/views/composer/types";
 import { useChannelAssist } from "@/views/room/useChannelAssist";
+import { useApplyPreset } from "@/views/room/ChannelPresetDialogs";
+import { ChannelPresetPicker } from "@/views/room/ChannelPresetPicker";
 
 // The channel and section dialogs of the rail (docs/prd/2026-10-28-channels-
 // and-threads.md §2.1, §2.1a, §8 slice 1). Each says a refusal inside
@@ -73,12 +76,25 @@ export function CreateChannelDialog({
   const [sectionId, setSectionId] = useState(places[0]?.value ?? "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  // A channel made from a preset (§2.1c): created, then the preset applied by
+  // the one apply (useApplyPreset), so Undo is the same as anywhere.
+  const [fromPreset, setFromPreset] = useState(false);
+  const [preset, setPreset] = useState<{ readonly label: string; readonly channel: ChannelPreset } | null>(null);
+  const applyPreset = useApplyPreset(roomId, noop);
   const create = async () => {
     if (!name.trim() || busy) return;
     setBusy(true);
     setErr("");
     try {
-      onCreated(await channelsApi.create(roomId, { name: name.trim(), purpose: purpose.trim(), sectionId }));
+      const made = await channelsApi.create(roomId, { name: name.trim(), purpose: purpose.trim(), sectionId });
+      if (fromPreset && preset) {
+        try {
+          await applyPreset(made, preset);
+        } catch (e) {
+          setErr(errorText(e, `#${made.name} was made, but the preset was not applied`));
+        }
+      }
+      onCreated(made);
     } catch (e) {
       setErr(errorText(e, "Could not create the channel"));
     } finally {
@@ -120,11 +136,18 @@ export function CreateChannelDialog({
           </Field>
         )}
         {places.length === 0 && <p className="text-sm text-[var(--color-fg-muted)]">The room's channel creation policy keeps new channels to its owner and admins.</p>}
+        <div className="flex items-center justify-between gap-4">
+          <p className="text-sm font-medium">Start from a preset</p>
+          <Switch checked={fromPreset} ariaLabel="Start from a preset" onChange={setFromPreset} />
+        </div>
+        {fromPreset && <ChannelPresetPicker roomId={roomId} channel={{ purpose: purpose.trim(), rules: "", settings: {} }} onPick={setPreset} />}
         {err && <p role="alert" className="text-sm text-[var(--color-danger)]">{err}</p>}
       </div>
     </Dialog>
   );
 }
+
+const noop = () => {};
 
 // ChannelSettingsDialog is a channel's settings (its managers'): name,
 // purpose (with the AI's draft), rules, section, default agent, who posts,

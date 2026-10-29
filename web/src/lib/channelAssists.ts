@@ -7,6 +7,7 @@
 // dropped, never guessed). With no model, every control works by hand.
 import { fieldText } from "./assistDrafts.ts";
 import {
+  AssistTaskDraftChannelPreset,
   AssistTaskDraftChannelPurpose,
   AssistTaskDraftRoomRules,
   AssistTaskDraftThreadTitle,
@@ -27,6 +28,9 @@ export const FIND_CHANNEL = AssistTaskFindChannel;
 // and reads the answer).
 export const DRAFT_THREAD_TITLE = AssistTaskDraftThreadTitle;
 export const SUMMARIZE_THREAD = AssistTaskSummarizeThread;
+// A channel preset from a sentence (§2.1c): shown as a preset's preview
+// (lib/channelPresets presetFromFields reads the answer).
+export const DRAFT_CHANNEL_PRESET = AssistTaskDraftChannelPreset;
 
 /** What the web says where an assist's button would be when no model is
  *  set up for the member (or the task is missing): the controls work by

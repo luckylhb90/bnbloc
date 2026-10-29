@@ -11,11 +11,14 @@ import type { RoomAgent } from "@/views/composer/types";
 import type { ChannelActions } from "@/views/room/ChannelMenu";
 import { ChannelSettingsDialog, CreateChannelDialog, GroupDialog, SectionDialog } from "@/views/room/ChannelDialogs";
 import { ArchivedChannelsDialog, ChannelDirectoryDialog } from "@/views/room/ChannelDirectory";
+import { ApplyPresetDialog, SavePresetDialog } from "@/views/room/ChannelPresetDialogs";
 import type { RoomChannels } from "@/views/room/useRoomChannels";
 
 type Open =
   | { readonly kind: "create" }
   | { readonly kind: "settings"; readonly channel: Channel }
+  | { readonly kind: "applyPreset"; readonly channel: Channel }
+  | { readonly kind: "savePreset"; readonly channel: Channel }
   | { readonly kind: "section"; readonly section: RoomSection | null }
   | { readonly kind: "group"; readonly group: ChannelGroup | null; readonly channel: Channel | null }
   | { readonly kind: "directory" }
@@ -77,6 +80,8 @@ export function useChannelManager({
       browse: () => setOpen({ kind: "directory" }),
       showArchived: () => setOpen({ kind: "archived" }),
       settings: (c) => setOpen({ kind: "settings", channel: c }),
+      applyPreset: (c) => setOpen({ kind: "applyPreset", channel: c }),
+      savePreset: (c) => setOpen({ kind: "savePreset", channel: c }),
       editSection: (s) => setOpen({ kind: "section", section: s }),
       joinSection: (s) =>
         void channelsApi
@@ -146,6 +151,10 @@ export function useChannelManager({
         }}
       />
     );
+  } else if (open?.kind === "applyPreset") {
+    dialogs = <ApplyPresetDialog roomId={roomId} channel={open.channel} onClose={close} onApplied={() => void reload()} />;
+  } else if (open?.kind === "savePreset") {
+    dialogs = <SavePresetDialog channel={open.channel} onClose={close} />;
   } else if (open?.kind === "section") {
     dialogs = (
       <SectionDialog
