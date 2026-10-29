@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -169,6 +170,25 @@ func rootText(m store.RoomMessage) string {
 		}
 	}
 	return ""
+}
+
+// followedThreads is the set of threads among channels userID follows (one
+// read, only when the room has a thread). A failed read follows none: the
+// unread then leaves threads out rather than count them for everyone.
+func (s *Service) followedThreads(ctx context.Context, roomID, userID string, channels []store.RoomChannel) map[string]bool {
+	if !slices.ContainsFunc(channels, store.RoomChannel.IsThread) {
+		return nil
+	}
+	fs, err := s.Channels.ChannelFollows(ctx, roomID, userID)
+	if err != nil {
+		log.Printf("realtime: room=%s user=%s: follows: %v", roomID, userID, err)
+		return nil
+	}
+	out := make(map[string]bool, len(fs))
+	for _, f := range fs {
+		out[f.ChannelID] = true
+	}
+	return out
 }
 
 // errBadReply: replyTo names no live message the reply may answer.

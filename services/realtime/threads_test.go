@@ -180,3 +180,32 @@ func TestThreadOfMembersOnlyChannel(t *testing.T) {
 	}
 	_ = realtime.Durable{}
 }
+
+// A thread's unread is its followers' (C4): who wrote in it, was mentioned
+// in it, or chose to follow it; anyone else sees its root's line only.
+func TestThreadUnreadIsItsFollowers(t *testing.T) {
+	srv, svc := newChannelTestServer(t)
+	svc.Membership.(*membership.Static).Add("room-1", "carl")
+	root := postChat(t, srv, "alice", "plan for friday", "ch_a")
+	_, th := openThread(t, srv.URL, "bob", "ch_a", root, "")
+	counts := func(user string) map[string]int {
+		out := map[string]int{}
+		for _, c := range fetchUnread(t, srv, user).Channels["room-1"] {
+			out[c.ChannelID] = c.Count
+		}
+		return out
+	}
+	postChat(t, srv, "bob", "I take the slides", th.ChannelID)
+	// alice wrote the root: she follows the thread from its opening.
+	if counts("alice")[th.ChannelID] != 1 {
+		t.Fatalf("the root's author's unread = %v", counts("alice"))
+	}
+	if _, ok := counts("carl")[th.ChannelID]; ok {
+		t.Fatalf("a member who does not follow the thread counts it: %v", counts("carl"))
+	}
+	// A mention in the thread makes carl follow it.
+	postChat(t, srv, "bob", "@carl can you review?", th.ChannelID)
+	if counts("carl")[th.ChannelID] != 2 {
+		t.Fatalf("after a mention carl's unread = %v", counts("carl"))
+	}
+}

@@ -228,6 +228,7 @@ type ChannelStore interface {
 	// being mentioned joins it (C18).
 	ClaimChannelPost(ctx context.Context, roomID, channelID, userID string, atMs, minGapMs int64) (retryAfterMs int64, err error)
 	FollowChannel(ctx context.Context, roomID, channelID, userID string, atMs int64, marks store.FollowMarks) error
+	ChannelFollows(ctx context.Context, roomID, userID string) ([]store.ChannelFollow, error)
 	// ListSections and MemberSections are what store.LoadChannelAccess
 	// reads: who may read which channel (store.MayReadChannel,
 	// channel_access.go).
@@ -1302,8 +1303,14 @@ func (s *Service) handleUnread(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 				access := &channelAccess{svc: s, ctx: ctx, roomID: roomID, reader: readerOf(userID, m)}
+				followed := s.followedThreads(ctx, roomID, userID, channels)
 				for _, ch := range channels {
 					if !access.mayRead(ch.ChannelID) {
+						continue
+					}
+					// A thread's unread is its followers' (C4: followed
+					// threads all; anyone else sees its root's line).
+					if ch.IsThread() && !followed[ch.ChannelID] {
 						continue
 					}
 					n, err := s.Chat.UnreadCount(ctx, roomID, ch.ChannelID, userID)
