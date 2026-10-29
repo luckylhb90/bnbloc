@@ -30,8 +30,8 @@ func presetBundle(t *testing.T, channel map[string]any, extra map[string]any, fi
 func deskChannel() map[string]any {
 	return map[string]any{"purpose": "Ask anything about the product", "rules": "One question per thread.",
 		"settings": map[string]any{"agentParticipation": wire.ChannelAgentsQuestions, "slowModeSeconds": 10, "postingStyle": "threads",
-			"tags":     []map[string]any{{"id": "billing", "name": "Billing", "color": "#3b82f6"}, {"id": "bug", "name": "Bug"}},
-			"statuses": []map[string]any{{"id": "open", "name": "Open"}, {"id": "answered", "name": "Answered"}},
+			"tags":         []map[string]any{{"id": "billing", "name": "Billing", "color": "#3b82f6"}, {"id": "bug", "name": "Bug"}},
+			"statuses":     []map[string]any{{"id": "open", "name": "Open"}, {"id": "answered", "name": "Answered"}},
 			"postTemplate": "What did you try?\nWhat happened?"}}
 }
 
