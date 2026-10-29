@@ -30,14 +30,11 @@ import (
 // KindChannelPreset is the channel preset kind.
 const KindChannelPreset = "bnbloc.channel-preset.package/v1"
 
-// Bounds of a channel preset.
+// Bounds of a channel preset. A forum's vocabulary and template take the
+// room service's own bounds (wire.MaxChannelTags, MaxChannelStatuses,
+// MaxChannelTagName, MaxPostTemplate): a preset that validates applies.
 const (
-	maxPresetTags      = 30
-	maxPresetStatuses  = 12
-	maxPresetTagName   = 40
-	maxPresetTagID     = 40
 	maxPresetColor     = 16
-	maxPostTemplate    = 4000
 	maxPresetSlowMode  = 6 * 60 * 60
 	maxPresetSettingsB = 16 << 10
 )
@@ -80,8 +77,6 @@ var presetSettingKeys = map[string]bool{
 }
 
 // Posting styles a preset may set (§2.1c "Posting style").
-var presetPostingStyles = map[string]bool{"": true, "messages": true, "threads": true}
-
 var errPresetFields = errors.New("a channel's purpose, rules and settings belong to a channel preset")
 
 func init() {
@@ -155,12 +150,12 @@ func CheckChannelPreset(c ChannelPreset) error {
 		return errors.New("channel.settings.agentParticipation is one of the channel's participation values")
 	case s.SlowModeSeconds < 0 || s.SlowModeSeconds > maxPresetSlowMode:
 		return fmt.Errorf("channel.settings.slowModeSeconds is 0 (off) to %d", maxPresetSlowMode)
-	case !presetPostingStyles[s.PostingStyle]:
-		return errors.New("channel.settings.postingStyle is \"messages\" or \"threads\"")
-	case len(s.Tags) > maxPresetTags:
-		return fmt.Errorf("channel.settings.tags: at most %d", maxPresetTags)
-	case len(s.Statuses) > maxPresetStatuses:
-		return fmt.Errorf("channel.settings.statuses: at most %d", maxPresetStatuses)
+	case !wire.IsChannelPostingStyle(s.PostingStyle):
+		return fmt.Errorf("channel.settings.postingStyle is \"\" (messages) or %q", wire.ChannelPostThreads)
+	case len(s.Tags) > wire.MaxChannelTags:
+		return fmt.Errorf("channel.settings.tags: at most %d", wire.MaxChannelTags)
+	case len(s.Statuses) > wire.MaxChannelStatuses:
+		return fmt.Errorf("channel.settings.statuses: at most %d", wire.MaxChannelStatuses)
 	}
 	ids := map[string]bool{}
 	for i, t := range s.Tags {
@@ -177,14 +172,14 @@ func CheckChannelPreset(c ChannelPreset) error {
 			return err
 		}
 	}
-	return checkText("channel.settings.postTemplate", s.PostTemplate, maxPostTemplate, false)
+	return checkText("channel.settings.postTemplate", s.PostTemplate, wire.MaxPostTemplate, false)
 }
 
 // checkPresetEntry: a tag or status is an id (a name: lower-case letters,
 // digits and hyphens, once per list) and a one-line name.
 func checkPresetEntry(what, id, name string, seen map[string]bool) error {
 	switch {
-	case !ValidName(id) || len(id) > maxPresetTagID:
+	case !wire.ValidVocabularyID(id):
 		return fmt.Errorf("channel.settings.%s.id %q: lower-case letters, digits and hyphens", what, id)
 	case seen[id]:
 		return fmt.Errorf("channel.settings.%s.id %q is listed twice", what, id)
@@ -192,7 +187,7 @@ func checkPresetEntry(what, id, name string, seen map[string]bool) error {
 		return fmt.Errorf("channel.settings.%s needs a name", what)
 	}
 	seen[id] = true
-	return checkText("channel.settings."+what+".name", name, maxPresetTagName, true)
+	return checkText("channel.settings."+what+".name", name, wire.MaxChannelTagName, true)
 }
 
 // channelPresetFromForm: a preset is its manifest (and the README the edited

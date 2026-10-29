@@ -116,6 +116,9 @@ export interface RoomEvent {
   toAgent?: boolean;
   // For chat_message answering another message (payload.replyTo).
   replyTo?: ReplyRef;
+  // For chat_message: asked of the channel's agent by its participation
+  // (payload.agentAuto, C19), not by its author's choice.
+  agentAuto?: boolean;
   // For thread_updated: a thread of the event's channel (its root's line).
   threadUpdate?: ThreadUpdatedPayload;
 }
@@ -254,6 +257,7 @@ export function normalizeRoomEvent(ev: RoomEvent, emit: (e: RoomEvent) => void):
     ev.expert = expertMarker(p);
     ev.fileRef = fileRefOf(p.fileRef);
     ev.replyTo = replyRefOf(p.replyTo);
+    if (p.agentAuto === true) ev.agentAuto = true;
     const recipient = p.recipient as { provider?: unknown } | undefined;
     ev.toAgent = typeof recipient?.provider === "string" && recipient.provider !== "";
   } else if (ev.kind === "agent_session_state") {

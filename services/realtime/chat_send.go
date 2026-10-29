@@ -107,6 +107,14 @@ type ChatPost struct {
 	// the thread's root. Completed (author, excerpt) on post. In a thread it
 	// is the root when the post names none (§2.2: a thread answers its root).
 	ReplyTo int64
+	// Thread is a forum post's thread (ChannelSettings.Forum): the post in
+	// such a channel is the root of a new thread, titled and tagged so. A
+	// post in a forum without it opens one too, titled from its words.
+	Thread *wire.ChatThreadFields
+	// AgentAuto marks a post the channel's default agent is asked to answer
+	// by its agent participation (C19), not by its author's choice
+	// (payload.agentAuto): the web says so, and a person can stop it.
+	AgentAuto bool
 }
 
 // ChatPosted is what PostChat did: the message's sequence and, for an agent
@@ -115,6 +123,8 @@ type ChatPost struct {
 type ChatPosted struct {
 	Sequence int64
 	Job      *store.AgentJob
+	// Thread is the thread a forum post opened (nil for any other post).
+	Thread *store.RoomChannel
 }
 
 // PostChat validates, persists, and publishes a chat message, then creates
@@ -248,6 +258,9 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) 
 	if expert != nil {
 		payload["expert"] = expert.payload()
 	}
+	if p.AgentAuto && agent {
+		payload[wire.MessageAgentAuto] = true
+	}
 	if agent {
 		rp := map[string]any{
 			"ownerId":  p.Recipient.OwnerID,
@@ -348,6 +361,17 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) 
 			s.pulseJobQueued(job)
 			s.auditExpertUse(ctx, expert, job)
 			_, _ = s.publish(ctx, wire.Event{RoomID: p.RoomID, ChannelID: channelID, Kind: wire.EventAgentJobCreated, Payload: job.View(), AtUnixMs: nowMs}, realtime.Durable{})
+		}
+	}
+	// A top-level post in a forum is the root of a new thread (§2.1c); the
+	// post is already stored and delivered, so a thread that fails to open
+	// is logged and the post stays a message of the channel.
+	if channel.Settings.Forum() && !channel.IsThread() {
+		th, err := s.openPostThread(ctx, p, author, channel, ev.Sequence)
+		if err != nil {
+			log.Printf("realtime: room=%s channel=%s seq=%d: forum thread: %v", p.RoomID, channelID, ev.Sequence, err)
+		} else {
+			posted.Thread = &th
 		}
 	}
 	return posted, nil

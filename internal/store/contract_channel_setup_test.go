@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"reflect"
 	"slices"
 	"sync"
 	"testing"
@@ -55,7 +56,7 @@ func TestContractChannelStoreSetup(t *testing.T) {
 		}
 		got, _ = must2(s.GetChannel(ctx, room, a))(t)
 		if got.Name != "alpha" || got.Purpose != "ship it" || got.Rules != "" || got.SectionID != "" || got.Position != 0 || got.OwnerID != "maya" ||
-			got.Settings != (wire.ChannelSettings{NoAgents: true}) {
+			!reflect.DeepEqual(got.Settings, wire.ChannelSettings{NoAgents: true}) {
 			t.Fatalf("after patch = %+v", got)
 		}
 		if adm, found, err := s.ChannelAdmission(ctx, room, a); err != nil || !found || !adm.NoAgents {

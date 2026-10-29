@@ -39,6 +39,53 @@ const (
 	ChannelAgentsThreads = "threads"
 )
 
+// How a channel takes posts (ChannelSettings.PostingStyle, §2.1c): a feed of
+// messages, or every top-level post a titled thread (a forum).
+//
+//wire:union ChannelPostingStyle
+const (
+	// ChannelPostMessages: a feed of messages (the default).
+	ChannelPostMessages = ""
+	// ChannelPostThreads: every top-level post opens a thread whose root it
+	// is; the channel lists its threads.
+	ChannelPostThreads = "threads"
+)
+
+// IsChannelPostingStyle is the one validation of a posting style.
+func IsChannelPostingStyle(v string) bool {
+	return v == ChannelPostMessages || v == ChannelPostThreads
+}
+
+// ChannelTag is one tag a channel's owners define for its threads (C20).
+type ChannelTag struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Color string `json:"color,omitempty"`
+}
+
+// ChannelStatus is one status a channel's owners define for its threads
+// (C20): the board's columns, in order.
+type ChannelStatus struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// ValidVocabularyID is the one rule of a forum tag's or status's id (C20):
+// letters, digits, - and _, at most MaxChannelTagName. The room service
+// holds a channel's settings to it and a channel preset (contentpkg) too,
+// so a preset that validates is one the room service takes.
+func ValidVocabularyID(id string) bool {
+	if id == "" || len(id) > MaxChannelTagName {
+		return false
+	}
+	for _, r := range id {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_') {
+			return false
+		}
+	}
+	return true
+}
+
 // IsChannelWhoPosts and IsChannelAgentParticipation are the one validation
 // of a channel's settings values (the web reads the generated
 // ChannelWhoPostsValues and ChannelAgentParticipationValues unions).
@@ -64,9 +111,24 @@ type ChannelSettings struct {
 	// the channel; 0 is off. Set by the channel's owners, no platform
 	// default (C22).
 	SlowModeSeconds int `json:"slowModeSeconds,omitempty"`
-	// AgentParticipation is stored only in this slice (C19).
+	// AgentParticipation is when the channel's default agent answers (C19):
+	// "threads" asks it once in every new thread; "questions" is stored only.
 	AgentParticipation string `json:"agentParticipation,omitempty" tstype:"ChannelAgentParticipation"`
+	// PostingStyle is how the channel takes posts (§2.1c): messages, or
+	// every top-level post a thread (a forum, ChannelSettings.Forum).
+	PostingStyle string `json:"postingStyle,omitempty" tstype:"ChannelPostingStyle"`
+	// Tags and Statuses are the channel's owners' vocabulary for its
+	// threads (C20): a thread carries tags and one status (ThreadInfo).
+	Tags     []ChannelTag    `json:"tags,omitempty"`
+	Statuses []ChannelStatus `json:"statuses,omitempty"`
+	// PostTemplate is what a new post in a forum starts from in the
+	// composer (fields to fill).
+	PostTemplate string `json:"postTemplate,omitempty"`
 }
+
+// Forum reports whether a channel of these settings takes every top-level
+// post as a thread (PostingStyle threads): the one rule of "a forum".
+func (s ChannelSettings) Forum() bool { return s.PostingStyle == ChannelPostThreads }
 
 // RoomChannel is one channel of a room as the room service answers it
 // (list, create, patch, archive, restore). Joined, Starred and Hidden are
@@ -111,7 +173,45 @@ type ThreadInfo struct {
 	Replies       int      `json:"replies"`
 	LastReplyAtMs int64    `json:"lastReplyAtMs,omitempty"`
 	Participants  []string `json:"participants"`
+	// Tags and Status are ids of the parent's ChannelSettings.Tags and
+	// Statuses (C20); AnsweredSeq is the reply marked as its answer (0
+	// none).
+	Tags        []string `json:"tags,omitempty"`
+	Status      string   `json:"status,omitempty"`
+	AnsweredSeq int64    `json:"answeredSeq,omitempty"`
 }
+
+// ThreadMarkRequest is PATCH /v1/rooms/{id}/channel-threads/{threadId}: a
+// thread's tags, status and answer, set by a member who may post in its
+// parent (C20). A nil field is left as it is; AnsweredSeq 0 clears it.
+type ThreadMarkRequest struct {
+	Tags        *[]string `json:"tags,omitempty"`
+	Status      *string   `json:"status,omitempty"`
+	AnsweredSeq *int64    `json:"answeredSeq,omitempty"`
+}
+
+// ChatThreadFields are what a post in a forum channel (ChannelSettings.Forum)
+// adds to a chat message (POST /v1/rooms/{id}/chat): every top-level post
+// there opens a thread whose root it is, titled ThreadTitle (the post's
+// first words when empty) and tagged ThreadTags (the channel's tag ids).
+// The answer names the thread (ChatPostReply.ThreadID).
+type ChatThreadFields struct {
+	ThreadTitle string   `json:"threadTitle,omitempty"`
+	ThreadTags  []string `json:"threadTags,omitempty"`
+}
+
+// ChatPostReply is POST /v1/rooms/{id}/chat's answer: the message's
+// sequence and, for a post in a forum, the thread it opened.
+type ChatPostReply struct {
+	Sequence int64  `json:"sequence"`
+	ThreadID string `json:"threadId,omitempty"`
+}
+
+// MessageAgentAuto is a chat message's payload marker (payload.agentAuto)
+// for a post the channel's default agent was asked to answer by its agent
+// participation (C19), not by its author: the web says so, and a person
+// can stop the run.
+const MessageAgentAuto = "agentAuto"
 
 // ThreadOpenRequest is POST /v1/rooms/{id}/threads: open (or get) the
 // thread of message RootSeq of channel ParentID. Title is optional (the

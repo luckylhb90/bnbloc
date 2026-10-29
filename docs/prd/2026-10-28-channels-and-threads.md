@@ -857,3 +857,36 @@ change, and the two meet at the settings keys):
    ones who may change its setup).
 4. A preset's `requires.expert` is validated but not applied yet: a
    channel's expert (C9) is slice 6.
+
+**Slice 3b, the forum switches** (§2.1c, C19, C20):
+
+- `settings.postingStyle` "threads" makes a forum (`ChannelSettings.Forum`,
+  the one rule): every top-level post is the root of a new thread, titled
+  and tagged from the post (`POST .../chat` with `threadTitle`,
+  `threadTags`; the answer names the thread). The channel's main view lists
+  its threads, open first by activity, filtered by tag and status, or as a
+  board of its statuses.
+- Tags and statuses (C20) are the channel's owners' vocabulary (bounded in
+  `wire.limits`); any member who may post in the parent sets a thread's
+  tags, status and answer (`PATCH .../channel-threads/{id}`; migration
+  `2026_10_thread_marks`, only adds). The settings dialog takes them one a
+  line (ids from names, `web/src/lib/forum.ts`).
+- `settings.postTemplate` is what a new post starts from.
+- Agent participation "threads" (C19): the channel's default agent is asked
+  once in every new thread, as its opener, through `PostChat` like any
+  addressed message, marked automatic (`payload.agentAuto`, shown "Asked
+  automatically"); a person stops the run as any run. "Questions" is still
+  stored only: whether a message is a question is the agent's own reading.
+- Not in it: "save to knowledge" on an answered thread (the room knowledge
+  component), a stop control on the automatic request in the thread panel
+  (runs are stopped from the room's runs today), `room_setup channel` for
+  the forum fields.
+- Tests: `services/room/forum_test.go`, `services/realtime/forum_test.go`,
+  the store on MySQL, `web/src/lib/forum.test.ts`, `web/e2e/forum.mjs`.
+- Rollout (lens 11): an old room pod drops the new settings keys on a PATCH
+  it handles (it does not know them): set up forums after every pod runs
+  this release.
+
+**Decisions pending owner, slice 3b:** the vocabulary bounds (30 tags, 12
+statuses, names of 32 characters, 8 tags a thread, a template of 4000
+characters); a thread's marks are set only on an open thread of a forum.

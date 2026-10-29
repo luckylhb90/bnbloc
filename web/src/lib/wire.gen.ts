@@ -2183,6 +2183,28 @@ export const ChannelAgentsQuestions = "questions";
 // ChannelAgentsThreads: to every new thread.
 export const ChannelAgentsThreads = "threads";
 
+// How a channel takes posts (ChannelSettings.PostingStyle, §2.1c): a feed of
+// messages, or every top-level post a titled thread (a forum).
+// ChannelPostMessages: a feed of messages (the default).
+export const ChannelPostMessages = "";
+// ChannelPostThreads: every top-level post opens a thread whose root it
+// is; the channel lists its threads.
+export const ChannelPostThreads = "threads";
+
+// ChannelTag is one tag a channel's owners define for its threads (C20).
+export interface ChannelTag {
+  id: string;
+  name: string;
+  color?: string;
+}
+
+// ChannelStatus is one status a channel's owners define for its threads
+// (C20): the board's columns, in order.
+export interface ChannelStatus {
+  id: string;
+  name: string;
+}
+
 // ChannelSettings is a channel's settings document (its owners', §2.1). The
 // zero value is today's channel: everyone posts, agents are admitted, no
 // slow mode, agents answer when mentioned.
@@ -2197,8 +2219,19 @@ export interface ChannelSettings {
   // the channel; 0 is off. Set by the channel's owners, no platform
   // default (C22).
   slowModeSeconds?: number;
-  // AgentParticipation is stored only in this slice (C19).
+  // AgentParticipation is when the channel's default agent answers (C19):
+  // "threads" asks it once in every new thread; "questions" is stored only.
   agentParticipation?: ChannelAgentParticipation;
+  // PostingStyle is how the channel takes posts (§2.1c): messages, or
+  // every top-level post a thread (a forum, ChannelSettings.Forum).
+  postingStyle?: ChannelPostingStyle;
+  // Tags and Statuses are the channel's owners' vocabulary for its
+  // threads (C20): a thread carries tags and one status (ThreadInfo).
+  tags?: ChannelTag[];
+  statuses?: ChannelStatus[];
+  // PostTemplate is what a new post in a forum starts from in the
+  // composer (fields to fill).
+  postTemplate?: string;
 }
 
 // RoomChannel is one channel of a room as the room service answers it
@@ -2244,7 +2277,45 @@ export interface ThreadInfo {
   replies: number;
   lastReplyAtMs?: number;
   participants: string[];
+  // Tags and Status are ids of the parent's ChannelSettings.Tags and
+  // Statuses (C20); AnsweredSeq is the reply marked as its answer (0
+  // none).
+  tags?: string[];
+  status?: string;
+  answeredSeq?: number;
 }
+
+// ThreadMarkRequest is PATCH /v1/rooms/{id}/channel-threads/{threadId}: a
+// thread's tags, status and answer, set by a member who may post in its
+// parent (C20). A nil field is left as it is; AnsweredSeq 0 clears it.
+export interface ThreadMarkRequest {
+  tags?: string[];
+  status?: string;
+  answeredSeq?: number;
+}
+
+// ChatThreadFields are what a post in a forum channel (ChannelSettings.Forum)
+// adds to a chat message (POST /v1/rooms/{id}/chat): every top-level post
+// there opens a thread whose root it is, titled ThreadTitle (the post's
+// first words when empty) and tagged ThreadTags (the channel's tag ids).
+// The answer names the thread (ChatPostReply.ThreadID).
+export interface ChatThreadFields {
+  threadTitle?: string;
+  threadTags?: string[];
+}
+
+// ChatPostReply is POST /v1/rooms/{id}/chat's answer: the message's
+// sequence and, for a post in a forum, the thread it opened.
+export interface ChatPostReply {
+  sequence: number;
+  threadId?: string;
+}
+
+// MessageAgentAuto is a chat message's payload marker (payload.agentAuto)
+// for a post the channel's default agent was asked to answer by its agent
+// participation (C19), not by its author: the web says so, and a person
+// can stop the run.
+export const MessageAgentAuto = "agentAuto";
 
 // ThreadOpenRequest is POST /v1/rooms/{id}/threads: open (or get) the
 // thread of message RootSeq of channel ParentID. Title is optional (the
@@ -4871,6 +4942,16 @@ export const MaxRoomRules = 8000;
 // decision: pending owner, the PRD gives no bound).
 export const MaxChannelGroupName = 64;
 export const MaxChannelGroups = 50;
+// A forum's vocabulary (C20): at most MaxChannelTags tags and
+// MaxChannelStatuses statuses, each name at most MaxChannelTagName
+// characters, a thread at most MaxThreadTags tags; a post template at
+// most MaxPostTemplate characters (decision: pending owner, the PRD
+// gives no bounds).
+export const MaxChannelTags = 30;
+export const MaxChannelStatuses = 12;
+export const MaxChannelTagName = 32;
+export const MaxThreadTags = 8;
+export const MaxPostTemplate = 4000;
 // MaxRoomSourcePurpose bounds a room package's stated purpose for a
 // source it asks for (sources[].purpose), in characters.
 export const MaxRoomSourcePurpose = 500;
@@ -8034,6 +8115,8 @@ export type ChannelWhoPosts = "" | "admins";
 export const ChannelWhoPostsValues: readonly ChannelWhoPosts[] = ["", "admins"];
 export type ChannelAgentParticipation = "" | "questions" | "threads";
 export const ChannelAgentParticipationValues: readonly ChannelAgentParticipation[] = ["", "questions", "threads"];
+export type ChannelPostingStyle = "" | "threads";
+export const ChannelPostingStyleValues: readonly ChannelPostingStyle[] = ["", "threads"];
 export type SectionVisibility = "open" | "members";
 export const SectionVisibilityValues: readonly SectionVisibility[] = ["open", "members"];
 export type SectionJoinPolicy = "invite" | "ask" | "open";

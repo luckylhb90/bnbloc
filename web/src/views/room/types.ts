@@ -113,6 +113,8 @@ export interface FeedItem {
   peopleOnly?: boolean;
   // The message this one answers (payload.replyTo): shown as a quote.
   replyTo?: ReplyRef;
+  // Sent to the channel's agent by its participation (C19), not chosen.
+  agentAuto?: boolean;
 }
 
 // Case-insensitive self match. The agent (author "agent") and other members

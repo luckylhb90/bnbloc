@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -96,6 +98,118 @@ func (s *Service) patchThread(w http.ResponseWriter, r *http.Request, roomID str
 	}
 	s.publishChannelUpdated(r.Context(), roomID, th.ChannelID, th.SectionID)
 	s.viewFor(w, r, roomID, th.ChannelID, who.user)
+}
+
+// handleMarkThread sets a thread's tags, status and answer
+// (PATCH /v1/rooms/{roomId}/channel-threads/{threadId}, wire.ThreadMarkRequest
+// → wire.RoomChannel): any member who may post in its parent (C20; never a
+// visitor), with ids of the parent's own vocabulary (ChannelSettings.Tags,
+// Statuses), on a thread of a forum channel (ChannelSettings.Forum). A
+// thread its caller may not read is not found.
+func (s *Service) handleMarkThread(w http.ResponseWriter, r *http.Request) {
+	roomID := r.PathValue("roomId")
+	who, ok := s.humanCaller(w, r, roomID)
+	if !ok {
+		return
+	}
+	if who.role == store.RoleVisitor {
+		httpx.Error(w, "visitors do not mark threads", http.StatusForbidden)
+		return
+	}
+	th, found, err := s.Channels.GetChannel(r.Context(), roomID, r.PathValue("threadId"))
+	var parent store.RoomChannel
+	if err == nil && found && th.IsThread() {
+		parent, found, err = s.Channels.GetChannel(r.Context(), roomID, th.ParentID)
+	}
+	if err != nil {
+		obs.ServerError(w, "read thread failed", err)
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !found || !th.IsThread() {
+		httpx.Error(w, "thread not found", http.StatusNotFound)
+		return
+	}
+	access, err := s.memberAccess(r.Context(), roomID, who)
+	if err != nil {
+		obs.ServerError(w, "read channel access failed", err)
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !access.MayReadChannel(th) {
+		httpx.Error(w, "thread not found", http.StatusNotFound)
+		return
+	}
+	if !parent.Settings.Forum() {
+		httpx.Error(w, "tags, statuses and answers are a forum channel's (its posting style is threads)", http.StatusConflict)
+		return
+	}
+	if th.Archived() {
+		httpx.Error(w, "this thread is closed: it is read-only", http.StatusConflict)
+		return
+	}
+	var body wire.ThreadMarkRequest
+	if !httpx.DecodeJSON(w, r, maxJSONBodyBytes, &body) {
+		return
+	}
+	marks, err := threadMarks(parent.Settings, body)
+	if err != nil {
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	updated, err := s.Channels.MarkThread(r.Context(), roomID, th.ChannelID, marks)
+	if err != nil {
+		if errors.Is(err, store.ErrChannelNotFound) {
+			httpx.Error(w, "thread not found", http.StatusNotFound)
+			return
+		}
+		obs.ServerError(w, "mark thread failed", err)
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.publishThreadUpdated(r.Context(), updated)
+	s.viewFor(w, r, roomID, th.ChannelID, who.user)
+}
+
+// threadMarks checks a mark request against the parent's vocabulary: tags
+// and a status the parent defines ("" clears the status), at most
+// MaxThreadTags tags, an answer that is a message sequence (0 clears it).
+func threadMarks(parent wire.ChannelSettings, body wire.ThreadMarkRequest) (store.ThreadMarks, error) {
+	var m store.ThreadMarks
+	if body.Tags != nil {
+		known := map[string]bool{}
+		for _, t := range parent.Tags {
+			known[t.ID] = true
+		}
+		var tags []string
+		for _, id := range *body.Tags {
+			id = strings.TrimSpace(id)
+			if !known[id] {
+				return m, errBadRequest("a tag the channel does not define: " + id)
+			}
+			if !slices.Contains(tags, id) {
+				tags = append(tags, id)
+			}
+		}
+		if len(tags) > wire.MaxThreadTags {
+			return m, errBadRequest("a thread has at most " + strconv.Itoa(wire.MaxThreadTags) + " tags")
+		}
+		m.Tags = &tags
+	}
+	if body.Status != nil {
+		st := strings.TrimSpace(*body.Status)
+		if st != "" && !slices.ContainsFunc(parent.Statuses, func(x wire.ChannelStatus) bool { return x.ID == st }) {
+			return m, errBadRequest("a status the channel does not define: " + st)
+		}
+		m.Status = &st
+	}
+	if body.AnsweredSeq != nil {
+		if *body.AnsweredSeq < 0 {
+			return m, errBadRequest("answeredSeq is a message's sequence (0 clears it)")
+		}
+		m.AnsweredSeq = body.AnsweredSeq
+	}
+	return m, nil
 }
 
 // cleanThreadTitle is a title one line, 1–MaxThreadTitle runes.

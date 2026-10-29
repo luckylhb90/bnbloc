@@ -22,7 +22,9 @@ import type {
   SectionJoinReply,
   SectionPatchRequest,
   SectionRequests,
+  ChatPostReply,
   ThreadList,
+  ThreadMarkRequest,
   ThreadOpenRequest,
 } from "./wire.gen.ts";
 
@@ -34,6 +36,12 @@ export const channelsApi = {
   /** The threads the caller may read: one channel's, or the ones they follow. */
   threads: (roomId: string, q: { readonly parent?: string; readonly followed?: boolean }) =>
     req<ThreadList>(`${roomPath(roomId, "channel-threads")}?${q.parent ? `parent=${encodeURIComponent(q.parent)}` : ""}${q.followed ? `${q.parent ? "&" : ""}followed=1` : ""}`),
+  /** A forum thread's tags, status and answer (C20): any member who may post. */
+  markThread: (roomId: string, threadId: string, body: ThreadMarkRequest) =>
+    req<RoomChannel>(roomPath(roomId, "channel-threads", threadId), json("PATCH", body)),
+  /** A new post in a forum: the root of its own thread, titled and tagged. */
+  postToForum: (roomId: string, channelId: string, body: { readonly text: string; readonly threadTitle?: string; readonly threadTags?: readonly string[] }) =>
+    req<ChatPostReply>(roomPath(roomId, "chat"), json("POST", { ...body, channelId, clientMsgId: crypto.randomUUID(), atUnixMs: Date.now() })),
   /** The open channels and the sections; archived: the archived channels. */
   list: (roomId: string, archived = false) => req<ChannelList>(`${roomPath(roomId, "channels")}${archived ? "?archived=1" : ""}`),
   directory: (roomId: string) => req<ChannelDirectory>(roomPath(roomId, "channel-directory")),

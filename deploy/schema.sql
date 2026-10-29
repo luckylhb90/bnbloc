@@ -240,6 +240,11 @@ CREATE TABLE IF NOT EXISTS room_channels (
   thread_replies INT NOT NULL DEFAULT 0,
   thread_last_reply_at_ms BIGINT NOT NULL DEFAULT 0,
   thread_participants_json JSON NULL,
+  -- A thread's marks in a forum channel (C20): its tags and status (ids of
+  -- its parent's settings) and the reply marked as its answer.
+  thread_tags_json JSON NULL,
+  thread_status VARCHAR(64) NOT NULL DEFAULT '',
+  thread_answered_seq BIGINT NOT NULL DEFAULT 0,
   KEY idx_channel_room (tenant_id, room_id, deleted_at_ms),
   KEY idx_channel_parent (tenant_id, room_id, parent_id),
   UNIQUE KEY uq_channel_thread_root (tenant_id, room_id, thread_root)

@@ -113,12 +113,25 @@ func (s *Service) OpenThread(ctx context.Context, roomID, userID string, m membe
 	if !found || root.ChannelID != parent.ChannelID || !wire.PersistedFeedKind(root.Kind) {
 		return store.RoomChannel{}, errNotThreadable
 	}
-	title := threadTitle(body.Title, root)
-	th := store.ThreadOf(parent, ids.New("ch_"), body.RootSeq, title, userID, time.Now().UnixMilli())
+	return s.createThread(ctx, userID, m, parent, root, body.Title, nil)
+}
+
+// createThread makes the thread of root (a live message of parent) for its
+// opener: titled (threadTitle) and tagged (a forum's tags, of the parent's
+// vocabulary), followed by the opener and the root's author (C4), told to
+// the parent's stream, and, when the parent's agents answer every new thread
+// (C19), asked of its default agent. The one construction after the checks,
+// for a thread opened from a message and for a forum's post.
+func (s *Service) createThread(ctx context.Context, userID string, m membership.Member, parent store.RoomChannel, root store.RoomMessage, title string, tags []string) (store.RoomChannel, error) {
+	roomID := parent.RoomID
+	th := store.ThreadOf(parent, ids.New("ch_"), root.Seq, threadTitle(title, root), userID, time.Now().UnixMilli())
+	if known := forumTags(parent.Settings, tags); len(known) > 0 {
+		th.Thread.Tags = known
+	}
 	if err := s.Channels.PutChannel(ctx, th); err != nil {
 		if errors.Is(err, store.ErrThreadExists) {
 			// Opened concurrently: the one that won is the thread.
-			existing, found, gerr := s.Channels.ThreadOfRoot(ctx, roomID, parent.ChannelID, body.RootSeq)
+			existing, found, gerr := s.Channels.ThreadOfRoot(ctx, roomID, parent.ChannelID, root.Seq)
 			if gerr == nil && found {
 				return existing, nil
 			}
@@ -135,7 +148,68 @@ func (s *Service) OpenThread(ctx context.Context, roomID, userID string, m membe
 		}
 	}
 	s.publishThreadUpdated(ctx, th)
+	s.askChannelAgent(ctx, userID, parent, th, root)
 	return th, nil
+}
+
+// openPostThread opens the thread a forum's post is the root of (§2.1c): the
+// post (seq, just stored in channel) by p.Author, titled and tagged by the
+// post's thread fields.
+func (s *Service) openPostThread(ctx context.Context, p ChatPost, m membership.Member, channel store.RoomChannel, seq int64) (store.RoomChannel, error) {
+	root, found, err := s.Chat.GetRoomMessage(ctx, p.RoomID, seq)
+	if err != nil {
+		return store.RoomChannel{}, err
+	}
+	if !found {
+		return store.RoomChannel{}, errNotThreadable
+	}
+	var title string
+	var tags []string
+	if p.Thread != nil {
+		title, tags = p.Thread.ThreadTitle, p.Thread.ThreadTags
+	}
+	return s.createThread(ctx, p.Author, m, channel, root, title, tags)
+}
+
+// forumTags keeps the tags of the parent's own vocabulary (C20), once each,
+// at most MaxThreadTags; none outside a forum.
+func forumTags(parent wire.ChannelSettings, tags []string) []string {
+	if !parent.Forum() || len(tags) == 0 {
+		return nil
+	}
+	var out []string
+	for _, id := range tags {
+		id = strings.TrimSpace(id)
+		if slices.ContainsFunc(parent.Tags, func(t wire.ChannelTag) bool { return t.ID == id }) && !slices.Contains(out, id) && len(out) < wire.MaxThreadTags {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// askChannelAgent asks a new thread's question of its parent's default
+// agent when the parent's agents answer every new thread (C19 "threads"):
+// one message in the thread, as its opener, to that agent, marked automatic
+// (payload.agentAuto), through PostChat like any addressed message (the
+// agents switch, a platform agent's host, borrowing and the job are its).
+// Best effort: the thread is open whatever happens to the request.
+func (s *Service) askChannelAgent(ctx context.Context, opener string, parent store.RoomChannel, th store.RoomChannel, root store.RoomMessage) {
+	a := parent.Settings.DefaultAgent
+	if parent.Settings.AgentParticipation != wire.ChannelAgentsThreads || a == nil || a.OwnerID == "" || a.Provider == "" {
+		return
+	}
+	text := strings.TrimSpace(rootText(root))
+	if text == "" {
+		text = th.Name
+	}
+	if _, err := s.PostChat(ctx, ChatPost{
+		RoomID: parent.RoomID, Author: opener, Text: text, ChannelID: th.ChannelID,
+		ClientMsgID: "auto:" + th.ChannelID, AtUnixMs: time.Now().UnixMilli(),
+		Recipient: &ChatRecipient{OwnerID: a.OwnerID, Core: a.Core, Provider: a.Provider},
+		AgentAuto: true,
+	}); err != nil {
+		log.Printf("realtime: room=%s thread=%s: the channel's agent was not asked: %v", parent.RoomID, th.ChannelID, err)
+	}
 }
 
 // threadTitle is a thread's title: the opener's, else the root's first

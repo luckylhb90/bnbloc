@@ -73,12 +73,15 @@ func TestChannelPresetValidation(t *testing.T) {
 	bad("a status id that is no name", set("statuses", []map[string]any{{"id": "In Progress", "name": "In progress"}}), "lower-case")
 	bad("too many statuses", set("statuses", func() []map[string]any {
 		var out []map[string]any
-		for _, n := range names("s", maxPresetStatuses+1) {
+		for _, n := range names("s", wire.MaxChannelStatuses+1) {
 			out = append(out, map[string]any{"id": n, "name": n})
 		}
 		return out
 	}()), "at most")
-	bad("a long template", set("postTemplate", strings.Repeat("t", maxPostTemplate+1)), "longer than")
+	bad("a long template", set("postTemplate", strings.Repeat("t", wire.MaxPostTemplate+1)), "longer than")
+	// The room service's own rules (wire): a preset that validates applies.
+	bad("a posting style the room service does not take", set("postingStyle", "messages"), "postingStyle")
+	bad("a tag name over the room service's bound", set("tags", []map[string]any{{"id": "a", "name": strings.Repeat("n", wire.MaxChannelTagName+1)}}), "longer than")
 	if _, err := Validate(presetBundle(t, map[string]any{"purpose": "Notes"}, nil, nil), "", Options{}); err != nil {
 		t.Errorf("a preset of a purpose alone: %v", err)
 	}

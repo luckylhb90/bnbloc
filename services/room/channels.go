@@ -3,6 +3,7 @@ package room
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"slices"
@@ -101,6 +102,28 @@ func cleanChannelSettings(s wire.ChannelSettings) (wire.ChannelSettings, error) 
 	if s.SlowModeSeconds < 0 {
 		return s, errBadRequest("settings.slowModeSeconds must not be negative (0 is off)")
 	}
+	if !wire.IsChannelPostingStyle(s.PostingStyle) {
+		return s, errBadRequest("settings.postingStyle must be one of \"\" (messages) or \"threads\"")
+	}
+	if utf8.RuneCountInString(s.PostTemplate) > wire.MaxPostTemplate {
+		return s, errBadRequest("settings.postTemplate is too long")
+	}
+	tags, err := cleanVocabulary(s.Tags, wire.MaxChannelTags, "tags", func(t wire.ChannelTag) (string, string) { return t.ID, t.Name })
+	if err != nil {
+		return s, err
+	}
+	for i := range tags {
+		tags[i].Color = strings.TrimSpace(tags[i].Color)
+		if len(tags[i].Color) > 16 {
+			return s, errBadRequest("settings.tags: a color is a short name or #rrggbb")
+		}
+	}
+	s.Tags = tags
+	statuses, err := cleanVocabulary(s.Statuses, wire.MaxChannelStatuses, "statuses", func(t wire.ChannelStatus) (string, string) { return t.ID, t.Name })
+	if err != nil {
+		return s, err
+	}
+	s.Statuses = statuses
 	if a := s.DefaultAgent; a != nil {
 		// An agent is named by its key (owner, core, provider): a default
 		// agent without an owner or a provider names none.
@@ -111,6 +134,41 @@ func cleanChannelSettings(s wire.ChannelSettings) (wire.ChannelSettings, error) 
 		s.DefaultAgent = &cp
 	}
 	return s, nil
+}
+
+// cleanVocabulary checks a forum's tags or statuses (C20): at most max, each
+// a unique id (letters, digits, - and _, at most MaxChannelTagName) with a
+// one-line name of 1–MaxChannelTagName characters. It returns them trimmed;
+// nil for none.
+func cleanVocabulary[T wire.ChannelTag | wire.ChannelStatus](in []T, max int, what string, parts func(T) (string, string)) ([]T, error) {
+	if len(in) == 0 {
+		return nil, nil
+	}
+	if len(in) > max {
+		return nil, errBadRequest(fmt.Sprintf("settings.%s: at most %d", what, max))
+	}
+	seen := map[string]bool{}
+	out := make([]T, 0, len(in))
+	for _, v := range in {
+		id, name := parts(v)
+		id, name = strings.TrimSpace(id), strings.Join(strings.Fields(name), " ")
+		if !wire.ValidVocabularyID(id) || seen[id] {
+			return nil, errBadRequest(fmt.Sprintf("settings.%s: each needs a unique id of letters, digits, - or _", what))
+		}
+		if name == "" || utf8.RuneCountInString(name) > wire.MaxChannelTagName {
+			return nil, errBadRequest(fmt.Sprintf("settings.%s: each needs a name of at most %d characters", what, wire.MaxChannelTagName))
+		}
+		seen[id] = true
+		switch x := any(v).(type) {
+		case wire.ChannelTag:
+			x.ID, x.Name = id, name
+			out = append(out, any(x).(T))
+		case wire.ChannelStatus:
+			x.ID, x.Name = id, name
+			out = append(out, any(x).(T))
+		}
+	}
+	return out, nil
 }
 
 // channelCaller is the caller of a channel route: their membership.
