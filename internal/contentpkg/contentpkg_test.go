@@ -368,7 +368,7 @@ func TestReferencesAndLookup(t *testing.T) {
 	if k, ok := Lookup(KindSkill); !ok || k.Short != "skill" {
 		t.Fatal("lookup by kind")
 	}
-	if len(Kinds()) != 6 {
+	if len(Kinds()) != 7 {
 		t.Fatalf("kinds = %+v", Kinds())
 	}
 }

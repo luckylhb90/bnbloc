@@ -51,6 +51,9 @@ type Form struct {
 	Files        []wire.RoomPackageFile     `json:"files,omitempty"`
 	Sources      []wire.RoomSourceAsk       `json:"sources,omitempty"`
 	Captured     *RoomCapture               `json:"-"`
+
+	// A channel preset's channel setup (channel_preset.go).
+	Channel *wire.ChannelPreset `json:"channel,omitempty"`
 }
 
 // FormSkill is one skill written in the form: its SKILL.md is generated
@@ -81,6 +84,9 @@ func Build(f Form, version string, opts Options, base *Package) (*Package, []byt
 	}
 	if spec.Kind != KindRoom && (len(f.Sections)+len(f.Channels)+len(f.Schedules)+len(f.Apps)+len(f.AppSnapshots)+len(f.Files)+len(f.Sources) > 0 || f.Captured != nil) {
 		return nil, nil, errRoomFields
+	}
+	if spec.Kind != KindChannelPreset && f.Channel != nil {
+		return nil, nil, errPresetFields
 	}
 	m := Manifest{
 		Kind: spec.Kind, Name: strings.TrimSpace(f.Name), Version: version,

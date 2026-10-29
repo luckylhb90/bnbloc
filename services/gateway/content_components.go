@@ -186,6 +186,9 @@ func contentView(c store.ContentComponent, v store.ContentComponentVersion, clai
 	}
 	out.Assist = m.AssistSpec()
 	out.Room = m.RoomSpec()
+	if m.Kind == contentpkg.KindChannelPreset {
+		out.Channel = m.Channel
+	}
 	held := ownedBy(c, claims)
 	out.Mine = held && c.Scope == store.ContentScopePersonal
 	out.Removable = held && (c.Scope == store.ContentScopePersonal || c.Scope == store.ContentScopeShared)

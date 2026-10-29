@@ -216,8 +216,14 @@ func validateEnvelope(m Manifest, opts Options) error {
 	if m.Kind != KindAssist && (m.Output != "" || len(m.Fields) > 0 || len(m.Context) > 0 || m.Gate != nil) {
 		return errAssistFields
 	}
-	if m.Kind != KindRoom && (m.Requires.Expert != "" || len(m.Sections)+len(m.Channels)+len(m.Schedules)+len(m.Apps)+len(m.AppSnapshots)+len(m.Files)+len(m.Sources) > 0) {
+	if m.Kind != KindRoom && (len(m.Sections)+len(m.Channels)+len(m.Schedules)+len(m.Apps)+len(m.AppSnapshots)+len(m.Files)+len(m.Sources) > 0) {
 		return errRoomFields
+	}
+	if m.Kind != KindRoom && m.Kind != KindChannelPreset && m.Requires.Expert != "" {
+		return errRoomFields
+	}
+	if m.Kind != KindChannelPreset && m.Channel != nil {
+		return errPresetFields
 	}
 	r := m.Requires
 	if len(r.Skills)+len(r.Prompts)+len(r.MCP)+len(r.Permissions) > maxRequires {

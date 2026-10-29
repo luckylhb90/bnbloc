@@ -28,6 +28,9 @@ export const CONTENT_KINDS: Readonly<Record<ContentKind, { readonly word: string
   work: { word: "work", label: "Work", libraryTab: null, packageKind: "bnbloc.work.package/v1" },
   assist: { word: "AI assist", label: "AI assist", libraryTab: "assists", packageKind: "bnbloc.assist.package/v1" },
   room: { word: "room component", label: "Room", libraryTab: "rooms", packageKind: "bnbloc.room.package/v1" },
+  // A channel preset (docs/prd/2026-10-28-channels-and-threads.md §2.1c): a
+  // kind of channel, applied to a channel from its settings (lib/channelPresets.ts).
+  "channel-preset": { word: "channel preset", label: "Channel preset", libraryTab: null, packageKind: "bnbloc.channel.preset/v1" },
 };
 
 /** The Library tabs that list content components of a kind. */

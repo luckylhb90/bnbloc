@@ -39,7 +39,7 @@ const (
 // (component.RoomContentLimitsFile), and content that guides authoring
 // (the Expert builder) points there.
 func Limits() []Limit {
-	const all, expert, skill, prompt, team, work, assist, room = "every package", "expert", "skill pack", "prompt pack", "team expert", "work", "assist", "room package"
+	const all, expert, skill, prompt, team, work, assist, room, preset = "every package", "expert", "skill pack", "prompt pack", "team expert", "work", "assist", "room package", "channel preset"
 	return []Limit{
 		{all, "name", maxName, UnitChars},
 		{all, "displayName", maxDisplayName, UnitChars},
@@ -107,6 +107,19 @@ func Limits() []Limit {
 		{room, ReadmeFile, maxInstructions, UnitBytes},
 		{room, "files in the package", RoomLimits.MaxFiles, UnitFiles},
 		{room, "package size", RoomLimits.MaxBytes, UnitBytes},
+		{preset, "channel.purpose", wire.MaxChannelPurpose, UnitChars},
+		{preset, "channel.rules", wire.MaxChannelRules, UnitChars},
+		{preset, "channel.settings", maxPresetSettingsB, UnitBytes},
+		{preset, "channel.settings.slowModeSeconds (seconds)", maxPresetSlowMode, UnitItems},
+		{preset, "channel.settings.tags", maxPresetTags, UnitItems},
+		{preset, "channel.settings.statuses", maxPresetStatuses, UnitItems},
+		{preset, "tags[].id and statuses[].id", maxPresetTagID, UnitChars},
+		{preset, "tags[].name and statuses[].name", maxPresetTagName, UnitChars},
+		{preset, "tags[].color", maxPresetColor, UnitChars},
+		{preset, "channel.settings.postTemplate", maxPostTemplate, UnitChars},
+		{preset, ReadmeFile, maxInstructions, UnitBytes},
+		{preset, "files in the package", PresetLimits.MaxFiles, UnitFiles},
+		{preset, "package size", PresetLimits.MaxBytes, UnitBytes},
 	}
 }
 
@@ -116,7 +129,7 @@ func Limits() []Limit {
 func LimitsDoc() string {
 	var b strings.Builder
 	b.WriteString("# Content package limits\n\n")
-	b.WriteString("What bnbloc's validator allows in a content package (an expert, a skill pack, a prompt pack, an assist, a work, a room package); ")
+	b.WriteString("What bnbloc's validator allows in a content package (an expert, a skill pack, a prompt pack, an assist, a work, a room package, a channel preset); ")
 	b.WriteString("a save over any of them is refused. Generated from the validator's own checks and kept current by bnbloc.\n\n")
 	b.WriteString("| Applies to | Field | At most |\n|---|---|---|\n")
 	for _, l := range Limits() {

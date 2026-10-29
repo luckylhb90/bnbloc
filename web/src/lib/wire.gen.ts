@@ -2138,6 +2138,18 @@ export interface MyBudgetReply extends BudgetPeriod {
   blockedBy?: string;
 }
 
+// ---- wire/channel_presets.go ----
+
+// ChannelPreset is a preset's channel setup: the purpose and rules it gives
+// the channel and its settings document (JSON, ChannelSettings' keys without
+// a default agent: a preset names no people). Empty fields are left as the
+// channel has them.
+export interface ChannelPreset {
+  purpose?: string;
+  rules?: string;
+  settings?: unknown;
+}
+
 // ---- wire/channels.go ----
 
 // ChannelAgent is a channel's default agent, by its key (owner, core,
@@ -3190,6 +3202,9 @@ export interface ContentComponent {
   // Room is a room package's setup (its channels, schedules, apps and
   // sources); absent for the other kinds.
   room?: RoomSpec;
+  // Channel is a channel preset's channel setup (what applying it sets);
+  // absent for the other kinds.
+  channel?: ChannelPreset;
   createdAtMs: number;
   updatedAtMs: number;
 }
@@ -8116,8 +8131,8 @@ export const ComponentRuntimeValues: readonly ComponentRuntime[] = ["stdio", "en
 export type ComponentRollout = "auto" | "optin" | "off";
 export const ComponentRolloutValues: readonly ComponentRollout[] = ["auto", "optin", "off"];
 // A content component kind's short name (the contentpkg registry).
-export type ContentKind = "assist" | "expert" | "prompt" | "room" | "skill" | "work";
-export const ContentKindValues: readonly ContentKind[] = ["assist", "expert", "prompt", "room", "skill", "work"];
+export type ContentKind = "assist" | "channel-preset" | "expert" | "prompt" | "room" | "skill" | "work";
+export const ContentKindValues: readonly ContentKind[] = ["assist", "channel-preset", "expert", "prompt", "room", "skill", "work"];
 
 // ---- tables computed by their Go owners ----
 // The job statuses store.AgentJobStatus.Terminal reports finished; every
