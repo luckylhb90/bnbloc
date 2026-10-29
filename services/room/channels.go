@@ -194,6 +194,11 @@ func channelView(c store.RoomChannel, f store.ChannelFollow) wire.RoomChannel {
 	if c.ArchivedAtMs != nil {
 		v.ArchivedAtMs = *c.ArchivedAtMs
 	}
+	if c.IsThread() {
+		info := c.ThreadInfo()
+		v.Joined = f.ChannelID != ""
+		v.Thread = &info
+	}
 	return v
 }
 
@@ -245,6 +250,12 @@ func (s *Service) viewFor(w http.ResponseWriter, r *http.Request, roomID, channe
 // room (room-wide, wire.EventChannelUpdated).
 func (s *Service) publishChannelUpdated(ctx context.Context, roomID, channelID, sectionID string) {
 	if s.Publisher == nil {
+		return
+	}
+	// A thread's change (its title, its archive) redraws its root's line
+	// in the parent's stream; the listing has nothing to reload.
+	if ch, found, err := s.Channels.GetChannel(ctx, roomID, channelID); err == nil && found && ch.IsThread() {
+		s.publishThreadUpdated(ctx, ch)
 		return
 	}
 	s.Publisher.Publish(ctx, wire.Event{
@@ -303,7 +314,9 @@ func (s *Service) handleListChannels(w http.ResponseWriter, r *http.Request) {
 	out := wire.ChannelList{Channels: []wire.RoomChannel{}, Sections: []wire.RoomSection{}, Groups: groups}
 	for _, c := range channels {
 		switch {
-		case c.IsPeople():
+		case !c.Listed():
+			// The people chat and threads are no channels of the room's
+			// list (threads: GET .../threads, under their parent).
 			continue
 		case forAgents:
 			// decision: channels PRD §2.1 ("agents admitted ... a channel
@@ -385,7 +398,7 @@ func (s *Service) handleChannelDirectory(w http.ResponseWriter, r *http.Request)
 	}
 	out := wire.ChannelDirectory{Channels: []wire.ChannelDirectoryEntry{}, Sections: []wire.RoomSection{}}
 	for _, c := range channels {
-		if c.IsPeople() || c.Archived() || !access.MayReadChannel(c) {
+		if !c.Listed() || c.Archived() || !access.MayReadChannel(c) {
 			continue
 		}
 		out.Channels = append(out.Channels, wire.ChannelDirectoryEntry{RoomChannel: channelView(c, follows[c.ChannelID]), Followers: counts[c.ChannelID]})
@@ -555,6 +568,10 @@ func (s *Service) handlePatchChannel(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, "the people chat is not configurable", http.StatusConflict)
 		return
 	}
+	if ch.IsThread() {
+		s.patchThread(w, r, roomID, who, ch)
+		return
+	}
 	if !mayManageChannel(who.role, who.user, ch, sec) {
 		httpx.Error(w, "only the room's owner, an admin, the channel's owner or its section's owners change this channel", http.StatusForbidden)
 		return
@@ -695,7 +712,15 @@ func (s *Service) handleArchiveChannel(archive bool) http.HandlerFunc {
 			httpx.Error(w, "the default channel and the people chat cannot be archived", http.StatusConflict)
 			return
 		}
-		if !mayManageChannel(who.role, who.user, ch, sec) {
+		if ch.IsThread() {
+			// decision: channels PRD C3 (a person archives a thread: any
+			// member who may post in it, as anyone who may post edits its
+			// title, §2.2).
+			if who.role == store.RoleVisitor {
+				httpx.Error(w, "visitors do not archive threads", http.StatusForbidden)
+				return
+			}
+		} else if !mayManageChannel(who.role, who.user, ch, sec) {
 			httpx.Error(w, "only the room's owner, an admin, the channel's owner or its section's owners archive or restore this channel", http.StatusForbidden)
 			return
 		}

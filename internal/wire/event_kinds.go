@@ -108,6 +108,10 @@ var RoomEventKinds = []EventKindSpec{
 	// room-wide, so listings reload and realtime re-scopes the member's
 	// streams at once (C11: never shown to a preview).
 	{Name: EventSectionMembership},
+	// A thread opened, renamed, archived or replied in (realtime and
+	// bnbloc-room): scoped to the thread's parent channel, whose stream
+	// redraws the root's summary line.
+	{Name: EventThreadUpdated, ChannelScoped: true, Preview: true},
 }
 
 var eventKinds = func() map[string]EventKindSpec {

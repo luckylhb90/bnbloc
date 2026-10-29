@@ -186,6 +186,7 @@ func (s *Service) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/rooms/{roomId}/artifacts/{artifactId}/state", s.handleArtifactState)
 	mux.HandleFunc("GET /v1/rooms/{roomId}/artifacts/{artifactId}/state", s.handleGetArtifactState)
 	mux.HandleFunc("GET /v1/rooms/{roomId}/channels", s.handleListChannels)
+	mux.HandleFunc("GET /v1/rooms/{roomId}/channel-threads", s.handleListThreads)
 	mux.HandleFunc("POST /v1/rooms/{roomId}/channels", s.handleCreateChannel)
 	mux.HandleFunc("PATCH /v1/rooms/{roomId}/channels/{channelId}", s.handlePatchChannel)
 	mux.HandleFunc("DELETE /v1/rooms/{roomId}/channels/{channelId}", s.handleDeleteChannel)

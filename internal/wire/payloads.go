@@ -25,7 +25,23 @@ type ChatMessagePayload struct {
 	ContinuedFrom *ContinueMarker `json:"continuedFrom,omitempty"`
 	// Imported marks a row a handoff import wrote.
 	Imported *ImportedMarker `json:"imported,omitempty"`
+	// ReplyTo is the message this one answers (§2.3), as its sender quoted
+	// it: its sequence, author and the start of its text, fixed at send.
+	ReplyTo *ReplyRef `json:"replyTo,omitempty"`
 }
+
+// ReplyRef is the message a chat message answers (ChatMessagePayload.ReplyTo):
+// a message of the same channel, or a thread's root (a thread's messages
+// answer its root by default). Author and Excerpt are what the server read
+// of it when the reply was posted, so the quote reads the same later.
+type ReplyRef struct {
+	Seq     int64  `json:"seq"`
+	Author  string `json:"author,omitempty"`
+	Excerpt string `json:"excerpt,omitempty"`
+}
+
+// MaxReplyExcerpt bounds ReplyRef.Excerpt (runes).
+const MaxReplyExcerpt = 200
 
 // ChatRecipientRef is the agent a chat message addresses.
 type ChatRecipientRef struct {

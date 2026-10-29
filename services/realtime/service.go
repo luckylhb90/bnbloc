@@ -233,6 +233,11 @@ type ChannelStore interface {
 	// channel_access.go).
 	ListSections(ctx context.Context, roomID string) ([]store.RoomSection, error)
 	MemberSections(ctx context.Context, roomID, userID string) ([]string, error)
+	// Threads (threads.go): a channel opened from a message, and its
+	// replies counted on its root.
+	PutChannel(ctx context.Context, c store.RoomChannel) error
+	ThreadOfRoot(ctx context.Context, roomID, parentID string, rootSeq int64) (store.RoomChannel, bool, error)
+	NoteThreadReply(ctx context.Context, roomID, threadID, author string, atMs int64) (store.RoomChannel, error)
 }
 
 // BridgeJobStore persists durable agent jobs created from agent-directed chat.
@@ -267,6 +272,7 @@ func (s *Service) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/rooms/{roomId}/events", s.handleEvents)
 	mux.HandleFunc("GET /v1/rooms/{roomId}/agents", s.handleAgents)
 	mux.HandleFunc("POST /v1/rooms/{roomId}/chat", s.handleChat)
+	mux.HandleFunc("POST /v1/rooms/{roomId}/threads", s.handleOpenThread)
 	mux.HandleFunc("POST /v1/rooms/{roomId}/attachments", s.handleUploadAttachment)
 	mux.HandleFunc("GET /v1/rooms/{roomId}/attachments/{attachmentId}", s.handleDownloadAttachment)
 	mux.HandleFunc("GET /v1/rooms/{roomId}/attachments/{attachmentId}/meta", s.handleAttachmentMeta)
@@ -744,6 +750,8 @@ func (s *Service) handleChat(w http.ResponseWriter, r *http.Request) {
 		// FileRef names the room file the message is about (an edit
 		// request from the workbench's Ask AI panel).
 		FileRef *wire.FileRef `json:"fileRef,omitempty"`
+		// ReplyTo is the sequence of the message this one answers (§2.3).
+		ReplyTo int64 `json:"replyTo,omitempty"`
 	}
 	// Cap the request body so a client cannot stream an unbounded payload; the
 	// text limit in PostChat is the product bound, this is defense-in-depth.
@@ -761,6 +769,7 @@ func (s *Service) handleChat(w http.ResponseWriter, r *http.Request) {
 		AttachmentIDs: body.AttachmentIds,
 		Expert:        body.Expert,
 		FileRef:       body.FileRef,
+		ReplyTo:       body.ReplyTo,
 	})
 	if err != nil {
 		writeChatPostErr(w, err)
@@ -791,6 +800,8 @@ func writeChatPostErr(w http.ResponseWriter, err error) {
 		httpx.Error(w, err.Error(), http.StatusBadRequest)
 	case errors.Is(err, errUnknownChannel):
 		httpx.Error(w, err.Error(), http.StatusNotFound)
+	case errors.Is(err, errBadReply):
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
 	default:
 		obs.ServerError(w, "message persistence failed", err)
 		httpx.Error(w, "message persistence failed", http.StatusInternalServerError)
@@ -847,6 +858,11 @@ func (s *Service) handleInternalPublish(w http.ResponseWriter, r *http.Request) 
 		obs.ServerError(w, "publish failed", err)
 		httpx.Error(w, "publish failed", http.StatusInternalServerError)
 		return
+	}
+	if ev.Kind == wire.KindAgentMessages {
+		// An agent's reply in a thread counts on its root (no person
+		// joins its participants).
+		s.noteThreadPost(r.Context(), roomID, ev.ChannelID, "", ev.AtUnixMs)
 	}
 	w.WriteHeader(http.StatusOK)
 }

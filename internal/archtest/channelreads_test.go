@@ -41,6 +41,7 @@ func TestChannelReadsAskTheRule(t *testing.T) {
 		"services/realtime/room_events.go:causeRoom":       "reads a job's room and client id to name an event's cause",
 		"services/realtime/handoff.go:handleInternalFeed":  "the room service's handoff export only, which filters by the exporter's access (handoff_export.go)",
 		"services/realtime/service.go:messageChannel":      "reads a message's channel id for its caller to check (edit, delete)",
+		"services/realtime/threads.go:replyRef":            "reads the quoted message only when it is of the channel the poster may read (PostChat asked) or that thread's root",
 		// room
 		"services/room/appdata.go:serveApp":                 "the app the request's signed app scope names (its ticket or its agent's job)",
 		"services/room/channels.go:handleGetPeopleChat":     "the people chat is no section's",

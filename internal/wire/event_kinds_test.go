@@ -128,6 +128,8 @@ func TestPreviewEventKinds(t *testing.T) {
 		KindChatMessage: true, KindAgentMessages: true, EventMessageDeleted: true, EventMessageEdited: true,
 		EventArtifactUpdated: true, EventArtifactState: true, EventMemberJoined: true, EventMemberRemoved: true, EventRoomDeleted: true,
 		EventChannelUpdated: true,
+		// A thread's root line in a channel a preview reads (§2.2).
+		EventThreadUpdated: true,
 	}
 	members := map[string]bool{
 		EventAgentJobCreated: true, EventAgentJobUpdated: true, EventAgentJobProgress: true, EventJobLiveFrame: true,

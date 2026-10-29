@@ -124,6 +124,22 @@ func threadSettings(parent wire.ChannelSettings) wire.ChannelSettings {
 	return wire.ChannelSettings{NoAgents: parent.NoAgents}
 }
 
+// ThreadInfo is the wire view of a thread's parent, root and activity
+// (zero for a channel that is no thread); ThreadUpdated the payload that
+// tells its parent's stream. The one projection of both, for realtime and
+// bnbloc-room.
+func (c RoomChannel) ThreadInfo() wire.ThreadInfo {
+	p := slices.Clone(c.Thread.Participants)
+	if p == nil {
+		p = []string{}
+	}
+	return wire.ThreadInfo{ParentID: c.ParentID, RootSeq: c.RootSeq, Replies: c.Thread.Replies, LastReplyAtMs: c.Thread.LastReplyAtMs, Participants: p}
+}
+
+func (c RoomChannel) ThreadUpdated() wire.ThreadUpdatedPayload {
+	return wire.ThreadUpdatedPayload{ThreadID: c.ChannelID, Title: c.Name, Archived: c.Archived(), Thread: c.ThreadInfo()}
+}
+
 // noteThreadReply is the one change NoteThreadReply makes to a thread's
 // stats: one more reply at atMs, author (a person, "" for an agent) among
 // the participants.

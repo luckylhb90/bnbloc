@@ -102,6 +102,10 @@ type ChatPost struct {
 	// FileRef names the room file the message is about (version 0 = the
 	// current one); validated and completed (version, name) on post.
 	FileRef *wire.FileRef
+	// ReplyTo is the sequence of the message this one answers (§2.3): a
+	// live message of the same channel, or of a thread's parent when it is
+	// the thread's root. Completed (author, excerpt) on post.
+	ReplyTo int64
 }
 
 // ChatPosted is what PostChat did: the message's sequence and, for an agent
@@ -220,6 +224,13 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) 
 	if fileRef != nil {
 		payload["fileRef"] = *fileRef
 	}
+	if p.ReplyTo > 0 {
+		ref, err := s.replyRef(ctx, p.RoomID, channel, p.ReplyTo)
+		if err != nil {
+			return ChatPosted{}, err
+		}
+		payload["replyTo"] = ref
+	}
 	if p.Scheduled != nil {
 		payload["scheduled"] = map[string]any{"scheduleId": p.Scheduled.ScheduleID}
 	}
@@ -281,6 +292,8 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) 
 	s.pulseMessageSent(ctx, p.RoomID, ev.Sequence, agent, p.Author)
 	// decision: channels PRD C18 (being mentioned joins the channel).
 	s.joinMentioned(ctx, p.RoomID, channelID, p.Author, text)
+	// A reply in a thread counts on its root (§2.2).
+	s.noteThreadPost(ctx, p.RoomID, channelID, p.Author, ev.AtUnixMs)
 	if agent && s.BridgeJobs != nil {
 		coreName := strings.TrimSpace(p.Recipient.Core)
 		var model, reasoningEffort string

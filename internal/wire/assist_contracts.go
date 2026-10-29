@@ -34,6 +34,12 @@ const (
 	AssistTaskDraftChannelPurpose = "draft-channel-purpose"
 	AssistTaskDraftRoomRules      = "draft-room-rules"
 	AssistTaskFindChannel         = "find-channel"
+	// The threads' assists (§2.2, §4): a thread's title from its root and
+	// first replies, and the summary posted to its parent when it is done
+	// (what was decided, what is still open). The web sends the thread's
+	// text; the member posts what they accept.
+	AssistTaskDraftThreadTitle = "draft-thread-title"
+	AssistTaskSummarizeThread  = "summarize-thread"
 )
 
 // AssistContract is what an assist named Task must answer: its output, the
@@ -142,6 +148,10 @@ var AssistContracts = []AssistContract{
 	}},
 	{Task: AssistTaskDraftChannelPurpose, Output: AssistOutputJSON, Fields: []AssistContractField{{Name: "purpose"}}},
 	{Task: AssistTaskDraftRoomRules, Output: AssistOutputJSON, Fields: []AssistContractField{{Name: "rules"}, {Name: "welcome"}}},
+	{Task: AssistTaskDraftThreadTitle, Output: AssistOutputJSON, Fields: []AssistContractField{{Name: "title"}}},
+	{Task: AssistTaskSummarizeThread, Output: AssistOutputJSON, Fields: []AssistContractField{
+		{Name: "decided", Type: AssistFieldList}, {Name: "open", Type: AssistFieldList}, {Name: "summary"},
+	}},
 	{Task: AssistTaskFindChannel, Output: AssistOutputJSON, Fields: []AssistContractField{
 		{Name: "answer"},
 		{Name: "channels", Type: AssistFieldItems, Item: []AssistContractField{{Name: "channelId"}, {Name: "why"}}},

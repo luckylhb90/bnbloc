@@ -93,6 +93,58 @@ type RoomChannel struct {
 	// GroupID is the caller's own group the channel sits in on their rail
 	// ("" none; C24). Never another member's.
 	GroupID string `json:"groupId"`
+	// Thread is set for a thread (Kind ChannelKindThread): its parent, root
+	// message and activity.
+	Thread *ThreadInfo `json:"thread,omitempty"`
+}
+
+// ChannelKindThread is RoomChannel.Kind of a thread (§2.2, C1): a channel
+// opened from one message, never listed among the room's channels.
+const ChannelKindThread = "thread"
+
+// ThreadInfo is what a thread is of its parent: the channel and message it
+// was opened from, and what its root shows (reply count, last activity,
+// participants).
+type ThreadInfo struct {
+	ParentID      string   `json:"parentId"`
+	RootSeq       int64    `json:"rootSeq"`
+	Replies       int      `json:"replies"`
+	LastReplyAtMs int64    `json:"lastReplyAtMs,omitempty"`
+	Participants  []string `json:"participants"`
+}
+
+// ThreadOpenRequest is POST /v1/rooms/{id}/threads: open (or get) the
+// thread of message RootSeq of channel ParentID. Title is optional (the
+// root's first words when empty).
+type ThreadOpenRequest struct {
+	ParentID string `json:"parentId"`
+	RootSeq  int64  `json:"rootSeq"`
+	Title    string `json:"title,omitempty"`
+}
+
+// ThreadList is GET /v1/rooms/{id}/channel-threads: the threads the caller may read
+// (?parent=<channel> one channel's; ?followed=1 the ones they follow, unread
+// first on the web), each with their following.
+type ThreadList struct {
+	Threads []RoomChannel `json:"threads"`
+}
+
+// MaxThreadTitle bounds a thread's title (its name).
+const MaxThreadTitle = 120
+
+// EventThreadUpdated (ThreadUpdatedPayload) is published by realtime when a
+// reply lands in a thread and by bnbloc-room when one is opened, renamed or
+// archived: the parent channel's stream updates its root's summary line.
+// Channel-scoped to the PARENT channel, so a reader of the parent receives
+// it (and only a reader: the thread's readers are its parent's).
+const EventThreadUpdated = "thread_updated"
+
+// ThreadUpdatedPayload names the thread and its root, with its activity.
+type ThreadUpdatedPayload struct {
+	ThreadID string     `json:"threadId"`
+	Title    string     `json:"title"`
+	Archived bool       `json:"archived,omitempty"`
+	Thread   ThreadInfo `json:"thread"`
 }
 
 // ChannelGroup is one of the caller's own groups of their channel rail

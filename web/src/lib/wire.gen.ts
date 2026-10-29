@@ -1893,6 +1893,12 @@ export const AssistTaskFindAWay = "find-a-way";
 export const AssistTaskDraftChannelPurpose = "draft-channel-purpose";
 export const AssistTaskDraftRoomRules = "draft-room-rules";
 export const AssistTaskFindChannel = "find-channel";
+// The threads' assists (§2.2, §4): a thread's title from its root and
+// first replies, and the summary posted to its parent when it is done
+// (what was decided, what is still open). The web sends the thread's
+// text; the member posts what they accept.
+export const AssistTaskDraftThreadTitle = "draft-thread-title";
+export const AssistTaskSummarizeThread = "summarize-thread";
 
 // AssistContract is what an assist named Task must answer: its output, the
 // fields of a JSON reply the caller reads (a package may declare more,
@@ -1924,7 +1930,7 @@ export interface AssistContractField {
 }
 
 // AssistContracts are the contracts, one per task name.
-export const AssistContracts: readonly AssistContract[] = [{ task: "enhance-prompt", output: "text" }, { task: "describe-work", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "category", values: ["office", "data", "productivity", "content", "learning", "engineering", "finance", "life", "other"] }, { name: "tags", type: "list" }] }, { task: "describe-room", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "category" }, { name: "tags", type: "list" }, { name: "welcome" }, { name: "instructions" }, { name: "dependsOn", type: "items", item: [{ name: "what" }, { name: "kind", values: ["instructions", "app", "file", "tool", "schedule", "agent", "data", "other"] }, { name: "included", values: ["yes", "no"] }, { name: "why" }] }, { name: "findings", type: "items", item: [{ name: "field" }, { name: "quote" }, { name: "why", values: ["secret", "internal-link", "personal-name", "private-data"] }] }] }, { task: "draft-expert", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "instructions" }, { name: "welcome" }, { name: "quickPrompts", type: "items", item: [{ name: "title" }, { name: "prompt" }] }, { name: "tags", type: "list" }] }, { task: "draft-skill-pack", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "skills", type: "items", item: [{ name: "name" }, { name: "description" }, { name: "body" }] }, { name: "tags", type: "list" }] }, { task: "draft-prompt-pack", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "prompts", type: "items", item: [{ name: "title" }, { name: "body" }] }, { name: "tags", type: "list" }] }, { task: "plan-room", output: "json", fields: [{ name: "roomId" }, { name: "name" }, { name: "description" }, { name: "expert" }, { name: "skills", type: "list" }, { name: "firstMessage" }, { name: "sections", type: "items", item: [{ name: "name" }, { name: "rules" }] }, { name: "channels", type: "items", item: [{ name: "name" }, { name: "purpose" }, { name: "section" }] }] }, { task: "draft-schedule", output: "json", fields: [{ name: "text" }, { name: "kind", values: ["once", "daily", "weekly", "cron"] }, { name: "time" }, { name: "days", type: "list" }, { name: "cron" }, { name: "at" }] }, { task: "explain-source-use", output: "json", fields: [{ name: "summary" }, { name: "uses", type: "list" }, { name: "mismatch" }], consent: true }, { task: "review-skill", output: "json", fields: [{ name: "findings", type: "list" }, { name: "name" }, { name: "displayName" }, { name: "description" }, { name: "tags", type: "list" }] }, { task: "fill-settings", output: "json", fields: [{ name: "values", type: "items", item: [{ name: "key" }, { name: "value" }] }, { name: "notes" }] }, { task: "suggest-skill-dirs", output: "json", fields: [{ name: "add", type: "items", item: [{ name: "path" }, { name: "why" }] }, { name: "notes" }] }, { task: "find-a-way", output: "json", fields: [{ name: "cause", values: ["access", "missing-file", "capability", "unclear", "agent-error", "other"] }, { name: "summary" }, { name: "fixes", type: "items", item: [{ name: "action", values: ["install", "ask-agent", "attach", "own-agent", "rephrase", "report", "allow-host"] }, { name: "target" }, { name: "why" }] }], gate: true }, { task: "draft-channel-purpose", output: "json", fields: [{ name: "purpose" }] }, { task: "draft-room-rules", output: "json", fields: [{ name: "rules" }, { name: "welcome" }] }, { task: "find-channel", output: "json", fields: [{ name: "answer" }, { name: "channels", type: "items", item: [{ name: "channelId" }, { name: "why" }] }] }];
+export const AssistContracts: readonly AssistContract[] = [{ task: "enhance-prompt", output: "text" }, { task: "describe-work", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "category", values: ["office", "data", "productivity", "content", "learning", "engineering", "finance", "life", "other"] }, { name: "tags", type: "list" }] }, { task: "describe-room", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "category" }, { name: "tags", type: "list" }, { name: "welcome" }, { name: "instructions" }, { name: "dependsOn", type: "items", item: [{ name: "what" }, { name: "kind", values: ["instructions", "app", "file", "tool", "schedule", "agent", "data", "other"] }, { name: "included", values: ["yes", "no"] }, { name: "why" }] }, { name: "findings", type: "items", item: [{ name: "field" }, { name: "quote" }, { name: "why", values: ["secret", "internal-link", "personal-name", "private-data"] }] }] }, { task: "draft-expert", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "instructions" }, { name: "welcome" }, { name: "quickPrompts", type: "items", item: [{ name: "title" }, { name: "prompt" }] }, { name: "tags", type: "list" }] }, { task: "draft-skill-pack", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "skills", type: "items", item: [{ name: "name" }, { name: "description" }, { name: "body" }] }, { name: "tags", type: "list" }] }, { task: "draft-prompt-pack", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "prompts", type: "items", item: [{ name: "title" }, { name: "body" }] }, { name: "tags", type: "list" }] }, { task: "plan-room", output: "json", fields: [{ name: "roomId" }, { name: "name" }, { name: "description" }, { name: "expert" }, { name: "skills", type: "list" }, { name: "firstMessage" }, { name: "sections", type: "items", item: [{ name: "name" }, { name: "rules" }] }, { name: "channels", type: "items", item: [{ name: "name" }, { name: "purpose" }, { name: "section" }] }] }, { task: "draft-schedule", output: "json", fields: [{ name: "text" }, { name: "kind", values: ["once", "daily", "weekly", "cron"] }, { name: "time" }, { name: "days", type: "list" }, { name: "cron" }, { name: "at" }] }, { task: "explain-source-use", output: "json", fields: [{ name: "summary" }, { name: "uses", type: "list" }, { name: "mismatch" }], consent: true }, { task: "review-skill", output: "json", fields: [{ name: "findings", type: "list" }, { name: "name" }, { name: "displayName" }, { name: "description" }, { name: "tags", type: "list" }] }, { task: "fill-settings", output: "json", fields: [{ name: "values", type: "items", item: [{ name: "key" }, { name: "value" }] }, { name: "notes" }] }, { task: "suggest-skill-dirs", output: "json", fields: [{ name: "add", type: "items", item: [{ name: "path" }, { name: "why" }] }, { name: "notes" }] }, { task: "find-a-way", output: "json", fields: [{ name: "cause", values: ["access", "missing-file", "capability", "unclear", "agent-error", "other"] }, { name: "summary" }, { name: "fixes", type: "items", item: [{ name: "action", values: ["install", "ask-agent", "attach", "own-agent", "rephrase", "report", "allow-host"] }, { name: "target" }, { name: "why" }] }], gate: true }, { task: "draft-channel-purpose", output: "json", fields: [{ name: "purpose" }] }, { task: "draft-room-rules", output: "json", fields: [{ name: "rules" }, { name: "welcome" }] }, { task: "draft-thread-title", output: "json", fields: [{ name: "title" }] }, { task: "summarize-thread", output: "json", fields: [{ name: "decided", type: "list" }, { name: "open", type: "list" }, { name: "summary" }] }, { task: "find-channel", output: "json", fields: [{ name: "answer" }, { name: "channels", type: "items", item: [{ name: "channelId" }, { name: "why" }] }] }];
 
 // ---- wire/attachment_types.go ----
 
@@ -2199,6 +2205,58 @@ export interface RoomChannel {
   // GroupID is the caller's own group the channel sits in on their rail
   // ("" none; C24). Never another member's.
   groupId: string;
+  // Thread is set for a thread (Kind ChannelKindThread): its parent, root
+  // message and activity.
+  thread?: ThreadInfo;
+}
+
+// ChannelKindThread is RoomChannel.Kind of a thread (§2.2, C1): a channel
+// opened from one message, never listed among the room's channels.
+export const ChannelKindThread = "thread";
+
+// ThreadInfo is what a thread is of its parent: the channel and message it
+// was opened from, and what its root shows (reply count, last activity,
+// participants).
+export interface ThreadInfo {
+  parentId: string;
+  rootSeq: number;
+  replies: number;
+  lastReplyAtMs?: number;
+  participants: string[];
+}
+
+// ThreadOpenRequest is POST /v1/rooms/{id}/threads: open (or get) the
+// thread of message RootSeq of channel ParentID. Title is optional (the
+// root's first words when empty).
+export interface ThreadOpenRequest {
+  parentId: string;
+  rootSeq: number;
+  title?: string;
+}
+
+// ThreadList is GET /v1/rooms/{id}/channel-threads: the threads the caller may read
+// (?parent=<channel> one channel's; ?followed=1 the ones they follow, unread
+// first on the web), each with their following.
+export interface ThreadList {
+  threads: RoomChannel[];
+}
+
+// MaxThreadTitle bounds a thread's title (its name).
+export const MaxThreadTitle = 120;
+
+// EventThreadUpdated (ThreadUpdatedPayload) is published by realtime when a
+// reply lands in a thread and by bnbloc-room when one is opened, renamed or
+// archived: the parent channel's stream updates its root's summary line.
+// Channel-scoped to the PARENT channel, so a reader of the parent receives
+// it (and only a reader: the thread's readers are its parent's).
+export const EventThreadUpdated = "thread_updated";
+
+// ThreadUpdatedPayload names the thread and its root, with its activity.
+export interface ThreadUpdatedPayload {
+  threadId: string;
+  title: string;
+  archived?: boolean;
+  thread: ThreadInfo;
 }
 
 // ChannelGroup is one of the caller's own groups of their channel rail
@@ -4013,7 +4071,7 @@ export interface EventKindSpec {
 // RoomEventKinds is the registry of room event kinds. The web's
 // RoomEventKind union (and RoomEventKindValues) is generated from the Name
 // of each row: a kind registered here is a kind the web listens for.
-export const RoomEventKinds: readonly EventKindSpec[] = [{ name: "chat_message", durable: true, replay: true, channelScoped: true, preview: true }, { name: "agent_messages", durable: true, replay: true, channelScoped: true, preview: true }, { name: "agent_job_created", channelScoped: true }, { name: "agent_job_updated", channelScoped: true }, { name: "agent_job_progress", channelScoped: true }, { name: "job_live_frame", channelScoped: true }, { name: "agent_session_state" }, { name: "agent_roster" }, { name: "presence_join" }, { name: "presence_leave" }, { name: "presence_snapshot" }, { name: "presence_typing", channelScoped: true }, { name: "message_deleted", channelScoped: true, preview: true }, { name: "message_edited", channelScoped: true, preview: true }, { name: "task_updated", channelScoped: true }, { name: "artifact_updated", crossChannel: true, preview: true }, { name: "artifact_state", crossChannel: true, preview: true }, { name: "member_joined", preview: true }, { name: "member_removed", revocation: true, preview: true }, { name: "room_deleted", revocation: true, preview: true }, { name: "content_saved" }, { name: "content_uses_changed" }, { name: "app_changed" }, { name: "channel_updated", preview: true }, { name: "section_membership" }];
+export const RoomEventKinds: readonly EventKindSpec[] = [{ name: "chat_message", durable: true, replay: true, channelScoped: true, preview: true }, { name: "agent_messages", durable: true, replay: true, channelScoped: true, preview: true }, { name: "agent_job_created", channelScoped: true }, { name: "agent_job_updated", channelScoped: true }, { name: "agent_job_progress", channelScoped: true }, { name: "job_live_frame", channelScoped: true }, { name: "agent_session_state" }, { name: "agent_roster" }, { name: "presence_join" }, { name: "presence_leave" }, { name: "presence_snapshot" }, { name: "presence_typing", channelScoped: true }, { name: "message_deleted", channelScoped: true, preview: true }, { name: "message_edited", channelScoped: true, preview: true }, { name: "task_updated", channelScoped: true }, { name: "artifact_updated", crossChannel: true, preview: true }, { name: "artifact_state", crossChannel: true, preview: true }, { name: "member_joined", preview: true }, { name: "member_removed", revocation: true, preview: true }, { name: "room_deleted", revocation: true, preview: true }, { name: "content_saved" }, { name: "content_uses_changed" }, { name: "app_changed" }, { name: "channel_updated", preview: true }, { name: "section_membership" }, { name: "thread_updated", channelScoped: true, preview: true }];
 
 // ---- wire/events.go ----
 
@@ -5486,7 +5544,23 @@ export interface ChatMessagePayload {
   continuedFrom?: ContinueMarker;
   // Imported marks a row a handoff import wrote.
   imported?: ImportedMarker;
+  // ReplyTo is the message this one answers (§2.3), as its sender quoted
+  // it: its sequence, author and the start of its text, fixed at send.
+  replyTo?: ReplyRef;
 }
+
+// ReplyRef is the message a chat message answers (ChatMessagePayload.ReplyTo):
+// a message of the same channel, or a thread's root (a thread's messages
+// answer its root by default). Author and Excerpt are what the server read
+// of it when the reply was posted, so the quote reads the same later.
+export interface ReplyRef {
+  seq: number;
+  author?: string;
+  excerpt?: string;
+}
+
+// MaxReplyExcerpt bounds ReplyRef.Excerpt (runes).
+export const MaxReplyExcerpt = 200;
 
 // ChatRecipientRef is the agent a chat message addresses.
 export interface ChatRecipientRef {
@@ -7922,8 +7996,8 @@ export type AssistSkipReason = "below" | "no-gate";
 export const AssistSkipReasonValues: readonly AssistSkipReason[] = ["below", "no-gate"];
 export type AssistFieldType = "text" | "list" | "items";
 export const AssistFieldTypeValues: readonly AssistFieldType[] = ["text", "list", "items"];
-export type AssistTaskName = "enhance-prompt" | "describe-work" | "describe-room" | "draft-expert" | "draft-skill-pack" | "draft-prompt-pack" | "plan-room" | "draft-schedule" | "explain-source-use" | "review-skill" | "fill-settings" | "suggest-skill-dirs" | "find-a-way" | "draft-channel-purpose" | "draft-room-rules" | "find-channel";
-export const AssistTaskNameValues: readonly AssistTaskName[] = ["enhance-prompt", "describe-work", "describe-room", "draft-expert", "draft-skill-pack", "draft-prompt-pack", "plan-room", "draft-schedule", "explain-source-use", "review-skill", "fill-settings", "suggest-skill-dirs", "find-a-way", "draft-channel-purpose", "draft-room-rules", "find-channel"];
+export type AssistTaskName = "enhance-prompt" | "describe-work" | "describe-room" | "draft-expert" | "draft-skill-pack" | "draft-prompt-pack" | "plan-room" | "draft-schedule" | "explain-source-use" | "review-skill" | "fill-settings" | "suggest-skill-dirs" | "find-a-way" | "draft-channel-purpose" | "draft-room-rules" | "find-channel" | "draft-thread-title" | "summarize-thread";
+export const AssistTaskNameValues: readonly AssistTaskName[] = ["enhance-prompt", "describe-work", "describe-room", "draft-expert", "draft-skill-pack", "draft-prompt-pack", "plan-room", "draft-schedule", "explain-source-use", "review-skill", "fill-settings", "suggest-skill-dirs", "find-a-way", "draft-channel-purpose", "draft-room-rules", "find-channel", "draft-thread-title", "summarize-thread"];
 export type AttachmentContent = "png" | "jpeg" | "gif" | "webp" | "pdf" | "zip" | "ole" | "text" | "isomedia" | "webm" | "mp3" | "wav" | "ogg";
 export const AttachmentContentValues: readonly AttachmentContent[] = ["png", "jpeg", "gif", "webp", "pdf", "zip", "ole", "text", "isomedia", "webm", "mp3", "wav", "ogg"];
 export type ChannelWhoPosts = "" | "admins";
@@ -7946,8 +8020,8 @@ export type ContentSavedAction = "saved" | "submitted" | "published";
 export const ContentSavedActionValues: readonly ContentSavedAction[] = ["saved", "submitted", "published"];
 export type DecisionQuestionType = "predicate" | "choice" | "score";
 export const DecisionQuestionTypeValues: readonly DecisionQuestionType[] = ["predicate", "choice", "score"];
-export type RoomEventKind = "chat_message" | "agent_messages" | "agent_job_created" | "agent_job_updated" | "agent_job_progress" | "job_live_frame" | "agent_session_state" | "agent_roster" | "presence_join" | "presence_leave" | "presence_snapshot" | "presence_typing" | "message_deleted" | "message_edited" | "task_updated" | "artifact_updated" | "artifact_state" | "member_joined" | "member_removed" | "room_deleted" | "content_saved" | "content_uses_changed" | "app_changed" | "channel_updated" | "section_membership";
-export const RoomEventKindValues: readonly RoomEventKind[] = ["chat_message", "agent_messages", "agent_job_created", "agent_job_updated", "agent_job_progress", "job_live_frame", "agent_session_state", "agent_roster", "presence_join", "presence_leave", "presence_snapshot", "presence_typing", "message_deleted", "message_edited", "task_updated", "artifact_updated", "artifact_state", "member_joined", "member_removed", "room_deleted", "content_saved", "content_uses_changed", "app_changed", "channel_updated", "section_membership"];
+export type RoomEventKind = "chat_message" | "agent_messages" | "agent_job_created" | "agent_job_updated" | "agent_job_progress" | "job_live_frame" | "agent_session_state" | "agent_roster" | "presence_join" | "presence_leave" | "presence_snapshot" | "presence_typing" | "message_deleted" | "message_edited" | "task_updated" | "artifact_updated" | "artifact_state" | "member_joined" | "member_removed" | "room_deleted" | "content_saved" | "content_uses_changed" | "app_changed" | "channel_updated" | "section_membership" | "thread_updated";
+export const RoomEventKindValues: readonly RoomEventKind[] = ["chat_message", "agent_messages", "agent_job_created", "agent_job_updated", "agent_job_progress", "job_live_frame", "agent_session_state", "agent_roster", "presence_join", "presence_leave", "presence_snapshot", "presence_typing", "message_deleted", "message_edited", "task_updated", "artifact_updated", "artifact_state", "member_joined", "member_removed", "room_deleted", "content_saved", "content_uses_changed", "app_changed", "channel_updated", "section_membership", "thread_updated"];
 export type EventSubscriptionSource = "bnbloc/platform" | "bnbloc/room" | "bnbloc/member" | "webhook";
 export const EventSubscriptionSourceValues: readonly EventSubscriptionSource[] = ["bnbloc/platform", "bnbloc/room", "bnbloc/member", "webhook"];
 export type PlatformEventType = "platform.deployed" | "component.published" | "desktop.published";
