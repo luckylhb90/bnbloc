@@ -557,7 +557,20 @@ export interface EgressHosts {
   // seen by the component (a system other tools also call, where the
   // component handles one API).
   paths?: Record<string, string[]>;
+  // Files, from a provider on this computer for a sandboxed run, are small
+  // text files a CLI wants beside its environment (a configuration the
+  // placeholders in Env refer to): the bridge writes them under the
+  // workspace's .room/egress/<provider>/ at each turn (names: one path
+  // segment, see ValidProviderFile; at most MaxProviderFiles and
+  // MaxProviderFilesBytes together) and `{files}` in an Env value is that
+  // folder's path in the guest. Never a credential: the folder is the
+  // agent's to read.
+  files?: Record<string, string>;
 }
+
+// Bounds of the files a provider hands a sandboxed run (EgressHosts.Files).
+export const MaxProviderFiles = 8;
+export const MaxProviderFilesBytes = 65536;
 
 // MaxEgressHosts bounds the hosts one component claims.
 export const MaxEgressHosts = 256;

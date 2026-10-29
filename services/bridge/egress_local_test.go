@@ -229,3 +229,56 @@ func TestACoreThatAdvertisesEgressProviderIsAProvider(t *testing.T) {
 		t.Fatalf("the core saw %v", saw)
 	}
 }
+
+// A provider's files go into the sandboxed workspace's .room/egress/providers/<name>/
+// at each turn (replaced whole), invalid names and oversize sets are dropped, and
+// `{files}` in an Env value is the folder's path in the guest.
+func TestProviderFilesReachTheSandboxedWorkspace(t *testing.T) {
+	state := t.TempDir()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(component.EgressHosts{Hosts: []string{"api.model.example.com"},
+			Env:   map[string]string{"APP_HOME": "{files}", "PLAIN": "x"},
+			Files: map[string]string{"config.yaml": "model: x\n", "../escape": "no", ".hidden": "no", "a/b": "no"}})
+	}))
+	defer srv.Close()
+	_ = os.MkdirAll(filepath.Join(state, "egress-providers", "acme"), 0o755)
+	raw, _ := json.Marshal(component.EgressProviderFile{Contract: component.EgressProviderContract, URL: srv.URL})
+	_ = os.WriteFile(filepath.Join(state, "egress-providers", "acme", component.EgressProviderFileName), raw, 0o600)
+	gw := emptyGateway(t)
+	ln, _ := net.Listen("tcp", "127.0.0.1:0")
+	port := ln.Addr().(*net.TCPAddr).Port
+	_ = ln.Close()
+	b := New(Config{GatewayBaseURL: gw.URL, GatewayToken: "t", OwnerSubject: "maya", StateDir: state, Sandbox: SandboxConfig{HostProxy: fmt.Sprintf("host.vm.internal:%d", port)}})
+	stop, err := b.EnableRoomTools("/opt/bnbloc/bnbloc-bridge")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	workdir := t.TempDir()
+	own := &component.ProviderTurn{Turn: component.Turn{Room: "room-1", Job: "job-1", Drive: component.DriveOwn}, Provider: "hermes"}
+	env := b.sandbox.spaceEnv(context.Background(), workdir, "room-1", "job-1", own)
+	dir := filepath.Join(workdir, ".room", "egress", "providers", "acme")
+	if env["APP_HOME"] != dir || env["PLAIN"] != "x" {
+		t.Fatalf("env = %v, want APP_HOME=%s", env, dir)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "config.yaml"))
+	if err != nil || string(got) != "model: x\n" {
+		t.Fatalf("config.yaml = %q %v", got, err)
+	}
+	ents, _ := os.ReadDir(dir)
+	if len(ents) != 1 {
+		t.Fatalf("invalid names were written: %v", ents)
+	}
+	// A stale file is gone on the next turn.
+	_ = os.WriteFile(filepath.Join(dir, "stale"), []byte("x"), 0o644)
+	b.sandbox.spaceEnv(context.Background(), workdir, "room-1", "job-2", own)
+	if _, err := os.Stat(filepath.Join(dir, "stale")); err == nil {
+		t.Fatal("a stale provider file stayed")
+	}
+	// A run that is not the member's own gets no files.
+	other := t.TempDir()
+	b.sandbox.spaceEnv(context.Background(), other, "room-1", "job-3", nil)
+	if _, err := os.Stat(filepath.Join(other, ".room", "egress", "providers")); err == nil {
+		t.Fatal("a run that is not own got provider files")
+	}
+}

@@ -240,6 +240,9 @@ func (c *roomToolsContributor) hooks(sess *roomtools.Session, egress bool, sandb
 				sess.SetLocalProviders(cl.local)
 				sess.SetEgressHosts(cl.hosts, cl.streams)
 				sess.SetEgressPaths(cl.paths)
+				if sandboxWorkdir != "" {
+					c.writeProviderFiles(sandboxWorkdir, cl, nil)
+				}
 			}
 		}, func(t TurnInfo) {
 			sess.Unbind(t.JobID)
@@ -364,6 +367,7 @@ func (c *roomToolsContributor) egressEnv(ctx context.Context, info SessionInfo, 
 	sess.SetEgressPaths(cl.paths)
 	if info.Sandboxed {
 		c.writeSandboxCA(info.Workdir)
+		c.writeProviderFiles(info.Workdir, cl, nil)
 		return nil, true
 	}
 	maps.Copy(env, proxy)
@@ -407,9 +411,12 @@ func (c *roomToolsContributor) sandboxEgressEnv(ctx context.Context, workdir, ro
 	env := map[string]string{}
 	if job != "" {
 		actx, cancel := context.WithTimeout(ctx, egressAskTimeout)
-		placeholders := c.b.egressFor(actx, room, job, nil, own).env
+		claims := c.b.egressFor(actx, room, job, nil, own)
 		cancel()
-		maps.Copy(env, placeholders)
+		for k, v := range claims.env {
+			env[k] = v
+		}
+		c.writeProviderFiles(workdir, claims, env)
 	}
 	maps.Copy(env, c.srv.EgressEnv(c.egressAlias(workdir), c.b.cfg.Sandbox.HostProxy))
 	env["NODE_EXTRA_CA_CERTS"] = caFile
@@ -419,6 +426,31 @@ func (c *roomToolsContributor) sandboxEgressEnv(ctx context.Context, workdir, ro
 		}
 	}
 	return env
+}
+
+// writeProviderFiles writes the local providers' files into the sandboxed
+// workspace (.room/egress/<provider>/, replaced whole at each turn: a provider
+// that hands none leaves none) and names the folder in env's `{files:<provider>}`
+// tokens. The folder is the agent's to read: a provider puts no credential
+// in it.
+func (c *roomToolsContributor) writeProviderFiles(workdir string, claims egressClaims, env map[string]string) {
+	base := filepath.Join(workdir, filepath.FromSlash(sandboxEgressDir))
+	for provider, files := range claims.files {
+		dir := filepath.Join(base, "providers", provider)
+		_ = os.RemoveAll(dir)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			slog.Warn("bnbloc bridge provider files not written", "event", "bnbloc.bridge.provider_files_failed", "provider", provider, "error", err)
+			continue
+		}
+		for name, content := range files {
+			if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+				slog.Warn("bnbloc bridge provider file not written", "event", "bnbloc.bridge.provider_files_failed", "provider", provider, "file", name, "error", err)
+			}
+		}
+		for k, v := range env {
+			env[k] = strings.ReplaceAll(v, providerFilesToken(roomtools.LocalPrefix+provider), dir)
+		}
+	}
 }
 
 // writeSandboxCA copies the proxy's CA (and the bundle with the system's

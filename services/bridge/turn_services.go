@@ -184,6 +184,7 @@ func serviceFactFiles(facts []serviceFacts) []roomlog.NamedFile {
 // its hosts never go out unauthenticated (and takes no streamed body).
 func (b *Bridge) egressFor(ctx context.Context, room, job string, prev map[string]string, own *component.ProviderTurn) egressClaims {
 	hosts, env, streams, paths := map[string]string{}, map[string]string{}, map[string]bool{}, map[string][]string{}
+	files := map[string]map[string]string{}
 	var local []*roomtools.LocalProvider
 	type source struct {
 		name string
@@ -232,14 +233,43 @@ func (b *Bridge) egressFor(ctx context.Context, room, job string, prev map[strin
 				paths[host] = ps
 			}
 		}
+		if fs := validProviderFiles(h.Files); len(fs) > 0 && strings.HasPrefix(name, roomtools.LocalPrefix) {
+			files[strings.TrimPrefix(name, roomtools.LocalPrefix)] = fs
+		}
 		for k, v := range h.Env {
 			if _, taken := env[k]; !taken && validEnvName(k) {
-				env[k] = v
+				env[k] = strings.ReplaceAll(v, "{files}", providerFilesToken(name))
 			}
 		}
 	}
 	slog.Info("bnbloc bridge egress hosts", "event", "bnbloc.bridge.egress_hosts", "room", room, "job", job, "hosts", len(hosts))
-	return egressClaims{hosts: hosts, env: env, streams: streams, paths: paths, local: local}
+	return egressClaims{hosts: hosts, env: env, streams: streams, paths: paths, local: local, files: files}
+}
+
+// providerFilesToken stands for a provider's files folder in an Env value
+// until the folder's path is known (the workspace's, writeProviderFiles).
+func providerFilesToken(service string) string {
+	return "{files:" + strings.TrimPrefix(service, roomtools.LocalPrefix) + "}"
+}
+
+// validProviderFiles keeps the files a provider may hand a run: valid names, at
+// most component.MaxProviderFiles and component.MaxProviderFilesBytes together.
+func validProviderFiles(in map[string]string) map[string]string {
+	names := make([]string, 0, len(in))
+	for n := range in {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	out := map[string]string{}
+	total := 0
+	for _, n := range names {
+		if !component.ValidProviderFile(n) || len(out) >= component.MaxProviderFiles || total+len(in[n]) > component.MaxProviderFilesBytes {
+			continue
+		}
+		out[n] = in[n]
+		total += len(in[n])
+	}
+	return out
 }
 
 // hasEgress reports whether a session may have the egress proxy: an
@@ -311,6 +341,9 @@ type egressClaims struct {
 	// local are the providers on this computer asked for the job (the
 	// session answers their hosts' requests through them).
 	local []*roomtools.LocalProvider
+	// files are the local providers' files, by provider name: written under
+	// the sandboxed workspace's .room/egress/<provider>/ at each turn.
+	files map[string]map[string]string
 }
 
 // validPaths keeps a claim's path prefixes that start with "/" (at most 64).

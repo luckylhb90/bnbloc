@@ -337,6 +337,36 @@ type EgressHosts struct {
 	// seen by the component (a system other tools also call, where the
 	// component handles one API).
 	Paths map[string][]string `json:"paths,omitempty"`
+	// Files, from a provider on this computer for a sandboxed run, are small
+	// text files a CLI wants beside its environment (a configuration the
+	// placeholders in Env refer to): the bridge writes them under the
+	// workspace's .room/egress/<provider>/ at each turn (names: one path
+	// segment, see ValidProviderFile; at most MaxProviderFiles and
+	// MaxProviderFilesBytes together) and `{files}` in an Env value is that
+	// folder's path in the guest. Never a credential: the folder is the
+	// agent's to read.
+	Files map[string]string `json:"files,omitempty"`
+}
+
+// Bounds of the files a provider hands a sandboxed run (EgressHosts.Files).
+const (
+	MaxProviderFiles      = 8
+	MaxProviderFilesBytes = 64 << 10
+)
+
+// ValidProviderFile reports a file name a provider may hand: one path
+// segment of letters, digits, dot, dash and underscore, not starting with a
+// dot.
+func ValidProviderFile(name string) bool {
+	if name == "" || len(name) > 64 || name[0] == '.' {
+		return false
+	}
+	for _, r := range name {
+		if !(r == '.' || r == '-' || r == '_' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9') {
+			return false
+		}
+	}
+	return true
 }
 
 // MaxEgressHosts bounds the hosts one component claims.

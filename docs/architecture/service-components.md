@@ -183,6 +183,12 @@ The bridge's room tools server is also the session's HTTPS proxy
     computer that authenticates for its caller); an organization's service
     cannot. Release order: the platform first (an older bridge or CLI rejects a
     package that declares the capability as unknown), then the core.
+  - **Files for a sandboxed run** (`EgressHosts.Files`): a provider may hand a
+    run a few small text files (at most 8, 64 KiB, one path segment each) the
+    CLI wants beside its environment; the bridge writes them under the
+    workspace's `.room/egress/providers/<provider>/` at the session's start and
+    each turn (replaced whole), and `{files}` in an `Env` value is that folder.
+    The folder is the agent's to read: never a credential.
   - **Upgrade**: a request with `Upgrade` to a claimed host is answered `426`
     and never sent (a client that opens a WebSocket first falls back to HTTPS
     at once, and nothing carries the credential).
