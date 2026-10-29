@@ -398,3 +398,25 @@ func TestTheGuestsPortDoesNotServeTheRelayOrAForeignHost(t *testing.T) {
 		t.Errorf("GuestURL without a proxy port = %q, want none", got)
 	}
 }
+
+// An agent in the guest names the host the tools are on by its own alias; that name must not go
+// through the egress proxy. An agent whose MCP client honours the proxy variables (qwen's) would
+// otherwise tunnel to a name no resolver has ("host.microsandbox.internal does not resolve") and run
+// without its tools, with nothing said.
+func TestTheGuestsHostIsNotProxied(t *testing.T) {
+	srv, _, _, _ := guestServer(t)
+	env := srv.EgressEnv("token-token-token-token", srv.cfg.GuestHost)
+	host, _, _ := net.SplitHostPort(srv.cfg.GuestHost)
+	for _, k := range []string{"NO_PROXY", "no_proxy"} {
+		if !strings.Contains(","+env[k]+",", ","+host+",") {
+			t.Errorf("%s = %q, want the guest's name for the host (%s) in it", k, env[k], host)
+		}
+		if !strings.Contains(env[k], "127.0.0.1") {
+			t.Errorf("%s = %q lost the loopback addresses", k, env[k])
+		}
+	}
+	// On this computer the proxy is the server's own loopback address: nothing to add.
+	if own := srv.EgressEnv("token-token-token-token", ""); strings.Count(own["NO_PROXY"], ",") != 2 {
+		t.Errorf("NO_PROXY on this computer = %q, want only the loopback names", own["NO_PROXY"])
+	}
+}

@@ -145,9 +145,17 @@ func (s *Server) EgressEnv(token, proxyHost string) map[string]string {
 		proxyHost = s.Addr()
 	}
 	proxy := "http://" + url.UserPassword(EgressProxyUser, token).String() + "@" + proxyHost
+	// What is not proxied: this computer's own addresses, and the guest's name for the host the
+	// proxy runs on. An agent in the guest reaches its tools there directly (the port serves them
+	// beside the proxy); sent through the proxy instead, the call is a tunnel to a name no resolver
+	// has, and an agent whose MCP client honours the proxy variables (qwen's) runs without its tools.
+	noProxy := "localhost,127.0.0.1,::1"
+	if host, _, err := net.SplitHostPort(proxyHost); err == nil && host != "" && !loopbackHostname(host) {
+		noProxy += "," + host
+	}
 	env := map[string]string{
 		"HTTPS_PROXY": proxy, "https_proxy": proxy,
-		"NO_PROXY": "localhost,127.0.0.1,::1", "no_proxy": "localhost,127.0.0.1,::1",
+		"NO_PROXY": noProxy, "no_proxy": noProxy,
 		"NODE_USE_ENV_PROXY": "1",
 	}
 	if s.ca.caFile != "" {
