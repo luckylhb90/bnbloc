@@ -174,18 +174,28 @@ type ThreadMarkRequest struct {
 	AnsweredSeq *int64    `json:"answeredSeq,omitempty"`
 }
 
-// ThreadPostRequest is POST /v1/rooms/{id}/threads/post: a new post in a
-// forum channel (ChannelSettings.Forum), stored as the root of a new thread
-// titled Title (the post's first words when empty) and tagged Tags.
-type ThreadPostRequest struct {
-	ChannelID     string   `json:"channelId"`
-	Title         string   `json:"title,omitempty"`
-	Text          string   `json:"text"`
-	ClientMsgID   string   `json:"clientMsgId,omitempty"`
-	AtUnixMs      int64    `json:"atUnixMs,omitempty"`
-	AttachmentIDs []string `json:"attachmentIds,omitempty"`
-	Tags          []string `json:"tags,omitempty"`
+// ChatThreadFields are what a post in a forum channel (ChannelSettings.Forum)
+// adds to a chat message (POST /v1/rooms/{id}/chat): every top-level post
+// there opens a thread whose root it is, titled ThreadTitle (the post's
+// first words when empty) and tagged ThreadTags (the channel's tag ids).
+// The answer names the thread (ChatPostReply.ThreadID).
+type ChatThreadFields struct {
+	ThreadTitle string   `json:"threadTitle,omitempty"`
+	ThreadTags  []string `json:"threadTags,omitempty"`
 }
+
+// ChatPostReply is POST /v1/rooms/{id}/chat's answer: the message's
+// sequence and, for a post in a forum, the thread it opened.
+type ChatPostReply struct {
+	Sequence int64  `json:"sequence"`
+	ThreadID string `json:"threadId,omitempty"`
+}
+
+// MessageAgentAuto is a chat message's payload marker (payload.agentAuto)
+// for a post the channel's default agent was asked to answer by its agent
+// participation (C19), not by its author: the web says so, and a person
+// can stop the run.
+const MessageAgentAuto = "agentAuto"
 
 // ThreadOpenRequest is POST /v1/rooms/{id}/threads: open (or get) the
 // thread of message RootSeq of channel ParentID. Title is optional (the

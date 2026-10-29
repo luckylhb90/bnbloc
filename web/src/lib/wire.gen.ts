@@ -2277,18 +2277,28 @@ export interface ThreadMarkRequest {
   answeredSeq?: number;
 }
 
-// ThreadPostRequest is POST /v1/rooms/{id}/threads/post: a new post in a
-// forum channel (ChannelSettings.Forum), stored as the root of a new thread
-// titled Title (the post's first words when empty) and tagged Tags.
-export interface ThreadPostRequest {
-  channelId: string;
-  title?: string;
-  text: string;
-  clientMsgId?: string;
-  atUnixMs?: number;
-  attachmentIds?: string[];
-  tags?: string[];
+// ChatThreadFields are what a post in a forum channel (ChannelSettings.Forum)
+// adds to a chat message (POST /v1/rooms/{id}/chat): every top-level post
+// there opens a thread whose root it is, titled ThreadTitle (the post's
+// first words when empty) and tagged ThreadTags (the channel's tag ids).
+// The answer names the thread (ChatPostReply.ThreadID).
+export interface ChatThreadFields {
+  threadTitle?: string;
+  threadTags?: string[];
 }
+
+// ChatPostReply is POST /v1/rooms/{id}/chat's answer: the message's
+// sequence and, for a post in a forum, the thread it opened.
+export interface ChatPostReply {
+  sequence: number;
+  threadId?: string;
+}
+
+// MessageAgentAuto is a chat message's payload marker (payload.agentAuto)
+// for a post the channel's default agent was asked to answer by its agent
+// participation (C19), not by its author: the web says so, and a person
+// can stop the run.
+export const MessageAgentAuto = "agentAuto";
 
 // ThreadOpenRequest is POST /v1/rooms/{id}/threads: open (or get) the
 // thread of message RootSeq of channel ParentID. Title is optional (the

@@ -753,6 +753,8 @@ func (s *Service) handleChat(w http.ResponseWriter, r *http.Request) {
 		FileRef *wire.FileRef `json:"fileRef,omitempty"`
 		// ReplyTo is the sequence of the message this one answers (§2.3).
 		ReplyTo int64 `json:"replyTo,omitempty"`
+		// A forum post's thread title and tags (§2.1c).
+		wire.ChatThreadFields
 	}
 	// Cap the request body so a client cannot stream an unbounded payload; the
 	// text limit in PostChat is the product bound, this is defense-in-depth.
@@ -771,13 +773,18 @@ func (s *Service) handleChat(w http.ResponseWriter, r *http.Request) {
 		Expert:        body.Expert,
 		FileRef:       body.FileRef,
 		ReplyTo:       body.ReplyTo,
+		Thread:        &body.ChatThreadFields,
 	})
 	if err != nil {
 		writeChatPostErr(w, err)
 		return
 	}
+	reply := wire.ChatPostReply{Sequence: posted.Sequence}
+	if posted.Thread != nil {
+		reply.ThreadID = posted.Thread.ChannelID
+	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]int64{"sequence": posted.Sequence})
+	_ = json.NewEncoder(w).Encode(reply)
 }
 
 // writeChatPostErr maps a PostChat error to its HTTP status.
