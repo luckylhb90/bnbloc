@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -385,6 +386,18 @@ func (s *Server) serveClaimed(raw net.Conn, buffered *bufio.Reader, sess *Sessio
 			}
 			req.Header.Del("Expect")
 		}
+		if req.Header.Get("Upgrade") != "" {
+			// A WebSocket (or any upgrade) to a claimed host is refused here,
+			// never sent as a plain request that would carry a credential: the
+			// client falls back to HTTPS at once (docs/prd/2026-10-27-model-credentials.md §3.4).
+			resp := egressError(http.StatusUpgradeRequired, "an upgrade to "+host+" goes through this proxy as plain HTTPS only")
+			resp.Close = true
+			_ = req.Body.Close()
+			_ = tconn.SetDeadline(time.Time{})
+			_ = resp.Write(idleWriter{c: tconn})
+			_ = resp.Body.Close()
+			return
+		}
 		if !sess.claimsPath(host, req.URL.Path) {
 			// A path the service does not handle on this host: it goes out
 			// from here as the command sent it (the service never sees it).
@@ -420,11 +433,39 @@ func (s *Server) serveClaimed(raw net.Conn, buffered *bufio.Reader, sess *Sessio
 		// unread): it ends with this answer, and the body is never drained.
 		resp.Close = req.Close || large
 		_ = tconn.SetDeadline(time.Time{})
+		stop := watchCommand(tconn, br, resp.Body)
 		err = resp.Write(idleWriter{c: tconn})
+		stop()
 		_ = resp.Body.Close()
 		if err != nil || resp.Close {
 			return
 		}
+	}
+}
+
+// watchCommand ends a relayed answer when the command goes away: the answer
+// waits on the system, which may be silent for minutes, and nothing is
+// written to the command meanwhile to find out. It watches the command's
+// connection for the end of the stream (without consuming a byte a next
+// request may have already sent) and closes the answer's body, which ends the
+// send and tells the provider. The returned stop must run before the
+// connection is read again.
+func watchCommand(c net.Conn, br *bufio.Reader, body io.Closer) (stop func()) {
+	ru, ok := body.(*relayUsage)
+	if !ok {
+		return func() {}
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if _, err := br.Peek(1); err != nil && !errors.Is(err, os.ErrDeadlineExceeded) {
+			ru.abort()
+		}
+	}()
+	return func() {
+		_ = c.SetReadDeadline(time.Now())
+		<-done
+		_ = c.SetReadDeadline(time.Time{})
 	}
 }
 
@@ -459,21 +500,52 @@ func (w idleWriter) Write(p []byte) (int, error) {
 // idleConn is a connection of a send from this computer: each byte read or
 // written moves both deadlines, so a long upload keeps the answer's read
 // alive and a connection with nothing moving ends after egressIdle.
-type idleConn struct{ net.Conn }
+type idleConn struct {
+	net.Conn
+	idle time.Duration // 0: egressIdle
+}
+
+func (c idleConn) window() time.Duration {
+	if c.idle > 0 {
+		return c.idle
+	}
+	return egressIdle
+}
 
 func (c idleConn) Read(p []byte) (int, error) {
-	_ = c.SetDeadline(time.Now().Add(egressIdle))
+	_ = c.SetDeadline(time.Now().Add(c.window()))
 	n, err := c.Conn.Read(p)
 	if n > 0 {
-		_ = c.SetDeadline(time.Now().Add(egressIdle))
+		_ = c.SetDeadline(time.Now().Add(c.window()))
 	}
 	return n, err
 }
 
 func (c idleConn) Write(p []byte) (int, error) {
-	_ = c.SetDeadline(time.Now().Add(egressIdle))
+	_ = c.SetDeadline(time.Now().Add(c.window()))
 	return c.Conn.Write(p)
 }
+
+// relayClient sends a relayed request (a model call): its connection is
+// its own, never pooled, with the idle window the Send named (relayIdleKey),
+// so a model that thinks for minutes is not cut by the 2 minutes a git
+// clone is held to.
+var relayClient = &http.Client{
+	Transport: &http.Transport{Proxy: http.ProxyFromEnvironment, DisableCompression: true, DisableKeepAlives: true, TLSHandshakeTimeout: 15 * time.Second,
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			c, err := (&net.Dialer{Timeout: egressDialTimeout}).DialContext(ctx, network, addr)
+			if err != nil {
+				return nil, err
+			}
+			idle, _ := ctx.Value(relayIdleKey{}).(time.Duration)
+			return idleConn{Conn: c, idle: idle}, nil
+		}},
+	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+}
+
+// relayIdleKey carries a relayed send's idle window to the dial that
+// serves it (the request's context reaches DialContext).
+type relayIdleKey struct{}
 
 // hopHeaders never cross the proxy.
 var hopHeaders = []string{"Connection", "Proxy-Connection", "Keep-Alive", "Proxy-Authorization", "Proxy-Authenticate", "Te", "Trailer", "Transfer-Encoding", "Upgrade"}
@@ -496,7 +568,23 @@ func (s *Server) egressRoundTrip(sess *Session, host, service string, req *http.
 	in := component.EgressRequest{Method: req.Method, URL: "https://" + host + req.URL.RequestURI(), Header: header, Body: body, Streamed: stream != nil}
 	scope := sess.Scope()
 	path := component.TurnProxyPath + url.PathEscape(service) + "/egress/request?room=" + url.QueryEscape(scope.RoomID) + "&job=" + url.QueryEscape(job.JobID)
-	sent, out, xerr := exchange(context.Background(), s.cfg.Gateway, path, service, host, in, stream, func(c component.Card) { s.postCard(sess, job, service, c) })
+	ask := asker(func(ctx context.Context, in component.EgressRequest) ([]byte, error) {
+		return s.cfg.Gateway.Do(ctx, http.MethodPost, path, in)
+	})
+	hooks := exchangeHooks{onCard: func(c component.Card) { s.postCard(sess, job, service, c) }}
+	if strings.HasPrefix(service, LocalPrefix) {
+		// A provider on this computer serves the member's own run only: a
+		// claim left from another turn, or a provider that went away, answers
+		// 503 and nothing is sent.
+		lp, ok := sess.localProvider(service)
+		if !ok {
+			obs.ServerError(nil, "egress: "+serviceLabel(service)+" does not serve this run: "+host+" job "+job.JobID, nil)
+			return egressError(http.StatusServiceUnavailable, "the request to "+host+" was not sent: "+serviceLabel(service)+" does not serve this run")
+		}
+		ask = lp.ask(sess.providerTurn(job))
+		hooks.onUsage = func(u component.EgressUsage) { lp.report(sess.providerTurn(job), u) }
+	}
+	sent, out, xerr := exchange(context.Background(), ask, service, host, in, stream, hooks)
 	if xerr != nil {
 		obs.ServerError(nil, "egress: "+service+" "+host+" job "+job.JobID, xerr.cause)
 		return egressError(xerr.status, xerr.msg)
@@ -521,6 +609,18 @@ func (s *Server) egressRoundTrip(sess *Session, host, service string, req *http.
 	return resp
 }
 
+// asker puts one egress question to the component: through the gateway's
+// turn proxy for an organization's service, over loopback for a local
+// provider (egress_local.go).
+type asker func(ctx context.Context, in component.EgressRequest) ([]byte, error)
+
+// exchangeHooks are what an exchange tells its caller: a card to post, and
+// (a relayed answer) the usage when it ended.
+type exchangeHooks struct {
+	onCard  func(component.Card)
+	onUsage func(component.EgressUsage)
+}
+
 // exchangeError is why an exchange ended without the service's answer:
 // the status and message the command gets, and the cause for the log.
 type exchangeError struct {
@@ -536,7 +636,9 @@ type exchangeError struct {
 // with the service's answer (Accept: sent is the system's, its body still
 // streaming, for the caller to close) or why not. A card in an answer goes
 // to onCard. A streamed body (stream) is sent once.
-func exchange(ctx context.Context, gw Gateway, path, service, host string, in component.EgressRequest, stream *streamBody, onCard func(component.Card)) (*http.Response, component.EgressResponse, *exchangeError) {
+func exchange(ctx context.Context, ask asker, service, host string, in component.EgressRequest, stream *streamBody, h exchangeHooks) (*http.Response, component.EgressResponse, *exchangeError) {
+	who := serviceLabel(service)
+	onCard := h.onCard
 	var sent *http.Response
 	drop := func() {
 		if sent != nil {
@@ -547,21 +649,21 @@ func exchange(ctx context.Context, gw Gateway, path, service, host string, in co
 	signIns := 0
 	for attempt := 0; ; attempt++ {
 		actx, cancel := context.WithTimeout(ctx, egressAsk)
-		raw, err := gw.Do(actx, http.MethodPost, path, in)
+		raw, err := ask(actx, in)
 		cancel()
 		if err != nil {
 			drop()
 			var se *StatusError
-			msg := "the " + service + " service could not be reached"
+			msg := who + " could not be reached"
 			if errors.As(err, &se) {
-				msg = fmt.Sprintf("the %s service refused the call (%s): %s", service, httpStatusText(se.Status), strings.TrimSpace(string(bytes.TrimSpace(se.Body))))
+				msg = fmt.Sprintf("%s refused the call (%s): %s", who, httpStatusText(se.Status), strings.TrimSpace(string(bytes.TrimSpace(se.Body))))
 			}
 			return nil, component.EgressResponse{}, &exchangeError{http.StatusBadGateway, msg, err}
 		}
 		var out component.EgressResponse
 		if json.Unmarshal(raw, &out) != nil || !(out.Send != nil || (out.Accept && sent != nil) || (out.Status >= 100 && out.Status <= 599)) {
 			drop()
-			return nil, component.EgressResponse{}, &exchangeError{http.StatusBadGateway, "the " + service + " service answered something that is not an egress response", nil}
+			return nil, component.EgressResponse{}, &exchangeError{http.StatusBadGateway, who + " answered something that is not an egress response", nil}
 		}
 		if out.Card != nil && onCard != nil {
 			onCard(*out.Card)
@@ -580,7 +682,7 @@ func exchange(ctx context.Context, gw Gateway, path, service, host string, in co
 			// itself waits for the next answer.
 			u, _ := url.Parse(in.URL)
 			if signIns++; signIns > component.MaxEgressSignIns || u == nil {
-				return nil, component.EgressResponse{}, &exchangeError{http.StatusBadGateway, "the " + service + " service kept asking to sign in again", nil}
+				return nil, component.EgressResponse{}, &exchangeError{http.StatusBadGateway, who + " kept asking to sign in again", nil}
 			}
 			steps, err := sendSteps(ctx, in, out.Send, sessionFor(service, u, out.Send))
 			if err != nil {
@@ -591,16 +693,21 @@ func exchange(ctx context.Context, gw Gateway, path, service, host string, in co
 			continue
 		}
 		if err := sendsLeft(attempt); err != nil {
-			return nil, component.EgressResponse{}, &exchangeError{http.StatusBadGateway, "the " + service + " service kept asking to send the request again", err}
+			return nil, component.EgressResponse{}, &exchangeError{http.StatusBadGateway, who + " kept asking to send the request again", err}
 		}
 		if stream != nil && attempt > 0 {
 			// decision: docs/prd/2026-10-27-streamed-member-sends.md (3), a
 			// streamed body is sent once and never kept for a second send.
-			return nil, component.EgressResponse{}, &exchangeError{http.StatusBadGateway, "the " + service + " service asked to send the request again, but its body was streamed once and is not kept: run the command again", nil}
+			return nil, component.EgressResponse{}, &exchangeError{http.StatusBadGateway, who + " asked to send the request again, but its body was streamed once and is not kept: run the command again", nil}
 		}
-		resp, report, err := sendHere(ctx, service, in, stream, out.Send)
+		resp, report, err := sendHere(ctx, service, in, stream, out.Send, h)
 		if err != nil {
 			return nil, component.EgressResponse{}, &exchangeError{http.StatusBadGateway, "this computer could not reach " + host + ": " + err.Error(), err}
+		}
+		if out.Send.Relay {
+			// A relayed answer is the command's as it arrives: the component
+			// is not asked again (it never sees a body).
+			return resp, component.EgressResponse{Accept: true}, nil
 		}
 		report.Attempt = attempt + 1
 		sent, in.Report = resp, report
@@ -620,7 +727,11 @@ func SendFromHere(ctx context.Context, gw Gateway, id, service, method, rawURL s
 	defer cancel()
 	in := component.EgressRequest{Method: method, URL: u.String(), Header: map[string][]string{}}
 	// The component's name keys its sessions, as on a turn's sends.
-	sent, _, xerr := exchange(ctx, gw, component.SendProxyPath+url.PathEscape(id), service, u.Host, in, nil, nil)
+	path := component.SendProxyPath + url.PathEscape(id)
+	ask := asker(func(ctx context.Context, in component.EgressRequest) ([]byte, error) {
+		return gw.Do(ctx, http.MethodPost, path, in)
+	})
+	sent, _, xerr := exchange(ctx, ask, service, u.Host, in, nil, exchangeHooks{})
 	if xerr != nil {
 		return errors.Join(errors.New(xerr.msg), xerr.cause)
 	}
@@ -659,7 +770,7 @@ var hereClient = &http.Client{
 // it ends the send) and the report for the service: the status, the
 // Location and the answer's first component.MaxEgressReportBody bytes. A
 // streamed body is the command's own, as it arrives.
-func sendHere(ctx context.Context, service string, in component.EgressRequest, stream *streamBody, send *component.EgressSend) (*http.Response, *component.EgressReport, error) {
+func sendHere(ctx context.Context, service string, in component.EgressRequest, stream *streamBody, send *component.EgressSend, h exchangeHooks) (*http.Response, *component.EgressReport, error) {
 	u, err := url.Parse(in.URL)
 	if err != nil {
 		return nil, nil, err
@@ -668,6 +779,13 @@ func sendHere(ctx context.Context, service string, in component.EgressRequest, s
 	steps, err := sendSteps(ctx, in, send, jar)
 	if err != nil {
 		return nil, nil, err
+	}
+	if len(send.RemoveQuery) > 0 {
+		q := u.Query()
+		for _, k := range send.RemoveQuery {
+			q.Del(k)
+		}
+		u.RawQuery = q.Encode()
 	}
 	if len(send.Query) > 0 {
 		q := u.Query()
@@ -690,6 +808,9 @@ func sendHere(ctx context.Context, service string, in component.EgressRequest, s
 		body, length = bytes.NewReader(send.Body), int64(len(send.Body))
 	}
 	sctx, cancel := context.WithCancel(ctx)
+	if send.Relay {
+		sctx = context.WithValue(sctx, relayIdleKey{}, relayIdle(send))
+	}
 	req, err := http.NewRequestWithContext(sctx, in.Method, u.String(), body)
 	if err != nil {
 		cancel()
@@ -709,12 +830,19 @@ func sendHere(ctx context.Context, service string, in component.EgressRequest, s
 		req.Header[http.CanonicalHeaderKey(k)] = v
 	}
 	keep := withSession(jar, req)
-	resp, err := hereClient.Do(req)
+	client := hereClient
+	if send.Relay {
+		client = relayClient
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		cancel()
 		return nil, nil, err
 	}
 	keep(resp)
+	if send.Relay {
+		return relayAnswer(resp, cancel, in, send, h), nil, nil
+	}
 	head := make([]byte, component.MaxEgressReportBody)
 	n, err := io.ReadFull(resp.Body, head)
 	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
@@ -815,7 +943,7 @@ func (s *Server) postCard(sess *Session, job Job, service string, c component.Ca
 	if !sess.cardOnce(job.JobID, [2]string{service, cardKey(c)}) {
 		return
 	}
-	card := wire.ComponentCard{Component: service, For: job.RequesterUserID, Title: c.Title, Text: c.Text}
+	card := wire.ComponentCard{Component: cardComponent(service), For: job.RequesterUserID, Title: c.Title, Text: c.Text}
 	for _, a := range c.Actions {
 		card.Actions = append(card.Actions, wire.ComponentCardAction{Kind: a.Kind, Label: a.Label, Page: a.Page, Query: a.Query})
 	}

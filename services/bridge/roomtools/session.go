@@ -107,6 +107,13 @@ type Job struct {
 	// (not a schedule's post, not another agent's dispatch): the turn in
 	// which a "the person answered" checkpoint may hold (relay session).
 	ByRequester bool
+	// Drive is whose agent runs the turn as the bridge attests it
+	// (component.DriveOwn, DriveBorrowed or DrivePlatform). OwnRun is the
+	// stricter fact a credential rests on: the member's own run, wearing
+	// nothing of someone else's that runs scripts (only then is a local
+	// provider asked, egress_local.go).
+	Drive  string
+	OwnRun bool
 	// Workspace reads the session's workspace files (components save); nil
 	// when the core offers no session files.
 	Workspace Workspace
@@ -142,6 +149,9 @@ type Session struct {
 	paths    map[string][]string
 	cards    map[[2]string]bool
 	cardsJob string
+	// local are the providers on this computer, by service name
+	// (egress_local.go).
+	local map[string]*LocalProvider
 }
 
 // dispatched is one dispatch this session made.

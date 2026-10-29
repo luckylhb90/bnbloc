@@ -433,9 +433,12 @@ type EgressResponse struct {
 // sets and the query parameters it adds (the member's credentials for this
 // one request).
 type EgressSend struct {
-	Remove []string            `json:"remove,omitempty"`
-	Header map[string][]string `json:"header,omitempty"`
-	Query  map[string][]string `json:"query,omitempty"`
+	Remove []string `json:"remove,omitempty"`
+	// RemoveQuery are query parameters removed first, as Remove does
+	// headers (a credential an agent put in the query).
+	RemoveQuery []string            `json:"removeQuery,omitempty"`
+	Header      map[string][]string `json:"header,omitempty"`
+	Query       map[string][]string `json:"query,omitempty"`
 	// RawQuery, when set, replaces the request's query string as it is
 	// (after Query): a request signed over its exact query. ReplaceBody
 	// replaces its body with Body.
@@ -459,6 +462,24 @@ type EgressSend struct {
 	StepsOnly bool         `json:"stepsOnly,omitempty"`
 	// EndSession drops the session first (signing in afresh).
 	EndSession bool `json:"endSession,omitempty"`
+	// Relay sends the request for a credential only (a model call): the
+	// bridge reads the answer's head, not its body, reports nothing of the
+	// body to the component (a local provider gets an EgressUsage when the
+	// answer ends) and relays each chunk as it arrives, so a streamed
+	// completion reaches the command at once. It ends after
+	// RelayIdleSeconds with no byte moving (DefaultEgressRelayIdle when 0,
+	// at most MaxEgressRelayIdle), never on a clock. A relayed answer is
+	// Accept: the component is not asked again, and Steps and a second
+	// Send do not apply.
+	Relay            bool `json:"relay,omitempty"`
+	RelayIdleSeconds int  `json:"relayIdleSeconds,omitempty"`
+	// Scrub lists exact values the answer must not carry back to the
+	// command (the credential this Send set): they are removed from the
+	// answer's headers, and from its body when the status is 400 or more
+	// (at most MaxEgressReportBody bytes of it are kept then). Values of
+	// Authorization and Proxy-Authorization set here, and query values set
+	// here, are scrubbed without being listed.
+	Scrub []string `json:"scrub,omitempty"`
 }
 
 // EgressStep is one sign-in request (EgressSend.Steps): a GET or HEAD, or

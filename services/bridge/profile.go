@@ -47,6 +47,9 @@ type SessionInfo struct {
 	// SessionContribution.Turn.
 	JobID           string
 	RequesterUserID string
+	// Drive and OwnRun are the job's, as TurnInfo's.
+	Drive  string
+	OwnRun bool
 	// RoomRelayServers are the session's room-credential MCP servers
 	// (pkgmeta.MCPCredentialsRoom): the contributor holding the room relay
 	// sets its env on them (SessionContribution.RelayEnv).
@@ -82,6 +85,12 @@ type TurnInfo struct {
 	// ByRequester: the requester typed the prompting message themself
 	// (bridgeJob.byRequester).
 	ByRequester bool
+	// Drive is whose agent runs the turn (component.DriveOwn, DriveBorrowed,
+	// DrivePlatform); OwnRun is the member's own run wearing nothing of
+	// someone else's that runs scripts: the only run a credential serves
+	// (egress_local.go).
+	Drive  string
+	OwnRun bool
 	// Workspace reads the session's workspace through the core's
 	// session-files seam; it reports an error when the core offers none.
 	Workspace SessionWorkspace

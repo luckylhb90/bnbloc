@@ -49,6 +49,10 @@ import (
 type Config struct {
 	// GatewayBaseURL is the bnbloc gateway, e.g. http://gateway:8080.
 	GatewayBaseURL string
+	// EgressProvidersDir is where programs on this computer announce
+	// themselves as local egress providers (component.EgressProviderContract);
+	// "" = <StateDir>/egress-providers.
+	EgressProvidersDir string
 	// GatewayToken, if set, is a static bearer for gateway calls. Normally left
 	// empty: the bridge mints an owner session token via login so its calls
 	// carry the owner's room scope (a room's membership authorizes SSE + activity
@@ -1852,7 +1856,7 @@ func (b *Bridge) turnInfo(d *drive, rs *roomSession) TurnInfo {
 	if entry, ok := b.coreEntry(d.core); ok && d.caps.bytesWriter != nil {
 		ws.copier = &deliverableCopier{key: d.key(), w: d.caps.bytesWriter, ep: entry.endpoint, maxInput: d.caps.maxInput}
 	}
-	return TurnInfo{JobID: d.job.JobID, RequesterUserID: d.job.RequesterUserID, ChannelID: d.job.ChannelID, MessageSeq: d.job.MessageSeq, ByRequester: d.job.byRequester(), Workspace: ws, Team: d.content.teamRoster()}
+	return TurnInfo{JobID: d.job.JobID, RequesterUserID: d.job.RequesterUserID, ChannelID: d.job.ChannelID, MessageSeq: d.job.MessageSeq, ByRequester: d.job.byRequester(), Drive: d.drive(), OwnRun: d.ownRun(), Workspace: ws, Team: d.content.teamRoster()}
 }
 
 type ensureResult struct {
@@ -2140,7 +2144,7 @@ func (b *Bridge) sessionInfo(d *drive, opts corepkg.SessionOptions) SessionInfo 
 	info := SessionInfo{
 		TenantID: d.job.TenantID, RoomID: d.job.RoomID, ChannelID: d.job.ChannelID, Owner: d.owner, Core: d.core, Provider: d.job.Provider,
 		Sandboxed: opts.Execution != nil, MCPTransports: b.targetTransports(d.core, d.target, d.job.Provider),
-		JobID: d.job.JobID, RequesterUserID: d.job.RequesterUserID,
+		JobID: d.job.JobID, RequesterUserID: d.job.RequesterUserID, Drive: d.drive(), OwnRun: d.ownRun(),
 		RoomRelayServers: d.content.relayedMCP(),
 	}
 	if opts.Execution != nil {

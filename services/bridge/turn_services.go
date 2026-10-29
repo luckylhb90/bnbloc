@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/url"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/luckylhb90/bnbloc/component"
 	"github.com/luckylhb90/bnbloc/internal/roomlog"
 	"github.com/luckylhb90/bnbloc/internal/wire"
+	"github.com/luckylhb90/bnbloc/services/bridge/roomtools"
 )
 
 // Service components for a turn (docs/architecture/service-components.md):
@@ -179,11 +181,31 @@ func serviceFactFiles(facts []serviceFacts) []roomlog.NamedFile {
 // the merged environment, and the services that take a streamed body. A
 // service that cannot be read keeps the hosts it claimed before (prev), so
 // its hosts never go out unauthenticated (and takes no streamed body).
-func (b *Bridge) egressFor(ctx context.Context, room, job string, prev map[string]string) egressClaims {
+func (b *Bridge) egressFor(ctx context.Context, room, job string, prev map[string]string, own *component.ProviderTurn) egressClaims {
 	hosts, env, streams, paths := map[string]string{}, map[string]string{}, map[string]bool{}, map[string][]string{}
+	var local []*roomtools.LocalProvider
+	type source struct {
+		name string
+		ask  func() (component.EgressHosts, error)
+	}
+	var sources []source
 	for _, name := range b.servicesWith(ctx, component.ServiceEgress) {
-		var h component.EgressHosts
-		err := b.turnProxyGET(ctx, name, "egress/hosts", room, job, &h)
+		sources = append(sources, source{name, func() (h component.EgressHosts, err error) {
+			err = b.turnProxyGET(ctx, name, "egress/hosts", room, job, &h)
+			return
+		}})
+	}
+	// Providers on this computer are asked about the member's own run only:
+	// any other run claims nothing from them and never reaches them.
+	if own != nil {
+		for _, p := range b.localProviders() {
+			local = append(local, p)
+			sources = append(sources, source{p.Service(), func() (component.EgressHosts, error) { return p.Hosts(ctx, *own) }})
+		}
+	}
+	for _, src := range sources {
+		name := src.name
+		h, err := src.ask()
 		if err != nil {
 			slog.Warn("bnbloc bridge egress hosts unreadable", "event", "bnbloc.bridge.egress_hosts_failed", "service", name, "room", room, "job", job, "error", err)
 			for host, svc := range prev {
@@ -216,7 +238,38 @@ func (b *Bridge) egressFor(ctx context.Context, room, job string, prev map[strin
 		}
 	}
 	slog.Info("bnbloc bridge egress hosts", "event", "bnbloc.bridge.egress_hosts", "room", room, "job", job, "hosts", len(hosts))
-	return egressClaims{hosts: hosts, env: env, streams: streams, paths: paths}
+	return egressClaims{hosts: hosts, env: env, streams: streams, paths: paths, local: local}
+}
+
+// hasEgress reports whether this session may have the egress proxy: an
+// organization declares an egress service, or a program on this computer
+// announced a local provider.
+func (b *Bridge) hasEgress(ctx context.Context) bool {
+	return len(b.servicesWith(ctx, component.ServiceEgress)) > 0 || len(b.localProviders()) > 0
+}
+
+// ownTurn is the turn a local provider is told about, or nil when the job is
+// not the member's own run (providers are never asked then).
+func ownTurn(scope roomtools.Scope, job roomtools.Job) *component.ProviderTurn {
+	if !job.OwnRun {
+		return nil
+	}
+	t := roomtools.ProviderTurnOf(scope, job)
+	return &t
+}
+
+// localProviders reads the providers on this computer (what a program
+// announced under the state directory, component.EgressProviderContract).
+func (b *Bridge) localProviders() []*roomtools.LocalProvider {
+	dir := b.cfg.EgressProvidersDir
+	if dir == "" && b.cfg.StateDir != "" {
+		dir = filepath.Join(b.cfg.StateDir, "egress-providers")
+	}
+	ps, dropped := roomtools.ReadLocalProviders(dir)
+	for _, d := range dropped {
+		slog.Warn("bnbloc bridge egress provider dropped", "event", "bnbloc.bridge.egress_provider_dropped", "provider", d.String())
+	}
+	return ps
 }
 
 // egressClaims are what the egress services claim for a job: host →
@@ -227,6 +280,9 @@ type egressClaims struct {
 	env     map[string]string
 	streams map[string]bool
 	paths   map[string][]string
+	// local are the providers on this computer asked for the job (the
+	// session answers their hosts' requests through them).
+	local []*roomtools.LocalProvider
 }
 
 // validPaths keeps a claim's path prefixes that start with "/" (at most 64).

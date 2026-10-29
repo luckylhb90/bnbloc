@@ -39,6 +39,67 @@ export const RoomContentLimitsFile = ".room/content-limits.md";
 export const MinDecisionChoices = 2;
 export const MaxDecisionChoices = 255;
 
+// ---- component/egress_provider.go ----
+
+// EgressProviderContract names the descriptor of a local egress provider.
+export const EgressProviderContract = "bnbloc.egress.provider/v1";
+
+// EgressProviderFileName is the descriptor's file name, in the provider's
+// own folder of the bridge's providers directory.
+export const EgressProviderFileName = "provider.json";
+
+// EgressProviderFile is the descriptor. URL is a loopback http address
+// (127.0.0.1, ::1 or localhost, with a port); Token, when set, is sent as
+// the bearer of every call to it.
+export interface EgressProviderFile {
+  contract: string;
+  url: string;
+  token?: string;
+}
+
+// Paths a local provider serves (relative to its URL), called by the bridge
+// with the attested ProviderTurn in TurnHeader.
+// EgressProviderHostsPath answers EgressHosts for the turn (GET).
+export const EgressProviderHostsPath = "/egress/hosts";
+// EgressProviderRequestPath takes an EgressRequest (no body: the
+// provider never sees one) and answers an EgressResponse (POST), as
+// ServiceEgressRequestPath does for a service.
+export const EgressProviderRequestPath = "/egress/request";
+// EgressProviderReportPath takes an EgressUsage after a relayed request
+// ended (POST); its answer is ignored.
+export const EgressProviderReportPath = "/egress/report";
+
+// ProviderTurn is the turn a local provider is asked about, attested by the
+// bridge: the platform's Turn facts and the agent the commands run for (so a
+// provider can allow a credential per agent).
+export interface ProviderTurn extends Turn {
+  core?: string;
+  provider?: string;
+}
+
+// EgressUsage is what a relayed request did, for the provider's counters
+// and its page: never a header, a query or a body.
+export interface EgressUsage {
+  host: string;
+  method: string;
+  status: number;
+  // Bytes sent back to the agent; Millis the request's whole time.
+  bytes: number;
+  millis: number;
+  // Error is set when the answer did not complete (the agent dropped it,
+  // the system stopped sending): a cancelled stream is still counted.
+  error?: string;
+}
+
+// MaxEgressProviders bounds the local providers the bridge asks.
+export const MaxEgressProviders = 8;
+
+// MaxEgressRelayIdle bounds EgressSend.RelayIdleSeconds, and
+// DefaultEgressRelayIdle is its default: a relayed answer ends after this
+// long with no byte moving (a model that thinks), never after a total time.
+export const MaxEgressRelayIdle = 1800;
+export const DefaultEgressRelayIdle = 600;
+
 // ---- component/fence.go ----
 
 // FenceMark is the fence's opening and closing word.
@@ -569,6 +630,9 @@ export interface EgressResponse {
 // one request).
 export interface EgressSend {
   remove?: string[];
+  // RemoveQuery are query parameters removed first, as Remove does
+  // headers (a credential an agent put in the query).
+  removeQuery?: string[];
   header?: Record<string, string[]>;
   query?: Record<string, string[]>;
   // RawQuery, when set, replaces the request's query string as it is
@@ -594,6 +658,24 @@ export interface EgressSend {
   stepsOnly?: boolean;
   // EndSession drops the session first (signing in afresh).
   endSession?: boolean;
+  // Relay sends the request for a credential only (a model call): the
+  // bridge reads the answer's head, not its body, reports nothing of the
+  // body to the component (a local provider gets an EgressUsage when the
+  // answer ends) and relays each chunk as it arrives, so a streamed
+  // completion reaches the command at once. It ends after
+  // RelayIdleSeconds with no byte moving (DefaultEgressRelayIdle when 0,
+  // at most MaxEgressRelayIdle), never on a clock. A relayed answer is
+  // Accept: the component is not asked again, and Steps and a second
+  // Send do not apply.
+  relay?: boolean;
+  relayIdleSeconds?: number;
+  // Scrub lists exact values the answer must not carry back to the
+  // command (the credential this Send set): they are removed from the
+  // answer's headers, and from its body when the status is 400 or more
+  // (at most MaxEgressReportBody bytes of it are kept then). Values of
+  // Authorization and Proxy-Authorization set here, and query values set
+  // here, are scrubbed without being listed.
+  scrub?: string[];
 }
 
 // EgressStep is one sign-in request (EgressSend.Steps): a GET or HEAD, or

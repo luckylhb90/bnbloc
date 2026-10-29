@@ -1,6 +1,6 @@
 # Model credentials for agents in the sandbox: keys that never enter it (2026-10-27)
 
-Status: **design; slice 1 (the experiments that need no new code) done 2026-10-27, results in §8; nothing built.** Owner when built: a new component (its own
+Status: **design; slice 1 (the experiments that need no new code) done 2026-10-27, results in §8; slice 2 (the bridge seam) built 2026-10-29, see "Slice 2 as built" below; the desktop `secrets` API and the component are not built.** Owner when built: a new component (its own
 repository, `bnbloc-model-credentials`), the agent manager's catalog (which agent uses
 which provider), and one small platform mechanism in the bridge and one in the
 desktop (§4). Builds on `2026-10-26-sandbox-only-agents-design.md` (§5, whose
@@ -499,6 +499,33 @@ inject at all, which is the case the design already refuses; the catalog marks t
 4. **An agent that does not pass E1, or has no key path, is not offered the
    sandbox**, and its row says why (`signIn: "login"`). Security is not traded for
    coverage.
+
+## Slice 2 as built (2026-10-29)
+
+The bridge side of §3.3 and §3.4, tested against a fake provider and a fake
+model host (`services/bridge/roomtools/egress_local_test.go`,
+`services/bridge/egress_local_test.go`); the contract is in
+`component/egress_provider.go` and `docs/architecture/service-components.md`
+("Local providers"). What differs from the design above, decided while building:
+
+- **Discovery is a descriptor file, not a plugin capability.** The bridge reads
+  `<state dir>/egress-providers/<name>/provider.json` at each turn (the model of
+  `bnbloc.sandbox.mounts/v1`), so any local program can be a provider (the
+  desktop plugin, a core's sidecar) without a new desktop API, and the bridge needs no
+  channel to the plugin host. The URL must be loopback; the bearer is the
+  provider's own.
+- **The provider's questions are `GET /egress/hosts`, `POST /egress/request`
+  (no body) and `POST /egress/report`**, with the attested `ProviderTurn`
+  (`Turn` with drive always `own`, plus core and provider) in `X-Bnbloc-Turn`.
+  The `inject` of §3.3 is the existing `EgressSend` with `relay`, `scrub` and
+  `removeQuery` added: one sender stays (`sendHere`).
+- **Own-run attestation is one function** (`drive.ownRun`), tested for own,
+  own-in-sandbox, own forced into the sandbox by foreign scripts, borrowed,
+  unknown requester and platform; the session checks it again at every
+  request, so a left-over claim answers 503.
+- **Still open from §9 slice 2:** E3 (a 10 MiB request body through a relayed
+  send, a real idle provider), E7 (the canary through the real sandbox) and E9
+  with two accounts on one computer run only with a real provider component.
 
 ## Sources
 

@@ -147,6 +147,39 @@ The bridge's room tools server is also the session's HTTPS proxy
   commands trust it; the system's trust store is never touched. A tool
   that trusts only the system's roots (Go programs on macOS) fails its TLS
   check against a claimed host: its call never goes out unauthenticated.
+- **Local providers** (docs/prd/2026-10-27-model-credentials.md §3.3): a program
+  on the member's own computer can answer the same two questions over
+  loopback, so a credential that must stay on this computer (a model API key
+  in the OS keychain, a route to the company's models) never reaches the
+  gateway. It announces itself with `<bridge state dir>/egress-providers/<name>/provider.json`
+  (`component.EgressProviderFile`: contract `bnbloc.egress.provider/v1`, a
+  loopback `http` URL with a port, an optional bearer; anything else is
+  dropped and logged). The bridge names it `local:<name>` among the session's
+  services, so the claim, the card, the 503 between turns and the exchange are
+  the service path's own. It is asked (`GET /egress/hosts`, `POST /egress/request`
+  with no body, `POST /egress/report`) with the bridge-attested
+  `component.ProviderTurn` in `X-Bnbloc-Turn`, **only for the member's own run**
+  (`drive.ownRun`: the requester is the agent's owner, not a platform agent, and
+  not forced into the sandbox by someone else's scripts): any other run claims
+  nothing from it and a left-over claim answers 503. Its host claims go
+  through `ValidEgressHost` like a service's.
+  - **Relay** (`EgressSend.Relay`): the answer's head goes to the command at
+    once and each chunk as it arrives (a streamed completion); nothing of the
+    body is reported to the component, which gets one `EgressUsage` when the
+    answer ends (a command that drops it is counted with an error). It is
+    bounded by activity (`RelayIdleSeconds`, default 10 minutes, at most 30),
+    never a clock. The values `Send` set under a credential's name (and
+    `EgressSend.Scrub`) are removed from the answer's headers and, from status
+    400, its body (at most 64 KiB), so a provider that echoes the key does not
+    hand it to the agent. `RemoveQuery` removes credentials an agent put in the
+    query.
+  - **Upgrade**: a request with `Upgrade` to a claimed host is answered `426`
+    and never sent (a client that opens a WebSocket first falls back to HTTPS
+    at once, and nothing carries the credential).
+  - **Sandboxed own runs** get the proxy, the CA and the provider's placeholders
+    in their space with no organization egress service at all; a run that is
+    not the member's own gets neither.
+
 - **Cards**: (the room's events carry a card to every member; the clients
   show it only to the requester, as a publish proposal) an `EgressResponse.Card` (`component.CheckCard`: plain text,
   at most four actions: `open` a page, `call`, or `ask-again`) is posted

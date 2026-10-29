@@ -6,10 +6,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/luckylhb90/bnbloc/component"
 	corepkg "github.com/luckylhb90/bnbloc/core"
 	"github.com/luckylhb90/bnbloc/internal/shareagent"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/wire"
+	"github.com/luckylhb90/bnbloc/services/bridge/roomtools"
 )
 
 // The drive pipeline. A claimed job runs through eight named stages, in
@@ -109,6 +111,39 @@ func (d *drive) seatRequester() string {
 		return d.job.RequesterUserID
 	}
 	return ""
+}
+
+// drive is whose agent runs the job, as the gateway attests it to a service
+// (services/gateway turnDrive): a platform agent, the requester's own, or
+// another member's.
+func (d *drive) drive() string {
+	if _, ok := shareagent.PlatformAgentOfTarget(d.job.TargetID); ok {
+		return component.DrivePlatform
+	}
+	if d.borrowed || d.job.RequesterUserID == "" || d.job.RequesterUserID != d.owner {
+		return component.DriveBorrowed
+	}
+	return component.DriveOwn
+}
+
+// ownRun reports the one run a credential on this computer may serve: the
+// member's own, and one that wears nothing of someone else's that runs
+// scripts (a sandboxed drive that does not get the owner's environment).
+// One rule for it, the one the owner's forwarded environment already
+// follows (sandboxDecision.ownerEnv).
+func (d *drive) ownRun() bool {
+	return d.drive() == component.DriveOwn && (d.prepareExec == nil || d.ownSandbox)
+}
+
+// ownTurn is the turn a local provider is told about, nil unless this is
+// the member's own run (ownRun).
+func (d *drive) ownTurn() *component.ProviderTurn {
+	if !d.ownRun() {
+		return nil
+	}
+	t := roomtools.ProviderTurnOf(roomtools.Scope{RoomID: d.job.RoomID, TenantID: d.job.TenantID, Owner: d.owner, Core: d.core, Provider: d.job.Provider},
+		roomtools.Job{JobID: d.job.JobID, RequesterUserID: d.job.RequesterUserID, ChannelID: d.job.ChannelID})
+	return &t
 }
 
 // agent is the core/provider pair of the job's diagnostics.

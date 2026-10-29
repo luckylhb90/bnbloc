@@ -50,13 +50,13 @@ func TestSandboxPrepare_liveSidecar(t *testing.T) {
 	if ready, reason := rt.status(ctx); !ready {
 		t.Fatalf("sandbox not ready: %s", reason)
 	}
-	exec, err := rt.prepare(ctx, driveKey{room: "room-1", core: "core-a", provider: "codex", sandboxed: true}, "", "alice", nil, sandboxExecTokenTTL, false, nil)
+	exec, err := rt.prepare(ctx, driveKey{room: "room-1", core: "core-a", provider: "codex", sandboxed: true}, "", "alice", nil, sandboxExecTokenTTL, false, nil, nil)
 	if err != nil {
 		t.Fatalf("prepare: %v", err)
 	}
 	// The next turn re-ensures the space and fences it: the first turn's token
 	// is revoked with its processes, the second turn's is the one that works.
-	exec, err = rt.prepare(ctx, driveKey{room: "room-1", core: "core-a", provider: "codex", sandboxed: true}, "", "alice", nil, sandboxExecTokenTTL, false, nil)
+	exec, err = rt.prepare(ctx, driveKey{room: "room-1", core: "core-a", provider: "codex", sandboxed: true}, "", "alice", nil, sandboxExecTokenTTL, false, nil, nil)
 	if err != nil {
 		t.Fatalf("re-prepare (per-turn re-ensure): %v", err)
 	}
@@ -141,7 +141,7 @@ func TestSandboxPrepare_livePerSpaceMounts(t *testing.T) {
 	}
 	run := func(room, script string) string {
 		k := driveKey{room: room, core: "core-a", provider: "codex", sandboxed: true}
-		exec, err := rt.prepare(ctx, k, "", "alice", nil, sandboxExecTokenTTL, false, nil)
+		exec, err := rt.prepare(ctx, k, "", "alice", nil, sandboxExecTokenTTL, false, nil, nil)
 		if err != nil {
 			t.Fatalf("prepare %s: %v", room, err)
 		}
@@ -226,7 +226,7 @@ func TestSandboxPrepare_liveFixedPathMountsServeEveryRoom(t *testing.T) {
 	}
 	run := func(room string, borrowed bool) string {
 		k := driveKey{room: room, core: "core-a", provider: "codex", sandboxed: true}
-		exec, err := rt.prepare(ctx, k, "", "alice", nil, sandboxExecTokenTTL, borrowed, nil)
+		exec, err := rt.prepare(ctx, k, "", "alice", nil, sandboxExecTokenTTL, borrowed, nil, nil)
 		if err != nil {
 			t.Fatalf("prepare %s: %v", room, err)
 		}
@@ -305,7 +305,7 @@ func TestSandboxPrepare_liveWithTheDesktopsFolderLayout(t *testing.T) {
 		if ready, reason := rt.status(ctx); !ready {
 			t.Fatalf("sandbox not ready: %s", reason)
 		}
-		exec, err := rt.prepare(ctx, driveKey{room: "room-a", core: "core-a", provider: "codex", sandboxed: true}, "job-1", "alice", nil, sandboxExecTokenTTL, false, nil)
+		exec, err := rt.prepare(ctx, driveKey{room: "room-a", core: "core-a", provider: "codex", sandboxed: true}, "job-1", "alice", nil, sandboxExecTokenTTL, false, nil, nil)
 		if err != nil {
 			t.Fatalf("prepare: %v", err)
 		}
