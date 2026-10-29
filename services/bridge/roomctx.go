@@ -219,7 +219,7 @@ func (b *Bridge) roomRecordFiles(ctx context.Context, room, jobID string, self r
 // partial write never advertises files that do not exist). State is only
 // advanced on full success, so a failed pass retries cleanly next turn.
 func (b *Bridge) materializeRoomContext(ctx context.Context, w corepkg.WorkspaceFileWriter, ep corepkg.Endpoint, room, workspaceID, jobID, channelID string, seen, msgSeq int64, now string, self roomlog.Producer, st roomlog.CtxState, g roomlog.Guidance, cp *deliverableCopier) (next roomlog.CtxState, own []roomlog.Entry, from string, err error) {
-	list, _ := roomlog.AgentChannelList(ctx, b.gatewayGET, room, jobID)
+	list, _ := roomlog.AgentChannelList(ctx, b.gatewayGET, room, jobID, channelID)
 	ownCh, ok := roomlog.ChannelOf(list, channelID)
 	if !ok {
 		ownCh = list[0]
@@ -380,7 +380,7 @@ func (b *Bridge) channelReset(ctx context.Context, room, channelID string, rs *r
 		return false
 	}
 	if channelID == "" {
-		list, _ := roomlog.AgentChannelList(ctx, b.gatewayGET, room, "")
+		list, _ := roomlog.AgentChannelList(ctx, b.gatewayGET, room, "", "")
 		channelID = list[0].ID
 	}
 	return st.Resets[channelID] > rs.ctx.StartedMs
@@ -391,7 +391,7 @@ func (b *Bridge) channelReset(ctx context.Context, room, channelID string, rs *r
 // pass resolves it).
 func (b *Bridge) guidanceChannel(ctx context.Context, room, channelID string) string {
 	if channelID == "" {
-		list, _ := roomlog.AgentChannelList(ctx, b.gatewayGET, room, "")
+		list, _ := roomlog.AgentChannelList(ctx, b.gatewayGET, room, "", "")
 		channelID = list[0].ID
 	}
 	return roomlog.GuidanceChannel(channelID)
@@ -590,7 +590,7 @@ func (b *Bridge) driveTextDelta(ctx context.Context, room, owner, provider, jobI
 	self := agentSpeakerLabel(owner, provider)
 	// A channel is a context boundary: the session reads its own channel
 	// (docs/prd/2026-10-14-multi-member-rooms.md).
-	list, _ := roomlog.AgentChannelList(ctx, b.gatewayGET, room, jobID)
+	list, _ := roomlog.AgentChannelList(ctx, b.gatewayGET, room, jobID, channelID)
 	own, ok := roomlog.ChannelOf(list, channelID)
 	if !ok {
 		own = list[0]

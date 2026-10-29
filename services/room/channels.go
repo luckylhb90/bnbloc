@@ -334,6 +334,15 @@ func (s *Service) handleListChannels(w http.ResponseWriter, r *http.Request) {
 		}
 		out.Channels = append(out.Channels, channelView(c, follows[c.ChannelID]))
 	}
+	if threadID := strings.TrimSpace(q.Get(wire.ChannelListThread)); forAgents && threadID != "" {
+		// The turn's own thread (roomlog.AgentChannelList): listed for an
+		// agent only when it is one the reader may read, as any channel.
+		for _, c := range channels {
+			if c.ChannelID == threadID && c.IsThread() && c.Admission().Admits() && access.MayReadChannel(c) {
+				out.Channels = append(out.Channels, channelView(c, follows[c.ChannelID]))
+			}
+		}
+	}
 	out.Sections = s.knownSections(r.Context(), roomID, sections, access)
 	httpx.WriteJSON(w, http.StatusOK, out)
 }

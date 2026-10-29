@@ -79,6 +79,26 @@ type HistoryQuery struct {
 	Job string
 }
 
+// threadRoot reads a thread's root from its parent's history (the one
+// message at RootSeq), as a row of the thread: it belongs in the thread's
+// records. A failed read leaves the records without it.
+func threadRoot(ctx context.Context, fetch Fetch, room string, th Channel) (Row, bool) {
+	v := url.Values{"limit": {"1"}, "before": {strconv.FormatInt(th.RootSeq+1, 10)}, "channelId": {th.ParentID}}
+	raw, err := fetch(ctx, fmt.Sprintf("/v1/rooms/%s/history?%s", url.PathEscape(room), v.Encode()))
+	if err != nil {
+		return Row{}, false
+	}
+	var page struct {
+		Messages []Row `json:"messages"`
+	}
+	if json.Unmarshal(raw, &page) != nil || len(page.Messages) != 1 || page.Messages[0].Sequence != th.RootSeq {
+		return Row{}, false
+	}
+	r := page.Messages[0]
+	r.ChannelID = th.ID
+	return r, true
+}
+
 // ErrChannelNotReadable: HistoryQuery.Only names a channel no agent may read
 // (the people chat, or one that is not the room's).
 var ErrChannelNotReadable = errors.New("an agent may not read that channel")
@@ -87,6 +107,10 @@ var ErrChannelNotReadable = errors.New("an agent may not read that channel")
 type Channel struct {
 	ID   string
 	Name string
+	// A thread (§2.2): the channel it was opened in and its root message's
+	// sequence (a message of the parent). Its records start with the root.
+	ParentID string
+	RootSeq  int64
 }
 
 // AgentChannelsQuery is the query of the room service's channel listing for
@@ -96,7 +120,7 @@ const AgentChannelsQuery = wire.ChannelListForAgents + "=1"
 // AgentChannels lists the ids of the channels of a room an agent may read
 // (AgentChannelList).
 func AgentChannels(ctx context.Context, fetch Fetch, room string) (channels []string, ok bool) {
-	list, ok := AgentChannelList(ctx, fetch, room, "")
+	list, ok := AgentChannelList(ctx, fetch, room, "", "")
 	for _, c := range list {
 		channels = append(channels, c.ID)
 	}
@@ -120,10 +144,18 @@ func AgentChannels(ctx context.Context, fetch Fetch, room string) (channels []st
 // reads as the person it works for, never as the bridge's owner; a
 // borrowed agent working for someone outside a members-only section sees
 // none of it). Without a job (no turn) the listing is the owner's.
-func AgentChannelList(ctx context.Context, fetch Fetch, room, job string) (channels []Channel, ok bool) {
+//
+// own is the turn's conversation ("" none): when it is a thread (never
+// listed among the room's channels, §2.2) the listing adds it for a reader
+// who may read it, so the agent answering in a thread reads it like any
+// channel.
+func AgentChannelList(ctx context.Context, fetch Fetch, room, job, own string) (channels []Channel, ok bool) {
 	q := AgentChannelsQuery
 	if job != "" {
 		q += "&job=" + url.QueryEscape(job)
+	}
+	if own != "" {
+		q += "&" + wire.ChannelListThread + "=" + url.QueryEscape(own)
 	}
 	raw, err := fetch(ctx, "/v1/rooms/"+url.PathEscape(room)+"/channels?"+q)
 	if err != nil {
@@ -133,17 +165,32 @@ func AgentChannelList(ctx context.Context, fetch Fetch, room, job string) (chann
 	}
 	var parsed struct {
 		Channels []struct {
-			ChannelID string `json:"channelId"`
-			Name      string `json:"name"`
+			ChannelID string           `json:"channelId"`
+			Name      string           `json:"name"`
+			Thread    *wire.ThreadInfo `json:"thread"`
 		} `json:"channels"`
 	}
 	if json.Unmarshal(raw, &parsed) != nil {
 		return []Channel{{}}, false
 	}
+	names := map[string]string{}
 	for _, c := range parsed.Channels {
-		if id := strings.TrimSpace(c.ChannelID); id != "" {
-			channels = append(channels, Channel{ID: id, Name: strings.TrimSpace(c.Name)})
+		names[c.ChannelID] = strings.TrimSpace(c.Name)
+	}
+	for _, c := range parsed.Channels {
+		id := strings.TrimSpace(c.ChannelID)
+		if id == "" {
+			continue
 		}
+		ch := Channel{ID: id, Name: strings.TrimSpace(c.Name)}
+		if c.Thread != nil {
+			// A thread is named under its channel: "#releases › the login bug".
+			ch.ParentID, ch.RootSeq = c.Thread.ParentID, c.Thread.RootSeq
+			if p := names[c.Thread.ParentID]; p != "" {
+				ch.Name = p + " › " + ch.Name
+			}
+		}
+		channels = append(channels, ch)
 	}
 	if len(channels) == 0 { // a room always has its default channel
 		return []Channel{{}}, false
@@ -178,7 +225,7 @@ func ChannelOf(list []Channel, id string) (Channel, bool) {
 // stops globally at q.MaxRows rows; complete reports whether every channel
 // was fully covered (false: the cap truncated the read, keeping the newest).
 func History(ctx context.Context, fetch Fetch, room string, q HistoryQuery) (entries []Entry, complete bool, err error) {
-	channels, listed := AgentChannelList(ctx, fetch, room, q.Job)
+	channels, listed := AgentChannelList(ctx, fetch, room, q.Job, q.Only)
 	if q.Only != "" {
 		only, found := ChannelOf(channels, q.Only)
 		if !listed || !found {
@@ -284,6 +331,15 @@ func History(ctx context.Context, fetch Fetch, room string, q HistoryQuery) (ent
 	rows = slices.CompactFunc(rows, func(a, b Row) bool { return a.Sequence == b.Sequence })
 	if len(rows) > maxRows {
 		rows, complete = rows[:maxRows], false
+	}
+	// A thread read from its beginning starts with its root (a message of
+	// its parent): what the thread answers is part of its conversation.
+	for _, c := range cursors {
+		if c.ch.RootSeq > 0 && c.done && q.After < c.ch.RootSeq && (q.Before == 0 || q.Before > c.ch.RootSeq) {
+			if root, ok := threadRoot(ctx, fetch, room, c.ch); ok {
+				rows = append(rows, root)
+			}
+		}
 	}
 	for i := len(rows) - 1; i >= 0; i-- {
 		entries = append(entries, DecodeRow(rows[i])...)

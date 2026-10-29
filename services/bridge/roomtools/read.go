@@ -65,7 +65,7 @@ func readRoom(ctx context.Context, env *Env, args json.RawMessage) Result {
 	// is answering in (the others' records are in .room/channels/).
 	room := env.Session.Scope().RoomID
 	job := env.Session.current().JobID
-	list, listed := roomlog.AgentChannelList(ctx, gatewayFetch(env), room, job)
+	list, listed := roomlog.AgentChannelList(ctx, gatewayFetch(env), room, job, env.Session.current().ChannelID)
 	own, ok := roomlog.ChannelOf(list, env.Session.current().ChannelID)
 	if listed && !ok {
 		return toolError("the conversation you are answering in is not one you may read")

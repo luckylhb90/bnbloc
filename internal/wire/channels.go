@@ -289,6 +289,12 @@ const (
 	ChannelListForAgents = "agents"
 	// ChannelListArchived ("archived=1") lists the archived channels only.
 	ChannelListArchived = "archived"
+	// ChannelListThread ("thread=<id>", with agents=1) adds that thread to
+	// the agents' listing when the reader may read it: the turn's own
+	// conversation when it is a thread (threads are never listed among the
+	// room's channels, §2.2). The thread's root is a message of its parent,
+	// whose records stay their own.
+	ChannelListThread = "thread"
 )
 
 // ChannelDirectoryEntry is one channel of the room's directory: every open
