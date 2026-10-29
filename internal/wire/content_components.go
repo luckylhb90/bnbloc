@@ -88,9 +88,12 @@ type ContentComponent struct {
 	Team *ContentTeam `json:"team,omitempty"`
 	// Room is a room package's setup (its channels, schedules, apps and
 	// sources); absent for the other kinds.
-	Room        *RoomSpec `json:"room,omitempty"`
-	CreatedAtMs int64     `json:"createdAtMs"`
-	UpdatedAtMs int64     `json:"updatedAtMs"`
+	Room *RoomSpec `json:"room,omitempty"`
+	// Channel is a channel preset's channel setup (what applying it sets);
+	// absent for the other kinds.
+	Channel     *ChannelPreset `json:"channel,omitempty"`
+	CreatedAtMs int64          `json:"createdAtMs"`
+	UpdatedAtMs int64          `json:"updatedAtMs"`
 }
 
 // ContentRequires mirrors a manifest's requires (Expert: a room

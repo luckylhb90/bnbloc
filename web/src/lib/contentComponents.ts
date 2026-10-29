@@ -9,7 +9,7 @@ export type { ChatExpert, ContentComponent, ContentComponentDetail, ContentMCPRe
 import type { ChatExpert, ContentComponent, ContentQuickPrompt, ContentRequires, ContentUse, ContentVersionDetail } from "./wire.gen.ts";
 
 export type { ContentKind } from "./wire.gen.ts";
-import type { AssistField, AssistSpec, ContentKind, RoomSpec } from "./wire.gen.ts";
+import type { AssistField, AssistSpec, ChannelPreset, ContentKind, RoomSpec } from "./wire.gen.ts";
 import { ContentTagPattern, MaxContentTagRunes } from "./wire.gen.ts";
 
 // CONTENT_KINDS is everything the client says about a content kind, one row
@@ -28,6 +28,9 @@ export const CONTENT_KINDS: Readonly<Record<ContentKind, { readonly word: string
   work: { word: "work", label: "Work", libraryTab: null, packageKind: "bnbloc.work.package/v1" },
   assist: { word: "AI assist", label: "AI assist", libraryTab: "assists", packageKind: "bnbloc.assist.package/v1" },
   room: { word: "room component", label: "Room", libraryTab: "rooms", packageKind: "bnbloc.room.package/v1" },
+  // A channel preset (docs/prd/2026-10-28-channels-and-threads.md §2.1c): a
+  // kind of channel, applied to a channel from its settings (lib/channelPresets.ts).
+  "channel-preset": { word: "channel preset", label: "Channel preset", libraryTab: null, packageKind: "bnbloc.channel-preset.package/v1" },
 };
 
 /** The Library tabs that list content components of a kind. */
@@ -74,6 +77,8 @@ export interface ContentForm {
   assist?: AssistSpec;
   // A room component's setup (its room expert and packs are requires).
   room?: RoomSpec;
+  // A channel preset's channel setup (lib/channelPresets.ts).
+  channel?: ChannelPreset;
 }
 
 export interface ContentFormRole {
@@ -210,6 +215,7 @@ export function formPayload(f: ContentForm): Record<string, unknown> {
     if (room?.files.length) out.files = room.files;
     if (room?.sources.length) out.sources = room.sources;
   }
+  if (f.kind === "channel-preset" && f.channel) out.channel = f.channel;
   if (f.kind === "expert") {
     const roles = (f.team?.members ?? [])
       .map((m) => ({ role: trimmed(m.role), expert: trimmed(m.expert), defaultAgent: trimmed(m.defaultAgent), description: trimmed(m.description) }))

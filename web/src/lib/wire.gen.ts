@@ -1903,6 +1903,11 @@ export const AssistTaskFindChannel = "find-channel";
 // text; the member posts what they accept.
 export const AssistTaskDraftThreadTitle = "draft-thread-title";
 export const AssistTaskSummarizeThread = "summarize-thread";
+// A channel preset from a sentence (§2.1c, §4): the purpose, rules and
+// settings of the kind of channel described ("a help desk the agent
+// answers first"); the web shows it as a preset's preview and the member
+// applies or saves what they accept.
+export const AssistTaskDraftChannelPreset = "draft-channel-preset";
 
 // AssistContract is what an assist named Task must answer: its output, the
 // fields of a JSON reply the caller reads (a package may declare more,
@@ -1934,7 +1939,7 @@ export interface AssistContractField {
 }
 
 // AssistContracts are the contracts, one per task name.
-export const AssistContracts: readonly AssistContract[] = [{ task: "enhance-prompt", output: "text" }, { task: "describe-work", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "category", values: ["office", "data", "productivity", "content", "learning", "engineering", "finance", "life", "other"] }, { name: "tags", type: "list" }] }, { task: "describe-room", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "category" }, { name: "tags", type: "list" }, { name: "welcome" }, { name: "instructions" }, { name: "dependsOn", type: "items", item: [{ name: "what" }, { name: "kind", values: ["instructions", "app", "file", "tool", "schedule", "agent", "data", "other"] }, { name: "included", values: ["yes", "no"] }, { name: "why" }] }, { name: "findings", type: "items", item: [{ name: "field" }, { name: "quote" }, { name: "why", values: ["secret", "internal-link", "personal-name", "private-data"] }] }] }, { task: "draft-expert", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "instructions" }, { name: "welcome" }, { name: "quickPrompts", type: "items", item: [{ name: "title" }, { name: "prompt" }] }, { name: "tags", type: "list" }] }, { task: "draft-skill-pack", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "skills", type: "items", item: [{ name: "name" }, { name: "description" }, { name: "body" }] }, { name: "tags", type: "list" }] }, { task: "draft-prompt-pack", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "prompts", type: "items", item: [{ name: "title" }, { name: "body" }] }, { name: "tags", type: "list" }] }, { task: "plan-room", output: "json", fields: [{ name: "roomId" }, { name: "name" }, { name: "description" }, { name: "expert" }, { name: "skills", type: "list" }, { name: "firstMessage" }, { name: "sections", type: "items", item: [{ name: "name" }, { name: "rules" }] }, { name: "channels", type: "items", item: [{ name: "name" }, { name: "purpose" }, { name: "section" }] }] }, { task: "draft-schedule", output: "json", fields: [{ name: "text" }, { name: "kind", values: ["once", "daily", "weekly", "cron"] }, { name: "time" }, { name: "days", type: "list" }, { name: "cron" }, { name: "at" }] }, { task: "explain-source-use", output: "json", fields: [{ name: "summary" }, { name: "uses", type: "list" }, { name: "mismatch" }], consent: true }, { task: "review-skill", output: "json", fields: [{ name: "findings", type: "list" }, { name: "name" }, { name: "displayName" }, { name: "description" }, { name: "tags", type: "list" }] }, { task: "fill-settings", output: "json", fields: [{ name: "values", type: "items", item: [{ name: "key" }, { name: "value" }] }, { name: "notes" }] }, { task: "suggest-skill-dirs", output: "json", fields: [{ name: "add", type: "items", item: [{ name: "path" }, { name: "why" }] }, { name: "notes" }] }, { task: "find-a-way", output: "json", fields: [{ name: "cause", values: ["access", "missing-file", "capability", "unclear", "agent-error", "other"] }, { name: "summary" }, { name: "fixes", type: "items", item: [{ name: "action", values: ["install", "ask-agent", "attach", "own-agent", "rephrase", "report", "allow-host"] }, { name: "target" }, { name: "why" }] }], gate: true }, { task: "draft-channel-purpose", output: "json", fields: [{ name: "purpose" }] }, { task: "draft-room-rules", output: "json", fields: [{ name: "rules" }, { name: "welcome" }] }, { task: "draft-thread-title", output: "json", fields: [{ name: "title" }] }, { task: "summarize-thread", output: "json", fields: [{ name: "decided", type: "list" }, { name: "open", type: "list" }, { name: "summary" }] }, { task: "find-channel", output: "json", fields: [{ name: "answer" }, { name: "channels", type: "items", item: [{ name: "channelId" }, { name: "why" }] }] }];
+export const AssistContracts: readonly AssistContract[] = [{ task: "enhance-prompt", output: "text" }, { task: "describe-work", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "category", values: ["office", "data", "productivity", "content", "learning", "engineering", "finance", "life", "other"] }, { name: "tags", type: "list" }] }, { task: "describe-room", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "category" }, { name: "tags", type: "list" }, { name: "welcome" }, { name: "instructions" }, { name: "dependsOn", type: "items", item: [{ name: "what" }, { name: "kind", values: ["instructions", "app", "file", "tool", "schedule", "agent", "data", "other"] }, { name: "included", values: ["yes", "no"] }, { name: "why" }] }, { name: "findings", type: "items", item: [{ name: "field" }, { name: "quote" }, { name: "why", values: ["secret", "internal-link", "personal-name", "private-data"] }] }] }, { task: "draft-expert", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "instructions" }, { name: "welcome" }, { name: "quickPrompts", type: "items", item: [{ name: "title" }, { name: "prompt" }] }, { name: "tags", type: "list" }] }, { task: "draft-skill-pack", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "skills", type: "items", item: [{ name: "name" }, { name: "description" }, { name: "body" }] }, { name: "tags", type: "list" }] }, { task: "draft-prompt-pack", output: "json", fields: [{ name: "displayName" }, { name: "description" }, { name: "prompts", type: "items", item: [{ name: "title" }, { name: "body" }] }, { name: "tags", type: "list" }] }, { task: "plan-room", output: "json", fields: [{ name: "roomId" }, { name: "name" }, { name: "description" }, { name: "expert" }, { name: "skills", type: "list" }, { name: "firstMessage" }, { name: "sections", type: "items", item: [{ name: "name" }, { name: "rules" }] }, { name: "channels", type: "items", item: [{ name: "name" }, { name: "purpose" }, { name: "section" }] }] }, { task: "draft-schedule", output: "json", fields: [{ name: "text" }, { name: "kind", values: ["once", "daily", "weekly", "cron"] }, { name: "time" }, { name: "days", type: "list" }, { name: "cron" }, { name: "at" }] }, { task: "explain-source-use", output: "json", fields: [{ name: "summary" }, { name: "uses", type: "list" }, { name: "mismatch" }], consent: true }, { task: "review-skill", output: "json", fields: [{ name: "findings", type: "list" }, { name: "name" }, { name: "displayName" }, { name: "description" }, { name: "tags", type: "list" }] }, { task: "fill-settings", output: "json", fields: [{ name: "values", type: "items", item: [{ name: "key" }, { name: "value" }] }, { name: "notes" }] }, { task: "suggest-skill-dirs", output: "json", fields: [{ name: "add", type: "items", item: [{ name: "path" }, { name: "why" }] }, { name: "notes" }] }, { task: "find-a-way", output: "json", fields: [{ name: "cause", values: ["access", "missing-file", "capability", "unclear", "agent-error", "other"] }, { name: "summary" }, { name: "fixes", type: "items", item: [{ name: "action", values: ["install", "ask-agent", "attach", "own-agent", "rephrase", "report", "allow-host"] }, { name: "target" }, { name: "why" }] }], gate: true }, { task: "draft-channel-purpose", output: "json", fields: [{ name: "purpose" }] }, { task: "draft-room-rules", output: "json", fields: [{ name: "rules" }, { name: "welcome" }] }, { task: "draft-thread-title", output: "json", fields: [{ name: "title" }] }, { task: "draft-channel-preset", output: "json", fields: [{ name: "purpose" }, { name: "rules" }, { name: "settings" }] }, { task: "summarize-thread", output: "json", fields: [{ name: "decided", type: "list" }, { name: "open", type: "list" }, { name: "summary" }] }, { task: "find-channel", output: "json", fields: [{ name: "answer" }, { name: "channels", type: "items", item: [{ name: "channelId" }, { name: "why" }] }] }];
 
 // ---- wire/attachment_types.go ----
 
@@ -2136,6 +2141,18 @@ export interface MyBudgetReply extends BudgetPeriod {
   // ("member" = the caller's own, "tenant" = the organization's).
   blocked: boolean;
   blockedBy?: string;
+}
+
+// ---- wire/channel_presets.go ----
+
+// ChannelPreset is a preset's channel setup: the purpose and rules it gives
+// the channel and its settings document (JSON, ChannelSettings' keys without
+// a default agent: a preset names no people). Empty fields are left as the
+// channel has them.
+export interface ChannelPreset {
+  purpose?: string;
+  rules?: string;
+  settings?: unknown;
 }
 
 // ---- wire/channels.go ----
@@ -3190,6 +3207,9 @@ export interface ContentComponent {
   // Room is a room package's setup (its channels, schedules, apps and
   // sources); absent for the other kinds.
   room?: RoomSpec;
+  // Channel is a channel preset's channel setup (what applying it sets);
+  // absent for the other kinds.
+  channel?: ChannelPreset;
   createdAtMs: number;
   updatedAtMs: number;
 }
@@ -8006,8 +8026,8 @@ export type AssistSkipReason = "below" | "no-gate";
 export const AssistSkipReasonValues: readonly AssistSkipReason[] = ["below", "no-gate"];
 export type AssistFieldType = "text" | "list" | "items";
 export const AssistFieldTypeValues: readonly AssistFieldType[] = ["text", "list", "items"];
-export type AssistTaskName = "enhance-prompt" | "describe-work" | "describe-room" | "draft-expert" | "draft-skill-pack" | "draft-prompt-pack" | "plan-room" | "draft-schedule" | "explain-source-use" | "review-skill" | "fill-settings" | "suggest-skill-dirs" | "find-a-way" | "draft-channel-purpose" | "draft-room-rules" | "find-channel" | "draft-thread-title" | "summarize-thread";
-export const AssistTaskNameValues: readonly AssistTaskName[] = ["enhance-prompt", "describe-work", "describe-room", "draft-expert", "draft-skill-pack", "draft-prompt-pack", "plan-room", "draft-schedule", "explain-source-use", "review-skill", "fill-settings", "suggest-skill-dirs", "find-a-way", "draft-channel-purpose", "draft-room-rules", "find-channel", "draft-thread-title", "summarize-thread"];
+export type AssistTaskName = "enhance-prompt" | "describe-work" | "describe-room" | "draft-expert" | "draft-skill-pack" | "draft-prompt-pack" | "plan-room" | "draft-schedule" | "explain-source-use" | "review-skill" | "fill-settings" | "suggest-skill-dirs" | "find-a-way" | "draft-channel-purpose" | "draft-room-rules" | "find-channel" | "draft-thread-title" | "summarize-thread" | "draft-channel-preset";
+export const AssistTaskNameValues: readonly AssistTaskName[] = ["enhance-prompt", "describe-work", "describe-room", "draft-expert", "draft-skill-pack", "draft-prompt-pack", "plan-room", "draft-schedule", "explain-source-use", "review-skill", "fill-settings", "suggest-skill-dirs", "find-a-way", "draft-channel-purpose", "draft-room-rules", "find-channel", "draft-thread-title", "summarize-thread", "draft-channel-preset"];
 export type AttachmentContent = "png" | "jpeg" | "gif" | "webp" | "pdf" | "zip" | "ole" | "text" | "isomedia" | "webm" | "mp3" | "wav" | "ogg";
 export const AttachmentContentValues: readonly AttachmentContent[] = ["png", "jpeg", "gif", "webp", "pdf", "zip", "ole", "text", "isomedia", "webm", "mp3", "wav", "ogg"];
 export type ChannelWhoPosts = "" | "admins";
@@ -8116,8 +8136,8 @@ export const ComponentRuntimeValues: readonly ComponentRuntime[] = ["stdio", "en
 export type ComponentRollout = "auto" | "optin" | "off";
 export const ComponentRolloutValues: readonly ComponentRollout[] = ["auto", "optin", "off"];
 // A content component kind's short name (the contentpkg registry).
-export type ContentKind = "assist" | "expert" | "prompt" | "room" | "skill" | "work";
-export const ContentKindValues: readonly ContentKind[] = ["assist", "expert", "prompt", "room", "skill", "work"];
+export type ContentKind = "assist" | "channel-preset" | "expert" | "prompt" | "room" | "skill" | "work";
+export const ContentKindValues: readonly ContentKind[] = ["assist", "channel-preset", "expert", "prompt", "room", "skill", "work"];
 
 // ---- tables computed by their Go owners ----
 // The job statuses store.AgentJobStatus.Terminal reports finished; every

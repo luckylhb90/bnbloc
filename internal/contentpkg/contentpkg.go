@@ -143,6 +143,9 @@ type Manifest struct {
 	AppSnapshots []wire.RoomAppSnapshot     `json:"appSnapshots,omitempty"`
 	Files        []wire.RoomPackageFile     `json:"files,omitempty"`
 	Sources      []wire.RoomSourceAsk       `json:"sources,omitempty"`
+
+	// Channel preset: the channel setup applying it sets (channel_preset.go).
+	Channel *wire.ChannelPreset `json:"channel,omitempty"`
 }
 
 // Requires lists what a package needs at use time: skill and prompt packs
