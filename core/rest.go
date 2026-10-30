@@ -60,8 +60,13 @@ type HTTPError struct {
 	Body   []byte
 }
 
+// MaxErrorBodyBytes is how much of a core's error body an error message keeps. An agent's own
+// answer (its auth methods, a stack's first lines) is inside it and is what tells a member or an
+// operator why a session did not start: 256 cut it before the cause.
+const MaxErrorBodyBytes = 1024
+
 func (e *HTTPError) Error() string {
-	return fmt.Sprintf("%s %s %s: status %d: %s", e.Core, e.Method, e.Path, e.Status, Truncate(e.Body, 256))
+	return fmt.Sprintf("%s %s %s: status %d: %s", e.Core, e.Method, e.Path, e.Status, Truncate(e.Body, MaxErrorBodyBytes))
 }
 
 // NotFound reports a core's 404 answer: what the request named (a

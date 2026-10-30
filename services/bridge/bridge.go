@@ -2946,7 +2946,7 @@ func cleanDriveError(err error) string {
 			}
 		}
 	}
-	return corepkg.Truncate([]byte(raw), 200)
+	return corepkg.Truncate([]byte(raw), corepkg.MaxErrorBodyBytes)
 }
 
 // isBorrow reports whether a chat is a borrow: its author is a real, different
