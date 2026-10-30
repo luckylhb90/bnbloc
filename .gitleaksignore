@@ -10,3 +10,8 @@ b0ce3a665fd0e841f9611ecb762462290382b4b0:services/gateway/component_settings_end
 6c9f567a82ba6ad4479704d03a0d3bb5c9728b1a:services/bridge/progress_test.go:curl-auth-header:18
 1e376495c487e362a8da4648a608fdd3ae1d09fe:web/src/lib/hashRoute.test.ts:generic-api-key:73
 d5e15c8a46b63f2f569522489e41dc13fcf1100b:web/src/lib/loginReturn.test.ts:generic-api-key:27
+
+# Egress tests' placeholder model keys ("placeholder-key-000"); read 2026-10-30, not real.
+0b4c72c64647ccd7c98ef975ea62aa37fa5b37b1:services/bridge/egress_local_test.go:generic-api-key:33
+0b4c72c64647ccd7c98ef975ea62aa37fa5b37b1:services/bridge/roomtools/egress_local_test.go:generic-api-key:56
+0b4c72c64647ccd7c98ef975ea62aa37fa5b37b1:services/bridge/roomtools/egress_local_test.go:generic-api-key:177
