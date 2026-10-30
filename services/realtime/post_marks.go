@@ -128,6 +128,20 @@ func (pm *postMarks) forget(ctx context.Context, ev wire.Event) {
 	pm.mu.Unlock()
 }
 
+// forgetRemote is forget for another replica's event (the hub's bus), which
+// carries no tenant: the member's mark is dropped under every tenant (room
+// ids are global).
+func (pm *postMarks) forgetRemote(ev wire.Event) {
+	p, _ := wire.DecodePayload[wire.ChannelFollowPayload](ev.Payload)
+	pm.mu.Lock()
+	for k := range pm.marked {
+		if k.room == ev.RoomID && k.channel == p.ChannelID && k.user == p.UserID {
+			delete(pm.marked, k)
+		}
+	}
+	pm.mu.Unlock()
+}
+
 // Shutdown is what a stopping replica finishes before it exits (registered
 // with obs.OnShutdown): the follow marks written behind, and the
 // notifications of what it observed.

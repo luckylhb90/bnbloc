@@ -19,6 +19,9 @@ services:
       BNBLOC_REALTIME_PEERS: "realtime:8082"
       BNBLOC_REALTIME_SELF: "auto"
       BNBLOC_ATTACHMENTS_DIR_SHARED: "true"
+      # The bus between replicas: a room's events reach every replica with
+      # a stream of it, whichever replica committed them.
+      BNBLOC_REALTIME_BUS_REDIS_URL: "redis://redis:6379/1"
 
   relay:
     deploy: { replicas: 2 }

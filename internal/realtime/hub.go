@@ -67,6 +67,25 @@ type Hub struct {
 	buffer      int
 	// now is the replay clock (time.Now; tests move it).
 	now func() time.Time
+	// Bus carries the hub's events to the other replicas serving the same
+	// rooms and theirs to it (nil: this replica is alone). See bus.go.
+	Bus Bus
+	// RoomHead, with a Bus, returns the room's newest stored sequence: where
+	// the room's live order starts when the hub begins receiving the room
+	// from the bus (what is older the room's streams read from history).
+	// Nil or failing: the first sequence that arrives starts it.
+	RoomHead func(roomID string) (int64, error)
+	// Received, when set, sees every event another replica published for a
+	// room this hub receives, after its delivery (realtime's room state
+	// drops what it changed). It must not block.
+	Received func(ev wire.Event)
+	// busRooms are the rooms the hub receives from the bus, under mu.
+	busRooms map[string]*busRoom
+	// holdFor bounds how long a durable event waits for a missing earlier
+	// sequence before it is delivered anyway (reorderHold), lingerFor how
+	// long a room stays on the bus after its last stream (busLinger); tests
+	// shorten both.
+	holdFor, lingerFor time.Duration
 	// Metrics counts published events by kind (nil = off).
 	Metrics *obs.Metrics
 	// Committed, when set, receives the rows of every successful group
@@ -93,6 +112,9 @@ func NewHub(replayLimit, buffer int) *Hub {
 		seq:         map[string]int64{},
 		queues:      map[string]*roomQueue{},
 		recent:      map[string]*recentIDs{},
+		busRooms:    map[string]*busRoom{},
+		holdFor:     reorderHold,
+		lingerFor:   busLinger,
 		replayLimit: replayLimit,
 		buffer:      buffer,
 		now:         time.Now,
@@ -151,6 +173,7 @@ func (h *Hub) Subscribe(roomID string) *Subscriber {
 // reach back to since (the client fetches what lies between from history).
 // since 0 replays the whole snapshot.
 func (h *Hub) SubscribeSince(roomID string, since int64) (sub *Subscriber, gap bool) {
+	h.joinBus(roomID)
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	snapshot := h.pruneReplayLocked(roomID, h.now())
@@ -181,6 +204,7 @@ func (h *Hub) subscribe(roomID string, replay bool) *Subscriber {
 	if replay {
 		return h.Subscribe(roomID)
 	}
+	h.joinBus(roomID)
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.subscribeLocked(roomID, nil)
@@ -225,6 +249,7 @@ func (h *Hub) dropLocked(roomID string, sub *Subscriber) {
 		// Free the replay buffer for an empty room; it is only a latency
 		// optimization for currently-connected subscribers.
 		delete(h.replay, roomID)
+		h.idleBusLocked(roomID)
 	}
 }
 
@@ -301,7 +326,7 @@ func (h *Hub) PublishCommit(ev wire.Event, d Durable) (wire.Event, error) {
 		return h.enqueue(&pending{ev: ev, deliver: true})
 	default:
 		ev.Sequence = 0
-		h.deliver([]*pending{{ev: ev, out: ev, deliver: true}})
+		h.deliver([]*pending{{ev: ev, out: ev, deliver: true}}, true)
 		return ev, nil
 	}
 }
@@ -400,7 +425,7 @@ func (h *Hub) lead(q *roomQueue, first *pending) {
 	t0 := time.Now()
 	h.commit(batch)
 	t1 := time.Now()
-	h.deliver(batch)
+	h.deliver(batch, true)
 	h.Metrics.HistogramObserve(metricFeedCommitTime, t1.Sub(t0).Seconds())
 	h.Metrics.HistogramObserve(metricFeedDeliverTime, time.Since(t1).Seconds())
 
@@ -542,7 +567,7 @@ func (h *Hub) DeliverCommitted(ev wire.Event) bool {
 		}
 	}
 	h.mu.Unlock()
-	h.deliver([]*pending{{ev: ev, out: ev, deliver: true}})
+	h.deliver([]*pending{{ev: ev, out: ev, deliver: true}}, false)
 	return true
 }
 
@@ -618,66 +643,77 @@ func (h *Hub) store(j Journal, rows []store.RoomMessage) error {
 }
 
 // deliver retains and fans out, in batch order, every member that committed
-// (or needs no commit) and is meant to be delivered. Holding mu across the
-// batch keeps it contiguous on every stream.
-func (h *Hub) deliver(batch []*pending) {
-	// One encoding for every stream of the room (and the replay buffer),
-	// made before the hub's lock is taken: the lock covers only handing the
-	// bytes to the room's streams, so one busy room's delivery holds no
-	// other room for long.
+// (or needs no commit) and is meant to be delivered; own events (this hub
+// published them) then go on the bus. Holding mu across the batch keeps it
+// contiguous on every stream.
+func (h *Hub) deliver(batch []*pending, own bool) {
+	// One encoding for every stream of the room (and the replay buffer, and
+	// the bus), made before the hub's lock is taken: the lock covers only
+	// handing the bytes to the room's streams, so one busy room's delivery
+	// holds no other room for long.
+	evs := make([]wire.Event, 0, len(batch))
 	for _, p := range batch {
 		if p.deliver && p.err == nil && p.dupOf == nil {
 			if b, err := json.Marshal(p.out); err == nil {
 				p.out.Encoded = b
 			}
+			evs = append(evs, p.out)
 		}
+	}
+	if len(evs) == 0 {
+		return
 	}
 	h.mu.Lock()
-	defer h.mu.Unlock()
-	for _, p := range batch {
-		if !p.deliver || p.err != nil || p.dupOf != nil {
-			continue
-		}
-		ev := p.out
-		switch {
-		case ev.Kind == wire.EventRoomDeleted:
-			// Nothing of a deleted room may replay into a later room that
-			// reuses its id, and the revocation itself must not either.
-			delete(h.replay, ev.RoomID)
-			delete(h.recent, ev.RoomID)
-		case wire.ReplayedKind(ev.Kind):
-			// Only replay kinds (wire.RoomEventKinds) are retained: a
-			// transient event (a typing hint, a toast, a badge, a stale
-			// state, a revocation) delivered again on reconnect would look
-			// new to the client.
-			now := h.now()
-			buf := append(h.pruneReplayLocked(ev.RoomID, now), replayEntry{ev: ev, at: now})
-			if h.replayLimit > 0 && len(buf) > h.replayLimit {
-				buf = buf[len(buf)-h.replayLimit:]
-			}
-			h.replay[ev.RoomID] = buf
-		}
-		for sub := range h.subs[ev.RoomID] {
-			select {
-			case sub.ch <- ev:
-			default:
-				// The stream fell a whole buffer behind. Never a silent drop:
-				// the first time, the subscriber is marked gapped and its
-				// stream tells the client to fetch the difference from its
-				// last sequence (Telegram's updatesTooLong), keeping the
-				// connection; a second overflow before the stream took the
-				// first ends the stream (the client reconnects and catches up
-				// from history).
-				if sub.gapped.CompareAndSwap(false, true) {
-					h.Metrics.CounterInc(metricSSEGaps)
-					continue
-				}
-				h.dropLocked(ev.RoomID, sub)
-				h.Metrics.CounterInc(metricSSEOverflows)
-			}
-		}
-		h.Metrics.CounterInc(metricEventsPublished, obs.L("kind", EventKindLabel(ev.Kind)))
+	for _, ev := range evs {
+		h.acceptLocked(ev)
 	}
+	h.mu.Unlock()
+	if own {
+		h.publishBus(evs)
+	}
+}
+
+// fanoutLocked retains ev for replay (a replay kind) and hands it to the
+// room's streams; the caller holds mu.
+func (h *Hub) fanoutLocked(ev wire.Event) {
+	switch {
+	case ev.Kind == wire.EventRoomDeleted:
+		// Nothing of a deleted room may replay into a later room that
+		// reuses its id, and the revocation itself must not either.
+		delete(h.replay, ev.RoomID)
+		delete(h.recent, ev.RoomID)
+	case wire.ReplayedKind(ev.Kind):
+		// Only replay kinds (wire.RoomEventKinds) are retained: a
+		// transient event (a typing hint, a toast, a badge, a stale
+		// state, a revocation) delivered again on reconnect would look
+		// new to the client.
+		now := h.now()
+		buf := append(h.pruneReplayLocked(ev.RoomID, now), replayEntry{ev: ev, at: now})
+		if h.replayLimit > 0 && len(buf) > h.replayLimit {
+			buf = buf[len(buf)-h.replayLimit:]
+		}
+		h.replay[ev.RoomID] = buf
+	}
+	for sub := range h.subs[ev.RoomID] {
+		select {
+		case sub.ch <- ev:
+		default:
+			// The stream fell a whole buffer behind. Never a silent drop:
+			// the first time, the subscriber is marked gapped and its
+			// stream tells the client to fetch the difference from its
+			// last sequence (Telegram's updatesTooLong), keeping the
+			// connection; a second overflow before the stream took the
+			// first ends the stream (the client reconnects and catches up
+			// from history).
+			if sub.gapped.CompareAndSwap(false, true) {
+				h.Metrics.CounterInc(metricSSEGaps)
+				continue
+			}
+			h.dropLocked(ev.RoomID, sub)
+			h.Metrics.CounterInc(metricSSEOverflows)
+		}
+	}
+	h.Metrics.CounterInc(metricEventsPublished, obs.L("kind", EventKindLabel(ev.Kind)))
 }
 
 // fail sets err on every write and clears its sequence: nothing was consumed.

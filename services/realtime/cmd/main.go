@@ -16,6 +16,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/pulse"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
+	"github.com/luckylhb90/bnbloc/internal/realtime/redisbus"
 	"github.com/luckylhb90/bnbloc/internal/retention"
 	"github.com/luckylhb90/bnbloc/internal/sealbox"
 	"github.com/luckylhb90/bnbloc/internal/search"
@@ -211,6 +212,23 @@ func main() {
 		Search: searchIndex,
 	}).Run(context.Background())
 	svc.Hub.Metrics = metrics
+	// The bus between replicas (docs/prd/2026-10-30-replicas-without-owners.md):
+	// every replica with a stream of a room receives the room's events from
+	// whichever replica committed them. Unset: this replica is alone.
+	if url := config.FromEnvRaw(redisbus.EnvURL); url != "" {
+		bus, err := redisbus.New(url)
+		if err != nil {
+			log.Fatalf("bnbloc-realtime: %v", err)
+		}
+		svc.Hub.Bus = bus
+		chat := backends.Chat
+		svc.Hub.RoomHead = func(roomID string) (int64, error) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			return chat.MaxRoomSeq(ctx, roomID)
+		}
+		log.Printf("bnbloc-realtime: room events shared with the other replicas over the bus (%s)", redisbus.EnvURL)
+	}
 	handler := svc.Handler()
 	// The first refresh runs before serving, so the replica starts with a
 	// real view of its peers.

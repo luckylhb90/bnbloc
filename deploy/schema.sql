@@ -480,6 +480,17 @@ CREATE TABLE IF NOT EXISTS room_messages (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 SET SESSION innodb_ft_enable_stopword = DEFAULT;
 
+-- A room's sequence counter: the highest sequence handed out in the room.
+-- AppendNextRoomMessages advances it in the transaction that inserts the
+-- room's rows, so its row lock orders every writer of the room. Started at
+-- the room's stored max on its first numbered write (no backfill).
+CREATE TABLE IF NOT EXISTS room_counters (
+  room_id   VARCHAR(64) NOT NULL,
+  tenant_id VARCHAR(64) NOT NULL,
+  seq       BIGINT NOT NULL,
+  PRIMARY KEY (room_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- Message tasks (F6): a persisted room message (by room sequence) marked as a
 -- task. title/message_author are snapshots taken when the task was marked.
 CREATE TABLE IF NOT EXISTS message_tasks (

@@ -284,6 +284,11 @@ func (s *Service) Handler() http.Handler {
 	// The room state at the owner (room_state.go): channels, sections and
 	// the room's members read from memory, kept by the room's events.
 	s.roomStateOnce.Do(s.initRoomState)
+	// Another replica's events (the hub's bus) change this replica's room
+	// state as its own do; their taps ran where they were published.
+	if s.Hub != nil && s.Hub.Received == nil {
+		s.Hub.Received = s.observeRemote
+	}
 	if s.PluginHooks.mayRead == nil {
 		s.PluginHooks.mayRead = s.memberMayReadChannel
 	}

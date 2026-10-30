@@ -63,6 +63,8 @@ func newCluster(t *testing.T, n int) *cluster {
 		addrs[i] = c.reps[i].addr
 	}
 	jobs := store.NewMemoryBridgeJobs()
+	// The replicas share a bus, as in production with one configured.
+	bus := realtime.NewMemoryBus()
 	for i, r := range c.reps {
 		set, err := shard.New(shard.Options{Peers: strings.Join(addrs, ","), Self: r.addr, Probe: c.probe})
 		if err != nil {
@@ -75,6 +77,8 @@ func newCluster(t *testing.T, n int) *cluster {
 			c.plugins = fix
 		}
 		hub := realtime.NewHub(64, 64)
+		hub.Bus = bus.Endpoint()
+		hub.RoomHead = func(room string) (int64, error) { return c.chat.MaxRoomSeq(context.Background(), room) }
 		r.svc = &Service{
 			Hub: hub, Membership: c.members, Chat: c.chat, BridgeJobs: jobs, Dispatches: jobs,
 			Schedules: c.sched, RoomRoles: schedRoles{anyRoom: true},
@@ -453,7 +457,9 @@ func TestScaleOutOwnershipChangeMovesStreams(t *testing.T) {
 	c.setDown(owner, false)
 	c.refresh()
 	s.ended(t)
-	s = c.open(entry, "/v1/rooms/"+room+"/events?allChannels=1", "maya")
+	// The client resumes after the last sequence it holds (its replay may
+	// hold seq 2: the old owner still received the room from the bus).
+	s = c.open(entry, "/v1/rooms/"+room+"/events?allChannels=1&since=2", "maya")
 	waitSubscribers(t, owner, room, 1)
 	if seq := c.chatVia(entry, room, "jack", "three", "m-3"); seq != 3 {
 		t.Fatalf("after move back seq %d, want 3", seq)

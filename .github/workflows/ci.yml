@@ -39,12 +39,20 @@ jobs:
         options: >-
           --health-cmd "mysqladmin ping -h 127.0.0.1 -pci-root"
           --health-interval 5s --health-timeout 5s --health-retries 30
+      # The Redis tests (realtime's bus, Pulse) skip without it.
+      redis:
+        image: ${{ vars.BNBLOC_CI_REDIS_IMAGE || 'redis:7-alpine' }}
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 30
     env:
       # Enables the MySQL integration tests, which skip without it. Every
       # test binary works in throwaway databases it creates on this server
       # (internal/testmysql: `bnbloc_t*`, dropped afterwards), so the user
       # needs CREATE/DROP DATABASE: the job's root.
       BNBLOC_TEST_MYSQL_DSN: "root:ci-root@tcp(127.0.0.1:3306)/bnbloc?parseTime=true"
+      BNBLOC_TEST_REDIS_URL: "redis://127.0.0.1:6379/0"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

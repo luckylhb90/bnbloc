@@ -98,7 +98,7 @@ func (c *roomStateCache) release(owned func(roomID string) bool) {
 }
 
 // observe applies one of the room's published events: what it changed is
-// read again on next use.
+// read again on next use. Its cases are the kinds roomStateKind lists.
 func (c *roomStateCache) observe(ctx context.Context, ev wire.Event) {
 	switch ev.Kind {
 	case wire.EventChannelUpdated, wire.EventRoomDeleted, wire.EventRoomUpdated:
@@ -120,6 +120,43 @@ func (c *roomStateCache) observe(ctx context.Context, ev wire.Event) {
 			delete(e.channels, p.ThreadID)
 			delete(e.admission, p.ThreadID)
 		})
+	}
+}
+
+// roomStateKind reports a kind that changes the room's state (observe).
+func roomStateKind(kind string) bool {
+	switch kind {
+	case wire.EventChannelUpdated, wire.EventRoomDeleted, wire.EventRoomUpdated, wire.EventSectionMembership,
+		wire.EventMemberJoined, wire.EventMemberRemoved, wire.EventChannelFollow, wire.EventThreadUpdated:
+		return true
+	}
+	return false
+}
+
+// observeRemote applies another replica's event (the hub's bus). It carries
+// no tenant, so a kind that changes room state drops the room's whole state
+// under every tenant (room ids are global): such events are rare, and the
+// state is read again on next use.
+func (c *roomStateCache) observeRemote(ev wire.Event) {
+	if !roomStateKind(ev.Kind) {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for key := range c.rooms {
+		if _, roomID, ok := strings.Cut(key, "\x00"); ok && roomID == ev.RoomID {
+			delete(c.rooms, key)
+		}
+	}
+}
+
+// observeRemote is what another replica's event changes here.
+func (s *Service) observeRemote(ev wire.Event) {
+	if s.roomState != nil {
+		s.roomState.observeRemote(ev)
+	}
+	if ev.Kind == wire.EventChannelFollow {
+		s.postMarks.forgetRemote(ev)
 	}
 }
 

@@ -279,3 +279,34 @@ A's in §5.
   The failover drill (`scripts/failover-check.sh`, 3 replicas, drain,
   rejoin, crash, rejoin) passes on it: 6,000 of 6,000 sends, 19,441 of
   19,441 deliveries, no counter deadlock or duplicate logged.
+- **Slices 2 and 3 (2026-10-30): the bus.** `realtime.Bus` (`bus.go`): an
+  endpoint per replica; what one publishes reaches the room's other
+  subscribers, never itself (a replica delivers its own events directly);
+  at most once, with `lost` when a subscription may have missed events.
+  `MemoryBus` connects hubs in one process (tests); `redisbus` is Redis
+  PUB/SUB, one channel per room, one subscriber connection per replica,
+  enabled by `BNBLOC_REALTIME_BUS_REDIS_URL` (on in `compose.ha.yml`).
+  The hub (`hub_bus.go`): a room is received from the bus while it has a
+  stream here and 30 s after the last; joining subscribes first, then reads
+  the room's head (`RoomHead`, the stored max), so a message committed
+  meanwhile is in history or on the bus, never neither, and the replay
+  buffer starts again (a stream joining then reads the difference). Durable
+  events, its own and others', are delivered in sequence order: a later one
+  waits at most 300 ms for a missing one, then is delivered and the room's
+  streams read the difference; one already delivered is dropped. A lost
+  subscription (Redis reconnect) gaps the room's streams and restarts the
+  order at the head. Other replicas' events reach this replica's room state
+  (`Hub.Received`): a kind that changes it drops the room's state under
+  every tenant, since bus events carry none.
+  Not yet: ownership still routes posts and streams to one replica (slice
+  5 removes it); until then the bus covers the moments of two owners.
+  Known limit, for slice 5: a revocation from one replica and a message
+  from another are not ordered with each other (a removed member's stream
+  can see a message committed just after the removal, for the bus's
+  milliseconds); and a replica must be on the bus for every room it caches
+  state of, not only the rooms it streams.
+  The failover drill with the bus on passes: 6,000 of 6,000 sends, 19,313
+  of 19,313 deliveries; across the three replicas the bus carried 3,874
+  publishes and 1,056 receipts (the rooms' moments of two owners and their
+  linger), dropped 42 duplicates (the hand-over watch and the bus both
+  bringing one), held none, lost none.

@@ -19,6 +19,7 @@ const (
 	metricChatStep         = "realtime_chat_step_seconds"
 	metricFeedCommitTime   = "realtime_feed_commit_seconds"
 	metricFeedDeliverTime  = "realtime_feed_deliver_seconds"
+	metricBusEvents        = "realtime_bus_events_total"
 )
 
 // The steps of a chat post (ObserveChatStep), in order.
@@ -66,6 +67,10 @@ func RegisterMetrics(m *obs.Metrics) {
 	m.Describe(metricChatStep, "A chat post's time by step (access, admit, commit, after), seconds.")
 	m.Describe(metricFeedCommitTime, "One room batch's database commit, seconds.")
 	m.Describe(metricFeedDeliverTime, "One room batch's delivery to the room's streams, seconds.")
+	m.Describe(metricBusEvents, "Room events between replicas on the bus by outcome (published, publish_error, received, duplicate: a sequence already delivered, held: delivered after the reorder hold gave up on a missing one, lost: a subscription that may have missed events).")
+	for _, outcome := range []string{"published", "publish_error", "received", "duplicate", "held", "lost"} {
+		m.CounterAdd(metricBusEvents, 0, obs.L("outcome", outcome))
+	}
 	m.Describe(metricLaneEvents, "Room events on lanes streams by lane (full: delivered; activity: folded into a channel_activity; activity_sent: channel_activity events written; none: dropped, a closed channel's typing or progress).")
 	for _, lane := range []string{wire.LaneFull, wire.LaneActivity, "activity_sent", wire.LaneNone} {
 		m.CounterAdd(metricLaneEvents, 0, obs.L("lane", lane))
