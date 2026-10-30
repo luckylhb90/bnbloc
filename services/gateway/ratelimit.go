@@ -86,7 +86,7 @@ func (s *Service) appSpend(w http.ResponseWriter, d appDim, b rateBudget, key st
 	if b == appWriteBudget {
 		rt, l = appRates[d].write, &s.appLimiters[d].write
 	}
-	if !l.Get(rt.rate, rt.burst, s.Peers.Size).Allow(key) {
+	if !l.Get(rt.rate, rt.burst, s.replicaCount).Allow(key) {
 		httpx.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 		return false
 	}
@@ -95,5 +95,5 @@ func (s *Service) appSpend(w http.ResponseWriter, d appDim, b rateBudget, key st
 
 // visitorAllow consumes one visitor-token mint for a client IP.
 func (s *Service) visitorAllow(ip string) bool {
-	return s.visitorLimiter.Get(defaultVisitorRate, defaultVisitorBurst, s.Peers.Size).Allow("ip:" + ip)
+	return s.visitorLimiter.Get(defaultVisitorRate, defaultVisitorBurst, s.replicaCount).Allow("ip:" + ip)
 }

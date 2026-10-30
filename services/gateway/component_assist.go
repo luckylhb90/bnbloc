@@ -96,7 +96,7 @@ func (s *Service) handleComponentAssist(w http.ResponseWriter, r *http.Request) 
 		httpx.Error(w, "a service's task answers JSON", http.StatusBadRequest)
 		return
 	}
-	if !s.assistLimiter.Get(assistRate, assistBurst, s.Peers.Size).Allow(serviceAssistKey(name, req.Org)) {
+	if !s.assistLimiter.Get(assistRate, assistBurst, s.replicaCount).Allow(serviceAssistKey(name, req.Org)) {
 		httpx.Error(w, "too many AI runs for this service: try again in a minute", http.StatusTooManyRequests)
 		return
 	}

@@ -63,7 +63,7 @@ embedded SPA. Stateless apart from the shared database — scale horizontally.
 | `BNBLOC_CORES` (+ `BNBLOC_CORE_<NAME>_URL`) | optional | Explicit cores only; installed packages need none. |
 | `BNBLOC_PULSE_BASE_URL` | for the organization board | `http://bnbloc-pulse:8090` (Helm: rendered when `pulse.enabled`). Unset = the board routes answer "not deployed". |
 | `BNBLOC_METRICS_ADDR` | for metrics | Internal `/metrics` listener (`:9090` in compose/Helm). The public listener never serves `/metrics` (404); unset = no gateway metrics; the gateway's own listen address refuses to start. Never route or publish it. |
-| `BNBLOC_GATEWAY_PEERS` | with >1 replica | The gateway replica set (Helm: the headless `bnbloc-gateway-peers:8080`; or a comma list of `host:port`). Each replica enforces 1/N of every rate limit, N = live replicas, so the configured budget holds across the deployment. Unset = one replica (N replicas would then allow N times every budget). |
+| `BNBLOC_REDIS_URL` (+ `BNBLOC_REDIS_CLUSTER`) | with >1 replica, recommended | The replicas' Redis: it counts the live replicas, and each enforces 1/N of every rate limit so the configured budget holds across the deployment. Unset = each replica enforces every budget in full. |
 
 The gateway does **not** proxy the relay (it only reads the relay's `/version`);
 the edge proxy routes `/relay/*`.
@@ -92,7 +92,7 @@ Presence + business-event fan-out over SSE; durable chat history; attachment
 and artifact blobs. Replicas have **no owners**: any replica serves any room
 and member (docs/prd/2026-10-30-replicas-without-owners.md). The store
 numbers a room's messages (`room_counters`); with more than one replica they
-share a bus, a Redis (`BNBLOC_REALTIME_BUS_REDIS_URL`): a room's events reach
+share a Redis (`BNBLOC_REDIS_URL`): a room's events reach
 every replica streaming it, presence and the agent roster are joined across
 replicas, slow mode is one shared claim, and a member's desktop plugin
 deliveries reach whichever replica holds the stream. A replica going away
@@ -105,8 +105,8 @@ behind the `bnbloc-realtime` Service (an HPA may scale it).
 | `BNBLOC_INTERNAL_KEY` | yes | Same value as gateway. |
 | `BNBLOC_ROOM_BASE_URL` | yes | `http://bnbloc-room:8080` — membership checks. |
 | Blob storage | yes | A volume at `/var/lib/bnbloc/attachments` (`BNBLOC_ATTACHMENTS_DIR`), or `BNBLOC_ATTACHMENTS_S3_BUCKET` (+ `_REGION`, `_ENDPOINT`, credentials, `_KEY_PREFIX`, `_PATH_STYLE`). More than one replica requires S3, or a directory every replica mounts (`BNBLOC_ATTACHMENTS_DIR_SHARED=true`); startup refuses one replica's disk with a bus configured. |
-| `BNBLOC_REALTIME_BUS_REDIS_URL` | with >1 replica | The bus between replicas (`redis://host:6379/1`; `rediss://` with TLS). Unset = one replica. |
-| `BNBLOC_REALTIME_BUS_REDIS_CLUSTER` | with a Redis Cluster | `true`: the URL names a cluster node or configuration endpoint (no database number). |
+| `BNBLOC_REDIS_URL` | with >1 replica | The replicas' Redis (`redis://host:6379/1`; `rediss://` with TLS). Unset = one replica. |
+| `BNBLOC_REDIS_CLUSTER` | with a Redis Cluster | `true`: the URL names a cluster node or configuration endpoint (no database number). |
 | `BNBLOC_ATTACHMENTS_S3_DIRECT_DOWNLOADS` | optional | S3 only: opt-in downloads answer 302 to a 5-minute presigned URL (clients must reach the bucket). Default off: everything streams. |
 | `BNBLOC_ATTACHMENTS_S3_PUBLIC_ENDPOINT` | optional | S3 base URL clients reach, when `_ENDPOINT` is internal-only. Empty = `_ENDPOINT`. |
 | `BNBLOC_PUBLIC_URL` | recommended | Public web origin; member-notification deep links. Unset = no links. |
@@ -194,18 +194,17 @@ The production compose overlay starts it only with the `pulse` profile (see
 `deploy/compose.prod.yml`). The all-in-one image always runs it; without a Redis
 (from the environment or the Secrets Manager secret) it answers the board 503.
 
-## relay (`:8085`) — scales out by session-key ownership
+## relay (`:8085`)
 
 The WebSocket byte-stream relay for desktop file sync. No database, no svcauth (endpoints are authorized by the sync-layer
-HMAC). Pairing state is in process memory, so both halves of a session must
-meet on one replica: with more than one, set `BNBLOC_RELAY_PEERS` +
-`BNBLOC_RELAY_SELF` and every stream request is forwarded to its
-session key's owner (WebSocket upgrades pass through). Kubernetes runs it as
-a StatefulSet behind the headless `bnbloc-relay-peers` Service.
+HMAC). A session's two streams are piped inside one process: with more than
+one replica, the first records its replica in the replicas' Redis and the
+second, landing elsewhere, joins it there (pod to pod on 8085, its own pod IP
+found on its own; `/internal/relay/join`, which the edge never routes).
 
 | Variable | Required | Notes |
 | --- | --- | --- |
-| `BNBLOC_RELAY_PEERS` / `BNBLOC_RELAY_SELF` | with >1 replica | Same forms as realtime's (Helm: `bnbloc-relay-peers:8085` and `$(POD_IP)`). Unset = single node. |
+| `BNBLOC_REDIS_URL` (+ `BNBLOC_REDIS_CLUSTER`) | with >1 replica | The replicas' Redis. Unset = one replica pairs every session. |
 
 Deployment-layer requirements: the edge routes `https://<host>/relay/*` to it
 (forwarding the WebSocket upgrade, long idle timeout), and its public entry is

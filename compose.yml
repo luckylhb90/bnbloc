@@ -60,8 +60,8 @@ services:
       BNBLOC_PULSE_REDIS_URL: "${BNBLOC_PULSE_REDIS_URL:-redis://redis:6379/0}"
       # Member digest key (HMAC, at least 32 bytes), shared by realtime and room.
       BNBLOC_PULSE_KEY: "${BNBLOC_PULSE_KEY:-dev-bnbloc-pulse-key-change-me-0123456789}"
-      # One replica: no bus (BNBLOC_REALTIME_BUS_REDIS_URL). More replicas
-      # share one: compose.ha.yml here, the Helm chart in production
+      # One replica: no BNBLOC_REDIS_URL. More replicas share one:
+      # compose.ha.yml here, the Helm chart in production
       # (docs/production-deployment.md#high-availability).
       BNBLOC_INTERNAL_KEY: "${BNBLOC_INTERNAL_KEY:-dev-bnbloc-internal-key-change-me}"
       BNBLOC_ROOM_BASE_URL: "http://room:8080"
@@ -169,7 +169,7 @@ services:
     build: { context: ., args: { SERVICE: relay, CI_COMMIT_SHA: "${CI_COMMIT_SHA:-}" } }
     environment:
       BNBLOC_RELAY_LISTEN_ADDR: ":8085"
-      # Single node (no BNBLOC_RELAY_PEERS/_SELF): pairs every session here.
+      # One replica (no BNBLOC_REDIS_URL): pairs every session here.
 
   gateway:
     build: { context: ., args: { SERVICE: gateway, WEBUI: full, CI_COMMIT_SHA: "${CI_COMMIT_SHA:-}" } }

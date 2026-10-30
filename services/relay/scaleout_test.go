@@ -1,87 +1,69 @@
 package relay
 
 import (
-	"context"
-	"fmt"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/luckylhb90/bnbloc/internal/shard"
 	"github.com/luckylhb90/bnbloc/internal/wsconn"
 )
 
-type relayReplica struct {
-	addr string
-	srv  *httptest.Server
-	svc  *Service
-	set  *shard.Set
+// memoryMeet is the rendezvous in one process.
+type memoryMeet struct {
+	mu sync.Mutex
+	at map[string]string
 }
 
-// relayCluster starts two relay replicas sharing a static peer list whose
-// liveness the test controls.
-func relayCluster(t *testing.T) ([]*relayReplica, func(addr string, down bool)) {
-	t.Helper()
-	var mu sync.Mutex
-	down := map[string]bool{}
-	probe := func(_ context.Context, addr string) bool {
-		mu.Lock()
-		defer mu.Unlock()
-		return !down[addr]
+func (m *memoryMeet) Meet(key, holder string, _ time.Duration) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if at, ok := m.at[key]; ok {
+		return at, nil
 	}
-	reps := make([]*relayReplica, 2)
-	addrs := make([]string, 2)
-	for i := range reps {
+	m.at[key] = holder
+	return holder, nil
+}
+
+func (m *memoryMeet) Leave(key, holder string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.at[key] == holder {
+		delete(m.at, key)
+	}
+	return nil
+}
+
+func (m *memoryMeet) records() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.at)
+}
+
+// relayCluster starts two relay replicas sharing one rendezvous.
+func relayCluster(t *testing.T) ([]*httptest.Server, *memoryMeet) {
+	t.Helper()
+	meet := &memoryMeet{at: map[string]string{}}
+	srvs := make([]*httptest.Server, 2)
+	for i := range srvs {
 		srv := httptest.NewUnstartedServer(nil)
-		reps[i] = &relayReplica{addr: srv.Listener.Addr().String(), srv: srv}
-		addrs[i] = reps[i].addr
+		svc := New()
+		svc.Meet, svc.Self = meet, srv.Listener.Addr().String()
+		srv.Config.Handler = svc.Handler()
+		srv.Start()
+		t.Cleanup(srv.Close)
+		srvs[i] = srv
 	}
-	for _, r := range reps {
-		set, err := shard.New(shard.Options{Peers: strings.Join(addrs, ","), Self: r.addr, Probe: probe})
-		if err != nil {
-			t.Fatal(err)
-		}
-		set.Refresh(context.Background())
-		r.set = set
-		r.svc = New()
-		r.svc.Peers = set
-		r.srv.Config.Handler = r.svc.Handler()
-		r.srv.Start()
-		t.Cleanup(r.srv.Close)
-	}
-	return reps, func(addr string, d bool) { mu.Lock(); down[addr] = d; mu.Unlock() }
+	return srvs, meet
 }
 
-func sessionOwnedBy(t *testing.T, r *relayReplica) string {
+func exchange(t *testing.T, first, second interface {
+	Read([]byte) (int, error)
+	Write([]byte) (int, error)
+	SetReadDeadline(time.Time) error
+}) {
 	t.Helper()
-	for i := 0; i < 10000; i++ {
-		key := fmt.Sprintf("sess-%d", i)
-		if shard.Owner(r.set.Peers(), "relay:"+key) == r.addr {
-			return key
-		}
-	}
-	t.Fatal("no key")
-	return ""
-}
-
-// Two peers of one session that reach different replicas still pair: the
-// stream upgrades (WebSocket) are forwarded to the session key's owner.
-func TestRelayPairsAcrossReplicas(t *testing.T) {
-	reps, _ := relayCluster(t)
-	key := sessionOwnedBy(t, reps[1])
-
-	first, err := wsconn.Dial(reps[0].srv.URL+"/relay/stream/"+key, 2*time.Second)
-	if err != nil {
-		t.Fatalf("dial via replica 0: %v", err)
-	}
-	defer first.Close()
-	second, err := wsconn.Dial(reps[1].srv.URL+"/relay/stream/"+key, 2*time.Second)
-	if err != nil {
-		t.Fatalf("dial via replica 1: %v", err)
-	}
-	defer second.Close()
 	if _, err := first.Write([]byte("hello-across-replicas")); err != nil {
 		t.Fatal(err)
 	}
@@ -98,47 +80,99 @@ func TestRelayPairsAcrossReplicas(t *testing.T) {
 	if n, err = first.Read(buf); err != nil || string(buf[:n]) != "and-back" {
 		t.Fatalf("first read %q, %v", buf[:n], err)
 	}
-	// The pairing happened on the owner only.
-	reps[0].svc.streamMu.Lock()
-	stray := len(reps[0].svc.pendingStreams)
-	reps[0].svc.streamMu.Unlock()
-	if stray != 0 {
-		t.Fatal("the non-owner parked a stream")
-	}
 }
 
-// When the session key moves, the parked first peer is closed so it
-// reconnects to the new owner (where its partner will meet it).
-func TestRelayReleasesMovedKeys(t *testing.T) {
-	reps, setDown := relayCluster(t)
-	owner := reps[1]
-	key := sessionOwnedBy(t, owner)
-	parked, err := wsconn.Dial(reps[0].srv.URL+"/relay/stream/"+key, 2*time.Second)
+// Two peers of one session that reach different replicas still pair: the
+// second finds the first's replica at the rendezvous and joins it there;
+// the record is gone once they paired.
+func TestRelayPairsAcrossReplicas(t *testing.T) {
+	srvs, meet := relayCluster(t)
+	first, err := wsconn.Dial(srvs[0].URL+"/relay/stream/sess-1", 2*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer parked.Close()
+	defer first.Close()
 	deadline := time.Now().Add(2 * time.Second)
-	for {
-		owner.svc.streamMu.Lock()
-		n := len(owner.svc.pendingStreams)
-		owner.svc.streamMu.Unlock()
-		if n == 1 {
-			break
-		}
+	for meet.records() != 1 {
 		if time.Now().After(deadline) {
-			t.Fatal("first peer never parked on the owner")
+			t.Fatal("the first half never recorded its replica")
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	setDown(owner.addr, true)
-	for i := 0; i < 2; i++ { // two failed probes drop it
-		for _, r := range reps {
-			r.set.Refresh(context.Background())
-		}
+	second, err := wsconn.Dial(srvs[1].URL+"/relay/stream/sess-1", 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
 	}
-	_ = parked.SetReadDeadline(time.Now().Add(2 * time.Second))
-	if _, err := parked.Read(make([]byte, 8)); err == nil {
-		t.Fatal("parked peer of a moved key was not closed")
+	defer second.Close()
+	exchange(t, first, second)
+	if meet.records() != 0 {
+		t.Fatal("the rendezvous record outlived the pairing")
+	}
+}
+
+// Both halves on one replica pair there, as with a single replica.
+func TestRelayPairsOnOneReplica(t *testing.T) {
+	srvs, meet := relayCluster(t)
+	first, err := wsconn.Dial(srvs[1].URL+"/relay/stream/sess-2", 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	for meet.records() != 1 {
+		time.Sleep(5 * time.Millisecond)
+	}
+	second, err := wsconn.Dial(srvs[1].URL+"/relay/stream/sess-2", 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	exchange(t, first, second)
+}
+
+// A record left by a replica that died is cleared, and the half parks
+// where it landed for its partner.
+func TestRelayClearsADeadReplicasRecord(t *testing.T) {
+	srvs, meet := relayCluster(t)
+	_, _ = meet.Meet("sess-3", "127.0.0.1:1 deadtoken", time.Minute)
+	first, err := wsconn.Dial(srvs[0].URL+"/relay/stream/sess-3", 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	deadline := time.Now().Add(7 * time.Second)
+	for {
+		meet.mu.Lock()
+		at := meet.at["sess-3"]
+		meet.mu.Unlock()
+		if strings.HasPrefix(at, strings.TrimPrefix(srvs[0].URL, "http://")+" ") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("record %q, want replica 0's", at)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	second, err := wsconn.Dial(srvs[1].URL+"/relay/stream/sess-3", 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	exchange(t, first, second)
+}
+
+// A join without the parked half's token is refused.
+func TestRelayJoinNeedsTheToken(t *testing.T) {
+	srvs, meet := relayCluster(t)
+	first, err := wsconn.Dial(srvs[0].URL+"/relay/stream/sess-4", 2*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	for meet.records() != 1 {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if c, err := wsconn.Dial(srvs[0].URL+"/internal/relay/join/sess-4?t=guess", 2*time.Second); err == nil {
+		c.Close()
+		t.Fatal("a join with a wrong token was accepted")
 	}
 }

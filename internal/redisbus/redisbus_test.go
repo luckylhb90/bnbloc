@@ -243,3 +243,42 @@ func TestMarks(t *testing.T) {
 		t.Fatal("unmarked by every holder, still there")
 	}
 }
+
+// Every endpoint of a service counts the others.
+func TestCensus(t *testing.T) {
+	service := testRoom(t)
+	a, b := testBus(t), testBus(t)
+	ca := a.Census(service)
+	b.Census(service)
+	deadline := time.Now().Add(7 * time.Second)
+	for ca.Count() != 2 {
+		if time.Now().After(deadline) {
+			t.Fatalf("count %d, want 2", ca.Count())
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if (*Census)(nil).Count() != 1 {
+		t.Fatal("no census counts one")
+	}
+}
+
+// The first holder wins a rendezvous; the second learns it; only the
+// holder's leave frees it.
+func TestMeet(t *testing.T) {
+	a, b := testBus(t), testBus(t)
+	key := testRoom(t)
+	if at, err := a.Meet(key, "a", time.Minute); err != nil || at != "a" {
+		t.Fatalf("first: %q %v", at, err)
+	}
+	if at, err := b.Meet(key, "b", time.Minute); err != nil || at != "a" {
+		t.Fatalf("second: %q %v, want a", at, err)
+	}
+	_ = b.Leave(key, "b")
+	if at, _ := b.Meet(key, "b", time.Minute); at != "a" {
+		t.Fatal("another's leave freed the record")
+	}
+	_ = a.Leave(key, "a")
+	if at, _ := b.Meet(key, "b", time.Minute); at != "b" {
+		t.Fatal("the holder's leave did not free it")
+	}
+}

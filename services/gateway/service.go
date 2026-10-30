@@ -31,7 +31,6 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/rbac"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/sealbox"
-	"github.com/luckylhb90/bnbloc/internal/shard"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/svcauth"
 	"github.com/luckylhb90/bnbloc/internal/tarbundle"
@@ -212,10 +211,10 @@ type Service struct {
 	// appFeedRecheck overrides how often an app's change feed re-resolves
 	// its capability (tests; zero: appFeedRecheck).
 	appFeedRecheck time.Duration
-	// Peers is the live gateway replica set (BNBLOC_GATEWAY_PEERS): every
-	// per-replica limit above enforces 1/N of its configured budget. Nil =
-	// one replica.
-	Peers *shard.Set
+	// Replicas counts the live gateway replicas (the census on
+	// BNBLOC_REDIS_URL): every per-replica limit above enforces 1/N of its
+	// configured budget. Nil = one replica.
+	Replicas func() int
 	// DevDiscovery is the dev-only single-host switch (BNBLOC_DEV_DISCOVERY,
 	// DevDiscoveryFromEnv: never in production): /v1/local-agent/discover
 	// and a caller-supplied core address on the local-agent routes.
@@ -667,9 +666,17 @@ func (s *Service) proxyClaims(r *http.Request, p apiPath) (auth.Claims, bool) {
 	return c, true
 }
 
+// replicaCount is the live gateway replica count (Replicas; 1 when unset).
+func (s *Service) replicaCount() int {
+	if s.Replicas == nil {
+		return 1
+	}
+	return s.Replicas()
+}
+
 // rateAllow lazily builds the per-subject limiter and consumes one token.
 func (s *Service) rateAllow(subject string) bool {
-	return s.limiter.Get(defaultChatRate, defaultChatBurst, s.Peers.Size).Allow(subject)
+	return s.limiter.Get(defaultChatRate, defaultChatBurst, s.replicaCount).Allow(subject)
 }
 
 // guessAllow lazily builds the slow guess limiter and consumes one token for
@@ -677,23 +684,23 @@ func (s *Service) rateAllow(subject string) bool {
 // login and the API-token exchange (no trusted subject yet; one shared
 // bucket), "share-ip:<addr>" for public share token misses.
 func (s *Service) guessAllow(key string) bool {
-	return s.guessLimiter.Get(defaultGuessRate, defaultGuessBurst, s.Peers.Size).Allow(key)
+	return s.guessLimiter.Get(defaultGuessRate, defaultGuessBurst, s.replicaCount).Allow(key)
 }
 
 // inviteAllow consumes one invite-redemption token for subject.
 func (s *Service) inviteAllow(subject string) bool {
-	return s.inviteLimiter.Get(defaultInviteGuessRate, defaultInviteGuessBurst, s.Peers.Size).Allow("subject:" + subject)
+	return s.inviteLimiter.Get(defaultInviteGuessRate, defaultInviteGuessBurst, s.replicaCount).Allow("subject:" + subject)
 }
 
 // guessBlocked reports, without consuming, whether key's guess budget is
 // spent.
 func (s *Service) guessBlocked(key string) bool {
-	return s.guessLimiter.Get(defaultGuessRate, defaultGuessBurst, s.Peers.Size).Blocked(key)
+	return s.guessLimiter.Get(defaultGuessRate, defaultGuessBurst, s.replicaCount).Blocked(key)
 }
 
 // publicAllow consumes one public-read token for a client IP.
 func (s *Service) publicAllow(ip string) bool {
-	return s.publicLimiter.Get(defaultPublicRate, defaultPublicBurst, s.Peers.Size).Allow("ip:" + ip)
+	return s.publicLimiter.Get(defaultPublicRate, defaultPublicBurst, s.replicaCount).Allow("ip:" + ip)
 }
 
 // clientIP derives the caller's IP for the per-IP limits. X-Forwarded-For is
@@ -803,9 +810,6 @@ func (s *Service) proxyAs(w http.ResponseWriter, r *http.Request, p apiPath, cla
 		httpx.Error(w, "bad upstream", http.StatusInternalServerError)
 		return
 	}
-	// The ownership-forward marker is replica-to-replica only: a client that
-	// set it would pin its request to whichever replica it landed on.
-	r.Header.Del(shard.ForwardedHeader)
 	// Assert the session's identity (subject, effective tenant, org role)
 	// in place of anything the client sent, signed so the backend can verify
 	// it originated here and was not spoofed by another workload on the

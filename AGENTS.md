@@ -582,37 +582,25 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `docs/environment-variables.md` + `docs/deploy-service-env.md` in the same
   change. Document only variables the code reads; delete ones it no longer
   reads.
-- **realtime replicas have no owners; they share a bus.** Any replica
-  serves any room and member (docs/prd/2026-10-30-replicas-without-owners.md).
-  The store numbers a room's messages (`AppendNextRoomMessages`); with more
-  than one replica `BNBLOC_REALTIME_BUS_REDIS_URL` connects them
-  (`realtime.Topics`, Redis PUB/SUB in `internal/realtime/redisbus`). What a
-  replica keeps of a room or member must reach the others through it, never
-  through a "this replica owns it" assumption: a room's events (the hub's
-  `Bus`, delivered in sequence order with the reorder hold; a replica
-  receives a room while it streams it or keeps its state, `Hub.Watch`);
-  presence and the roster (`RoomViews`, whole views per replica); slow mode
-  (`Claims`); plugin events, catalog hints, members' desktop deliveries and
-  acks, the live replica count (`Replicas`, replicas.go). A new piece of
-  in-process state shared by a room's or member's requests must take one of
-  these paths, with a test in `replicas_test.go` that runs it across
-  replicas. More than one realtime replica requires S3 or a directory every
-  replica mounts (startup refuses one replica's disk with a bus set).
-- **relay scales out by key ownership (`internal/shard`).** Each sync
-  session key is owned by one replica, which holds its pairing.
-  `BNBLOC_RELAY_PEERS` is one `host:port` DNS name (re-resolved every 5 s) or
-  a comma list; `BNBLOC_RELAY_SELF` is `host:port` (or a bare IP in DNS
-  mode). Both unset = single node; only one set refuses startup. Every peer
-  is probed (`/readyz`) every second and leaves the set after two failures
-  (~2 s); a failed call to a live peer re-probes it at once. Any replica
-  forwards a keyed request one hop to the owner (`shard.Forward`;
-  WebSocket passes through, signed headers untouched);
-  `X-Bnbloc-Forwarded-By` means "serve locally, never re-forward" and the
-  gateway strips it from clients. Helm runs it as a StatefulSet behind a
-  headless `bnbloc-relay-peers` Service.
-- **Gateway rate limits are per replica, divided by the live count from
-  `BNBLOC_GATEWAY_PEERS`.** Every gateway surface running more than one
-  replica must set it, or N replicas allow N times the configured rate.
+- **Replicas share one Redis, nothing else (`BNBLOC_REDIS_URL`,
+  `internal/redisbus`).** No service has owners or peer lists
+  (docs/prd/2026-10-30-replicas-without-owners.md); any replica serves any
+  request. realtime: the store numbers a room's messages
+  (`AppendNextRoomMessages`); what a replica keeps of a room or member reaches
+  the others through the Redis, never through a "this replica owns it"
+  assumption — a room's events (the hub's `Bus`, in sequence order with the
+  reorder hold; a replica receives a room while it streams it or keeps its
+  state, `Hub.Watch`), presence and the roster (`RoomViews`), slow mode
+  (`Claims`), plugin events, catalog hints, members' desktop deliveries and
+  acks (`Replicas`, replicas.go). A new piece of in-process state shared by a
+  room's or member's requests takes one of these paths, with a test in
+  `replicas_test.go` that runs it across replicas. relay: a session's first
+  stream records its replica at the rendezvous (`redisbus.Meet`), the second
+  joins it there (`/internal/relay/join`, its token). gateway: the replicas
+  count each other (`redisbus.Census`) and every per-replica rate limit
+  divides by the count. A setting of a former design (peer lists, the
+  realtime-only bus URL) refuses startup (`redisbus.FromEnv`). More than one
+  realtime replica requires S3 or a directory every replica mounts.
 
 ### Public repo: neutral names only
 

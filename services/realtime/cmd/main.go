@@ -16,7 +16,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/pulse"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
-	"github.com/luckylhb90/bnbloc/internal/realtime/redisbus"
+	"github.com/luckylhb90/bnbloc/internal/redisbus"
 	"github.com/luckylhb90/bnbloc/internal/retention"
 	"github.com/luckylhb90/bnbloc/internal/sealbox"
 	"github.com/luckylhb90/bnbloc/internal/search"
@@ -35,15 +35,6 @@ func main() {
 	// events, SSE connections, notification delivery; docs/monitoring.md).
 	metrics := obs.NewMetrics("bnbloc-realtime")
 	realtime.RegisterMetrics(metrics)
-	// A deployment still configured for owned rooms runs several replicas:
-	// without a bus they would each serve their own share of every room's
-	// streams, so it must not start until the bus is set.
-	if config.FromEnvRaw("BNBLOC_REALTIME_PEERS") != "" {
-		if config.FromEnvRaw(redisbus.EnvURL) == "" {
-			log.Fatalf("bnbloc-realtime: BNBLOC_REALTIME_PEERS is set (several replicas) but %s is not: realtime replicas have no owners now and share a bus; set it (docs/production-deployment.md#high-availability) and remove BNBLOC_REALTIME_PEERS/_SELF", redisbus.EnvURL)
-		}
-		log.Printf("bnbloc-realtime: BNBLOC_REALTIME_PEERS is no longer read: realtime replicas have no owners and share the bus; remove it and BNBLOC_REALTIME_SELF")
-	}
 	pulseEm, pulseKey, err := pulse.FromEnv(context.Background(), "realtime")
 	if err != nil {
 		log.Fatalf("bnbloc-realtime: %v", err)
@@ -65,24 +56,25 @@ func main() {
 		log.Fatalf("bnbloc-realtime: store: %v", err)
 	}
 	svc.Chat = backends.Chat
-	// The bus between replicas (docs/prd/2026-10-30-replicas-without-owners.md):
+	// The replicas' Redis (docs/prd/2026-10-30-replicas-without-owners.md):
 	// any replica serves any room and member; a room's events reach every
 	// replica streaming it, and what else crosses replicas (plugin events,
-	// desktop deliveries, slow mode) travels the same Redis. Unset: this
-	// replica is alone.
-	if url := config.FromEnvRaw(redisbus.EnvURL); url != "" {
-		bus, err := redisbus.New(url, config.ParseBool(config.FromEnvRaw(redisbus.EnvCluster), false))
-		if err != nil {
-			log.Fatalf("bnbloc-realtime: %v", err)
-		}
-		svc.Hub.Bus, svc.Claims, svc.Replicas = realtime.RoomBus(bus), bus, realtimehttp.NewReplicas(bus, bus)
+	// desktop deliveries, slow mode, the replica count) travels the same
+	// Redis. Unset: this replica is alone.
+	bus, err := redisbus.FromEnv(config.FromEnvRaw)
+	if err != nil {
+		log.Fatalf("bnbloc-realtime: %v", err)
+	}
+	if bus != nil {
+		census := bus.Census("realtime")
+		svc.Hub.Bus, svc.Claims, svc.Replicas = realtime.RoomBus(bus), bus, realtimehttp.NewReplicas(bus, bus, census.Count)
 		chat := backends.Chat
 		svc.Hub.RoomHead = func(roomID string) (int64, error) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			return chat.MaxRoomSeq(ctx, roomID)
 		}
-		log.Printf("bnbloc-realtime: replicas share the bus (%s)", redisbus.EnvURL)
+		log.Printf("bnbloc-realtime: replicas share %s", redisbus.EnvURL)
 	}
 	// Member locations (pulse_geography) are read per organization; a failed read is off.
 	svc.PulseGeo = pulse.NewGeoGate(func(ctx context.Context, id string) (bool, error) {

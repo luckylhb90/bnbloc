@@ -1,11 +1,8 @@
 package gateway
 
 import (
-	"context"
 	"net/http"
 	"testing"
-
-	"github.com/luckylhb90/bnbloc/internal/shard"
 )
 
 // Only cost-bearing writes (POST chat, borrow authorization) are limited; reads,
@@ -31,18 +28,10 @@ func TestRateLimitedTargets(t *testing.T) {
 	}
 }
 
-// The gateway's limits read the live replica count from its peer set
-// (BNBLOC_GATEWAY_PEERS): two live replicas halve the per-subject chat burst.
+// The gateway's limits read the live replica count (the Redis census): two
+// live replicas halve the per-subject chat burst.
 func TestGatewayChatLimitSharedAcrossReplicas(t *testing.T) {
-	peers, err := shard.New(shard.Options{
-		Peers: "10.0.0.1:8080,10.0.0.2:8080",
-		Probe: func(context.Context, string) bool { return true },
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	peers.Refresh(context.Background())
-	gw := &Service{Peers: peers}
+	gw := &Service{Replicas: func() int { return 2 }}
 	allowed := 0
 	for i := 0; i < 50 && gw.rateAllow("maya"); i++ {
 		allowed++

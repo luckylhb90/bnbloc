@@ -9,10 +9,10 @@ import (
 
 // Gate G7: only the packages that own a Redis dependency import the client:
 // Pulse's two (product code writes events through Emit and never reads a
-// Pulse key) and realtime's bus between replicas (internal/realtime/redisbus,
+// Pulse key) and realtime's bus between replicas (internal/redisbus,
 // behind the realtime.Bus interface).
 func TestOnlyThePulsePackagesImportTheRedisClient(t *testing.T) {
-	allowed := []string{"internal/pulse/", "services/pulse/", "internal/realtime/redisbus/"}
+	allowed := []string{"internal/pulse/", "services/pulse/", "internal/redisbus/"}
 	var offenders []string
 	archtest.Scan(t, archtest.Opts{Lang: archtest.Go, Tests: true}, func(rel string, src []byte) {
 		if !strings.Contains(string(src), "\"github.com/redis/go-redis/") {

@@ -143,7 +143,7 @@ func (s *Service) handleAssistStatus(w http.ResponseWriter, r *http.Request, cla
 // of that name on the assist model, with the context the task declares.
 func (s *Service) handleAssist(w http.ResponseWriter, r *http.Request, claims auth.Claims) {
 	ctx := r.Context()
-	if !s.assistLimiter.Get(assistRate, assistBurst, s.Peers.Size).Allow(claims.Tenant + "/" + claims.Subject) {
+	if !s.assistLimiter.Get(assistRate, assistBurst, s.replicaCount).Allow(claims.Tenant + "/" + claims.Subject) {
 		httpx.Error(w, "too many AI assists: try again in a minute", http.StatusTooManyRequests)
 		return
 	}
@@ -294,7 +294,7 @@ func (s *Service) runConsentJSON(ctx context.Context, claims auth.Claims, name, 
 	if err != nil {
 		return nil, err
 	}
-	if !s.assistLimiter.Get(assistRate, assistBurst, s.Peers.Size).Allow(claims.Tenant + "/" + claims.Subject) {
+	if !s.assistLimiter.Get(assistRate, assistBurst, s.replicaCount).Allow(claims.Tenant + "/" + claims.Subject) {
 		return nil, errors.New("too many AI assists: try again in a minute")
 	}
 	fields, _, err := s.completeJSONTask(ctx, claims, task, model, assist.Messages(task.Package.Instructions, text, assist.Context{}), assistWhat(task))

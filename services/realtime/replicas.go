@@ -32,8 +32,9 @@ import (
 //   - a plugin delivery's ack that reached another replica goes to the
 //     replica that sent the delivery (replicaTopic), named by the delivery
 //     id's prefix;
-//   - every replica says it is alive (topicReplicas), so a budget shared
-//     out per replica divides by the live count.
+//
+// A budget shared out per replica divides by the live count (count, the
+// Redis census).
 //
 // A member's desktop plugin stream is marked (realtime.Marks) while a
 // replica holds it, so any replica can tell whether the member has one.
@@ -42,12 +43,12 @@ import (
 type Replicas struct {
 	topics realtime.Topics
 	marks  realtime.Marks
+	census func() int
 	origin string
 	svc    *Service
 
 	mu    sync.Mutex
 	calls map[string]chan json.RawMessage
-	seen  map[string]time.Time
 	// held are the members whose desktop streams this replica holds:
 	// memberTopic -> the topic's cancel.
 	held   map[string]func()
@@ -55,17 +56,13 @@ type Replicas struct {
 }
 
 const (
-	topicPlugins  = "all:plugin-events"
-	topicCatalog  = "all:catalog"
-	topicReplicas = "all:replicas"
+	topicPlugins = "all:plugin-events"
+	topicCatalog = "all:catalog"
 
-	// replicaBeat is how often a replica says it is alive; one not heard
-	// for replicaGone is counted out. desktopMarkTTL bounds a desktop mark
-	// its replica stopped renewing (it died); it is renewed every
-	// replicaBeat.
-	replicaBeat    = 10 * time.Second
-	replicaGone    = 3 * replicaBeat
-	desktopMarkTTL = 3 * replicaBeat
+	// desktopMarkTTL bounds a desktop mark its replica stopped renewing (it
+	// died); it is renewed every markRenew.
+	markRenew      = 10 * time.Second
+	desktopMarkTTL = 3 * markRenew
 	// replicaCallTimeout bounds a short call to another replica (an ack).
 	replicaCallTimeout = 5 * time.Second
 	// notificationCallTimeout outlasts the holder's own outcome wait: the
@@ -97,14 +94,14 @@ type replicaAck struct {
 	Ack     wire.PluginDeliveryAck `json:"ack"`
 }
 
-// NewReplicas returns the replicas' shared side over topics and marks (nil
-// topics: a replica alone, nil).
-func NewReplicas(topics realtime.Topics, marks realtime.Marks) *Replicas {
+// NewReplicas returns the replicas' shared side over topics and marks, with
+// census counting the live replicas (nil topics: a replica alone, nil).
+func NewReplicas(topics realtime.Topics, marks realtime.Marks, census func() int) *Replicas {
 	if topics == nil {
 		return nil
 	}
-	return &Replicas{topics: topics, marks: marks, origin: randomOrigin(),
-		calls: map[string]chan json.RawMessage{}, seen: map[string]time.Time{}, held: map[string]func(){}}
+	return &Replicas{topics: topics, marks: marks, census: census, origin: randomOrigin(),
+		calls: map[string]chan json.RawMessage{}, held: map[string]func(){}}
 }
 
 // start subscribes the replica's topics and begins saying it is alive.
@@ -118,7 +115,6 @@ func (p *Replicas) start(svc *Service) error {
 	for topic, fn := range map[string]func(replicaMsg){
 		topicPlugins:           p.onPluginEvent,
 		topicCatalog:           p.onCatalog,
-		topicReplicas:          p.onBeat,
 		replicaTopic(p.origin): p.onAck,
 		replyTopic(p.origin):   p.onReply,
 	} {
@@ -126,7 +122,7 @@ func (p *Replicas) start(svc *Service) error {
 			return err
 		}
 	}
-	go p.beat()
+	go p.renew()
 	return nil
 }
 
@@ -188,41 +184,20 @@ func (p *Replicas) onCatalog(m replicaMsg) {
 
 // ---------------------------------------------------------------- liveness
 
-// beat says this replica is alive and renews its desktop marks, every
-// replicaBeat for the process's life.
-func (p *Replicas) beat() {
-	for {
-		_ = p.publish(topicReplicas, replicaMsg{From: p.origin})
+// renew renews this replica's desktop marks every markRenew for the
+// process's life.
+func (p *Replicas) renew() {
+	for range time.Tick(markRenew) {
 		p.renewMarks()
-		time.Sleep(replicaBeat)
 	}
-}
-
-func (p *Replicas) onBeat(m replicaMsg) {
-	if m.From == "" {
-		return
-	}
-	p.mu.Lock()
-	p.seen[m.From] = time.Now()
-	p.mu.Unlock()
 }
 
 // count is how many replicas are alive, this one included.
 func (p *Replicas) count() int {
-	if p == nil {
+	if p == nil || p.census == nil {
 		return 1
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	n := 1
-	for origin, at := range p.seen {
-		if time.Since(at) > replicaGone {
-			delete(p.seen, origin)
-			continue
-		}
-		n++
-	}
-	return n
+	return p.census()
 }
 
 // ---------------------------------------------------------------- calls

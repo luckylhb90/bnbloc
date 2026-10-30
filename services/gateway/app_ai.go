@@ -45,7 +45,7 @@ func (s *Service) serveAppAI(w http.ResponseWriter, r *http.Request, c appCapabi
 		return
 	}
 	claims := auth.Claims{Subject: c.scope.Participant, Tenant: c.tenant}
-	if !s.assistLimiter.Get(assistRate, assistBurst, s.Peers.Size).Allow(claims.Tenant + "/" + claims.Subject) {
+	if !s.assistLimiter.Get(assistRate, assistBurst, s.replicaCount).Allow(claims.Tenant + "/" + claims.Subject) {
 		httpx.Error(w, "too many AI requests: try again in a minute", http.StatusTooManyRequests)
 		return
 	}
@@ -147,7 +147,7 @@ func (s *Service) serveAppAIVoice(w http.ResponseWriter, r *http.Request, c appC
 		return
 	}
 	claims := auth.Claims{Subject: c.scope.Participant, Tenant: c.tenant}
-	if !s.assistLimiter.Get(assistRate, assistBurst, s.Peers.Size).Allow(claims.Tenant + "/" + claims.Subject) {
+	if !s.assistLimiter.Get(assistRate, assistBurst, s.replicaCount).Allow(claims.Tenant + "/" + claims.Subject) {
 		httpx.Error(w, "too many AI requests: try again in a minute", http.StatusTooManyRequests)
 		return
 	}

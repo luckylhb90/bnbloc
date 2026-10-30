@@ -3,40 +3,28 @@ Workload + Service per bnbloc microservice.
 
 Each entry names the service's port, its values block, whether it reads the
 shared database + svcauth key (`db`), the peers it calls (rendered as
-BNBLOC_<PEER>_BASE_URL), and its scale-out role (`shard`):
-
-  - "owner": relay keeps per-key state in process memory (sync pairings).
-    It runs as a StatefulSet behind a headless Service (bnbloc-<name>-peers).
-    With more than one replica (or an HPA) every pod gets
-    BNBLOC_<NAME>_PEERS (the headless name, re-resolved to the ready pods)
-    and BNBLOC_<NAME>_SELF (its pod IP), owns the keys rendezvous hashing
-    assigns it, and forwards the rest to their owner (internal/shard). One
-    replica gets neither: single node.
-  - "count": the gateway only needs the live replica count (its rate limits
-    enforce 1/N of each budget), read from BNBLOC_GATEWAY_PEERS.
-
-realtime (`bus`) has no owners: any pod serves any room and member, and
-with more than one replica (or an HPA) the pods share a bus
-(BNBLOC_REALTIME_BUS_REDIS_URL; docs/prd/2026-10-30-replicas-without-owners.md).
+BNBLOC_<PEER>_BASE_URL), and whether its replicas share the replicas' Redis
+(`redis`: gateway, realtime and relay). That Redis (values `redis`) is all
+a service needs to run more than one replica: no peer lists, no ownership
+(docs/prd/2026-10-30-replicas-without-owners.md).
 
 The env each service receives mirrors what its services/<name>/cmd/main.go
 reads — see docs/deploy-service-env.md.
 */ -}}
 {{- $ports := dict "gateway" 8080 "room" 8080 "activity" 8081 "realtime" 8082 "shareagent" 8083 "relay" 8085 "pulse" 8090 -}}
 {{- $services := dict
-  "gateway"         (dict "cfg" .Values.gateway         "db" true  "shard" "count" "peers" (list "room" "activity" "realtime" "shareagent" "relay"))
-  "room"            (dict "cfg" .Values.room            "db" true  "shard" ""      "peers" (list "realtime"))
-  "activity"        (dict "cfg" .Values.activity        "db" true  "shard" ""      "peers" (list "room" "realtime"))
-  "realtime"        (dict "cfg" .Values.realtime        "db" true  "shard" ""      "peers" (list "room" "gateway") "bus" true)
-  "shareagent"      (dict "cfg" .Values.shareagent      "db" true  "shard" ""      "peers" (list "room"))
-  "relay"           (dict "cfg" .Values.relay           "db" false "shard" "owner" "peers" (list))
-  "pulse"           (dict "cfg" .Values.pulse           "db" true  "shard" ""      "peers" (list))
+  "gateway"         (dict "cfg" .Values.gateway         "db" true  "redis" true  "peers" (list "room" "activity" "realtime" "shareagent" "relay"))
+  "room"            (dict "cfg" .Values.room            "db" true  "redis" false "peers" (list "realtime"))
+  "activity"        (dict "cfg" .Values.activity        "db" true  "redis" false "peers" (list "room" "realtime"))
+  "realtime"        (dict "cfg" .Values.realtime        "db" true  "redis" true  "peers" (list "room" "gateway"))
+  "shareagent"      (dict "cfg" .Values.shareagent      "db" true  "redis" false "peers" (list "room"))
+  "relay"           (dict "cfg" .Values.relay           "db" false "redis" true  "peers" (list))
+  "pulse"           (dict "cfg" .Values.pulse           "db" true  "redis" false "peers" (list))
 -}}
 {{- range $name, $svc := $services }}
 {{- if or (ne $name "pulse") $.Values.pulse.enabled }}
 {{- $cfg := $svc.cfg | default dict }}
 {{- $port := get $ports $name }}
-{{- $owner := eq $svc.shard "owner" }}
 {{- /* Scale-out mode: more than one replica, now or through the HPA. */ -}}
 {{- $scaled := or (gt (int (default 1 $cfg.replicas)) 1) (and $cfg.hpa $cfg.hpa.enabled) }}
 {{- if and (eq $name "pulse") $scaled }}
@@ -45,12 +33,14 @@ reads — see docs/deploy-service-env.md.
 {{- if and (eq $name "realtime") $scaled (not $cfg.attachments.s3.bucket) }}
 {{- fail "bnbloc-realtime with more than one replica (or an HPA) needs realtime.attachments.s3.bucket: the disk blob store is one pod's volume, and realtime refuses it with a bus configured" }}
 {{- end }}
-{{- if and $svc.bus $scaled (not $cfg.bus.redisURLSecretRef.name) (not $.Values.awsSecrets.secretID) }}
-{{- fail "bnbloc-realtime with more than one replica (or an HPA) needs its bus: realtime.bus.redisURLSecretRef, or BNBLOC_REALTIME_BUS_REDIS_URL in the AWS Secrets Manager secret (awsSecrets.secretID)" }}
+{{- /* realtime and relay replicas cannot work without it; gateway replicas
+       can (each then enforces every limit in full, N times the budget). */ -}}
+{{- if and $svc.redis $scaled (ne $name "gateway") (not $.Values.redis.urlSecretRef.name) (not $.Values.awsSecrets.secretID) }}
+{{- fail (printf "bnbloc-%s with more than one replica (or an HPA) needs the replicas' Redis: redis.urlSecretRef, or BNBLOC_REDIS_URL in the AWS Secrets Manager secret (awsSecrets.secretID)" $name) }}
 {{- end }}
 ---
 apiVersion: apps/v1
-kind: {{ ternary "StatefulSet" "Deployment" $owner }}
+kind: Deployment
 metadata:
   name: bnbloc-{{ $name }}
   labels: { app.kubernetes.io/name: bnbloc-{{ $name }} }
@@ -60,12 +50,6 @@ spec:
   # One pod on a ReadWriteOnce volume: the old pod goes before the new one
   # mounts it.
   strategy: { type: Recreate }
-  {{- end }}
-  {{- if $owner }}
-  # The headless Service publishes the ready pods' IPs: the peer set.
-  serviceName: bnbloc-{{ $name }}-peers
-  # Ownership is by pod IP, not ordinal: start and replace pods in parallel.
-  podManagementPolicy: Parallel
   {{- end }}
   selector:
     matchLabels: { app.kubernetes.io/name: bnbloc-{{ $name }} }
@@ -114,36 +98,20 @@ spec:
             - name: BNBLOC_{{ upper $peer }}_BASE_URL
               value: "http://bnbloc-{{ $peer }}:{{ get $ports $peer }}"
             {{- end }}
-            {{- if and $owner $scaled }}
-            # Scale-out by key ownership (internal/shard): the headless name
-            # (re-resolved every 5s to the ready pods; peers probed every second) and this pod's own IP.
-            - name: POD_IP
+            {{- if and $svc.redis $scaled }}
+            # The replicas' Redis. A Secret ref when one is named; otherwise
+            # empty, so the AWS Secrets Manager loader (BNBLOC_AWS_SECRET_ID)
+            # fills it.
+            {{- if $.Values.redis.urlSecretRef.name }}
+            - name: BNBLOC_REDIS_URL
               valueFrom:
-                fieldRef: { fieldPath: status.podIP }
-            - name: BNBLOC_{{ upper $name }}_PEERS
-              value: "bnbloc-{{ $name }}-peers:{{ $port }}"
-            - name: BNBLOC_{{ upper $name }}_SELF
-              value: "$(POD_IP)"
-            {{- end }}
-            {{- if and $svc.bus $scaled }}
-            # The bus between realtime replicas. A Secret ref when one is
-            # named; otherwise empty, so the AWS Secrets Manager loader
-            # (BNBLOC_AWS_SECRET_ID) fills it.
-            {{- if $cfg.bus.redisURLSecretRef.name }}
-            - name: BNBLOC_REALTIME_BUS_REDIS_URL
-              valueFrom:
-                secretKeyRef: { name: {{ $cfg.bus.redisURLSecretRef.name }}, key: {{ $cfg.bus.redisURLSecretRef.key }} }
+                secretKeyRef: { name: {{ $.Values.redis.urlSecretRef.name }}, key: {{ $.Values.redis.urlSecretRef.key }} }
             {{- else }}
-            - name: BNBLOC_REALTIME_BUS_REDIS_URL
+            - name: BNBLOC_REDIS_URL
               value: ""
             {{- end }}
-            - name: BNBLOC_REALTIME_BUS_REDIS_CLUSTER
-              value: {{ ternary "true" "" $cfg.bus.redisCluster | quote }}
-            {{- end }}
-            {{- if eq $svc.shard "count" }}
-            # Live replica count for the per-replica share of every rate limit.
-            - name: BNBLOC_{{ upper $name }}_PEERS
-              value: "bnbloc-{{ $name }}-peers:{{ $port }}"
+            - name: BNBLOC_REDIS_CLUSTER
+              value: {{ ternary "true" "" $.Values.redis.cluster | quote }}
             {{- end }}
             {{- if $svc.db }}
             - name: BNBLOC_MYSQL_DSN
@@ -325,25 +293,6 @@ spec:
       port: {{ $cfg.metricsPort }}
       targetPort: {{ $cfg.metricsPort }}
     {{- end }}
-{{- if $svc.shard }}
----
-# Headless peer Service: its DNS name resolves to every READY pod, which is
-# the replica set the service shards over (or counts). Not-ready pods are
-# deliberately unpublished: a replica that cannot reach its dependencies owns
-# no keys.
-apiVersion: v1
-kind: Service
-metadata:
-  name: bnbloc-{{ $name }}-peers
-spec:
-  clusterIP: None
-  publishNotReadyAddresses: false
-  selector: { app.kubernetes.io/name: bnbloc-{{ $name }} }
-  ports:
-    - name: http
-      port: {{ $port }}
-      targetPort: {{ $port }}
-{{- end }}
 {{- if $scaled }}
 ---
 # A voluntary disruption (a node drain, an upgrade) takes one replica at a
@@ -366,7 +315,7 @@ metadata:
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
-    kind: {{ ternary "StatefulSet" "Deployment" $owner }}
+    kind: Deployment
     name: bnbloc-{{ $name }}
   minReplicas: {{ $cfg.hpa.minReplicas }}
   maxReplicas: {{ $cfg.hpa.maxReplicas }}

@@ -100,24 +100,21 @@ address defaults to the port shown.
 The gateway does not proxy the relay: `/relay/*` is routed by the edge proxy
 (`deploy/Caddyfile`, the Helm Ingress) straight to the relay service.
 
-## Scale-out peer sets (realtime, relay, gateway)
+## More than one replica: the replicas' Redis
 
-realtime and relay keep per-key state in process memory (rooms and member
-plugin streams; relay pairings). To run more than one replica, each replica
-learns its peers and owns the keys rendezvous hashing assigns it; a request
-for a key another replica owns is forwarded there in one hop (SSE and
-WebSocket pass through), so callers keep using the load-balanced service URL
-(`internal/shard`). Leave both variables of a service unset for a single node
-(compose, the all-in-one image, a one-replica chart): it owns every key and
-nothing is forwarded. Setting one without the other refuses startup. The Helm
-chart sets them when `replicas > 1` or an HPA is enabled.
+One setting lets any service run more than one replica: the Redis its
+replicas share (`internal/redisbus`). There are no peer lists and no
+ownership; any replica serves any request. Leave it unset for one replica
+(compose, the all-in-one image, a one-replica chart). The Helm chart sets it
+on gateway, realtime and relay from `redis` when they run more than one.
+A setting of the former designs (`BNBLOC_REALTIME_PEERS`/`_SELF`,
+`BNBLOC_RELAY_PEERS`/`_SELF`, `BNBLOC_GATEWAY_PEERS`,
+`BNBLOC_REALTIME_BUS_REDIS_URL`/`_CLUSTER`) refuses startup with the fix.
 
 | Variable | Scope | Default | Meaning |
 | --- | --- | --- | --- |
-| `BNBLOC_REALTIME_BUS_REDIS_CLUSTER` | realtime | — | `true` when the bus's Redis is a Redis Cluster (cluster mode enabled, e.g. ElastiCache): `BNBLOC_REALTIME_BUS_REDIS_URL` then names a node or the configuration endpoint (`rediss://` with in-transit encryption), with no database number. The bus uses plain PUB/SUB, which the cluster delivers on every node; its claims and marks are one key each. Unset or `false` = one Redis (primary with replicas). |
-| `BNBLOC_REALTIME_BUS_REDIS_URL` | realtime | — | Redis URL of the bus between realtime replicas (`redis://host:6379/1`), required with more than one: replicas have no owners, any one serves any room and member. A room's events reach every replica streaming it (PUB/SUB, one channel per room) in sequence order (a missing one is waited for 300 ms, then the room's streams read the difference); presence and the agent roster are joined across replicas; slow mode is one claim every replica shares; a member's desktop plugin deliveries and acks reach whichever replica holds the stream. Unset = the replica is alone. A replica that cannot reach it at startup exits; a broken connection is subscribed again and each room's streams read what they missed. With it set, startup refuses one replica's disk blob store (S3, or `BNBLOC_ATTACHMENTS_DIR_SHARED=true`). A replica that still has `BNBLOC_REALTIME_PEERS` (a deployment configured for owned rooms) refuses to start without it. See [Replicas without owners](./prd/2026-10-30-replicas-without-owners.md). |
-| `BNBLOC_RELAY_PEERS` / `BNBLOC_RELAY_SELF` | relay | — | The same pair for the relay (keys: sync session keys). |
-| `BNBLOC_GATEWAY_PEERS` | gateway | — | The gateway replica set, same forms (Helm: `bnbloc-gateway-peers:8080`). The gateway owns no keys; it divides every per-replica rate limit (chat/borrow per subject, guess, public share reads) by the live replica count so N replicas enforce the configured budget in total, not N times it. Unset = one replica. |
+| `BNBLOC_REDIS_URL` | gateway, realtime, relay | — | The replicas' Redis (`redis://host:6379/1`; `rediss://` with in-transit encryption; a database number of its own keeps it apart from Pulse's keys on a shared Redis). **realtime** (required with more than one replica): a room's events reach every replica streaming it (PUB/SUB, one channel per room) in sequence order (a missing one is waited for 300 ms, then the room's streams read the difference); presence and the agent roster are joined across replicas; slow mode is one claim every replica shares; a member's desktop plugin deliveries and acks reach whichever replica holds the stream; with it set, startup refuses one replica's disk blob store (S3, or `BNBLOC_ATTACHMENTS_DIR_SHARED=true`). **relay** (required with more than one): a session's first stream records its replica (`<pod IP>:<port>`, found on its own); the second, landing on another, joins it there pod to pod. **gateway**: the live replica count every per-replica rate limit divides by (chat/borrow per subject, guesses, public share reads), so N replicas enforce the configured budget in total; unset, each enforces it in full. A service that cannot reach it at startup exits; a broken connection is made again. See [Replicas without owners](./prd/2026-10-30-replicas-without-owners.md). |
+| `BNBLOC_REDIS_CLUSTER` | gateway, realtime, relay | — | `true` when that Redis is a Redis Cluster (cluster mode enabled, e.g. ElastiCache): `BNBLOC_REDIS_URL` then names a node or the configuration endpoint, with no database number. Plain PUB/SUB is delivered on every node; every key command names one key. |
 
 ### Build identity (build argument, not runtime)
 
@@ -341,8 +338,8 @@ WebSocket. Its endpoints (`/relay/*`) are unauthenticated at the transport;
 authorization is the sync-layer HMAC (`BNBLOC_SYNC_SECRET`, bridge). That token
 rides the stream's cleartext HELLO, so the relay's public entry **must be TLS**.
 Pairing state is in process memory: one replica pairs everything itself; more
-replicas need `BNBLOC_RELAY_PEERS`/`_SELF` (Scale-out peer sets above) so both
-halves of a session meet on the session key's owner.
+replicas need `BNBLOC_REDIS_URL` (above), where a session's first stream
+records its replica and the second joins it there.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |

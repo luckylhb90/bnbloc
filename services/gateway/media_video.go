@@ -42,7 +42,7 @@ func (s *Service) handleMediaVideo(w http.ResponseWriter, r *http.Request, claim
 		return
 	}
 	claims = actor.Claims
-	if !s.assistLimiter.Get(assistRate, assistBurst, s.Peers.Size).Allow(claims.Tenant + "/" + claims.Subject) {
+	if !s.assistLimiter.Get(assistRate, assistBurst, s.replicaCount).Allow(claims.Tenant + "/" + claims.Subject) {
 		httpx.Error(w, "too many requests: try again in a minute", http.StatusTooManyRequests)
 		return
 	}

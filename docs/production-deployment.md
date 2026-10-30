@@ -616,8 +616,7 @@ everything else → web. No runtime environment variables are read.
 ## Kubernetes
 
 `deploy/k8s` is a Helm chart rendering one workload + Service per service
-(Deployments; a StatefulSet with a headless peer Service for relay), an
-Ingress, and a PVC for realtime's disk blob store. It is validated with
+(Deployments), an Ingress, and a PVC for realtime's disk blob store. It is validated with
 `helm lint`, `helm template`, and kubeconform schema checks; it has not been
 exercised against a live cluster in this repository.
 
@@ -630,49 +629,44 @@ credentials. Set `oidc.issuerURL`/`oidc.clientID` and
 missing Secret key or OIDC value fails the pod at startup with the reason in
 its log.
 
-- **Scaling realtime.** realtime replicas have no owners
-  (`docs/prd/2026-10-30-replicas-without-owners.md`): any pod serves any room
-  and member, so realtime is a Deployment behind the `bnbloc-realtime`
-  Service and an HPA may scale it. The store numbers each room's messages;
-  with `replicas > 1` (or `hpa.enabled`) the pods share a **bus**, a Redis
-  (`realtime.bus.redisURLSecretRef`, or `BNBLOC_REALTIME_BUS_REDIS_URL` in the
-  AWS Secrets Manager secret; the chart fails without one): a room's events
-  reach every pod streaming it, in sequence order; presence and the agent
-  roster are joined across pods; slow mode is one shared claim; a member's
-  desktop plugin deliveries reach whichever pod holds the stream. A pod
-  going away (a deploy, a scale-in, a crash) reconnects only its own
-  streams, once, and they resume on the others. Use a managed Redis with a
-  replica in another zone (ElastiCache Multi-AZ); a Redis failover pauses
-  live delivery for its seconds, messages are still stored, and every
-  stream reads what it missed when the bus is back. Its own database number
-  (`/1`) keeps it apart from Pulse's keys on a shared Redis. A Redis Cluster
-  (cluster mode enabled) works too: `realtime.bus.redisCluster: true`
-  (`BNBLOC_REALTIME_BUS_REDIS_CLUSTER`), the URL naming the configuration
-  endpoint, no database number (its keys start `bnbloc:rt:`). Size the count
-  with the load test (`docs/load-testing.md`).
-- **Scaling relay.** relay keeps P2P sync pairings in memory and scales out
-  by key ownership: each sync session is owned by one pod, picked by
-  rendezvous hashing over the ready pods, as a StatefulSet behind a headless
-  `bnbloc-relay-peers` Service; with `replicas > 1` each pod gets
-  `BNBLOC_RELAY_PEERS` (the headless name, re-resolved every 5 s; every peer
-  probed each second, a dead one dropped in about 2 s) and
-  `BNBLOC_RELAY_SELF` (its pod IP), and forwards a request one hop to the
-  session's owner. Allow relay → relay on 8085 in any network policy.
-- **Without the chart.** With your own manifests, scaling realtime takes (1)
-  the S3 blob store (move existing disk blobs first: disk
-  `<dir>/<hex[:2]>/<hex>` becomes the object `<prefix>/sha256/<hex>`), or a
-  directory every replica mounts (`BNBLOC_ATTACHMENTS_DIR_SHARED=true`); (2)
-  `BNBLOC_REALTIME_BUS_REDIS_URL` on every realtime pod; (3) a `/readyz`
-  readiness probe. relay takes a headless Service (`clusterIP: None`,
-  `publishNotReadyAddresses: false`) on 8085 and, on each pod, `POD_IP` from
-  `fieldRef: status.podIP` declared **before** `BNBLOC_RELAY_SELF: $(POD_IP)`,
-  plus `BNBLOC_RELAY_PEERS: <headless-name>:8085`; a multi-replica gateway
-  takes only `BNBLOC_GATEWAY_PEERS`.
+- **More than one replica: one Redis.** Every service runs as a Deployment
+  behind its normal Service, and an HPA may scale any but pulse. Nothing has
+  owners and nothing needs peer lists
+  (`docs/prd/2026-10-30-replicas-without-owners.md`); the replicas of
+  gateway, realtime and relay share one Redis (`redis.urlSecretRef`, or
+  `BNBLOC_REDIS_URL` in the AWS Secrets Manager secret; `redis.cluster: true`
+  / `BNBLOC_REDIS_CLUSTER` for a Redis Cluster, the URL naming the
+  configuration endpoint with no database number). The chart fails when
+  realtime or relay run more than one replica without it.
+  - **realtime**: the store numbers each room's messages; a room's events
+    reach every pod streaming it, in sequence order; presence and the agent
+    roster are joined across pods; slow mode is one shared claim; a member's
+    desktop plugin deliveries reach whichever pod holds the stream. A pod
+    going away (a deploy, a scale-in, a crash) reconnects only its own
+    streams, once.
+  - **relay**: a session's first stream records its pod; the second, landing
+    on another, joins it there pod to pod on 8085 (allow it in any network
+    policy).
+  - **gateway**: the replicas count each other there, and each enforces 1/N
+    of every rate limit. Without the Redis each enforces it in full.
+
+  Use a managed Redis with a replica in another zone (ElastiCache
+  Multi-AZ). Its failover pauses realtime's live delivery for its seconds;
+  messages are still stored and every stream reads what it missed. A
+  database number of its own (`/1`) keeps it apart from Pulse's keys on a
+  shared Redis (on a cluster the key prefixes do: `bnbloc:` and `{pulse}:`).
+  Size the counts with the load test (`docs/load-testing.md`).
+- **Without the chart.** With your own manifests, more than one replica
+  takes `BNBLOC_REDIS_URL` on gateway, realtime and relay pods, a `/readyz`
+  readiness probe, and for realtime the S3 blob store (move existing disk
+  blobs first: disk `<dir>/<hex[:2]>/<hex>` becomes the object
+  `<prefix>/sha256/<hex>`) or a directory every replica mounts
+  (`BNBLOC_ATTACHMENTS_DIR_SHARED=true`).
 - **Blob storage.** With no `realtime.attachments.s3.bucket`, realtime mounts
   the `bnbloc-realtime-attachments` PVC (ReadWriteOnce: one realtime pod,
   recreated in place). More than one realtime replica requires the bucket —
-  the chart fails otherwise and realtime refuses one pod's disk with a bus
-  configured. Credentials come from a Secret or the pod's IAM identity;
+  the chart fails otherwise and realtime refuses one pod's disk with
+  `BNBLOC_REDIS_URL` set. Credentials come from a Secret or the pod's IAM identity;
   `directDownloads: true` (+ `publicEndpoint` when the endpoint is
   cluster-internal) answers downloads with presigned URLs.
 - **Ingress.** One host: `/relay` → relay, `/` → gateway, plus the sites
@@ -687,8 +681,8 @@ its log.
   replica reconciles installed components from platform settings every 30 s,
   so an install/uninstall on one replica reaches the others without a restart
   and no sticky routing is needed. Rate limits live in each replica's memory;
-  the chart sets `BNBLOC_GATEWAY_PEERS` (headless `bnbloc-gateway-peers`) so
-  each replica enforces 1/N of every budget, N being the live replica count.
+  with the replicas' Redis each enforces 1/N of every budget, N being the
+  live replica count.
 - **Probes.** Liveness `/healthz` (never DB-gated), readiness `/readyz`
   (DB-gated, and 503 while the pod drains).
 
@@ -698,18 +692,17 @@ No bnbloc service needs to be a single point of failure. What each one takes:
 
 | Service | State | Run | When a replica goes |
 |---|---|---|---|
-| gateway, room, activity, shareagent | none in process (the database) | 2+ replicas | the others serve; nothing to move |
-| realtime | none to move: any replica serves any room (the bus) | 2+ replicas with the bus, S3 (or a directory every replica mounts, `BNBLOC_ATTACHMENTS_DIR_SHARED=true`) | only its own streams reopen, on the others, and resume |
-| relay | sync sessions, by key ownership | 2 replicas | its sessions re-pair on the others |
+| gateway, room, activity, shareagent | none in process (the database) | 2+ replicas (gateway with the Redis, for shared rate limits) | the others serve; nothing to move |
+| realtime | none to move: any replica serves any room | 2+ replicas with the Redis, S3 (or a directory every replica mounts, `BNBLOC_ATTACHMENTS_DIR_SHARED=true`) | only its own streams reopen, on the others, and resume |
+| relay | the sessions it pipes | 2+ replicas with the Redis | its sessions reconnect and pair on the others |
 | pulse | one stream consumer | 1 replica (by design) | the organization board pauses until Kubernetes restarts it, then catches up from the stream; nothing on the message path waits for it |
 | MySQL | the authority | managed, multi-zone (RDS or Aurora Multi-AZ) | its failover (tens of seconds): requests fail and are retried, streams stay open |
-| Redis | realtime's bus; pulse's stream | managed, Multi-AZ | live delivery pauses for its failover; messages are still stored and streams read what they missed |
+| Redis | the replicas' (`BNBLOC_REDIS_URL`); pulse's stream | managed, Multi-AZ | realtime's live delivery pauses for its failover; messages are still stored and streams read what they missed |
 
 **Stopping a pod is a drain, not a cut** (`internal/obs/drain.go`). On
 SIGTERM a service answers `/readyz` with 503, ends its event streams and
-refuses new ones (503, `Retry-After: 1`), and a relay replica leaves its own
-peer set at once (its keys move before it goes); after 5 s it
-stops taking connections, waits up to 20 s for the requests in flight (a
+refuses new ones (503, `Retry-After: 1`); after 5 s it stops taking
+connections, waits up to 20 s for the requests in flight (a
 chat post's commit), then runs its shutdown hooks (realtime: the follow marks
 written behind, the queued notifications). The chart sets
 `terminationGracePeriodSeconds: 40`, a 2 s readiness period, a

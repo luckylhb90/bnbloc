@@ -23,8 +23,8 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/orgsync"
 	"github.com/luckylhb90/bnbloc/internal/provisioning"
+	"github.com/luckylhb90/bnbloc/internal/redisbus"
 	"github.com/luckylhb90/bnbloc/internal/sealbox"
-	"github.com/luckylhb90/bnbloc/internal/shard"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/svcauth"
 	"github.com/luckylhb90/bnbloc/services/gateway"
@@ -363,14 +363,15 @@ func main() {
 	// records within one interval.
 	go svc.RunComponentReconcile(context.Background())
 	// Gateway replicas share their per-subject/per-IP rate limits by each
-	// enforcing 1/N of every budget, N being the live replica count read
-	// from BNBLOC_GATEWAY_PEERS (unset = 1).
-	peers, err := shard.CountFromEnv("BNBLOC_GATEWAY")
+	// enforcing 1/N of every budget, N being the live replica count: the
+	// census on the replicas' Redis (BNBLOC_REDIS_URL; unset = 1 replica).
+	bus, err := redisbus.FromEnv(config.FromEnvRaw)
 	if err != nil {
 		log.Fatalf("bnbloc-gateway: %v", err)
 	}
-	peers.Start(context.Background())
-	svc.Peers = peers
+	if bus != nil {
+		svc.Replicas = bus.Census("gateway").Count
+	}
 	// A build new to this deployment is the platform.deployed event: every
 	// replica asks at boot, one records it and hands it to the scheduler.
 	go svc.RecordDeploy(context.Background(), buildinfo.Get("bnbloc-gateway").Commit)

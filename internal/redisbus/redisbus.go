@@ -1,8 +1,11 @@
-// Package redisbus is the transport between realtime replicas
-// (realtime.Topics) over Redis PUB/SUB, with the replicas' shared claims
-// and marks as Redis keys (docs/prd/2026-10-30-replicas-without-owners.md
-// §3). One endpoint per process holds one client for publishing and keys
-// and one subscriber connection for every topic it receives.
+// Package redisbus is the one Redis the replicas of a bnbloc service share
+// (BNBLOC_REDIS_URL): topics between replicas over PUB/SUB
+// (realtime.Topics), claims and marks as keys, a census of the live
+// replicas, and rendezvous records (relay). It is the only thing a service
+// needs to run more than one replica: no peer lists, no ownership
+// (docs/prd/2026-10-30-replicas-without-owners.md). One endpoint per
+// process holds one client for publishing and keys and one subscriber
+// connection for every topic it receives.
 package redisbus
 
 import (
@@ -19,14 +22,47 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// EnvURL names the bus's Redis (redis://…, rediss://… with TLS). Unset:
-// realtime has no bus (one replica). EnvCluster ("true") says it is a Redis
+// EnvURL names the replicas' Redis (redis://…, rediss://… with TLS). Unset:
+// the service runs one replica. EnvCluster ("true") says it is a Redis
 // Cluster (cluster mode enabled): the URL names a node or the cluster's
 // configuration endpoint.
 const (
-	EnvURL     = "BNBLOC_REALTIME_BUS_REDIS_URL"
-	EnvCluster = "BNBLOC_REALTIME_BUS_REDIS_CLUSTER"
+	EnvURL     = "BNBLOC_REDIS_URL"
+	EnvCluster = "BNBLOC_REDIS_CLUSTER"
 )
+
+// retired are the settings replicas once needed besides a Redis: a
+// deployment still carrying one is configured for a design that is gone.
+var retired = []string{
+	"BNBLOC_REALTIME_BUS_REDIS_URL", "BNBLOC_REALTIME_BUS_REDIS_CLUSTER",
+	"BNBLOC_REALTIME_PEERS", "BNBLOC_REALTIME_SELF",
+	"BNBLOC_RELAY_PEERS", "BNBLOC_RELAY_SELF", "BNBLOC_GATEWAY_PEERS",
+}
+
+// FromEnv connects to BNBLOC_REDIS_URL (nil when unset: one replica). A
+// retired setting (a peer list, the realtime-only bus URL) is an error that
+// names the fix, so a deployment configured for the old design does not
+// start as replicas that never meet.
+func FromEnv(getenv func(string) string) (*Bus, error) {
+	for _, name := range retired {
+		if getenv(name) != "" {
+			return nil, fmt.Errorf("%s is no longer read: replicas share one Redis, %s (and %s=true for a Redis Cluster); remove %s", name, EnvURL, EnvCluster, name)
+		}
+	}
+	url := getenv(EnvURL)
+	if url == "" {
+		return nil, nil
+	}
+	cluster := false
+	switch v := getenv(EnvCluster); v {
+	case "", "false", "0":
+	case "true", "1":
+		cluster = true
+	default:
+		return nil, fmt.Errorf("%s=%q: want true or false", EnvCluster, v)
+	}
+	return New(url, cluster)
+}
 
 // channelPrefix starts every topic's channel.
 const channelPrefix = "bnbloc:rt:"

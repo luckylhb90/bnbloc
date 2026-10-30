@@ -66,7 +66,7 @@ route word missing from the vocabulary only reads as `:id`.
 | `bnbloc_realtime_sse_overflows_total` | counter | — | Room streams closed because the client fell a whole buffer (64 events) behind. The client reconnects and catches up from history, so nothing is lost, but a steady rate means streams cannot keep up (slow clients or network, or an overloaded realtime). |
 | `bnbloc_realtime_stream_lane_events_total` | counter | `lane` | Room events on people's lanes streams (channels PRD §2.4) by lane: `full` delivered, `activity` folded into a `channel_activity`, `activity_sent` the `channel_activity` events written, `none` dropped (a closed channel's typing or job progress). `activity` against `full` is what the lanes save. |
 | `bnbloc_realtime_sse_gaps_total` | counter | — | Room streams that fell a whole buffer behind once and were told to fetch the difference (`stream_gap`) instead of being closed. A rate here with few overflows is streams riding out bursts; both rising is clients that cannot keep up. |
-| `bnbloc_realtime_bus_events_total` | counter | `outcome` | Room events between replicas on the bus (`BNBLOC_REALTIME_BUS_REDIS_URL`): `published`, `publish_error`, `received`, `duplicate` (a sequence already delivered: dropped), `held` (delivered after the 300 ms reorder hold gave up on a missing one; the room's streams read the difference), `lost` (a subscription that may have missed events: a reconnect). `publish_error` or `lost` rising is the bus's Redis in trouble; `held` rising is a replica whose publishes arrive late or never. |
+| `bnbloc_realtime_bus_events_total` | counter | `outcome` | Room events between replicas on the bus (`BNBLOC_REDIS_URL`): `published`, `publish_error`, `received`, `duplicate` (a sequence already delivered: dropped), `held` (delivered after the 300 ms reorder hold gave up on a missing one; the room's streams read the difference), `lost` (a subscription that may have missed events: a reconnect). `publish_error` or `lost` rising is the bus's Redis in trouble; `held` rising is a replica whose publishes arrive late or never. |
 | `bnbloc_realtime_chat_step_seconds` | histogram | `step` | A chat post's time by step: `access` (membership, channel, read access), `admit` (rules, who posts, slow mode), `commit` (waiting for the room's batch, its commit and delivery), `after` (mentions, thread counts, the agent job). `commit` is the database; any other step above a millisecond is a regression of the room state at the owner. |
 | `bnbloc_realtime_feed_commit_seconds` | histogram | — | One room batch's database commit. |
 | `bnbloc_realtime_feed_deliver_seconds` | histogram | — | One room batch's delivery to the room's streams (the hub's lock is held that long). |
@@ -97,16 +97,6 @@ backend ([production-deployment.md](./production-deployment.md#search-backend)).
 | `bnbloc_search_index_updates_total` | counter | `result` = `ok` \| `error` \| `dropped` | Messages handed to the index updater (new rows of the rooms this replica owns, edits, deletes). `error`: failed after three attempts (logged as `event=bnbloc.search.update_failed`); `dropped`: the 10,000-message queue was full (`event=bnbloc.search.update_dropped`). Either leaves the index behind until `bnbloc search reindex`; results stay correct (every candidate is re-checked in MySQL) but may miss new or edited messages. Writes never wait for or fail on the index. |
 | `bnbloc_search_index_queue_length` | gauge | — | Messages waiting for the index on this replica. Steadily near 10,000 means the cluster cannot keep up. |
 | `bnbloc_search_stale_candidates_total` | counter | — | Search candidates the store rejected: deleted, edited away or removed before the index caught up. A steady rate without matching update errors points at a lagging cluster. |
-
-### Scale-out (realtime, relay)
-
-Registered when the service runs with peers (`BNBLOC_<SVC>_PEERS`).
-
-| Metric | Type | Labels | Meaning |
-| --- | --- | --- | --- |
-| `bnbloc_shard_peers` | gauge | — | Live replicas in this replica's ownership view. Every replica should report the same value; a disagreement that persists beyond a few refreshes (5 s each) means replicas cannot probe each other. |
-| `bnbloc_shard_forwarded_total` | counter | — | Requests this replica proxied to the replica that owns their key (room, member, relay session). |
-| `bnbloc_shard_served_unowned_total` | counter | — | Forwarded requests served here although this replica does not own the key (two views briefly disagreed). Occasional increments during scaling are expected; a steady rate means the views do not converge. |
 
 ### Activity
 

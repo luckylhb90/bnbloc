@@ -79,8 +79,7 @@ gateway:
   # from platform settings every 30s, so an install on one replica reaches
   # the others without a restart and no sticky routing is needed. Rate
   # limits are per replica memory: each enforces 1/N of every budget, N
-  # being the live replica count (BNBLOC_GATEWAY_PEERS, the
-  # bnbloc-gateway-peers headless Service the chart renders).
+  # being the live replica count (counted on the replicas' Redis, `redis`).
   replicas: 2
   # Internal Prometheus listener (BNBLOC_METRICS_ADDR). The public port never
   # serves /metrics; scrape this port in-cluster and never route it from the
@@ -137,24 +136,14 @@ activity:  { replicas: 2, hpa: { enabled: true, minReplicas: 2, maxReplicas: 10,
 shareagent: { replicas: 2 }
 
 # realtime has no owners (docs/prd/2026-10-30-replicas-without-owners.md):
-# any pod serves any room and member, so it is a Deployment behind the
-# bnbloc-realtime Service and can autoscale. With replicas > 1 (or an HPA)
-# the pods share a bus, a Redis (bus.redisURLSecretRef, or
-# BNBLOC_REALTIME_BUS_REDIS_URL in the AWS Secrets Manager secret): a room's
+# any pod serves any room and member, so it can autoscale; with replicas > 1
+# (or an HPA) the pods share the replicas' Redis (`redis` below): a room's
 # events reach every pod streaming it, and a pod going away reconnects only
 # its own streams. More than one replica also requires the S3 blob store
 # (the chart fails otherwise). docs/production-deployment.md#high-availability.
 realtime:
   replicas: 1
   hpa: { enabled: false, minReplicas: 2, maxReplicas: 6, targetCPUUtilizationPercentage: 70 }
-  bus:
-    # Redis URL of the bus (redis://[user:password@]host:6379/1); its own
-    # database number keeps it apart from Pulse's keys on a shared Redis.
-    redisURLSecretRef: { name: "", key: redisURL }
-    # Redis Cluster (cluster mode enabled; BNBLOC_REALTIME_BUS_REDIS_CLUSTER):
-    # the URL then names a node or the configuration endpoint, and only
-    # database 0 exists, so leave the number off.
-    redisCluster: false
   attachments:
     # S3 (or S3-compatible) blob store for attachments + sidecar artifacts.
     # Empty bucket = local disk on the PVC below.
@@ -194,14 +183,26 @@ realtime:
     requests: { cpu: "250m", memory: "256Mi" }
     limits:   { cpu: "2", memory: "1Gi" }
 
-# relay scales out by KEY OWNERSHIP (internal/shard): a P2P sync session's
-# two peers must meet on one pod, so each session key is owned by one pod
-# (a StatefulSet behind a headless bnbloc-relay-peers Service; with
-# replicas > 1 each pod gets BNBLOC_RELAY_PEERS/_SELF) and any pod forwards
-# a request one hop to the owner.
+# relay pairs a P2P sync session's two streams; with replicas > 1 a stream
+# that reaches another pod than its partner finds it through the replicas'
+# Redis and joins it there (pod to pod on 8085).
 relay:
   replicas: 1
   hpa: { enabled: false, minReplicas: 2, maxReplicas: 4, targetCPUUtilizationPercentage: 70 }
+
+# The Redis the replicas of gateway, realtime and relay share
+# (BNBLOC_REDIS_URL): the only thing they need to run more than one replica
+# (the chart fails without it then). Either name a Secret here or put
+# BNBLOC_REDIS_URL in the AWS Secrets Manager secret (awsSecrets.secretID).
+# A managed Redis with a replica in another zone (ElastiCache Multi-AZ).
+redis:
+  # redis://[user:password@]host:6379/1, rediss:// with in-transit
+  # encryption; a database number of its own keeps it apart from Pulse's
+  # keys on a shared Redis.
+  urlSecretRef: { name: "", key: redisURL }
+  # Redis Cluster (cluster mode enabled; BNBLOC_REDIS_CLUSTER): the URL
+  # names a node or the configuration endpoint, with no database number.
+  cluster: false
 
 # The organization board (bnbloc-pulse, docs/prd/2026-10-24-executive-pulse-backend.md).
 # Off until enabled: the board then answers "not deployed" and the emitting

@@ -192,7 +192,7 @@ func (s *Service) handleDrawStoredWorkCover(w http.ResponseWriter, r *http.Reque
 		httpx.Error(w, "this work already has an AI cover", http.StatusConflict)
 		return
 	}
-	if !s.assistLimiter.Get(assistRate, assistBurst, s.Peers.Size).Allow(claims.Tenant + "/" + claims.Subject) {
+	if !s.assistLimiter.Get(assistRate, assistBurst, s.replicaCount).Allow(claims.Tenant + "/" + claims.Subject) {
 		httpx.Error(w, "too many requests: try again in a minute", http.StatusTooManyRequests)
 		return
 	}

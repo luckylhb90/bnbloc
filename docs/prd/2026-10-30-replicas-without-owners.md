@@ -362,3 +362,22 @@ A's in §5.
   stored, every delivery arrived, every stream open at the end. A scale
   event moves no stream (0 reconnects); a Redis restart reconnects none and
   tells every stream to read what it missed (`docs/load-testing.md`).
+- **One Redis for every service's replicas (2026-10-30).** The owner, on
+  hearing the gateway needed a peer list and relay its ownership:
+  "能不能设计不要这么复杂？简单高效高性能高可用". Now the only setting a
+  service needs to run more than one replica is `BNBLOC_REDIS_URL`
+  (`BNBLOC_REDIS_CLUSTER` for a Redis Cluster), read by gateway, realtime and
+  relay (`internal/redisbus`, moved out of realtime). `internal/shard` (peer
+  discovery, probes, rendezvous hashing, forwarding, 1,200 lines with its
+  tests) is gone, and so are the headless peer Services, StatefulSets and
+  `_PEERS`/`_SELF` settings.
+  - gateway: the replicas count each other (`redisbus.Census`, a sorted set
+    beaten every 5 s) and every per-replica rate limit divides by the count.
+  - relay: a session's first stream records `<pod IP>:<port> <token>` at the
+    rendezvous (`redisbus.Meet`, SET NX); the second, landing on another
+    replica, dials that one's `/internal/relay/join` with the token and pipes
+    its stream to the parked one; a record of a dead replica is cleared and
+    met again.
+  - realtime: the same Redis; its replica count is the census too.
+  - A setting of the former designs refuses startup with the fix
+    (`redisbus.FromEnv`).
