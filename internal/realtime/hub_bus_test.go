@@ -222,3 +222,29 @@ func TestBusLingersAfterTheLastStream(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+// A stream resuming below a sequence the hold gave up on is told to read the
+// difference: the replay buffer does not reach across the hole.
+func TestBusResumeBelowAHoleReadsTheDifference(t *testing.T) {
+	bus, chat := NewMemoryBus(), store.NewMemoryChat()
+	h := busHub(bus, chat)
+	keep := h.SubscribeLive("r")
+	defer h.Unsubscribe("r", keep)
+	other := RoomBus(bus.Endpoint())
+	for _, seq := range []int64{1, 2, 4} { // 3 never comes
+		if err := other.Publish(encodedEvent("r", seq)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for want := 1; want <= 3; want++ {
+		recv(t, keep)
+	}
+	if !keep.TakeGap() {
+		t.Fatal("the live stream was not told of the hole")
+	}
+	sub, gap := h.SubscribeSince("r", 2)
+	defer h.Unsubscribe("r", sub)
+	if !gap {
+		t.Fatal("a stream resuming at 2 was replayed past the missing 3 without a gap")
+	}
+}

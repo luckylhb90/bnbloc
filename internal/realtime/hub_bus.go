@@ -257,13 +257,18 @@ func (h *Hub) flushHeldLocked(roomID string, br *busRoom) {
 		seqs = append(seqs, seq)
 	}
 	slices.Sort(seqs)
+	// Before the held events go out: a stream that wakes on them finds the
+	// gap already marked, and the replay buffer starts again after the hole,
+	// so a stream resuming below it is told to read the difference too
+	// (SubscribeSince) instead of being replayed past it.
+	h.gapRoomLocked(roomID)
+	delete(h.replay, roomID)
 	for _, seq := range seqs {
 		h.fanoutLocked(br.held[seq])
 		h.Metrics.CounterInc(metricBusEvents, obs.L("outcome", "held"))
 	}
 	br.last, br.known = seqs[len(seqs)-1], true
 	clear(br.held)
-	h.gapRoomLocked(roomID)
 }
 
 // gapRoomLocked tells every stream of the room to read the difference from
