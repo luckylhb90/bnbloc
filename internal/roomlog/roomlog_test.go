@@ -94,13 +94,18 @@ func TestSplitWindowNewestVerbatim(t *testing.T) {
 	}
 }
 
-// StructuredSummarizer condenses deterministically: one bullet per speaker with
-// a turn count and their latest line, so any agent derives the same summary.
+// StructuredSummarizer condenses deterministically, so any agent derives the same summary: what
+// people said is kept message by message (an acknowledgement and a repeat are not), and what agents
+// said is one bullet per speaker with a turn count and their latest line.
 func TestStructuredSummarizerDeterministic(t *testing.T) {
 	entries := []Entry{
-		{Seq: 1, Speaker: "jack", Kind: KindHuman, Text: "first"},
-		{Seq: 2, Speaker: "jack", Kind: KindHuman, Text: "second"},
-		{Seq: 3, Speaker: "mia", Kind: KindHuman, Text: "hello"},
+		{Seq: 1, Speaker: "jack", Kind: KindHuman, Text: "first: deploy to QA only"},
+		{Seq: 2, Speaker: "jack", Kind: KindHuman, Text: "second: use the main branch"},
+		{Seq: 3, Speaker: "jack", Kind: KindHuman, Text: "ok"},
+		{Seq: 4, Speaker: "mia", Kind: KindHuman, Text: "hello there, team"},
+		{Seq: 5, Speaker: "mia", Kind: KindHuman, Text: "hello there, team"},
+		{Seq: 6, Speaker: "jack/codex", Kind: KindAgent, Text: "started"},
+		{Seq: 7, Speaker: "jack/codex", Kind: KindAgent, Text: "finished"},
 	}
 	s := StructuredSummarizer{}
 	got := s.Summarize(entries)
@@ -108,11 +113,16 @@ func TestStructuredSummarizerDeterministic(t *testing.T) {
 	if got != again {
 		t.Fatal("summary must be deterministic for the same input")
 	}
-	if !strings.Contains(got, "jack (2 turns): second") {
-		t.Fatalf("must fold jack's turns with latest line\n%s", got)
+	for _, want := range []string{"jack said: first: deploy to QA only", "second: use the main branch", "jack/codex (2 turns): finished"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("summary lacks %q\n%s", want, got)
+		}
 	}
-	if !strings.Contains(got, "mia (1 turn): hello") {
-		t.Fatalf("must render singular turn\n%s", got)
+	if strings.Contains(got, "said: ok") {
+		t.Errorf("an acknowledgement was kept:\n%s", got)
+	}
+	if strings.Count(got, "hello there, team") != 1 {
+		t.Errorf("a repeated message was kept twice:\n%s", got)
 	}
 	if s.Summarize(nil) != "" {
 		t.Fatal("empty input must summarize to empty")

@@ -2,6 +2,7 @@ package roomlog
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -269,10 +270,20 @@ func splitWindow(entries []Entry, windowChars int) (older, window []Entry) {
 func entryCost(e Entry) int { return len(e.Text) + len(e.Speaker) + 2 }
 
 // StructuredSummarizer is the default, model-free Summarizer. It condenses the
-// older conversation deterministically: one bullet per speaker with their turn
-// count and most recent line, newest speakers last. Being deterministic, every
-// agent in the room derives the same story-so-far from the same feed, so no
-// shared persistence or single-writer coordination is required. A configurable
+// older conversation deterministically, in two parts, because in a channel where several
+// people and several agents take turns they are not alike:
+//
+//   - What people said is kept, message by message (each bounded): a person's earlier
+//     instruction or constraint ("QA only, never prod") binds the work whoever speaks after,
+//     and a condensing that kept only each person's last line lost it the moment they said "ok".
+//     A short acknowledgement carries nothing and is left out; the most recent people's messages
+//     are the ones kept when there are too many (maxKeptPeople), the earlier ones are counted.
+//   - What agents said is one bullet per speaker with their turn count and most recent line,
+//     in the order they first spoke: their words are work product, found in full in the records
+//     the handover points to.
+//
+// Being deterministic, every agent in the room derives the same story-so-far from the same
+// feed, so no shared persistence or single-writer coordination is required. A configurable
 // LLM-backed Summarizer can replace it later behind the same interface.
 type StructuredSummarizer struct {
 	// MaxLineBytes bounds each speaker's quoted line (Truncate). 0 uses a
@@ -295,6 +306,7 @@ func (s StructuredSummarizer) Summarize(entries []Entry) string {
 		lastText string
 	}
 	bySpeaker := map[string]*agg{}
+	var people []Entry
 	order := 0
 	for _, e := range entries {
 		sp := e.Speaker
@@ -303,6 +315,14 @@ func (s StructuredSummarizer) Summarize(entries []Entry) string {
 		}
 		text := strings.TrimSpace(e.Text)
 		if text == "" {
+			continue
+		}
+		if e.Kind == KindHuman {
+			// A short acknowledgement carries nothing; the same message said again adds
+			// nothing either (the first said it, the count says how often).
+			if len(text) >= minPersonMessageBytes && !saidAlready(people, e) {
+				people = append(people, e)
+			}
 			continue
 		}
 		a := bySpeaker[sp]
@@ -314,7 +334,7 @@ func (s StructuredSummarizer) Summarize(entries []Entry) string {
 		a.count++
 		a.lastText = text
 	}
-	if len(bySpeaker) == 0 {
+	if len(bySpeaker) == 0 && len(people) == 0 {
 		return ""
 	}
 	speakers := make([]string, 0, len(bySpeaker))
@@ -327,12 +347,39 @@ func (s StructuredSummarizer) Summarize(entries []Entry) string {
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "Earlier in this room (%d turns condensed):\n", len(entries))
+	if len(people) > 0 {
+		skipped := 0
+		if len(people) > maxKeptPeople {
+			skipped = len(people) - maxKeptPeople
+			people = people[skipped:]
+		}
+		if skipped > 0 {
+			fmt.Fprintf(&b, "- (%d earlier messages from people are in the records)\n", skipped)
+		}
+		for _, e := range firstMentions(people) {
+			fmt.Fprintf(&b, "- %s said: %s\n", Sender(e), Truncate(strings.TrimSpace(e.Text), maxPersonLineBytes))
+		}
+	}
 	for _, sp := range speakers {
 		a := bySpeaker[sp]
 		fmt.Fprintf(&b, "- %s (%s): %s\n", sp, turns(a.count), Truncate(a.lastText, maxLine))
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
+
+// saidAlready reports whether the same person already said the same words among kept.
+func saidAlready(kept []Entry, e Entry) bool {
+	text := strings.TrimSpace(e.Text)
+	return slices.ContainsFunc(kept, func(k Entry) bool { return k.Speaker == e.Speaker && strings.TrimSpace(k.Text) == text })
+}
+
+// What of the older part a handover keeps of people: messages shorter than a few words
+// are acknowledgements; at most maxKeptPeople messages, each bounded; the rest is counted.
+const (
+	minPersonMessageBytes = 12
+	maxKeptPeople         = 12
+	maxPersonLineBytes    = 600
+)
 
 func turns(n int) string {
 	if n == 1 {

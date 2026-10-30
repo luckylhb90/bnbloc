@@ -449,12 +449,14 @@ func (b *Bridge) drivePrompt(ctx context.Context, d *drive, workspaceID string, 
 	if from != "" {
 		now.From = from
 	}
-	// A new session of an agent that already took part in the channel's
-	// conversation (its session was replaced) is handed it over: it
-	// remembers none of it, its own replies included. An agent new to the
-	// channel gets the pointer alone, and reads .room/ when it needs to.
+	// A new session in a channel that already has a conversation is handed it over: it remembers
+	// none of it, whether it is an agent that took part (its session was replaced, its own replies
+	// included) or one that never did (chosen mid-conversation, or the room's agent changed). Left
+	// with a pointer to .room/ alone it answered the message without what had been decided, and asked
+	// for it again. The channel is a conversation once anyone spoke in it besides the message that
+	// started this turn.
 	if fresh {
-		if prior, _ := dropInstruction(own, d.job.MessageSeq, text); spoke(prior, agentSpeakerLabel(owner, provider)) {
+		if prior, _ := dropInstruction(own, d.job.MessageSeq, text); len(prior) > 0 {
 			if st != nil {
 				for _, e := range own {
 					st.PushSeenSeq = max(st.PushSeenSeq, e.Seq)

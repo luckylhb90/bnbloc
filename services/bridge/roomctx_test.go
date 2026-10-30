@@ -401,17 +401,19 @@ func TestDriveClaimPullWritesRoomFilesAndPointerPrompt(t *testing.T) {
 		t.Fatal("no session prompt recorded")
 	}
 	prompt := prompts[0]
-	// The session's first prompt: its guidance (the .room/ legend included:
-	// the core takes workspace files), then the pointer, which keeps one
-	// line to the records on a core without agentProfile.
+	// The session's first prompt: its guidance (the .room/ legend included: the core takes
+	// workspace files), then the records pointer, then the conversation so far (an agent chosen
+	// in a channel that already has one is handed it: TestAnAgentNewToAChannelWithAConversationIsHandedIt),
+	// then the current message last.
 	facts, rest, ok := cutGuidance(prompt)
-	if !ok || !facts.HasRoomFiles || !strings.HasSuffix(rest, "---\n\n(room records: .room/INDEX.md)\n\n[now]\nwrite hello.rs") {
+	if !ok || !facts.HasRoomFiles || !strings.HasSuffix(rest, "[now]\nwrite hello.rs") || !strings.Contains(rest, "(room records: .room/INDEX.md)") {
 		t.Fatalf("pointer prompt malformed:\n%s", prompt)
 	}
-	// The whole point: history must NOT be in the prompt.
-	for _, leaked := range []string{"first in general", "second in test", "story so far"} {
+	// Only the channel the turn was driven in is handed over: another channel's history stays
+	// in the records the prompt points to.
+	for _, leaked := range []string{"second in test", "story so far"} {
 		if strings.Contains(prompt, leaked) {
-			t.Fatalf("history leaked into pointer prompt (%q):\n%s", leaked, prompt)
+			t.Fatalf("another channel's history leaked into the prompt (%q):\n%s", leaked, prompt)
 		}
 	}
 }
@@ -999,5 +1001,58 @@ func TestReplacedSessionIsHandedTheConversation(t *testing.T) {
 			t.Fatalf("the room was not told the session was replaced:\n%s", reports)
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// An agent that joins a channel where people and another agent have been talking is handed the
+// conversation, the same as one that lost its session: it was not there, and "read .room/ when you
+// need to" left it answering the message alone (an agent chosen mid-conversation did not know what
+// had been decided and asked for it again). What a person said early and what was said to it are in the
+// handover whoever spoke since; the agents' own chatter is condensed.
+func TestAnAgentNewToAChannelWithAConversationIsHandedIt(t *testing.T) {
+	g := newPullGateway(t)
+	g.addChatRow("general", 1, "maya", "Constraint: deploy to QA only, never to prod.")
+	g.addAgentRow("general", 2, "maya", "agent-a", "Understood, QA only.")
+	g.addChatRow("general", 3, "jack", "Use branch main for the release.")
+	for i := int64(0); i < 12; i++ {
+		g.addAgentRow("general", 4+i*2, "maya", "agent-a", strings.Repeat("working on the build ", 30))
+		g.addChatRow("general", 5+i*2, "jack", "ok, thanks")
+	}
+	g.addChatRow("general", 40, "maya", "deploy everything once")
+	prov := &fakeCoreProvider{url: g.srv.URL}
+	b := New(Config{
+		GatewayBaseURL: g.srv.URL,
+		GatewayToken:   "t",
+		OwnerSubject:   "maya",
+		Cores:          []CoreConfig{{Name: "core-a", Provider: prov, Endpoint: corepkg.Endpoint{BaseURL: g.srv.URL}}},
+	})
+	// agent-b has never spoken in this channel.
+	d := testDrive(b, jobRef{ID: "job-1", RequesterUserID: "maya", MessageSeq: 40}, "r1", "maya", "core-a", "agent-b", "t", "deploy everything once", "general")
+	if _, err := b.driveClaim(context.Background(), d, nil); err != nil {
+		t.Fatal(err)
+	}
+	prompts := prov.recordedPrompts()
+	if len(prompts) == 0 {
+		t.Fatal("no prompt")
+	}
+	got := prompts[len(prompts)-1]
+	for _, want := range []string{"Earlier in this conversation", "deploy to QA only, never to prod", "Use branch main for the release", ".room/channels/general/recent.md"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the new agent's prompt lacks %q:\n%s", want, got)
+		}
+	}
+	if !strings.HasSuffix(strings.TrimSpace(got), "deploy everything once") {
+		t.Errorf("the current message is not last:\n%s", got)
+	}
+	// An empty channel is not a conversation: the pointer alone, as before.
+	g2 := newPullGateway(t)
+	prov2 := &fakeCoreProvider{url: g2.srv.URL}
+	b2 := New(Config{GatewayBaseURL: g2.srv.URL, GatewayToken: "t", OwnerSubject: "maya", Cores: []CoreConfig{{Name: "core-a", Provider: prov2, Endpoint: corepkg.Endpoint{BaseURL: g2.srv.URL}}}})
+	g2.addChatRow("general", 1, "maya", "first message")
+	if _, err := b2.driveClaim(context.Background(), testDrive(b2, jobRef{ID: "job-1", RequesterUserID: "maya", MessageSeq: 1}, "r1", "maya", "core-a", "agent-b", "t", "first message", "general"), nil); err != nil {
+		t.Fatal(err)
+	}
+	if first := prov2.recordedPrompts(); len(first) == 0 || strings.Contains(first[len(first)-1], "Earlier in this conversation") {
+		t.Errorf("a channel with only the current message was handed a conversation:\n%v", first)
 	}
 }
