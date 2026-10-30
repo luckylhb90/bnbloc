@@ -15,7 +15,8 @@ import (
 )
 
 // testJournal records every batch the hub commits. fn, when set, runs first
-// and may block or fail the batch; inner, when set, then stores it for real.
+// (on rows not numbered yet) and may block or fail the batch; inner then
+// stores and numbers it (its own memory chat store when unset).
 type testJournal struct {
 	mu      sync.Mutex
 	fn      func(rows []store.RoomMessage) error
@@ -24,17 +25,21 @@ type testJournal struct {
 	batches [][]store.RoomMessage
 }
 
-func (j *testJournal) AppendRoomMessages(ctx context.Context, rows []store.RoomMessage) error {
+func (j *testJournal) AppendNextRoomMessages(ctx context.Context, rows []store.RoomMessage) error {
 	j.mu.Lock()
 	fn := j.fn
 	j.n++
+	if j.inner == nil {
+		j.inner = store.NewMemoryChat()
+	}
+	inner := j.inner
 	j.mu.Unlock()
 	var err error
 	if fn != nil {
 		err = fn(rows)
 	}
-	if err == nil && j.inner != nil {
-		err = j.inner.AppendRoomMessages(ctx, rows)
+	if err == nil {
+		err = inner.AppendNextRoomMessages(ctx, rows)
 	}
 	if err == nil {
 		j.mu.Lock()
@@ -190,14 +195,11 @@ func batchSizes(b [][]store.RoomMessage) []int {
 }
 
 // A batch commit that fails fails every member of the batch: nothing is
-// delivered, no sequence is consumed, the counter re-seeds from the durable
-// max, and each caller's retry succeeds.
+// delivered, no sequence is consumed, and each caller's retry succeeds.
 func TestGroupCommitFailureFailsWholeBatch(t *testing.T) {
 	g := newGate()
 	var mu sync.Mutex
 	commits := 0
-	durableMax := int64(0)
-	seeds := 0
 	j := &testJournal{fn: func(rows []store.RoomMessage) error {
 		g.wait()
 		mu.Lock()
@@ -205,16 +207,9 @@ func TestGroupCommitFailureFailsWholeBatch(t *testing.T) {
 		if commits++; commits == 2 { // the queued batch's commit fails
 			return errors.New("disk full")
 		}
-		durableMax = rows[len(rows)-1].Seq
 		return nil
 	}}
 	h := NewHub(64, 64)
-	h.SeedSeq = func(string) (int64, error) {
-		mu.Lock()
-		defer mu.Unlock()
-		seeds++
-		return durableMax, nil
-	}
 	sub := h.SubscribeLive("r")
 	defer h.Unsubscribe("r", sub)
 
@@ -237,16 +232,12 @@ func TestGroupCommitFailureFailsWholeBatch(t *testing.T) {
 	if got := drain(sub); len(got) != 1 || got[0].Sequence != 1 {
 		t.Fatalf("delivered %v, want only seq 1", got)
 	}
-	// Each caller retries (idempotent by client id): sequences continue at 2,
-	// re-seeded from the durable max.
+	// Each caller retries (idempotent by client id): sequences continue at 2.
 	for i := 0; i < 4; i++ {
 		ev, err := h.PublishCommit(chatEvent("r", fmt.Sprintf("b%d", i)), chatDurable(j, fmt.Sprintf("b%d", i)))
 		if err != nil || ev.Sequence != int64(i+2) {
 			t.Fatalf("retry %d seq=%d err=%v, want %d", i, ev.Sequence, err, i+2)
 		}
-	}
-	if seeds != 2 {
-		t.Fatalf("seeds = %d, want 2 (first publish, and once after the failed commit)", seeds)
 	}
 }
 
@@ -300,7 +291,6 @@ func TestGroupCommitClientMsgAlreadyInHistory(t *testing.T) {
 	g := newGate()
 	j := &testJournal{fn: func([]store.RoomMessage) error { g.wait(); return nil }, inner: chat}
 	h := NewHub(64, 64)
-	h.SeedSeq = func(room string) (int64, error) { return chat.MaxRoomSeq(ctx, room) }
 	sub := h.SubscribeLive("r")
 	defer h.Unsubscribe("r", sub)
 
@@ -333,16 +323,15 @@ func TestGroupCommitClientMsgAlreadyInHistory(t *testing.T) {
 	}
 }
 
-// The scale-out fence: another replica wrote the room's next slots, so the
-// batch hits the (room, seq) key. Every member fails (its idempotent retry
-// goes to the real owner), nothing is delivered, and the counter re-seeds.
-func TestGroupCommitFenceFailsEveryMember(t *testing.T) {
+// The store owns the room's sequence: another replica's write that lands
+// while this hub's batch waits takes the next number, and the batch is
+// numbered after it. No member fails, nothing repeats a number.
+func TestGroupCommitSharesTheRoomWithAnotherWriter(t *testing.T) {
 	chat := store.NewMemoryChat()
 	ctx := tenant.NewContext(context.Background(), testTenantID)
 	g := newGate()
 	j := &testJournal{fn: func([]store.RoomMessage) error { g.wait(); return nil }, inner: chat}
 	h := NewHub(64, 64)
-	h.SeedSeq = func(room string) (int64, error) { return chat.MaxRoomSeq(ctx, room) }
 	sub := h.SubscribeLive("r")
 	defer h.Unsubscribe("r", sub)
 
@@ -353,25 +342,23 @@ func TestGroupCommitFenceFailsEveryMember(t *testing.T) {
 		members = append(members, publishAsync(h, chatEvent("r", fmt.Sprintf("m%d", i)), chatDurable(j, fmt.Sprintf("m%d", i))))
 		waitQueued(t, h, "r", i+1)
 	}
-	// Meanwhile another replica (briefly owning the room) stores seq 3.
-	if err := chat.AppendRoomMessage(ctx, store.RoomMessage{RoomID: "r", Seq: 3, Kind: wire.KindChatMessage, ClientMsgID: "elsewhere", Payload: []byte(`{}`)}); err != nil {
-		t.Fatal(err)
+	// Meanwhile another replica stores a message of the room.
+	elsewhere := []store.RoomMessage{{TenantID: testTenantID, RoomID: "r", Kind: wire.KindChatMessage, ClientMsgID: "elsewhere", Payload: []byte(`{}`)}}
+	if err := chat.AppendNextRoomMessages(ctx, elsewhere); err != nil || elsewhere[0].Seq != 1 {
+		t.Fatalf("other writer seq=%d err=%v, want 1", elsewhere[0].Seq, err)
 	}
 	close(g.release)
-	if r := <-first; r.err != nil || r.ev.Sequence != 1 {
-		t.Fatalf("first seq=%d err=%v, want 1", r.ev.Sequence, r.err)
+	if r := <-first; r.err != nil || r.ev.Sequence != 2 {
+		t.Fatalf("first seq=%d err=%v, want 2 (after the other writer's 1)", r.ev.Sequence, r.err)
 	}
 	for i, ch := range members {
-		if r := <-ch; !errors.Is(r.err, store.ErrDuplicateSeq) || r.ev.Sequence != 0 {
-			t.Fatalf("member %d: seq=%d err=%v, want ErrDuplicateSeq and no sequence", i, r.ev.Sequence, r.err)
+		if r := <-ch; r.err != nil || r.ev.Sequence != int64(i+3) {
+			t.Fatalf("member %d: seq=%d err=%v, want %d", i, r.ev.Sequence, r.err, i+3)
 		}
 	}
-	if got := drain(sub); len(got) != 1 {
-		t.Fatalf("delivered %d events, want only the first", len(got))
-	}
-	ev, err := h.PublishCommit(chatEvent("r", "m0"), chatDurable(j, "m0"))
-	if err != nil || ev.Sequence != 4 {
-		t.Fatalf("after the fence seq=%d err=%v, want 4 (re-seeded from the durable max 3)", ev.Sequence, err)
+	got := drain(sub)
+	if len(got) != 4 || got[0].Sequence != 2 || got[3].Sequence != 5 {
+		t.Fatalf("delivered %v, want seqs 2..5", got)
 	}
 }
 
@@ -519,7 +506,6 @@ func TestGroupCommitOrderingUnderConcurrentSenders(t *testing.T) {
 		inner: chat,
 	}
 	h := NewHub(senders*perSender, 2*senders*perSender)
-	h.SeedSeq = func(room string) (int64, error) { return chat.MaxRoomSeq(ctx, room) }
 	sub := h.SubscribeLive("r")
 	defer h.Unsubscribe("r", sub)
 	other := h.SubscribeLive("other")
@@ -636,7 +622,7 @@ func TestGroupCommitContextNeverAbandonsTheInsert(t *testing.T) {
 
 type testJournalCtx struct{ fn func(context.Context) }
 
-func (j *testJournalCtx) AppendRoomMessages(ctx context.Context, _ []store.RoomMessage) error {
+func (j *testJournalCtx) AppendNextRoomMessages(ctx context.Context, _ []store.RoomMessage) error {
 	j.fn(ctx)
 	return nil
 }
@@ -663,7 +649,6 @@ func TestCommittedHookSeesStoredRows(t *testing.T) {
 		return nil
 	}}
 	h := NewHub(64, 64)
-	h.SeedSeq = func(room string) (int64, error) { return chat.MaxRoomSeq(ctx, room) }
 	var seen []store.RoomMessage
 	h.Committed = func(rows []store.RoomMessage) { seen = append(seen, rows...) }
 

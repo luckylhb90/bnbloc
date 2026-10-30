@@ -1211,27 +1211,27 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   read-idle timeout, the client reconnects (churning presence join/leave), and
   any reply produced during the dead window is missed. Keep the periodic
   `: keep-alive` comment in `realtime` `handleEvents`.
-- **Event `Sequence` must be a per-room monotonic counter, never derived from
-  the replay-buffer length.** Once the buffer slides past `replayLimit` the
-  length plateaus, sequences repeat, and the client (which dedupes by sequence)
-  silently drops later events.
+- **The store numbers a room's messages** (`ChatStore.AppendNextRoomMessages`,
+  the `room_counters` row advanced in the insert's own transaction). Its row
+  lock orders the room's writers, so sequences are dense, never reissued,
+  commit in sequence order, and any replica may write any room; a rollback
+  gives the numbers back. Never number durable events in a replica's memory
+  again (in-memory mode with no journal is the only exception), and never
+  derive a sequence from the replay-buffer length (it plateaus, sequences
+  repeat, and the client's dedup drops later events).
 - **Only durable kinds (`chat_message`, `agent_messages`) take a sequence.**
-  Transient events carry sequence 0 and no SSE `id:`, so the counter always
-  equals the stored max and seeding it from the store (restart, ownership
-  move) is exact. Two replicas briefly owning a room are fenced by the
-  `(room_id, seq)` key plus the idempotent `clientMsgId` retry. Do not
-  reintroduce transient sequencing.
+  Transient events carry sequence 0 and no SSE `id:`. Do not reintroduce
+  transient sequencing.
 - **Durable publishes group-commit per room** (`Hub.PublishCommit`). One
-  leader at a time takes what queued during the previous commit, assigns
-  consecutive sequences, stores the batch in ONE `AppendRoomMessages`
-  insert, and delivers only after it succeeds. Do not go back to a commit
+  leader at a time takes what queued during the previous commit, stores the
+  batch in ONE `AppendNextRoomMessages` transaction (which numbers it), and
+  delivers only after it succeeds. Do not go back to a commit
   per event under a room lock (the commit wait then queues every message of
   a busy room), never add an artificial batching delay, and never give the
   commit a timeout or a caller's context: an abandoned insert may still
   commit server-side, reported failed and never delivered. A failed batch
-  fails every member and re-seeds; the fence (`ErrDuplicateSeq`) is NOT
-  retried locally, so a stale owner stops writing and each caller's
-  idempotent retry reaches the real owner. A client id repeated in the
+  fails every member; each caller's idempotent retry stores it once. A
+  client id repeated in the
   batch or already in history answers the original sequence with
   `store.ErrDuplicateClientMsg`. Transient kinds bypass the queue (never
   wait on a commit); `member_removed`/`room_deleted` queue behind it.
@@ -1251,10 +1251,11 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   pages older than a sequence cursor. Human chat has no other durable home —
   the in-memory replay buffer (256) is lost on restart, so this is the only
   history source.
-- **The hub's per-room sequence must be seeded from the durable max on restart**
-  (`Hub.SeedSeq` -> `Chat.MaxRoomSeq`). Otherwise an in-memory reset to 0 re-issues
-  sequences below a client's persisted last-read cursor, so post-restart messages
-  look already-read (unread stuck at 0) and dedup misfires.
+- **A room's counter never goes below its stored max.** A room with no
+  `room_counters` row starts it at `MAX(seq)` (no backfill), and retention
+  keeps a fence row for the newest sequence for that reason. A counter
+  that restarted lower would re-issue sequences below clients' last-read
+  cursors: new messages look read and dedup drops them.
 - **Unread = messages with seq > the user's last-read seq** (`room_read_state`).
   `POST .../read` advances it (monotonic); `GET /v1/rooms-unread?rooms=` returns
   per-room counts (membership-checked). The client marks read as the feed's

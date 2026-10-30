@@ -26,8 +26,6 @@ func newHandoffServer(t *testing.T) (*Service, *store.MemoryChat, *realtime.Hand
 	mem.Add("room-1", "alice")
 	chat := store.NewMemoryChat()
 	svc := &Service{Hub: realtime.NewHub(64, 16), Membership: mem, Chat: chat}
-	// Durable seeding, as in production: the hub continues from the store max.
-	svc.Hub.SeedSeq = func(roomID string) (int64, error) { return chat.MaxRoomSeq(context.Background(), roomID) }
 	srv := httptest.NewServer(svcauth.Middleware(key, svc.Handler()))
 	t.Cleanup(srv.Close)
 	return svc, chat, realtime.NewHandoffClient(srv.URL, "room"), tenant.NewContext(context.Background(), tenant.Default)
@@ -99,9 +97,10 @@ func TestImportPersistsWithoutPublishing(t *testing.T) {
 		t.Fatalf("imported payload = %+v", p)
 	}
 	// Live chat continues after the imported rows.
-	next := svc.Hub.Publish(wire.Event{RoomID: "room-1", Kind: wire.KindChatMessage})
-	if next.Sequence != reply.LastSequence+1 {
-		t.Fatalf("next seq = %d, want %d", next.Sequence, reply.LastSequence+1)
+	next, err := svc.Hub.PublishCommit(wire.Event{RoomID: "room-1", Kind: wire.KindChatMessage},
+		realtime.Durable{Journal: chat, Row: store.RoomMessage{TenantID: tenant.Default}})
+	if err != nil || next.Sequence != reply.LastSequence+1 {
+		t.Fatalf("next seq = %d (err %v), want %d", next.Sequence, err, reply.LastSequence+1)
 	}
 }
 

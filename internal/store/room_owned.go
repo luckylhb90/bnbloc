@@ -45,6 +45,7 @@ var roomOwnedTables = []roomOwnedTable{
 
 	byTenantRoom("room_members"),
 	byTenantRoom("room_messages"),
+	byTenantRoom("room_counters"),
 	byTenantRoom("room_read_state"),
 	byTenantRoom("room_invites"),
 	byTenantRoom("room_channels"),

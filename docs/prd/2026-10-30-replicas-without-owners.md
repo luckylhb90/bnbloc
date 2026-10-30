@@ -1,7 +1,7 @@
 # Replicas without owners: a simpler multi-replica realtime (2026-10-30)
 
 Status: approved (2026-10-30: "这个方案可以啊", with "if there is a better
-one, dig further": §7 is that dig). Building: slices in §5. The owner: "有没有更简单更
+one, dig further": §6 is that dig). Building: slices in §5. The owner: "有没有更简单更
 灵活高性能高可用的多副本部署方案？". Builds on
 `docs/prd/2026-10-30-high-availability.md` (what it took to make today's
 design survive a failover) and `docs/prd/2026-10-10-enterprise-scale.md` §2
@@ -185,7 +185,7 @@ a small organization gets high availability from one image.
 8. A longer resend for a 503 from the database; RDS Proxy in the deployment
    guide.
 
-## 7. Digging further: is there something better?
+## 6. Digging further: is there something better?
 
 Each idea below was weighed against the proposal on the four words of the
 question: simpler, more flexible, faster, more available.
@@ -253,7 +253,7 @@ So the target is **A** (interchangeable realtime replicas over a bus, the
 sequence in MySQL) then **B** (one stream per client). Slices of B follow
 A's in §5.
 
-## 6. Decisions pending owner
+## 7. Decisions pending owner
 
 - **R1.** Build it: realtime without owners, Redis as the multi-replica bus
   (single node stays dependency-free)? Recommended.
@@ -261,3 +261,21 @@ A's in §5.
   a deploy's reconnects show on the database? Recommended.
 - **R3.** QA: is there an ElastiCache Redis for bnbloc (pulse's), or should
   one be created (Multi-AZ, small)?
+
+## 8. Progress
+
+- **Slice 1 (2026-10-30): the store numbers a room's messages.**
+  `ChatStore.AppendNextRoomMessages` advances the room's `room_counters`
+  row (`UPDATE … SET seq = LAST_INSERT_ID(seq + n)`) and inserts the batch in
+  one transaction; a room with no counter starts it at its stored max, in a
+  statement of its own (inside the transactions, concurrent first writers
+  deadlocked: found by the contract test on MySQL 8.4); a counter behind
+  rows written at chosen sequences catches up once; a deadlock victim runs
+  again. The hub's seed (`Hub.SeedSeq`), its counter (kept only for
+  in-memory mode with no journal) and the fence handling are gone. Tests:
+  the store contract (dense, in order, conflicts consume nothing, 8
+  concurrent writers of one room on both backends), the hub's group commit
+  with another writer committing into the room meanwhile.
+  The failover drill (`scripts/failover-check.sh`, 3 replicas, drain,
+  rejoin, crash, rejoin) passes on it: 6,000 of 6,000 sends, 19,441 of
+  19,441 deliveries, no counter deadlock or duplicate logged.

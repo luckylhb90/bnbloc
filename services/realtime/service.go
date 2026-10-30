@@ -201,9 +201,10 @@ func (s *Service) heartbeatEvery() time.Duration {
 // ChatStore persists room-feed messages, reads history pages, and tracks
 // per-user read state for unread counts.
 type ChatStore interface {
-	// AppendRoomMessages is the hub's journal (realtime.Journal): the room's
-	// group commit stores each batch of durable events through it.
-	AppendRoomMessages(ctx context.Context, rows []store.RoomMessage) error
+	// AppendNextRoomMessages is the hub's journal (realtime.Journal): the
+	// room's group commit stores and numbers each batch of durable events
+	// through it.
+	AppendNextRoomMessages(ctx context.Context, rows []store.RoomMessage) error
 	RoomHistory(ctx context.Context, roomID, channelID string, before int64, limit int) ([]store.RoomMessage, error)
 	RoomFeed(ctx context.Context, roomID string, after int64, limit int) ([]store.RoomMessage, error)
 	MarkRead(ctx context.Context, roomID, channelID, userID string, seq, atMs int64) error

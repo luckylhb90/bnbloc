@@ -53,15 +53,10 @@ type Hub struct {
 	mu     sync.Mutex
 	subs   map[string]map[*Subscriber]struct{}
 	replay map[string][]replayEntry
-	// seq is a per-room monotonic sequence counter for DURABLE events only. It
-	// is independent of the replay buffer length: once the buffer slides past
-	// replayLimit, buffer length plateaus, so deriving the sequence from it
-	// would repeat numbers and the client (which dedupes by sequence) would
-	// silently drop later events — e.g. agent replies after a busy room fills
-	// the buffer never render. Transient events never advance it, so the
-	// counter always equals the durable max: a new owner (restart, ownership
-	// move) that seeds from the store continues exactly where the old one
-	// stopped and re-issues no number any client has seen.
+	// seq numbers durable events published with no journal (in-memory
+	// mode, tests), per room. With a journal the store owns the room's
+	// sequence (store.ChatStore.AppendNextRoomMessages), so any replica may
+	// commit to any room and none needs to know where another stopped.
 	seq map[string]int64
 	// queues holds each room's group commit queue (see the Hub doc).
 	queues map[string]*roomQueue
@@ -72,14 +67,6 @@ type Hub struct {
 	buffer      int
 	// now is the replay clock (time.Now; tests move it).
 	now func() time.Time
-	// SeedSeq, when set, returns the durable max sequence for a room; the hub
-	// seeds its per-room counter from it on the room's first publish so
-	// sequences survive a restart. A seed error fails that publish and leaves
-	// the room unseeded, so the next publish retries — the counter never
-	// silently restarts at 0 (which would re-issue sequences below clients'
-	// read cursors and make dedup drop new messages). Nil in pure in-memory
-	// mode (dev/tests) — sequences start at 1.
-	SeedSeq func(roomID string) (int64, error)
 	// Metrics counts published events by kind (nil = off).
 	Metrics *obs.Metrics
 	// Committed, when set, receives the rows of every successful group
@@ -236,19 +223,18 @@ func (h *Hub) dropLocked(roomID string, sub *Subscriber) {
 	if len(set) == 0 {
 		delete(h.subs, roomID)
 		// Free the replay buffer for an empty room; it is only a latency
-		// optimization for currently-connected subscribers. The per-room seq
-		// counter is retained (one int64) so monotonicity holds without a
-		// store re-seed when the room next becomes active.
+		// optimization for currently-connected subscribers.
 		delete(h.replay, roomID)
 	}
 }
 
-// Journal stores a room's sequenced durable events: the room feed.
-// store.ChatStore satisfies it. Implementations must be comparable (a pointer,
-// or a struct of pointers): a batch commits only writes that name the same
-// journal.
+// Journal stores a room's durable events, the room feed, and numbers them:
+// AppendNextRoomMessages sets each row's Seq to the room's next sequence (see
+// store.ChatStore, which satisfies it). Implementations must be comparable (a
+// pointer, or a struct of pointers): a batch commits only writes that name
+// the same journal.
 type Journal interface {
-	AppendRoomMessages(ctx context.Context, rows []store.RoomMessage) error
+	AppendNextRoomMessages(ctx context.Context, rows []store.RoomMessage) error
 }
 
 // Durable is what a durable publish stores with its event.
@@ -256,9 +242,9 @@ type Durable struct {
 	// Journal receives the row; nil stores nothing (in-memory mode, tests).
 	Journal Journal
 	// Row is the stored row. The publisher sets TenantID, Author, ClientMsgID
-	// and Payload; the batch leader sets RoomID, ChannelID, Seq, Kind and
-	// CreatedAtMs from the event. A non-empty ClientMsgID is the publish's
-	// idempotency key.
+	// and Payload; the batch leader sets RoomID, ChannelID, Kind and
+	// CreatedAtMs from the event, and the journal sets Seq. A non-empty
+	// ClientMsgID is the publish's idempotency key.
 	Row store.RoomMessage
 }
 
@@ -273,9 +259,7 @@ const (
 
 // Publish fans the event out with no durable store. A transient kind
 // (presence, typing, roster, job/state deltas) is delivered with no sequence;
-// a durable kind is sequenced (in-memory mode and tests). A seed failure of a
-// durable kind drops the event (logged) and the room re-seeds on its next
-// publish.
+// a durable kind is numbered by the hub (in-memory mode and tests).
 func (h *Hub) Publish(ev wire.Event) wire.Event {
 	out, err := h.PublishCommit(ev, Durable{})
 	if err != nil {
@@ -285,27 +269,24 @@ func (h *Hub) Publish(ev wire.Event) wire.Event {
 }
 
 // PublishCommit publishes ev. A durable kind (wire.PersistedFeedKind) goes
-// through the room's group commit: it is assigned the room's next sequence,
-// stored through d.Journal together with the durable publishes queued with
-// it (one multi-row insert), and only when that commit succeeds is it
+// through the room's group commit: it is stored through d.Journal together
+// with the durable publishes queued with it (one transaction), which numbers
+// it with the room's next sequence, and only when that commit succeeds is it
 // retained for replay and delivered — in sequence order, after every earlier
-// durable event of the room. When the commit (or seeding) fails nothing of
-// the batch is delivered, no sequence is consumed, the room's counter
-// re-seeds on its next publish, and every member gets the error — so a
-// client retry cannot observe a live event that history never stored, and a
-// durable store that rejected the slots (counter behind the feed: another
-// replica briefly owned the room) is re-read.
+// durable event the hub committed for the room. When the commit fails
+// nothing of the batch is delivered, no sequence is consumed and every
+// member gets the error — so a client retry cannot observe a live event that
+// history never stored.
 //
 // Idempotency: a publish whose d.Row.ClientMsgID repeats an earlier publish
 // of the same batch, or a row already in history, stores and delivers
 // nothing; it returns the original event's sequence with
 // store.ErrDuplicateClientMsg.
 //
-// A transient kind carries no sequence, never touches the counter, needs no
-// seed and never waits on a commit: it is delivered immediately. The
-// revocation kinds (member_removed, room_deleted) are the exception: they
-// queue behind the room's in-flight durable events, so a message committed
-// before a revocation is never delivered after it.
+// A transient kind carries no sequence and never waits on a commit: it is
+// delivered immediately. The revocation kinds (member_removed, room_deleted)
+// are the exception: they queue behind the room's in-flight durable events,
+// so a message committed before a revocation is never delivered after it.
 //
 // A subscriber whose buffer is full never blocks the hub: its stream is
 // closed (see deliver), and the client reconnects and catches up from
@@ -325,8 +306,8 @@ func (h *Hub) PublishCommit(ev wire.Event, d Durable) (wire.Event, error) {
 	}
 }
 
-// CommitHistory assigns the room's next sequence and stores ev exactly like
-// PublishCommit (same group commit, counter and failure semantics), but never
+// CommitHistory stores ev at the room's next sequence exactly like
+// PublishCommit (same group commit and failure semantics), but never
 // retains the event for replay nor delivers it to any subscriber. It is the
 // write path for history that is not live chat — a handoff import — so
 // bridges (which drive agents from live chat_message events) and UI streams
@@ -441,9 +422,9 @@ func (h *Hub) lead(q *roomQueue, first *pending) {
 	}
 }
 
-// commit sequences and stores the durable members of a batch, setting each
-// member's out/err. It runs with no lock held: the room has exactly one
-// leader, so nothing else touches the room's counter meanwhile.
+// commit stores the durable members of a batch, numbered by the journal,
+// setting each member's out/err. It runs with no lock held: the room has
+// exactly one leader in this hub, so its batches commit and deliver in order.
 func (h *Hub) commit(batch []*pending) {
 	roomID := batch[0].ev.RoomID
 	var writes []*pending
@@ -486,36 +467,26 @@ func (h *Hub) commit(batch []*pending) {
 		return
 	}
 
-	h.mu.Lock()
-	cur, seeded := h.seq[roomID]
-	h.mu.Unlock()
-	if !seeded && h.SeedSeq != nil {
-		// Seed outside mu: the store round-trip must not stall other rooms.
-		n, err := guard("seed", func() (int64, error) { return h.SeedSeq(roomID) })
-		if err != nil {
-			fail(writes, fmt.Errorf("seed sequence: %w", err))
-			return
-		}
-		cur = n
-	}
 	journal := writes[0].d.Journal
 	var rows []store.RoomMessage
 	for len(writes) > 0 {
 		rows = make([]store.RoomMessage, len(writes))
 		for i, p := range writes {
-			p.out.Sequence = cur + int64(i) + 1
 			row := p.d.Row
-			row.RoomID, row.ChannelID, row.Seq = p.out.RoomID, p.out.ChannelID, p.out.Sequence
+			row.RoomID, row.ChannelID, row.Seq = p.out.RoomID, p.out.ChannelID, 0
 			row.Kind, row.CreatedAtMs = p.out.Kind, p.out.AtUnixMs
 			rows[i] = row
 		}
 		err := h.store(journal, rows)
 		if err == nil {
+			for i, p := range writes {
+				p.out.Sequence = rows[i].Seq
+			}
 			break
 		}
 		// Rows whose client id is already in history answer their original
-		// sequence; the rest of the batch retries at the same base, so the
-		// room's sequences stay dense.
+		// sequence; the rest of the batch is stored again (the failed
+		// transaction consumed no sequence, so the room's stay dense).
 		var conflict *store.ClientMsgConflict
 		if errors.As(err, &conflict) {
 			var kept []*pending
@@ -531,34 +502,23 @@ func (h *Hub) commit(batch []*pending) {
 				continue
 			}
 		}
-		// Anything else fails every remaining member. That includes the
-		// scale-out fence (store.ErrDuplicateSeq: another replica wrote the
-		// room's next slots): retrying locally would keep a stale owner
-		// writing a room whose live readers are on the new owner, so each
-		// caller gets the error and its idempotent retry (clientMsgId) lands
-		// on the real owner. The counter re-reads the durable max next time.
+		// Anything else fails every remaining member: each caller gets the
+		// error, and its idempotent retry (clientMsgId) stores it once.
 		fail(writes, err)
-		if h.SeedSeq != nil {
-			h.mu.Lock()
-			delete(h.seq, roomID)
-			h.mu.Unlock()
-		}
 		h.Metrics.CounterInc(metricFeedCommits, obs.L("result", "error"))
 		return
 	}
-	last := cur // every write may have been in history already
-	if len(writes) > 0 {
-		last = writes[len(writes)-1].out.Sequence
-		h.Metrics.CounterInc(metricFeedCommits, obs.L("result", "ok"))
-		h.Metrics.CounterAdd(metricFeedCommitEvents, float64(len(writes)))
-		if journal != nil && h.Committed != nil {
-			h.Committed(rows)
-		}
+	if len(writes) == 0 {
+		return // every write was in history already
+	}
+	h.Metrics.CounterInc(metricFeedCommits, obs.L("result", "ok"))
+	h.Metrics.CounterAdd(metricFeedCommitEvents, float64(len(writes)))
+	if journal != nil && h.Committed != nil {
+		h.Committed(rows)
 	}
 	h.mu.Lock()
-	h.seq[roomID] = last
 	for _, r := range rows {
-		if r.ClientMsgID != "" && last >= r.Seq {
+		if r.ClientMsgID != "" {
 			h.recentLocked(roomID).add(r.ClientMsgID, r.Seq)
 		}
 	}
@@ -568,9 +528,8 @@ func (h *Hub) commit(batch []*pending) {
 // DeliverCommitted delivers a durable event another replica stored for the
 // room (its previous owner, during a change of owner, still took a message
 // for a moment): once, with its own sequence, to the room's streams and its
-// replay buffer, and the room's counter moves past it so this replica never
-// reissues that sequence. It reports false when the hub already delivered
-// that sequence (it is in the replay buffer).
+// replay buffer. It reports false when the hub already delivered that
+// sequence (it is in the replay buffer).
 func (h *Hub) DeliverCommitted(ev wire.Event) bool {
 	if ev.Sequence <= 0 || !wire.PersistedFeedKind(ev.Kind) {
 		return false
@@ -581,9 +540,6 @@ func (h *Hub) DeliverCommitted(ev wire.Event) bool {
 			h.mu.Unlock()
 			return false
 		}
-	}
-	if cur, ok := h.seq[ev.RoomID]; ok && cur < ev.Sequence {
-		h.seq[ev.RoomID] = ev.Sequence
 	}
 	h.mu.Unlock()
 	h.deliver([]*pending{{ev: ev, out: ev, deliver: true}})
@@ -635,20 +591,28 @@ func (h *Hub) RecentClientMsg(roomID, clientMsgID string) (int64, bool) {
 	return seq, ok
 }
 
-// store runs one batch insert through the journal (nil = in-memory mode,
-// nothing stored). The commit runs to its real outcome: no caller's request
-// context (it carries the whole batch) and no timeout. Abandoning an insert
-// client-side does not abort it server-side, so a cancelled or timed-out
-// commit may still land: its callers would be told it failed, its events
-// never delivered live, and the re-seeded counter would then collide with
-// the late rows. Waiting through a slow commit keeps every guarantee; a dead
-// connection still fails, through the driver and TCP keepalive.
+// store runs one batch insert through the journal, which numbers the rows;
+// with no journal (in-memory mode) nothing is stored and the hub numbers
+// them. The commit runs to its real outcome: no caller's request context (it
+// carries the whole batch) and no timeout. Abandoning an insert client-side
+// does not abort it server-side, so a cancelled or timed-out commit may
+// still land: its callers would be told it failed and its events never
+// delivered live. Waiting through a slow commit keeps every guarantee; a
+// dead connection still fails, through the driver and TCP keepalive.
 func (h *Hub) store(j Journal, rows []store.RoomMessage) error {
 	if j == nil {
+		h.mu.Lock()
+		cur := h.seq[rows[0].RoomID]
+		for i := range rows {
+			cur++
+			rows[i].Seq = cur
+		}
+		h.seq[rows[0].RoomID] = cur
+		h.mu.Unlock()
 		return nil
 	}
 	_, err := guard("journal", func() (struct{}, error) {
-		return struct{}{}, j.AppendRoomMessages(context.Background(), rows)
+		return struct{}{}, j.AppendNextRoomMessages(context.Background(), rows)
 	})
 	return err
 }
@@ -737,9 +701,8 @@ func guard[T any](what string, fn func() (T, error)) (v T, err error) {
 // ReleaseRooms drops every room owned reports false for: its subscribers'
 // channels are closed (their streams end, and the clients reconnect to the
 // room's new owner and catch up from history), and its replay buffer and
-// sequence counter are forgotten, so a room that later moves back seeds
-// afresh from the durable max instead of resuming a stale counter. It
-// returns the number of subscriber streams closed. Called when the replica's
+// recent client ids are forgotten, so a room that later moves back starts
+// from history instead of a stale buffer. It returns the number of subscriber streams closed. Called when the replica's
 // peer set changes (scale-out ownership).
 func (h *Hub) ReleaseRooms(owned func(roomID string) bool) int {
 	h.mu.Lock()
@@ -758,11 +721,6 @@ func (h *Hub) ReleaseRooms(owned func(roomID string) bool) int {
 	for roomID := range h.replay {
 		if !owned(roomID) {
 			delete(h.replay, roomID)
-		}
-	}
-	for roomID := range h.seq {
-		if !owned(roomID) {
-			delete(h.seq, roomID)
 		}
 	}
 	for roomID := range h.recent {

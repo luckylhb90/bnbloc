@@ -198,7 +198,9 @@ infrastructure (no Redis or NATS).
 - **Ownership change.** When the peer set changes, a replica closes the
   streams of keys it no longer owns. Clients reconnect, land on the new owner
   and catch up from history (the existing reconnect path). The new owner
-  seeds the room's counter from the durable max (`Hub.SeedSeq`). The durable
+  seeds the room's counter from the durable max (`Hub.SeedSeq`; since
+  2026-10-30 the store numbers a room's messages instead, so there is no
+  counter to seed or fence). The durable
   `(room_id, seq)` primary key fences two replicas that briefly both believe
   they own a room: the loser's commit fails and the client's retry
   (idempotent by `clientMsgId`) lands on the new owner. Sequence numbers that
@@ -284,7 +286,7 @@ room lock. The counter now always equals the durable max.
 | State | Key | Behavior on an ownership move |
 | --- | --- | --- |
 | Hub subscribers (room SSE streams) | room | Closed on the old owner; clients reconnect to the new owner and catch up from history. |
-| Durable sequence counter | room | Forgotten on release; the new owner seeds from the durable max. Two replicas briefly owning a room are fenced by the `(room_id, seq)` primary key: the loser's commit fails, it re-seeds, and the client's retry (idempotent by `clientMsgId`) succeeds. |
+| Durable sequence counter | room | In the store since 2026-10-30 (`room_counters`, `docs/prd/2026-10-30-replicas-without-owners.md`): nothing to move; two replicas briefly owning a room both commit, numbered in order. Before: forgotten on release, seeded from the durable max, fenced by the `(room_id, seq)` key. |
 | Replay buffer | room | Forgotten on release (it only serves connected subscribers); reconnecting clients page history. |
 | Presence refcounts + leave timers | room | Closing streams run their deferred leave on the old owner, whose events are suppressed (only the owner announces presence); the new owner rebuilds presence from the reconnects. |
 | Agent roster + withdraw timers | room | Same as presence; each bridge re-advertises when its stream reconnects. |

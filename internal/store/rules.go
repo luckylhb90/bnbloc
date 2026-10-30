@@ -31,12 +31,23 @@ func liveAt(expiresAtMs, nowMs int64) bool { return nowMs < expiresAtMs }
 // mysqlErrDupEntry is MySQL's ER_DUP_ENTRY (duplicate key on insert).
 const mysqlErrDupEntry = 1062
 
-// isDupEntry reports a duplicate-key error. It is the only reader of a
-// driver error number: a write that can collide maps it to the store's
-// exported sentinel with dupAs, which the memory store returns as well.
+// mysqlErrDeadlock is MySQL's ER_LOCK_DEADLOCK: the transaction was rolled
+// back and may be run again.
+const mysqlErrDeadlock = 1213
+
+// isDupEntry reports a duplicate-key error. It and isDeadlock are the only
+// readers of a driver error number: a write that can collide maps it to the
+// store's exported sentinel with dupAs, which the memory store returns as
+// well.
 func isDupEntry(err error) bool {
 	var me *mysql.MySQLError
 	return errors.As(err, &me) && me.Number == mysqlErrDupEntry
+}
+
+// isDeadlock reports a transaction MySQL rolled back as a deadlock victim.
+func isDeadlock(err error) bool {
+	var me *mysql.MySQLError
+	return errors.As(err, &me) && me.Number == mysqlErrDeadlock
 }
 
 // isDupKey reports a duplicate-key error on the named unique key.

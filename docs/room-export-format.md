@@ -163,9 +163,9 @@ source room's organization and dies with it).
 5. **Messages** are written by realtime's internal, history-only import write
    (`POST /internal/v1/rooms/{roomId}/import`, svcauth-signed, membership
    checked, ≤ 500 rows / 8 MiB per request). Each row:
-   - takes the room's next hub sequence (the same per-room counter, seeded from
-     the durable max, that live publishes use), so imported rows are monotonic
-     and live chat continues after them;
+   - takes the room's next sequence (the store's per-room counter that live
+     publishes use), so imported rows are monotonic and live chat continues
+     after them;
    - keeps its original timestamp and attribution (chat `userId`, agent
      `ownerUserId`/`provider`); room-local references are rewritten (channel
      ids, attachment ids, the agent payload's `workspaceId`/`channelId`);

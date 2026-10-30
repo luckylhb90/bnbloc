@@ -75,9 +75,6 @@ func newCluster(t *testing.T, n int) *cluster {
 			c.plugins = fix
 		}
 		hub := realtime.NewHub(64, 64)
-		hub.SeedSeq = func(room string) (int64, error) {
-			return c.chat.MaxRoomSeq(context.Background(), room)
-		}
 		r.svc = &Service{
 			Hub: hub, Membership: c.members, Chat: c.chat, BridgeJobs: jobs, Dispatches: jobs,
 			Schedules: c.sched, RoomRoles: schedRoles{anyRoom: true},
@@ -445,7 +442,7 @@ func TestScaleOutOwnershipChangeMovesStreams(t *testing.T) {
 	waitSubscribers(t, entry, room, 1)
 	// A publish sent to the old owner is forwarded to the new one.
 	if seq := c.chatVia(owner, room, "jack", "two", "m-2"); seq != 2 {
-		t.Fatalf("after move seq %d, want 2 (seeded from the durable max)", seq)
+		t.Fatalf("after move seq %d, want 2 (the store numbers the room)", seq)
 	}
 	if ev := eventOf(t, s.next(t, "chat_message")); ev.Sequence != 2 {
 		t.Fatalf("got %d after move", ev.Sequence)

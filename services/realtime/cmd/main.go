@@ -210,16 +210,6 @@ func main() {
 		Audit: backends.ExtAudit, Blobs: blobs, Metrics: metrics,
 		Search: searchIndex,
 	}).Run(context.Background())
-	// Seed the hub's per-room sequence from the durable max so sequences continue
-	// monotonically across restarts (keeps unread counts and dedup correct).
-	chat := backends.Chat
-	// A read error is returned, never treated as 0: the hub then fails that
-	// publish and re-seeds on the next one instead of restarting the counter.
-	svc.Hub.SeedSeq = func(roomID string) (int64, error) {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		return chat.MaxRoomSeq(ctx, roomID)
-	}
 	svc.Hub.Metrics = metrics
 	handler := svc.Handler()
 	// The first refresh runs before serving, so the replica starts with a

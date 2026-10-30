@@ -1947,6 +1947,14 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return addColumnIfMissing(ctx, db, "notification_prefs", "quiet_hours_json", "JSON NULL AFTER channel_messages")
 		},
 	},
+	{
+		// The store numbers a room's messages (AppendNextRoomMessages): any
+		// replica may write any room.
+		id: "2026_10_room_counters",
+		run: func(ctx context.Context, db sqlConn) error {
+			return createSchemaTable(ctx, db, "room_counters")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

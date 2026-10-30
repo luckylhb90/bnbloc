@@ -24,6 +24,7 @@ func TestMySQLDeleteRoomRemovesEveryRoomOwnedRow(t *testing.T) {
 	ctx := tenantCtx(tenantA)
 	seeds := map[string]string{
 		"room_messages":               `INSERT INTO room_messages (tenant_id, room_id, channel_id, seq, kind, payload_json, created_at_ms) VALUES ('org-a', '{id}', 'ch', 1, 'chat_message', '{}', 1)`,
+		"room_counters":               `INSERT INTO room_counters (room_id, tenant_id, seq) VALUES ('{id}', 'org-a', 1)`,
 		"room_read_state":             `INSERT INTO room_read_state (tenant_id, room_id, channel_id, user_id, last_read_seq, updated_at_ms) VALUES ('org-a', '{id}', 'ch', 'alice', 1, 1)`,
 		"room_sections":               `INSERT INTO room_sections (section_id, tenant_id, room_id, name, created_by, created_at_ms) VALUES ('sec-{id}', 'org-a', '{id}', 'Design', 'alice', 1)`,
 		"channel_follows":             `INSERT INTO channel_follows (tenant_id, room_id, channel_id, user_id, joined_at_ms) VALUES ('org-a', '{id}', 'ch', 'alice', 1)`,

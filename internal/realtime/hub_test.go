@@ -61,58 +61,16 @@ func TestSubscribeReplayCarriesMonotonicSequences(t *testing.T) {
 	}
 }
 
-// A failing seeder must not silently restart the room's counter at 0: the
-// publish fails, nothing is delivered, and the next publish re-seeds.
-func TestPublishCommitSeedFailureSurfacesAndRetries(t *testing.T) {
-	h := NewHub(8, 8)
-	fail := true
-	calls := 0
-	h.SeedSeq = func(string) (int64, error) {
-		calls++
-		if fail {
-			return 0, errors.New("db down")
-		}
-		return 41, nil
-	}
-	sub := h.SubscribeLive("r")
-	defer h.Unsubscribe("r", sub)
-	if _, err := h.PublishCommit(wire.Event{RoomID: "r", Kind: "chat_message"}, Durable{}); err == nil {
-		t.Fatal("publish with a failing seeder succeeded; want the seed error")
-	}
-	if len(sub.Events()) != 0 {
-		t.Fatal("a durable event was delivered without a seeded sequence")
-	}
-	// A transient event needs no seed: it carries no sequence, so a store
-	// outage never drops presence or typing.
-	h.Publish(wire.Event{RoomID: "r", Kind: "presence_typing"})
-	if ev := <-sub.Events(); ev.Kind != "presence_typing" || ev.Sequence != 0 {
-		t.Fatalf("transient delivery = %s seq=%d, want presence_typing with no sequence", ev.Kind, ev.Sequence)
-	}
-	if _, err := h.PublishCommit(wire.Event{RoomID: "r", Kind: "chat_message"}, Durable{}); err == nil {
-		t.Fatal("second publish with a failing seeder succeeded; want the seed error")
-	}
-	fail = false
-	ev, err := h.PublishCommit(wire.Event{RoomID: "r", Kind: "chat_message"}, Durable{})
-	if err != nil || ev.Sequence != 42 {
-		t.Fatalf("after recovery: seq=%d err=%v, want 42 (durable max 41 + 1)", ev.Sequence, err)
-	}
-	if calls != 3 {
-		t.Fatalf("seeder calls = %d, want 3 (each failed durable attempt retries; transient never seeds)", calls)
-	}
-}
-
-// Transient events never consume the durable sequence space: the counter
-// stays equal to the durable max, so a new owner (restart or ownership move)
-// that seeds from the store re-issues no number a client has already seen,
-// and a durable event after a burst of presence/typing continues densely.
+// Transient events never consume the durable sequence space, and a durable
+// event after a burst of presence/typing continues densely; another replica
+// writing the room through the same store continues after it, above every
+// number a subscriber here saw.
 func TestTransientEventsDoNotConsumeSequences(t *testing.T) {
-	durable := int64(0)
 	h := NewHub(16, 16)
-	h.SeedSeq = func(string) (int64, error) { return durable, nil }
 	sub := h.SubscribeLive("r")
 	defer h.Unsubscribe("r", sub)
 
-	j := &testJournal{fn: func(rows []store.RoomMessage) error { durable = rows[len(rows)-1].Seq; return nil }}
+	j := &testJournal{}
 	commit := Durable{Journal: j, Row: store.RoomMessage{TenantID: "t"}}
 	if ev, err := h.PublishCommit(wire.Event{RoomID: "r", Kind: wire.KindChatMessage}, commit); err != nil || ev.Sequence != 1 {
 		t.Fatalf("first chat seq=%d err=%v, want 1", ev.Sequence, err)
@@ -129,13 +87,10 @@ func TestTransientEventsDoNotConsumeSequences(t *testing.T) {
 		t.Fatalf("agent reply after transient burst seq=%d err=%v, want 2 (dense durable space)", ev.Sequence, err)
 	}
 
-	// A new owner seeds from the durable max and continues at 3: the number
-	// it issues is above every number any subscriber of the old owner saw.
-	next := NewHub(16, 16)
-	next.SeedSeq = func(string) (int64, error) { return durable, nil }
-	ev, err = next.PublishCommit(wire.Event{RoomID: "r", Kind: wire.KindChatMessage}, commit)
+	other := NewHub(16, 16)
+	ev, err = other.PublishCommit(wire.Event{RoomID: "r", Kind: wire.KindChatMessage}, commit)
 	if err != nil || ev.Sequence != 3 {
-		t.Fatalf("new owner first chat seq=%d err=%v, want 3", ev.Sequence, err)
+		t.Fatalf("other replica's first chat seq=%d err=%v, want 3", ev.Sequence, err)
 	}
 	var maxSeen int64
 	for len(sub.Events()) > 0 {
@@ -144,22 +99,22 @@ func TestTransientEventsDoNotConsumeSequences(t *testing.T) {
 		}
 	}
 	if ev.Sequence <= maxSeen {
-		t.Fatalf("new owner issued %d, not above the %d an old-owner client saw", ev.Sequence, maxSeen)
+		t.Fatalf("other replica issued %d, not above the %d a client here saw", ev.Sequence, maxSeen)
 	}
 }
 
 // ReleaseRooms closes the streams of rooms the replica no longer owns and
-// forgets their replay buffer and counter, so a room that moves back seeds
-// afresh from the durable max; owned rooms are untouched.
+// forgets their replay buffer; owned rooms are untouched. A room that moves
+// back continues after what other replicas stored meanwhile.
 func TestReleaseRoomsClosesAndForgetsUnownedRooms(t *testing.T) {
-	durable := map[string]int64{"gone": 0, "kept": 0}
+	j := &testJournal{}
+	commit := Durable{Journal: j, Row: store.RoomMessage{TenantID: "t"}}
 	h := NewHub(16, 16)
-	h.SeedSeq = func(room string) (int64, error) { return durable[room], nil }
 	gone := h.Subscribe("gone")
 	kept := h.Subscribe("kept")
 	defer h.Unsubscribe("kept", kept)
 	for _, room := range []string{"gone", "kept"} {
-		if _, err := h.PublishCommit(wire.Event{RoomID: room, Kind: wire.KindChatMessage}, Durable{}); err != nil {
+		if _, err := h.PublishCommit(wire.Event{RoomID: room, Kind: wire.KindChatMessage}, commit); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -174,10 +129,14 @@ func TestReleaseRoomsClosesAndForgetsUnownedRooms(t *testing.T) {
 	if h.SubscriberCount("kept") != 1 {
 		t.Fatal("owned room's stream was closed")
 	}
-	// Another replica committed seq 1..5 while the room was away; moving back
-	// seeds from that max instead of resuming the forgotten counter at 2.
-	durable["gone"] = 5
-	ev, err := h.PublishCommit(wire.Event{RoomID: "gone", Kind: wire.KindChatMessage}, Durable{})
+	// Another replica committed seq 2..5 while the room was away.
+	other := NewHub(16, 16)
+	for i := 0; i < 4; i++ {
+		if _, err := other.PublishCommit(wire.Event{RoomID: "gone", Kind: wire.KindChatMessage}, commit); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ev, err := h.PublishCommit(wire.Event{RoomID: "gone", Kind: wire.KindChatMessage}, commit)
 	if err != nil || ev.Sequence != 6 {
 		t.Fatalf("after move back seq=%d err=%v, want 6", ev.Sequence, err)
 	}
@@ -199,43 +158,40 @@ func TestPublishCommitFailureDeliversNothing(t *testing.T) {
 	if len(sub.Events()) != 0 {
 		t.Fatal("event delivered although its commit failed")
 	}
-	var committed int64
-	ok := &testJournal{fn: func(rows []store.RoomMessage) error { committed = rows[0].Seq; return nil }}
+	// A transient event needs no commit: a store outage never drops
+	// presence or typing.
+	h.Publish(wire.Event{RoomID: "r", Kind: "presence_typing"})
+	if ev := <-sub.Events(); ev.Kind != "presence_typing" || ev.Sequence != 0 {
+		t.Fatalf("transient delivery = %s seq=%d, want presence_typing with no sequence", ev.Kind, ev.Sequence)
+	}
+	ok := &testJournal{}
 	ev, err := h.PublishCommit(wire.Event{RoomID: "r", Kind: "chat_message"}, Durable{Journal: ok, Row: store.RoomMessage{TenantID: "t"}})
-	if err != nil || ev.Sequence != 1 || committed != 1 {
-		t.Fatalf("retry seq=%d committed=%d err=%v, want 1/1/nil", ev.Sequence, committed, err)
+	if b := ok.committed(); err != nil || ev.Sequence != 1 || len(b) != 1 || b[0][0].Seq != 1 {
+		t.Fatalf("retry seq=%d committed=%v err=%v, want 1/[1]/nil", ev.Sequence, b, err)
 	}
 	if got := (<-sub.Events()).Sequence; got != 1 {
 		t.Fatalf("delivered seq = %d, want 1", got)
 	}
 }
 
-// Seeding happens outside the hub-wide mutex: a slow seeder for one room must
-// not block publishes to another room.
-func TestSeedDoesNotBlockOtherRooms(t *testing.T) {
+// A slow commit of one room never blocks a publish to another room.
+func TestSlowCommitDoesNotBlockOtherRooms(t *testing.T) {
 	h := NewHub(8, 8)
-	release := make(chan struct{})
-	entered := make(chan struct{})
-	h.SeedSeq = func(room string) (int64, error) {
-		if room == "slow" {
-			close(entered)
-			<-release
-		}
-		return 0, nil
-	}
-	go h.Publish(wire.Event{RoomID: "slow", Kind: "chat_message"})
-	<-entered
+	g := newGate()
+	slow := &testJournal{fn: func([]store.RoomMessage) error { g.wait(); return nil }}
+	go h.PublishCommit(chatEvent("slow", "x"), chatDurable(slow, "x"))
+	<-g.entered
 	done := make(chan struct{})
 	go func() {
-		h.Publish(wire.Event{RoomID: "fast", Kind: "chat_message"})
+		h.PublishCommit(chatEvent("fast", "y"), chatDurable(&testJournal{}, "y"))
 		close(done)
 	}()
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
-		t.Fatal("publish to another room blocked behind a slow seed")
+		t.Fatal("publish to another room blocked behind a slow commit")
 	}
-	close(release)
+	close(g.release)
 }
 
 // Access-revocation events are live-only: a replay must never deliver a stale
@@ -448,8 +404,8 @@ func TestSubscribeSinceSendsTheDifference(t *testing.T) {
 }
 
 // A message another replica stored (the room's previous owner) is delivered
-// once, and the room's counter moves past it.
-func TestDeliverCommittedOnceAndPastTheCounter(t *testing.T) {
+// once.
+func TestDeliverCommittedOnce(t *testing.T) {
 	h := NewHub(8, 8)
 	sub := h.SubscribeLive("r")
 	defer h.Unsubscribe("r", sub)
@@ -463,8 +419,5 @@ func TestDeliverCommittedOnceAndPastTheCounter(t *testing.T) {
 	}
 	if h.DeliverCommitted(wire.Event{RoomID: "r", Sequence: 2, Kind: wire.KindChatMessage}) {
 		t.Fatal("delivered twice")
-	}
-	if ev := h.Publish(wire.Event{RoomID: "r", Kind: wire.KindChatMessage}); ev.Sequence != 3 {
-		t.Fatalf("the next sequence = %d, want 3 (past the other replica's)", ev.Sequence)
 	}
 }

@@ -102,10 +102,11 @@ const (
 // RetentionFenceKind is the kind of a room message retention redacted
 // instead of deleting, because it held the room's highest sequence.
 //
-// The room's sequence counter is seeded from the durable max
-// (ChatStore.MaxRoomSeq): deleting a room's newest row would lower that max
-// and the next owner would re-issue sequences clients already saw (and that
-// read cursors already passed). So retention never deletes a room's
+// A room with no counter yet starts it at the durable max
+// (ChatStore.AppendNextRoomMessages, ChatStore.MaxRoomSeq): deleting a
+// room's newest row would lower that max and the room would re-issue
+// sequences clients already saw (and that read cursors already passed).
+// So retention never deletes a room's
 // max-sequence row: it strips it to a fence — kind retention_fence, empty
 // payload, no author, text, client id or edit stamp, soft-deleted — which
 // keeps only (room, seq, channel, time). Every reader already skips

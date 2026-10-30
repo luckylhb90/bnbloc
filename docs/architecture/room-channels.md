@@ -268,8 +268,8 @@ Every scope asks `store.MayReadChannel` of every channel-scoped event.
 - `RoomHistory` / `MarkRead` / `UnreadCount`: `""` addresses the legacy
   default/empty channel **(not a wildcard)** — it matches only rows stored with
   an empty channel id.
-- `MaxRoomSeq`: `""` means **room-wide** (sequence allocation must read the
-  room's single counter).
+- `MaxRoomSeq` and `AppendNextRoomMessages` are **room-wide**: a room has one
+  sequence across its channels (`room_counters`).
 
 ## Store
 

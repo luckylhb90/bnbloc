@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"slices"
 	"strconv"
+	"sync"
 	"testing"
 
 	"github.com/luckylhb90/bnbloc/internal/tenant"
@@ -572,6 +574,125 @@ func TestContractChatIndexSearchSources(t *testing.T) {
 		}
 		if _, _, err := b.Chat.ScanSearchSources(context.Background(), "bogus", 2); !errors.Is(err, ErrInvalidSearchCursor) {
 			t.Fatalf("bogus cursor = %v", err)
+		}
+	})
+}
+
+// The store numbers a room's rows: dense, in row order, after what the room
+// already holds (also rows written at chosen sequences); a client id
+// conflict stores nothing and consumes no sequence; concurrent writers of
+// one room never share or skip a number.
+func TestContractChatStoreAppendNext(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) {
+		tid, room := uniq("t-next-"), uniq("room-")
+		ctx := tenantCtx(tid)
+		s := b.Chat
+		row := func(cmi string) RoomMessage {
+			m := chatRow(tid, room, "", 0, "hi")
+			m.ClientMsgID = cmi
+			return m
+		}
+		stored := func() []int64 { return seqsOf(must(s.RoomFeed(ctx, room, 0, 100))(t)) }
+
+		// Rows written before the room had a counter.
+		old := chatRow(tid, room, "", 1, "old")
+		old.ClientMsgID = "old"
+		if err := s.AppendRoomMessages(ctx, []RoomMessage{old, chatRow(tid, room, "", 2, ""), chatRow(tid, room, "", 3, "")}); err != nil {
+			t.Fatal(err)
+		}
+		batch := []RoomMessage{row("a"), row(""), row("b")}
+		batch[1].Seq = 99 // ignored
+		if err := s.AppendNextRoomMessages(ctx, batch); err != nil {
+			t.Fatal(err)
+		}
+		if got := seqsOf(batch); !slices.Equal(got, []int64{4, 5, 6}) {
+			t.Fatalf("numbered %v, want [4 5 6]", got)
+		}
+		if seq, ok := must2(s.LookupClientMsg(ctx, room, "b"))(t); !ok || seq != 6 {
+			t.Fatalf("stored b at %d %v, want 6", seq, ok)
+		}
+
+		err := s.AppendNextRoomMessages(ctx, []RoomMessage{row("c"), row("old")})
+		var conflict *ClientMsgConflict
+		if !errors.As(err, &conflict) || len(conflict.Seqs) != 1 || conflict.Seqs["old"] != 1 {
+			t.Fatalf("batch with a stored client id = %v, want a conflict naming old:1", err)
+		}
+		next := []RoomMessage{row("c")}
+		if err := s.AppendNextRoomMessages(ctx, next); err != nil || next[0].Seq != 7 {
+			t.Fatalf("after the conflict seq=%d err=%v, want 7 (none consumed)", next[0].Seq, err)
+		}
+
+		// A row written at a chosen sequence past the counter: the next
+		// numbered write continues after it.
+		if err := s.AppendRoomMessages(ctx, []RoomMessage{chatRow(tid, room, "", 8, ""), chatRow(tid, room, "", 9, "")}); err != nil {
+			t.Fatal(err)
+		}
+		next = []RoomMessage{row("d")}
+		if err := s.AppendNextRoomMessages(ctx, next); err != nil || next[0].Seq != 10 {
+			t.Fatalf("after chosen rows seq=%d err=%v, want 10", next[0].Seq, err)
+		}
+		if got := stored(); !slices.Equal(got, []int64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}) {
+			t.Fatalf("stored %v", got)
+		}
+		if err := s.AppendNextRoomMessages(ctx, nil); err != nil {
+			t.Fatalf("empty batch: %v", err)
+		}
+		if err := s.AppendNextRoomMessages(bg(), []RoomMessage{{RoomID: room, Kind: "chat_message"}}); !errors.Is(err, tenant.ErrNoTenant) {
+			t.Fatalf("no tenant = %v", err)
+		}
+
+		// Concurrent writers of a fresh room.
+		busy := uniq("room-")
+		const writers, each = 8, 10
+		var wg sync.WaitGroup
+		got := make(chan RoomMessage, writers*each*3)
+		for w := range writers {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for i := range each {
+					rows := make([]RoomMessage, 1+(w+i)%3)
+					for k := range rows {
+						rows[k] = chatRow(tid, busy, "", 0, "")
+						rows[k].ClientMsgID = fmt.Sprintf("w%d-%d-%d", w, i, k)
+					}
+					if err := s.AppendNextRoomMessages(ctx, rows); err != nil {
+						t.Errorf("writer %d: %v", w, err)
+						return
+					}
+					for k := 1; k < len(rows); k++ {
+						if rows[k].Seq != rows[k-1].Seq+1 {
+							t.Errorf("writer %d batch numbered %v, want consecutive", w, seqsOf(rows))
+						}
+					}
+					for _, r := range rows {
+						got <- r
+					}
+				}
+			}()
+		}
+		wg.Wait()
+		close(got)
+		bySeq := map[int64]string{}
+		for r := range got {
+			if prev, dup := bySeq[r.Seq]; dup {
+				t.Fatalf("seq %d handed to %s and %s", r.Seq, prev, r.ClientMsgID)
+			}
+			bySeq[r.Seq] = r.ClientMsgID
+		}
+		feed := must(s.RoomFeed(ctx, busy, 0, 500))(t)
+		if len(feed) != len(bySeq) {
+			t.Fatalf("stored %d rows, handed out %d sequences", len(feed), len(bySeq))
+		}
+		for i, r := range feed {
+			if r.Seq != int64(i+1) {
+				t.Fatalf("row %d has seq %d: not dense", i, r.Seq)
+			}
+		}
+		for seq, cmi := range bySeq {
+			if at, ok := must2(s.LookupClientMsg(ctx, busy, cmi))(t); !ok || at != seq {
+				t.Fatalf("%s stored at %d %v, but handed seq %d", cmi, at, ok, seq)
+			}
 		}
 	})
 }

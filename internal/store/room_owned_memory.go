@@ -8,12 +8,13 @@ import "strings"
 // roomKeyPrefix is the "tenant\x00room\x00" prefix of composite memory keys.
 func roomKeyPrefix(tenantID, roomID string) string { return tenantID + "\x00" + roomID + "\x00" }
 
-// room_messages, room_read_state.
+// room_messages, room_counters, room_read_state.
 func (s *MemoryChat) deleteRoomRows(tenantID, roomID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	rk := tenantID + "\x00" + roomID
 	delete(s.msgs, rk)
+	delete(s.last, roomID)
 	prefix := rk + "\x00"
 	for _, m := range []map[string]int64{s.read, s.byCMI} {
 		for k := range m {
