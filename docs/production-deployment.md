@@ -713,6 +713,16 @@ written behind, the queued notifications). The chart sets
 PodDisruptionBudget (`maxUnavailable: 1`) and topology spread over nodes and
 zones for every service with more than one replica.
 
+**A database failover** (Aurora or RDS Multi-AZ: tens of seconds) is the
+one outage every replica shares. A chat send that meets it (a broken or
+refused connection, the old writer read-only) is answered 503 with
+`Retry-After` and nothing is stored; the web client sends it again with the
+same `clientMsgId` for about 30 s, and it is stored once the new writer
+takes it. Put **RDS Proxy** in front of the database (the DSN names the
+proxy's endpoint): it holds clients' connections through a writer failover,
+shortening it for them, and pools every pod's connections, so adding pods
+does not add database connections one for one.
+
 **What clients do when their replica goes.** A stream reopens with the last
 sequence it received (`since`) and is sent only what is newer; a buffer that
 does not reach back sends `stream_gap`, and the client reads the difference

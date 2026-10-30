@@ -349,3 +349,16 @@ A's in §5.
   The failover drill passes: 6,000 of 6,000 sends, 19,900 of 19,900
   deliveries, 240 reconnects and 4 gaps (owned rooms: 564 to 884 and about
   450).
+- **Slice 8 (2026-10-30): a database failover.** `store.Unavailable`
+  classifies a broken or refused connection and MySQL's read-only (a writer
+  failing over), full and shutting-down errors; a chat send that meets one
+  is answered 503 with `Retry-After`, and the web client (and the load
+  tool) send a 503 again for about 30 s more (5, 8, 8, 8 s after the usual
+  0.4, 1.2, 3 s). RDS Proxy is in the deployment guide.
+- **Slice 6 (2026-10-30): drills.** `scripts/failover-check.sh` takes a
+  drill: `replicas` (drain, rejoin, crash, rejoin), `rolling` (each replica
+  in turn), `scale` (3 → 5 → 3), `redis` (the bus's Redis restarted). All
+  pass under the same load (300 members, 30 rooms, 50 msgs/s): every send
+  stored, every delivery arrived, every stream open at the end. A scale
+  event moves no stream (0 reconnects); a Redis restart reconnects none and
+  tells every stream to read what it missed (`docs/load-testing.md`).

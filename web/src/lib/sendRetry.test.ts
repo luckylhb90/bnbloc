@@ -26,3 +26,21 @@ test("after the last wait the failure is the caller's", async () => {
   await assert.rejects(withSendRetry(async () => { n++; throw new ApiError(500, "x"); }, [1, 1], noSleep));
   assert.equal(n, 3);
 });
+
+test("a database failing over (503) is sent again for longer; another 5xx is not", async () => {
+  let n = 0;
+  const waited: number[] = [];
+  const got = await withSendRetry(async () => {
+    n++;
+    if (n < 6) throw new ApiError(503, "the database is unavailable");
+    return 9;
+  }, [1, 2], async (ms) => { waited.push(ms); }, [3, 4, 5]);
+  assert.equal(got, 9);
+  assert.deepEqual(waited, [1, 2, 3, 4, 5]);
+  n = 0;
+  await assert.rejects(withSendRetry(async () => { n++; throw new ApiError(500, "x"); }, [1, 2], noSleep, [3, 4, 5]));
+  assert.equal(n, 3, "a 500 stops after the short waits");
+  n = 0;
+  await assert.rejects(withSendRetry(async () => { n++; throw new ApiError(503, "x"); }, [1], noSleep, [2]));
+  assert.equal(n, 3, "a 503 stops after the long waits too");
+});

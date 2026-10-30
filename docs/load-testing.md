@@ -477,8 +477,16 @@ load tool behaves as the web client does (it resends a 5xx with the same
 
 ```sh
 docker compose -f compose.yml -f compose.ha.yml up -d --build
-scripts/failover-check.sh
+scripts/failover-check.sh            # or: rolling, scale, redis
 ```
+
+The other drills, without owners (2026-10-30, same load, all passing):
+
+| Drill | Sends stored | Deliveries | Reconnects | `stream_gap` |
+| --- | --- | --- | --- | --- |
+| `rolling`: drain and start each of the 3 replicas in turn | 6,000 of 6,000 | 18,768 of 18,768 | 455 | 52 |
+| `scale`: 3 → 5 → 3 replicas | 6,000 of 6,000 | 20,400 of 20,400 | 0 | 0 |
+| `redis`: the bus's Redis restarted | 6,000 of 6,000 | 20,400 of 20,400 | 0 | 307 (every stream reads what it missed) |
 
 | Build | Sends stored | Deliveries lost | Streams open at the end | Stream opens refused |
 | --- | --- | --- | --- | --- |

@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-sql-driver/mysql"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/store"
@@ -205,10 +206,17 @@ func TestChatClientMsgIDRaceDeliversOnce(t *testing.T) {
 	}
 }
 
-// failingChat rejects every append, simulating a store outage.
-type failingChat struct{ *store.MemoryChat }
+// failingChat rejects every append with err (a plain failure when nil),
+// simulating a store outage.
+type failingChat struct {
+	*store.MemoryChat
+	err error
+}
 
-func (failingChat) AppendNextRoomMessages(context.Context, []store.RoomMessage) error {
+func (c failingChat) AppendNextRoomMessages(context.Context, []store.RoomMessage) error {
+	if c.err != nil {
+		return c.err
+	}
 	return errors.New("db down")
 }
 
@@ -218,7 +226,7 @@ func TestChatPersistFailureDeliversNothing(t *testing.T) {
 	hub := realtime.NewHub(16, 16)
 	mem := membership.NewStatic()
 	mem.Add("room-1", "alice")
-	srv := httptest.NewServer((&Service{Hub: hub, Membership: mem, Chat: failingChat{store.NewMemoryChat()}}).Handler())
+	srv := httptest.NewServer((&Service{Hub: hub, Membership: mem, Chat: failingChat{MemoryChat: store.NewMemoryChat()}}).Handler())
 	defer srv.Close()
 	sub := hub.SubscribeLive("room-1")
 	defer hub.Unsubscribe("room-1", sub)
@@ -231,6 +239,32 @@ func TestChatPersistFailureDeliversNothing(t *testing.T) {
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("status %d, want 500", resp.StatusCode)
+	}
+	if len(sub.Events()) != 0 {
+		t.Fatal("unpersisted message was delivered live")
+	}
+}
+
+// A database failing over answers 503 with Retry-After, so the client keeps
+// sending (it resends a 503 for about 30 s); nothing is delivered.
+func TestChatDuringDatabaseFailoverAnswers503(t *testing.T) {
+	hub := realtime.NewHub(16, 16)
+	mem := membership.NewStatic()
+	mem.Add("room-1", "alice")
+	readOnly := &mysql.MySQLError{Number: 1290, Message: "The MySQL server is running with the --read-only option"}
+	srv := httptest.NewServer((&Service{Hub: hub, Membership: mem, Chat: failingChat{store.NewMemoryChat(), readOnly}}).Handler())
+	defer srv.Close()
+	sub := hub.SubscribeLive("room-1")
+	defer hub.Unsubscribe("room-1", sub)
+	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/rooms/room-1/chat", strings.NewReader(`{"text":"hi","clientMsgId":"c1"}`))
+	req.Header.Set("X-Bnbloc-User", "alice")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable || resp.Header.Get("Retry-After") == "" {
+		t.Fatalf("status %d Retry-After %q, want 503 with Retry-After", resp.StatusCode, resp.Header.Get("Retry-After"))
 	}
 	if len(sub.Events()) != 0 {
 		t.Fatal("unpersisted message was delivered live")

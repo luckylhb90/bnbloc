@@ -445,8 +445,9 @@ loop:
 				// As the web client: a network error or a 5xx is sent again
 				// with the same clientMsgId (web/src/lib/sendRetry.ts).
 				err := a.sendChat(context.Background(), p.m, p.r.id, p.ch, id, text)
-				for _, wait := range sendRetryWaits {
-					if err == nil || !retryableSend(err) {
+				for i := 0; err != nil && retryableSend(err); i++ {
+					wait, ok := sendRetryWait(i, err)
+					if !ok {
 						break
 					}
 					time.Sleep(wait)
@@ -639,9 +640,26 @@ func randomHex(n int) (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// sendRetryWaits are the web client's waits before sending again
-// (web/src/lib/sendRetry.ts SEND_RETRY_WAITS).
-var sendRetryWaits = []time.Duration{400 * time.Millisecond, 1200 * time.Millisecond, 3 * time.Second}
+// sendRetryWaits are the web client's waits before sending again, and
+// sendUnavailableWaits its further waits while the answer is a 503 (the
+// database failing over) (web/src/lib/sendRetry.ts).
+var (
+	sendRetryWaits       = []time.Duration{400 * time.Millisecond, 1200 * time.Millisecond, 3 * time.Second}
+	sendUnavailableWaits = []time.Duration{5 * time.Second, 8 * time.Second, 8 * time.Second, 8 * time.Second}
+)
+
+// sendRetryWait is the wait before attempt i+2 of a send that failed with
+// err; false once there is none.
+func sendRetryWait(i int, err error) (time.Duration, bool) {
+	if i < len(sendRetryWaits) {
+		return sendRetryWaits[i], true
+	}
+	var se *statusError
+	if errors.As(err, &se) && se.status == 503 && i-len(sendRetryWaits) < len(sendUnavailableWaits) {
+		return sendUnavailableWaits[i-len(sendRetryWaits)], true
+	}
+	return 0, false
+}
 
 // retryableSend: no answer, or a 5xx.
 func retryableSend(err error) bool {

@@ -1,8 +1,11 @@
 package store
 
 import (
+	"database/sql/driver"
 	"errors"
+	"net"
 	"strings"
+	"syscall"
 
 	"github.com/go-sql-driver/mysql"
 )
@@ -35,13 +38,46 @@ const mysqlErrDupEntry = 1062
 // back and may be run again.
 const mysqlErrDeadlock = 1213
 
-// isDupEntry reports a duplicate-key error. It and isDeadlock are the only
-// readers of a driver error number: a write that can collide maps it to the
+// isDupEntry reports a duplicate-key error. It, isDeadlock and Unavailable
+// are the only readers of a driver error number: a write that can collide maps it to the
 // store's exported sentinel with dupAs, which the memory store returns as
 // well.
 func isDupEntry(err error) bool {
 	var me *mysql.MySQLError
 	return errors.As(err, &me) && me.Number == mysqlErrDupEntry
+}
+
+// MySQL errors of a database that cannot take a write now: read-only (a
+// writer failing over), too many connections, shutting down.
+const (
+	mysqlErrReadOnly        = 1290
+	mysqlErrTooManyConns    = 1040
+	mysqlErrServerShutdown  = 1053
+	mysqlErrConnKilled      = 1927
+	mysqlErrReadOnlyTxn     = 1792
+	mysqlErrOptionPreventer = 1836
+)
+
+// Unavailable reports an error of the database being out of reach or unable
+// to take writes for a moment (a failover: the connection broke or was
+// refused, the old writer is read-only, it is shutting down or full): a
+// caller may answer 503 and the client send again. Anything else is the
+// request's own failure.
+func Unavailable(err error) bool {
+	if err == nil {
+		return false
+	}
+	var me *mysql.MySQLError
+	if errors.As(err, &me) {
+		switch me.Number {
+		case mysqlErrReadOnly, mysqlErrTooManyConns, mysqlErrServerShutdown, mysqlErrConnKilled, mysqlErrReadOnlyTxn, mysqlErrOptionPreventer:
+			return true
+		}
+		return false
+	}
+	var ne net.Error
+	return errors.Is(err, driver.ErrBadConn) || errors.Is(err, mysql.ErrInvalidConn) ||
+		errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ECONNRESET) || errors.As(err, &ne)
 }
 
 // isDeadlock reports a transaction MySQL rolled back as a deadlock victim.

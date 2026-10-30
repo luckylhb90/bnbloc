@@ -927,6 +927,13 @@ func writeChatPostErr(w http.ResponseWriter, err error) {
 		httpx.Error(w, err.Error(), http.StatusNotFound)
 	case errors.Is(err, errBadReply):
 		httpx.Error(w, err.Error(), http.StatusBadRequest)
+	case store.Unavailable(err):
+		// The database is failing over: nothing was stored, and the client
+		// sends again with the same clientMsgId (web/src/lib/sendRetry.ts
+		// keeps at it for about 30 s on a 503).
+		obs.ServerError(w, "message persistence failed: the database is unavailable", err)
+		w.Header().Set("Retry-After", "2")
+		httpx.Error(w, "the database is unavailable for a moment; send again", http.StatusServiceUnavailable)
 	default:
 		obs.ServerError(w, "message persistence failed", err)
 		httpx.Error(w, "message persistence failed", http.StatusInternalServerError)
