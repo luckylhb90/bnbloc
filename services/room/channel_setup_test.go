@@ -360,6 +360,39 @@ func TestFollowAndDirectory(t *testing.T) {
 	e.call(http.MethodDelete, "/v1/rooms/room-1/channels/"+e.def+"/follow", "carol", nil, http.StatusConflict, nil)
 }
 
+// A member's notification level for a channel (C4): set on their follow,
+// kept when other marks change, back to the default with "", and the
+// effective level beside it (mentions where they never posted).
+func TestChannelNotifyLevel(t *testing.T) {
+	e := newSetupEnv(t)
+	design := e.create("bob", wire.ChannelCreateRequest{Name: "design"}, http.StatusOK)
+	path := "/v1/rooms/room-1/channels/" + design.ChannelID + "/follow"
+	var got wire.RoomChannel
+	e.call(http.MethodPut, path, "carol", nil, http.StatusOK, &got)
+	if got.NotifyLevel != "" || got.NotifyEffective != wire.NotifyLevelMentions {
+		t.Fatalf("a new follower's level = %q/%q, want default/mentions", got.NotifyLevel, got.NotifyEffective)
+	}
+	e.call(http.MethodPut, path, "carol", map[string]any{"level": wire.NotifyLevelAll}, http.StatusOK, &got)
+	e.call(http.MethodPut, path, "carol", map[string]any{"starred": true}, http.StatusOK, &got)
+	if got.NotifyLevel != wire.NotifyLevelAll || got.NotifyEffective != wire.NotifyLevelAll || !got.Starred {
+		t.Fatalf("after all and a star = %+v", got)
+	}
+	e.call(http.MethodPut, path, "carol", map[string]any{"level": "loud"}, http.StatusBadRequest, nil)
+	e.call(http.MethodPut, "/v1/rooms/room-1/channels/"+e.def+"/follow", "carol", map[string]any{"level": wire.NotifyLevelMuted}, http.StatusOK, &got)
+	if got.NotifyEffective != wire.NotifyLevelMuted || !got.Joined {
+		t.Fatalf("the default channel muted = %+v", got)
+	}
+	got = wire.RoomChannel{} // the default level is omitted from the JSON
+	e.call(http.MethodPut, path, "carol", map[string]any{"level": ""}, http.StatusOK, &got)
+	if got.NotifyLevel != "" || got.NotifyEffective != wire.NotifyLevelMentions {
+		t.Fatalf("back to the default = %+v", got)
+	}
+	// The creator posted nothing yet: a channel's creator is at mentions too.
+	if c := byChannel(e.list("bob", "").Channels)[design.ChannelID]; c.NotifyEffective == "" {
+		t.Fatalf("the list carries no effective level: %+v", c)
+	}
+}
+
 // The room's rules, recommended channels and creation policy are the
 // owner's or an admin's; the name stays the owner's. A new member joins the
 // recommended channels; agreeing takes the current version only.

@@ -33,6 +33,13 @@ type Observer struct {
 	// (a deployment without channels). It is called on the Run goroutine,
 	// in the event's tenant.
 	MayRead func(ctx context.Context, roomID, channelID, userID string) bool
+	// Listeners lists who listens to a channel (realtime owns it): the
+	// people who may read it, each with their effective level
+	// (wire.EffectiveNotifyLevel) and whether they are here. It lists the
+	// channel's followers for ReachFollowers, adds the members who read it in
+	// the last hour or are in the room for ReachHere, and every member who
+	// may read it for ReachChannel. Nil: only direct mentions notify.
+	Listeners func(ctx context.Context, roomID, channelID, reach string) ([]Listener, error)
 
 	queue   chan observation
 	dropped atomic.Int64
@@ -43,6 +50,22 @@ type Observer struct {
 	pending map[string]pendingJob
 	overdue []observation
 }
+
+// Listener is one person listening to a channel (Observer.Listeners).
+type Listener struct {
+	UserID string
+	// Level is the effective level: all, mentions or muted.
+	Level string
+	// Here: follows the channel, read it in the last hour, or is in the room.
+	Here bool
+}
+
+// The reach of a Listeners call.
+const (
+	ReachFollowers = "followers"
+	ReachHere      = "here"
+	ReachChannel   = "channel"
+)
 
 // observation is the immutable extract of one published event.
 type observation struct {
@@ -88,7 +111,9 @@ func (o *Observer) Observe(ctx context.Context, ev wire.Event) {
 			return
 		}
 		obs.author, obs.text = p.UserID, p.Text
-		if !strings.Contains(obs.text, "@") {
+		// Without listeners only a mention notifies; with them a channel at
+		// level "all" hears every message.
+		if o.Listeners == nil && !strings.Contains(obs.text, "@") {
 			return
 		}
 	case wire.EventAgentJobUpdated:
@@ -181,7 +206,7 @@ func (o *Observer) emit(parent context.Context, tenantID string, events []Event)
 func (o *Observer) events(obs observation) []Event {
 	switch obs.kind {
 	case wire.KindChatMessage:
-		return o.mentionEvents(obs)
+		return o.messageEvents(obs)
 	case wire.KindAgentMessages:
 		return o.replyObserved(obs, time.Now())
 	case wire.EventAgentJobUpdated:
@@ -203,37 +228,100 @@ func (o *Observer) mayRead(obs observation, userID string) bool {
 	return o.MayRead(ctx, obs.roomID, obs.channelID, userID)
 }
 
-// mentionEvents notifies the room members a human message @-mentions. A
-// candidate counts only when it names a member of the room; the author is
-// never notified about their own message.
-func (o *Observer) mentionEvents(obs observation) []Event {
+// messageEvents notifies about a person's message (C4, C5): the room
+// members it @-mentions (in a channel they may read, whatever its level; a
+// muted room is the emitter's), the listeners an @channel or @here reaches
+// (never at level muted), and the listeners at level "all". Each person is
+// told once, by the first that applies; the author never.
+func (o *Observer) messageEvents(obs observation) []Event {
 	if o.Membership == nil || obs.author == "" {
 		return nil
 	}
-	var recipients []string
+	told := map[string]bool{obs.author: true}
+	var direct []string
+	broadcast := ""
 	for _, c := range MentionCandidates(obs.text) {
-		if c == obs.author {
+		if b := broadcastReach(c); b != "" {
+			if broadcast != ReachChannel {
+				broadcast = b
+			}
+			continue
+		}
+		if told[c] {
 			continue
 		}
 		if membership.HumanMember(o.Membership, obs.roomID, c) && o.mayRead(obs, c) {
-			recipients = append(recipients, c)
+			told[c] = true
+			direct = append(direct, c)
 		}
 	}
-	if len(recipients) == 0 {
+	key := "msg:" + obs.roomID + ":" + strconv.FormatInt(obs.seq, 10)
+	event := func(typ string, recipients []string, title, dedup string) Event {
+		return Event{Type: typ, RoomID: obs.roomID, Recipients: recipients, Actor: obs.author, Title: title,
+			Text: obs.text, DedupKey: dedup, Seq: obs.seq, ChannelID: obs.channelID, Reply: roomReplyTo(obs.channelID)}
+	}
+	var out []Event
+	if len(direct) > 0 {
+		out = append(out, event(wire.NotificationMention, direct, obs.author+" mentioned you", key))
+	}
+	if o.Listeners == nil || obs.channelID == "" {
+		return out
+	}
+	reach := ReachFollowers
+	if broadcast != "" {
+		reach = broadcast
+	}
+	listeners := o.listeners(obs, reach)
+	var reached, all []string
+	for _, l := range listeners {
+		if told[l.UserID] || l.Level == wire.NotifyLevelMuted {
+			continue
+		}
+		switch {
+		case broadcast == ReachChannel, broadcast == ReachHere && l.Here:
+			reached = append(reached, l.UserID)
+		case l.Level == wire.NotifyLevelAll:
+			all = append(all, l.UserID)
+		default:
+			continue
+		}
+		told[l.UserID] = true
+	}
+	if len(reached) > 0 {
+		ev := event(wire.NotificationMention, reached, obs.author+" mentioned @"+broadcast, key+":"+broadcast)
+		ev.Broadcast = true
+		out = append(out, ev)
+	}
+	if len(all) > 0 {
+		out = append(out, event(wire.NotificationChannelMessage, all, obs.author+" posted", key+":all"))
+	}
+	return out
+}
+
+// broadcastReach maps an @-token to the reach it asks for ("" for a
+// member's id: "channel" and "here" are no member ids).
+func broadcastReach(tok string) string {
+	switch tok {
+	case "channel":
+		return ReachChannel
+	case "here":
+		return ReachHere
+	}
+	return ""
+}
+
+// listeners asks Listeners in the observation's tenant; a failure notifies
+// nobody beyond the direct mentions (fail closed).
+func (o *Observer) listeners(obs observation, reach string) []Listener {
+	ctx, cancel := context.WithTimeout(tenant.NewContext(context.Background(), obs.tenantID), 5*time.Second)
+	defer cancel()
+	ls, err := o.Listeners(ctx, obs.roomID, obs.channelID, reach)
+	if err != nil {
+		slog.Warn("bnbloc notifications: listeners lookup failed",
+			"event", "bnbloc.notify.listeners_failed", "room", obs.roomID, "channel", obs.channelID, "error", err)
 		return nil
 	}
-	return []Event{{
-		Type:       wire.NotificationMention,
-		RoomID:     obs.roomID,
-		Recipients: recipients,
-		Actor:      obs.author,
-		Title:      obs.author + " mentioned you",
-		Text:       obs.text,
-		DedupKey:   "msg:" + obs.roomID + ":" + strconv.FormatInt(obs.seq, 10),
-		Seq:        obs.seq,
-		ChannelID:  obs.channelID,
-		Reply:      roomReplyTo(obs.channelID),
-	}}
+	return ls
 }
 
 // jobEvents notifies the member who addressed an agent when the job ends, and

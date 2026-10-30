@@ -1,5 +1,10 @@
 package wire
 
+import (
+	"errors"
+	"time"
+)
+
 // Notification DTOs (F5). realtime serves the member preferences, posts
 // NotificationPayload to every notifier component visible to the event's
 // tenant, and hands a member's notification to their desktop plugin
@@ -48,7 +53,45 @@ const (
 	// (docs/prd/2026-10-21-room-events.md §2.4). Operational, like a budget
 	// warning: sent once per task until it is edited, never muted.
 	NotificationScheduleNotice = "schedule_notice"
+	// NotificationChannelMessage tells a member of a message in a channel
+	// or thread whose level for them is "all" (§2.5, C4): posted by a
+	// person, not a mention of them (a mention is NotificationMention).
+	NotificationChannelMessage = "channel_message"
 )
+
+// A member's notification level for a channel or thread
+// (docs/prd/2026-10-28-channels-and-threads.md §2.5, C4).
+//
+//wire:union NotifyLevel
+const (
+	// NotifyLevelDefault: the member set none (EffectiveNotifyLevel).
+	NotifyLevelDefault = ""
+	// NotifyLevelAll: every message posted by a person.
+	NotifyLevelAll = "all"
+	// NotifyLevelMentions: a mention of them, @channel and @here.
+	NotifyLevelMentions = "mentions"
+	// NotifyLevelMuted: nothing but a direct mention of them.
+	NotifyLevelMuted = "muted"
+)
+
+// IsNotifyLevel is the one validation of a level a member sets.
+func IsNotifyLevel(v string) bool {
+	return v == NotifyLevelDefault || v == NotifyLevelAll || v == NotifyLevelMentions || v == NotifyLevelMuted
+}
+
+// EffectiveNotifyLevel is the one rule of a member's level for a channel
+// (C4): the level they set; else "all" for a thread they follow or a
+// channel they posted in, "mentions" otherwise. Room mute is applied after
+// (it wins over every level).
+func EffectiveNotifyLevel(set string, thread, following, posted bool) string {
+	switch {
+	case set != NotifyLevelDefault:
+		return set
+	case thread && following, !thread && posted:
+		return NotifyLevelAll
+	}
+	return NotifyLevelMentions
+}
 
 // AdminAlertRequest is the body of POST /v1/platform/alerts. Recipients
 // default to every configured platform super-admin.
@@ -81,15 +124,20 @@ const (
 // NotificationPrefs is a member's notification settings
 // (GET/PUT /v1/my/notification-prefs). Defaults: every type on, no quiet rooms.
 type NotificationPrefs struct {
-	Mentions       bool     `json:"mentions"`
-	AgentFinished  bool     `json:"agentFinished"`
-	AgentFailed    bool     `json:"agentFailed"`
-	BorrowRequests bool     `json:"borrowRequests"`
-	ContentShared  bool     `json:"contentShared"`
-	ContentReview  bool     `json:"contentReview"`
-	AppNotices     bool     `json:"appNotices"`
-	RoomReports    bool     `json:"roomReports"`
-	QuietRooms     []string `json:"quietRooms"`
+	Mentions bool `json:"mentions"`
+	// ChannelMessages: messages of the channels and threads the member set
+	// (or defaulted) to "all" (NotificationChannelMessage).
+	ChannelMessages bool `json:"channelMessages"`
+	// QuietHours is a daily window without notifications (§2.5); nil none.
+	QuietHours     *QuietHours `json:"quietHours,omitempty"`
+	AgentFinished  bool        `json:"agentFinished"`
+	AgentFailed    bool        `json:"agentFailed"`
+	BorrowRequests bool        `json:"borrowRequests"`
+	ContentShared  bool        `json:"contentShared"`
+	ContentReview  bool        `json:"contentReview"`
+	AppNotices     bool        `json:"appNotices"`
+	RoomReports    bool        `json:"roomReports"`
+	QuietRooms     []string    `json:"quietRooms"`
 }
 
 // RoomReportRequest is POST /v1/rooms/{roomId}/report: a member's note to
@@ -249,4 +297,56 @@ type NotificationPayload struct {
 	// the groups capability receives one.
 	Group        string `json:"group,omitempty"`
 	GroupAddress string `json:"groupAddress,omitempty"`
+}
+
+// QuietHours is a member's daily window without notifications (§2.5):
+// from Start to End ("HH:MM", End before Start runs past midnight) in the
+// IANA zone TZ; a direct mention still comes through when AllowMentions.
+type QuietHours struct {
+	Start         string `json:"start"`
+	End           string `json:"end"`
+	TZ            string `json:"tz"`
+	AllowMentions bool   `json:"allowMentions,omitempty"`
+}
+
+// Validate checks the window: two "HH:MM" times that differ and a zone
+// time.LoadLocation knows.
+func (q QuietHours) Validate() error {
+	a, errA := clockMinutes(q.Start)
+	b, errB := clockMinutes(q.End)
+	if errA != nil || errB != nil {
+		return errors.New("quietHours: start and end are HH:MM")
+	}
+	if a == b {
+		return errors.New("quietHours: start and end are the same time")
+	}
+	if _, err := time.LoadLocation(q.TZ); err != nil || q.TZ == "" {
+		return errors.New("quietHours: unknown time zone " + q.TZ)
+	}
+	return nil
+}
+
+// Contains reports whether t falls inside the window (the one rule; a window
+// that does not validate contains nothing).
+func (q QuietHours) Contains(t time.Time) bool {
+	if q.Validate() != nil {
+		return false
+	}
+	loc, _ := time.LoadLocation(q.TZ)
+	lt := t.In(loc)
+	now := lt.Hour()*60 + lt.Minute()
+	a, _ := clockMinutes(q.Start)
+	b, _ := clockMinutes(q.End)
+	if a < b {
+		return now >= a && now < b
+	}
+	return now >= a || now < b
+}
+
+func clockMinutes(s string) (int, error) {
+	t, err := time.Parse("15:04", s)
+	if err != nil || len(s) != 5 {
+		return 0, errors.New("not HH:MM")
+	}
+	return t.Hour()*60 + t.Minute(), nil
 }

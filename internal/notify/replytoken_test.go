@@ -142,7 +142,7 @@ func TestMentionNotifiesReadersOnly(t *testing.T) {
 	for len(o.queue) > 0 {
 		o.process(context.Background(), <-o.queue)
 	}
-	events := o.mentionEvents(observation{tenantID: "t", kind: "chat_message", roomID: "r1", channelID: "ch_secret", seq: 9, author: "alice", text: "@bob @carol look"})
+	events := o.messageEvents(observation{tenantID: "t", kind: "chat_message", roomID: "r1", channelID: "ch_secret", seq: 9, author: "alice", text: "@bob @carol look"})
 	if len(events) != 1 || len(events[0].Recipients) != 1 || events[0].Recipients[0] != "carol" {
 		t.Fatalf("mention recipients = %+v, want carol only", events)
 	}

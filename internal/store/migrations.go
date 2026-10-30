@@ -1930,6 +1930,23 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return nil
 		},
 	},
+	{
+		// A member's notification level per channel and thread
+		// (docs/prd/2026-10-28-channels-and-threads.md §2.5, C4): a defaulted
+		// column the previous release never reads.
+		id: "2026_10_notify_levels",
+		run: func(ctx context.Context, db sqlConn) error {
+			if err := addColumnIfMissing(ctx, db, "channel_follows", "notify_level", "VARCHAR(16) NOT NULL DEFAULT '' AFTER group_id"); err != nil {
+				return err
+			}
+			// A member's prefs gain channel messages (on, as the default prefs)
+			// and quiet hours.
+			if err := addColumnIfMissing(ctx, db, "notification_prefs", "channel_messages", "TINYINT(1) NOT NULL DEFAULT 1 AFTER room_reports"); err != nil {
+				return err
+			}
+			return addColumnIfMissing(ctx, db, "notification_prefs", "quiet_hours_json", "JSON NULL AFTER channel_messages")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

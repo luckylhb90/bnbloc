@@ -91,6 +91,9 @@ type ChatStore interface {
 	// MarkRead advances a user's last-read sequence (monotonic), tracked per
 	// (room, channel, user). channelID "" addresses the empty/default channel.
 	MarkRead(ctx context.Context, roomID, channelID, userID string, seq, atMs int64) error
+	// ChannelReadersSince returns who marked a channel read at or after
+	// sinceMs: the members who were reading it lately (@here, C5).
+	ChannelReadersSince(ctx context.Context, roomID, channelID string, sinceMs int64) ([]string, error)
 	// UnreadCount returns how many stored messages in a room's channel have seq
 	// greater than the user's last-read sequence for that channel, at most
 	// MaxUnreadCount (clients show "99+" beyond 99; counting a months-old
@@ -157,6 +160,7 @@ type MemoryChat struct {
 	mu      sync.Mutex
 	msgs    map[string][]RoomMessage // roomID -> ascending by seq
 	read    map[string]int64         // "roomID\x00channelID\x00userID" -> last-read seq
+	readAt  map[string]int64         // the same key -> when it was last marked
 	byCMI   map[string]int64         // "roomID\x00clientMsgID" -> seq
 	deleted map[string]bool          // "roomID\x00seq" -> soft-deleted
 	revised map[string]int64         // "roomID\x00seq" -> last edit or deletion
@@ -167,6 +171,7 @@ func NewMemoryChat() *MemoryChat {
 	return &MemoryChat{
 		msgs:    map[string][]RoomMessage{},
 		read:    map[string]int64{},
+		readAt:  map[string]int64{},
 		byCMI:   map[string]int64{},
 		deleted: map[string]bool{},
 		revised: map[string]int64{},
@@ -440,7 +445,7 @@ func (s *MemoryChat) RoomFeed(ctx context.Context, roomID string, after int64, l
 }
 
 // MarkRead advances the user's last-read sequence (monotonic), per channel.
-func (s *MemoryChat) MarkRead(ctx context.Context, roomID, channelID, userID string, seq, _ int64) error {
+func (s *MemoryChat) MarkRead(ctx context.Context, roomID, channelID, userID string, seq, atMs int64) error {
 	tid, err := tenant.Require(ctx)
 	if err != nil {
 		return err
@@ -451,7 +456,26 @@ func (s *MemoryChat) MarkRead(ctx context.Context, roomID, channelID, userID str
 	if seq > s.read[key] {
 		s.read[key] = seq
 	}
+	s.readAt[key] = atMs
 	return nil
+}
+
+func (s *MemoryChat) ChannelReadersSince(ctx context.Context, roomID, channelID string, sinceMs int64) ([]string, error) {
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	prefix := tid + "\x00" + roomID + "\x00" + channelID + "\x00"
+	out := []string{}
+	for k, at := range s.readAt {
+		if strings.HasPrefix(k, prefix) && at >= sinceMs {
+			out = append(out, strings.TrimPrefix(k, prefix))
+		}
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
 // MaxUnreadCount bounds UnreadCount: one more than the largest number a client
@@ -701,6 +725,24 @@ func (s *MySQLChat) MarkRead(ctx context.Context, roomID, channelID, userID stri
 		  updated_at_ms = VALUES(updated_at_ms)`,
 		tid, roomID, channelID, userID, seq, atMs)
 	return err
+}
+
+func (s *MySQLChat) ChannelReadersSince(ctx context.Context, roomID, channelID string, sinceMs int64) ([]string, error) {
+	tid, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out, err := queryAll(ctx, s.DB, `
+SELECT user_id FROM room_read_state WHERE tenant_id = ? AND room_id = ? AND channel_id = ? AND updated_at_ms >= ? ORDER BY user_id`,
+		func(sc rowScanner) (string, error) {
+			var u string
+			err := sc.Scan(&u)
+			return u, err
+		}, tid, roomID, channelID, sinceMs)
+	if out == nil && err == nil {
+		out = []string{}
+	}
+	return out, err
 }
 
 // UnreadCount counts messages in one channel with seq greater than the user's

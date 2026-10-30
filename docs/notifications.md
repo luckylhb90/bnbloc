@@ -20,7 +20,8 @@ deliver them.
 
 | Type | When | Recipients | Actor |
 | --- | --- | --- | --- |
-| `mention` | A chat message @-mentions a room member (`@<memberId>`, as the composer inserts it). Agent handles (`@owner/provider`) are not member mentions. | The mentioned members of the room. | The author. |
+| `mention` | A chat message @-mentions a room member (`@<memberId>`, as the composer inserts it), or says `@channel` or `@here` ([Channel levels](#channel-levels)). Agent handles (`@owner/provider`) are not member mentions; `channel` and `here` are no member ids. | The mentioned members of the room who may read the message's channel, whatever their level for it; for `@channel`, every person who may read the channel and has not muted it; for `@here`, those of them who follow it, read it in the last hour or are in the room now. | The author. |
+| `channel_message` | A person's message in a channel or thread a member listens to at level `all` ([Channel levels](#channel-levels)). At most one a minute per member and room. | The listeners at `all` not already told of the message by a mention. | The author. |
 | `agent_finished` | An agent job reaches `replied`. `text` starts with a plain-text summary of the agent's reply (below), then the request. | The member who addressed the agent (the job's requester). | `owner/provider`. |
 | `agent_failed` | An agent job ends `failed` or `timed_out` (not a cancel). | The job's requester. | `owner/provider`. |
 | `borrow_request` | A borrower asks an owner for more runs (borrow quota request), or a borrower's message to an owner's agent fails because the owner has not authorized borrowing in that room. | The agent owner. | The borrower. |
@@ -209,6 +210,8 @@ own settings; `PUT` replaces the whole object):
   "contentReview": true,
   "appNotices": true,
   "roomReports": true,
+  "channelMessages": true,
+  "quietHours": {"start": "22:00", "end": "08:00", "tz": "Europe/Berlin", "allowMentions": true},
   "quietRooms": ["room-a"]
 }
 ```
@@ -224,6 +227,24 @@ A member who never saved preferences has everything on and no quiet rooms
 keep it on).
 `quietRooms` (max 500) mutes every type for those rooms; the web client
 manages it from the room header's bell button.
+`channelMessages` turns off `channel_message`.
+`quietHours` (omitted: none) is a daily window, `start` to `end` (`HH:MM`;
+an end before the start runs past midnight; the two differ) in the IANA zone
+`tz`. Inside it no notification is sent, except a direct `mention` when
+`allowMentions` (never an `@channel` or `@here`). Nothing held back is sent
+later: the room keeps it unread. Operational types (`admin_alert`,
+`budget_warning`, `schedule_notice`) ignore preferences.
+
+### Channel levels
+
+A member's level for a channel or thread is set on their follow
+(`PUT /v1/rooms/{roomId}/channels/{channelId}/follow` with `level`: `all`,
+`mentions`, `muted`, or `""` for the default); a channel lists it as
+`notifyLevel` with the resolved `notifyEffective`. The default is `all` for a
+channel the member posted in and a thread they follow, `mentions` otherwise
+(`wire.EffectiveNotifyLevel`, the one rule). `muted` stops `@channel`,
+`@here` and `channel_message` for that channel; a direct mention still comes
+through, and a muted room (`quietRooms`) stops everything.
 
 ## The member's notifier list
 

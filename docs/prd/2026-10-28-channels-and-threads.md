@@ -890,3 +890,44 @@ change, and the two meet at the settings keys):
 **Decisions pending owner, slice 3b:** the vocabulary bounds (30 tags, 12
 statuses, names of 32 characters, 8 tags a thread, a template of 4000
 characters); a thread's marks are set only on an open thread of a forum.
+
+**Slice 4, notification levels, @here/@channel, quiet hours** (§2.5, C4,
+C5; delivery lanes are the rest of the slice):
+
+- A member's level for a channel or thread is on their follow
+  (`channel_follows.notify_level`, migration `2026_10_notify_levels`, only
+  adds): all, mentions, muted, or the default. The one rule is
+  `wire.EffectiveNotifyLevel`: their own; else all for a thread they follow
+  or a channel they posted in; mentions otherwise. A channel lists both
+  (`notifyLevel`, `notifyEffective`); the rail's channel menu sets it, and a
+  muted channel shows a muted bell.
+- Every person's message is observed (not only those with an "@"): a
+  direct mention notifies a reader of the channel whatever their level;
+  `@channel` reaches every person who may read the channel and has not muted
+  it; `@here` those of them who follow it, read it in the last hour or are in
+  the room now; then `channel_message` the listeners at all. Each person is
+  told once, by the first that applies, the author never. Who listens is
+  realtime's (`notifyListeners`, readers only by `store.MayReadChannel`).
+  `channel_message` collapses to one a minute per member and room.
+- Preferences gain `channelMessages` and `quietHours` (a daily window in the
+  member's zone, `wire.QuietHours`, the one rule of the window): inside it
+  nothing is sent, except a direct mention when they allow mentions (never
+  `@channel` or `@here`). Held back is dropped, not delayed: the room keeps
+  it unread. Settings has both; the composer offers `@here` and `@channel`.
+- `docs/notifications.md` has the contract.
+- Tests: `internal/notify/levels_test.go`, the prefs endpoint test,
+  `services/realtime/notify_listeners_test.go` (a members-only channel
+  lists no outsider even by `@channel`), `services/room` level test, the
+  store on MySQL, `web/src/lib/notifyLevels.test.ts`,
+  `web/e2e/notifications.mjs`.
+- Rollout (lens 11): the columns default to what an old pod writes (no
+  level, channel messages on, no quiet hours), and an old pod's upsert
+  leaves them untouched; an old room pod ignores `level` on a follow (set
+  levels after every pod runs this release).
+
+**Decisions pending owner, slice 4:** a direct mention still notifies in a
+channel the member muted (Slack's default; the room mute still wins); quiet
+hours drop what they hold back rather than send it at the end; agents'
+replies are not `channel_message` (a member hears their own requests'
+answers through `agent_finished`); `@here` counts a read within the last
+hour; `@channel` is open to every member who may post (C5's proposal).

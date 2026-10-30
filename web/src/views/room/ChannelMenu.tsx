@@ -3,6 +3,8 @@ import {
   ArrowCounterClockwiseIcon,
   ArrowDownIcon,
   ArrowUpIcon,
+  BellIcon,
+  BellSlashIcon,
   BookmarkSimpleIcon,
   DotsThreeVerticalIcon,
   EyeSlashIcon,
@@ -20,6 +22,7 @@ import {
 import type { Channel } from "@/lib/api";
 import { mayDeleteChannel, mayManageChannel, mayManageSection, sectionJoin } from "@/lib/channelRules";
 import type { RoomMembership } from "@/lib/roomRoles";
+import { notifyChoices, type NotifyLevel } from "@/lib/notifyLevels";
 import type { ChannelGroup, RoomSection } from "@/lib/wire.gen";
 import { Menu, MenuGroup, MenuItem } from "@/ui/Menu";
 import { cn } from "@/lib/cn";
@@ -43,6 +46,8 @@ export interface ChannelActions {
   readonly move: (c: Channel, siblings: readonly Channel[], step: -1 | 1) => void;
   readonly mark: (c: Channel, marks: { readonly starred?: boolean; readonly hidden?: boolean }) => void;
   readonly leave: (c: Channel) => void;
+  // The member's notification level for the channel (C4; "" the default).
+  readonly notify: (c: Channel, level: NotifyLevel) => void;
   // The member's own groups of their rail (C24): put a channel in one (""
   // takes it out), make one for it, rename or delete one.
   readonly groups: readonly ChannelGroup[];
@@ -111,6 +116,18 @@ export function ChannelMenu({
               Leave channel
             </MenuItem>
           )}
+        </MenuGroup>
+        <MenuGroup label="Notifications">
+          {notifyChoices(c.notifyEffective).map((o) => (
+            <MenuItem
+              key={o.level || "default"}
+              icon={o.level === "muted" ? BellSlashIcon : BellIcon}
+              current={(c.notifyLevel ?? "") === o.level}
+              onSelect={() => (c.notifyLevel ?? "") !== o.level && actions.notify(c, o.level)}
+            >
+              {o.label}
+            </MenuItem>
+          ))}
         </MenuGroup>
         {c.joined && (
           <MenuGroup label="Your groups">

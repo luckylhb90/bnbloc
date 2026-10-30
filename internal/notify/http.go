@@ -102,10 +102,17 @@ func (h *Handlers) handlePutPrefs(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	if body.QuietHours != nil {
+		if err := body.QuietHours.Validate(); err != nil {
+			httpx.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
 	p := store.NotificationPrefs{
 		Mentions: body.Mentions, AgentFinished: body.AgentFinished, AgentFailed: body.AgentFailed,
 		BorrowRequests: body.BorrowRequests, ContentShared: body.ContentShared, ContentReview: body.ContentReview,
-		AppNotices: body.AppNotices, RoomReports: body.RoomReports, QuietRooms: quiet, UpdatedAtMs: h.now().UnixMilli(),
+		AppNotices: body.AppNotices, RoomReports: body.RoomReports, ChannelMessages: body.ChannelMessages,
+		QuietHours: body.QuietHours, QuietRooms: quiet, UpdatedAtMs: h.now().UnixMilli(),
 	}
 	if err := h.Prefs.PutNotificationPrefs(r.Context(), user, p); err != nil {
 		obs.ServerError(w, "save notification prefs failed", err)
@@ -142,7 +149,8 @@ func prefsDTO(p store.NotificationPrefs) wire.NotificationPrefs {
 	}
 	return wire.NotificationPrefs{
 		Mentions: p.Mentions, AgentFinished: p.AgentFinished, AgentFailed: p.AgentFailed,
-		BorrowRequests: p.BorrowRequests, ContentShared: p.ContentShared, ContentReview: p.ContentReview, AppNotices: p.AppNotices, RoomReports: p.RoomReports, QuietRooms: quiet,
+		BorrowRequests: p.BorrowRequests, ContentShared: p.ContentShared, ContentReview: p.ContentReview, AppNotices: p.AppNotices, RoomReports: p.RoomReports,
+		ChannelMessages: p.ChannelMessages, QuietHours: p.QuietHours, QuietRooms: quiet,
 	}
 }
 

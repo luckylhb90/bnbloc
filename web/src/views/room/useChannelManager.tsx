@@ -3,6 +3,7 @@ import type { Channel, RoomDetail } from "@/lib/api";
 import { channelsApi } from "@/lib/channelsApi";
 import { reorderedPositions } from "@/lib/channelRules";
 import { errorText } from "@/lib/errors";
+import { notifySaved } from "@/lib/notifyLevels";
 import type { RoomMembership } from "@/lib/roomRoles";
 import type { ChannelGroup, RoomSection } from "@/lib/wire.gen";
 import { ConfirmDialog } from "@/ui/Dialog";
@@ -104,6 +105,7 @@ export function useChannelManager({
           for (const p of reorderedPositions(siblings, c.channelId, step)) await channelsApi.patch(roomId, p.channelId, { position: p.position });
         }),
       mark: (c, marks) => void act(c, marks.hidden ? "hide it" : "star it", () => channelsApi.follow(roomId, c.channelId, marks), marks.hidden ? `#${c.name} is hidden: find it in Browse channels` : undefined),
+      notify: (c, level) => void act(c, "change its notifications", () => channelsApi.follow(roomId, c.channelId, { level }), notifySaved(c.name, level)),
       leave: (c) => void act(c, "leave it", () => channelsApi.unfollow(roomId, c.channelId), `You left #${c.name}: find it in Browse channels`),
       groups: channels.groups,
       group: (c, groupId) => void act(c, groupId ? "move it to your group" : "take it out of your group", () => channelsApi.follow(roomId, c.channelId, { groupId })),

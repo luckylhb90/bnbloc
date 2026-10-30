@@ -41,7 +41,7 @@ import { agentHandle } from "@/lib/roomAgents";
 import type { SendOptions } from "@/views/room/useRoomMessageActions";
 import type { RoomPlatformAgents } from "@/views/room/useRoomPlatformAgents";
 import { useDisplayNames } from "@/lib/useDisplayName";
-import { mentionLabel, mentionMatches } from "@/views/composer/mentions";
+import { BROADCAST_MENTIONS, mentionLabel, mentionMatches } from "@/views/composer/mentions";
 import { contentLabel, type ExpertChoice } from "@/lib/contentComponents";
 import { useComposerExpert } from "@/views/composer/useComposerExpert";
 import { ExpertBanner, ExpertPermissionDialog, ExpertPicker } from "@/views/composer/ExpertPicker";
@@ -178,7 +178,8 @@ export function Composer({
   // The list shows display names; picking inserts the canonical handle.
   const nameOf = useDisplayNames(members.map((m) => (m.includes("/") ? "" : m)).concat(roomAgents.map((a) => a.ownerId)));
   const labelOf = (m: string) => mentionLabel(m, roomAgents, nameOf);
-  const matches = mention ? mentionMatches(members, mention.query, labelOf) : [];
+  // A channel's composer offers @here and @channel after its people.
+  const matches = mention ? mentionMatches(people ? members : [...members, ...BROADCAST_MENTIONS], mention.query, labelOf) : [];
   // Experts (the room's pinned ones and the member's own) answer @name too:
   // picking one sets the expert, which runs on the selected agent.
   const exp = useComposerExpert(roomId, !people);

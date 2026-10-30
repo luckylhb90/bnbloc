@@ -63,14 +63,15 @@ func TestPrefsEndpoints(t *testing.T) {
 	if code := call(t, srv, "GET", "/v1/my/notification-prefs", "bob", nil, &p); code != 200 {
 		t.Fatalf("get = %d", code)
 	}
-	if !(p.Mentions && p.AgentFinished && p.AgentFailed && p.BorrowRequests && p.ContentShared && p.ContentReview) || p.QuietRooms == nil || len(p.QuietRooms) != 0 {
+	if !(p.Mentions && p.AgentFinished && p.AgentFailed && p.BorrowRequests && p.ContentShared && p.ContentReview && p.ChannelMessages) || p.QuietRooms == nil || len(p.QuietRooms) != 0 || p.QuietHours != nil {
 		t.Fatalf("defaults = %+v, want all on and empty quietRooms", p)
 	}
-	put := wire.NotificationPrefs{Mentions: true, AgentFailed: true, ContentReview: true, QuietRooms: []string{"r1", "r1", " r2 "}}
+	put := wire.NotificationPrefs{Mentions: true, AgentFailed: true, ContentReview: true, QuietRooms: []string{"r1", "r1", " r2 "},
+		QuietHours: &wire.QuietHours{Start: "22:00", End: "07:30", TZ: "Europe/Berlin", AllowMentions: true}}
 	if code := call(t, srv, "PUT", "/v1/my/notification-prefs", "bob", put, &p); code != 200 {
 		t.Fatalf("put = %d", code)
 	}
-	if p.AgentFinished || p.BorrowRequests || p.ContentShared || !p.ContentReview || !reflect.DeepEqual(p.QuietRooms, []string{"r1", "r2"}) {
+	if p.AgentFinished || p.BorrowRequests || p.ContentShared || !p.ContentReview || p.ChannelMessages || !reflect.DeepEqual(p.QuietRooms, []string{"r1", "r2"}) || p.QuietHours == nil || p.QuietHours.End != "07:30" {
 		t.Fatalf("saved = %+v", p)
 	}
 	var again wire.NotificationPrefs
@@ -86,6 +87,9 @@ func TestPrefsEndpoints(t *testing.T) {
 	}
 	if code := call(t, srv, "PUT", "/v1/my/notification-prefs", "bob", wire.NotificationPrefs{QuietRooms: []string{"bad/room"}}, nil); code != 400 {
 		t.Fatalf("invalid room id = %d, want 400", code)
+	}
+	if code := call(t, srv, "PUT", "/v1/my/notification-prefs", "bob", wire.NotificationPrefs{QuietHours: &wire.QuietHours{Start: "22:00", End: "22:00", TZ: "UTC"}}, nil); code != 400 {
+		t.Fatalf("an empty quiet window = %d, want 400", code)
 	}
 	if code := call(t, srv, "GET", "/v1/my/notification-prefs", "", nil, nil); code != 401 {
 		t.Fatalf("anonymous = %d, want 401", code)

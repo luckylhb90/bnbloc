@@ -11,6 +11,7 @@ import { ErrorBox } from "@/ui/ErrorBox";
 import { useToast } from "@/ui/Toast";
 import { NotifierDelivery } from "@/views/settings/NotifierDelivery";
 import { BrowserPush } from "@/views/settings/BrowserPush";
+import { QuietHoursSetting } from "@/views/settings/QuietHoursSetting";
 import { SignedInDevices } from "@/views/settings/SignedInDevices";
 import { MyBudget } from "@/views/settings/MyBudget";
 import { ProfileSettings } from "@/views/settings/ProfileSettings";
@@ -101,6 +102,7 @@ export function Settings() {
               </label>
             ))}
           </Card>
+          <QuietHoursSetting prefs={prefs} saving={saving} save={(next) => void save(next)} />
           <BrowserPush />
         </section>
         <NotifierDelivery />

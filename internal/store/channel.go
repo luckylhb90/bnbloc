@@ -291,6 +291,9 @@ type ChannelFollow struct {
 	// GroupID is the member's own group the channel sits in on their rail
 	// ("" none; C24).
 	GroupID string
+	// Level is the member's own notification level for the channel
+	// (wire.NotifyLevel*, "" the default: wire.EffectiveNotifyLevel).
+	Level string
 }
 
 // FollowMarks are the marks a follow sets; nil leaves a mark as it is.
@@ -300,6 +303,8 @@ type FollowMarks struct {
 	// Group places the channel in one of the member's groups ("" takes it
 	// out); the caller checks the group is theirs.
 	Group *string
+	// Level sets the member's notification level ("" back to the default).
+	Level *string
 }
 
 // ChannelGroup is one member's own group of their channel rail (C24): a
@@ -417,6 +422,10 @@ type ChannelStore interface {
 	UnfollowChannel(ctx context.Context, roomID, channelID, userID string) error
 	// ChannelFollows returns the channels of the room userID follows.
 	ChannelFollows(ctx context.Context, roomID, userID string) ([]ChannelFollow, error)
+	// ChannelFollowersOf returns the follows of one channel (every member
+	// who joined it, with their marks and level): who a message of it may
+	// notify (internal/notify's audience).
+	ChannelFollowersOf(ctx context.Context, roomID, channelID string) ([]ChannelFollow, error)
 	// ChannelFollowerCounts counts the followers of each followed channel of
 	// the room.
 	ChannelFollowerCounts(ctx context.Context, roomID string) (map[string]int, error)
@@ -1030,8 +1039,28 @@ func (s *MemoryChannel) FollowChannel(ctx context.Context, roomID, channelID, us
 	if marks.Group != nil {
 		f.GroupID = *marks.Group
 	}
+	if marks.Level != nil {
+		f.Level = *marks.Level
+	}
 	s.room.follows[k] = f
 	return nil
+}
+
+func (s *MemoryChannel) ChannelFollowersOf(ctx context.Context, roomID, channelID string) ([]ChannelFollow, error) {
+	tnt, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.room.mu.Lock()
+	defer s.room.mu.Unlock()
+	out := []ChannelFollow{}
+	for _, f := range s.room.follows {
+		if f.TenantID == tnt && f.RoomID == roomID && f.ChannelID == channelID {
+			out = append(out, f)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].UserID < out[j].UserID })
+	return out, nil
 }
 
 func (s *MemoryChannel) UnfollowChannel(ctx context.Context, roomID, channelID, userID string) error {

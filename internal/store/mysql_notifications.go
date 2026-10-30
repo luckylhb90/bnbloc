@@ -7,6 +7,7 @@ import (
 	"errors"
 
 	"github.com/luckylhb90/bnbloc/internal/tenant"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // MySQLNotifications is the MySQL-backed notification prefs + outbox store.
@@ -27,10 +28,11 @@ func (m *MySQLNotifications) GetNotificationPrefs(ctx context.Context, userID st
 	}
 	var p NotificationPrefs
 	var quiet string
+	var hours sql.NullString
 	err = m.DB.QueryRowContext(ctx,
-		`SELECT mentions, agent_finished, agent_failed, borrow_requests, content_shared, content_review, app_notices, room_reports, quiet_rooms, updated_at_ms
+		`SELECT mentions, agent_finished, agent_failed, borrow_requests, content_shared, content_review, app_notices, room_reports, channel_messages, quiet_hours_json, quiet_rooms, updated_at_ms
 		 FROM notification_prefs WHERE tenant_id=? AND user_id=?`, tid, userID).
-		Scan(&p.Mentions, &p.AgentFinished, &p.AgentFailed, &p.BorrowRequests, &p.ContentShared, &p.ContentReview, &p.AppNotices, &p.RoomReports, &quiet, &p.UpdatedAtMs)
+		Scan(&p.Mentions, &p.AgentFinished, &p.AgentFailed, &p.BorrowRequests, &p.ContentShared, &p.ContentReview, &p.AppNotices, &p.RoomReports, &p.ChannelMessages, &hours, &quiet, &p.UpdatedAtMs)
 	if errors.Is(err, sql.ErrNoRows) {
 		return NotificationPrefs{}, false, nil
 	}
@@ -42,6 +44,13 @@ func (m *MySQLNotifications) GetNotificationPrefs(ctx context.Context, userID st
 		if err := json.Unmarshal([]byte(quiet), &p.QuietRooms); err != nil {
 			return NotificationPrefs{}, false, err
 		}
+	}
+	if hours.Valid && hours.String != "" && hours.String != "null" {
+		var q wire.QuietHours
+		if err := json.Unmarshal([]byte(hours.String), &q); err != nil {
+			return NotificationPrefs{}, false, err
+		}
+		p.QuietHours = &q
 	}
 	return p, true, nil
 }
@@ -58,13 +67,20 @@ func (m *MySQLNotifications) PutNotificationPrefs(ctx context.Context, userID st
 	if err != nil {
 		return err
 	}
+	var hours any
+	if p.QuietHours != nil {
+		if hours, err = jsonArg(p.QuietHours); err != nil {
+			return err
+		}
+	}
 	_, err = m.DB.ExecContext(ctx,
-		`INSERT INTO notification_prefs (tenant_id, user_id, mentions, agent_finished, agent_failed, borrow_requests, content_shared, content_review, app_notices, room_reports, quiet_rooms, updated_at_ms)
-		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+		`INSERT INTO notification_prefs (tenant_id, user_id, mentions, agent_finished, agent_failed, borrow_requests, content_shared, content_review, app_notices, room_reports, channel_messages, quiet_hours_json, quiet_rooms, updated_at_ms)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 		 ON DUPLICATE KEY UPDATE mentions=VALUES(mentions), agent_finished=VALUES(agent_finished), agent_failed=VALUES(agent_failed),
 		   borrow_requests=VALUES(borrow_requests), content_shared=VALUES(content_shared), content_review=VALUES(content_review),
-		   app_notices=VALUES(app_notices), room_reports=VALUES(room_reports), quiet_rooms=VALUES(quiet_rooms), updated_at_ms=VALUES(updated_at_ms)`,
-		tid, userID, p.Mentions, p.AgentFinished, p.AgentFailed, p.BorrowRequests, p.ContentShared, p.ContentReview, p.AppNotices, p.RoomReports, quiet, p.UpdatedAtMs)
+		   app_notices=VALUES(app_notices), room_reports=VALUES(room_reports), channel_messages=VALUES(channel_messages),
+		   quiet_hours_json=VALUES(quiet_hours_json), quiet_rooms=VALUES(quiet_rooms), updated_at_ms=VALUES(updated_at_ms)`,
+		tid, userID, p.Mentions, p.AgentFinished, p.AgentFailed, p.BorrowRequests, p.ContentShared, p.ContentReview, p.AppNotices, p.RoomReports, p.ChannelMessages, hours, quiet, p.UpdatedAtMs)
 	return err
 }
 

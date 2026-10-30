@@ -320,6 +320,16 @@ func TestContractChatStoreUnread(t *testing.T) {
 		if n := unread("ch_a", "maya"); n != 0 {
 			t.Fatalf("unread after a stale mark-read = %d, want 0", n)
 		}
+		// Who read a channel lately (an @here): by the last read's time.
+		if err := s.MarkRead(ctx, room, "ch_a", "jack", 1, 2); err != nil {
+			t.Fatal(err)
+		}
+		if got := must(s.ChannelReadersSince(ctx, room, "ch_a", 3))(t); !slices.Equal(got, []string{"maya"}) {
+			t.Fatalf("readers since 3 = %v, want [maya]", got)
+		}
+		if got := must(s.ChannelReadersSince(ctx, room, "ch_b", 0))(t); len(got) != 0 {
+			t.Fatalf("readers of an unread channel = %v", got)
+		}
 		// Deleted messages are not unread.
 		if ok, err := s.DeleteRoomMessage(ctx, room, 2, "maya", 4); err != nil || !ok {
 			t.Fatalf("delete = %v %v", ok, err)

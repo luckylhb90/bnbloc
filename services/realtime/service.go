@@ -194,6 +194,9 @@ type ChatStore interface {
 	RoomHistory(ctx context.Context, roomID, channelID string, before int64, limit int) ([]store.RoomMessage, error)
 	RoomFeed(ctx context.Context, roomID string, after int64, limit int) ([]store.RoomMessage, error)
 	MarkRead(ctx context.Context, roomID, channelID, userID string, seq, atMs int64) error
+	// ChannelReadersSince lists who read a channel at or after sinceMs (who
+	// is here for an @here, notify_listeners.go).
+	ChannelReadersSince(ctx context.Context, roomID, channelID string, sinceMs int64) ([]string, error)
 	UnreadCount(ctx context.Context, roomID, channelID, userID string) (int, error)
 	UnreadRooms(ctx context.Context, userID string, roomIDs []string, max int) (int, error)
 	MaxRoomSeq(ctx context.Context, roomID string) (int64, error)
@@ -229,6 +232,9 @@ type ChannelStore interface {
 	ClaimChannelPost(ctx context.Context, roomID, channelID, userID string, atMs, minGapMs int64) (retryAfterMs int64, err error)
 	FollowChannel(ctx context.Context, roomID, channelID, userID string, atMs int64, marks store.FollowMarks) error
 	ChannelFollows(ctx context.Context, roomID, userID string) ([]store.ChannelFollow, error)
+	// ChannelFollowersOf lists a channel's follow rows, their notification
+	// levels with them (notify_listeners.go).
+	ChannelFollowersOf(ctx context.Context, roomID, channelID string) ([]store.ChannelFollow, error)
 	// ListSections and MemberSections are what store.LoadChannelAccess
 	// reads: who may read which channel (store.MayReadChannel,
 	// channel_access.go).
@@ -268,6 +274,10 @@ func (s *Service) Handler() http.Handler {
 	// A mention notifies only a reader of its channel (store.MayReadChannel).
 	if s.Notifications != nil && s.Notifications.Observer != nil && s.Notifications.Observer.MayRead == nil {
 		s.Notifications.Observer.MayRead = s.memberMayReadChannel
+	}
+	// Levels, @here and @channel: who listens to a channel.
+	if s.Notifications != nil && s.Notifications.Observer != nil && s.Notifications.Observer.Listeners == nil {
+		s.Notifications.Observer.Listeners = s.notifyListeners
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/rooms/{roomId}/events", s.handleEvents)

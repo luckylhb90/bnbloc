@@ -248,6 +248,7 @@ func channelView(c store.RoomChannel, f store.ChannelFollow) wire.RoomChannel {
 		ChannelID: c.ChannelID, Name: c.Name, IsDefault: c.IsDefault, Kind: c.Kind, CreatedBy: c.CreatedBy,
 		Purpose: c.Purpose, Rules: c.Rules, SectionID: c.SectionID, Position: c.Position, OwnerID: c.OwnerID,
 		Settings: c.Settings, Joined: c.IsDefault || f.ChannelID != "", Starred: f.Starred, Hidden: f.Hidden, GroupID: f.GroupID,
+		NotifyLevel: f.Level,
 	}
 	if c.ArchivedAtMs != nil {
 		v.ArchivedAtMs = *c.ArchivedAtMs
@@ -257,6 +258,7 @@ func channelView(c store.RoomChannel, f store.ChannelFollow) wire.RoomChannel {
 		v.Joined = f.ChannelID != ""
 		v.Thread = &info
 	}
+	v.NotifyEffective = wire.EffectiveNotifyLevel(f.Level, c.IsThread(), f.ChannelID != "", f.LastPostedAtMs > 0)
 	return v
 }
 
@@ -880,6 +882,10 @@ func (s *Service) handleFollowChannel(follow bool) http.HandlerFunc {
 			if !httpx.DecodeOptionalJSON(w, r, maxJSONBodyBytes, &body) {
 				return
 			}
+			if body.Level != nil && !wire.IsNotifyLevel(*body.Level) {
+				httpx.Error(w, "level is one of all, mentions, muted, or empty for the default", http.StatusBadRequest)
+				return
+			}
 			if body.GroupID != nil && *body.GroupID != "" {
 				// A channel goes only into one of the caller's own groups.
 				if found, gerr := s.ownGroup(r.Context(), roomID, who.user, *body.GroupID); gerr != nil {
@@ -890,7 +896,7 @@ func (s *Service) handleFollowChannel(follow bool) http.HandlerFunc {
 				}
 			}
 			if err == nil {
-				err = s.Channels.FollowChannel(r.Context(), roomID, ch.ChannelID, who.user, s.Now(), store.FollowMarks{Starred: body.Starred, Hidden: body.Hidden, Group: body.GroupID})
+				err = s.Channels.FollowChannel(r.Context(), roomID, ch.ChannelID, who.user, s.Now(), store.FollowMarks{Starred: body.Starred, Hidden: body.Hidden, Group: body.GroupID, Level: body.Level})
 			}
 		} else {
 			err = s.Channels.UnfollowChannel(r.Context(), roomID, ch.ChannelID, who.user)

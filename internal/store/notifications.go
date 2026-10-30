@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/luckylhb90/bnbloc/internal/tenant"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // NotificationPrefs is one member's notification settings in a tenant. A
@@ -28,13 +29,17 @@ type NotificationPrefs struct {
 	// RoomReports: a member reported to the organization's admins what a
 	// room could not do (org admins).
 	RoomReports bool
+	// ChannelMessages: messages of channels and threads at level "all".
+	ChannelMessages bool
+	// QuietHours is a daily window without notifications (nil none).
+	QuietHours  *wire.QuietHours
 	QuietRooms  []string
 	UpdatedAtMs int64
 }
 
 // DefaultNotificationPrefs is the setting of a member who never saved any.
 func DefaultNotificationPrefs() NotificationPrefs {
-	return NotificationPrefs{Mentions: true, AgentFinished: true, AgentFailed: true, BorrowRequests: true, ContentShared: true, ContentReview: true, AppNotices: true, RoomReports: true, QuietRooms: []string{}}
+	return NotificationPrefs{Mentions: true, AgentFinished: true, AgentFailed: true, BorrowRequests: true, ContentShared: true, ContentReview: true, AppNotices: true, RoomReports: true, ChannelMessages: true, QuietRooms: []string{}}
 }
 
 // NotificationPrefsStore persists per-member notification settings keyed
@@ -192,6 +197,7 @@ func (m *MemoryNotifications) GetNotificationPrefs(ctx context.Context, userID s
 	p, ok := m.prefs[[2]string{tid, userID}]
 	if ok {
 		p.QuietRooms = append([]string{}, p.QuietRooms...)
+		p.QuietHours = copyQuietHours(p.QuietHours)
 	}
 	return p, ok, nil
 }
@@ -204,8 +210,17 @@ func (m *MemoryNotifications) PutNotificationPrefs(ctx context.Context, userID s
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	p.QuietRooms = append([]string{}, p.QuietRooms...)
+	p.QuietHours = copyQuietHours(p.QuietHours)
 	m.prefs[[2]string{tid, userID}] = p
 	return nil
+}
+
+func copyQuietHours(q *wire.QuietHours) *wire.QuietHours {
+	if q == nil {
+		return nil
+	}
+	c := *q
+	return &c
 }
 
 func (m *MemoryNotifications) EnqueueNotification(ctx context.Context, item NotificationOutboxItem) (bool, error) {

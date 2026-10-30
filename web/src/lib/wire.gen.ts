@@ -2259,6 +2259,10 @@ export interface RoomChannel {
   // GroupID is the caller's own group the channel sits in on their rail
   // ("" none; C24). Never another member's.
   groupId: string;
+  // NotifyLevel is the caller's own level here ("" the default) and
+  // NotifyEffective what applies (EffectiveNotifyLevel, C4).
+  notifyLevel?: NotifyLevel;
+  notifyEffective?: NotifyLevel;
   // Thread is set for a thread (Kind ChannelKindThread): its parent, root
   // message and activity.
   thread?: ThreadInfo;
@@ -2511,6 +2515,9 @@ export interface ChannelFollowRequest {
   starred?: boolean;
   hidden?: boolean;
   groupId?: string;
+  // Level is the member's notification level here ("" back to the
+  // default; NotifyLevel*).
+  level?: NotifyLevel;
 }
 
 // ChannelPatchRequest is PATCH /v1/rooms/{id}/channels/{channelId}: a nil
@@ -5439,6 +5446,21 @@ export const NotificationRoomReport = "room_report";
 // (docs/prd/2026-10-21-room-events.md §2.4). Operational, like a budget
 // warning: sent once per task until it is edited, never muted.
 export const NotificationScheduleNotice = "schedule_notice";
+// NotificationChannelMessage tells a member of a message in a channel
+// or thread whose level for them is "all" (§2.5, C4): posted by a
+// person, not a mention of them (a mention is NotificationMention).
+export const NotificationChannelMessage = "channel_message";
+
+// A member's notification level for a channel or thread
+// (docs/prd/2026-10-28-channels-and-threads.md §2.5, C4).
+// NotifyLevelDefault: the member set none (EffectiveNotifyLevel).
+export const NotifyLevelDefault = "";
+// NotifyLevelAll: every message posted by a person.
+export const NotifyLevelAll = "all";
+// NotifyLevelMentions: a mention of them, @channel and @here.
+export const NotifyLevelMentions = "mentions";
+// NotifyLevelMuted: nothing but a direct mention of them.
+export const NotifyLevelMuted = "muted";
 
 // AdminAlertRequest is the body of POST /v1/platform/alerts. Recipients
 // default to every configured platform super-admin.
@@ -5470,6 +5492,11 @@ export const NotificationEventIDHeader = "X-Bnbloc-Event-Id";
 // (GET/PUT /v1/my/notification-prefs). Defaults: every type on, no quiet rooms.
 export interface NotificationPrefs {
   mentions: boolean;
+  // ChannelMessages: messages of the channels and threads the member set
+  // (or defaulted) to "all" (NotificationChannelMessage).
+  channelMessages: boolean;
+  // QuietHours is a daily window without notifications (§2.5); nil none.
+  quietHours?: QuietHours;
   agentFinished: boolean;
   agentFailed: boolean;
   borrowRequests: boolean;
@@ -5633,6 +5660,16 @@ export interface NotificationPayload {
   // the groups capability receives one.
   group?: string;
   groupAddress?: string;
+}
+
+// QuietHours is a member's daily window without notifications (§2.5):
+// from Start to End ("HH:MM", End before Start runs past midnight) in the
+// IANA zone TZ; a direct mention still comes through when AllowMentions.
+export interface QuietHours {
+  start: string;
+  end: string;
+  tz: string;
+  allowMentions?: boolean;
 }
 
 // ---- wire/payloads.go ----
@@ -8149,6 +8186,8 @@ export type MediaVideoAspect = "16:9" | "9:16";
 export const MediaVideoAspectValues: readonly MediaVideoAspect[] = ["16:9", "9:16"];
 export type MediaVideoStatus = "rendering" | "done" | "failed";
 export const MediaVideoStatusValues: readonly MediaVideoStatus[] = ["rendering", "done", "failed"];
+export type NotifyLevel = "" | "all" | "mentions" | "muted";
+export const NotifyLevelValues: readonly NotifyLevel[] = ["", "all", "mentions", "muted"];
 export type FeedLayout = "time" | "request";
 export const FeedLayoutValues: readonly FeedLayout[] = ["time", "request"];
 export type RoomSource = "runs";

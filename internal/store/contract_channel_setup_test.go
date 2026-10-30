@@ -275,7 +275,32 @@ func TestContractChannelStoreFollows(t *testing.T) {
 		if passed != 1 {
 			t.Fatalf("concurrent claims passed = %d, want 1 (%v)", passed, waits)
 		}
+		// A notification level is kept across other marks and posts, and
+		// back to the default with ""; a channel lists its followers.
+		muted, none := "muted", ""
+		if err := s.FollowChannel(ctx, room, a, "jack", 12_000, FollowMarks{Level: &muted}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.FollowChannel(ctx, room, a, "jack", 12_001, FollowMarks{Starred: ptr(true)}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.ClaimChannelPost(ctx, room, a, "jack", 30_000, 0); err != nil {
+			t.Fatal(err)
+		}
+		fs := must(s.ChannelFollowersOf(ctx, room, a))(t)
+		if len(fs) != 2 || fs[0].UserID != "Maya" || fs[1].UserID != "jack" || fs[1].Level != "muted" || !fs[1].Starred || fs[1].LastPostedAtMs != 30_000 {
+			t.Fatalf("followers of a = %+v", fs)
+		}
+		if err := s.FollowChannel(ctx, room, a, "jack", 12_002, FollowMarks{Level: &none}); err != nil {
+			t.Fatal(err)
+		}
+		if got := must(s.ChannelFollowersOf(ctx, room, a))(t); got[1].Level != "" {
+			t.Fatalf("level after reset = %q", got[1].Level)
+		}
 		// Another tenant reads none of it; the room's delete takes it.
+		if got := must(s.ChannelFollowersOf(tenantCtx(uniq("t-fol-b-")), room, a))(t); len(got) != 0 {
+			t.Fatalf("tenant B reads followers: %+v", got)
+		}
 		if got := must(s.ChannelFollows(tenantCtx(uniq("t-fol-b-")), room, "jack"))(t); len(got) != 0 {
 			t.Fatalf("tenant B reads follows: %+v", got)
 		}

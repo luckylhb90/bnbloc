@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { ArchiveIcon, CaretDownIcon, CaretRightIcon, ChatsCircleIcon, CompassIcon, FolderSimpleIcon, HashIcon, PlusIcon, StarIcon } from "@phosphor-icons/react";
+import { ArchiveIcon, BellSlashIcon, CaretDownIcon, CaretRightIcon, ChatsCircleIcon, CompassIcon, FolderSimpleIcon, HashIcon, PlusIcon, StarIcon } from "@phosphor-icons/react";
 import type { Channel } from "@/lib/api";
 import { foldedChannels, mayCreateSection, mayPlaceChannel, railGroupKey, railGroups, sectionJoin, sectionOf, sharedOrder } from "@/lib/channelRules";
 import { foldedSections, setFoldedSections } from "@/lib/roomMemory";
@@ -119,6 +119,7 @@ export function ChannelRail({
         >
           {c.starred ? <StarIcon size={14} weight="fill" className="shrink-0 text-[var(--color-warning)]" aria-label="Starred" /> : <HashIcon size={14} className="shrink-0 opacity-70" />}
           <span className={cn("flex-1 truncate text-left", !c.joined && "italic")}>{c.name}</span>
+          {c.notifyLevel === "muted" && <BellSlashIcon size={12} className="shrink-0 text-[var(--color-fg-subtle)]" aria-label="Muted" />}
           {showBadge && (
             <span className="shrink-0 rounded-full bg-[var(--color-accent)] px-1.5 text-[11px] font-semibold leading-5 text-[var(--color-accent-fg,#04120c)]">
               {unread > 99 ? "99+" : unread}

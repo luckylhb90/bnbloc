@@ -58,7 +58,6 @@ var writeOnlyColumnAllowed = map[string]string{
 	// Bookkeeping timestamps that predate the check; candidates for the
 	// next removal migration (or a reader that needs them).
 	"org_sync_default_rooms.granted_at_ms": "pre-existing: when organization sync granted the default room",
-	"room_read_state.updated_at_ms":        "pre-existing: when the member last moved the read marker",
 	"user_profiles.updated_at_ms":          "pre-existing: when the display name last changed",
 }
 

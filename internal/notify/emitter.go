@@ -33,6 +33,8 @@ var collapseWindow = map[string]time.Duration{
 	wire.NotificationAgentFinished: 30 * time.Second,
 	wire.NotificationAgentFailed:   30 * time.Second,
 	wire.NotificationBorrowRequest: 5 * time.Minute,
+	// A busy channel at level "all" notifies once a minute, not per message.
+	wire.NotificationChannelMessage: time.Minute,
 }
 
 // Event is one notification-worthy happening, before preference filtering.
@@ -73,6 +75,9 @@ type Event struct {
 	// connected with and that notifier's address of it. Recipients is
 	// ignored.
 	Group, GroupNotifier, GroupAddress string
+	// Broadcast marks a mention by @channel or @here: quiet hours hold it
+	// back even when they let direct mentions through.
+	Broadcast bool
 }
 
 // ErrNoGroupNotifier: the group chat's notifier is not distributed to the
@@ -382,7 +387,7 @@ func (e *Emitter) filter(ctx context.Context, tid string, ev Event, now time.Tim
 		if !ok {
 			prefs = store.DefaultNotificationPrefs()
 		}
-		if !Allows(prefs, ev.Type, ev.RoomID) {
+		if !Allows(prefs, ev.Type, ev.RoomID) || Quiet(prefs, ev, now) {
 			continue
 		}
 		if !e.admit(tid, r, ev.RoomID, ev.Type, now) {
@@ -444,8 +449,20 @@ func Allows(p store.NotificationPrefs, typ, roomID string) bool {
 		return p.AppNotices
 	case wire.NotificationRoomReport:
 		return p.RoomReports
+	case wire.NotificationChannelMessage:
+		return p.ChannelMessages
 	}
 	return false
+}
+
+// Quiet reports whether the member's quiet hours hold ev back at now: all of
+// it, except a direct mention when they allow mentions. Held back is dropped,
+// not delayed: the room still shows it unread.
+func Quiet(p store.NotificationPrefs, ev Event, now time.Time) bool {
+	if p.QuietHours == nil || !p.QuietHours.Contains(now) {
+		return false
+	}
+	return !(p.QuietHours.AllowMentions && ev.Type == wire.NotificationMention && !ev.Broadcast)
 }
 
 // EventID derives the delivery id (the receiver's idempotency key) from the

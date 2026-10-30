@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"sync"
 	"testing"
+
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 type notificationStores interface {
@@ -40,7 +42,8 @@ func testNotificationPrefs(t *testing.T, s notificationStores, tid string) {
 	if _, ok, err := s.GetNotificationPrefs(ctx, "alice"); err != nil || ok {
 		t.Fatalf("absent prefs = ok %v err %v", ok, err)
 	}
-	want := NotificationPrefs{Mentions: true, AgentFinished: false, AgentFailed: true, BorrowRequests: false, ContentShared: false, ContentReview: true, QuietRooms: []string{"r1", "r2"}, UpdatedAtMs: 42}
+	want := NotificationPrefs{Mentions: true, AgentFinished: false, AgentFailed: true, BorrowRequests: false, ContentShared: false, ContentReview: true, ChannelMessages: true,
+		QuietHours: &wire.QuietHours{Start: "22:00", End: "07:00", TZ: "Asia/Shanghai", AllowMentions: true}, QuietRooms: []string{"r1", "r2"}, UpdatedAtMs: 42}
 	if err := s.PutNotificationPrefs(ctx, "alice", want); err != nil {
 		t.Fatalf("put prefs: %v", err)
 	}
@@ -51,9 +54,12 @@ func testNotificationPrefs(t *testing.T, s notificationStores, tid string) {
 	if _, ok, _ := s.GetNotificationPrefs(other, "alice"); ok {
 		t.Fatal("prefs leaked across tenants")
 	}
-	want.QuietRooms = nil
+	want.QuietRooms, want.QuietHours = nil, nil
 	if err := s.PutNotificationPrefs(ctx, "alice", want); err != nil {
 		t.Fatalf("put prefs: %v", err)
+	}
+	if got, _, _ := s.GetNotificationPrefs(ctx, "alice"); got.QuietHours != nil {
+		t.Fatalf("quiet hours not cleared: %+v", got.QuietHours)
 	}
 	if got, _, _ := s.GetNotificationPrefs(ctx, "alice"); got.QuietRooms == nil || len(got.QuietRooms) != 0 {
 		t.Fatalf("quiet rooms not replaced: %#v (want [])", got.QuietRooms)

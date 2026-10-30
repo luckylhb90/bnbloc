@@ -598,11 +598,14 @@ func (m *MySQLChannel) FollowChannel(ctx context.Context, roomID, channelID, use
 	// The key carries the tenant, so the upsert never touches another
 	// tenant's row; a repeat keeps the first joined_at_ms.
 	update := "joined_at_ms = joined_at_ms"
-	group := ""
+	group, level := "", ""
 	if marks.Group != nil {
 		group = *marks.Group
 	}
-	args := []any{tnt, roomID, channelID, userID, atMs, marks.Starred != nil && *marks.Starred, marks.Hidden != nil && *marks.Hidden, group}
+	if marks.Level != nil {
+		level = *marks.Level
+	}
+	args := []any{tnt, roomID, channelID, userID, atMs, marks.Starred != nil && *marks.Starred, marks.Hidden != nil && *marks.Hidden, group, level}
 	if marks.Starred != nil {
 		update += ", starred = VALUES(starred)"
 	}
@@ -612,9 +615,12 @@ func (m *MySQLChannel) FollowChannel(ctx context.Context, roomID, channelID, use
 	if marks.Group != nil {
 		update += ", group_id = VALUES(group_id)"
 	}
+	if marks.Level != nil {
+		update += ", notify_level = VALUES(notify_level)"
+	}
 	_, err = m.DB.ExecContext(ctx, `
-INSERT INTO channel_follows (tenant_id, room_id, channel_id, user_id, joined_at_ms, starred, hidden, group_id)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO channel_follows (tenant_id, room_id, channel_id, user_id, joined_at_ms, starred, hidden, group_id, notify_level)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON DUPLICATE KEY UPDATE `+update, args...)
 	return err
 }
@@ -710,18 +716,37 @@ func (m *MySQLChannel) UnfollowChannel(ctx context.Context, roomID, channelID, u
 	return err
 }
 
+// followColumns and scanFollow are the one reading of a channel_follows row.
+const followColumns = "tenant_id, room_id, channel_id, user_id, joined_at_ms, starred, hidden, last_posted_at_ms, group_id, notify_level"
+
+func scanFollow(sc rowScanner) (ChannelFollow, error) {
+	var f ChannelFollow
+	err := sc.Scan(&f.TenantID, &f.RoomID, &f.ChannelID, &f.UserID, &f.JoinedAtMs, &f.Starred, &f.Hidden, &f.LastPostedAtMs, &f.GroupID, &f.Level)
+	return f, err
+}
+
+func (m *MySQLChannel) ChannelFollowersOf(ctx context.Context, roomID, channelID string) ([]ChannelFollow, error) {
+	tnt, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out, err := queryAll(ctx, m.DB, `
+SELECT `+followColumns+` FROM channel_follows
+WHERE tenant_id = ? AND room_id = ? AND channel_id = ? ORDER BY user_id`, scanFollow, tnt, roomID, channelID)
+	if out == nil && err == nil {
+		out = []ChannelFollow{}
+	}
+	return out, err
+}
+
 func (m *MySQLChannel) ChannelFollows(ctx context.Context, roomID, userID string) ([]ChannelFollow, error) {
 	tnt, err := tenant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
 	out, err := queryAll(ctx, m.DB, `
-SELECT tenant_id, room_id, channel_id, user_id, joined_at_ms, starred, hidden, last_posted_at_ms, group_id FROM channel_follows
-WHERE tenant_id = ? AND room_id = ? AND user_id = ? ORDER BY channel_id`, func(sc rowScanner) (ChannelFollow, error) {
-		var f ChannelFollow
-		err := sc.Scan(&f.TenantID, &f.RoomID, &f.ChannelID, &f.UserID, &f.JoinedAtMs, &f.Starred, &f.Hidden, &f.LastPostedAtMs, &f.GroupID)
-		return f, err
-	}, tnt, roomID, userID)
+SELECT `+followColumns+` FROM channel_follows
+WHERE tenant_id = ? AND room_id = ? AND user_id = ? ORDER BY channel_id`, scanFollow, tnt, roomID, userID)
 	if out == nil && err == nil {
 		out = []ChannelFollow{}
 	}

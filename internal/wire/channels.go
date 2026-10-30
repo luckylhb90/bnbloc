@@ -155,6 +155,10 @@ type RoomChannel struct {
 	// GroupID is the caller's own group the channel sits in on their rail
 	// ("" none; C24). Never another member's.
 	GroupID string `json:"groupId"`
+	// NotifyLevel is the caller's own level here ("" the default) and
+	// NotifyEffective what applies (EffectiveNotifyLevel, C4).
+	NotifyLevel     string `json:"notifyLevel,omitempty" tstype:"NotifyLevel"`
+	NotifyEffective string `json:"notifyEffective,omitempty" tstype:"NotifyLevel"`
 	// Thread is set for a thread (Kind ChannelKindThread): its parent, root
 	// message and activity.
 	Thread *ThreadInfo `json:"thread,omitempty"`
@@ -418,6 +422,9 @@ type ChannelFollowRequest struct {
 	Starred *bool   `json:"starred,omitempty"`
 	Hidden  *bool   `json:"hidden,omitempty"`
 	GroupID *string `json:"groupId,omitempty"`
+	// Level is the member's notification level here ("" back to the
+	// default; NotifyLevel*).
+	Level *string `json:"level,omitempty" tstype:"NotifyLevel"`
 }
 
 // ChannelPatchRequest is PATCH /v1/rooms/{id}/channels/{channelId}: a nil

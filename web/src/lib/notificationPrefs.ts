@@ -3,16 +3,17 @@
 // Shapes are internal/wire/notifications.go's (wire.gen.ts); the contract is documented in
 // docs/notifications.md.
 
-export type { MemberNotifier, NotificationPrefs, NotificationTestResult } from "./wire.gen.ts";
-import type { NotificationPrefs, NotificationTestResult } from "./wire.gen.ts";
+export type { MemberNotifier, NotificationPrefs, NotificationTestResult, QuietHours } from "./wire.gen.ts";
+import type { NotificationPrefs, NotificationTestResult, QuietHours } from "./wire.gen.ts";
 
 // NotificationToggle is a per-type switch of the member's preferences.
-export type NotificationToggle = "mentions" | "agentFinished" | "agentFailed" | "borrowRequests" | "contentShared" | "contentReview" | "appNotices" | "roomReports";
+export type NotificationToggle = "mentions" | "channelMessages" | "agentFinished" | "agentFailed" | "borrowRequests" | "contentShared" | "contentReview" | "appNotices" | "roomReports";
 
 // NOTIFICATION_TOGGLES are Settings → Notifications' switches, one per
 // notification type a member can turn off.
 export const NOTIFICATION_TOGGLES: readonly { readonly key: NotificationToggle; readonly label: string; readonly hint: string }[] = [
-  { key: "mentions", label: "Mentions", hint: "Someone @-mentions you in a room." },
+  { key: "mentions", label: "Mentions", hint: "Someone @-mentions you, or @channel or @here in a channel you read." },
+  { key: "channelMessages", label: "Channel messages", hint: "A new message in a channel or thread whose notifications are set to all (by default, the ones you posted in and the threads you follow)." },
   { key: "agentFinished", label: "Agent finished", hint: "An agent finished a request you sent it." },
   { key: "agentFailed", label: "Agent failed", hint: "An agent could not complete a request you sent it." },
   { key: "borrowRequests", label: "Borrow requests", hint: "A member asks to use (or needs more runs of) your agent." },
@@ -25,6 +26,7 @@ export const NOTIFICATION_TOGGLES: readonly { readonly key: NotificationToggle; 
 // The server default for a member who never saved preferences.
 export const DEFAULT_NOTIFICATION_PREFS: NotificationPrefs = {
   mentions: true,
+  channelMessages: true,
   agentFinished: true,
   agentFailed: true,
   borrowRequests: true,
@@ -34,6 +36,18 @@ export const DEFAULT_NOTIFICATION_PREFS: NotificationPrefs = {
   roomReports: true,
   quietRooms: [],
 };
+
+// defaultQuietHours is the window offered when a member turns quiet hours
+// on: the night, in their browser's zone, direct mentions let through.
+export function defaultQuietHours(): QuietHours {
+  let tz = "UTC";
+  try {
+    tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    // keep UTC
+  }
+  return { start: "22:00", end: "08:00", tz, allowMentions: true };
+}
 
 // isRoomMuted reports whether the member muted notifications for roomId.
 export function isRoomMuted(prefs: NotificationPrefs | null, roomId: string): boolean {

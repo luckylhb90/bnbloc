@@ -305,6 +305,7 @@ CREATE TABLE IF NOT EXISTS channel_follows (
   hidden        TINYINT(1) NOT NULL DEFAULT 0,
   last_posted_at_ms BIGINT NOT NULL DEFAULT 0,
   group_id      VARCHAR(64) NOT NULL DEFAULT '',
+  notify_level  VARCHAR(16) NOT NULL DEFAULT '',
   PRIMARY KEY (tenant_id, room_id, channel_id, user_id),
   KEY idx_follow_user (tenant_id, room_id, user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -691,6 +692,8 @@ CREATE TABLE IF NOT EXISTS notification_prefs (
   content_review  TINYINT(1) NOT NULL DEFAULT 1,
   app_notices     TINYINT(1) NOT NULL DEFAULT 1,
   room_reports    TINYINT(1) NOT NULL DEFAULT 1,
+  channel_messages TINYINT(1) NOT NULL DEFAULT 1,
+  quiet_hours_json JSON NULL,
   quiet_rooms     JSON NOT NULL,
   updated_at_ms   BIGINT NOT NULL,
   PRIMARY KEY (tenant_id, user_id)

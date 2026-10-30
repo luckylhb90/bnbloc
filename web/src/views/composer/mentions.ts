@@ -7,12 +7,24 @@ import { agentHandle, parseAgentHandle } from "../../lib/roomAgents.ts";
 
 type AgentRef = { readonly ownerId: string; readonly provider: string; readonly core?: string };
 
+// BROADCAST_MENTIONS reach a channel's people rather than one (C5): @here
+// those active in it, @channel everyone who may read it; neither is a
+// member id (the server reserves both words).
+export const BROADCAST_MENTIONS: readonly string[] = ["here", "channel"];
+
+const BROADCAST_LABELS: Record<string, string> = {
+  here: "here: people active in this channel",
+  channel: "channel: everyone in this channel",
+};
+
 // mentionLabel is what the picker shows for one mention candidate.
 export function mentionLabel(
   candidate: string,
   agents: readonly AgentRef[],
   nameOf: (id: string) => string = defaultDisplayName,
 ): string {
+  const broadcast = BROADCAST_LABELS[candidate];
+  if (broadcast) return broadcast;
   if (!candidate.includes("/")) return nameOf(candidate);
   const agent = agents.find((a) => agentHandle(a) === candidate);
   if (agent) return agentDisplayLabel(agent, nameOf);
