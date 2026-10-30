@@ -1,0 +1,189 @@
+# Replicas without owners: a simpler multi-replica realtime (2026-10-30)
+
+Status: research and proposal (2026-10-30), not built. The owner: "有没有更简单更
+灵活高性能高可用的多副本部署方案？". Builds on
+`docs/prd/2026-10-30-high-availability.md` (what it took to make today's
+design survive a failover) and `docs/prd/2026-10-10-enterprise-scale.md` §2
+(scale-out by key ownership).
+
+## 1. The question, and what today's design costs
+
+Every bnbloc service but realtime and relay is already interchangeable:
+any replica serves any request, state is in MySQL. realtime is different:
+each room is **owned** by one replica (rendezvous hashing over a peer set
+found by DNS and probes), which holds the room's subscribers, sequence
+counter, replay buffer, presence and roster; every other replica forwards
+the room's requests and streams to it.
+
+What owning costs, measured this week:
+
+- **Moving parts.** Peer discovery (DNS every 5 s, probes every second),
+  one-hop forwarding with a retry when the owner died, release of rooms on
+  every view change, the sequence fence, the hand-over watch that delivers
+  what a previous owner stored, forced gap reads while a room changes hands,
+  `Leave` on drain. About 1,500 lines (`internal/shard`,
+  `services/realtime/scaleout.go`, `handover.go`), and every one of them was
+  needed to stop a failover from losing messages
+  (`docs/bugs/2026-10-30-owner-change-loses-messages.md`).
+- **Windows of two owners.** A replica joining is seen by the others up to
+  5 s apart; for those seconds two replicas own a room. Every correctness
+  fix since is a way to repair what happens in that window.
+- **Reconnects.** A view change moves rooms, so their streams reconnect —
+  also when a replica *joins*. In the failover drill (300 streams, 4 events:
+  drain, rejoin, crash, rejoin) streams reconnected 564 to 884 times. Only
+  the streams of the replica that went away had to: about 200.
+- **Every deploy is 2 moves per pod.** A rolling update stops a pod (its
+  rooms move away) and starts its replacement (other rooms move to it): most
+  clients reconnect twice per deploy.
+- **An extra hop for most traffic.** With N replicas, (N-1)/N of posts and
+  stream opens land on a replica that does not own the room and are proxied
+  on; a forwarded stream's bytes pass through two pods for its whole life.
+- **No autoscaling in practice.** The chart's own comment: every scale event
+  moves a share of rooms; "prefer a fixed count".
+
+## 2. How others do it
+
+| System | Who holds a conversation's live state | How replicas share a message | Catching up |
+|---|---|---|---|
+| Discord | one guild process (owner); relays split its fan-out | Erlang distribution | sessions resume by sequence |
+| Slack | one Channel Server per channel (consistent hashing, CHARMs replace a dead one in < 20 s) | Gateway Servers subscribe to Channel Servers | — |
+| Telegram | a message box per channel with its own `pts` | own servers | `getChannelDifference` from the client's `pts` |
+| Centrifugo | **nobody**: any node serves any client | broker PUB/SUB (Redis, NATS, Postgres; memory for one node) | a bounded per-channel history in the broker, `epoch` + `offset`, "never a partial recovery"; the database stays the truth |
+| Socket.IO (Redis adapter) | nobody | Redis PUB/SUB | the application's |
+
+Sources: the engineering posts cited in
+`docs/prd/2026-10-30-message-path-performance.md` §2; Centrifugo's
+documentation ("Stream history and recovery", "Engines"); read 2026-10-30.
+
+Discord and Slack own conversations because a guild of a million online
+members needs its member list and permissions in one process and its fan-out
+split across machines. Their owners are replaced by dedicated coordinators
+(Slack's CHARMs) or handed over with their state (Discord's guild hand-off).
+An enterprise room of hundreds to a few thousand people needs neither. The
+systems built to be deployed by others, at any scale from one node up, chose
+the other way: **no owners, a broker between interchangeable nodes, the
+database as the truth, a short history to catch up from**. Centrifugo says
+why the history matters: on a deploy everyone reconnects at once, and
+without it every reconnect queries the database.
+
+## 3. The proposal: realtime as interchangeable replicas over a bus
+
+Every realtime replica serves any room. A message is committed by whichever
+replica the request reached, then published on a **bus**; every replica with
+a stream of that room receives it and fans it out to its own streams.
+
+| Today (owner) | Proposed (no owner) |
+|---|---|
+| room sequence: the owner's in-memory counter, seeded from the durable max, fenced by the `(room, seq)` key | a `room_counters` row updated in the message's own transaction (`UPDATE … SET seq = seq + n`): its row lock orders a room's batches across replicas, as the owner did, and commit order is sequence order |
+| live delivery: the owner's hub | publish after commit on the bus channel of the room; each replica subscribes to the rooms it has streams for |
+| order | per room by sequence; a replica holds an event a moment (≤ 300 ms) when the one before it has not arrived, as Telegram waits 0.5 s on a gap |
+| resume | `since` against history in MySQL (`RoomFeed` after the client's sequence: one indexed read per reconnect); later, if a deploy's reconnects load the database, a short per-room history in the bus (Centrifugo's design) |
+| presence, agent roster | entries in the bus's store with a TTL, refreshed by the replica holding the stream; deltas on the bus |
+| room state (channels, sections, members) | each replica's own cache, dropped by the same room events, which now reach every replica on the bus |
+| slow mode | an atomic key with the gap as TTL (`SET NX PX`) |
+| a member's desktop plugin stream | a bus channel per member |
+| scheduled posts, workers | leases (already) |
+
+The **bus** is one small interface with two implementations:
+
+- **in process** — one replica, no dependency: development, the all-in-one
+  image, air-gapped installs (as today);
+- **Redis** — PUB/SUB (sharded PUB/SUB on a Redis Cluster), TTL keys for
+  presence and slow mode. ElastiCache Multi-AZ on AWS; pulse already uses a
+  Redis for its stream.
+
+Measured: Redis PUB/SUB, 3 subscriber replicas, 100 rooms, 500 msgs/s of
+400 bytes, on this laptop under a load average of 185: **p50 0.20 ms, p95
+0.52 ms, p99 1.0 ms**, 15,000 of 15,000 received. Against a chat post of
+5 ms (p50), the bus is noise.
+
+What it removes: peer discovery and forwarding for realtime, the sequence
+seed and fence, release on view change, the hand-over watch and the forced
+gap reads, `Leave`. What stays: drain (a stopping replica's own streams
+reopen elsewhere, once), `since` and `stream_gap` (a replica that missed bus
+messages — PUB/SUB is at most once — tells its streams to read the
+difference), the client's resend.
+
+### What a deployment becomes
+
+| Part | Replicas | Notes |
+|---|---|---|
+| gateway, room, activity, shareagent | 2+, HPA | as today |
+| realtime | 2+, a Deployment, HPA | no peer Service, no StatefulSet; a pod going away reconnects only its own streams |
+| relay | 2, keyed | P2P sync pairing needs both peers on one replica: keep its ownership, or route by session at the ingress (consistent hash); off the message path |
+| pulse | 1 | unchanged |
+| MySQL | Aurora/RDS Multi-AZ, behind RDS Proxy | the proxy shortens a writer failover for clients and pools every pod's connections |
+| Redis | ElastiCache Multi-AZ | bus, presence, slow mode, pulse |
+
+And because every service is then interchangeable, the **all-in-one image
+can run as N identical copies** behind a load balancer with MySQL and Redis:
+a small organization gets high availability from one image.
+
+### Failure modes
+
+- **Redis fails over** (seconds): publishes fail and are retried; messages
+  are still committed; each replica tells its streams `stream_gap` when its
+  bus connection returns, and clients read the difference. Nothing is lost;
+  live delivery pauses for the failover.
+- **A replica dies**: its streams reopen on the others (once) and resume by
+  sequence; posts in flight are resent by the client. No room moves.
+- **A replica is slow on the bus** (a full subscription buffer): it drops
+  and tells its streams `stream_gap` (as the hub's overflow does now).
+
+### Costs and risks
+
+- realtime's hub is the core of the product; the change touches ordering,
+  idempotency (the batch insert's client-id conflicts stay), presence and
+  plugin delivery. Every guarantee of the 1b write path has a test today;
+  they all carry over.
+- One more dependency for multi-replica realtime (Redis). Single-node
+  deployments keep none.
+- A replica receives every message of every room it has a stream in, so a
+  room whose members are spread over N replicas costs N bus deliveries per
+  message (cheap: 0.2 ms each, measured).
+
+## 4. Alternatives considered
+
+- **Keep owners, coordinate better** (leases in MySQL or Kubernetes `Lease`
+  objects per room, or endpoints watched through the Kubernetes API instead
+  of DNS): shrinks the two-owner window but keeps forwarding, moves on join
+  and the double reconnect per deploy. More code, not less.
+- **Active/standby** (one realtime, a hot standby taking over by lease):
+  simplest, no scale-out; every client reconnects on every failover and
+  deploy.
+- **Adopt Centrifugo** as the realtime tier: its model is the proposal's,
+  but our per-event access rule (members-only sections), lanes and
+  activity, agent admission and plugin hooks would have to live in proxies
+  around it; two systems to run instead of one.
+- **NATS JetStream** as the bus: per-subject ordered history with replay by
+  sequence is a better bus than Redis PUB/SUB, but a new stateful system for
+  operators; Redis is already in the stack. The interface keeps it possible.
+- **The gateway as the fan-out tier** (it terminates the stream itself and
+  subscribes to the bus, like Slack's Gateway Servers): saves one more hop;
+  moves the access rule into the edge. Later, if the hop shows.
+
+## 5. Plan (slices)
+
+1. `room_counters` and the commit path through it (single node too); the
+   fence and the seed go.
+2. The bus interface and the in-process bus; the hub delivers what it
+   receives from the bus (its own publishes included); the reorder hold.
+3. The Redis bus: subscribe a room on its first local stream, unsubscribe a
+   while after its last; `stream_gap` after a bus reconnect.
+4. Presence, roster and slow mode on the bus's store; member channels for
+   plugin delivery.
+5. Remove realtime's ownership (forwarding, release, hand-over, peers);
+   realtime as a Deployment with an HPA in the chart; relay keeps its own.
+6. Drills: `scripts/failover-check.sh` (pass: no send failed, no delivery
+   lost, about one reconnect per stream of the replica that went), a rolling
+   deploy under load, a scale-out from 2 to 4 under load, a Redis failover
+   under load.
+
+## 6. Decisions pending owner
+
+- **R1.** Build it: realtime without owners, Redis as the multi-replica bus
+  (single node stays dependency-free)? Recommended.
+- **R2.** Resume from MySQL first, and add a short history in Redis only if
+  a deploy's reconnects show on the database? Recommended.
+- **R3.** QA: is there an ElastiCache Redis for bnbloc (pulse's), or should
+  one be created (Multi-AZ, small)?
