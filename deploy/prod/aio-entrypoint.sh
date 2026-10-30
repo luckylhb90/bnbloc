@@ -32,11 +32,11 @@ export BNBLOC_SHAREAGENT_BASE_URL="http://127.0.0.1:8083"
 export BNBLOC_RELAY_BASE_URL="http://127.0.0.1:8085"
 
 # The all-in-one is one node by construction: realtime and relay own every
-# key and the gateway is the only replica. Scale-out peer sets (a Kubernetes
+# key and the gateway is the only replica. Scale-out settings (a Kubernetes
 # deployment) must never leak in from the container environment — realtime
 # would refuse its disk blob store and the gateway would divide its rate
 # limits by replicas that do not exist.
-unset BNBLOC_REALTIME_PEERS BNBLOC_REALTIME_SELF BNBLOC_RELAY_PEERS BNBLOC_RELAY_SELF BNBLOC_GATEWAY_PEERS
+unset BNBLOC_REALTIME_BUS_REDIS_URL BNBLOC_RELAY_PEERS BNBLOC_RELAY_SELF BNBLOC_GATEWAY_PEERS
 
 # Member notifications read BNBLOC_PUBLIC_URL (room deep links, shared by
 # realtime, shareagent and activity's budget warnings; the gateway's links

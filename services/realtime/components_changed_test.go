@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,7 +12,6 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/realtime"
-	"github.com/luckylhb90/bnbloc/internal/shard"
 	"github.com/luckylhb90/bnbloc/internal/svcauth"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
@@ -177,12 +177,12 @@ func TestComponentsChanged_hintStreamIsNoPluginDesktop(t *testing.T) {
 }
 
 // A gateway signal on one replica reaches the member streams of every
-// replica; a peer's hand-off is served locally and never forwarded again.
-func TestComponentsChanged_handedToEveryPeer(t *testing.T) {
+// replica.
+func TestComponentsChanged_handedToEveryReplica(t *testing.T) {
 	c := newCluster(t, 3)
 	var streams []*pluginStream
-	for _, r := range c.reps {
-		st, err := r.svc.PluginHooks.subscribe(c.memberOwnedBy(r), tenant.Default, false)
+	for i, r := range c.reps {
+		st, err := r.svc.PluginHooks.subscribe(fmt.Sprintf("maya-%d", i), tenant.Default, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -201,32 +201,6 @@ func TestComponentsChanged_handedToEveryPeer(t *testing.T) {
 		if got := expectHint(t, st); got.AtMs != 7 {
 			t.Fatalf("hint = %+v", got)
 		}
-	}
-	// A peer's hand-off (forwarded marker) is served locally only.
-	req := c.request(c.reps[0], http.MethodPost, "/internal/v1/components/changed", svcauth.ServiceSubject("realtime"), wire.ComponentsChanged{AtMs: 8})
-	req.Header.Set(shard.ForwardedHeader, c.reps[2].addr)
-	resp, err = http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	expectHint(t, streams[0])
-	expectNoHint(t, streams[1])
-	expectNoHint(t, streams[2])
-}
-
-func TestMergeHints(t *testing.T) {
-	m := mergeHints(nil, wire.ComponentsChanged{TenantID: "a", Member: "x", AtMs: 1})
-	if m.TenantID != "a" || m.Member != "x" {
-		t.Fatalf("first = %+v", m)
-	}
-	m = mergeHints(m, wire.ComponentsChanged{TenantID: "a", Member: "y", AtMs: 3})
-	if m.TenantID != "a" || m.Member != "" || m.AtMs != 3 {
-		t.Fatalf("member widened = %+v", m)
-	}
-	m = mergeHints(m, wire.ComponentsChanged{TenantID: "b", AtMs: 2})
-	if m.TenantID != "" || m.AtMs != 3 {
-		t.Fatalf("tenant widened = %+v", m)
 	}
 	raw, _ := json.Marshal(wire.ComponentsChanged{AtMs: 1})
 	if string(raw) != `{"atMs":1}` {

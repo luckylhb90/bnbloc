@@ -36,6 +36,10 @@ type GatewayAIRuns struct {
 	Client  *http.Client
 }
 
+// realtimeServiceSubject is the identity realtime asserts on its own
+// internal calls.
+var realtimeServiceSubject = svcauth.ServiceSubject("realtime")
+
 func (g GatewayAIRuns) RunSchedule(ctx context.Context, sc wire.RoomSchedule, slot time.Time, dry bool) (wire.ScheduleRunReply, error) {
 	var out wire.ScheduleRunReply
 	body, err := json.Marshal(wire.ScheduleRunRequest{Schedule: sc, SlotMs: slot.UnixMilli(), DryRun: dry})

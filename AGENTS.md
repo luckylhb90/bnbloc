@@ -582,33 +582,34 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   `docs/environment-variables.md` + `docs/deploy-service-env.md` in the same
   change. Document only variables the code reads; delete ones it no longer
   reads.
-- **realtime and relay scale out by key ownership (`internal/shard`).** Each
-  room (`room:<id>`), member (`member:<id>`) or relay session key is owned by
-  one replica, which holds all of that key's in-process state (hub
-  subscribers, the durable sequence counter, replay buffer, presence/roster
-  and their timers, plugin streams and pending acks, relay pairings).
-  `BNBLOC_<SVC>_PEERS` is one `host:port` DNS name (re-resolved every 5 s) or a
-  comma list; `BNBLOC_<SVC>_SELF` is `host:port` (or a bare IP in DNS mode).
-  Both unset = single node; only one set refuses startup. Every peer is
-  probed (`/readyz`) every second and leaves the set after two failures
-  (~2 s); a failed call to a live peer (forward or peer request, via the
-  set's transport) re-probes it at once, so a crashed replica is dropped in
-  ~0.25 s under traffic. Peer calls must use `Set.Client()`/the forward
-  transport so failures feed this. Any replica forwards a keyed request one hop
-  to the owner (`shard.Forward`; SSE/WebSocket pass through, signed headers
-  untouched); `X-Bnbloc-Forwarded-By` means "serve locally, never re-forward"
-  and the gateway strips it from clients. Routing keys: `/v1/rooms/{id}/…`
-  and `/internal/v1/rooms/{id}/…` → room; `/v1/my/plugin-events` (+ ack) and
-  `/internal/v1/members/{m}/…` → member; relay routes → session key;
-  store-backed reads anywhere. **Never touch a room's hub from a replica that
-  may not own it:** background work goes to the owner (scheduler posts via
-  `/internal/v1/rooms/{id}/schedules/{s}/post`, notifications via
-  `MemberDesktopRoute`, plugin fan-out via the per-peer hand-off). A new keyed
-  route or new per-key in-process state must extend `RouteKey` and
-  `reconcileOwnership`; a new peer-to-peer call is svcauth-signed
-  (`Peers.call`). More than one realtime replica requires S3 (startup refuses
-  the disk store with peers set). Helm runs both as StatefulSets behind a
-  headless `bnbloc-<name>-peers` Service.
+- **realtime replicas have no owners; they share a bus.** Any replica
+  serves any room and member (docs/prd/2026-10-30-replicas-without-owners.md).
+  The store numbers a room's messages (`AppendNextRoomMessages`); with more
+  than one replica `BNBLOC_REALTIME_BUS_REDIS_URL` connects them
+  (`realtime.Topics`, Redis PUB/SUB in `internal/realtime/redisbus`). What a
+  replica keeps of a room or member must reach the others through it, never
+  through a "this replica owns it" assumption: a room's events (the hub's
+  `Bus`, delivered in sequence order with the reorder hold; a replica
+  receives a room while it streams it or keeps its state, `Hub.Watch`);
+  presence and the roster (`RoomViews`, whole views per replica); slow mode
+  (`Claims`); plugin events, catalog hints, members' desktop deliveries and
+  acks, the live replica count (`Replicas`, replicas.go). A new piece of
+  in-process state shared by a room's or member's requests must take one of
+  these paths, with a test in `replicas_test.go` that runs it across
+  replicas. More than one realtime replica requires S3 or a directory every
+  replica mounts (startup refuses one replica's disk with a bus set).
+- **relay scales out by key ownership (`internal/shard`).** Each sync
+  session key is owned by one replica, which holds its pairing.
+  `BNBLOC_RELAY_PEERS` is one `host:port` DNS name (re-resolved every 5 s) or
+  a comma list; `BNBLOC_RELAY_SELF` is `host:port` (or a bare IP in DNS
+  mode). Both unset = single node; only one set refuses startup. Every peer
+  is probed (`/readyz`) every second and leaves the set after two failures
+  (~2 s); a failed call to a live peer re-probes it at once. Any replica
+  forwards a keyed request one hop to the owner (`shard.Forward`;
+  WebSocket passes through, signed headers untouched);
+  `X-Bnbloc-Forwarded-By` means "serve locally, never re-forward" and the
+  gateway strips it from clients. Helm runs it as a StatefulSet behind a
+  headless `bnbloc-relay-peers` Service.
 - **Gateway rate limits are per replica, divided by the live count from
   `BNBLOC_GATEWAY_PEERS`.** Every gateway surface running more than one
   replica must set it, or N replicas allow N times the configured rate.

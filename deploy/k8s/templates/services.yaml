@@ -5,15 +5,19 @@ Each entry names the service's port, its values block, whether it reads the
 shared database + svcauth key (`db`), the peers it calls (rendered as
 BNBLOC_<PEER>_BASE_URL), and its scale-out role (`shard`):
 
-  - "owner": realtime and relay keep per-key state in process memory
-    (rooms and member streams; relay pairings). They run as a StatefulSet
-    behind a headless Service (bnbloc-<name>-peers). With more than one
-    replica (or an HPA) every pod gets BNBLOC_<NAME>_PEERS (the headless
-    name, re-resolved to the ready pods) and BNBLOC_<NAME>_SELF (its pod
-    IP), owns the keys rendezvous hashing assigns it, and forwards the rest
-    to their owner (internal/shard). One replica gets neither: single node.
+  - "owner": relay keeps per-key state in process memory (sync pairings).
+    It runs as a StatefulSet behind a headless Service (bnbloc-<name>-peers).
+    With more than one replica (or an HPA) every pod gets
+    BNBLOC_<NAME>_PEERS (the headless name, re-resolved to the ready pods)
+    and BNBLOC_<NAME>_SELF (its pod IP), owns the keys rendezvous hashing
+    assigns it, and forwards the rest to their owner (internal/shard). One
+    replica gets neither: single node.
   - "count": the gateway only needs the live replica count (its rate limits
     enforce 1/N of each budget), read from BNBLOC_GATEWAY_PEERS.
+
+realtime (`bus`) has no owners: any pod serves any room and member, and
+with more than one replica (or an HPA) the pods share a bus
+(BNBLOC_REALTIME_BUS_REDIS_URL; docs/prd/2026-10-30-replicas-without-owners.md).
 
 The env each service receives mirrors what its services/<name>/cmd/main.go
 reads — see docs/deploy-service-env.md.
@@ -23,7 +27,7 @@ reads — see docs/deploy-service-env.md.
   "gateway"         (dict "cfg" .Values.gateway         "db" true  "shard" "count" "peers" (list "room" "activity" "realtime" "shareagent" "relay"))
   "room"            (dict "cfg" .Values.room            "db" true  "shard" ""      "peers" (list "realtime"))
   "activity"        (dict "cfg" .Values.activity        "db" true  "shard" ""      "peers" (list "room" "realtime"))
-  "realtime"        (dict "cfg" .Values.realtime        "db" true  "shard" "owner" "peers" (list "room" "gateway"))
+  "realtime"        (dict "cfg" .Values.realtime        "db" true  "shard" ""      "peers" (list "room" "gateway") "bus" true)
   "shareagent"      (dict "cfg" .Values.shareagent      "db" true  "shard" ""      "peers" (list "room"))
   "relay"           (dict "cfg" .Values.relay           "db" false "shard" "owner" "peers" (list))
   "pulse"           (dict "cfg" .Values.pulse           "db" true  "shard" ""      "peers" (list))
@@ -39,7 +43,10 @@ reads — see docs/deploy-service-env.md.
 {{- fail "bnbloc-pulse runs one consumer per deployment (its stream group consumer is fixed): keep pulse.replicas at 1 and no HPA" }}
 {{- end }}
 {{- if and (eq $name "realtime") $scaled (not $cfg.attachments.s3.bucket) }}
-{{- fail "bnbloc-realtime with more than one replica (or an HPA) needs realtime.attachments.s3.bucket: the disk blob store is one pod's volume, and realtime refuses it when peers are configured" }}
+{{- fail "bnbloc-realtime with more than one replica (or an HPA) needs realtime.attachments.s3.bucket: the disk blob store is one pod's volume, and realtime refuses it with a bus configured" }}
+{{- end }}
+{{- if and $svc.bus $scaled (not $cfg.bus.redisURLSecretRef.name) (not $.Values.awsSecrets.secretID) }}
+{{- fail "bnbloc-realtime with more than one replica (or an HPA) needs its bus: realtime.bus.redisURLSecretRef, or BNBLOC_REALTIME_BUS_REDIS_URL in the AWS Secrets Manager secret (awsSecrets.secretID)" }}
 {{- end }}
 ---
 apiVersion: apps/v1
@@ -49,6 +56,11 @@ metadata:
   labels: { app.kubernetes.io/name: bnbloc-{{ $name }} }
 spec:
   replicas: {{ default 1 $cfg.replicas }}
+  {{- if and (eq $name "realtime") (not $cfg.attachments.s3.bucket) }}
+  # One pod on a ReadWriteOnce volume: the old pod goes before the new one
+  # mounts it.
+  strategy: { type: Recreate }
+  {{- end }}
   {{- if $owner }}
   # The headless Service publishes the ready pods' IPs: the peer set.
   serviceName: bnbloc-{{ $name }}-peers
@@ -112,6 +124,19 @@ spec:
               value: "bnbloc-{{ $name }}-peers:{{ $port }}"
             - name: BNBLOC_{{ upper $name }}_SELF
               value: "$(POD_IP)"
+            {{- end }}
+            {{- if and $svc.bus $scaled }}
+            # The bus between realtime replicas. A Secret ref when one is
+            # named; otherwise empty, so the AWS Secrets Manager loader
+            # (BNBLOC_AWS_SECRET_ID) fills it.
+            {{- if $cfg.bus.redisURLSecretRef.name }}
+            - name: BNBLOC_REALTIME_BUS_REDIS_URL
+              valueFrom:
+                secretKeyRef: { name: {{ $cfg.bus.redisURLSecretRef.name }}, key: {{ $cfg.bus.redisURLSecretRef.key }} }
+            {{- else }}
+            - name: BNBLOC_REALTIME_BUS_REDIS_URL
+              value: ""
+            {{- end }}
             {{- end }}
             {{- if eq $svc.shard "count" }}
             # Live replica count for the per-replica share of every rate limit.
@@ -357,8 +382,8 @@ spec:
 ---
 # Realtime's disk blob store (attachments + sidecar artifacts), only for a
 # single realtime replica (more require S3; the chart fails otherwise).
-# ReadWriteOnce is sufficient: the StatefulSet replaces its one pod in place
-# (old pod gone before the new one starts).
+# ReadWriteOnce is sufficient: the Deployment recreates its one pod (old pod
+# gone before the new one starts).
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

@@ -89,28 +89,23 @@ owns interactive apps' data (sealed documents per site artifact).
 ## realtime (`:8082`) — scales out by room ownership
 
 Presence + business-event fan-out over SSE; durable chat history; attachment
-and artifact blobs. The SSE hub (per-room durable sequence counter, replay
-buffer, presence, the agent roster) and members' plugin streams live in
-process memory, so every room and member is **owned by exactly one
-replica**. One replica (no peers) owns everything. With more, set
-`BNBLOC_REALTIME_PEERS` + `BNBLOC_REALTIME_SELF`: any replica accepts any
-request and forwards room-scoped routes (`/v1/rooms/{id}/…`,
-`/internal/v1/rooms/{id}/…`) to the room's owner and the member plugin stream
-(`/v1/my/plugin-events` + ack) to the member's owner, in one hop; store-backed
-reads (unread, search, blobs) are served anywhere. Callers keep using
-the `bnbloc-realtime` Service. A replica joining or leaving moves only its own
-keys: those streams close, reconnect to the new owner, and catch up from
-history. Kubernetes runs it as a StatefulSet behind the headless
-`bnbloc-realtime-peers` Service.
+and artifact blobs. Replicas have **no owners**: any replica serves any room
+and member (docs/prd/2026-10-30-replicas-without-owners.md). The store
+numbers a room's messages (`room_counters`); with more than one replica they
+share a bus, a Redis (`BNBLOC_REALTIME_BUS_REDIS_URL`): a room's events reach
+every replica streaming it, presence and the agent roster are joined across
+replicas, slow mode is one shared claim, and a member's desktop plugin
+deliveries reach whichever replica holds the stream. A replica going away
+reconnects only its own streams, once. Kubernetes runs it as a Deployment
+behind the `bnbloc-realtime` Service (an HPA may scale it).
 
 | Variable | Required | Notes |
 | --- | --- | --- |
-| `BNBLOC_MYSQL_DSN` | yes | Chat history + hub sequence seed. |
-| `BNBLOC_INTERNAL_KEY` | yes | Same value as gateway. Also signs replica-to-replica calls. |
+| `BNBLOC_MYSQL_DSN` | yes | Chat history and the rooms' sequences. |
+| `BNBLOC_INTERNAL_KEY` | yes | Same value as gateway. |
 | `BNBLOC_ROOM_BASE_URL` | yes | `http://bnbloc-room:8080` — membership checks. |
-| Blob storage | yes | A volume at `/var/lib/bnbloc/attachments` (`BNBLOC_ATTACHMENTS_DIR`), or `BNBLOC_ATTACHMENTS_S3_BUCKET` (+ `_REGION`, `_ENDPOINT`, credentials, `_KEY_PREFIX`, `_PATH_STYLE`). More than one replica requires S3 (startup refuses the disk store with peers configured). |
-| `BNBLOC_REALTIME_PEERS` | with >1 replica | The replica set: one `host:port` DNS name re-resolved every 5 s (Helm: `bnbloc-realtime-peers:8082`) or a comma list of `host:port`. Replicas failing `GET /readyz` twice (probed every second, ~2 s; a failed peer call re-probes at once) leave the set. Unset (with `_SELF`) = single node. |
-| `BNBLOC_REALTIME_SELF` | with peers | This replica's address as peers reach it: `host:port`, or the bare pod IP (DNS form; Helm passes `$(POD_IP)`). |
+| Blob storage | yes | A volume at `/var/lib/bnbloc/attachments` (`BNBLOC_ATTACHMENTS_DIR`), or `BNBLOC_ATTACHMENTS_S3_BUCKET` (+ `_REGION`, `_ENDPOINT`, credentials, `_KEY_PREFIX`, `_PATH_STYLE`). More than one replica requires S3, or a directory every replica mounts (`BNBLOC_ATTACHMENTS_DIR_SHARED=true`); startup refuses one replica's disk with a bus configured. |
+| `BNBLOC_REALTIME_BUS_REDIS_URL` | with >1 replica | The bus between replicas (`redis://host:6379/1`). Unset = one replica. |
 | `BNBLOC_ATTACHMENTS_S3_DIRECT_DOWNLOADS` | optional | S3 only: opt-in downloads answer 302 to a 5-minute presigned URL (clients must reach the bucket). Default off: everything streams. |
 | `BNBLOC_ATTACHMENTS_S3_PUBLIC_ENDPOINT` | optional | S3 base URL clients reach, when `_ENDPOINT` is internal-only. Empty = `_ENDPOINT`. |
 | `BNBLOC_PUBLIC_URL` | recommended | Public web origin; member-notification deep links. Unset = no links. |

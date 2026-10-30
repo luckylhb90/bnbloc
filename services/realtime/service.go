@@ -25,7 +25,6 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/roomctx"
 	"github.com/luckylhb90/bnbloc/internal/sealbox"
 	"github.com/luckylhb90/bnbloc/internal/search"
-	"github.com/luckylhb90/bnbloc/internal/shard"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/svcauth"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
@@ -89,9 +88,6 @@ type Service struct {
 	// postMarks are the members' last posts (slow mode) and their follow
 	// marks written behind (post_marks.go).
 	postMarks postMarks
-	// handovers are the rooms this replica watches after it started serving
-	// them (handover.go).
-	handovers handovers
 	// lanes are the lanes streams this replica serves (lanes.go).
 	lanes      laneStreams
 	Hub        *realtime.Hub
@@ -167,11 +163,10 @@ type Service struct {
 	// Content resolves the expert a chat asks its agent to wear (content
 	// components). Nil refuses a chat that names an expert.
 	Content store.ContentComponentStore
-	// Peers is the scale-out replica set (scaleout.go): requests for a room
-	// or member another replica owns are forwarded there, and work produced
-	// here for such keys crosses over internal peer routes. Nil is a single
-	// node (every key owned here).
-	Peers *Peers
+	// Replicas is what this replica shares with the others besides rooms'
+	// events (replicas.go): plugin events, catalog hints, members' desktop
+	// deliveries and acks, the live replica count. Nil is a replica alone.
+	Replicas *Replicas
 	// HeartbeatEvery is the room stream's keep-alive and membership re-check
 	// interval (0 = 15s).
 	HeartbeatEvery time.Duration
@@ -388,13 +383,12 @@ func (s *Service) Handler() http.Handler {
 	// A request to a task's webhook, from the gateway's open route
 	// (hooks.go). Not keyed: the hook names its room only once read.
 	mux.Handle("POST /internal/v1/hooks/{hookId}", services("gateway")(s.handleInternalHook))
-	// Replica-to-replica routes (scaleout.go); the gateway also signals a
-	// component catalog change.
-	s.registerPeerRoutes(mux, services("realtime"), services("realtime", "gateway"))
-	// Scale-out: release the state of keys this replica stops owning after
-	// every peer-set refresh, and route each keyed request to its owner.
-	s.Peers.Set().OnRefresh(s.reconcileOwnership)
-	return shard.Forward(s.Peers.Set(), RouteKey, svcauth.EnsureTenant(mux))
+	// The gateway signals a component catalog change (scaleout.go).
+	s.registerReplicaRoutes(mux, services("gateway"))
+	if err := s.Replicas.start(s); err != nil {
+		log.Printf("realtime: replicas: %v (plugin events and desktop deliveries stay on this replica)", err)
+	}
+	return svcauth.EnsureTenant(mux)
 }
 
 // resolveChannel maps a request's channelId to its routing target. An explicit
@@ -529,7 +523,6 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	handingOver := s.noteServing(r.Context(), roomID)
 	// A platform agent host's stream (its bridge driving the hosted agent)
 	// and a preview's (a shared room read before joining) are not a
 	// person's: never present, never advertising a roster, and never shown
@@ -618,9 +611,6 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 		sub = s.Hub.SubscribeLive(roomID)
 	case since > 0:
 		sub, resumeGap = s.Hub.SubscribeSince(roomID, since)
-		// The room just changed owner: the client may lack a message the
-		// other owner wrote below its last sequence (handover.go).
-		resumeGap = resumeGap || handingOver
 	default:
 		sub = s.Hub.Subscribe(roomID)
 	}
@@ -1038,9 +1028,9 @@ func (s *Service) afterPublish(ctx context.Context, ev wire.Event) {
 			log.Printf("realtime: room=%s channel=%s admission lookup failed; skipping plugin hooks: %v", ev.RoomID, ev.ChannelID, err)
 		} else if !barred {
 			s.PluginHooks.Deliver(ctx, s.Membership, ev)
-			// Members owned by other replicas hold their plugin streams
-			// there: hand the event to every peer for its own fan-out.
-			s.Peers.forwardPluginEvent(tenant.FromContext(ctx), ev)
+			// Other replicas hold other members' plugin streams: hand the
+			// event to every one for its own fan-out.
+			s.Replicas.broadcastPluginEvent(tenant.FromContext(ctx), ev)
 		}
 	}
 	s.Notifications.Observe(ctx, ev)

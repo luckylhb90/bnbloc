@@ -70,8 +70,6 @@ func (s *Service) handlePluginEvents(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-st.closed:
-			return // the member is owned by another replica now
 		case <-heartbeat.C:
 			fmt.Fprint(w, ": keep-alive\n\n")
 			flusher.Flush()
@@ -109,7 +107,8 @@ func (s *Service) handlePluginEventAck(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, `status must be "delivered" or "failed"`, http.StatusBadRequest)
 		return
 	}
-	if !s.PluginHooks.ack(r.Context(), subject, r.PathValue("id"), ack) {
+	// A delivery another replica sent is resolved there (Replicas).
+	if !s.PluginHooks.ack(r.Context(), subject, r.PathValue("id"), ack) && !s.Replicas.remoteAck(subject, r.PathValue("id"), ack) {
 		httpx.Error(w, "delivery not found", http.StatusNotFound)
 		return
 	}
@@ -117,6 +116,14 @@ func (s *Service) handlePluginEventAck(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d *PluginHookDispatcher) subscribe(subject, tenantID string, plugins bool) (*pluginStream, error) {
+	st, err := d.subscribeLocked(subject, tenantID, plugins)
+	if err == nil && d.streamsChanged != nil {
+		d.streamsChanged(tenantID, subject)
+	}
+	return st, err
+}
+
+func (d *PluginHookDispatcher) subscribeLocked(subject, tenantID string, plugins bool) (*pluginStream, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	n := 0
@@ -129,7 +136,7 @@ func (d *PluginHookDispatcher) subscribe(subject, tenantID string, plugins bool)
 		return nil, errTooManyPluginStreams
 	}
 	st := &pluginStream{subject: subject, tenantID: tenantID, plugins: plugins, ch: make(chan wire.PluginDelivery, pluginStreamBuffer),
-		hints: make(chan wire.ComponentsChanged, 1), closed: make(chan struct{})}
+		hints: make(chan wire.ComponentsChanged, 1)}
 	d.streams[st] = struct{}{}
 	return st, nil
 }
@@ -140,25 +147,9 @@ func (d *PluginHookDispatcher) unsubscribe(st *pluginStream) {
 	d.mu.Lock()
 	delete(d.streams, st)
 	d.mu.Unlock()
-}
-
-// closeStreams ends the streams of every member owned reports false for (the
-// member's plugin streams moved to another replica) and returns how many.
-// Deliveries already sent stay pending here until acked or expired: the ack
-// is routed to the member's owner, so an in-flight one may expire (audited
-// failed) — the same outcome as a desktop that dropped its stream.
-func (d *PluginHookDispatcher) closeStreams(owned func(member string) bool) int {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	n := 0
-	for st := range d.streams {
-		if !owned(st.subject) {
-			delete(d.streams, st)
-			close(st.closed)
-			n++
-		}
+	if d.streamsChanged != nil {
+		d.streamsChanged(st.tenantID, st.subject)
 	}
-	return n
 }
 
 // pluginStreams are the connected streams of desktops running plugin
@@ -212,7 +203,7 @@ func (d *PluginHookDispatcher) componentsChanged(c wire.ComponentsChanged) int {
 // table or stream buffer drops it, audited as failed. group (a notification
 // delivery) learns every outcome.
 func (d *PluginHookDispatcher) offer(st *pluginStream, plugin, tenantID, event string, envelope json.RawMessage, group *deliveryGroup) {
-	id := strconv.FormatInt(d.now(), 36) + "-" + strconv.FormatUint(d.seq.Add(1), 36)
+	id := d.idPrefix + strconv.FormatInt(d.now(), 36) + "-" + strconv.FormatUint(d.seq.Add(1), 36)
 	p := pendingDelivery{plugin: plugin, subject: st.subject, tenantID: tenantID, event: event, atMs: d.now(), group: group}
 	group.add()
 	d.mu.Lock()

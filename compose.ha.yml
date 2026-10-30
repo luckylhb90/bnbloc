@@ -7,20 +7,18 @@
 #   docker stop <one realtime container>      # a drain (SIGTERM)
 #   docker kill <one realtime container>      # a crash
 #
-# realtime and relay scale out by key ownership: each replica finds the others
-# through the service's DNS name (one address per container) and takes its own
-# address from its interface (_SELF=auto). More than one realtime replica needs
-# one blob store for all: here the attachments volume every replica mounts
-# (in production S3, or an NFS/EFS mount).
+# realtime replicas have no owners: any one serves any room and member, and
+# they share a bus (the stack's Redis, its own database number). More than
+# one realtime replica needs one blob store for all: here the attachments
+# volume every replica mounts (in production S3, or an NFS/EFS mount). relay
+# scales out by key ownership: each replica finds the others through the
+# service's DNS name (one address per container) and takes its own address
+# from its interface (_SELF=auto).
 services:
   realtime:
     deploy: { replicas: 3 }
     environment:
-      BNBLOC_REALTIME_PEERS: "realtime:8082"
-      BNBLOC_REALTIME_SELF: "auto"
       BNBLOC_ATTACHMENTS_DIR_SHARED: "true"
-      # The bus between replicas: a room's events reach every replica with
-      # a stream of it, whichever replica committed them.
       BNBLOC_REALTIME_BUS_REDIS_URL: "redis://redis:6379/1"
 
   relay:

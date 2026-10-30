@@ -20,17 +20,15 @@ func TestRoomPreambleOwned(t *testing.T) {
 	// Functions that read the path room or the caller for a reason other
 	// than a member's room request, with why.
 	allowed := map[string]string{
-		"room_request.go:roomCaller":              "the owner",
-		"room_request.go:requireSubject":          "the owner",
-		"service.go:handleInternalPublish":        "a service route (svcauth.RequireService): no member caller",
-		"app_events.go:handleInternalAppEvents":   "the gateway's route (svcauth.RequireService): no member caller",
-		"service.go:handleInternalHistory":        "the gateway's consented read (svcauth.RequireService): no member caller",
-		"scaleout.go:handleInternalScheduledPost": "a peer route: the schedule's creator posts through PostChat",
-		"scaleout.go:RouteKey":                    "ownership routing, before any handler",
-		"service.go:handleUnread":                 "reads across the rooms the caller names, each checked with member",
-		"service.go:handleEvents":                 "the open stream's re-check at every heartbeat",
-		"chat_send.go:PostChat":                   "the operation's own Chat check of the author, so no post path skips it",
-		"dispatch.go:checkDispatchAuthority":      "the dispatch guards: the bridge owner and the parent job's requester",
+		"room_request.go:roomCaller":            "the owner",
+		"room_request.go:requireSubject":        "the owner",
+		"service.go:handleInternalPublish":      "a service route (svcauth.RequireService): no member caller",
+		"app_events.go:handleInternalAppEvents": "the gateway's route (svcauth.RequireService): no member caller",
+		"service.go:handleInternalHistory":      "the gateway's consented read (svcauth.RequireService): no member caller",
+		"service.go:handleUnread":               "reads across the rooms the caller names, each checked with member",
+		"service.go:handleEvents":               "the open stream's re-check at every heartbeat",
+		"chat_send.go:PostChat":                 "the operation's own Chat check of the author, so no post path skips it",
+		"dispatch.go:checkDispatchAuthority":    "the dispatch guards: the bridge owner and the parent job's requester",
 	}
 	files, err := filepath.Glob("*.go")
 	if err != nil {

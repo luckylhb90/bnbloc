@@ -9,15 +9,14 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
-	"github.com/luckylhb90/bnbloc/internal/shard"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/svcauth"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
@@ -27,9 +26,10 @@ import (
 const scaleoutKey = "scaleout-test-internal-key"
 
 // cluster is n in-process realtime replicas on httptest, sharing one store
-// (the durable feed, schedules, plugin install records) and one membership
-// set, each with its own hub and plugin dispatcher, wired by a static peer
-// list whose liveness the test controls.
+// (the durable feed, schedules, plugin install records), one membership set
+// and one bus (topics, claims, marks), each with its own hub, plugin
+// dispatcher and views: replicas without owners, any of which serves any
+// request.
 type cluster struct {
 	t        *testing.T
 	reps     []*replica
@@ -37,8 +37,7 @@ type cluster struct {
 	members  *membership.Static
 	sched    *store.MemoryRoomSchedules
 	plugins  *pluginFixture
-	mu       sync.Mutex
-	down     map[string]bool
+	bus      *realtime.MemoryBus
 	settings store.PlatformSettingsStore
 }
 
@@ -46,7 +45,6 @@ type replica struct {
 	addr string
 	srv  *httptest.Server
 	svc  *Service
-	set  *shard.Set
 }
 
 func newCluster(t *testing.T, n int) *cluster {
@@ -54,82 +52,34 @@ func newCluster(t *testing.T, n int) *cluster {
 	t.Setenv("BNBLOC_INTERNAL_KEY", scaleoutKey)
 	c := &cluster{
 		t: t, chat: store.NewMemoryChat(), members: membership.NewStatic(), sched: store.NewMemoryRoomSchedules(),
-		down: map[string]bool{}, settings: store.NewMemoryPlatformSettings(),
-	}
-	addrs := make([]string, n)
-	for i := 0; i < n; i++ {
-		srv := httptest.NewUnstartedServer(nil)
-		c.reps = append(c.reps, &replica{addr: srv.Listener.Addr().String(), srv: srv})
-		addrs[i] = c.reps[i].addr
+		bus: realtime.NewMemoryBus(), settings: store.NewMemoryPlatformSettings(),
 	}
 	jobs := store.NewMemoryBridgeJobs()
-	// The replicas share a bus, as in production with one configured.
-	bus := realtime.NewMemoryBus()
-	for i, r := range c.reps {
-		set, err := shard.New(shard.Options{Peers: strings.Join(addrs, ","), Self: r.addr, Probe: c.probe})
-		if err != nil {
-			t.Fatal(err)
-		}
-		r.set = set
+	claims, marks := &realtime.MemoryClaims{}, &realtime.MemoryMarks{}
+	for i := 0; i < n; i++ {
+		srv := httptest.NewUnstartedServer(nil)
+		r := &replica{addr: srv.Listener.Addr().String(), srv: srv}
+		c.reps = append(c.reps, r)
 		// Every replica reads the same plugin install records (one store).
 		fix := newPluginFixture(t, c.settings)
 		if i == 0 {
 			c.plugins = fix
 		}
+		topics := c.bus.Endpoint()
 		hub := realtime.NewHub(64, 64)
-		hub.Bus = bus.Endpoint()
+		hub.Bus = realtime.RoomBus(topics)
 		hub.RoomHead = func(room string) (int64, error) { return c.chat.MaxRoomSeq(context.Background(), room) }
 		r.svc = &Service{
 			Hub: hub, Membership: c.members, Chat: c.chat, BridgeJobs: jobs, Dispatches: jobs,
 			Schedules: c.sched, RoomRoles: schedRoles{anyRoom: true},
-			PluginHooks: fix.dispatcher, Peers: NewPeers(set),
+			PluginHooks: fix.dispatcher, Claims: claims, Replicas: NewReplicas(topics, marks),
 		}
 		r.srv.Config.Handler = svcauth.Middleware(scaleoutKey, r.svc.Handler())
 		r.srv.Start()
 		t.Cleanup(r.srv.Close)
 	}
-	c.refresh()
 	return c
 }
-
-func (c *cluster) probe(_ context.Context, addr string) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return !c.down[addr]
-}
-
-func (c *cluster) setDown(r *replica, down bool) {
-	c.mu.Lock()
-	c.down[r.addr] = down
-	c.mu.Unlock()
-}
-
-// refresh runs one peer-set refresh on every replica (its ownership
-// reconcile runs as the set's listener).
-func (c *cluster) refresh() {
-	for _, r := range c.reps {
-		r.set.Refresh(context.Background())
-	}
-}
-
-func (c *cluster) peers() []string { return c.reps[0].set.Peers() }
-
-// ownedBy finds a key of the given form owned by r in the current view.
-func (c *cluster) ownedBy(r *replica, format string, key func(string) string) string {
-	c.t.Helper()
-	for i := 0; i < 10000; i++ {
-		id := fmt.Sprintf(format, i)
-		if shard.Owner(c.peers(), key(id)) == r.addr {
-			return id
-		}
-	}
-	c.t.Fatal("no key found")
-	return ""
-}
-
-func (c *cluster) roomOwnedBy(r *replica) string { return c.ownedBy(r, "room-%d", RoomKey) }
-
-func (c *cluster) memberOwnedBy(r *replica) string { return c.ownedBy(r, "maya-%d", MemberKey) }
 
 // request builds a gateway-shaped request: the signed identity assertion the
 // gateway injects (which must survive the forward to the owner).
@@ -237,7 +187,7 @@ func (s *stream) next(t *testing.T, kind string) sseFrame {
 	}
 }
 
-// ended waits for the stream to close (its key moved to another replica).
+// ended waits for the stream to close.
 func (s *stream) ended(t *testing.T) {
 	t.Helper()
 	timeout := time.After(3 * time.Second)
@@ -248,7 +198,7 @@ func (s *stream) ended(t *testing.T) {
 				return
 			}
 		case <-timeout:
-			t.Fatal("stream still open after its key moved")
+			t.Fatal("stream still open")
 		}
 	}
 }
@@ -273,52 +223,48 @@ func waitSubscribers(t *testing.T, r *replica, room string, n int) {
 	}
 }
 
-// A chat sent to a non-owner reaches subscribers connected through other
-// non-owners: every stream and publish of the room lands on its owner, the
-// signed identity survives the hop, and transient events carry no sequence.
-func TestScaleOutChatReachesSubscribersOnOtherReplicas(t *testing.T) {
+// A chat sent through any replica reaches the room's streams on every
+// replica, once and in sequence order; each replica serves its own
+// streams; the signed identity is required everywhere; history answers the
+// same through any replica.
+func TestReplicasChatReachesStreamsOnEveryReplica(t *testing.T) {
 	c := newCluster(t, 3)
-	owner, a, b := c.reps[0], c.reps[1], c.reps[2]
-	room := c.roomOwnedBy(owner)
+	a, b, other := c.reps[0], c.reps[1], c.reps[2]
+	room := "room-1"
 	c.members.Add(room, "maya")
 	c.members.Add(room, "jack")
 
 	maya := c.open(a, "/v1/rooms/"+room+"/events?allChannels=1", "maya")
 	jack := c.open(b, "/v1/rooms/"+room+"/events?allChannels=1", "jack")
-	waitSubscribers(t, owner, room, 2)
-	for _, r := range []*replica{a, b} {
-		if n := r.svc.Hub.SubscriberCount(room); n != 0 {
-			t.Fatalf("non-owner %s holds %d subscribers", r.addr, n)
-		}
-	}
-	// Presence is the owner's: transient, no sequence, no SSE id.
+	waitSubscribers(t, a, room, 1)
+	waitSubscribers(t, b, room, 1)
+	// Presence is transient: no sequence, no SSE id.
 	if f := maya.next(t, "presence_snapshot"); f.id != "" || eventOf(t, f).Sequence != 0 {
 		t.Fatalf("transient presence frame carries a sequence: %+v", f)
 	}
 
-	seq1 := c.chatVia(b, room, "maya", "hello from maya", "cm-1")
+	seq1 := c.chatVia(other, room, "maya", "hello from maya", "cm-1")
 	seq2 := c.chatVia(a, room, "jack", "hi maya", "cm-2")
-	if seq1 != 1 || seq2 != 2 {
-		t.Fatalf("sequences %d,%d, want 1,2 (dense durable space)", seq1, seq2)
+	seq3 := c.chatVia(b, room, "maya", "and again", "cm-3")
+	if seq1 != 1 || seq2 != 2 || seq3 != 3 {
+		t.Fatalf("sequences %d,%d,%d, want 1,2,3 (dense, whichever replica)", seq1, seq2, seq3)
 	}
 	for name, s := range map[string]*stream{"maya": maya, "jack": jack} {
-		first, second := eventOf(t, s.next(t, "chat_message")), eventOf(t, s.next(t, "chat_message"))
-		if first.Sequence != seq1 || second.Sequence != seq2 {
-			t.Fatalf("%s received %d,%d, want %d,%d in order", name, first.Sequence, second.Sequence, seq1, seq2)
+		for want := int64(1); want <= 3; want++ {
+			if got := eventOf(t, s.next(t, "chat_message")).Sequence; got != want {
+				t.Fatalf("%s received %d, want %d", name, got, want)
+			}
 		}
 	}
-	// History is store-backed and answers the same through any replica.
-	resp, err := http.DefaultClient.Do(c.request(b, http.MethodGet, "/v1/rooms/"+room+"/history", "jack", nil))
+	resp, err := http.DefaultClient.Do(c.request(other, http.MethodGet, "/v1/rooms/"+room+"/history", "jack", nil))
 	if err != nil {
 		t.Fatal(err)
 	}
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if !strings.Contains(string(body), "hello from maya") || !strings.Contains(string(body), "hi maya") {
-		t.Fatalf("history via non-owner = %s", body)
+	if !strings.Contains(string(body), "hello from maya") || !strings.Contains(string(body), "and again") {
+		t.Fatalf("history = %s", body)
 	}
-	// An unsigned identity is refused on the owner even when it arrives
-	// forwarded (the forward never mints identity).
 	req, _ := http.NewRequest(http.MethodPost, a.srv.URL+"/v1/rooms/"+room+"/chat", strings.NewReader(`{"text":"forged"}`))
 	req.Header.Set(svcauth.HeaderUser, "maya")
 	if resp, err := http.DefaultClient.Do(req); err != nil || resp.StatusCode != http.StatusUnauthorized {
@@ -326,34 +272,60 @@ func TestScaleOutChatReachesSubscribersOnOtherReplicas(t *testing.T) {
 	}
 }
 
-// A member's plugin stream lives on the member's owner; a chat published on
-// the room's owner (another replica) is handed across and delivered there,
-// and the ack routed through yet another replica resolves it.
-func TestScaleOutPluginDeliveryCrossesReplicas(t *testing.T) {
+// Who is here is the room's, not a replica's: a stream on one replica is
+// told of a member whose stream is on another.
+func TestReplicasSharePresence(t *testing.T) {
+	c := newCluster(t, 2)
+	a, b := c.reps[0], c.reps[1]
+	room := "room-1"
+	c.members.Add(room, "maya")
+	c.members.Add(room, "jack")
+	maya := c.open(a, "/v1/rooms/"+room+"/events?allChannels=1", "maya")
+	waitSubscribers(t, a, room, 1)
+	c.open(b, "/v1/rooms/"+room+"/events?allChannels=1", "jack")
+	deadline := time.After(5 * time.Second)
+	for {
+		var p wire.PresenceDeltaPayload
+		f := maya.next(t, "presence_delta")
+		_ = json.Unmarshal([]byte(f.data), &struct {
+			Payload *wire.PresenceDeltaPayload `json:"payload"`
+		}{&p})
+		if slices.Contains(p.Joined, "jack") {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("maya's stream was never told jack joined on the other replica")
+		default:
+		}
+	}
+	if got := a.svc.Views.Members(room); !slices.Contains(got, "jack") || !slices.Contains(got, "maya") {
+		t.Fatalf("replica a sees %v here", got)
+	}
+}
+
+// A member's plugin stream may be on any replica: a chat posted through
+// another is delivered to it, and the ack sent through a third resolves it.
+func TestReplicasPluginDeliveryCrossesReplicas(t *testing.T) {
 	c := newCluster(t, 3)
 	c.plugins.pipe.AllowUnsigned = true
 	if _, err := c.plugins.pipe.Install(t.Context(), installReq(t, "acme-notes")); err != nil {
 		t.Fatal(err)
 	}
-	roomOwner, memberOwner, other := c.reps[0], c.reps[1], c.reps[2]
-	room := c.roomOwnedBy(roomOwner)
-	member := c.memberOwnedBy(memberOwner)
+	holder, poster, acker := c.reps[0], c.reps[1], c.reps[2]
+	room, member := "room-1", "maya"
 	c.members.Add(room, member)
 	c.members.Add(room, "jack")
 
-	plugin := c.open(other, "/v1/my/plugin-events?plugins=1", member)
+	plugin := c.open(holder, "/v1/my/plugin-events?plugins=1", member)
 	deadline := time.Now().Add(3 * time.Second)
-	for !memberOwner.svc.PluginHooks.HasDesktop(tenant.Default, member) {
+	for !holder.svc.PluginHooks.HasDesktop(tenant.Default, member) {
 		if time.Now().After(deadline) {
-			t.Fatal("plugin stream did not land on the member's owner")
+			t.Fatal("plugin stream not held")
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	if other.svc.PluginHooks.HasDesktop(tenant.Default, member) || roomOwner.svc.PluginHooks.HasDesktop(tenant.Default, member) {
-		t.Fatal("a non-owner holds the member's plugin stream")
-	}
-
-	c.chatVia(other, room, "jack", "deploy is green", "cm-plugin")
+	c.chatVia(poster, room, "jack", "deploy is green", "cm-plugin")
 	f := plugin.next(t, wire.PluginEventKind)
 	var d wire.PluginDelivery
 	if err := json.Unmarshal([]byte(f.data), &d); err != nil {
@@ -363,13 +335,18 @@ func TestScaleOutPluginDeliveryCrossesReplicas(t *testing.T) {
 	if d.Plugin != "acme-notes" || env.RoomID != room || !strings.Contains(string(d.Envelope), "deploy is green") {
 		t.Fatalf("delivery = %+v envelope %s", d, d.Envelope)
 	}
-	resp, err := http.DefaultClient.Do(c.request(roomOwner, http.MethodPost, "/v1/my/plugin-events/"+d.ID+"/ack", member, map[string]string{"status": wire.PluginDeliveryDelivered}))
+	resp, err := http.DefaultClient.Do(c.request(acker, http.MethodPost, "/v1/my/plugin-events/"+d.ID+"/ack", member, map[string]string{"status": wire.PluginDeliveryDelivered}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("ack via a non-owner = %d, want 204 (routed to the member's owner)", resp.StatusCode)
+		t.Fatalf("ack through another replica = %d, want 204 (resolved by the replica that sent it)", resp.StatusCode)
+	}
+	resp, _ = http.DefaultClient.Do(c.request(acker, http.MethodPost, "/v1/my/plugin-events/"+d.ID+"/ack", member, map[string]string{"status": wire.PluginDeliveryDelivered}))
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("a second ack = %d, want 404", resp.StatusCode)
 	}
 }
 
@@ -377,24 +354,24 @@ func installReq(t *testing.T, name string) extpipe.InstallRequest {
 	return extpipe.InstallRequest{Body: realtimePluginBody(t, name), Actor: "admin"}
 }
 
-// The notification worker runs on any replica; a member's desktop lives on
-// the member's owner, so the route asks and delivers there and reports the
-// owner's outcome.
-func TestScaleOutNotificationRouteCrossesReplicas(t *testing.T) {
+// The notification worker runs on any replica; a member's desktop stream
+// may be held by another, so the route finds it there (its mark) and
+// reports that replica's outcome.
+func TestReplicasNotificationRouteCrossesReplicas(t *testing.T) {
 	c := newCluster(t, 2)
 	c.plugins.pipe.AllowUnsigned = true
 	c.plugins.installNotificationPlugin(t, "nimbus-bot", "")
-	worker, memberOwner := c.reps[0], c.reps[1]
-	member := c.memberOwnedBy(memberOwner)
-	route := MemberDesktopRoute(worker.svc.PluginHooks, worker.svc.Peers)
+	worker, holder := c.reps[0], c.reps[1]
+	member := "maya"
+	route := MemberDesktopRoute(worker.svc.PluginHooks, worker.svc.Replicas)
 	if route.HasDesktop(tenant.Default, member) {
 		t.Fatal("desktop reported before the member connected")
 	}
-	plugin := c.open(worker, "/v1/my/plugin-events?plugins=1", member) // forwarded to the owner
+	plugin := c.open(holder, "/v1/my/plugin-events?plugins=1", member)
 	deadline := time.Now().Add(3 * time.Second)
 	for !route.HasDesktop(tenant.Default, member) {
 		if time.Now().After(deadline) {
-			t.Fatal("route never saw the member's desktop on its owner")
+			t.Fatal("route never saw the member's desktop on the other replica")
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -412,110 +389,74 @@ func TestScaleOutNotificationRouteCrossesReplicas(t *testing.T) {
 	}
 	resp.Body.Close()
 	got.waitFor(t, true)
+	plugin.cancel()
+	deadline = time.Now().Add(3 * time.Second)
+	for route.HasDesktop(tenant.Default, member) {
+		if time.Now().After(deadline) {
+			t.Fatal("the desktop's mark outlived its stream")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
-// When the peer set changes, a replica closes the streams of keys it no
-// longer owns; the client reconnects (here: through the same entry replica),
-// lands on the new owner, and durable sequences continue from the durable
-// max with no gap, repeat or loss — also when the room moves back.
-func TestScaleOutOwnershipChangeMovesStreams(t *testing.T) {
-	c := newCluster(t, 2)
-	entry, owner := c.reps[0], c.reps[1]
-	room := c.roomOwnedBy(owner)
+// A replica going away ends only its own streams: the client reopens on
+// another replica after the last sequence it holds and misses nothing,
+// while streams on the other replicas stay open; a resent post is stored
+// once.
+func TestReplicasStreamReopensElsewhere(t *testing.T) {
+	c := newCluster(t, 3)
+	gone, b, poster := c.reps[0], c.reps[1], c.reps[2]
+	room := "room-1"
 	c.members.Add(room, "maya")
 	c.members.Add(room, "jack")
 
-	s := c.open(entry, "/v1/rooms/"+room+"/events?allChannels=1", "maya")
-	waitSubscribers(t, owner, room, 1)
-	if seq := c.chatVia(entry, room, "jack", "one", "m-1"); seq != 1 {
+	s := c.open(gone, "/v1/rooms/"+room+"/events?allChannels=1", "maya")
+	jack := c.open(b, "/v1/rooms/"+room+"/events?allChannels=1", "jack")
+	waitSubscribers(t, gone, room, 1)
+	waitSubscribers(t, b, room, 1)
+	if seq := c.chatVia(poster, room, "jack", "one", "m-1"); seq != 1 {
 		t.Fatalf("first seq %d", seq)
 	}
 	if ev := eventOf(t, s.next(t, "chat_message")); ev.Sequence != 1 {
 		t.Fatalf("got %d", ev.Sequence)
 	}
-
-	// The owner leaves every view (two failed probes): it releases the room.
-	c.setDown(owner, true)
-	c.refresh()
-	c.refresh()
+	gone.srv.CloseClientConnections()
 	s.ended(t)
-	if owner.svc.Hub.SubscriberCount(room) != 0 {
-		t.Fatal("released room still has subscribers on the old owner")
+	if seq := c.chatVia(poster, room, "jack", "two", "m-2"); seq != 2 {
+		t.Fatalf("while the stream was away seq %d", seq)
 	}
-	s = c.open(entry, "/v1/rooms/"+room+"/events?allChannels=1", "maya")
-	waitSubscribers(t, entry, room, 1)
-	// A publish sent to the old owner is forwarded to the new one.
-	if seq := c.chatVia(owner, room, "jack", "two", "m-2"); seq != 2 {
-		t.Fatalf("after move seq %d, want 2 (the store numbers the room)", seq)
+	s = c.open(b, "/v1/rooms/"+room+"/events?allChannels=1&since=1", "maya")
+	if seq := c.chatVia(poster, room, "jack", "three", "m-3"); seq != 3 {
+		t.Fatalf("after reopening seq %d", seq)
 	}
-	if ev := eventOf(t, s.next(t, "chat_message")); ev.Sequence != 2 {
-		t.Fatalf("got %d after move", ev.Sequence)
+	got := map[int64]bool{}
+	for len(got) < 2 {
+		ev := eventOf(t, s.next(t, "chat_message"))
+		got[ev.Sequence] = true
 	}
-
-	// It comes back: the room returns to it, whose forgotten counter seeds
-	// afresh (a stale 1 would collide with the stored 2).
-	c.setDown(owner, false)
-	c.refresh()
-	s.ended(t)
-	// The client resumes after the last sequence it holds (its replay may
-	// hold seq 2: the old owner still received the room from the bus).
-	s = c.open(entry, "/v1/rooms/"+room+"/events?allChannels=1&since=2", "maya")
-	waitSubscribers(t, owner, room, 1)
-	if seq := c.chatVia(entry, room, "jack", "three", "m-3"); seq != 3 {
-		t.Fatalf("after move back seq %d, want 3", seq)
+	if !got[2] || !got[3] {
+		t.Fatalf("reopened stream got %v, want 2 (replayed) and 3 (live)", got)
 	}
-	if ev := eventOf(t, s.next(t, "chat_message")); ev.Sequence != 3 {
-		t.Fatalf("got %d after move back", ev.Sequence)
+	for want := int64(1); want <= 3; want++ {
+		if ev := eventOf(t, jack.next(t, "chat_message")); ev.Sequence != want {
+			t.Fatalf("the other replica's stream got %d, want %d", ev.Sequence, want)
+		}
 	}
-	// A client retry of an already-stored send (its response was lost in the
-	// move) is idempotent on the new owner.
-	if seq := c.chatVia(entry, room, "jack", "two", "m-2"); seq != 2 {
-		t.Fatalf("retried send = %d, want the original 2", seq)
+	if seq := c.chatVia(b, room, "jack", "two", "m-2"); seq != 2 {
+		t.Fatalf("a resent post = %d, want the original 2", seq)
 	}
 	msgs, _ := c.chat.RoomFeed(tenant.NewContext(context.Background(), tenant.Default), room, 0, 50)
 	if len(msgs) != 3 {
-		t.Fatalf("history has %d rows, want 3 (no loss, no duplicate)", len(msgs))
-	}
-	for i, m := range msgs {
-		if m.Seq != int64(i+1) {
-			t.Fatalf("history seqs %+v not 1..3", msgs)
-		}
+		t.Fatalf("history has %d rows, want 3", len(msgs))
 	}
 }
 
-// A request forwarded to a replica whose view names another owner (the
-// views briefly disagree) is served locally rather than looped; the stream
-// it opened is swept on that replica's next refresh, so the client moves to
-// the real owner instead of missing the room's events indefinitely.
-func TestScaleOutUnownedForwardedStreamIsSwept(t *testing.T) {
+// The scheduler claims slots on whichever replica runs the tick and posts
+// there; the room's streams on other replicas see the post.
+func TestReplicasScheduledPostReachesEveryReplica(t *testing.T) {
 	c := newCluster(t, 2)
-	stray, owner := c.reps[0], c.reps[1]
-	room := c.roomOwnedBy(owner)
-	c.members.Add(room, "maya")
-	req := c.request(stray, http.MethodGet, "/v1/rooms/"+room+"/events", "maya", nil)
-	req.Header.Set(shard.ForwardedHeader, "10.9.9.9:8082") // a peer with a stale view
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	resp, err := http.DefaultClient.Do(req.WithContext(ctx))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	waitSubscribers(t, stray, room, 1)
-	stray.set.Refresh(context.Background())
-	waitSubscribers(t, stray, room, 0)
-	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
-		t.Fatalf("stream did not end cleanly: %v", err)
-	}
-}
-
-// The scheduler claims slots on whichever replica runs the tick; a slot for
-// a room another replica owns is posted by that owner, so live subscribers
-// (on the owner) see it and the sequence comes from the owner's counter.
-func TestScaleOutScheduledPostRunsOnRoomOwner(t *testing.T) {
-	c := newCluster(t, 2)
-	ticker, owner := c.reps[0], c.reps[1]
-	room := c.roomOwnedBy(owner)
+	ticker, other := c.reps[0], c.reps[1]
+	room := "room-1"
 	c.members.Add(room, "maya")
 	resp, err := http.DefaultClient.Do(c.request(ticker, http.MethodPost, "/v1/rooms/"+room+"/schedules", "maya", dailyBody("standup notes", map[string]any{"kind": "room"})))
 	if err != nil {
@@ -527,16 +468,13 @@ func TestScaleOutScheduledPostRunsOnRoomOwner(t *testing.T) {
 	if resp.StatusCode != http.StatusCreated || json.Unmarshal(body, &sc) != nil {
 		t.Fatalf("create schedule: %d %s", resp.StatusCode, body)
 	}
-	s := c.open(ticker, "/v1/rooms/"+room+"/events?allChannels=1", "maya")
-	waitSubscribers(t, owner, room, 1)
+	s := c.open(other, "/v1/rooms/"+room+"/events?allChannels=1", "maya")
+	waitSubscribers(t, other, room, 1)
 	if n := ticker.svc.RunDueSchedules(context.Background(), time.UnixMilli(sc.NextRunAtMs).Add(time.Second)); n != 1 {
 		t.Fatalf("ran %d schedules, want 1", n)
 	}
 	if ev := eventOf(t, s.next(t, "chat_message")); ev.Sequence != 1 || !strings.Contains(fmt.Sprint(ev.Payload), "standup notes") {
 		t.Fatalf("scheduled post = %+v", ev)
-	}
-	if ticker.svc.Hub.SubscriberCount(room) != 0 {
-		t.Fatal("the ticking replica touched the room's hub")
 	}
 	got, err := c.sched.GetSchedule(tenant.NewContext(context.Background(), tenant.Default), room, sc.ScheduleID)
 	if err != nil || got.LastStatus != wire.ScheduleRunOK || got.LastSeq != 1 {

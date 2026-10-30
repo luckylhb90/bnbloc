@@ -329,3 +329,23 @@ A's in §5.
   Left for slice 5 with the ownership: a member's desktop plugin stream
   and its deliveries (member-keyed routing), scheduled posts at the owner,
   plugin events and catalog hints sent to peers.
+- **Slice 5 (2026-10-30): no owners.** Forwarding, release on view change,
+  the hand-over watch (`handover.go`, `DeliverCommitted`), the peer set and
+  `Leave` are gone from realtime; any replica serves any room and member.
+  What crossed peers now crosses the bus's topics (`Replicas`,
+  `services/realtime/replicas.go`): a hook-bearing room event to every
+  replica's plugin streams; catalog hints; a member's notification to the
+  replica holding their desktop stream (found by a mark, `realtime.Marks`,
+  renewed every 10 s, gone 30 s after its replica) with the outcome back;
+  a delivery's ack that reached another replica, to the one that sent it
+  (named by the delivery id's prefix); the live replica count for per-replica
+  budgets (a beat every 10 s). Scheduled and dispatched posts run where they
+  land. A replica keeping a room's state receives the room from the bus
+  meanwhile (`Hub.Watch`), so the other replicas' changes reach it. The bus
+  is generic topics (`realtime.Topics`; `RoomBus` over it for room events).
+  The chart runs realtime as a Deployment (an HPA may scale it), fails
+  without a bus or S3 when scaled, and recreates a single pod on its disk
+  volume. relay keeps its ownership.
+  The failover drill passes: 6,000 of 6,000 sends, 19,900 of 19,900
+  deliveries, 240 reconnects and 4 gaps (owned rooms: 564 to 884 and about
+  450).

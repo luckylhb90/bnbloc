@@ -2,6 +2,7 @@ package realtime
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"testing"
 	"time"
@@ -14,10 +15,17 @@ import (
 // busHub is a hub on bus whose room head is chat's stored max.
 func busHub(bus *MemoryBus, chat *store.MemoryChat) *Hub {
 	h := NewHub(64, 64)
-	h.Bus = bus.Endpoint()
+	h.Bus = RoomBus(bus.Endpoint())
 	h.RoomHead = func(room string) (int64, error) { return chat.MaxRoomSeq(context.Background(), room) }
 	h.holdFor, h.lingerFor = 50*time.Millisecond, time.Hour
 	return h
+}
+
+// encodedEvent is a chat message of room at seq, encoded as on the bus.
+func encodedEvent(room string, seq int64) wire.Event {
+	ev := wire.Event{RoomID: room, Kind: wire.KindChatMessage, Sequence: seq}
+	ev.Encoded, _ = json.Marshal(ev)
+	return ev
 }
 
 // recv waits for the next event on sub.
@@ -95,10 +103,9 @@ func TestBusOrdersHoldsAndDedupes(t *testing.T) {
 	h.holdFor = 400 * time.Millisecond
 	sub := h.SubscribeLive("r")
 	defer h.Unsubscribe("r", sub)
-	other := bus.Endpoint()
+	other := RoomBus(bus.Endpoint())
 	send := func(seq int64) {
-		ev := wire.Event{RoomID: "r", Kind: wire.KindChatMessage, Sequence: seq, Encoded: []byte(`{}`)}
-		if err := other.Publish(ev); err != nil {
+		if err := other.Publish(encodedEvent("r", seq)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -139,12 +146,12 @@ func TestBusJoinStartsAtTheHead(t *testing.T) {
 		}
 	}
 	h := busHub(bus, chat)
-	other := bus.Endpoint()
+	other := RoomBus(bus.Endpoint())
 	head := h.RoomHead
 	h.RoomHead = func(room string) (int64, error) {
 		// While the head is read, replica "other" publishes 3 (stored) and 4.
 		for _, seq := range []int64{3, 4} {
-			_ = other.Publish(wire.Event{RoomID: room, Kind: wire.KindChatMessage, Sequence: seq, Encoded: []byte(`{}`)})
+			_ = other.Publish(encodedEvent(room, seq))
 		}
 		return head(room)
 	}
@@ -169,8 +176,8 @@ func TestBusLostReadsTheDifference(t *testing.T) {
 	h := busHub(bus, chat)
 	sub := h.SubscribeLive("r")
 	defer h.Unsubscribe("r", sub)
-	other := bus.Endpoint()
-	_ = other.Publish(wire.Event{RoomID: "r", Kind: wire.KindChatMessage, Sequence: 1, Encoded: []byte(`{}`)})
+	other := RoomBus(bus.Endpoint())
+	_ = other.Publish(encodedEvent("r", 1))
 	recv(t, sub)
 	// Meanwhile 2..5 were stored and their messages lost.
 	ctx := tenant.NewContext(context.Background(), testTenantID)
@@ -183,7 +190,7 @@ func TestBusLostReadsTheDifference(t *testing.T) {
 	if !sub.TakeGap() {
 		t.Fatal("a lost subscription did not tell the stream to read the difference")
 	}
-	_ = other.Publish(wire.Event{RoomID: "r", Kind: wire.KindChatMessage, Sequence: 6, Encoded: []byte(`{}`)})
+	_ = other.Publish(encodedEvent("r", 6))
 	if ev := recv(t, sub); ev.Sequence != 6 {
 		t.Fatalf("after the loss delivered %d, want 6 (no hold for 2..5)", ev.Sequence)
 	}
@@ -195,10 +202,10 @@ func TestBusLingersAfterTheLastStream(t *testing.T) {
 	bus, chat := NewMemoryBus(), store.NewMemoryChat()
 	h := busHub(bus, chat)
 	h.lingerFor = 100 * time.Millisecond
-	other := bus.Endpoint()
+	other := RoomBus(bus.Endpoint())
 	sub := h.Subscribe("r")
 	h.Unsubscribe("r", sub)
-	_ = other.Publish(wire.Event{RoomID: "r", Kind: wire.KindChatMessage, Sequence: 1, Encoded: []byte(`{}`)})
+	_ = other.Publish(encodedEvent("r", 1))
 	back := h.Subscribe("r")
 	if ev := recv(t, back); ev.Sequence != 1 {
 		t.Fatalf("replayed %d, want 1", ev.Sequence)
@@ -206,10 +213,7 @@ func TestBusLingersAfterTheLastStream(t *testing.T) {
 	h.Unsubscribe("r", back)
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		bus.mu.Lock()
-		n := len(bus.subs["r"])
-		bus.mu.Unlock()
-		if n == 0 {
+		if bus.Subscribers(RoomTopic("r")) == 0 {
 			break
 		}
 		if time.Now().After(deadline) {

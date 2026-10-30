@@ -68,6 +68,11 @@ type PluginHookDispatcher struct {
 	// mayRead says whether a member may read a channel (the service's
 	// store.MayReadChannel); nil reads every channel.
 	mayRead func(ctx context.Context, roomID, channelID, userID string) bool
+	// idPrefix starts every delivery id (the replica's name on the bus, so
+	// an ack reaching another replica finds this one); streamsChanged is
+	// told after a member's stream here opened or closed (Replicas).
+	idPrefix       string
+	streamsChanged func(tenantID, subject string)
 }
 
 const (
@@ -168,9 +173,6 @@ type pluginStream struct {
 	// queued covers any number of later ones; the desktop re-reads its
 	// whole catalog).
 	hints chan wire.ComponentsChanged
-	// closed ends the stream: the member moved to another replica
-	// (closeStreams); the desktop reconnects to the new owner.
-	closed chan struct{}
 
 	// installs caches the member's opt-in plugin installs (fan-out worker only).
 	installs     map[string]bool

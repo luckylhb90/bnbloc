@@ -103,48 +103,6 @@ func TestTransientEventsDoNotConsumeSequences(t *testing.T) {
 	}
 }
 
-// ReleaseRooms closes the streams of rooms the replica no longer owns and
-// forgets their replay buffer; owned rooms are untouched. A room that moves
-// back continues after what other replicas stored meanwhile.
-func TestReleaseRoomsClosesAndForgetsUnownedRooms(t *testing.T) {
-	j := &testJournal{}
-	commit := Durable{Journal: j, Row: store.RoomMessage{TenantID: "t"}}
-	h := NewHub(16, 16)
-	gone := h.Subscribe("gone")
-	kept := h.Subscribe("kept")
-	defer h.Unsubscribe("kept", kept)
-	for _, room := range []string{"gone", "kept"} {
-		if _, err := h.PublishCommit(wire.Event{RoomID: room, Kind: wire.KindChatMessage}, commit); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if n := h.ReleaseRooms(func(room string) bool { return room == "kept" }); n != 1 {
-		t.Fatalf("closed %d streams, want 1", n)
-	}
-	<-gone.Events() // the buffered chat
-	if _, open := <-gone.Events(); open {
-		t.Fatal("released room's stream still open")
-	}
-	h.Unsubscribe("gone", gone) // the handler's deferred unsubscribe is a no-op
-	if h.SubscriberCount("kept") != 1 {
-		t.Fatal("owned room's stream was closed")
-	}
-	// Another replica committed seq 2..5 while the room was away.
-	other := NewHub(16, 16)
-	for i := 0; i < 4; i++ {
-		if _, err := other.PublishCommit(wire.Event{RoomID: "gone", Kind: wire.KindChatMessage}, commit); err != nil {
-			t.Fatal(err)
-		}
-	}
-	ev, err := h.PublishCommit(wire.Event{RoomID: "gone", Kind: wire.KindChatMessage}, commit)
-	if err != nil || ev.Sequence != 6 {
-		t.Fatalf("after move back seq=%d err=%v, want 6", ev.Sequence, err)
-	}
-	if late := h.Subscribe("gone"); len(late.Events()) != 1 {
-		t.Fatalf("replay after move back has %d events, want only the new one", len(late.Events()))
-	}
-}
-
 // A failed commit must neither deliver the event nor consume its sequence, so
 // a retried send cannot surface a live duplicate of a message history lacks.
 func TestPublishCommitFailureDeliversNothing(t *testing.T) {
@@ -401,23 +359,4 @@ func TestSubscribeSinceSendsTheDifference(t *testing.T) {
 		t.Fatalf("since 6 (up to date): gap %v, %d queued", gap, len(sub.Events()))
 	}
 	h.Unsubscribe("r", sub)
-}
-
-// A message another replica stored (the room's previous owner) is delivered
-// once.
-func TestDeliverCommittedOnce(t *testing.T) {
-	h := NewHub(8, 8)
-	sub := h.SubscribeLive("r")
-	defer h.Unsubscribe("r", sub)
-	h.Publish(wire.Event{RoomID: "r", Kind: wire.KindChatMessage}) // seq 1, delivered here
-	<-sub.Events()
-	if h.DeliverCommitted(wire.Event{RoomID: "r", Sequence: 1, Kind: wire.KindChatMessage}) {
-		t.Fatal("a sequence this hub delivered was delivered again")
-	}
-	if !h.DeliverCommitted(wire.Event{RoomID: "r", Sequence: 2, Kind: wire.KindChatMessage}) || (<-sub.Events()).Sequence != 2 {
-		t.Fatal("the other replica's message was not delivered")
-	}
-	if h.DeliverCommitted(wire.Event{RoomID: "r", Sequence: 2, Kind: wire.KindChatMessage}) {
-		t.Fatal("delivered twice")
-	}
 }

@@ -1,22 +1,21 @@
-// Package redisbus is the realtime bus (realtime.Bus) over Redis PUB/SUB:
-// how realtime replicas without owners share a room's events
-// (docs/prd/2026-10-30-replicas-without-owners.md §3). One endpoint per
-// process holds one client for publishing and one subscriber connection
-// for every room it receives.
+// Package redisbus is the transport between realtime replicas
+// (realtime.Topics) over Redis PUB/SUB, with the replicas' shared claims
+// and marks as Redis keys (docs/prd/2026-10-30-replicas-without-owners.md
+// §3). One endpoint per process holds one client for publishing and keys
+// and one subscriber connection for every topic it receives.
 package redisbus
 
 import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
+	"strconv"
 	"sync"
 	"time"
 
-	"github.com/luckylhb90/bnbloc/internal/wire"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -24,8 +23,8 @@ import (
 // replica).
 const EnvURL = "BNBLOC_REALTIME_BUS_REDIS_URL"
 
-// channelPrefix starts every room's channel.
-const channelPrefix = "bnbloc:rt:room:"
+// channelPrefix starts every topic's channel.
+const channelPrefix = "bnbloc:rt:"
 
 // originLen is the length of the origin that starts every message: the
 // endpoint that published it, so it skips its own.
@@ -46,14 +45,14 @@ type Bus struct {
 	origin string
 
 	mu sync.Mutex
-	// rooms maps a channel to its subscription.
-	rooms map[string]*room
-	stop  context.CancelFunc
-	done  chan struct{}
+	// topics maps a channel to its subscription.
+	topics map[string]*topic
+	stop   context.CancelFunc
+	done   chan struct{}
 }
 
-type room struct {
-	deliver func(wire.Event)
+type topic struct {
+	deliver func([]byte)
 	lost    func()
 	// confirmed is closed when Redis confirmed the subscription.
 	confirmed chan struct{}
@@ -79,7 +78,7 @@ func New(url string) (*Bus, error) {
 	}
 	loop, stop := context.WithCancel(context.Background())
 	b := &Bus{client: client, ps: client.Subscribe(loop), origin: hex.EncodeToString(id[:]),
-		rooms: map[string]*room{}, stop: stop, done: make(chan struct{})}
+		topics: map[string]*topic{}, stop: stop, done: make(chan struct{})}
 	go b.receive(loop)
 	return b, nil
 }
@@ -92,16 +91,13 @@ func (b *Bus) Close() error {
 	return errors.Join(err, b.client.Close())
 }
 
-// Publish sends ev to the room's channel.
-func (b *Bus) Publish(ev wire.Event) error {
-	if len(ev.Encoded) == 0 {
-		return fmt.Errorf("realtime bus: %s for room %s is not encoded", ev.Kind, ev.RoomID)
-	}
-	msg := make([]byte, 0, originLen+len(ev.Encoded))
-	msg = append(append(msg, b.origin...), ev.Encoded...)
+// Publish sends msg on the topic's channel.
+func (b *Bus) Publish(name string, msg []byte) error {
+	out := make([]byte, 0, originLen+len(msg))
+	out = append(append(out, b.origin...), msg...)
 	ctx, cancel := context.WithTimeout(context.Background(), publishTimeout)
 	defer cancel()
-	return b.client.Publish(ctx, channelPrefix+ev.RoomID, msg).Err()
+	return b.client.Publish(ctx, channelPrefix+name, out).Err()
 }
 
 // claimPrefix starts every claim's key.
@@ -127,17 +123,59 @@ func (b *Bus) Claim(key string, ttl time.Duration) (bool, time.Duration, error) 
 	return false, left, nil
 }
 
-// Subscribe subscribes the endpoint's connection to the room's channel and
-// returns once Redis confirmed it.
-func (b *Bus) Subscribe(roomID string, deliver func(wire.Event), lost func()) (func(), error) {
-	ch := channelPrefix + roomID
-	r := &room{deliver: deliver, lost: lost, confirmed: make(chan struct{})}
-	b.mu.Lock()
-	if _, taken := b.rooms[ch]; taken {
-		b.mu.Unlock()
-		return nil, fmt.Errorf("realtime bus: room %s is subscribed already", roomID)
+// markPrefix starts every mark's key: a hash of holder -> the Unix ms its
+// mark ends.
+const markPrefix = "bnbloc:rt:mark:"
+
+// Mark sets holder's mark of key for ttl (realtime.Marks); the key itself
+// lives as long as its longest mark.
+func (b *Bus) Mark(key, holder string, ttl time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), publishTimeout)
+	defer cancel()
+	k := markPrefix + key
+	_, err := b.client.TxPipelined(ctx, func(p redis.Pipeliner) error {
+		p.HSet(ctx, k, holder, time.Now().Add(ttl).UnixMilli())
+		p.PExpire(ctx, k, ttl)
+		return nil
+	})
+	return err
+}
+
+// Unmark deletes holder's mark of key.
+func (b *Bus) Unmark(key, holder string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), publishTimeout)
+	defer cancel()
+	return b.client.HDel(ctx, markPrefix+key, holder).Err()
+}
+
+// Marked reports whether any holder's mark of key is live.
+func (b *Bus) Marked(key string) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), publishTimeout)
+	defer cancel()
+	ends, err := b.client.HGetAll(ctx, markPrefix+key).Result()
+	if err != nil {
+		return false, err
 	}
-	b.rooms[ch] = r
+	now := time.Now().UnixMilli()
+	for _, end := range ends {
+		if ms, err := strconv.ParseInt(end, 10, 64); err == nil && ms > now {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// Subscribe subscribes the endpoint's connection to the topic's channel and
+// returns once Redis confirmed it.
+func (b *Bus) Subscribe(name string, deliver func([]byte), lost func()) (func(), error) {
+	ch := channelPrefix + name
+	r := &topic{deliver: deliver, lost: lost, confirmed: make(chan struct{})}
+	b.mu.Lock()
+	if _, taken := b.topics[ch]; taken {
+		b.mu.Unlock()
+		return nil, fmt.Errorf("realtime bus: topic %s is subscribed already", name)
+	}
+	b.topics[ch] = r
 	b.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), subscribeTimeout)
 	defer cancel()
@@ -151,19 +189,19 @@ func (b *Bus) Subscribe(roomID string, deliver func(wire.Event), lost func()) (f
 	}
 	if err != nil {
 		b.forget(ch, r)
-		return nil, fmt.Errorf("realtime bus: subscribe room %s: %w", roomID, err)
+		return nil, fmt.Errorf("realtime bus: subscribe %s: %w", name, err)
 	}
 	return func() { b.forget(ch, r) }, nil
 }
 
 // forget ends r's subscription of ch.
-func (b *Bus) forget(ch string, r *room) {
+func (b *Bus) forget(ch string, r *topic) {
 	b.mu.Lock()
-	if b.rooms[ch] != r {
+	if b.topics[ch] != r {
 		b.mu.Unlock()
 		return
 	}
-	delete(b.rooms, ch)
+	delete(b.topics, ch)
 	b.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), subscribeTimeout)
 	defer cancel()
@@ -174,7 +212,7 @@ func (b *Bus) forget(ch string, r *room) {
 
 // receive reads the subscriber connection until Close. A read error means
 // the connection broke: the next read connects again and subscribes every
-// channel again, and each confirmation tells its room it may have missed
+// channel again, and each confirmation tells its topic it may have missed
 // events (confirm), once Redis is back.
 func (b *Bus) receive(ctx context.Context) {
 	defer close(b.done)
@@ -208,7 +246,7 @@ func (b *Bus) receive(ctx context.Context) {
 // was published meanwhile is lost to it.
 func (b *Bus) confirm(ch string) {
 	b.mu.Lock()
-	r := b.rooms[ch]
+	r := b.topics[ch]
 	again := r != nil && r.ok
 	if r != nil && !r.ok {
 		r.ok = true
@@ -220,23 +258,15 @@ func (b *Bus) confirm(ch string) {
 	}
 }
 
-// dispatch delivers one message to its room, unless this endpoint sent it.
+// dispatch delivers one message to its topic, unless this endpoint sent it.
 func (b *Bus) dispatch(ch, payload string) {
 	if len(payload) < originLen || payload[:originLen] == b.origin {
 		return
 	}
 	b.mu.Lock()
-	r := b.rooms[ch]
+	r := b.topics[ch]
 	b.mu.Unlock()
-	if r == nil {
-		return
+	if r != nil {
+		r.deliver([]byte(payload[originLen:]))
 	}
-	raw := []byte(payload[originLen:])
-	var ev wire.Event
-	if err := json.Unmarshal(raw, &ev); err != nil {
-		log.Printf("realtime bus: %s: undecodable event: %v", ch, err)
-		return
-	}
-	ev.Encoded = raw
-	r.deliver(ev)
 }

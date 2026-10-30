@@ -60,9 +60,9 @@ services:
       BNBLOC_PULSE_REDIS_URL: "${BNBLOC_PULSE_REDIS_URL:-redis://redis:6379/0}"
       # Member digest key (HMAC, at least 32 bytes), shared by realtime and room.
       BNBLOC_PULSE_KEY: "${BNBLOC_PULSE_KEY:-dev-bnbloc-pulse-key-change-me-0123456789}"
-      # One replica = a single node that owns every room: no
-      # BNBLOC_REALTIME_PEERS/_SELF. Scaling realtime out by room ownership
-      # is the Helm chart's job (docs/production-deployment.md).
+      # One replica: no bus (BNBLOC_REALTIME_BUS_REDIS_URL). More replicas
+      # share one: compose.ha.yml here, the Helm chart in production
+      # (docs/production-deployment.md#high-availability).
       BNBLOC_INTERNAL_KEY: "${BNBLOC_INTERNAL_KEY:-dev-bnbloc-internal-key-change-me}"
       BNBLOC_ROOM_BASE_URL: "http://room:8080"
       # AI schedules are carried out by the gateway (the assist model's

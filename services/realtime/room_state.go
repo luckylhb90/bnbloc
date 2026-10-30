@@ -11,7 +11,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
-// Room state at the owner (docs/prd/2026-10-30-message-path-performance.md
+// Room state in memory (docs/prd/2026-10-30-message-path-performance.md
 // §4.1): what a post and the notification producer decide with (a room's
 // channels, sections, section memberships and admission; the room and its
 // members' roles and rules agreements; a channel's followers) is read once
@@ -19,10 +19,11 @@ import (
 // processes do, instead of read from MySQL on every message. The access rule
 // stays store.LoadChannelAccess: the cache holds its inputs.
 //
-// Kept until the room's own events change it (observe), which every replica
-// serving the room's requests sees (the room's owner publishes them), and
-// never longer than roomStateTTL (a lost event's bound). A failed read and a
-// miss (a channel not found) are never kept.
+// Kept until the room's own events change it (observe; another replica's
+// arrive on the bus, observeRemote: a replica keeping a room's state
+// receives the room from the bus meanwhile, watch), and never longer than
+// roomStateTTL (a lost event's bound). A failed read and a miss (a channel
+// not found) are never kept.
 
 const (
 	roomStateTTL = 30 * time.Second
@@ -30,7 +31,10 @@ const (
 )
 
 type roomStateCache struct {
-	now   func() time.Time
+	now func() time.Time
+	// watch, when set, has the room received from the bus while its state
+	// is kept here (Hub.Watch): the other replicas' changes reach it.
+	watch func(roomID string)
 	mu    sync.Mutex
 	rooms map[string]*roomCacheEntry // tenant + room
 }
@@ -68,6 +72,14 @@ func roomCacheKey(ctx context.Context, roomID string) string {
 // missing or older than roomStateTTL.
 func (c *roomStateCache) with(ctx context.Context, roomID string, fn func(e *roomCacheEntry)) {
 	key, now := roomCacheKey(ctx, roomID), c.now()
+	if c.watch != nil {
+		c.mu.Lock()
+		e := c.rooms[key]
+		c.mu.Unlock()
+		if e == nil || now.Sub(e.at) >= roomStateTTL {
+			c.watch(roomID) // before the reads that fill it: none of a change is missed
+		}
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	e := c.rooms[key]
@@ -84,17 +96,6 @@ func (c *roomStateCache) forget(ctx context.Context, roomID string) {
 	c.mu.Lock()
 	delete(c.rooms, roomCacheKey(ctx, roomID))
 	c.mu.Unlock()
-}
-
-// release drops the state of every room this replica no longer owns.
-func (c *roomStateCache) release(owned func(roomID string) bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	for key := range c.rooms {
-		if _, roomID, ok := strings.Cut(key, "\x00"); ok && !owned(roomID) {
-			delete(c.rooms, key)
-		}
-	}
 }
 
 // observe applies one of the room's published events: what it changed is
@@ -328,7 +329,12 @@ func (s cachedRoles) GetMember(ctx context.Context, roomID, userID string) (stor
 }
 
 // initRoomState makes the room state once.
-func (s *Service) initRoomState() { s.roomState = newRoomStateCache(nil) }
+func (s *Service) initRoomState() {
+	s.roomState = newRoomStateCache(nil)
+	if s.Hub != nil && s.Hub.Bus != nil {
+		s.roomState.watch = s.Hub.Watch
+	}
+}
 
 // channelStore is the channel store as realtime reads it: through the room
 // state (nil when the deployment has no channels).

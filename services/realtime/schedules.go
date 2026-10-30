@@ -28,9 +28,9 @@ import (
 //
 // realtime owns schedules because it owns chat publish. Every replica runs
 // the scheduler: the claim protocol (store.ClaimDueSchedules) keeps runs
-// exactly-once across replicas, the claimed slot is posted by the room's
-// owner (postScheduledAtOwner), and the per-slot clientMsgId keeps a
-// re-claimed slot (crashed run) from posting twice.
+// exactly-once across replicas, the replica that claimed a slot posts it,
+// and the per-slot clientMsgId keeps a re-claimed slot (crashed run) from
+// posting twice.
 
 // Schedule caps. These are protocol-level sanity bounds of the feature, not
 // deployment data: a room's schedule list is a human-managed panel (more
@@ -561,7 +561,7 @@ func (s *Service) runClaimedSchedule(ctx context.Context, sc wire.RoomSchedule, 
 	}
 	// Only the room's owner sequences its messages: a slot claimed here for a
 	// room another replica owns is posted there (scaleout.go).
-	seq, err := s.postScheduledAtOwner(tctx, sc, slot)
+	seq, err := s.postScheduled(tctx, sc, slot)
 	switch {
 	case err == nil:
 		res.Status, res.Seq = wire.ScheduleRunOK, seq

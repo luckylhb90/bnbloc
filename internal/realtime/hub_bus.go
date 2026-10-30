@@ -94,6 +94,21 @@ func (h *Hub) joinBus(roomID string) {
 	h.syncBus(roomID, br)
 }
 
+// Watch has the hub receive roomID from the bus for lingerFor (renewed by
+// every call) without a stream of it: what realtime keeps of the room
+// (its room state) hears the other replicas' changes.
+func (h *Hub) Watch(roomID string) {
+	if h.Bus == nil {
+		return
+	}
+	h.joinBus(roomID)
+	h.mu.Lock()
+	if len(h.subs[roomID]) == 0 {
+		h.idleBusLocked(roomID)
+	}
+	h.mu.Unlock()
+}
+
 // syncBus starts the room's order at its stored head. The replay buffer
 // goes: what it holds was not ordered with other replicas' events, so a
 // stream resuming from it could skip one; the stream reads history instead.

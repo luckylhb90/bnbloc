@@ -286,13 +286,12 @@ func TestDispatchFanOutHoldsUnderConcurrency(t *testing.T) {
 	}
 }
 
-// A dispatch arriving at a replica that does not own the room is posted on
-// the owner (RouteKey keys /internal/v1/rooms/{id}/dispatch to the room):
-// only the owner's hub sees it.
-func TestScaleOutDispatchRunsOnRoomOwner(t *testing.T) {
+// A dispatch posted through one replica reaches the room's streams on
+// another.
+func TestReplicasDispatchReachesEveryReplica(t *testing.T) {
 	c := newCluster(t, 2)
 	other, owner := c.reps[0], c.reps[1]
-	room := c.roomOwnedBy(owner)
+	room := "room-1"
 	for _, u := range []string{"maya", "jack", "bob"} {
 		c.members.Add(room, u)
 	}
@@ -304,7 +303,7 @@ func TestScaleOutDispatchRunsOnRoomOwner(t *testing.T) {
 	if _, err := jobs.PutAgentJob(ctx, store.AgentJob{JobID: "job_p", RoomID: room, MessageSeq: 1, RequesterUserID: "maya", OwnerUserID: "jack", Core: "acme", Provider: "codex", Status: store.AgentJobRunning, LeaseBridgeID: "bridge-jack"}); err != nil {
 		t.Fatal(err)
 	}
-	s := c.open(other, "/v1/rooms/"+room+"/events?allChannels=1", "maya")
+	s := c.open(owner, "/v1/rooms/"+room+"/events?allChannels=1", "maya")
 	waitSubscribers(t, owner, room, 1)
 	resp, err := http.DefaultClient.Do(c.request(other, http.MethodPost, "/internal/v1/rooms/"+room+"/dispatch", "jack", toBob("job_p")))
 	if err != nil {
@@ -313,14 +312,11 @@ func TestScaleOutDispatchRunsOnRoomOwner(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("dispatch via non-owner = %d %s", resp.StatusCode, body)
+		t.Fatalf("dispatch = %d %s", resp.StatusCode, body)
 	}
 	ev := eventOf(t, s.next(t, "chat_message"))
 	if !strings.Contains(fmt.Sprint(ev.Payload), "dispatchedBy") {
 		t.Fatalf("chat_message = %+v; want the dispatch marker", ev)
-	}
-	if other.svc.Hub.SubscriberCount(room) != 0 {
-		t.Fatal("the non-owner touched the room's hub")
 	}
 }
 

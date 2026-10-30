@@ -189,8 +189,8 @@ func (h *Hub) SubscribeSince(roomID string, since int64) (sub *Subscriber, gap b
 			}
 		}
 		// Unless the buffer reaches back to since, the client may lack
-		// events in between (the buffer was freed, evicted, or belongs to
-		// a new owner): it fetches the difference. A gap that holds
+		// events in between (the buffer was freed, evicted, or started
+		// again when the room joined the bus): it fetches the difference. A gap that holds
 		// nothing costs one history read.
 		gap = len(snapshot) == 0 || snapshot[0].ev.Sequence > since+1
 		snapshot = kept
@@ -578,27 +578,6 @@ func (h *Hub) commit(batch []*pending) {
 	h.mu.Unlock()
 }
 
-// DeliverCommitted delivers a durable event another replica stored for the
-// room (its previous owner, during a change of owner, still took a message
-// for a moment): once, with its own sequence, to the room's streams and its
-// replay buffer. It reports false when the hub already delivered that
-// sequence (it is in the replay buffer).
-func (h *Hub) DeliverCommitted(ev wire.Event) bool {
-	if ev.Sequence <= 0 || !wire.PersistedFeedKind(ev.Kind) {
-		return false
-	}
-	h.mu.Lock()
-	for _, e := range h.replay[ev.RoomID] {
-		if e.ev.Sequence == ev.Sequence {
-			h.mu.Unlock()
-			return false
-		}
-	}
-	h.mu.Unlock()
-	h.deliver([]*pending{{ev: ev, out: ev, deliver: true}}, false)
-	return true
-}
-
 // recentClientIDs bounds the client ids a room remembers: a retry comes
 // within seconds of its send, far fewer than this many messages later.
 const recentClientIDs = 2048
@@ -760,39 +739,6 @@ func guard[T any](what string, fn func() (T, error)) (v T, err error) {
 		}
 	}()
 	return fn()
-}
-
-// ReleaseRooms drops every room owned reports false for: its subscribers'
-// channels are closed (their streams end, and the clients reconnect to the
-// room's new owner and catch up from history), and its replay buffer and
-// recent client ids are forgotten, so a room that later moves back starts
-// from history instead of a stale buffer. It returns the number of subscriber streams closed. Called when the replica's
-// peer set changes (scale-out ownership).
-func (h *Hub) ReleaseRooms(owned func(roomID string) bool) int {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	closed := 0
-	for roomID, set := range h.subs {
-		if owned(roomID) {
-			continue
-		}
-		for sub := range set {
-			close(sub.ch)
-			closed++
-		}
-		delete(h.subs, roomID)
-	}
-	for roomID := range h.replay {
-		if !owned(roomID) {
-			delete(h.replay, roomID)
-		}
-	}
-	for roomID := range h.recent {
-		if !owned(roomID) {
-			delete(h.recent, roomID)
-		}
-	}
-	return closed
 }
 
 // roomQueue returns the room's group commit queue, creating it on first use.

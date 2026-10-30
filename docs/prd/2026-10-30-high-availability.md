@@ -1,7 +1,10 @@
 # No single point of failure (2026-10-30)
 
-Status: built (2026-10-30). The owner, on hearing the services run as one
-replica each: "现在服务都是单点，怎么更好的解决单点问题？" and "有问题就解决啊". Owner:
+Status: built (2026-10-30); realtime's ownership parts (forward retry,
+`Leave`, the hand-over) are superseded the same day by
+`docs/prd/2026-10-30-replicas-without-owners.md` (realtime replicas have no
+owners). Drain, the client's resend, gap reads and the chart settings
+stay. The owner, on hearing the services run as one replica each: "现在服务都是单点，怎么更好的解决单点问题？" and "有问题就解决啊". Owner:
 the service runtime (`internal/obs`), the scale-out set (`internal/shard`),
 realtime's room hand-over (`services/realtime/handover.go`), the Helm chart
 (`deploy/k8s`), the web stream client (`web/src/lib/sse.ts`,

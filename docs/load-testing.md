@@ -487,6 +487,7 @@ scripts/failover-check.sh
 | + the new owner delivers what the previous one stored | 6,000 | 10 | 300 | 279 |
 | + a stream resuming in a room that just changed owner reads the difference | 6,000 | **0** | 300 | 203 |
 | + a draining replica leaves its peer set at once; new streams refused with 503 | 6,000 | **0** | 300 | 320 (503, retried) |
+| replicas without owners: the store numbers rooms, a bus between replicas (`compose.ha.yml` sets it) | 6,000 | **0** | 300 | 232 (503, retried) |
 
 What each step fixed:
 
@@ -510,6 +511,13 @@ What each step fixed:
   failed on its own cancelled lookups. It is refused with 503 and
   `Retry-After: 1`, and a request cancelled by its client or the drain is
   logged as 499, not as a server error.
+
+- **Without owners** (`docs/prd/2026-10-30-replicas-without-owners.md`) the
+  same drill reconnected streams 240 times and sent 4 `stream_gap`s, where
+  the owned rooms took 564 to 884 reconnects and about 450 gaps: only the
+  streams of the replica that went reopen (about 100 each time), since no
+  room moves when a replica leaves or joins. 19,900 of 19,900 deliveries,
+  p99 218 ms on this laptop under a load average of 75 to 94.
 
 In Kubernetes a draining pod leaves its Service's endpoints within the 2 s
 readiness period; in Compose the gateway keeps resolving it until it stops,

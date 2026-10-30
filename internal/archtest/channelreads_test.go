@@ -43,7 +43,6 @@ func TestChannelReadsAskTheRule(t *testing.T) {
 		"services/realtime/service.go:messageChannel":      "reads a message's channel id for its caller to check (edit, delete)",
 		"services/realtime/threads.go:replyRef":            "reads the quoted message only when it is of the channel the poster may read (PostChat asked) or that thread's root",
 		"services/realtime/threads.go:openPostThread":      "the forum post PostChat just stored, in a channel PostChat checked its author may read",
-		"services/realtime/handover.go:watchHandover":      "hands rows another replica stored to the hub, whose streams ask MayReadChannel of every event they write",
 		// room
 		"services/room/appdata.go:serveApp":                 "the app the request's signed app scope names (its ticket or its agent's job)",
 		"services/room/channels.go:handleGetPeopleChat":     "the people chat is no section's",

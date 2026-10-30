@@ -70,7 +70,8 @@ func (in *inbox) wait(t *testing.T, n int) []wire.Event {
 // an endpoint never receives its own; a cancelled subscription receives
 // nothing more.
 func TestBusCarriesEventsInOrder(t *testing.T) {
-	a, b := testBus(t), testBus(t)
+	ta, tb := testBus(t), testBus(t)
+	a, b := realtime.RoomBus(ta), realtime.RoomBus(tb)
 	r := testRoom(t)
 	var onA, onB inbox
 	cancelA, err := a.Subscribe(r, onA.deliver, onA.lose)
@@ -117,7 +118,7 @@ func TestBusCarriesEventsInOrder(t *testing.T) {
 // A subscriber connection that breaks is subscribed again, and each room is
 // told it may have missed events; delivery goes on.
 func TestBusReportsLossAfterAReconnect(t *testing.T) {
-	a, b := testBus(t), testBus(t)
+	a, b := realtime.RoomBus(testBus(t)), realtime.RoomBus(testBus(t))
 	r := testRoom(t)
 	var onB inbox
 	if _, err := b.Subscribe(r, onB.deliver, onB.lose); err != nil {
@@ -158,7 +159,7 @@ func TestHubsShareARoomOverRedis(t *testing.T) {
 	hubs := make([]*realtime.Hub, 2)
 	for i := range hubs {
 		hubs[i] = realtime.NewHub(256, 1024)
-		hubs[i].Bus, hubs[i].RoomHead = testBus(t), head
+		hubs[i].Bus, hubs[i].RoomHead = realtime.RoomBus(testBus(t)), head
 	}
 	r := testRoom(t)
 	subs := []*realtime.Subscriber{hubs[0].SubscribeLive(r), hubs[1].SubscribeLive(r)}
@@ -209,5 +210,36 @@ func TestClaimOncePerTTL(t *testing.T) {
 	time.Sleep(wait + 20*time.Millisecond)
 	if ok, _, err := b.Claim(key, 300*time.Millisecond); err != nil || !ok {
 		t.Fatalf("after the wait ok=%v err=%v", ok, err)
+	}
+}
+
+// A key is marked while any holder's mark of it is live.
+func TestMarks(t *testing.T) {
+	a, b := testBus(t), testBus(t)
+	key := testRoom(t)
+	if ok, err := b.Marked(key); err != nil || ok {
+		t.Fatalf("unset mark: %v %v", ok, err)
+	}
+	if err := a.Mark(key, "a", 200*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := b.Marked(key); !ok {
+		t.Fatal("the mark is not seen by another endpoint")
+	}
+	time.Sleep(250 * time.Millisecond)
+	if ok, _ := b.Marked(key); ok {
+		t.Fatal("the mark outlived its time")
+	}
+	_ = a.Mark(key, "a", time.Minute)
+	_ = b.Mark(key, "b", time.Minute)
+	if err := a.Unmark(key, "a"); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := b.Marked(key); !ok {
+		t.Fatal("one holder's unmark removed another's mark")
+	}
+	_ = b.Unmark(key, "b")
+	if ok, _ := a.Marked(key); ok {
+		t.Fatal("unmarked by every holder, still there")
 	}
 }

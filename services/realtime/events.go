@@ -66,7 +66,7 @@ type eventLimiters struct {
 	source, task ratelimit.Lazy
 }
 
-func (s *Service) replicas() int { return s.Peers.Set().Size() }
+func (s *Service) replicas() int { return s.Replicas.count() }
 
 func (s *Service) sourceLimiter() *ratelimit.Limiter {
 	return s.eventLimits.source.Get(sourceEventRate, sourceEventBurst, s.replicas)

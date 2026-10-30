@@ -17,7 +17,7 @@ agent CLI ──MCP──▶ bridge room tools server (127.0.0.1, per-session be
 gateway POST /v1/rooms/{room}/dispatch      (room scope, drive_agent, chat rate limit)
                      │ rewritten + svcauth-signed as the bridge owner
                      ▼
-realtime POST /internal/v1/rooms/{room}/dispatch   (RouteKey → the room's owner replica)
+realtime POST /internal/v1/rooms/{room}/dispatch   (any replica)
                      │ guards, then PostChat as the parent job's requester
                      ▼
 chat_message {dispatchedBy} + agent job {dispatchedByJobId, dispatchDepth}
@@ -416,8 +416,8 @@ component (that would list it in a Library), so it is staged as an
 `wire.DispatchRequest {parentJobId, recipient, text, expert?, draft?, clientMsgId?, role?}`
 (`expert` is a `wire.ChatExpert {id, version?}`).
 The gateway's public door `POST /v1/rooms/{room}/dispatch` is the only edge
-route rewritten onto an internal one. `RouteKey` keys the path to the room,
-so the post (which touches the room's hub) runs on the room's owner replica.
+route rewritten onto an internal one. Any realtime replica serves it: the
+post reaches the room's streams on every replica over the bus.
 
 **Guards** (refusals answer `{code, error}`; every decision, admitted or
 refused, is an `extension_audit` row of kind `agent_dispatch` with the
