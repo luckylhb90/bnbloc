@@ -35,8 +35,14 @@ func main() {
 	// events, SSE connections, notification delivery; docs/monitoring.md).
 	metrics := obs.NewMetrics("bnbloc-realtime")
 	realtime.RegisterMetrics(metrics)
+	// A deployment still configured for owned rooms runs several replicas:
+	// without a bus they would each serve their own share of every room's
+	// streams, so it must not start until the bus is set.
 	if config.FromEnvRaw("BNBLOC_REALTIME_PEERS") != "" {
-		log.Printf("bnbloc-realtime: BNBLOC_REALTIME_PEERS is no longer read: realtime replicas have no owners and share a bus (%s); remove it", redisbus.EnvURL)
+		if config.FromEnvRaw(redisbus.EnvURL) == "" {
+			log.Fatalf("bnbloc-realtime: BNBLOC_REALTIME_PEERS is set (several replicas) but %s is not: realtime replicas have no owners now and share a bus; set it (docs/production-deployment.md#high-availability) and remove BNBLOC_REALTIME_PEERS/_SELF", redisbus.EnvURL)
+		}
+		log.Printf("bnbloc-realtime: BNBLOC_REALTIME_PEERS is no longer read: realtime replicas have no owners and share the bus; remove it and BNBLOC_REALTIME_SELF")
 	}
 	pulseEm, pulseKey, err := pulse.FromEnv(context.Background(), "realtime")
 	if err != nil {
