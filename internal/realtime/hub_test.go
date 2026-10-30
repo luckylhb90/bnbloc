@@ -446,3 +446,25 @@ func TestSubscribeSinceSendsTheDifference(t *testing.T) {
 	}
 	h.Unsubscribe("r", sub)
 }
+
+// A message another replica stored (the room's previous owner) is delivered
+// once, and the room's counter moves past it.
+func TestDeliverCommittedOnceAndPastTheCounter(t *testing.T) {
+	h := NewHub(8, 8)
+	sub := h.SubscribeLive("r")
+	defer h.Unsubscribe("r", sub)
+	h.Publish(wire.Event{RoomID: "r", Kind: wire.KindChatMessage}) // seq 1, delivered here
+	<-sub.Events()
+	if h.DeliverCommitted(wire.Event{RoomID: "r", Sequence: 1, Kind: wire.KindChatMessage}) {
+		t.Fatal("a sequence this hub delivered was delivered again")
+	}
+	if !h.DeliverCommitted(wire.Event{RoomID: "r", Sequence: 2, Kind: wire.KindChatMessage}) || (<-sub.Events()).Sequence != 2 {
+		t.Fatal("the other replica's message was not delivered")
+	}
+	if h.DeliverCommitted(wire.Event{RoomID: "r", Sequence: 2, Kind: wire.KindChatMessage}) {
+		t.Fatal("delivered twice")
+	}
+	if ev := h.Publish(wire.Event{RoomID: "r", Kind: wire.KindChatMessage}); ev.Sequence != 3 {
+		t.Fatalf("the next sequence = %d, want 3 (past the other replica's)", ev.Sequence)
+	}
+}

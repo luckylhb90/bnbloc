@@ -17,11 +17,11 @@ import (
 )
 
 // Reconnect backoff of the web client's subscribeRoom: 1s doubling up to
-// 30s, with 50-100% jitter, reset by a successful open. Variables only so
+// 8s, with 50-100% jitter, reset by a successful open. Variables only so
 // tests can shorten them.
 var (
 	reconnectBase = time.Second
-	reconnectMax  = 30 * time.Second
+	reconnectMax  = 8 * time.Second
 )
 
 // stream is one member's room SSE subscription, held for the whole run and
@@ -264,12 +264,22 @@ func activityReport(streams []*stream, ss *streamStats) ActivityReport {
 // each message found there as delivered to this stream (a recovered one,
 // not a lost one).
 func (st *stream) fillGap() {
-	ids, err := st.api.historyClientIDs(context.Background(), st.member, st.room.id, st.channel)
-	if err != nil {
-		return
-	}
-	at := time.Now()
-	for _, id := range ids {
-		st.tracker.deliver(st.id, id, at)
+	for i, wait := range gapReads {
+		if i > 0 {
+			time.Sleep(wait)
+		}
+		ids, err := st.api.historyClientIDs(context.Background(), st.member, st.room.id, st.channel)
+		if err != nil {
+			continue
+		}
+		at := time.Now()
+		for _, id := range ids {
+			st.tracker.deliver(st.id, id, at)
+		}
 	}
 }
+
+// gapReads are when the web client reads a gap's difference: at once, and
+// again once a room's owners agree (web/src/lib/useRoomStream.ts
+// GAP_SETTLE_MS).
+var gapReads = []time.Duration{0, 3 * time.Second}

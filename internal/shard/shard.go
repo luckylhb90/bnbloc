@@ -33,6 +33,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/obs"
@@ -68,6 +69,8 @@ const (
 // Set is one service's live peer set.
 type Set struct {
 	self string
+	// leaving: this replica is stopping (Leave); it owns nothing from now.
+	leaving atomic.Bool
 	// Exactly one of dnsHost (DNS mode, with dnsPort) or static (list mode)
 	// names the candidates.
 	dnsHost string
@@ -219,6 +222,13 @@ func New(o Options) (*Set, error) {
 }
 
 func (s *Set) parseSelf(self string) (string, error) {
+	if self == SelfAuto {
+		ip, err := localAddress()
+		if err != nil {
+			return "", err
+		}
+		self = ip
+	}
 	if ip := net.ParseIP(strings.Trim(self, "[]")); ip != nil {
 		if s.dnsHost == "" {
 			return "", fmt.Errorf("shard: own address %q has no port (a bare address is accepted only with a DNS peer name)", self)
@@ -447,10 +457,17 @@ func (s *Set) refresh(ctx context.Context, resolve bool) {
 		if st == nil {
 			st = &peerState{}
 		}
-		if results[i] {
-			st.up, st.fails = true, 0
-		} else if st.fails++; st.fails >= downAfter {
+		switch {
+		case addr == s.self && s.leaving.Load():
+			// Leaving (Leave): out of its own view at once, not after
+			// downAfter probes.
 			st.up = false
+		case results[i]:
+			st.up, st.fails = true, 0
+		default:
+			if st.fails++; st.fails >= downAfter {
+				st.up = false
+			}
 		}
 		next[addr] = st
 		if st.up {
@@ -474,6 +491,18 @@ func (s *Set) refresh(ctx context.Context, resolve bool) {
 	for _, fn := range listeners {
 		fn(changed)
 	}
+}
+
+// Leave takes this replica out of its own view at once (it is stopping):
+// every key it owned is forwarded to its new owner from now, and the
+// listeners release the keys' state (their streams reopen there). The other
+// replicas drop it when its /readyz turns 503.
+func (s *Set) Leave() {
+	if s == nil {
+		return
+	}
+	s.leaving.Store(true)
+	s.refresh(context.Background(), false)
 }
 
 // OnRefresh registers fn to run after every refresh, with changed reporting
@@ -569,4 +598,23 @@ func score(peer, key string) uint64 {
 	x *= 0xc4ceb9fe1a85ec53
 	x ^= x >> 33
 	return x
+}
+
+// SelfAuto as <prefix>_SELF takes this host's own address: its first
+// non-loopback unicast address (a container's, where no downward API gives
+// the pod IP: Docker Compose with replicas). DNS peer names only.
+const SelfAuto = "auto"
+
+// localAddress is this host's first non-loopback unicast address.
+func localAddress() (string, error) {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return "", fmt.Errorf("shard: own address (auto): %w", err)
+	}
+	for _, a := range addrs {
+		if n, ok := a.(*net.IPNet); ok && n.IP.IsGlobalUnicast() {
+			return n.IP.String(), nil
+		}
+	}
+	return "", errors.New("shard: own address (auto): no non-loopback address")
 }

@@ -24,7 +24,7 @@ for a deployment and to compare runs before and after a change.
    room's members are spread over them round-robin: member k has channel
    k mod C open. The streams count as present members and receive presence
    events. They open evenly over the ramp-up. A dropped stream reopens with
-   the web client's backoff: 1 s doubling to 30 s, with jitter.
+   the web client's backoff: 1 s doubling to 8 s, with jitter.
 4. **Sends.** After the ramp-up it sends chat at the target total rate, the
    way `api.sendChat` does: `POST /v1/rooms/{id}/chat` with `text`,
    `atUnixMs`, a unique `clientMsgId` and the `channelId` the member has
@@ -460,3 +460,54 @@ state is read from the owner's memory, preferences once per member per 30 s,
 the client id from the hub, and the follow mark is written behind, only when
 it changes something. The one select left is the room service's membership
 check.
+
+## Failover (2026-10-30)
+
+`compose.ha.yml` runs the dev stack with replicas (realtime 3, relay 2,
+room, activity and shareagent 2 each). `scripts/failover-check.sh` loads it
+(300 members in 30 rooms of 3 channels, 50 msgs/s, 120 s) and meanwhile
+drains one realtime replica (`docker stop`, SIGTERM), starts it again, kills
+another (`docker kill`), and starts it again. It passes when every send is
+stored, every delivery arrives, and every stream is open at the end; the
+load tool behaves as the web client does (it resends a 5xx with the same
+`clientMsgId`, reopens with `since`, reads history on `stream_gap`).
+
+```sh
+docker compose -f compose.yml -f compose.ha.yml up -d --build
+scripts/failover-check.sh
+```
+
+| Build | Sends stored | Deliveries lost | Streams open at the end | Stream opens refused |
+| --- | --- | --- | --- | --- |
+| before (no drain, no resend, no handover) | 5,966 of 6,000 (34 answered 500/502) | 49 | 275 of 300 | 212 (500/502) |
+| a dead owner's request sent on to the next, sends resent, shorter reconnect backoff | 6,000 | 10 | 300 | 203 (502) |
+| + the new owner delivers what the previous one stored | 6,000 | 10 | 300 | 279 |
+| + a stream resuming in a room that just changed owner reads the difference | 6,000 | **0** | 300 | 203 |
+| + a draining replica leaves its peer set at once; new streams refused with 503 | 6,000 | **0** | 300 | 320 (503, retried) |
+
+What each step fixed:
+
+- **Sends failed** where a request reached a replica whose view still named
+  the dead one as owner (502), or two replicas briefly both owned a room and
+  one's commit hit the other's sequence (500). The forward now waits for the
+  view to drop a peer it could not connect to and serves the request again
+  through the new owner (nothing of it had reached the dead one); the web
+  client and the load tool resend a 5xx with the same `clientMsgId`.
+- **Streams stayed closed**: after a few failed reopens the client waited up
+  to 30 s. The backoff now stops at 8 s.
+- **Messages were lost** while the replicas' views disagreed (a replica
+  joining is seen by the others up to 5 s apart: DNS is re-read every 5 s).
+  A replica that still thought it owned a room stored a message whose live
+  event reached nobody, and a client that resumed from its last sequence
+  never learned of an earlier one the other owner had written. A replica
+  that starts serving a room now reads the room's newest rows for 6 s and
+  delivers those it did not, and a stream resuming in such a room is told to
+  read the difference.
+- **Drains cut new streams with 500s**: a stream opening on a draining replica
+  failed on its own cancelled lookups. It is refused with 503 and
+  `Retry-After: 1`, and a request cancelled by its client or the drain is
+  logged as 499, not as a server error.
+
+In Kubernetes a draining pod leaves its Service's endpoints within the 2 s
+readiness period; in Compose the gateway keeps resolving it until it stops,
+which is where the 503s come from.

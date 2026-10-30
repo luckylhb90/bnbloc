@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -175,5 +176,48 @@ func TestForwardToDeadOwnerIs502(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusBadGateway {
 		t.Fatalf("status %d, want 502", resp.StatusCode)
+	}
+}
+
+// A request whose owner cannot be reached is served again once the view has
+// dropped that owner — by the key's new owner, its body intact — instead of
+// failing: nothing of it had reached the dead one.
+func TestForwardToDeadOwnerIsServedByTheNext(t *testing.T) {
+	a, b := httptest.NewUnstartedServer(nil), httptest.NewUnstartedServer(nil)
+	addrA, addrB := a.Listener.Addr().String(), b.Listener.Addr().String()
+	var bDown atomic.Bool
+	probe := func(_ context.Context, addr string) bool { return !(addr == addrB && bDown.Load()) }
+	set, err := New(Options{Peers: addrA + "," + addrB, Self: addrA, Probe: probe, Interval: 50 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	set.Refresh(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	set.Start(ctx)
+	echo := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		fmt.Fprintf(w, "%s:%s", addrA, body)
+	})
+	a.Config.Handler = Forward(set, func(r *http.Request) (string, bool) { return strings.CutPrefix(r.URL.Path, "/k/") }, echo)
+	a.Start()
+	defer a.Close()
+	b.Start()
+	var key string
+	for i := 0; ; i++ {
+		if key = fmt.Sprintf("room:%d", i); Owner([]string{addrA, addrB}, key) == addrB {
+			break
+		}
+	}
+	b.Close() // the owner dies
+	bDown.Store(true)
+	resp, err := http.Post(a.URL+"/k/"+key, "application/json", strings.NewReader(`{"text":"hi"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || string(got) != addrA+`:{"text":"hi"}` {
+		t.Fatalf("status %d body %q, want served by the remaining replica with the body", resp.StatusCode, got)
 	}
 }

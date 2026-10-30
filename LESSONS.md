@@ -575,6 +575,20 @@ Evidence: docs/bugs/2026-10-30-presence-snapshot-storm.md,
 docs/load-testing.md ("One large room over channels").
 Seen 1× (2026-10-30).
 
+### Drill a failover under load and count every message by id before calling a service highly available
+
+Every service "supported" replicas: the code paths existed and the unit
+tests passed. The first drill (one realtime replica drained, one killed,
+both brought back, 50 msgs/s) failed 34 sends, lost 49 deliveries and left
+25 streams closed: a request forwarded to a dead owner, two owners for a
+moment, a resume from a high-water mark that hid a lower sequence, a
+30 s backoff, no drain. None of it shows without load and a tracker that
+matches each message to each stream.
+
+Evidence: docs/bugs/2026-10-30-owner-change-loses-messages.md,
+`scripts/failover-check.sh`, docs/load-testing.md ("Failover").
+Seen 1× (2026-10-30).
+
 ## Done right
 
 ### Replay a member's long task across a release, not just a smoke reply

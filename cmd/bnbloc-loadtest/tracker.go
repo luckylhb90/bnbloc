@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"sort"
 	"sync"
 	"time"
 )
@@ -134,4 +136,33 @@ func (t *tracker) outstanding() int {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.expected - t.delivered
+}
+
+// lostSamples describes up to n committed sends still missing somewhere:
+// when each was sent and on which streams it never arrived.
+func (t *tracker) lostSamples(n int) []string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	var out []string
+	for id, m := range t.msgs {
+		if !m.committed || m.done {
+			continue
+		}
+		var missing []int
+		for s := range m.expected {
+			if !m.got[s] {
+				missing = append(missing, s)
+			}
+		}
+		if len(missing) == 0 {
+			continue
+		}
+		sort.Ints(missing)
+		out = append(out, fmt.Sprintf("%s sent %s, missing on streams %v", id, m.start.Format("15:04:05.000"), missing))
+		if len(out) == n {
+			break
+		}
+	}
+	sort.Strings(out)
+	return out
 }

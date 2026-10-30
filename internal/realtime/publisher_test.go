@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/svcauth"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
@@ -47,5 +49,32 @@ func TestHTTPPublisherDropsTenantlessEvent(t *testing.T) {
 	NewHTTPPublisher(srv.URL, "room").Publish(context.Background(), wire.Event{RoomID: "room-1", Kind: "artifact_updated"})
 	if called {
 		t.Fatal("tenantless event must not be published")
+	}
+}
+
+// A publish that meets a refusal of the moment (a replica restarting, a room
+// changing owner: a 5xx) is tried again in the background; a 4xx is not.
+func TestHTTPPublisherRetriesA5xx(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) < 3 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	p := NewHTTPPublisher(srv.URL, "room")
+	start := time.Now()
+	p.Publish(tenant.NewContext(context.Background(), "t1"), wire.Event{RoomID: "room-1", Kind: wire.EventChannelUpdated})
+	if time.Since(start) > 300*time.Millisecond {
+		t.Fatal("the caller waited for the retries")
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for calls.Load() < 3 {
+		if time.Now().After(deadline) {
+			t.Fatalf("calls = %d, want the publish tried until it was taken", calls.Load())
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

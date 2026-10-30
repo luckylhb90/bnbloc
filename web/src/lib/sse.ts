@@ -68,7 +68,10 @@ export function subscribeRoom(
   // to refresh the token before the next attempt.
   const REAUTH_AFTER = 3;
   const BASE_DELAY_MS = 1000;
-  const MAX_DELAY_MS = 30_000;
+  // A replica that stops hands its rooms to the others within seconds: a
+  // stream that failed a few times while that happened must not then wait
+  // half a minute (the reopen resumes from its last sequence, cheaply).
+  const MAX_DELAY_MS = 8_000;
 
   const handle = (raw: string) => {
     if (!raw) return;

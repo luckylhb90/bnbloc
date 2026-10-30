@@ -1,0 +1,36 @@
+# High-availability overlay for the dev stack: every service that can run more
+# than once does, so a replica can be stopped or killed while load runs
+# (docs/load-testing.md "Failover"). Not a production layout: production is the
+# Helm chart (docs/production-deployment.md#high-availability).
+#
+#   docker compose -f compose.yml -f compose.ha.yml up -d --build
+#   docker stop <one realtime container>      # a drain (SIGTERM)
+#   docker kill <one realtime container>      # a crash
+#
+# realtime and relay scale out by key ownership: each replica finds the others
+# through the service's DNS name (one address per container) and takes its own
+# address from its interface (_SELF=auto). More than one realtime replica needs
+# one blob store for all: here the attachments volume every replica mounts
+# (in production S3, or an NFS/EFS mount).
+services:
+  realtime:
+    deploy: { replicas: 3 }
+    environment:
+      BNBLOC_REALTIME_PEERS: "realtime:8082"
+      BNBLOC_REALTIME_SELF: "auto"
+      BNBLOC_ATTACHMENTS_DIR_SHARED: "true"
+
+  relay:
+    deploy: { replicas: 2 }
+    environment:
+      BNBLOC_RELAY_PEERS: "relay:8085"
+      BNBLOC_RELAY_SELF: "auto"
+
+  room:
+    deploy: { replicas: 2 }
+
+  activity:
+    deploy: { replicas: 2 }
+
+  shareagent:
+    deploy: { replicas: 2 }

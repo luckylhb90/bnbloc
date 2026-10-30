@@ -565,6 +565,31 @@ func (h *Hub) commit(batch []*pending) {
 	h.mu.Unlock()
 }
 
+// DeliverCommitted delivers a durable event another replica stored for the
+// room (its previous owner, during a change of owner, still took a message
+// for a moment): once, with its own sequence, to the room's streams and its
+// replay buffer, and the room's counter moves past it so this replica never
+// reissues that sequence. It reports false when the hub already delivered
+// that sequence (it is in the replay buffer).
+func (h *Hub) DeliverCommitted(ev wire.Event) bool {
+	if ev.Sequence <= 0 || !wire.PersistedFeedKind(ev.Kind) {
+		return false
+	}
+	h.mu.Lock()
+	for _, e := range h.replay[ev.RoomID] {
+		if e.ev.Sequence == ev.Sequence {
+			h.mu.Unlock()
+			return false
+		}
+	}
+	if cur, ok := h.seq[ev.RoomID]; ok && cur < ev.Sequence {
+		h.seq[ev.RoomID] = ev.Sequence
+	}
+	h.mu.Unlock()
+	h.deliver([]*pending{{ev: ev, out: ev, deliver: true}})
+	return true
+}
+
 // recentClientIDs bounds the client ids a room remembers: a retry comes
 // within seconds of its send, far fewer than this many messages later.
 const recentClientIDs = 2048
@@ -632,6 +657,17 @@ func (h *Hub) store(j Journal, rows []store.RoomMessage) error {
 // (or needs no commit) and is meant to be delivered. Holding mu across the
 // batch keeps it contiguous on every stream.
 func (h *Hub) deliver(batch []*pending) {
+	// One encoding for every stream of the room (and the replay buffer),
+	// made before the hub's lock is taken: the lock covers only handing the
+	// bytes to the room's streams, so one busy room's delivery holds no
+	// other room for long.
+	for _, p := range batch {
+		if p.deliver && p.err == nil && p.dupOf == nil {
+			if b, err := json.Marshal(p.out); err == nil {
+				p.out.Encoded = b
+			}
+		}
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	for _, p := range batch {
@@ -639,12 +675,6 @@ func (h *Hub) deliver(batch []*pending) {
 			continue
 		}
 		ev := p.out
-		// One encoding for every stream of the room (and the replay buffer).
-		if len(h.subs[ev.RoomID]) > 0 || wire.ReplayedKind(ev.Kind) {
-			if b, err := json.Marshal(ev); err == nil {
-				ev.Encoded = b
-			}
-		}
 		switch {
 		case ev.Kind == wire.EventRoomDeleted:
 			// Nothing of a deleted room may replay into a later room that

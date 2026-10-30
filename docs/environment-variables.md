@@ -36,6 +36,7 @@ Three deployment shapes consume these differently:
 
 | Variable | Scope | Meaning |
 | --- | --- | --- |
+| `BNBLOC_PPROF` | every Go service | `1` serves Go's profiler (`/debug/pprof/`) where `/metrics` is served (the internal listener, or an internal service's main listener), never on a public listener. Off by default. |
 | `BNBLOC_METRICS_ADDR` | every Go service | Internal listen address for Prometheus `/metrics` (e.g. `:9090`). Set: `/metrics` is served only there, never on the main listener. Unset: internal services (room, activity, realtime, shareagent, relay) keep `/metrics` on their main listener, which is reachable only on the private service network, and the gateway — the public edge — serves no metrics at all. The gateway's main listener always answers `/metrics` with 404. A value equal to an internal service's own listen address is the same as unset (logged); on the gateway it refuses to start, since it would publish `/metrics`. Never publish this port. The compose files and the Helm chart set `:9090` for the gateway; the all-in-one image hands the value (default `:9090`) to the gateway process only, since its six services share one network namespace. |
 
 ## Required on stateful / authenticated services
@@ -113,8 +114,8 @@ chart sets them when `replicas > 1` or an HPA is enabled.
 
 | Variable | Scope | Default | Meaning |
 | --- | --- | --- | --- |
-| `BNBLOC_REALTIME_PEERS` | realtime | — | The realtime replica set. One `host:port` is a DNS name re-resolved every 5 s, each address a peer at that port (a Kubernetes headless Service: `bnbloc-realtime-peers:8082`); a comma list of two or more `host:port` is a fixed set. Every candidate is probed every second (`GET /readyz`; two consecutive failures drop it, about 2 s), and a failed call to a live peer re-probes it at once (about 0.25 s under traffic), so a dead or unready replica leaves the set in both forms. With peers configured, startup refuses the disk blob store (more than one replica requires `BNBLOC_ATTACHMENTS_S3_BUCKET`). |
-| `BNBLOC_REALTIME_SELF` | realtime | — | This replica's own address as its peers reach it: `host:port` (one of the list's entries in list form), or a bare IP that takes the DNS entry's port (the pod IP from the downward API; IPv6-safe). |
+| `BNBLOC_REALTIME_PEERS` | realtime | — | The realtime replica set. One `host:port` is a DNS name re-resolved every 5 s, each address a peer at that port (a Kubernetes headless Service: `bnbloc-realtime-peers:8082`); a comma list of two or more `host:port` is a fixed set. Every candidate is probed every second (`GET /readyz`; two consecutive failures drop it, about 2 s), and a failed call to a live peer re-probes it at once (about 0.25 s under traffic), so a dead or unready replica leaves the set in both forms. With peers configured, startup refuses the disk blob store (more than one replica requires `BNBLOC_ATTACHMENTS_S3_BUCKET`, or `BNBLOC_ATTACHMENTS_DIR_SHARED=true` for a directory every replica mounts). |
+| `BNBLOC_REALTIME_SELF` | realtime | — | This replica's own address as its peers reach it: `host:port` (one of the list's entries in list form), or a bare IP that takes the DNS entry's port (the pod IP from the downward API; IPv6-safe), or `auto` (DNS form only): this host's first non-loopback address, for Docker Compose replicas (`compose.ha.yml`). |
 | `BNBLOC_RELAY_PEERS` / `BNBLOC_RELAY_SELF` | relay | — | The same pair for the relay (keys: sync session keys). |
 | `BNBLOC_GATEWAY_PEERS` | gateway | — | The gateway replica set, same forms (Helm: `bnbloc-gateway-peers:8080`). The gateway owns no keys; it divides every per-replica rate limit (chat/borrow per subject, guess, public share reads) by the live replica count so N replicas enforce the configured budget in total, not N times it. Unset = one replica. |
 
@@ -144,6 +145,7 @@ Default is a local disk directory. For more than one host, use S3.
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `BNBLOC_ATTACHMENTS_DIR` | `/var/lib/bnbloc/attachments` (image) | Local blob directory. The service images create it owned by the nonroot user, so a named volume mounted there is writable. Max attachment 25 MiB; staged sidecar artifacts up to 256 MiB; room artifact files up to `BNBLOC_ARTIFACT_MAX_BYTES`. |
+| `BNBLOC_ATTACHMENTS_DIR_SHARED` | `false` | `true`: every realtime replica mounts `BNBLOC_ATTACHMENTS_DIR` (an NFS or EFS mount, a Compose volume), so the disk store may serve more than one replica. Writes are a temporary file renamed into place, safe on one file system. |
 | `BNBLOC_ATTACHMENTS_S3_BUCKET` | — | S3 bucket. Setting it switches from disk to S3. |
 | `BNBLOC_ATTACHMENTS_S3_REGION` | — | S3 region (falls back to `AWS_REGION` / `AWS_DEFAULT_REGION`). |
 | `BNBLOC_ATTACHMENTS_S3_ENDPOINT` | — | S3-compatible endpoint (empty = AWS). |

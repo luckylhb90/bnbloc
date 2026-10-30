@@ -127,3 +127,13 @@ func (pm *postMarks) forget(ctx context.Context, ev wire.Event) {
 	delete(pm.marked, postKey{tenant.FromContext(ctx), ev.RoomID, p.ChannelID, p.UserID})
 	pm.mu.Unlock()
 }
+
+// Shutdown is what a stopping replica finishes before it exits (registered
+// with obs.OnShutdown): the follow marks written behind, and the
+// notifications of what it observed.
+func (s *Service) Shutdown(ctx context.Context) {
+	s.postMarks.flush()
+	if s.Notifications != nil {
+		s.Notifications.Observer.Drain(ctx)
+	}
+}

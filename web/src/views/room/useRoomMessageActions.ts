@@ -2,6 +2,7 @@ import { useCallback, useMemo, type Dispatch, type SetStateAction } from "react"
 import { api, ApiError, type ChatAttachment, type Room } from "@/lib/api";
 import { isPlatformOffline, PLATFORM_OFFLINE_MESSAGE } from "@/lib/platformAgents";
 import { onboardingEvents } from "@/lib/onboardingEvents";
+import { withSendRetry } from "@/lib/sendRetry";
 import { borrowTarget } from "@/lib/roomAgents";
 import { useToast } from "@/ui/Toast";
 import type { RoomAgent } from "@/views/composer/types";
@@ -109,7 +110,9 @@ export function useRoomMessageActions({
   const deliver: (localId: number, clientMsgId: string, out: OutgoingMessage) => Promise<Delivery> = useCallback(
     async (localId: number, clientMsgId: string, out: OutgoingMessage): Promise<Delivery> => {
       try {
-        const { sequence } = await api.sendChat(roomId, out, clientMsgId);
+        // A moment of trouble (a replica stopping) is sent again with the
+        // same clientMsgId: stored once (lib/sendRetry).
+        const { sequence } = await withSendRetry(() => api.sendChat(roomId, out, clientMsgId));
         setFeed((f) => ackSent(f, localId, sequence));
         onboardingEvents.emit({ kind: "message_sent", roomId, source: "action", seq: sequence, toAgent: !!out.recipient });
         return "accepted";

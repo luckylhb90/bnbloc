@@ -61,6 +61,23 @@ spec:
     metadata:
       labels: { app.kubernetes.io/name: bnbloc-{{ $name }} }
     spec:
+      # A stopping pod drains (internal/obs/drain.go): not ready, its streams
+      # end and its keys move, then the requests in flight finish (5 s + up
+      # to 20 s). The grace period covers both.
+      terminationGracePeriodSeconds: 40
+      {{- if $scaled }}
+      # Replicas on different nodes, and zones where there are several: one
+      # node or zone lost leaves the service up.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector: { matchLabels: { app.kubernetes.io/name: bnbloc-{{ $name }} } }
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector: { matchLabels: { app.kubernetes.io/name: bnbloc-{{ $name }} } }
+      {{- end }}
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
@@ -247,7 +264,10 @@ spec:
             periodSeconds: 20
           readinessProbe:
             httpGet: { path: /readyz, port: {{ $port }} }
-            periodSeconds: 10
+            # Short enough that a draining pod leaves its Service within
+            # the drain's 5 s.
+            periodSeconds: 2
+            failureThreshold: 1
           resources: {{- toYaml ($cfg.resources | default $.Values.resources) | nindent 12 }}
           {{- if and (eq $name "realtime") (not $cfg.attachments.s3.bucket) }}
           volumeMounts:
@@ -296,6 +316,19 @@ spec:
     - name: http
       port: {{ $port }}
       targetPort: {{ $port }}
+{{- end }}
+{{- if $scaled }}
+---
+# A voluntary disruption (a node drain, an upgrade) takes one replica at a
+# time: the service stays up while it happens.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: bnbloc-{{ $name }}
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: bnbloc-{{ $name }} }
 {{- end }}
 {{- if and $cfg.hpa $cfg.hpa.enabled }}
 ---

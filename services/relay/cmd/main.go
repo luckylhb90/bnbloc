@@ -22,7 +22,8 @@ func main() {
 	}
 	metrics := obs.NewMetrics("bnbloc-relay")
 	peers.Instrument(metrics, "bnbloc-relay")
-	peers.CheckSelfWith(func() error { return nil }) // no dependencies: serving = ready
+	peers.CheckSelfWith(obs.ReadyUnlessDraining(nil)) // no dependencies: serving = ready, until it drains
+	obs.OnDrain(peers.Leave)
 	svc.Peers = peers
 	handler := svc.Handler()
 	peers.Start(context.Background())

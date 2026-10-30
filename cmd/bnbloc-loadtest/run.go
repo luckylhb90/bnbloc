@@ -189,6 +189,9 @@ func run(ctx context.Context, cfg config, logw io.Writer) (*Report, error) {
 	report.Streams.Gaps = ss.gaps
 	report.Activity = activityReport(streams, ss)
 	report.Notes = append(notes, report.notes()...)
+	for _, l := range tr.lostSamples(20) {
+		logf("lost: %s", l)
+	}
 	return report, nil
 }
 
@@ -421,7 +424,16 @@ loop:
 				// stops issuing, it does not abandon answers in flight.
 				t0 := time.Now()
 				tr.begin(id, t0, p.r.liveStreams(p.ch))
+				// As the web client: a network error or a 5xx is sent again
+				// with the same clientMsgId (web/src/lib/sendRetry.ts).
 				err := a.sendChat(context.Background(), p.m, p.r.id, p.ch, id, text)
+				for _, wait := range sendRetryWaits {
+					if err == nil || !retryableSend(err) {
+						break
+					}
+					time.Sleep(wait)
+					err = a.sendChat(context.Background(), p.m, p.r.id, p.ch, id, text)
+				}
 				took := time.Since(t0)
 				st.mu.Lock()
 				defer st.mu.Unlock()
@@ -607,4 +619,17 @@ func randomHex(n int) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
+}
+
+// sendRetryWaits are the web client's waits before sending again
+// (web/src/lib/sendRetry.ts SEND_RETRY_WAITS).
+var sendRetryWaits = []time.Duration{400 * time.Millisecond, 1200 * time.Millisecond, 3 * time.Second}
+
+// retryableSend: no answer, or a 5xx.
+func retryableSend(err error) bool {
+	var se *statusError
+	if errors.As(err, &se) {
+		return se.status >= 500
+	}
+	return true
 }

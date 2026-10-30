@@ -72,6 +72,9 @@ interface UseRoomStream {
   refreshUnread: () => void;
 }
 
+// GAP_SETTLE_MS is when a stream gap's difference is read the second time.
+const GAP_SETTLE_MS = 3000;
+
 // The member is looking at the room only while the document is visible AND
 // focused. Reading state must not advance otherwise (a background tab or an
 // unfocused desktop window), or unread counts and notifications never fire.
@@ -271,6 +274,10 @@ export function useRoomStream(params: UseRoomStreamParams): UseRoomStream {
           onCatchUpRef.current?.();
           setLiveReload((n) => n + 1);
           onReconnectRef.current();
+          // A room that just changed owner may still take a message on the
+          // one leaving for a moment: read the difference once more after
+          // the owners agree (they do within about two seconds).
+          window.setTimeout(() => onCatchUpRef.current?.(), GAP_SETTLE_MS);
           return;
         }
         if (e.kind === "channel_activity") {

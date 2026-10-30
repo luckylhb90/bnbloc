@@ -114,12 +114,52 @@ func (p *HTTPPublisher) PlatformEvent(ctx context.Context, d wire.EventDispatch)
 	return p.send(ctx, "/internal/v1/events", "", buf)
 }
 
-// post makes one signed internal call to realtime as p.Service in tenantID,
-// best-effort: a failure is logged.
+// publishRetries are the waits before a failed publish is tried again: a
+// realtime replica restarting or a room moving to another owner answers for
+// a moment with a refused connection or a 5xx, and an event lost then is a
+// stream that misses it and a room state that keeps an old answer until its
+// bound (docs/prd/2026-10-30-message-path-performance.md §4.1).
+var publishRetries = []time.Duration{100 * time.Millisecond, 400 * time.Millisecond, time.Second}
+
+// post makes a signed internal call to realtime as p.Service in tenantID,
+// best-effort: after a transport error or a 5xx it is tried again in the
+// background (the caller's answer never waits for realtime to come back),
+// then logged.
 func (p *HTTPPublisher) post(ctx context.Context, path, tenantID string, buf []byte, what string) {
-	if err := p.send(ctx, path, tenantID, buf); err != nil {
-		log.Printf("realtime publisher(%s): publish %s: %v", p.Service, what, err)
+	err := p.send(ctx, path, tenantID, buf)
+	if err == nil {
+		return
 	}
+	if !retryable(err) {
+		log.Printf("realtime publisher(%s): publish %s: %v", p.Service, what, err)
+		return
+	}
+	ctx = context.WithoutCancel(ctx)
+	go func() {
+		for _, wait := range publishRetries {
+			time.Sleep(wait)
+			if err = p.send(ctx, path, tenantID, buf); err == nil || !retryable(err) {
+				break
+			}
+		}
+		if err != nil {
+			log.Printf("realtime publisher(%s): publish %s: %v", p.Service, what, err)
+		}
+	}()
+}
+
+// statusError is an answer outside 2xx.
+type statusError struct{ code int }
+
+func (e statusError) Error() string { return fmt.Sprintf("status %d", e.code) }
+
+// retryable: a transport failure or a 5xx; a 4xx is the request's own fault.
+func retryable(err error) bool {
+	var se statusError
+	if errors.As(err, &se) {
+		return se.code >= 500
+	}
+	return true
 }
 
 // send makes one signed internal call to realtime as p.Service in tenantID.
@@ -144,7 +184,7 @@ func (p *HTTPPublisher) send(ctx context.Context, path, tenantID string, buf []b
 	}
 	_ = resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
-		return fmt.Errorf("status %d", resp.StatusCode)
+		return statusError{resp.StatusCode}
 	}
 	return nil
 }

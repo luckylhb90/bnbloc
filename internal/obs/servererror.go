@@ -53,8 +53,18 @@ func findRecorder(w http.ResponseWriter) *statusRecorder {
 // upstream failure as the cause of its 502 (the default handler only writes
 // an unstructured log line).
 func ProxyError(what string) func(http.ResponseWriter, *http.Request, error) {
-	return func(w http.ResponseWriter, _ *http.Request, err error) {
+	return func(w http.ResponseWriter, r *http.Request, err error) {
+		// The request itself ended (its client left, its stream drained):
+		// nothing failed upstream, and no one reads the answer.
+		if r.Context().Err() != nil {
+			w.WriteHeader(StatusClientClosed)
+			return
+		}
 		ServerError(w, what, err)
 		w.WriteHeader(http.StatusBadGateway)
 	}
 }
+
+// StatusClientClosed is the status logged for a request its client (or the
+// process draining) ended before it was answered (nginx's 499).
+const StatusClientClosed = 499

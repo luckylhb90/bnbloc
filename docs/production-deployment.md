@@ -683,7 +683,47 @@ its log.
   the chart sets `BNBLOC_GATEWAY_PEERS` (headless `bnbloc-gateway-peers`) so
   each replica enforces 1/N of every budget, N being the live replica count.
 - **Probes.** Liveness `/healthz` (never DB-gated), readiness `/readyz`
-  (DB-gated).
+  (DB-gated, and 503 while the pod drains).
+
+### High availability
+
+No bnbloc service needs to be a single point of failure. What each one takes:
+
+| Service | State | Run | When a replica goes |
+|---|---|---|---|
+| gateway, room, activity, shareagent | none in process (the database) | 2+ replicas | the others serve; nothing to move |
+| realtime | rooms' live state, by key ownership | 3 replicas, S3 (or a directory every replica mounts, `BNBLOC_ATTACHMENTS_DIR_SHARED=true`) | its rooms move to the others in about 2 s; streams reopen there and resume |
+| relay | sync sessions, by key ownership | 2 replicas | its sessions re-pair on the others |
+| pulse | one stream consumer | 1 replica (by design) | the organization board pauses until Kubernetes restarts it, then catches up from the stream; nothing on the message path waits for it |
+| MySQL | the authority | managed, multi-zone (RDS or Aurora Multi-AZ) | its failover (tens of seconds): requests fail and are retried, streams stay open |
+| Redis | pulse's stream only | managed | the board pauses |
+
+**Stopping a pod is a drain, not a cut** (`internal/obs/drain.go`). On
+SIGTERM a service answers `/readyz` with 503, ends its event streams and
+refuses new ones (503, `Retry-After: 1`), and a realtime or relay replica
+leaves its own peer set at once (its keys move before it goes); after 5 s it
+stops taking connections, waits up to 20 s for the requests in flight (a
+chat post's commit), then runs its shutdown hooks (realtime: the follow marks
+written behind, the queued notifications). The chart sets
+`terminationGracePeriodSeconds: 40`, a 2 s readiness period, a
+PodDisruptionBudget (`maxUnavailable: 1`) and topology spread over nodes and
+zones for every service with more than one replica.
+
+**What clients do across a change of owner.** A stream reopens with the last
+sequence it received (`since`) and is sent only what is newer; a room that
+just changed owner, or a buffer that does not reach back, sends `stream_gap`
+and the client reads the difference from history, at once and again 3 s
+later. A send that meets a 5xx or no answer is sent again with the same
+`clientMsgId` (stored once). For a few seconds after a replica starts serving
+a room it reads the room's newest rows and delivers any the previous owner
+stored (it may take a message for a moment while the views disagree). A
+request whose owner died is sent to the new owner once the view drops it
+(nothing of it had reached the dead one).
+
+**Measured** (`docs/load-testing.md`, "Failover"): 300 members in 30 rooms
+at 50 msgs/s while one realtime replica is drained, brought back, another
+killed and brought back: 6,000 of 6,000 sends stored, 19,549 of 19,549
+deliveries arrived, every stream open at the end.
 - **Nightly smoke.** `smoke.enabled` renders a CronJob running
   `bnbloc smoke --alert-on-failure` from the `<repository>-cli` image against
   the gateway Service, with an API token from an existing Secret; see

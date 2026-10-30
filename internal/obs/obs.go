@@ -5,12 +5,16 @@ package obs
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"regexp"
+	"strings"
+	"syscall"
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/sharelink"
@@ -57,6 +61,26 @@ func Middleware(logger *slog.Logger, metrics *Metrics, next http.Handler) http.H
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		// A long-lived stream ends when the process starts to stop, so its
+		// client reopens on a replica that stays (drain.go); a new one is
+		// refused at once, with when to try again.
+		if strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
+			if isDraining() {
+				w.Header().Set("Retry-After", "1")
+				http.Error(w, "draining: reopen the stream", http.StatusServiceUnavailable)
+				return
+			}
+			ctx, cancel := context.WithCancel(r.Context())
+			defer cancel()
+			go func() {
+				select {
+				case <-Draining():
+					cancel()
+				case <-ctx.Done():
+				}
+			}()
+			r = r.WithContext(ctx)
+		}
 		next.ServeHTTP(rec, r)
 
 		elapsed := time.Since(start)
@@ -71,6 +95,17 @@ func Middleware(logger *slog.Logger, metrics *Metrics, next http.Handler) http.H
 			"sub", r.Header.Get("X-Bnbloc-User"),
 			"status", rec.status,
 			"durationMs", elapsed.Milliseconds(),
+		}
+		// A request whose client left (or whose stream the drain ended)
+		// before it was answered failed nobody: logged as 499, not as an
+		// error.
+		status := rec.status
+		if status >= http.StatusInternalServerError && r.Context().Err() != nil {
+			status = StatusClientClosed
+			attrs[9] = status
+			logger.Info("request", attrs...)
+			metrics.observeRequest(methodLabel(r.Method), routeLabel(r.URL.Path), status, float64(elapsed.Microseconds())/1000.0)
+			return
 		}
 		if rec.status >= http.StatusInternalServerError {
 			// Every 5xx is an Error line with its cause (ServerError); a 5xx
@@ -182,14 +217,38 @@ func serve(service, addr string, handler http.Handler, metrics *Metrics, check f
 		main = withVersion(service, main)
 	}
 	errc := make(chan error, 2)
+	var metricsSrv *http.Server
 	if plan.metricsAddr != "" {
+		metricsSrv = newServer(plan.metricsAddr, metricsMux(metrics, profiler))
 		go func() {
-			err := newServer(plan.metricsAddr, metricsMux(metrics, profiler)).ListenAndServe()
+			err := metricsSrv.ListenAndServe()
 			errc <- fmt.Errorf("metrics listener %s: %w", plan.metricsAddr, err)
 		}()
 	}
-	go func() { errc <- newServer(addr, main).ListenAndServe() }()
-	return <-errc
+	srv := newServer(addr, main)
+	go func() { errc <- srv.ListenAndServe() }()
+	stop, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
+	defer cancel()
+	select {
+	case err := <-errc:
+		return err
+	case <-stop.Done():
+	}
+	// Drain (drain.go): not ready, streams end, then the requests in flight.
+	logger.Info("draining", "delay", drainDelay.String())
+	startDraining()
+	time.Sleep(drainDelay)
+	ctx, done := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer done()
+	if err := srv.Shutdown(ctx); err != nil {
+		logger.Warn("shutdown: requests still in flight were cut", "error", err)
+	}
+	if metricsSrv != nil {
+		_ = metricsSrv.Shutdown(ctx)
+	}
+	runShutdownHooks(ctx)
+	logger.Info("stopped")
+	return nil
 }
 
 // Server timeouts. ReadHeaderTimeout bounds a slow-loris client that trickles
@@ -221,6 +280,12 @@ func buildServeMux(logger *slog.Logger, metrics *Metrics, handler http.Handler, 
 	// Readiness: safe to receive traffic. Gated on the dependency check when one
 	// is supplied; with no check it mirrors liveness (always ready).
 	mux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {
+		// A stopping process is not ready: traffic and room ownership leave
+		// it while it still answers (drain.go).
+		if isDraining() {
+			http.Error(w, "draining", http.StatusServiceUnavailable)
+			return
+		}
 		if check != nil {
 			if err := check(); err != nil {
 				http.Error(w, "not ready", http.StatusServiceUnavailable)

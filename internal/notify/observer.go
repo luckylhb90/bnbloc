@@ -94,6 +94,24 @@ func NewObserver(e *Emitter, m membership.Reader, size int) *Observer {
 	return &Observer{Emitter: e, Membership: m, queue: make(chan observation, size)}
 }
 
+// Drain waits until the queued observations are processed (by Run) or ctx
+// ends: a stopping replica turns what it observed into notifications before
+// it exits.
+func (o *Observer) Drain(ctx context.Context) {
+	if o == nil {
+		return
+	}
+	t := time.NewTicker(20 * time.Millisecond)
+	defer t.Stop()
+	for len(o.queue) > 0 {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
 // Dropped returns how many observations a full queue discarded.
 func (o *Observer) Dropped() int64 { return o.dropped.Load() }
 

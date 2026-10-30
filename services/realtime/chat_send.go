@@ -142,6 +142,7 @@ type ChatPosted struct {
 // scheduled or dispatched post) can skip them.
 func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) {
 	step := s.chatSteps()
+	s.noteServing(ctx, p.RoomID)
 	author, err := membership.RoomScope(ctx, s.Membership, p.RoomID, p.Author, membership.Chat)
 	if err != nil {
 		return ChatPosted{}, err

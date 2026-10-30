@@ -16,7 +16,18 @@ import (
 
 type DiskStore struct {
 	dir string
+	// shared: every replica mounts this directory (an NFS or EFS mount, a
+	// Compose volume), so more than one may write it (SharedDiskEnv).
+	shared bool
 }
+
+// SharedDiskEnv, true, declares BNBLOC_ATTACHMENTS_DIR one directory every
+// replica mounts (writes are a temp file renamed into place, safe on one
+// file system): the disk store may then serve more than one realtime replica.
+const SharedDiskEnv = "BNBLOC_ATTACHMENTS_DIR_SHARED"
+
+// Shared reports whether every replica mounts the store's directory.
+func (s *DiskStore) Shared() bool { return s.shared }
 
 func NewDiskStore(dir string) (*DiskStore, error) {
 	if dir == "" {

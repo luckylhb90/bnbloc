@@ -65,7 +65,7 @@ func main() {
 	}
 	// This replica is live in its own view while its readiness check passes
 	// (the other replicas probe its /readyz for the same answer).
-	peers.CheckSelfWith(backends.HealthCheck())
+	peers.CheckSelfWith(obs.ReadyUnlessDraining(backends.HealthCheck()))
 	svc.Chat = backends.Chat
 	// Member locations (pulse_geography) are read per organization; a failed read is off.
 	svc.PulseGeo = pulse.NewGeoGate(func(ctx context.Context, id string) (bool, error) {
@@ -187,9 +187,10 @@ func main() {
 		svc.Blobs, blobs = b, b
 	}
 	// The disk backend is one replica's filesystem: with peers, a blob
-	// written through one replica would be missing on the others.
-	if _, disk := svc.Blobs.(*blobstore.DiskStore); disk && peers != nil {
-		log.Fatalf("bnbloc-realtime: BNBLOC_REALTIME_PEERS is set but the blob store is the local disk; more than one replica requires the S3 backend (BNBLOC_ATTACHMENTS_S3_BUCKET)")
+	// written through one replica would be missing on the others, unless
+	// every replica mounts the same directory (BNBLOC_ATTACHMENTS_DIR_SHARED).
+	if d, disk := svc.Blobs.(*blobstore.DiskStore); disk && peers != nil && !d.Shared() {
+		log.Fatalf("bnbloc-realtime: BNBLOC_REALTIME_PEERS is set but the blob store is one replica's disk; more than one replica requires the S3 backend (BNBLOC_ATTACHMENTS_S3_BUCKET) or a directory every replica mounts (%s=true)", blobstore.SharedDiskEnv)
 	}
 	direct, err := blobstore.DirectDownloadsFromEnv()
 	if err != nil {
@@ -224,6 +225,12 @@ func main() {
 	// The first refresh runs before serving, so the replica starts with a
 	// real view of its peers.
 	peers.Start(context.Background())
+	// Stopping: finish the marks written behind and the queued
+	// notifications once the listener has drained (obs drain.go).
+	obs.OnShutdown(svc.Shutdown)
+	// Stopping: give up every room at once, so its streams and posts go to
+	// their new owners during the drain (shard.Set.Leave).
+	obs.OnDrain(peers.Leave)
 	if err := obs.ServeWithHealth("bnbloc-realtime", cfg.ListenAddr, svcauth.Middleware(svcauth.KeyFromEnv(), handler), backends.HealthCheck(), obs.WithMetrics(metrics)); err != nil {
 		log.Fatalf("bnbloc-realtime: %v", err)
 	}

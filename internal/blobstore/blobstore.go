@@ -111,10 +111,20 @@ func FromEnv() (BlobStore, error) {
 			UsePathStyle:       usePathStyle,
 		})
 	}
-	if dir := strings.TrimSpace(config.FromEnvRaw("BNBLOC_ATTACHMENTS_DIR")); dir != "" {
-		return NewDiskStore(dir)
+	dir := strings.TrimSpace(config.FromEnvRaw("BNBLOC_ATTACHMENTS_DIR"))
+	if dir == "" {
+		dir = defaultDiskDir
 	}
-	return NewDiskStore(defaultDiskDir)
+	shared, err := config.StrictBool(SharedDiskEnv)
+	if err != nil {
+		return nil, err
+	}
+	d, err := NewDiskStore(dir)
+	if err != nil {
+		return nil, err
+	}
+	d.shared = shared
+	return d, nil
 }
 
 // DirectDownloadsFromEnv reads BNBLOC_ATTACHMENTS_S3_DIRECT_DOWNLOADS (unset =

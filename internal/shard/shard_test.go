@@ -387,3 +387,15 @@ func TestDeadReplicaLeavesViewQuickly(t *testing.T) {
 		t.Fatalf("detection with failing calls took %v, want well under the idle bound", busy)
 	}
 }
+
+// SELF=auto takes this host's own address, with the DNS entry's port.
+func TestSelfAuto(t *testing.T) {
+	s, err := New(Options{Peers: "realtime:8082", Self: SelfAuto, Lookup: func(context.Context, string) ([]string, error) { return nil, nil }})
+	if err != nil {
+		t.Skipf("no non-loopback address on this host: %v", err)
+	}
+	host, port, err := net.SplitHostPort(s.Self())
+	if err != nil || port != "8082" || net.ParseIP(host) == nil || net.ParseIP(host).IsLoopback() {
+		t.Fatalf("self = %q", s.Self())
+	}
+}

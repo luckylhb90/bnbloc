@@ -1,11 +1,15 @@
 package shard
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httputil"
+	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/obs"
 )
@@ -35,6 +39,8 @@ func Forward(s *Set, key KeyFunc, next http.Handler) http.Handler {
 	if s == nil {
 		return next
 	}
+	var serve http.HandlerFunc
+	proxyFailed := obs.ProxyError("peer forward failed")
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			owner, _ := pr.In.Context().Value(ownerCtxKey{}).(string)
@@ -48,9 +54,29 @@ func Forward(s *Set, key KeyFunc, next http.Handler) http.Handler {
 		},
 		Transport:     s.transport,
 		FlushInterval: -1,
-		ErrorHandler:  obs.ProxyError("peer forward failed"),
+		// The owner could not be reached at all (it died, or is leaving): the
+		// request never left this replica, so once the view has dropped that
+		// owner it is served again, by the key's new owner, instead of failing
+		// (docs/production-deployment.md#high-availability).
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			rt, _ := r.Context().Value(retryCtxKey{}).(*retryState)
+			owner, _ := r.Context().Value(ownerCtxKey{}).(string)
+			if rt == nil || rt.tried || !unreached(err) {
+				proxyFailed(w, r, err)
+				return
+			}
+			rt.tried = true
+			s.Suspect(owner)
+			if !s.waitOwnerChange(r.Context(), rt.key, owner, ownerChangeWait) {
+				proxyFailed(w, r, err)
+				return
+			}
+			r2 := r.Clone(r.Context())
+			r2.Body = rt.body()
+			serve(w, r2)
+		},
 	}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	serve = func(w http.ResponseWriter, r *http.Request) {
 		k, ok := key(r)
 		if !ok {
 			next.ServeHTTP(w, r)
@@ -77,8 +103,83 @@ func Forward(s *Set, key KeyFunc, next http.Handler) http.Handler {
 		m := s.metrics
 		s.mu.RUnlock()
 		m.CounterInc(metricForwarded)
-		proxy.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ownerCtxKey{}, owner)))
-	})
+		ctx := context.WithValue(r.Context(), ownerCtxKey{}, owner)
+		if r.Context().Value(retryCtxKey{}) == nil {
+			if rt := newRetryState(r, k); rt != nil {
+				ctx = context.WithValue(ctx, retryCtxKey{}, rt)
+				r.Body = rt.body()
+			}
+		}
+		proxy.ServeHTTP(w, r.WithContext(ctx))
+	}
+	return serve
+}
+
+// ownerChangeWait bounds how long a request whose owner died waits for the
+// view to drop it (downAfter probes, the first one at once: Suspect).
+const ownerChangeWait = 3 * time.Second
+
+// maxRetryBody is the largest request body kept to be sent again: a chat
+// post, never an upload.
+const maxRetryBody = 1 << 20
+
+type retryCtxKey struct{}
+
+// retryState is what a forwarded request needs to be served once more.
+type retryState struct {
+	key   string
+	buf   []byte
+	tried bool
+}
+
+// newRetryState keeps r's body (when small enough) so r can be sent again;
+// nil when it cannot.
+func newRetryState(r *http.Request, key string) *retryState {
+	rt := &retryState{key: key}
+	if r.Body == nil || r.Body == http.NoBody {
+		return rt
+	}
+	if r.ContentLength < 0 || r.ContentLength > maxRetryBody {
+		return nil
+	}
+	buf, err := io.ReadAll(io.LimitReader(r.Body, maxRetryBody+1))
+	_ = r.Body.Close()
+	if err != nil || len(buf) > maxRetryBody {
+		return nil
+	}
+	rt.buf = buf
+	return rt
+}
+
+func (rt *retryState) body() io.ReadCloser {
+	if rt.buf == nil {
+		return http.NoBody
+	}
+	return io.NopCloser(bytes.NewReader(rt.buf))
+}
+
+// unreached reports a failure to connect to the peer: nothing of the
+// request reached it.
+func unreached(err error) bool {
+	var op *net.OpError
+	return errors.As(err, &op) && op.Op == "dial"
+}
+
+// waitOwnerChange waits until key's owner is no longer was (the view dropped
+// it), up to d; false when it did not change.
+func (s *Set) waitOwnerChange(ctx context.Context, key, was string, d time.Duration) bool {
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+		if s.Owner(key) != was {
+			return true
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+	return false
 }
 
 // PeerRequest builds a request addressed to peer that is already routed by

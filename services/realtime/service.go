@@ -85,6 +85,9 @@ type Service struct {
 	// postMarks are the members' last posts (slow mode) and their follow
 	// marks written behind (post_marks.go).
 	postMarks postMarks
+	// handovers are the rooms this replica watches after it started serving
+	// them (handover.go).
+	handovers handovers
 	// lanes are the lanes streams this replica serves (lanes.go).
 	lanes      laneStreams
 	Hub        *realtime.Hub
@@ -510,6 +513,7 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	handingOver := s.noteServing(r.Context(), roomID)
 	// A platform agent host's stream (its bridge driving the hosted agent)
 	// and a preview's (a shared room read before joining) are not a
 	// person's: never present, never advertising a roster, and never shown
@@ -598,6 +602,9 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 		sub = s.Hub.SubscribeLive(roomID)
 	case since > 0:
 		sub, resumeGap = s.Hub.SubscribeSince(roomID, since)
+		// The room just changed owner: the client may lack a message the
+		// other owner wrote below its last sequence (handover.go).
+		resumeGap = resumeGap || handingOver
 	default:
 		sub = s.Hub.Subscribe(roomID)
 	}

@@ -347,6 +347,7 @@ func (s *Service) reconcileOwnership(bool) {
 	if s.roomState != nil {
 		s.roomState.release(s.Peers.OwnsRoom)
 	}
+	s.forgetServed(s.Peers.OwnsRoom)
 	members := s.PluginHooks.closeStreams(s.Peers.OwnsMember)
 	s.Peers.prune()
 	if rooms > 0 || members > 0 {
