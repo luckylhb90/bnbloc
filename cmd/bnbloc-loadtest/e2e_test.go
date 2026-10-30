@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -88,6 +89,18 @@ func (g *fakeGateway) handler() http.Handler {
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		writeJSONT(w, map[string]string{"sessionToken": fakeToken(body.IDPToken, time.Now().Add(time.Hour)), "subject": body.IDPToken})
+	})
+	mux.HandleFunc("POST /v1/auth/api-token", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Token string `json:"token"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		sub, ok := strings.CutPrefix(body.Token, "bnbloc_at_")
+		if !ok {
+			http.Error(w, "invalid", http.StatusUnauthorized)
+			return
+		}
+		writeJSONT(w, map[string]string{"sessionToken": fakeToken(sub, time.Now().Add(time.Hour)), "subject": sub})
 	})
 	mux.HandleFunc("POST /v1/rooms", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
@@ -457,5 +470,25 @@ func TestEndToEndKeepThenReuseRooms(t *testing.T) {
 	}
 	if rep.Deliver.Expected == 0 || rep.Deliver.Delivered != rep.Deliver.Expected {
 		t.Fatalf("delivery in reused rooms: %+v", rep.Deliver)
+	}
+}
+
+// A tokens file of API tokens: each is exchanged for a session first.
+func TestEndToEndAPITokensFile(t *testing.T) {
+	g := newFakeGateway(t)
+	srv := httptest.NewServer(g.handler())
+	defer srv.Close()
+	path := t.TempDir() + "/tokens"
+	if err := os.WriteFile(path, []byte("# two service subjects\nbnbloc_at_svc-lt-1\nbnbloc_at_svc-lt-2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := e2eConfig(srv.URL)
+	cfg.TokensFile, cfg.Rooms, cfg.Rate = path, 1, 4
+	rep, err := run(context.Background(), cfg, io.Discard)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if rep.Setup.Streams != 2 || rep.Sends.OK == 0 || rep.Deliver.Lost != 0 {
+		t.Fatalf("setup %+v sends %+v delivery %+v", rep.Setup, rep.Sends, rep.Deliver)
 	}
 }

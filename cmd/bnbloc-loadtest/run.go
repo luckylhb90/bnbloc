@@ -210,7 +210,25 @@ func signIn(ctx context.Context, cfg config, a *api, logf func(string, ...any)) 
 		for i := range ms {
 			out[i] = &ms[i]
 		}
-		return out, nil
+		// API tokens become sessions now (the exchange is throttled per
+		// client IP like a sign-in: --forwarded-for as with the dev
+		// sign-in).
+		err = parallel(ctx, len(out), cfg.LoginParallel, func(ctx context.Context, i int) error {
+			if out[i].apiToken == "" {
+				return nil
+			}
+			xff := ""
+			if cfg.ForwardedFor {
+				xff = syntheticIP(i)
+			}
+			m, err := a.exchangeAPIToken(ctx, out[i].apiToken, xff)
+			if err != nil {
+				return fmt.Errorf("API token of line member %d: %w", i+1, err)
+			}
+			*out[i] = m
+			return nil
+		})
+		return out, err
 	}
 	out := make([]*member, cfg.Members)
 	logf("signing in %d members (%s-0001 ...)", cfg.Members, cfg.MemberPrefix)

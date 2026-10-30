@@ -67,12 +67,15 @@ person's client uses.
   `BNBLOC_TRUSTED_PROXIES`. Never trust a load generator on a production
   gateway. Without that setting, the tool stops at the first 429 and names
   both remedies.
-- **Tokens file (`--tokens-file`).** One session bearer per line; lines
-  starting with `#` are comments. The member's subject comes from the token
-  payload. Use this when the dev sign-in is unavailable, for example on a
-  gateway with OIDC: mint sessions with your identity provider and put one
-  per line. Sessions last one hour. The tool warns when a token expires
-  before the run ends.
+- **Tokens file (`--tokens-file`).** One session bearer or API token per
+  line; lines starting with `#` are comments. A session's subject comes from
+  its payload. Use this when the dev sign-in is unavailable, for example on a
+  gateway with OIDC. API tokens (`bnbloc api-tokens create --subject
+  svc:loadtest-0001`, one per member, super-admin) are exchanged for
+  one-hour sessions as the run starts (`POST /v1/auth/api-token`, throttled
+  per client IP like a sign-in: pass `--forwarded-for` with the load
+  generator listed in `BNBLOC_TRUSTED_PROXIES` for the run). The tool warns
+  when a session expires before the run ends.
 
 Sends use `Authorization: Bearer`. Streams pass the token as `access_token`,
 as `EventSource` must.

@@ -31,6 +31,9 @@ type api struct {
 type member struct {
 	subject string
 	token   string
+	// apiToken is an API token (bnbloc_at_…) the run exchanges for a session
+	// before it starts (exchangeAPIToken); "" when token is a session.
+	apiToken string
 	// expires is the session's expiry (zero when unknown).
 	expires time.Time
 }
@@ -144,6 +147,37 @@ func (a *api) login(ctx context.Context, subject, forwardedFor string) (member, 
 	return m, nil
 }
 
+// apiTokenPrefix starts an API token (bnbloc api-tokens create).
+const apiTokenPrefix = "bnbloc_at_"
+
+// exchangeAPIToken trades an API token for a one-hour session
+// (POST /v1/auth/api-token), with forwardedFor as login does: the exchange
+// is throttled per client IP like a sign-in.
+func (a *api) exchangeAPIToken(ctx context.Context, apiToken, forwardedFor string) (member, error) {
+	hdr := http.Header{}
+	if forwardedFor != "" {
+		hdr.Set("X-Forwarded-For", forwardedFor)
+	}
+	var grant struct {
+		SessionToken string `json:"sessionToken"`
+		Subject      string `json:"subject"`
+	}
+	if err := a.do(ctx, nil, http.MethodPost, "/v1/auth/api-token", hdr, map[string]string{"token": apiToken}, &grant); err != nil {
+		return member{}, err
+	}
+	if grant.SessionToken == "" {
+		return member{}, errors.New("POST /v1/auth/api-token: answer has no sessionToken")
+	}
+	m := member{subject: grant.Subject, token: grant.SessionToken}
+	if sub, exp, err := sessionClaims(grant.SessionToken); err == nil {
+		m.expires = exp
+		if m.subject == "" {
+			m.subject = sub
+		}
+	}
+	return m, nil
+}
+
 // sessionClaims reads the subject and expiry of a bnbloc session bearer
 // (<base64url JSON payload>.<signature>). The gateway verifies the signature
 // on every call; this only names the member the token belongs to.
@@ -159,7 +193,8 @@ func sessionClaims(token string) (string, time.Time, error) {
 	return claims.Subject, exp, nil
 }
 
-// readTokensFile reads one session bearer per line ('#' starts a comment).
+// readTokensFile reads one session bearer or API token per line ('#'
+// starts a comment); API tokens are exchanged by signIn.
 func readTokensFile(path string) ([]member, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -174,6 +209,10 @@ func readTokensFile(path string) ([]member, error) {
 		line++
 		tok := strings.TrimSpace(sc.Text())
 		if tok == "" || strings.HasPrefix(tok, "#") {
+			continue
+		}
+		if strings.HasPrefix(tok, apiTokenPrefix) {
+			out = append(out, member{apiToken: tok})
 			continue
 		}
 		subject, exp, err := sessionClaims(tok)
