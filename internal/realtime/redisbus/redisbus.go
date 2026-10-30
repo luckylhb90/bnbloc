@@ -19,9 +19,14 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// EnvURL names the bus's Redis (redis://…). Unset: realtime has no bus (one
-// replica).
-const EnvURL = "BNBLOC_REALTIME_BUS_REDIS_URL"
+// EnvURL names the bus's Redis (redis://…, rediss://… with TLS). Unset:
+// realtime has no bus (one replica). EnvCluster ("true") says it is a Redis
+// Cluster (cluster mode enabled): the URL names a node or the cluster's
+// configuration endpoint.
+const (
+	EnvURL     = "BNBLOC_REALTIME_BUS_REDIS_URL"
+	EnvCluster = "BNBLOC_REALTIME_BUS_REDIS_CLUSTER"
+)
 
 // channelPrefix starts every topic's channel.
 const channelPrefix = "bnbloc:rt:"
@@ -40,7 +45,7 @@ const (
 
 // Bus is one process's endpoint of the bus.
 type Bus struct {
-	client *redis.Client
+	client redis.UniversalClient
 	ps     *redis.PubSub
 	origin string
 
@@ -59,13 +64,28 @@ type topic struct {
 	ok        bool
 }
 
-// New connects to the Redis at url and starts the endpoint's receive loop.
-func New(url string) (*Bus, error) {
-	opts, err := redis.ParseURL(url)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", EnvURL, err)
+// New connects to the Redis at url (a Redis Cluster when cluster is set)
+// and starts the endpoint's receive loop.
+//
+// On a cluster the bus uses plain PUB/SUB, which the cluster delivers to
+// subscribers on every node (a message crosses the cluster bus once per
+// node): the subscriber connection may be on any node, and claims and marks
+// are one key each, so no command spans slots.
+func New(url string, cluster bool) (*Bus, error) {
+	var client redis.UniversalClient
+	if cluster {
+		opts, err := redis.ParseClusterURL(url)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", EnvURL, err)
+		}
+		client = redis.NewClusterClient(opts)
+	} else {
+		opts, err := redis.ParseURL(url)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", EnvURL, err)
+		}
+		client = redis.NewClient(opts)
 	}
-	client := redis.NewClient(opts)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := client.Ping(ctx).Err(); err != nil {

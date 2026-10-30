@@ -24,7 +24,7 @@ func testBus(t *testing.T) *Bus {
 	if url == "" {
 		t.Skip("BNBLOC_TEST_REDIS_URL not set")
 	}
-	b, err := New(url)
+	b, err := New(url, os.Getenv("BNBLOC_TEST_REDIS_CLUSTER") == "true")
 	if err != nil {
 		t.Fatal(err)
 	}

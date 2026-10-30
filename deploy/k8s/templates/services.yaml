@@ -137,6 +137,8 @@ spec:
             - name: BNBLOC_REALTIME_BUS_REDIS_URL
               value: ""
             {{- end }}
+            - name: BNBLOC_REALTIME_BUS_REDIS_CLUSTER
+              value: {{ ternary "true" "" $cfg.bus.redisCluster | quote }}
             {{- end }}
             {{- if eq $svc.shard "count" }}
             # Live replica count for the per-replica share of every rate limit.

@@ -151,6 +151,10 @@ realtime:
     # Redis URL of the bus (redis://[user:password@]host:6379/1); its own
     # database number keeps it apart from Pulse's keys on a shared Redis.
     redisURLSecretRef: { name: "", key: redisURL }
+    # Redis Cluster (cluster mode enabled; BNBLOC_REALTIME_BUS_REDIS_CLUSTER):
+    # the URL then names a node or the configuration endpoint, and only
+    # database 0 exists, so leave the number off.
+    redisCluster: false
   attachments:
     # S3 (or S3-compatible) blob store for attachments + sidecar artifacts.
     # Empty bucket = local disk on the PVC below.

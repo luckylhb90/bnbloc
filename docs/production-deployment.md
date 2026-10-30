@@ -645,7 +645,10 @@ its log.
   replica in another zone (ElastiCache Multi-AZ); a Redis failover pauses
   live delivery for its seconds, messages are still stored, and every
   stream reads what it missed when the bus is back. Its own database number
-  (`/1`) keeps it apart from Pulse's keys on a shared Redis. Size the count
+  (`/1`) keeps it apart from Pulse's keys on a shared Redis. A Redis Cluster
+  (cluster mode enabled) works too: `realtime.bus.redisCluster: true`
+  (`BNBLOC_REALTIME_BUS_REDIS_CLUSTER`), the URL naming the configuration
+  endpoint, no database number (its keys start `bnbloc:rt:`). Size the count
   with the load test (`docs/load-testing.md`).
 - **Scaling relay.** relay keeps P2P sync pairings in memory and scales out
   by key ownership: each sync session is owned by one pod, picked by

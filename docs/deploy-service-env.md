@@ -105,7 +105,8 @@ behind the `bnbloc-realtime` Service (an HPA may scale it).
 | `BNBLOC_INTERNAL_KEY` | yes | Same value as gateway. |
 | `BNBLOC_ROOM_BASE_URL` | yes | `http://bnbloc-room:8080` — membership checks. |
 | Blob storage | yes | A volume at `/var/lib/bnbloc/attachments` (`BNBLOC_ATTACHMENTS_DIR`), or `BNBLOC_ATTACHMENTS_S3_BUCKET` (+ `_REGION`, `_ENDPOINT`, credentials, `_KEY_PREFIX`, `_PATH_STYLE`). More than one replica requires S3, or a directory every replica mounts (`BNBLOC_ATTACHMENTS_DIR_SHARED=true`); startup refuses one replica's disk with a bus configured. |
-| `BNBLOC_REALTIME_BUS_REDIS_URL` | with >1 replica | The bus between replicas (`redis://host:6379/1`). Unset = one replica. |
+| `BNBLOC_REALTIME_BUS_REDIS_URL` | with >1 replica | The bus between replicas (`redis://host:6379/1`; `rediss://` with TLS). Unset = one replica. |
+| `BNBLOC_REALTIME_BUS_REDIS_CLUSTER` | with a Redis Cluster | `true`: the URL names a cluster node or configuration endpoint (no database number). |
 | `BNBLOC_ATTACHMENTS_S3_DIRECT_DOWNLOADS` | optional | S3 only: opt-in downloads answer 302 to a 5-minute presigned URL (clients must reach the bucket). Default off: everything streams. |
 | `BNBLOC_ATTACHMENTS_S3_PUBLIC_ENDPOINT` | optional | S3 base URL clients reach, when `_ENDPOINT` is internal-only. Empty = `_ENDPOINT`. |
 | `BNBLOC_PUBLIC_URL` | recommended | Public web origin; member-notification deep links. Unset = no links. |

@@ -71,7 +71,7 @@ func main() {
 	// desktop deliveries, slow mode) travels the same Redis. Unset: this
 	// replica is alone.
 	if url := config.FromEnvRaw(redisbus.EnvURL); url != "" {
-		bus, err := redisbus.New(url)
+		bus, err := redisbus.New(url, config.ParseBool(config.FromEnvRaw(redisbus.EnvCluster), false))
 		if err != nil {
 			log.Fatalf("bnbloc-realtime: %v", err)
 		}
