@@ -68,6 +68,8 @@ type Report struct {
 	Sends   SendReport    `json:"sends"`
 	Deliver DeliverReport `json:"delivery"`
 	Streams StreamReport  `json:"streams"`
+	// Activity covers the lanes streams' channel_activity (--channels > 1).
+	Activity ActivityReport `json:"activity"`
 	// Interrupted is true when SIGINT ended the send window early.
 	Interrupted bool     `json:"interrupted"`
 	Notes       []string `json:"notes,omitempty"`
@@ -78,6 +80,7 @@ type SetupReport struct {
 	Members        int     `json:"members"`
 	Rooms          int     `json:"rooms"`
 	MembersPerRoom int     `json:"membersPerRoom"`
+	Channels       int     `json:"channelsPerRoom"`
 	Streams        int     `json:"streams"`
 	RoomsCreated   bool    `json:"roomsCreated"`
 	TargetRate     float64 `json:"targetRatePerSec"`
@@ -132,6 +135,17 @@ type DeliverReport struct {
 	LatencyMs Percentiles `json:"latencyMs"`
 }
 
+// ActivityReport covers channel_activity on the lanes streams: what moves
+// a member's badges for the channels they do not have open.
+type ActivityReport struct {
+	// Events counts channel_activity events received.
+	Events int `json:"events"`
+	// Streams is how many streams had another channel with messages;
+	// Complete how many of them heard of every such channel.
+	Streams  int `json:"streams"`
+	Complete int `json:"complete"`
+}
+
 // StreamReport covers the room SSE streams.
 type StreamReport struct {
 	// Opened counts successful opens (first opens plus reconnects).
@@ -165,7 +179,7 @@ func (r *Report) writeText(w io.Writer) {
 	}
 	p("")
 	p("setup")
-	p("  members %d, rooms %d (%s), %d members/room, %d streams", s.Members, s.Rooms, map[bool]string{true: "created", false: "existing"}[s.RoomsCreated], s.MembersPerRoom, s.Streams)
+	p("  members %d, rooms %d (%s), %d members/room, %d channels/room, %d streams", s.Members, s.Rooms, map[bool]string{true: "created", false: "existing"}[s.RoomsCreated], s.MembersPerRoom, s.Channels, s.Streams)
 	p("  target %.1f msgs/s (%.3f per member), duration %.0fs, ramp-up %.0fs, %d-byte text", s.TargetRate, s.PerMemberRate, s.DurationSec, s.RampUpSec, s.TextBytes)
 	p("  sign-in took %.1fs", s.SignInSec)
 	p("")
@@ -188,6 +202,10 @@ func (r *Report) writeText(w io.Writer) {
 		p("  connect errors: %s", formatCounts(r.Streams.ConnectErrors))
 	}
 	p("  connect ms        %s", formatPercentiles(r.Streams.ConnectMs))
+	if r.Activity.Streams > 0 {
+		p("activity (channels not open)")
+		p("  events %d; streams that heard of every other channel %d of %d", r.Activity.Events, r.Activity.Complete, r.Activity.Streams)
+	}
 	for _, n := range r.Notes {
 		p("")
 		p("note: %s", n)
@@ -226,6 +244,9 @@ func (r *Report) notes() []string {
 	}
 	if r.Deliver.Lost > 0 {
 		out = append(out, fmt.Sprintf("%d expected deliveries never arrived within the drain wait (see disconnects; a stream that reconnects catches up only through the replay buffer).", r.Deliver.Lost))
+	}
+	if r.Activity.Complete < r.Activity.Streams {
+		out = append(out, fmt.Sprintf("only %d of %d streams heard of every other channel's messages (channel_activity): badges would be wrong.", r.Activity.Complete, r.Activity.Streams))
 	}
 	if r.Streams.OpenAtStart < r.Setup.Streams {
 		out = append(out, fmt.Sprintf("only %d of %d streams were open when sending began.", r.Streams.OpenAtStart, r.Setup.Streams))

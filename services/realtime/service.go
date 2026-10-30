@@ -77,9 +77,11 @@ type Service struct {
 	// unreadSummaries holds each member's latest GET /v1/my/unread answer for
 	// a few seconds (unread_summary.go).
 	unreadSummaries unreadSummaryCache
-	Hub             *realtime.Hub
-	Membership      membership.Directory
-	Presence        *realtime.Presence
+	// lanes are the lanes streams this replica serves (lanes.go).
+	lanes      laneStreams
+	Hub        *realtime.Hub
+	Membership membership.Directory
+	Presence   *realtime.Presence
 	// Roster tracks which agents each member's bridge advertises as reachable in
 	// a room, so the composer picker offers real drivable agents without the
 	// gateway reaching any user's machine (remote-safe). Lazily created in
@@ -281,6 +283,7 @@ func (s *Service) Handler() http.Handler {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/rooms/{roomId}/events", s.handleEvents)
+	mux.HandleFunc("POST /v1/rooms/{roomId}/events/scope", s.handleStreamScope)
 	mux.HandleFunc("GET /v1/rooms/{roomId}/agents", s.handleAgents)
 	mux.HandleFunc("POST /v1/rooms/{roomId}/chat", s.handleChat)
 	mux.HandleFunc("POST /v1/rooms/{roomId}/threads", s.handleOpenThread)
@@ -524,6 +527,22 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 	// such a channel's event can never reach an agent's stream. Room-wide
 	// events (empty ChannelID: presence, roster, agent state) always deliver.
 	allChannels := r.URL.Query().Get("allChannels") == "1"
+	// A person's lanes stream (lanes.go): every channel they may read, full
+	// only where open; anyone else's ?lanes=1 is an allChannels stream.
+	var lane *laneStream
+	if r.URL.Query().Get("lanes") == "1" {
+		allChannels = true
+		if human {
+			open, ok := openSet(strings.Split(r.URL.Query().Get("open"), ","))
+			if !ok {
+				httpx.Error(w, "open: at most 4 channel ids", http.StatusBadRequest)
+				return
+			}
+			lane = newLaneStream(roomID, userID, open)
+			s.lanes.add(lane)
+			defer s.lanes.remove(lane.id)
+		}
+	}
 	var agents *agentFilter
 	if allChannels && (r.URL.Query().Get("includePeople") != "1" || !human) {
 		agents = &agentFilter{svc: s, ctx: r.Context(), roomID: roomID, verdict: map[string]bool{}}
@@ -608,6 +627,19 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 	// keeps the stream alive without emitting a spurious event.
 	heartbeat := time.NewTicker(s.heartbeatEvery())
 	defer heartbeat.Stop()
+	// send writes one event to the stream (not flushed).
+	send := func(ev wire.Event) {
+		data, err := json.Marshal(ev)
+		if err != nil {
+			return
+		}
+		// Only durable events carry a sequence (the SSE id); a transient
+		// event has none and must not reset the stream's last event id.
+		if ev.Sequence > 0 {
+			fmt.Fprintf(w, "id: %d\n", ev.Sequence)
+		}
+		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Kind, data)
+	}
 	// write streams one event; it reports whether the subscriber's access
 	// ended (member removed / room deleted): the client has been told why, so
 	// the stream closes rather than running until it reconnects.
@@ -639,22 +671,46 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 		if m.Preview && !wire.PreviewedKind(ev.Kind) {
 			return false
 		}
-		data, err := json.Marshal(ev)
-		if err != nil {
-			return false
+		if lane != nil {
+			switch lane.lane(ev) {
+			case wire.LaneNone:
+				return false
+			case wire.LaneActivity:
+				if a, due := lane.note(ev, time.Now()); due {
+					send(a)
+				}
+				return accessRevoked(ev, userID)
+			}
 		}
-		// Only durable events carry a sequence (the SSE id); a transient
-		// event has none and must not reset the stream's last event id.
-		if ev.Sequence > 0 {
-			fmt.Fprintf(w, "id: %d\n", ev.Sequence)
-		}
-		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Kind, data)
+		send(ev)
 		return accessRevoked(ev, userID)
 	}
+	var activityTick <-chan time.Time
+	if lane != nil {
+		send(lane.opened(time.Now()))
+		t := time.NewTicker(activityEvery)
+		defer t.Stop()
+		activityTick = t.C
+	}
+	// Who is here, written to this stream alone (Presence.Snapshot); joins
+	// and leaves follow on the room's stream.
+	if !m.Preview {
+		send(s.Presence.Snapshot(roomID))
+	}
+	flusher.Flush()
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case now := <-activityTick:
+			lane.report(s.Hub.Metrics)
+			lane.forgetOpen()
+			if due := lane.flush(now); len(due) > 0 {
+				for _, a := range due {
+					send(a)
+				}
+				flusher.Flush()
+			}
 		case <-heartbeat.C:
 			// The revocation event is live-only and may never reach this
 			// replica (an ownership move, a failed ingest): the stream

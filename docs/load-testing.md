@@ -16,22 +16,31 @@ for a deployment and to compare runs before and after a change.
    person with several tabs. The first member of a room owns it and adds the
    others.
 3. **Streams.** Every member holds the room SSE stream the web room view
-   holds, as `web/src/lib/sse.ts` `subscribeRoom` opens it:
-   `GET /v1/rooms/{id}/events?access_token=…&channelId=<default>&allChannels=1&includePeople=1`.
-   The streams count as present members and receive presence events. They
-   open evenly over the ramp-up. A dropped stream reopens with the web
-   client's backoff: 1 s doubling to 30 s, with jitter.
+   holds, as `web/src/lib/sse.ts` `subscribeRoom` opens it, a lanes stream
+   (channels PRD §2.4):
+   `GET /v1/rooms/{id}/events?access_token=…&channelId=<channel>&lanes=1&open=<channel>&includePeople=1`.
+   With `--channels C` (default 1) each room has C channels (its default
+   plus ones the tool creates, or reuses in `--room-ids` rooms), and the
+   room's members are spread over them round-robin: member k has channel
+   k mod C open. The streams count as present members and receive presence
+   events. They open evenly over the ramp-up. A dropped stream reopens with
+   the web client's backoff: 1 s doubling to 30 s, with jitter.
 4. **Sends.** After the ramp-up it sends chat at the target total rate, the
    way `api.sendChat` does: `POST /v1/rooms/{id}/chat` with `text`,
-   `atUnixMs`, a unique `clientMsgId` and the default `channelId`. Sends go
+   `atUnixMs`, a unique `clientMsgId` and the `channelId` the member has
+   open. Sends go
    round-robin over a shuffled list of every (room, member) pair, so each
    member's rate stays as low as the population allows. The send loop is
    open-loop: a send is due by the clock, not when the previous one answered.
-5. **Measurement.** The tool notes which of the room's streams were open
-   when each send started. Every `chat_message` that arrives on a stream is
+5. **Measurement.** The tool notes which of the room's streams with the
+   message's channel open were open when each send started. Every `chat_message` that arrives on a stream is
    matched to its send by `clientMsgId`. The first arrival on each expected
    stream is one latency sample, from send start to arrival. The sender's own
-   stream counts too: that is the echo the web client renders.
+   stream counts too: that is the echo the web client renders. A stream
+   with another channel open receives the message as that channel's
+   `channel_activity` (coalesced to one a second); the report's activity
+   line counts them and how many streams heard of every other channel, the
+   unread badges' source.
 6. **End.** It waits for outstanding deliveries (`--drain`, 5 s by default),
    then prints the report. Rooms it created are deleted unless
    `--cleanup=false`.
@@ -383,3 +392,36 @@ Every other run delivered every expected event, in order, with no 429.
   stall longer than that: 16 commits timed out client-side but committed
   server-side, and the re-seeded counter then collided with those rows (383
   sends answered 500). A commit now waits for its real outcome.
+
+## One large room over channels (channels slice 4, 2026-10-30)
+
+The delivery acceptance of `docs/prd/2026-10-28-channels-and-threads.md`
+(§2.4): one room of 1,024 members spread over 16 channels, 100 msgs/s
+across them, each member with one channel open. Same laptop and compose
+stack as above (default MySQL settings).
+
+```sh
+bnbloc-loadtest --gateway http://localhost:17090 --forwarded-for \
+  --members 1024 --rooms 1 --channels 16 --rate 100 --duration 60s --ramp-up 20s --settle 20s
+```
+
+| Run | Build | Deliveries/s | Delivery p50 / p95 / p99 / max (ms) | POST p50 / p99 (ms) | Lost | Disconnects |
+| --- | --- | --- | --- | --- | --- | --- |
+| 16 channels, lanes | presence snapshot broadcast | 772 | 11,334 / 16,647 / 18,481 / — | 9,915 / 14,902 | 6,439 of 52,739 | 22,455 |
+| 16 channels, lanes | snapshot per stream | 6,400 | 9 / 202 / 266 / 1,591 | 10 / 253 | 0 of 384,000 | 0 |
+| 1 channel (every stream gets every message) | snapshot per stream | 102,062 | 62 / 1,433 / 5,403 / 39,050 | 63 / 3,068 | 8,810 of 6,132,736 | 1 |
+
+- **The first build stormed before a message was sent.** Every arrival
+  broadcast a presence snapshot of every member to every stream: n
+  snapshots of n ids per arrival. At 1,024 members the streams overflowed
+  their buffers during the ramp-up, reconnected, and arrived again. A
+  stream now writes its own snapshot when it opens; arrivals and departures
+  stay one small event each (`docs/bugs/2026-10-30-presence-snapshot-storm.md`).
+- **Lanes carry the room.** With each member's own channel in full and the
+  other 15 as `channel_activity` (at most one a second each), 1,024 streams
+  took 100 msgs/s with no loss and no reconnect, and every stream heard of
+  every other channel (the badges' source). The same room with everyone in
+  one channel is 16 times the deliveries and its tail goes to seconds.
+- **The p99 is the commit, not the fan-out.** Delivery p99 (266 ms)
+  follows the POST p99 (253 ms), as in the baseline above: the target of
+  100 ms is not met on this disk; the fan-out adds about nothing.

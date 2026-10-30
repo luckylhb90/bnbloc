@@ -33,6 +33,12 @@ type stream struct {
 	api     *api
 	tracker *tracker
 	stats   *streamStats
+	// channel is the channel the stream has open (a lanes stream: full
+	// events there, channel_activity for the room's others).
+	channel string
+	// activityFrom are the channels this stream received activity for.
+	activityMu   sync.Mutex
+	activityFrom map[string]bool
 	// idle ends a connection that delivered no bytes (not even the server's
 	// 15s keep-alive comment) for this long, as a browser or proxy would.
 	idle time.Duration
@@ -50,6 +56,7 @@ type streamStats struct {
 	disconnects   int
 	reconnects    int
 	outOfOrder    int
+	activity      int
 	connectErrors map[string]int
 	connect       []time.Duration
 }
@@ -96,7 +103,7 @@ func (st *stream) run(ctx context.Context) {
 func (st *stream) connectOnce(ctx context.Context) (opened bool, err error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, st.api.eventsURL(st.member, st.room.id, st.room.channel, st.tz), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, st.api.eventsURL(st.member, st.room.id, st.channel, st.tz), nil)
 	if err != nil {
 		return false, err
 	}
@@ -156,6 +163,15 @@ func (st *stream) connectOnce(ctx context.Context) (opened bool, err error) {
 		if ev.clientMsgID != "" {
 			st.tracker.deliver(st.id, ev.clientMsgID, at)
 		}
+		if ev.activityFrom != "" {
+			st.activityMu.Lock()
+			if st.activityFrom == nil {
+				st.activityFrom = map[string]bool{}
+			}
+			st.activityFrom[ev.activityFrom] = true
+			st.activityMu.Unlock()
+			st.stats.add(func(s *streamStats) { s.activity++ })
+		}
 	}
 }
 
@@ -165,15 +181,18 @@ func (st *stream) connectOnce(ctx context.Context) (opened bool, err error) {
 type roomEvent struct {
 	Sequence    int64 `json:"sequence"`
 	clientMsgID string
+	// activityFrom is the channel of a channel_activity event.
+	activityFrom string
 }
 
 // decodeEvent decodes one SSE data payload. It reports false for data that is
 // not a room event.
 func decodeEvent(kind string, data []byte) (roomEvent, bool) {
 	var raw struct {
-		Sequence int64  `json:"sequence"`
-		Kind     string `json:"kind"`
-		Payload  struct {
+		Sequence  int64  `json:"sequence"`
+		Kind      string `json:"kind"`
+		ChannelID string `json:"channelId"`
+		Payload   struct {
 			ClientMsgID string `json:"clientMsgId"`
 		} `json:"payload"`
 	}
@@ -184,8 +203,42 @@ func decodeEvent(kind string, data []byte) (roomEvent, bool) {
 		raw.Kind = kind
 	}
 	ev := roomEvent{Sequence: raw.Sequence}
-	if raw.Kind == wire.KindChatMessage {
+	switch raw.Kind {
+	case wire.KindChatMessage:
 		ev.clientMsgID = raw.Payload.ClientMsgID
+	case wire.EventChannelActivity:
+		ev.activityFrom = raw.ChannelID
 	}
 	return ev, true
+}
+
+// activityReport says whether the lanes streams' activity reached them: a
+// stream should have heard of every other channel of its room that had
+// messages (each channel had, with a member posting in it).
+func activityReport(streams []*stream, ss *streamStats) ActivityReport {
+	r := ActivityReport{Events: ss.activity}
+	for _, st := range streams {
+		others := 0
+		for _, ch := range st.room.channels {
+			if ch != st.channel && st.room.hasPoster(ch) {
+				others++
+			}
+		}
+		if others == 0 {
+			continue
+		}
+		r.Streams++
+		st.activityMu.Lock()
+		heard := 0
+		for ch := range st.activityFrom {
+			if ch != st.channel {
+				heard++
+			}
+		}
+		st.activityMu.Unlock()
+		if heard >= others {
+			r.Complete++
+		}
+	}
+	return r
 }

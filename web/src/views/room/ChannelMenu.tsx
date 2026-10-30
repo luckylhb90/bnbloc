@@ -3,8 +3,6 @@ import {
   ArrowCounterClockwiseIcon,
   ArrowDownIcon,
   ArrowUpIcon,
-  BellIcon,
-  BellSlashIcon,
   BookmarkSimpleIcon,
   DotsThreeVerticalIcon,
   EyeSlashIcon,
@@ -22,9 +20,9 @@ import {
 import type { Channel } from "@/lib/api";
 import { mayDeleteChannel, mayManageChannel, mayManageSection, sectionJoin } from "@/lib/channelRules";
 import type { RoomMembership } from "@/lib/roomRoles";
-import { notifyChoices, type NotifyLevel } from "@/lib/notifyLevels";
+import { notifyCaption, notifyChoices, type NotifyLevel } from "@/lib/notifyLevels";
 import type { ChannelGroup, RoomSection } from "@/lib/wire.gen";
-import { Menu, MenuGroup, MenuItem } from "@/ui/Menu";
+import { Menu, MenuChoices, MenuGroup, MenuItem } from "@/ui/Menu";
 import { cn } from "@/lib/cn";
 
 /** What the rail's menus do: the room's channel manager
@@ -95,7 +93,7 @@ export function ChannelMenu({
     <>
       <Menu
         label={`#${c.name}`}
-        menuClassName="absolute right-0 top-full mt-1 w-56"
+        menuClassName="absolute right-0 top-full mt-1 w-64"
         trigger={(props, open) => (
           <button {...props} aria-label={`Channel options for #${c.name}`} title="Channel options" className={kebab(open)}>
             <DotsThreeVerticalIcon size={16} weight="bold" />
@@ -118,16 +116,12 @@ export function ChannelMenu({
           )}
         </MenuGroup>
         <MenuGroup label="Notifications">
-          {notifyChoices(c.notifyEffective).map((o) => (
-            <MenuItem
-              key={o.level || "default"}
-              icon={o.level === "muted" ? BellSlashIcon : BellIcon}
-              current={(c.notifyLevel ?? "") === o.level}
-              onSelect={() => (c.notifyLevel ?? "") !== o.level && actions.notify(c, o.level)}
-            >
-              {o.label}
-            </MenuItem>
-          ))}
+          <MenuChoices
+            choices={notifyChoices(c.notifyEffective)}
+            value={c.notifyLevel ?? ""}
+            caption={notifyCaption(c.notifyLevel, c.notifyEffective)}
+            onSelect={(level) => actions.notify(c, level)}
+          />
         </MenuGroup>
         {c.joined && (
           <MenuGroup label="Your groups">

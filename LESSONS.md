@@ -562,6 +562,19 @@ Evidence: docs/prd/2026-10-25-suggest-what-to-use.md, `web/e2e/suggest-use.mjs`.
 Seen 1× (2026-10-25).
 
 
+### Load-test a room at the size the PRD promises, not at the size the last run used
+
+Every load run had used rooms of 10 to 50 members. The first run at the
+channels PRD's 1,024 members in one room stormed before a message was sent:
+each arrival broadcast a presence snapshot of every member to every stream
+(n² per arrival), the streams overflowed and reconnected, and each reconnect
+was another arrival. Nothing at 50 members hinted at it. A room-wide event
+whose payload grows with the room is the shape to look for.
+
+Evidence: docs/bugs/2026-10-30-presence-snapshot-storm.md,
+docs/load-testing.md ("One large room over channels").
+Seen 1× (2026-10-30).
+
 ## Done right
 
 ### Replay a member's long task across a release, not just a smoke reply

@@ -39,7 +39,7 @@ export interface MenuTriggerProps {
 
 const CloseMenu = createContext<() => void>(() => {});
 
-const ITEM = '[role="menuitem"]:not([disabled])';
+const ITEM = '[role="menuitem"]:not([disabled]), [role="menuitemradio"]:not([disabled])';
 function place(surface: HTMLElement, trigger: HTMLElement, cls: string): void {
   surface.style.maxHeight = "";
   surface.style.maxWidth = "";
@@ -223,5 +223,51 @@ export function MenuItem({
       <span className="min-w-0 flex-1 truncate">{children}</span>
       {current && <span className="size-1.5 shrink-0 rounded-full bg-[var(--color-accent)]" />}
     </button>
+  );
+}
+
+// MenuChoices is one of a few choices as a compact segmented row (a
+// member's notification level): picking one closes the menu and runs
+// onSelect; the caption says what the current one means.
+export function MenuChoices<T extends string>({
+  choices,
+  value,
+  onSelect,
+  caption,
+}: {
+  readonly choices: readonly { readonly value: T; readonly short: string; readonly label: string }[];
+  readonly value: T;
+  readonly onSelect: (value: T) => void;
+  readonly caption?: string;
+}) {
+  const close = useContext(CloseMenu);
+  return (
+    <div className="px-3 pb-1.5 pt-0.5">
+      <div className="flex rounded-[var(--radius)] border border-[var(--color-border)] p-0.5">
+        {choices.map((c) => (
+          <button
+            key={c.value || "default"}
+            type="button"
+            role="menuitemradio"
+            aria-checked={c.value === value}
+            aria-label={c.label}
+            title={c.label}
+            tabIndex={-1}
+            onClick={() => {
+              close();
+              if (c.value !== value) onSelect(c.value);
+            }}
+            className={cn(
+              "min-w-0 flex-1 truncate rounded-[calc(var(--radius)-2px)] px-0.5 py-1 text-[11px] focus:outline-none",
+              "hover:text-[var(--color-fg)] focus:bg-[var(--color-surface-2)]",
+              c.value === value ? "bg-[var(--color-surface-2)] font-semibold text-[var(--color-fg)]" : "text-[var(--color-fg-muted)]",
+            )}
+          >
+            {c.short}
+          </button>
+        ))}
+      </div>
+      {caption && <div className="mt-1 truncate text-[11px] text-[var(--color-fg-subtle)]">{caption}</div>}
+    </div>
   );
 }

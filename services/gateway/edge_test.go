@@ -91,6 +91,9 @@ func TestViewerMayMarkReadTypeJoinLeave(t *testing.T) {
 			t.Errorf("viewer refused POST /%s (perm %s)", sub, perm)
 		}
 	}
+	if perm := requiredPermission(http.MethodPost, mustParseAPIPath(t, http.MethodPost, "/v1/rooms/r/events/scope")); !rbac.Can(string(rbac.RoleViewer), perm) {
+		t.Errorf("viewer refused re-scoping their stream (perm %s)", perm)
+	}
 	for _, path := range []string{"/v1/rooms/r/chat", "/v1/rooms/r/shared-agents/x/authorization", "/v1/rooms", "/v1/rooms/r/read/extra"} {
 		perm := requiredPermission(http.MethodPost, mustParseAPIPath(t, http.MethodPost, path))
 		if rbac.Can(string(rbac.RoleViewer), perm) {

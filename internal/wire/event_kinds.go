@@ -63,6 +63,13 @@ type EventKindSpec struct {
 	// surface (the Docs panel) that still keeps a members-only channel's
 	// content to its readers (C13).
 	CrossChannel bool `json:"crossChannel,omitempty"`
+	// Lane is the kind's lane on a lanes stream (§2.4 of
+	// docs/prd/2026-10-28-channels-and-threads.md; StreamLane): "" a
+	// channel-scoped kind reaches only the channels the stream has open
+	// (a room-wide kind, ChannelID "", always), LaneRoom reaches every
+	// channel the reader may read, LaneActivity becomes a coalesced
+	// channel_activity outside the open channels.
+	Lane string `json:"lane,omitempty"`
 	// Preview kinds reach a preview's stream (a person reading a shared room
 	// they have not joined, docs/prd/2026-10-22-shared-room-preview.md): the
 	// kinds that match what a preview may read over REST, the feed and the
@@ -77,10 +84,10 @@ type EventKindSpec struct {
 //
 //wire:union RoomEventKind Name
 var RoomEventKinds = []EventKindSpec{
-	{Name: KindChatMessage, Durable: true, Replay: true, ChannelScoped: true, Preview: true},
-	{Name: KindAgentMessages, Durable: true, Replay: true, ChannelScoped: true, Preview: true},
-	{Name: EventAgentJobCreated, ChannelScoped: true},
-	{Name: EventAgentJobUpdated, ChannelScoped: true},
+	{Name: KindChatMessage, Durable: true, Replay: true, ChannelScoped: true, Preview: true, Lane: LaneActivity},
+	{Name: KindAgentMessages, Durable: true, Replay: true, ChannelScoped: true, Preview: true, Lane: LaneActivity},
+	{Name: EventAgentJobCreated, ChannelScoped: true, Lane: LaneRoom},
+	{Name: EventAgentJobUpdated, ChannelScoped: true, Lane: LaneRoom},
 	{Name: EventAgentJobProgress, ChannelScoped: true},
 	{Name: EventJobLiveFrame, ChannelScoped: true},
 	{Name: EventAgentSessionState},
@@ -89,9 +96,9 @@ var RoomEventKinds = []EventKindSpec{
 	{Name: EventPresenceLeave},
 	{Name: EventPresenceSnapshot},
 	{Name: EventPresenceTyping, ChannelScoped: true},
-	{Name: EventMessageDeleted, ChannelScoped: true, Preview: true},
+	{Name: EventMessageDeleted, ChannelScoped: true, Preview: true, Lane: LaneActivity},
 	{Name: EventMessageEdited, ChannelScoped: true, Preview: true},
-	{Name: EventTaskUpdated, ChannelScoped: true},
+	{Name: EventTaskUpdated, ChannelScoped: true, Lane: LaneRoom},
 	{Name: EventArtifactUpdated, CrossChannel: true, Preview: true},
 	{Name: EventArtifactState, CrossChannel: true, Preview: true},
 	{Name: EventMemberJoined, Preview: true},
@@ -111,7 +118,36 @@ var RoomEventKinds = []EventKindSpec{
 	// A thread opened, renamed, archived or replied in (realtime and
 	// bnbloc-room): scoped to the thread's parent channel, whose stream
 	// redraws the root's summary line.
-	{Name: EventThreadUpdated, ChannelScoped: true, Preview: true},
+	{Name: EventThreadUpdated, ChannelScoped: true, Preview: true, Lane: LaneRoom},
+	// Made by a lanes stream itself, never published to a room (§2.4):
+	// a channel's activity outside the open channels, and the stream's id
+	// that re-scoping names.
+	{Name: EventChannelActivity, ChannelScoped: true, Preview: true},
+	{Name: EventStreamOpened, Preview: true},
+}
+
+// The lanes of a lanes stream (EventKindSpec.Lane, StreamLane).
+const (
+	LaneFull     = "full"
+	LaneRoom     = "room"
+	LaneActivity = "activity"
+	LaneNone     = "none"
+)
+
+// StreamLane is the one rule of a lanes stream: how an event of kind for
+// channelID reaches a subscriber who has open the channels open says yes to
+// (§2.4). Full delivers the event; activity turns it into the channel's
+// coalesced channel_activity; none drops it. Read access
+// (store.MayReadChannel) is asked separately, for every lane.
+func StreamLane(kind, channelID string, open func(string) bool) string {
+	spec := eventKinds[kind]
+	switch {
+	case channelID == "", spec.CrossChannel, spec.Lane == LaneRoom, open(channelID):
+		return LaneFull
+	case spec.Lane == LaneActivity:
+		return LaneActivity
+	}
+	return LaneNone
 }
 
 var eventKinds = func() map[string]EventKindSpec {

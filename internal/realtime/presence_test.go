@@ -36,15 +36,18 @@ func newTestPresence(publish func(wire.Event)) (*Presence, *controllableTimers) 
 	return p, timers
 }
 
-// Entering emits join+snapshot; a leave is announced only after the grace window
-// elapses (deferred), then emits presence_leave+snapshot.
+// Entering emits join (the snapshot is each stream's own, Snapshot); a leave
+// is announced only after the grace window elapses (deferred).
 func TestPresenceJoinThenDeferredLeave(t *testing.T) {
 	var events []wire.Event
 	p, timers := newTestPresence(func(ev wire.Event) { events = append(events, ev) })
 
 	p.Enter("room-1", "alice")
-	if len(events) != 2 || events[0].Kind != "presence_join" || events[1].Kind != "presence_snapshot" {
-		t.Fatalf("enter events = %v, want join+snapshot", kinds(events))
+	if len(events) != 1 || events[0].Kind != "presence_join" {
+		t.Fatalf("enter events = %v, want join only", kinds(events))
+	}
+	if snap := p.Snapshot("room-1"); snap.Kind != "presence_snapshot" || len(snap.Payload.(map[string]any)["members"].([]string)) != 1 {
+		t.Fatalf("snapshot = %+v", snap)
 	}
 
 	events = nil
@@ -58,8 +61,8 @@ func TestPresenceJoinThenDeferredLeave(t *testing.T) {
 	}
 
 	timers.fire() // grace window elapses with no reconnect
-	if len(events) != 2 || events[0].Kind != "presence_leave" || events[1].Kind != "presence_snapshot" {
-		t.Fatalf("finalized leave events = %v, want leave+snapshot", kinds(events))
+	if len(events) != 1 || events[0].Kind != "presence_leave" {
+		t.Fatalf("finalized leave events = %v, want leave only", kinds(events))
 	}
 	if got := p.Members("room-1"); len(got) != 0 {
 		t.Fatalf("members after leave = %v, want empty", got)

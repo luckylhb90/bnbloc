@@ -12,6 +12,7 @@ const (
 	metricFeedCommits      = "realtime_feed_commits_total"
 	metricFeedCommitEvents = "realtime_feed_commit_events_total"
 	metricSSEOverflows     = "realtime_sse_overflows_total"
+	metricLaneEvents       = "realtime_stream_lane_events_total"
 )
 
 // SSE connection kinds: a presence-counting subscriber (a member's web or
@@ -47,6 +48,10 @@ func RegisterMetrics(m *obs.Metrics) {
 	m.Describe(metricFeedCommitEvents, "Durable events stored by successful group commits; divided by the ok commits it is the mean batch size.")
 	m.Describe(metricSSEOverflows, "Room streams closed because the client fell a whole buffer behind; the client reconnects and catches up from history.")
 	m.Describe(metricSSEConnections, "Open room event streams by kind (member: presence-counting client; bridge: ?presence=0 observer; app: an interactive app's change feed; preview: a person reading a shared room they have not joined).")
+	m.Describe(metricLaneEvents, "Room events on lanes streams by lane (full: delivered; activity: folded into a channel_activity; activity_sent: channel_activity events written; none: dropped, a closed channel's typing or progress).")
+	for _, lane := range []string{wire.LaneFull, wire.LaneActivity, "activity_sent", wire.LaneNone} {
+		m.CounterAdd(metricLaneEvents, 0, obs.L("lane", lane))
+	}
 	for _, kind := range []string{SSEKindMember, SSEKindBridge, SSEKindApp, SSEKindPreview} {
 		m.GaugeSet(metricSSEConnections, 0, obs.L("kind", kind))
 	}
@@ -60,4 +65,15 @@ func TrackSSE(m *obs.Metrics, kind string) (done func()) {
 	}
 	m.GaugeAdd(metricSSEConnections, 1, obs.L("kind", kind))
 	return func() { m.GaugeAdd(metricSSEConnections, -1, obs.L("kind", kind)) }
+}
+
+// CountLaneEvents adds a lanes stream's counts since its last report
+// (per lane: wire.LaneFull, wire.LaneActivity, "activity_sent",
+// wire.LaneNone); streams report once a second, not per event.
+func CountLaneEvents(m *obs.Metrics, counts map[string]int) {
+	for lane, n := range counts {
+		if n > 0 {
+			m.CounterAdd(metricLaneEvents, float64(n), obs.L("lane", lane))
+		}
+	}
 }

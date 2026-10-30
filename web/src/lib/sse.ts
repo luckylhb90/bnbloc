@@ -1,3 +1,5 @@
+import { req } from "./api";
+import { ApiError } from "./errors.ts";
 import { getToken, refreshSession } from "./session";
 import { apiUrl } from "./config";
 import { normalizeRoomEvent, type RoomEvent } from "./roomEvents.ts";
@@ -13,6 +15,17 @@ import { currentTenantPolicy } from "./tenantPolicy.ts";
 export interface RoomStreamScope {
   readonly includePeople?: boolean;
   readonly channelOnly?: boolean;
+  // lanes: full events only for the open channel (channelId), a coalesced
+  // channel_activity for every other (channels PRD §2.4); rescope changes
+  // the open channel without reopening the stream.
+  readonly lanes?: boolean;
+}
+
+// A room subscription: call it to unsubscribe; rescope moves a lanes
+// stream to other open channels (a no-op for any other stream).
+export interface RoomSubscription {
+  (): void;
+  readonly rescope: (open: readonly string[]) => void;
 }
 
 // subscribeRoom opens an SSE stream for a room's live events. EventSource cannot
@@ -37,8 +50,12 @@ export function subscribeRoom(
   onAuthError: () => Promise<boolean> = refreshSession,
   channelId?: string,
   scope: RoomStreamScope = {},
-): () => void {
+): RoomSubscription {
   let es: EventSource | null = null;
+  // A lanes stream: its id (its first event) and the channels it has open,
+  // which a reconnect opens with.
+  let streamId = "";
+  let open: readonly string[] = channelId ? [channelId] : [];
   let closed = false;
   let attempts = 0;
   let timer: number | null = null;
@@ -57,6 +74,10 @@ export function subscribeRoom(
     } catch {
       // Not an event (a proxy's error page, a truncated frame): dropped,
       // never rendered as a kindless row the feed takes for an agent reply.
+      return;
+    }
+    if (ev.kind === "stream_opened") {
+      streamId = typeof ev.payload?.streamId === "string" ? ev.payload.streamId : "";
       return;
     }
     normalizeRoomEvent(ev, onEvent);
@@ -89,12 +110,19 @@ export function subscribeRoom(
       if (closed) return;
     }
     const token = getToken();
-    const channelQ = channelId ? `&channelId=${encodeURIComponent(channelId)}` : "";
+    streamId = "";
+    // A lanes stream names its first open channel as channelId too: a
+    // realtime replica without lanes serves that channel alone.
+    const channelQ = scope.lanes
+      ? `&lanes=1&open=${open.map(encodeURIComponent).join(",")}${open[0] ? `&channelId=${encodeURIComponent(open[0])}` : ""}`
+      : channelId
+        ? `&channelId=${encodeURIComponent(channelId)}`
+        : "";
     // allChannels: the room view needs cross-channel events — agent-job rows
     // and artifact updates carry the channel they originated in, while the
     // Files panel lists room-wide deliverables. Feed kinds are filtered to the
     // active channel by the caller.
-    const scopeQ = scope.channelOnly ? "" : `&allChannels=1${scope.includePeople ? "&includePeople=1" : ""}`;
+    const scopeQ = scope.channelOnly ? "" : `${scope.lanes ? "" : "&allChannels=1"}${scope.includePeople ? "&includePeople=1" : ""}`;
     // Member locations: the time zone is sent only when the organization has them
     // on (pulse_geography). Off, the zone never leaves the device.
     const tzQ = currentTenantPolicy()?.pulseGeography
@@ -131,7 +159,28 @@ export function subscribeRoom(
 
   void connect();
 
-  return () => {
+  const reconnectNow = () => {
+    if (closed) return;
+    if (es) {
+      es.close();
+      es = null;
+    }
+    void connect();
+  };
+
+  const rescope = (next: readonly string[]) => {
+    if (!scope.lanes || closed) return;
+    open = next;
+    // Not open yet (or reconnecting): the next connection opens with it.
+    if (!streamId) return;
+    rescopeStream(roomId, streamId, next).then((found) => {
+      // The stream is gone on the server (closed, or moved replicas):
+      // reopen with the open channels.
+      if (!found) reconnectNow();
+    }, reconnectNow);
+  };
+
+  const off = () => {
     closed = true;
     if (timer !== null) {
       clearTimeout(timer);
@@ -142,4 +191,17 @@ export function subscribeRoom(
       es = null;
     }
   };
+  return Object.assign(off, { rescope });
+}
+
+// rescopeStream asks realtime to move a lanes stream to other open channels
+// (POST .../events/scope); false when the stream is gone.
+async function rescopeStream(roomId: string, streamId: string, open: readonly string[]): Promise<boolean> {
+  try {
+    await req<void>(roomPath(roomId, "events", "scope"), { method: "POST", body: JSON.stringify({ streamId, open }), as: "none" });
+    return true;
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return false;
+    throw e;
+  }
 }

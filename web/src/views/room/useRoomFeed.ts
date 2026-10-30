@@ -26,6 +26,8 @@ export interface RoomFeed {
   readonly history: HistoryState;
   // Load the page older than the current cursor ("Load earlier").
   readonly loadEarlier: () => void;
+  // Merge the latest page in, paging untouched (a lanes stream's catch-up).
+  readonly catchUp: () => void;
   // Apply a feed-kind live event (chat, agent reply, delete, edit). Returns
   // false for kinds the feed does not own.
   readonly applyEvent: (e: RoomEvent) => boolean;
@@ -101,6 +103,26 @@ export function useRoomFeed({
     void loadPage(undefined);
   }, [loadPage, joinedGen]);
 
+  // catchUp merges the latest page into the feed, its paging left as it is:
+  // what a lanes stream did not deliver in full while it was re-scoped to
+  // this channel (useRoomStream onOpenActivity).
+  const catchUp = useCallback(() => {
+    if (!channelId) return;
+    void api
+      .roomHistory(roomId, undefined, PAGE, channelId)
+      .then((res) => {
+        const page: FeedItem[] = [];
+        for (const raw of res.messages) {
+          normalizeRoomEvent(raw as RoomEvent, (e: RoomEvent) => {
+            const item = feedItemFromEvent(e, subject, false);
+            if (item) page.push(item);
+          });
+        }
+        setFeed((f) => mergeHistory(f, page));
+      })
+      .catch(() => {});
+  }, [roomId, channelId, subject, setFeed]);
+
   const loadEarlier = useCallback(() => {
     if (history.loading || history.oldestSeq == null) return;
     void loadPage(history.oldestSeq);
@@ -131,5 +153,5 @@ export function useRoomFeed({
     [roomId, subject, setFeed],
   );
 
-  return { feed, setFeed, history, loadEarlier, applyEvent };
+  return { feed, setFeed, history, loadEarlier, catchUp, applyEvent };
 }

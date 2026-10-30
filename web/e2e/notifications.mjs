@@ -78,8 +78,9 @@ await page.goto(B + "/#/room/r1", { waitUntil: "load" });
 try {
   // The channel's menu: the default named by what it means now, then mute.
   await page.getByRole("button", { name: "Channel options for #general" }).click({ force: true });
-  ok(await page.getByRole("menuitem", { name: "Default (all messages)" }).isVisible(), "the default level is named by its meaning (all, where I posted)");
-  await page.getByRole("menuitem", { name: "Muted" }).click();
+  ok(await page.getByRole("menuitemradio", { name: "Default (all messages)" }).isVisible(), "the default level is named by its meaning (all, where I posted)");
+  ok((await page.getByRole("menuitemradio", { checked: true }).getAttribute("aria-label")) === "Default (all messages)", "the current level is checked");
+  await page.getByRole("menuitemradio", { name: "Muted" }).click();
   await page.waitForTimeout(400);
   ok(s.follows.at(-1)?.channelId === "ch_gen" && s.follows.at(-1)?.level === "muted", `muting sets the level on the follow: ${JSON.stringify(s.follows.at(-1))}`);
   ok(await page.getByLabel("Muted").first().isVisible(), "the rail marks the muted channel");

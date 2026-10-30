@@ -931,3 +931,47 @@ hours drop what they hold back rather than send it at the end; agents'
 replies are not `channel_message` (a member hears their own requests'
 answers through `agent_finished`); `@here` counts a read within the last
 hour; `@channel` is open to every member who may post (C5's proposal).
+
+**Slice 4, delivery lanes** (§2.4):
+
+- A person's stream may be a lanes stream (`?lanes=1&open=<channel>,…`, at
+  most `wire.MaxStreamOpen` open): full events for the open channels;
+  room-wide kinds and the room lane (agent jobs' state, tasks, thread
+  summaries, deliverables) always; for every other channel the reader may
+  read, a `channel_activity` (its last sequence, how many events, whether
+  one mentions the member), at most one a second per channel; a closed
+  channel's typing, edits and job progress are dropped. The one rule is
+  `wire.StreamLane` over the kind registry's `Lane`; read access
+  (`store.MayReadChannel`) is asked on every lane.
+- The stream's first event (`stream_opened`) names it;
+  `POST .../events/scope` moves it to other open channels without reopening
+  (the caller's own stream only; a stream gone answers 404 and the client
+  reopens). The room view's stream is a lanes stream that follows the active
+  channel; activity for the channel just opened makes the feed catch up (a
+  message landing while the scope moved). The thread panel and the people
+  chat keep their one-channel streams; the bridge keeps `allChannels`.
+- `realtime_stream_lane_events_total{lane}` counts per lane (streams report
+  once a second). `bnbloc-loadtest` holds lanes streams and gains
+  `--channels`: members spread over a room's channels, each with theirs
+  open; the report's activity line says whether every stream heard of every
+  other channel.
+- The channel menu's notification choice is one compact row (four items
+  made the menu scroll on a short rail).
+- Tests: `services/realtime/lanes_test.go` (full where open, coalesced
+  activity with a mention, re-scope, the scope is the owner's, members-only
+  stays closed), `internal/wire` lane table, the load tool against its fake
+  gateway, `web/e2e/lanes.mjs` (another channel's badge moves while one is
+  open; navigation re-scopes and reopens nothing).
+- Rollout (lens 11): a lanes stream also names its open channel as
+  `channelId`, so an old realtime pod (no lanes) serves that one channel;
+  its scope route answers 404 and the client reopens on the channel now
+  open. Other channels' badges then move only on the next unread read
+  until every realtime pod runs this release.
+- The acceptance run (`docs/load-testing.md`, "One large room over
+  channels"): 1,024 members over 16 channels at 100 msgs/s, no loss, no
+  reconnect, every stream heard of every other channel; delivery p50 9 ms,
+  p99 266 ms, which follows the POST p99 (the commit on this disk), so the
+  100 ms p99 target is not met here. The first run found presence
+  snapshots broadcast to every stream on every arrival (n² in a large room,
+  `docs/bugs/2026-10-30-presence-snapshot-storm.md`): a stream now writes
+  its own snapshot on opening.

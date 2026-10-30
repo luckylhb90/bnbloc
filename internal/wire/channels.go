@@ -540,3 +540,40 @@ const (
 	// chat, or a channel whose settings bar them).
 	AgentsNotAdmitted = "agents_not_admitted"
 )
+
+// EventChannelActivity (ChannelActivityPayload) is what a lanes stream sends
+// for a channel it does not have open (§2.4): at most one a second per
+// channel, so a member's rail and badges move without the messages.
+const EventChannelActivity = "channel_activity"
+
+// ChannelActivityPayload is a channel's activity since the stream's last one
+// for it: its last sequence, how many events it stands for, and whether one of
+// them mentions the subscriber (by id, @channel or @here).
+type ChannelActivityPayload struct {
+	ChannelID string `json:"channelId"`
+	LastSeq   int64  `json:"lastSeq"`
+	Events    int    `json:"events"`
+	Mention   bool   `json:"mention,omitempty"`
+}
+
+// EventStreamOpened (StreamOpenedPayload) is a lanes stream's first event:
+// its id, which POST /v1/rooms/{roomId}/events/scope names to change the
+// channels it has open without reopening it.
+const EventStreamOpened = "stream_opened"
+
+// StreamOpenedPayload names a lanes stream and the channels it opened with.
+type StreamOpenedPayload struct {
+	StreamID string   `json:"streamId"`
+	Open     []string `json:"open"`
+}
+
+// MaxStreamOpen bounds the channels a lanes stream has open at once (the
+// room view's channel and its open thread, with room to spare).
+const MaxStreamOpen = 4
+
+// StreamScopeRequest re-scopes a lanes stream (POST .../events/scope): the
+// channels it has open from now on, replacing the previous ones.
+type StreamScopeRequest struct {
+	StreamID string   `json:"streamId"`
+	Open     []string `json:"open"`
+}

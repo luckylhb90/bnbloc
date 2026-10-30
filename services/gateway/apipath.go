@@ -404,6 +404,10 @@ func requiredPermission(method string, p apiPath) rbac.Permission {
 		return rbac.PermCreateRoom
 	case method == http.MethodPost && len(p.segs) == 4 && p.section() == "invites" && p.segs[3] == "redeem":
 		return rbac.PermCreateRoom
+	case method == http.MethodPost && len(p.segs) == 5 && p.RoomSub == "events" && p.segs[4] == "scope":
+		// Which channels one's own stream has open (channels §2.4): how
+		// one reads the room, not a write.
+		return rbac.PermRead
 	case method == http.MethodPost && len(p.segs) == 4 && readerRoomAction(p.RoomSub):
 		// A viewer's own read-side room actions: marking read, the typing
 		// hint, and joining/leaving a shared room are not cost-bearing.

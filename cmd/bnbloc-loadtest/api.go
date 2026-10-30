@@ -202,9 +202,9 @@ func (a *api) deleteRoom(ctx context.Context, owner *member, roomID string) erro
 	return a.do(ctx, owner, http.MethodDelete, "/v1/rooms/"+url.PathEscape(roomID), nil, nil, nil)
 }
 
-// defaultChannel returns the room's default channel id (the channel the web
-// client opens a room on).
-func (a *api) defaultChannel(ctx context.Context, m *member, roomID string) (string, error) {
+// channels returns the room's channel ids, the default first (the channel
+// the web client opens a room on).
+func (a *api) channels(ctx context.Context, m *member, roomID string) ([]string, error) {
 	var out struct {
 		Channels []struct {
 			ChannelID string `json:"channelId"`
@@ -212,17 +212,31 @@ func (a *api) defaultChannel(ctx context.Context, m *member, roomID string) (str
 		} `json:"channels"`
 	}
 	if err := a.do(ctx, m, http.MethodGet, "/v1/rooms/"+url.PathEscape(roomID)+"/channels", nil, nil, &out); err != nil {
-		return "", err
+		return nil, err
 	}
+	var ids []string
 	for _, c := range out.Channels {
 		if c.IsDefault {
-			return c.ChannelID, nil
+			ids = append([]string{c.ChannelID}, ids...)
+		} else {
+			ids = append(ids, c.ChannelID)
 		}
 	}
-	if len(out.Channels) > 0 {
-		return out.Channels[0].ChannelID, nil
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("room %s lists no channel", roomID)
 	}
-	return "", fmt.Errorf("room %s lists no channel", roomID)
+	return ids, nil
+}
+
+// createChannel makes a channel in the room as its owner.
+func (a *api) createChannel(ctx context.Context, owner *member, roomID, name string) (string, error) {
+	var out struct {
+		ChannelID string `json:"channelId"`
+	}
+	if err := a.do(ctx, owner, http.MethodPost, "/v1/rooms/"+url.PathEscape(roomID)+"/channels", nil, map[string]string{"name": name}, &out); err != nil {
+		return "", err
+	}
+	return out.ChannelID, nil
 }
 
 // sendChat posts one chat message exactly as the web client does
@@ -241,14 +255,10 @@ func (a *api) sendChat(ctx context.Context, m *member, roomID, channelID, client
 
 // eventsURL is the room stream URL of the web room view (web/src/lib/sse.ts
 // subscribeRoom with the room view's scope): the session token as the
-// access_token query param (EventSource cannot set headers), the active
-// channel, allChannels=1 and includePeople=1.
+// access_token query param (EventSource cannot set headers), a lanes stream
+// with the member's channel open (and named as channelId), includePeople=1.
 func (a *api) eventsURL(m *member, roomID, channelID, tz string) string {
-	q := "access_token=" + url.QueryEscape(m.token)
-	if channelID != "" {
-		q += "&channelId=" + url.QueryEscape(channelID)
-	}
-	q += "&allChannels=1&includePeople=1"
+	q := "access_token=" + url.QueryEscape(m.token) + "&channelId=" + url.QueryEscape(channelID) + "&lanes=1&open=" + url.QueryEscape(channelID) + "&includePeople=1"
 	if tz != "" {
 		q += "&tz=" + url.QueryEscape(tz)
 	}

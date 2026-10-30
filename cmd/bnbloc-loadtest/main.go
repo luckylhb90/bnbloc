@@ -65,6 +65,7 @@ type config struct {
 	Rooms          int
 	RoomIDs        []string
 	MembersPerRoom int
+	Channels       int
 	Rate           float64
 	Duration       time.Duration
 	RampUp         time.Duration
@@ -101,6 +102,7 @@ func parseFlags(args []string, errOut io.Writer) (config, error) {
 	fs.IntVar(&c.Rooms, "rooms", 20, "rooms the tool creates (ignored with --room-ids)")
 	roomIDs := fs.String("room-ids", "", "comma-separated existing room ids to use instead of creating rooms; every assigned member must already be a member")
 	fs.IntVar(&c.MembersPerRoom, "members-per-room", 0, "members in each room (default members/rooms); above that a member holds one stream per room it is in")
+	fs.IntVar(&c.Channels, "channels", 1, "channels per room (the default plus channels the tool creates, or reuses in --room-ids rooms); members are spread over them round-robin, each holding the web room view's lanes stream with its channel open and posting in it")
 	fs.Float64Var(&c.Rate, "rate", 50, "total chat sends per second, spread round-robin over every (room, member) pair")
 	fs.DurationVar(&c.Duration, "duration", 60*time.Second, "send window")
 	fs.DurationVar(&c.RampUp, "ramp-up", 10*time.Second, "streams open evenly over this period before sending starts")
@@ -136,6 +138,8 @@ func parseFlags(args []string, errOut io.Writer) (config, error) {
 		return c, errors.New("--members must be at least 1")
 	case c.Rooms < 1:
 		return c, errors.New("--rooms must be at least 1")
+	case c.Channels < 1 || c.Channels > 64:
+		return c, errors.New("--channels must be between 1 and 64")
 	case c.Rate <= 0:
 		return c, errors.New("--rate must be positive")
 	case c.Duration <= 0:

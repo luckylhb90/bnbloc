@@ -240,6 +240,26 @@ default-first. The web channel rail consumes the per-channel list.
 4. `persist` stamps `room_messages.channel_id`; the agent borrow record (if the
    message drove an agent) stamps `shared_agent_audit.channel_id`.
 
+## Stream scopes
+
+A room stream (`GET /v1/rooms/{id}/events`) is one of three scopes:
+
+- **one channel** (`channelId`, default the room's default channel): that
+  channel's events and the room-wide ones (the people-chat panel, the
+  thread panel);
+- **all channels** (`allChannels=1`): every channel the subscriber may
+  read, agents' streams without the channels agents are not admitted to
+  (the bridge);
+- **lanes** (`lanes=1&open=<id>,…`, a person's only; the web room view):
+  full events for the open channels, the room lane always, and one
+  coalesced `channel_activity` a second for every other channel it may
+  read (`wire.StreamLane`, docs/prd/2026-10-28-channels-and-threads.md
+  §2.4). Its first event, `stream_opened`, names it; `POST
+  .../events/scope {streamId, open}` moves it to other open channels
+  without reopening.
+
+Every scope asks `store.MayReadChannel` of every channel-scoped event.
+
 ## Semantics of the empty channel id
 
 `""` means different things by call site — deliberate, documented on the

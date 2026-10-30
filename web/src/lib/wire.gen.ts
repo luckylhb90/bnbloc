@@ -2622,6 +2622,43 @@ export const RulesChanged = "rules_changed";
 // chat, or a channel whose settings bar them).
 export const AgentsNotAdmitted = "agents_not_admitted";
 
+// EventChannelActivity (ChannelActivityPayload) is what a lanes stream sends
+// for a channel it does not have open (§2.4): at most one a second per
+// channel, so a member's rail and badges move without the messages.
+export const EventChannelActivity = "channel_activity";
+
+// ChannelActivityPayload is a channel's activity since the stream's last one
+// for it: its last sequence, how many events it stands for, and whether one of
+// them mentions the subscriber (by id, @channel or @here).
+export interface ChannelActivityPayload {
+  channelId: string;
+  lastSeq: number;
+  events: number;
+  mention?: boolean;
+}
+
+// EventStreamOpened (StreamOpenedPayload) is a lanes stream's first event:
+// its id, which POST /v1/rooms/{roomId}/events/scope names to change the
+// channels it has open without reopening it.
+export const EventStreamOpened = "stream_opened";
+
+// StreamOpenedPayload names a lanes stream and the channels it opened with.
+export interface StreamOpenedPayload {
+  streamId: string;
+  open: string[];
+}
+
+// MaxStreamOpen bounds the channels a lanes stream has open at once (the
+// room view's channel and its open thread, with room to spare).
+export const MaxStreamOpen = 4;
+
+// StreamScopeRequest re-scopes a lanes stream (POST .../events/scope): the
+// channels it has open from now on, replacing the previous ones.
+export interface StreamScopeRequest {
+  streamId: string;
+  open: string[];
+}
+
 // ---- wire/client_config.go ----
 
 // ClientConfig is GET /v1/public/client-config: the deployment facts a client
@@ -4168,6 +4205,13 @@ export interface EventKindSpec {
   // surface (the Docs panel) that still keeps a members-only channel's
   // content to its readers (C13).
   crossChannel?: boolean;
+  // Lane is the kind's lane on a lanes stream (§2.4 of
+  // docs/prd/2026-10-28-channels-and-threads.md; StreamLane): "" a
+  // channel-scoped kind reaches only the channels the stream has open
+  // (a room-wide kind, ChannelID "", always), LaneRoom reaches every
+  // channel the reader may read, LaneActivity becomes a coalesced
+  // channel_activity outside the open channels.
+  lane?: string;
   // Preview kinds reach a preview's stream (a person reading a shared room
   // they have not joined, docs/prd/2026-10-22-shared-room-preview.md): the
   // kinds that match what a preview may read over REST, the feed and the
@@ -4179,7 +4223,13 @@ export interface EventKindSpec {
 // RoomEventKinds is the registry of room event kinds. The web's
 // RoomEventKind union (and RoomEventKindValues) is generated from the Name
 // of each row: a kind registered here is a kind the web listens for.
-export const RoomEventKinds: readonly EventKindSpec[] = [{ name: "chat_message", durable: true, replay: true, channelScoped: true, preview: true }, { name: "agent_messages", durable: true, replay: true, channelScoped: true, preview: true }, { name: "agent_job_created", channelScoped: true }, { name: "agent_job_updated", channelScoped: true }, { name: "agent_job_progress", channelScoped: true }, { name: "job_live_frame", channelScoped: true }, { name: "agent_session_state" }, { name: "agent_roster" }, { name: "presence_join" }, { name: "presence_leave" }, { name: "presence_snapshot" }, { name: "presence_typing", channelScoped: true }, { name: "message_deleted", channelScoped: true, preview: true }, { name: "message_edited", channelScoped: true, preview: true }, { name: "task_updated", channelScoped: true }, { name: "artifact_updated", crossChannel: true, preview: true }, { name: "artifact_state", crossChannel: true, preview: true }, { name: "member_joined", preview: true }, { name: "member_removed", revocation: true, preview: true }, { name: "room_deleted", revocation: true, preview: true }, { name: "content_saved" }, { name: "content_uses_changed" }, { name: "app_changed" }, { name: "channel_updated", preview: true }, { name: "section_membership" }, { name: "thread_updated", channelScoped: true, preview: true }];
+export const RoomEventKinds: readonly EventKindSpec[] = [{ name: "chat_message", durable: true, replay: true, channelScoped: true, lane: "activity", preview: true }, { name: "agent_messages", durable: true, replay: true, channelScoped: true, lane: "activity", preview: true }, { name: "agent_job_created", channelScoped: true, lane: "room" }, { name: "agent_job_updated", channelScoped: true, lane: "room" }, { name: "agent_job_progress", channelScoped: true }, { name: "job_live_frame", channelScoped: true }, { name: "agent_session_state" }, { name: "agent_roster" }, { name: "presence_join" }, { name: "presence_leave" }, { name: "presence_snapshot" }, { name: "presence_typing", channelScoped: true }, { name: "message_deleted", channelScoped: true, lane: "activity", preview: true }, { name: "message_edited", channelScoped: true, preview: true }, { name: "task_updated", channelScoped: true, lane: "room" }, { name: "artifact_updated", crossChannel: true, preview: true }, { name: "artifact_state", crossChannel: true, preview: true }, { name: "member_joined", preview: true }, { name: "member_removed", revocation: true, preview: true }, { name: "room_deleted", revocation: true, preview: true }, { name: "content_saved" }, { name: "content_uses_changed" }, { name: "app_changed" }, { name: "channel_updated", preview: true }, { name: "section_membership" }, { name: "thread_updated", channelScoped: true, lane: "room", preview: true }, { name: "channel_activity", channelScoped: true, preview: true }, { name: "stream_opened", preview: true }];
+
+// The lanes of a lanes stream (EventKindSpec.Lane, StreamLane).
+export const LaneFull = "full";
+export const LaneRoom = "room";
+export const LaneActivity = "activity";
+export const LaneNone = "none";
 
 // ---- wire/events.go ----
 
@@ -8170,8 +8220,8 @@ export type ContentSavedAction = "saved" | "submitted" | "published";
 export const ContentSavedActionValues: readonly ContentSavedAction[] = ["saved", "submitted", "published"];
 export type DecisionQuestionType = "predicate" | "choice" | "score";
 export const DecisionQuestionTypeValues: readonly DecisionQuestionType[] = ["predicate", "choice", "score"];
-export type RoomEventKind = "chat_message" | "agent_messages" | "agent_job_created" | "agent_job_updated" | "agent_job_progress" | "job_live_frame" | "agent_session_state" | "agent_roster" | "presence_join" | "presence_leave" | "presence_snapshot" | "presence_typing" | "message_deleted" | "message_edited" | "task_updated" | "artifact_updated" | "artifact_state" | "member_joined" | "member_removed" | "room_deleted" | "content_saved" | "content_uses_changed" | "app_changed" | "channel_updated" | "section_membership" | "thread_updated";
-export const RoomEventKindValues: readonly RoomEventKind[] = ["chat_message", "agent_messages", "agent_job_created", "agent_job_updated", "agent_job_progress", "job_live_frame", "agent_session_state", "agent_roster", "presence_join", "presence_leave", "presence_snapshot", "presence_typing", "message_deleted", "message_edited", "task_updated", "artifact_updated", "artifact_state", "member_joined", "member_removed", "room_deleted", "content_saved", "content_uses_changed", "app_changed", "channel_updated", "section_membership", "thread_updated"];
+export type RoomEventKind = "chat_message" | "agent_messages" | "agent_job_created" | "agent_job_updated" | "agent_job_progress" | "job_live_frame" | "agent_session_state" | "agent_roster" | "presence_join" | "presence_leave" | "presence_snapshot" | "presence_typing" | "message_deleted" | "message_edited" | "task_updated" | "artifact_updated" | "artifact_state" | "member_joined" | "member_removed" | "room_deleted" | "content_saved" | "content_uses_changed" | "app_changed" | "channel_updated" | "section_membership" | "thread_updated" | "channel_activity" | "stream_opened";
+export const RoomEventKindValues: readonly RoomEventKind[] = ["chat_message", "agent_messages", "agent_job_created", "agent_job_updated", "agent_job_progress", "job_live_frame", "agent_session_state", "agent_roster", "presence_join", "presence_leave", "presence_snapshot", "presence_typing", "message_deleted", "message_edited", "task_updated", "artifact_updated", "artifact_state", "member_joined", "member_removed", "room_deleted", "content_saved", "content_uses_changed", "app_changed", "channel_updated", "section_membership", "thread_updated", "channel_activity", "stream_opened"];
 export type EventSubscriptionSource = "bnbloc/platform" | "bnbloc/room" | "bnbloc/member" | "webhook";
 export const EventSubscriptionSourceValues: readonly EventSubscriptionSource[] = ["bnbloc/platform", "bnbloc/room", "bnbloc/member", "webhook"];
 export type PlatformEventType = "platform.deployed" | "component.published" | "desktop.published";

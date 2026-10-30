@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { refreshSession } from "@/lib/session";
-import { subscribeRoom, type RoomStreamScope } from "@/lib/sse";
+import { subscribeRoom, type RoomStreamScope, type RoomSubscription } from "@/lib/sse";
 import type { RoomEvent } from "@/lib/roomEvents";
 import { dedupeMembers, sameUser } from "@/lib/format";
 import { useScopedState } from "@/lib/useScopedState";
@@ -42,6 +42,9 @@ interface UseRoomStreamParams {
   // Access to the room ended (it was deleted, or this member was removed).
   // The stream is already stopped — it must not reconnect into a 403 loop.
   readonly onRevoked: (reason: RoomAccessEnd) => void;
+  // A lanes stream saw activity in the open channel itself (a message that
+  // landed while the stream was being re-scoped to it): the feed catches up.
+  readonly onOpenActivity?: () => void;
   // Which events the subscription receives (sse.RoomStreamScope): the room
   // view takes every channel including the people chat (its badge), the
   // people-chat panel only its own channel.
@@ -95,6 +98,7 @@ export function useRoomStream(params: UseRoomStreamParams): UseRoomStream {
   const { roomId, subject, joinedGen, channelId, feed, historyLoaded, preview = false } = params;
   const includePeople = params.scope?.includePeople ?? false;
   const channelOnly = params.scope?.channelOnly ?? false;
+  const lanes = params.scope?.lanes ?? false;
   const scope = channelId ?? "";
 
   const [connected, setConnected] = useState(false);
@@ -125,6 +129,13 @@ export function useRoomStream(params: UseRoomStreamParams): UseRoomStream {
   onReconnectRef.current = params.onReconnect;
   const onRevokedRef = useRef(params.onRevoked);
   onRevokedRef.current = params.onRevoked;
+  const onOpenActivityRef = useRef(params.onOpenActivity);
+  onOpenActivityRef.current = params.onOpenActivity;
+  // The active channel as the stream's handler reads it: a lanes stream is
+  // not reopened when it changes.
+  const channelRef = useRef(channelId);
+  channelRef.current = channelId;
+  const subRef = useRef<RoomSubscription | null>(null);
 
   const wasConnected = useRef(false);
   useEffect(() => {
@@ -199,10 +210,18 @@ export function useRoomStream(params: UseRoomStreamParams): UseRoomStream {
     return () => window.clearInterval(id);
   }, [typingUsers]);
 
+  // A lanes stream follows the active channel by re-scoping; any other
+  // stream is opened per channel.
+  const streamChannel = lanes ? (channelId ? "open" : null) : channelId;
   useEffect(() => {
-    if (!channelId) return;
     setTypingUsers({});
-    let off = () => {};
+    if (lanes && channelId) subRef.current?.rescope([channelId]);
+  }, [lanes, channelId]);
+
+  useEffect(() => {
+    const opening = channelRef.current;
+    if (!streamChannel || !opening) return;
+    let off: RoomSubscription | null = null;
     off = subscribeRoom(
       roomId,
       (e: RoomEvent) => {
@@ -210,7 +229,7 @@ export function useRoomStream(params: UseRoomStreamParams): UseRoomStream {
         // it, so the reconnect loop never starts.
         const ended = roomAccessEnded(e, subject);
         if (ended) {
-          off();
+          off?.();
           setConnected(false);
           onRevokedRef.current(ended);
           return;
@@ -238,10 +257,22 @@ export function useRoomStream(params: UseRoomStreamParams): UseRoomStream {
         // The subscription is room-wide so cross-channel job/artifact events
         // arrive; a message landing in another channel never enters the feed —
         // it schedules a coalesced unread true-up instead (a refetch, not a
-        // local increment: reconnect replays would double-count locally).
+        // local increment: reconnect replays would double-count locally). A
+        // lanes stream sends another channel's messages as its activity.
+        const active = channelRef.current;
+        if (e.kind === "channel_activity") {
+          if (e.channelId && e.channelId === active) onOpenActivityRef.current?.();
+          else if (unreadDirtyTimer.current === null) {
+            unreadDirtyTimer.current = window.setTimeout(() => {
+              unreadDirtyTimer.current = null;
+              setUnreadDirty((n) => n + 1);
+            }, 300);
+          }
+          return;
+        }
         if (e.kind === "chat_message" || e.kind === "agent_messages") {
           const evCh = e.channelId || "";
-          if (evCh && evCh !== channelId) {
+          if (evCh && evCh !== active) {
             if (unreadDirtyTimer.current === null) {
               unreadDirtyTimer.current = window.setTimeout(() => {
                 unreadDirtyTimer.current = null;
@@ -255,17 +286,19 @@ export function useRoomStream(params: UseRoomStreamParams): UseRoomStream {
       },
       setConnected,
       refreshSession,
-      channelId,
-      { includePeople, channelOnly },
+      opening,
+      { includePeople, channelOnly, lanes },
     );
+    subRef.current = off;
     return () => {
-      off();
+      off?.();
+      subRef.current = null;
       if (unreadDirtyTimer.current !== null) {
         window.clearTimeout(unreadDirtyTimer.current);
         unreadDirtyTimer.current = null;
       }
     };
-  }, [roomId, subject, joinedGen, channelId, includePeople, channelOnly]);
+  }, [roomId, subject, joinedGen, streamChannel, includePeople, channelOnly, lanes]);
 
   return {
     connected,

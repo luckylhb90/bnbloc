@@ -44,10 +44,24 @@ type fakeGateway struct {
 }
 
 type fakeRoom struct {
-	owner   string
-	members map[string]bool
-	events  []string
-	subs    map[chan string]bool
+	owner    string
+	members  map[string]bool
+	channels []string
+	events   []fakeEvent
+	// subs maps each stream to the channel it has open (a lanes stream:
+	// full frames there, a channel_activity frame for the others).
+	subs map[chan string]string
+}
+
+type fakeEvent struct{ channel, frame string }
+
+func (rm *fakeRoom) hasChannel(id string) bool {
+	for _, c := range rm.channels {
+		if c == id {
+			return true
+		}
+	}
+	return false
 }
 
 func newFakeGateway(t *testing.T) *fakeGateway {
@@ -87,7 +101,7 @@ func (g *fakeGateway) handler() http.Handler {
 			http.Error(w, "exists", http.StatusConflict)
 			return
 		}
-		g.rooms[body.RoomID] = &fakeRoom{owner: sub, members: map[string]bool{sub: true}, subs: map[chan string]bool{}}
+		g.rooms[body.RoomID] = &fakeRoom{owner: sub, members: map[string]bool{sub: true}, channels: []string{"ch-" + body.RoomID}, subs: map[chan string]string{}}
 		writeJSONT(w, map[string]string{"roomId": body.RoomID})
 	})
 	mux.HandleFunc("POST /v1/rooms/{id}/members", func(w http.ResponseWriter, r *http.Request) {
@@ -105,7 +119,32 @@ func (g *fakeGateway) handler() http.Handler {
 		rm.members[body.UserID] = true
 	})
 	mux.HandleFunc("GET /v1/rooms/{id}/channels", func(w http.ResponseWriter, r *http.Request) {
-		writeJSONT(w, map[string]any{"channels": []map[string]any{{"channelId": "ch-" + r.PathValue("id"), "isDefault": true}}})
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		rm := g.rooms[r.PathValue("id")]
+		if rm == nil {
+			http.Error(w, "no room", http.StatusNotFound)
+			return
+		}
+		var list []map[string]any
+		for i, c := range rm.channels {
+			list = append(list, map[string]any{"channelId": c, "isDefault": i == 0})
+		}
+		// The room service lists the default first; the tool must not rely on it.
+		sort.Slice(list, func(i, j int) bool { return list[i]["channelId"].(string) > list[j]["channelId"].(string) })
+		writeJSONT(w, map[string]any{"channels": list})
+	})
+	mux.HandleFunc("POST /v1/rooms/{id}/channels", func(w http.ResponseWriter, r *http.Request) {
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		rm := g.rooms[r.PathValue("id")]
+		if rm == nil || rm.owner != g.subject(r) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		id := fmt.Sprintf("ch-%s-%d", r.PathValue("id"), len(rm.channels)+1)
+		rm.channels = append(rm.channels, id)
+		writeJSONT(w, map[string]string{"channelId": id})
 	})
 	mux.HandleFunc("DELETE /v1/rooms/{id}", func(w http.ResponseWriter, r *http.Request) {
 		g.mu.Lock()
@@ -133,7 +172,7 @@ func (g *fakeGateway) handler() http.Handler {
 			http.Error(w, "not a member", http.StatusForbidden)
 			return
 		}
-		if body.ClientMsgID == "" || body.ChannelID != "ch-"+r.PathValue("id") {
+		if body.ClientMsgID == "" || !rm.hasChannel(body.ChannelID) {
 			http.Error(w, "bad chat body", http.StatusBadRequest)
 			return
 		}
@@ -146,10 +185,17 @@ func (g *fakeGateway) handler() http.Handler {
 		data, _ := json.Marshal(map[string]any{"sequence": seq, "kind": "chat_message", "channelId": body.ChannelID,
 			"payload": map[string]any{"userId": sub, "text": body.Text, "clientMsgId": body.ClientMsgID}})
 		frame := fmt.Sprintf("id: %d\nevent: chat_message\ndata: %s\n\n", seq, data)
-		rm.events = append(rm.events, frame)
-		for ch := range rm.subs {
+		act, _ := json.Marshal(map[string]any{"kind": "channel_activity", "channelId": body.ChannelID,
+			"payload": map[string]any{"channelId": body.ChannelID, "lastSeq": seq, "events": 1}})
+		activity := fmt.Sprintf("event: channel_activity\ndata: %s\n\n", act)
+		rm.events = append(rm.events, fakeEvent{body.ChannelID, frame})
+		for ch, open := range rm.subs {
+			f := frame
+			if open != body.ChannelID {
+				f = activity
+			}
 			select {
-			case ch <- frame:
+			case ch <- f:
 			default:
 			}
 		}
@@ -158,11 +204,6 @@ func (g *fakeGateway) handler() http.Handler {
 	mux.HandleFunc("GET /v1/rooms/{id}/events", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		id := r.PathValue("id")
-		if q.Get("access_token") == "" || q.Get("allChannels") != "1" || q.Get("includePeople") != "1" || q.Get("channelId") != "ch-"+id || r.Header.Get("Authorization") != "" {
-			g.mu.Lock()
-			g.badQuery = append(g.badQuery, r.URL.RawQuery)
-			g.mu.Unlock()
-		}
 		sub := g.subject(r)
 		ch := make(chan string, 1024)
 		g.mu.Lock()
@@ -172,8 +213,17 @@ func (g *fakeGateway) handler() http.Handler {
 			http.Error(w, "not a member", http.StatusForbidden)
 			return
 		}
-		replay := append([]string(nil), rm.events...)
-		rm.subs[ch] = true
+		open := q.Get("open")
+		if q.Get("access_token") == "" || q.Get("lanes") != "1" || q.Get("includePeople") != "1" || !rm.hasChannel(open) || q.Has("allChannels") || r.Header.Get("Authorization") != "" {
+			g.badQuery = append(g.badQuery, r.URL.RawQuery)
+		}
+		var replay []string
+		for _, e := range rm.events {
+			if e.channel == open {
+				replay = append(replay, e.frame)
+			}
+		}
+		rm.subs[ch] = open
 		key := sub + "/" + id
 		first := !g.connected[key]
 		g.connected[key] = true
@@ -216,7 +266,7 @@ func writeJSONT(w http.ResponseWriter, v any) {
 
 func e2eConfig(url string) config {
 	return config{
-		Gateway: url, Members: 6, MemberPrefix: "maya", LoginParallel: 4, Rooms: 2,
+		Gateway: url, Members: 6, MemberPrefix: "maya", LoginParallel: 4, Rooms: 2, Channels: 1,
 		Rate: 40, Duration: time.Second, RampUp: 100 * time.Millisecond, Settle: 2 * time.Second,
 		Drain: 2 * time.Second, TextBytes: 32, MaxInflight: 64, Timeout: 5 * time.Second,
 		StreamIdle: 10 * time.Second, Cleanup: true,
@@ -256,6 +306,35 @@ func TestEndToEndAgainstFakeGateway(t *testing.T) {
 	}
 	if len(rep.Notes) != 0 {
 		t.Fatalf("clean run has notes: %v", rep.Notes)
+	}
+}
+
+// Members spread over a room's channels (--channels): a message reaches in
+// full the streams that have its channel open, and every other stream hears
+// of it as its channel's activity.
+func TestEndToEndChannels(t *testing.T) {
+	g := newFakeGateway(t)
+	srv := httptest.NewServer(g.handler())
+	defer srv.Close()
+	cfg := e2eConfig(srv.URL)
+	cfg.Rooms, cfg.Channels = 1, 3
+
+	rep, err := run(context.Background(), cfg, io.Discard)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(g.badQuery) > 0 {
+		t.Fatalf("streams did not use the web client's query: %v", g.badQuery)
+	}
+	// 6 members over 3 channels: two streams have each message's channel open.
+	if rep.Setup.Channels != 3 || rep.Deliver.Expected != rep.Sends.OK*2 || rep.Deliver.Lost != 0 || rep.Deliver.Extra != 0 {
+		t.Fatalf("delivery over channels: setup %+v, delivery %+v (ok sends %d)", rep.Setup, rep.Deliver, rep.Sends.OK)
+	}
+	if rep.Activity.Streams != 6 || rep.Activity.Complete != 6 || rep.Activity.Events != rep.Sends.OK*4 {
+		t.Fatalf("activity: %+v (ok sends %d)", rep.Activity, rep.Sends.OK)
+	}
+	if len(g.deleted) != 1 {
+		t.Fatalf("cleanup deleted %v", g.deleted)
 	}
 }
 
@@ -339,7 +418,10 @@ func TestParseFlags(t *testing.T) {
 	if c.Gateway != "http://gw" || c.Rooms != 2 || len(c.RoomIDs) != 2 || !c.Cleanup {
 		t.Fatalf("parsed %+v", c)
 	}
-	for _, bad := range [][]string{{}, {"--gateway", "x", "--rate", "0"}, {"--gateway", "x", "extra"}} {
+	if c.Channels != 1 {
+		t.Fatalf("default channels = %d, want 1", c.Channels)
+	}
+	for _, bad := range [][]string{{}, {"--gateway", "x", "--rate", "0"}, {"--gateway", "x", "extra"}, {"--gateway", "x", "--channels", "0"}} {
 		if _, err := parseFlags(bad, io.Discard); err == nil {
 			t.Errorf("parseFlags(%v) accepted", bad)
 		}

@@ -130,6 +130,8 @@ func TestPreviewEventKinds(t *testing.T) {
 		EventChannelUpdated: true,
 		// A thread's root line in a channel a preview reads (§2.2).
 		EventThreadUpdated: true,
+		// A lanes stream's own: a preview's rail moves too (§2.4).
+		EventChannelActivity: true, EventStreamOpened: true,
 	}
 	members := map[string]bool{
 		EventAgentJobCreated: true, EventAgentJobUpdated: true, EventAgentJobProgress: true, EventJobLiveFrame: true,
@@ -151,6 +153,30 @@ func TestPreviewEventKinds(t *testing.T) {
 			}
 		default:
 			t.Errorf("%s is not decided: add it to the previewed or the members' list", k.Name)
+		}
+	}
+}
+
+// The lanes (§2.4): room-wide and room-lane kinds always, a channel's
+// messages full only where open and as activity elsewhere, typing and a
+// job's progress only where open.
+func TestStreamLane(t *testing.T) {
+	open := func(c string) bool { return c == "ch_open" }
+	for _, c := range []struct{ kind, channel, want string }{
+		{EventPresenceJoin, "", LaneFull},
+		{KindChatMessage, "ch_open", LaneFull},
+		{KindChatMessage, "ch_other", LaneActivity},
+		{KindAgentMessages, "ch_other", LaneActivity},
+		{EventMessageDeleted, "ch_other", LaneActivity},
+		{EventMessageEdited, "ch_other", LaneNone},
+		{EventPresenceTyping, "ch_other", LaneNone},
+		{EventAgentJobProgress, "ch_other", LaneNone},
+		{EventAgentJobUpdated, "ch_other", LaneFull},
+		{EventThreadUpdated, "ch_other", LaneFull},
+		{EventArtifactUpdated, "ch_other", LaneFull},
+	} {
+		if got := StreamLane(c.kind, c.channel, open); got != c.want {
+			t.Errorf("%s in %s: lane %s, want %s", c.kind, c.channel, got, c.want)
 		}
 	}
 }

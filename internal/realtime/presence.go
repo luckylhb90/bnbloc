@@ -39,7 +39,10 @@ func presenceKey(roomID, userID string) string { return roomID + "\x00" + userID
 
 // Enter records a user's presence. The first live reference emits presence_join;
 // a reference that arrives during a pending leave cancels it (a reconnect), so no
-// churn. Every enter emits a presence_snapshot of the current members.
+// churn. No snapshot is broadcast: each stream writes its own on opening
+// (Members), so a room of n members costs n events per arrival, not n
+// snapshots of n (a 1,024-member room's streams overflowed on the
+// snapshots alone, channels PRD §2.4's load test).
 func (p *Presence) Enter(roomID, userID string) {
 	p.mu.Lock()
 	if p.rooms[roomID] == nil {
@@ -55,7 +58,6 @@ func (p *Presence) Enter(roomID, userID string) {
 	}
 	first := p.rooms[roomID][userID] == 0
 	p.rooms[roomID][userID]++
-	members := p.membersLocked(roomID)
 	p.mu.Unlock()
 
 	// Announce join only on a genuine first arrival, not a reconnect that a
@@ -63,7 +65,11 @@ func (p *Presence) Enter(roomID, userID string) {
 	if first && !reconnecting {
 		p.emit(roomID, wire.EventPresenceJoin, map[string]any{"userId": userID})
 	}
-	p.emit(roomID, wire.EventPresenceSnapshot, map[string]any{"members": members})
+}
+
+// Snapshot is the presence_snapshot a stream writes to itself on opening.
+func (p *Presence) Snapshot(roomID string) wire.Event {
+	return wire.Event{RoomID: roomID, Kind: wire.EventPresenceSnapshot, Payload: map[string]any{"members": p.Members(roomID)}}
 }
 
 // Leave drops a user's presence reference. When the last reference goes, the
@@ -102,11 +108,9 @@ func (p *Presence) finalizeLeave(roomID, userID string) {
 		return
 	}
 	delete(set, userID)
-	members := p.membersLocked(roomID)
 	p.mu.Unlock()
 
 	p.emit(roomID, wire.EventPresenceLeave, map[string]any{"userId": userID})
-	p.emit(roomID, wire.EventPresenceSnapshot, map[string]any{"members": members})
 }
 
 // Members returns the current present users in a room.

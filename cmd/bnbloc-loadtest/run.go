@@ -16,22 +16,35 @@ import (
 
 // room is one room under load and the streams its members hold in it.
 type room struct {
-	id      string
-	channel string
-	members []*member
-	streams []*stream
-	created bool
+	id string
+	// channels are the room's channels in the run, the default first.
+	channels []string
+	members  []*member
+	streams  []*stream
+	created  bool
 }
 
-// liveStreams returns the ids of the room's currently open streams.
-func (r *room) liveStreams() []int {
+// liveStreams returns the ids of the room's currently open streams that
+// have channelID open (the ones a message there reaches in full).
+func (r *room) liveStreams(channelID string) []int {
 	out := make([]int, 0, len(r.streams))
 	for _, s := range r.streams {
-		if s.live.Load() {
+		if s.live.Load() && s.channel == channelID {
 			out = append(out, s.id)
 		}
 	}
 	return out
+}
+
+// hasPoster reports whether a member of the room posts in channelID (one of
+// its streams has it open).
+func (r *room) hasPoster(channelID string) bool {
+	for _, s := range r.streams {
+		if s.channel == channelID {
+			return true
+		}
+	}
+	return false
 }
 
 // sendStats aggregates POST .../chat outcomes.
@@ -91,14 +104,14 @@ func run(ctx context.Context, cfg config, logw io.Writer) (*Report, error) {
 	ss := newStreamStats()
 	var streams []*stream
 	for _, r := range rooms {
-		for _, m := range r.members {
-			st := &stream{id: len(streams), room: r, member: m, api: a, tracker: tr, stats: ss, idle: cfg.StreamIdle, tz: tzFor(cfg.TZ, len(streams))}
+		for k, m := range r.members {
+			st := &stream{id: len(streams), room: r, channel: r.channels[k%len(r.channels)], member: m, api: a, tracker: tr, stats: ss, idle: cfg.StreamIdle, tz: tzFor(cfg.TZ, len(streams))}
 			r.streams = append(r.streams, st)
 			streams = append(streams, st)
 		}
 	}
 	report := &Report{Gateway: cfg.Gateway, Setup: SetupReport{
-		Members: len(members), Rooms: len(rooms), MembersPerRoom: perRoom, Streams: len(streams),
+		Members: len(members), Rooms: len(rooms), MembersPerRoom: perRoom, Channels: cfg.Channels, Streams: len(streams),
 		RoomsCreated: len(cfg.RoomIDs) == 0, TargetRate: cfg.Rate, PerMemberRate: perMemberRate(cfg.Rate, rooms),
 		DurationSec: cfg.Duration.Seconds(), RampUpSec: cfg.RampUp.Seconds(), TextBytes: cfg.TextBytes,
 		SignInSec: signInTook.Seconds(),
@@ -173,6 +186,7 @@ func run(ctx context.Context, cfg config, logw io.Writer) (*Report, error) {
 	report.Streams.Reconnects = ss.reconnects
 	report.Streams.ConnectErrors = ss.connectErrors
 	report.Streams.ConnectMs = summarize(ss.connect)
+	report.Activity = activityReport(streams, ss)
 	report.Notes = append(notes, report.notes()...)
 	return report, nil
 }
@@ -248,8 +262,9 @@ func assignRooms(cfg config, members []*member, runID string) ([]*room, int) {
 	return rooms, perRoom
 }
 
-// setupRooms creates the rooms (unless given), adds their members, and reads
-// each room's default channel.
+// setupRooms creates the rooms (unless given), adds their members, and
+// reads each room's channels, creating the ones --channels asks for beyond
+// those the room has.
 func setupRooms(ctx context.Context, cfg config, a *api, rooms []*room) error {
 	create := len(cfg.RoomIDs) == 0
 	if create {
@@ -287,11 +302,19 @@ func setupRooms(ctx context.Context, cfg config, a *api, rooms []*room) error {
 		}
 	}
 	return parallel(ctx, len(rooms), cfg.LoginParallel, func(ctx context.Context, i int) error {
-		ch, err := a.defaultChannel(ctx, rooms[i].members[0], rooms[i].id)
+		r := rooms[i]
+		chs, err := a.channels(ctx, r.members[0], r.id)
 		if err != nil {
-			return fmt.Errorf("room %s channels: %w", rooms[i].id, err)
+			return fmt.Errorf("room %s channels: %w", r.id, err)
 		}
-		rooms[i].channel = ch
+		for n := len(chs) + 1; len(chs) < cfg.Channels; n++ {
+			id, err := a.createChannel(ctx, r.members[0], r.id, fmt.Sprintf("lt-%d", n))
+			if err != nil {
+				return fmt.Errorf("room %s: create a channel: %w", r.id, err)
+			}
+			chs = append(chs, id)
+		}
+		r.channels = chs[:cfg.Channels]
 		return nil
 	})
 }
@@ -343,14 +366,16 @@ func logKeptRooms(rooms []*room, logf func(string, ...any)) {
 // not when the previous one answered. It returns the window length and
 // whether ctx ended it early.
 func sendLoop(ctx context.Context, cfg config, a *api, rooms []*room, runID string, tr *tracker, st *sendStats) (time.Duration, bool) {
+	// A member posts in the channel their stream has open.
 	type pair struct {
-		r *room
-		m *member
+		r  *room
+		m  *member
+		ch string
 	}
 	var pairs []pair
 	for _, r := range rooms {
-		for _, m := range r.members {
-			pairs = append(pairs, pair{r, m})
+		for k, m := range r.members {
+			pairs = append(pairs, pair{r, m, r.channels[k%len(r.channels)]})
 		}
 	}
 	mrand.Shuffle(len(pairs), func(i, j int) { pairs[i], pairs[j] = pairs[j], pairs[i] })
@@ -394,8 +419,8 @@ loop:
 				// Sends finish on their own timeout, not ctx: an interrupt
 				// stops issuing, it does not abandon answers in flight.
 				t0 := time.Now()
-				tr.begin(id, t0, p.r.liveStreams())
-				err := a.sendChat(context.Background(), p.m, p.r.id, p.r.channel, id, text)
+				tr.begin(id, t0, p.r.liveStreams(p.ch))
+				err := a.sendChat(context.Background(), p.m, p.r.id, p.ch, id, text)
 				took := time.Since(t0)
 				st.mu.Lock()
 				defer st.mu.Unlock()
