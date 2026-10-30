@@ -671,6 +671,7 @@ impl Registry {
         settings: Settings,
     ) -> Result<(), String> {
         let (machine, account) = settings.split(rt.account.lock().serve);
+        let before = rt.account.lock().clone();
         let machine_changed = {
             let mut current = self.machine.settings.lock();
             let changed = *current != machine;
@@ -685,7 +686,14 @@ impl Registry {
             }
             changed
         };
+        let restart_account = account.bridge_differs(&before);
         rt.update_account(|current| *current = account)?;
+        // A choice only the web reads (the default agent, the default models)
+        // is saved and nothing restarts: a restart ends the member's running
+        // turns, and the page saves on every switch.
+        if !machine_changed && !restart_account {
+            return Ok(());
+        }
         let affected: Vec<Arc<AccountRuntime>> = if machine_changed {
             self.inner.lock().runtimes.values().cloned().collect()
         } else {

@@ -66,6 +66,10 @@ pub struct Settings {
     /// "core/provider" pairs the user turned off; not advertised or driveable.
     #[serde(default)]
     pub disabled_providers: Vec<String>,
+    /// The model a person chose as the default of one agent, by
+    /// "core/provider". Empty = the agent's own default.
+    #[serde(default)]
+    pub default_models: std::collections::BTreeMap<String, String>,
     /// Deployment-wide file-sync secret (optional; empty disables sync auth).
     #[serde(default)]
     pub sync_secret: String,

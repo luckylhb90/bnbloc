@@ -42,6 +42,9 @@ export interface LocalAgent {
   setUrl: (v: string) => void;
   setToken: (v: string) => void;
   setTarget: (id: string) => void;
+  // userDefaultModel is the model the member chose as the default of one of
+  // their agents ("" = none, or one the agent no longer lists).
+  userDefaultModel: (core: string, provider: string) => string;
   save: () => void; // persist url/token then reload targets
   reload: () => void;
 }
@@ -84,6 +87,21 @@ function setState(patch: Partial<LocalAgentState>): void {
 function subscribe(l: () => void): () => void {
   listeners.add(l);
   return () => listeners.delete(l);
+}
+
+// rememberSettings makes the settings the shell just saved the ones every
+// consumer reads: the composer's list follows a switch on the Agents page at
+// once, not at the next load.
+export function rememberSettings(settings: DesktopSettings): void {
+  setState({ settings });
+}
+
+// userDefaultModelOf is the member's chosen default model of an agent, when the
+// agent still lists it (or lists no models to check against).
+export function userDefaultModelOf(settings: DesktopSettings | null, t: Pick<AgentTarget, "core" | "provider" | "models">): string {
+  const m = settings?.defaultModels?.[`${t.core}/${t.provider}`] ?? "";
+  if (!m) return "";
+  return !t.models || t.models.length === 0 || t.models.includes(m) ? m : "";
 }
 
 function setTarget(id: string): void {
@@ -174,7 +192,12 @@ export function useLocalAgent(active: boolean): LocalAgent {
     let defaultId = "";
     if (settings) {
       const disabled = new Set(settings.disabledProviders);
-      list = list.filter((x) => !disabled.has(`${x.core}/${x.provider}`));
+      list = list
+        .filter((x) => !disabled.has(`${x.core}/${x.provider}`))
+        .map((x) => {
+          const chosen = userDefaultModelOf(settings, x);
+          return chosen ? { ...x, defaultModel: chosen } : x;
+        });
       defaultId =
         list.find(
           (x) => x.core === settings.defaultAgent.core && x.provider === settings.defaultAgent.provider,
@@ -196,6 +219,14 @@ export function useLocalAgent(active: boolean): LocalAgent {
     if (pending && !targets.some((x) => x.id === saved)) return;
     setTarget(targets.find((x) => x.id === saved)?.id || defaultId || targets[0]?.id || "");
   }, [active, loaded, pending, targets, defaultId]);
+
+  const userDefaultModel = useCallback(
+    (core: string, provider: string) => {
+      const t = targets.find((x) => x.core === core && x.provider === provider);
+      return t ? userDefaultModelOf(settings, t) : "";
+    },
+    [targets, settings],
+  );
 
   const save = useCallback(() => {
     writeStored(LS_URL, state.url);
@@ -238,9 +269,10 @@ export function useLocalAgent(active: boolean): LocalAgent {
       setUrl,
       setToken,
       setTarget,
+      userDefaultModel,
       save,
       reload,
     }),
-    [devAddress, url, token, targets, target, core, detected, coreStatus, anyCoreAvailable, devDiscovery, isRemoteGateway, setUrl, setToken, save],
+    [devAddress, url, token, targets, target, core, detected, coreStatus, anyCoreAvailable, devDiscovery, isRemoteGateway, setUrl, setToken, userDefaultModel, save],
   );
 }

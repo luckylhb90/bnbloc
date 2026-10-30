@@ -51,6 +51,9 @@ export interface DesktopSettings {
   cores: CoreConfig[];
   defaultAgent: DefaultAgent;
   disabledProviders: string[];
+  /** The model the member chose as the default of an agent, by "core/provider".
+   *  Absent or empty = the agent's own default. */
+  defaultModels: Record<string, string>;
   syncSecret: string;
   /** Single-host mode: this one bridge drives every member's agent (local
    *  multi-user testing). Off in a real deployment. */

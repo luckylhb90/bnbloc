@@ -139,6 +139,10 @@ pub struct AccountSettings {
     /// "core/provider" pairs this account turned off.
     #[serde(default)]
     pub disabled_providers: Vec<String>,
+    /// The model this account chose as the default of an agent, by
+    /// "core/provider".
+    #[serde(default)]
+    pub default_models: std::collections::BTreeMap<String, String>,
     /// The file-sync secret of this account's deployment.
     #[serde(default)]
     pub sync_secret: String,
@@ -161,10 +165,23 @@ impl Default for AccountSettings {
         Self {
             default_agent: DefaultAgent::default(),
             disabled_providers: Vec::new(),
+            default_models: Default::default(),
             sync_secret: String::new(),
             gateway_token: String::new(),
             serve: true,
         }
+    }
+}
+
+impl AccountSettings {
+    /// Whether `other` differs in something the bridge is started with. The
+    /// default agent and the default models are read by the web only, so a
+    /// change of them needs no restart.
+    pub(crate) fn bridge_differs(&self, other: &AccountSettings) -> bool {
+        self.disabled_providers != other.disabled_providers
+            || self.sync_secret != other.sync_secret
+            || self.gateway_token != other.gateway_token
+            || self.serve != other.serve
     }
 }
 
@@ -185,6 +202,7 @@ impl Settings {
             cores: machine.cores.clone(),
             default_agent: account.default_agent.clone(),
             disabled_providers: account.disabled_providers.clone(),
+            default_models: account.default_models.clone(),
             sync_secret: account.sync_secret.clone(),
             serve_all_owners: machine.serve_all_owners,
             gateway_token: account.gateway_token.clone(),
@@ -204,6 +222,7 @@ impl Settings {
             AccountSettings {
                 default_agent: self.default_agent.clone(),
                 disabled_providers: self.disabled_providers.clone(),
+                default_models: self.default_models.clone(),
                 sync_secret: self.sync_secret.clone(),
                 gateway_token: self.gateway_token.clone(),
                 serve,
@@ -318,6 +337,7 @@ mod tests {
                 provider: "codex".into(),
             },
             disabled_providers: vec!["acme/cursor".into()],
+            default_models: [("acme/codex".to_string(), "gpt-x".to_string())].into(),
             sync_secret: "s".into(),
             gateway_token: "t".into(),
             serve: false,

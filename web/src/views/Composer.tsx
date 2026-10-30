@@ -244,7 +244,10 @@ export function Composer({
   // catalog is unknown or empty, set aside only while a loaded catalog lacks
   // it. The stored pick itself changes only by the member's own pick, so a
   // catalog loading (re-entering a room, a core restarting) never erases it.
-  const offeredModel = offeredChoice(model, effTarget?.models);
+  // Nothing picked here: my own agent runs on the model I chose as its
+  // default (Agents page), when there is one. Only my local targets carry it.
+  const ownDefault = effTarget && agent.targets.includes(effTarget as (typeof agent.targets)[number]) ? agent.userDefaultModel(effTarget.core ?? "", effTarget.provider) : "";
+  const offeredModel = offeredChoice(model, effTarget?.models) || ownDefault;
   // The model whose reasoning options apply: the explicit pick, else the
   // target's configured default, else the first catalog entry. Without this
   // last fallback a harness that has per-model reasoning but no default model

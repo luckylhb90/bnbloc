@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowClockwiseIcon,
   StopIcon,
@@ -15,7 +15,7 @@ import {
   type CoreConfig,
 } from "@/lib/desktop";
 import { inDesktopShell } from "@/lib/config";
-import { api, type Core, type ReleaseFile } from "@/lib/api";
+import { api, type AgentTarget, type Core, type ReleaseFile } from "@/lib/api";
 import { Button } from "@/ui/Button";
 import { Input, Field } from "@/ui/Input";
 import { Card, Badge, Dot } from "@/ui/Card";
@@ -36,6 +36,9 @@ import { ReleaseDownloadButton } from "@/views/ReleaseDownloadButton";
 import { PlatformAgentsHint } from "@/views/PlatformAgentsHint";
 import { errorText } from "@/lib/errors";
 import { refreshMyAgents, useMyAgents } from "@/lib/queries";
+import { rememberSettings, useLocalAgent } from "@/lib/useLocalAgent";
+import { modelLabel } from "@/lib/modelLabel";
+import { Select } from "@/ui/Select";
 
 // Agents is the single page for everything about the agents this workspace can
 // drive. It replaces the former split between the read-only "Agent cores" page
@@ -71,6 +74,7 @@ const EMPTY: DesktopSettings = {
   cores: [],
   defaultAgent: { core: "", provider: "" },
   disabledProviders: [],
+  defaultModels: {},
   syncSecret: "",
   serveAllOwners: false,
   gatewayToken: "",
@@ -154,10 +158,21 @@ export function Agents() {
   const [settings, setSettings] = useState<DesktopSettings>(EMPTY);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  // The settings as the shell has them: a switch on an agent is saved on top of
+  // these at once, so a half-typed field below is never saved with it.
+  const saved = useRef<DesktopSettings | null>(null);
+  const queue = useRef<Promise<void>>(Promise.resolve());
+  // The agents of this computer with the models they list (the pickers' own
+  // answer): the default-model choice offers exactly these.
+  const mine = useLocalAgent(shell);
 
   useEffect(() => {
     if (!shell) return;
-    desktop.getSettings().then((s) => s && setSettings(s));
+    desktop.getSettings().then((s) => {
+      if (!s) return;
+      saved.current = s;
+      setSettings(s);
+    });
     desktop.status().then((s) => s && setStatus(s));
     let unlisten = () => {};
     desktop.onStatus((s) => setStatus(s)).then((fn) => (unlisten = fn));
@@ -194,14 +209,38 @@ export function Agents() {
         patch.disabledProviders = kept;
       }
     }
-    update(patch);
+    return commit(patch);
   };
   const isDisabled = (core: string, provider: string) =>
     settings.disabledProviders.includes(`${core}/${provider}`);
   const isDefault = (core: string, provider: string) =>
     settings.defaultAgent.core === core && settings.defaultAgent.provider === provider;
+  // commit saves a choice about agents (on/off, the default agent, a default
+  // model) the moment it is made: the switch on the row is the whole action, so
+  // it takes effect and survives a reload. A refusal puts the row back.
+  const commit = (patch: Partial<DesktopSettings>): Promise<void> => {
+    const base = saved.current;
+    if (!base) return Promise.resolve(); // the shell's settings are not read yet: nothing to save on top of
+    const next = { ...base, ...patch };
+    saved.current = next;
+    setSettings((s) => ({ ...s, ...patch }));
+    // One save after another, each on top of the last: two quick switches never
+    // overwrite each other.
+    const run = queue.current.then(async () => {
+      try {
+        await desktop.setSettings(next);
+        rememberSettings(next);
+      } catch (e) {
+        saved.current = { ...saved.current!, ...Object.fromEntries(Object.keys(patch).map((k) => [k, base[k as keyof DesktopSettings]])) };
+        setSettings((s) => ({ ...s, ...Object.fromEntries(Object.keys(patch).map((k) => [k, base[k as keyof DesktopSettings]])) }));
+        toast.error(errorText(e, "Could not save"));
+      }
+    });
+    queue.current = run;
+    return run;
+  };
   const setDefault = (core: string, provider: string) =>
-    update({ defaultAgent: { core, provider } });
+    commit({ defaultAgent: { core, provider } });
   const toggleProvider = (core: string, provider: string) => {
     const key = `${core}/${provider}`;
     const disabling = !isDisabled(core, provider);
@@ -212,13 +251,23 @@ export function Agents() {
     if (disabling && isDefault(core, provider)) {
       patch.defaultAgent = { core: "", provider: "" };
     }
-    update(patch);
+    return commit(patch);
   };
+  const setDefaultModel = (core: string, provider: string, model: string) => {
+    const { [`${core}/${provider}`]: _drop, ...rest } = settings.defaultModels ?? {};
+    return commit({ defaultModels: model ? { ...rest, [`${core}/${provider}`]: model } : rest });
+  };
+  // What a row offers as models: the agent's own list. A disabled agent is not
+  // listed by the composer, so it offers none.
+  const modelsOf = (core: string, provider: string) =>
+    mine.targets.find((t) => t.core === core && t.provider === provider);
 
   const save = async () => {
     setSaving(true);
     try {
       await desktop.setSettings(settings);
+      saved.current = settings;
+      rememberSettings(settings);
       setDirty(false);
       toast.success("Settings saved");
     } catch (e) {
@@ -358,6 +407,9 @@ export function Agents() {
               isDisabled={(p) => isDisabled(d.name, p)}
               onSetDefault={(p) => setDefault(d.name, p)}
               onToggle={(p) => toggleProvider(d.name, p)}
+              modelsOf={(p) => modelsOf(d.name, p)}
+              chosenModel={(p) => settings.defaultModels?.[`${d.name}/${p}`] ?? ""}
+              onSetModel={(p, m) => setDefaultModel(d.name, p, m)}
               onChange={(patch) => updateCore(d.name, patch)}
               onRemove={() => removeCore(d.name)}
               canRemove={shell}
@@ -552,6 +604,9 @@ function CoreGroup({
   isDisabled,
   onSetDefault,
   onToggle,
+  modelsOf,
+  chosenModel,
+  onSetModel,
   onChange,
   onRemove,
   canRemove,
@@ -569,6 +624,9 @@ function CoreGroup({
   isDisabled: (provider: string) => boolean;
   onSetDefault: (provider: string) => void;
   onToggle: (provider: string) => void;
+  modelsOf: (provider: string) => AgentTarget | undefined;
+  chosenModel: (provider: string) => string;
+  onSetModel: (provider: string, model: string) => void;
   onChange: (patch: Partial<CoreConfig>) => void;
   onRemove: () => void;
   canRemove: boolean;
@@ -610,6 +668,9 @@ function CoreGroup({
               disabled={isDisabled(p)}
               onSetDefault={() => onSetDefault(p)}
               onToggle={() => onToggle(p)}
+              catalog={inDesktop ? modelsOf(p) : undefined}
+              model={chosenModel(p)}
+              onSetModel={(m) => onSetModel(p, m)}
             />
           ))}
         </div>
@@ -663,6 +724,9 @@ function ProviderRow({
   disabled,
   onSetDefault,
   onToggle,
+  catalog,
+  model,
+  onSetModel,
 }: {
   provider: string;
   core: string;
@@ -670,7 +734,16 @@ function ProviderRow({
   disabled: boolean;
   onSetDefault: () => void;
   onToggle: () => void;
+  // The agent's own model list; absent when it lists none (or this is not the
+  // desktop, where nothing is saved).
+  catalog?: AgentTarget;
+  model: string;
+  onSetModel: (model: string) => void;
 }) {
+  const models = catalog?.models ?? [];
+  // A saved model the agent no longer lists stays visible, marked, so the
+  // member sees why it is not used.
+  const stale = !!model && models.length > 0 && !models.includes(model);
   return (
     <div
       className={cn(
@@ -682,6 +755,25 @@ function ProviderRow({
         <div className="text-sm font-medium">{provider}</div>
         <div className="tabular text-xs text-[var(--color-fg-subtle)]">{`${core}/${provider}`}</div>
       </div>
+      {models.length > 0 && !disabled && (
+        <Select
+          aria-label={`Default model of ${core}/${provider}`}
+          title="The model this agent starts on"
+          value={model}
+          onChange={(e) => onSetModel(e.target.value)}
+          className="max-w-[11rem] truncate rounded-md border border-[var(--color-border)] bg-transparent py-1 pl-2 text-xs"
+        >
+          <option value="">
+            {catalog?.defaultModel ? `Agent default (${modelLabel(catalog.defaultModel, catalog.modelNames)})` : "Agent default"}
+          </option>
+          {stale && <option value={model}>{`${modelLabel(model, catalog?.modelNames)} (no longer listed)`}</option>}
+          {models.map((m) => (
+            <option key={m} value={m}>
+              {modelLabel(m, catalog?.modelNames)}
+            </option>
+          ))}
+        </Select>
+      )}
       {isDefault && !disabled && (
         <span className="rounded-full bg-[var(--color-accent)] px-1.5 text-[0.6rem] font-semibold text-[#04140f]">
           Default

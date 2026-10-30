@@ -569,3 +569,26 @@ fn an_account_already_open_in_another_app_window_is_found() {
         Some("app-y-2")
     );
 }
+
+/// The default agent and the default models are read by the web only: saving
+/// them is a save, not a restart (a restart ends the member's running turns,
+/// and the Agents page saves on every switch). What the bridge is started with
+/// is another matter.
+#[test]
+fn a_choice_only_the_web_reads_does_not_restart_the_bridge() {
+    use crate::account::AccountSettings;
+    let base = AccountSettings::default();
+    let mut web_only = base.clone();
+    web_only.default_agent = DefaultAgent {
+        core: "acme".into(),
+        provider: "codex".into(),
+    };
+    web_only.default_models = [("acme/codex".to_string(), "gpt-x".to_string())].into();
+    assert!(!web_only.bridge_differs(&base));
+    let mut off = base.clone();
+    off.disabled_providers = vec!["acme/cursor".into()];
+    assert!(off.bridge_differs(&base), "an agent turned off is the bridge's");
+    let mut secret = base.clone();
+    secret.sync_secret = "s".into();
+    assert!(secret.bridge_differs(&base));
+}

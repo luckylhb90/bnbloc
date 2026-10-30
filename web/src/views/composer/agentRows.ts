@@ -75,7 +75,7 @@ export function agentRows(
     });
   }
   const groups: { group: string; rows: AgentRow[] }[] = [];
-  for (const row of byKey.values()) {
+  for (const row of rankRows([...byKey.values()])) {
     let g = groups.find((x) => x.group === row.group);
     if (!g) {
       g = { group: row.group, rows: [] };
@@ -99,6 +99,18 @@ export function agentRows(
     });
   }
   return groups;
+}
+
+// An agent that is also offered through a wrapper (a provider named
+// "<prefix>-<name>" beside "<name>" in the same core) is the original: it needs
+// its own sign-in or key, the wrapped one does not, so it lists after the
+// wrapped one. The order is otherwise the order the rows arrived in. One rule
+// for every agent: no name is known here.
+export function rankRows(rows: readonly AgentRow[]): AgentRow[] {
+  const isOriginal = (r: AgentRow) =>
+    rows.some((o) => o !== r && o.core === r.core && o.ownerId === r.ownerId && o.provider.endsWith(`-${r.provider}`));
+  const original = new Map(rows.map((r) => [r, isOriginal(r)]));
+  return [...rows].sort((a, b) => Number(original.get(a)) - Number(original.get(b)));
 }
 
 function platformRef(a: { readonly core?: string; readonly provider: string }): PlatformAgentRef {
