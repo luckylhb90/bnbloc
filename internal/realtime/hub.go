@@ -79,6 +79,10 @@ type Hub struct {
 	// room this hub receives, after its delivery (realtime's room state
 	// drops what it changed). It must not block.
 	Received func(ev wire.Event)
+	// Joined, when set, is told each time the hub starts receiving a room
+	// from the bus (and again after a lost subscription): realtime asks the
+	// other replicas for their views of the room (RoomViews.Query).
+	Joined func(roomID string)
 	// busRooms are the rooms the hub receives from the bus, under mu.
 	busRooms map[string]*busRoom
 	// holdFor bounds how long a durable event waits for a missing earlier
@@ -329,6 +333,30 @@ func (h *Hub) PublishCommit(ev wire.Event, d Durable) (wire.Event, error) {
 		h.deliver([]*pending{{ev: ev, out: ev, deliver: true}}, true)
 		return ev, nil
 	}
+}
+
+// PublishLocal delivers a transient event to this replica's streams of the
+// room only, never to the bus: what each replica works out for its own
+// streams (RoomViews' presence_delta and agent_roster).
+func (h *Hub) PublishLocal(ev wire.Event) {
+	ev.Sequence = 0
+	h.deliver([]*pending{{ev: ev, out: ev, deliver: true}}, false)
+}
+
+// Announce puts a transient event on the bus only, never on this replica's
+// streams (RoomViews' wire.EventRoomView). Nothing happens with no bus.
+func (h *Hub) Announce(ev wire.Event) {
+	if h.Bus == nil {
+		return
+	}
+	ev.Sequence = 0
+	b, err := json.Marshal(ev)
+	if err != nil {
+		log.Printf("realtime: hub: announce %s room=%s: %v", ev.Kind, ev.RoomID, err)
+		return
+	}
+	ev.Encoded = b
+	h.publishBus([]wire.Event{ev})
 }
 
 // CommitHistory stores ev at the room's next sequence exactly like

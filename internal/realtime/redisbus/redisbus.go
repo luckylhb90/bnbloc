@@ -104,6 +104,29 @@ func (b *Bus) Publish(ev wire.Event) error {
 	return b.client.Publish(ctx, channelPrefix+ev.RoomID, msg).Err()
 }
 
+// claimPrefix starts every claim's key.
+const claimPrefix = "bnbloc:rt:claim:"
+
+// Claim takes key for ttl unless it is taken (SET NX PX); when it is, wait
+// is what is left of it (PTTL).
+func (b *Bus) Claim(key string, ttl time.Duration) (bool, time.Duration, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), publishTimeout)
+	defer cancel()
+	k := claimPrefix + key
+	ok, err := b.client.SetNX(ctx, k, 1, ttl).Result()
+	if err != nil || ok {
+		return ok, 0, err
+	}
+	left, err := b.client.PTTL(ctx, k).Result()
+	if err != nil {
+		return false, 0, err
+	}
+	if left <= 0 {
+		left = time.Millisecond // it ended between the two calls
+	}
+	return false, left, nil
+}
+
 // Subscribe subscribes the endpoint's connection to the room's channel and
 // returns once Redis confirmed it.
 func (b *Bus) Subscribe(roomID string, deliver func(wire.Event), lost func()) (func(), error) {

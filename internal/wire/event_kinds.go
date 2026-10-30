@@ -123,6 +123,10 @@ var RoomEventKinds = []EventKindSpec{
 	// A member followed, left or re-marked a channel (bnbloc-room): realtime
 	// forgets what it kept of the channel's followers; never on a stream.
 	{Name: EventChannelFollow, ChannelScoped: true, Internal: true},
+	// A realtime replica's view of the room's live state (who is here, the
+	// agents members' bridges serve), on the bus between replicas
+	// (realtime.RoomViews); never on a stream.
+	{Name: EventRoomView, Internal: true},
 	// A thread opened, renamed, archived or replied in (realtime and
 	// bnbloc-room): scoped to the thread's parent channel, whose stream
 	// redraws the root's summary line.

@@ -355,17 +355,6 @@ func (s *Service) reconcileOwnership(bool) {
 	}
 }
 
-// publishOwned is the publish callback of presence and the roster: their
-// events are published only by the room's owner. A non-owner still tracks
-// the refcounts of streams it serves (a forwarded request while the views
-// disagree, or a stream about to be released) so its timers settle, but it
-// never announces them into a room it does not own.
-func (s *Service) publishOwned(ev wire.Event) {
-	if s.Peers.OwnsRoom(ev.RoomID) {
-		s.Hub.Publish(ev)
-	}
-}
-
 // ---------------------------------------------------------------- internal peer routes
 
 // realtimeServiceSubject is the identity a replica asserts on its calls to

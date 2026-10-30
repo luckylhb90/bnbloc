@@ -49,8 +49,8 @@ func (s *Service) notifyListeners(ctx context.Context, roomID, channelID, reach 
 				here[u], candidates[u] = true, true
 			}
 		}
-		if s.Presence != nil {
-			for _, u := range s.Presence.Members(roomID) {
+		if s.Views != nil {
+			for _, u := range s.Views.Members(roomID) {
 				here[u], candidates[u] = true, true
 			}
 		}

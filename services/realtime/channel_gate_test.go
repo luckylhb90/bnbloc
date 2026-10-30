@@ -236,6 +236,24 @@ func TestGateSlowModeAcrossRestart(t *testing.T) {
 	e.mustPost("bob", "ch_a", "three")
 }
 
+// Slow mode over the bus's claims holds whichever replica the member's next
+// post reaches: one that never saw the first post (no memory, no mark
+// written yet) still refuses it.
+func TestGateSlowModeSharedByReplicas(t *testing.T) {
+	e := newGateEnv(t)
+	e.svc.Claims = &realtime.MemoryClaims{Now: func() time.Time { e.mu.Lock(); defer e.mu.Unlock(); return e.now }}
+	e.setSettings("ch_a", wire.ChannelSettings{SlowModeSeconds: 60})
+	e.mustPost("bob", "ch_a", "one")
+	e.svc.postMarks = postMarks{} // another replica: nothing in memory, the mark not written
+	e.advance(20 * time.Second)
+	if code, eb, _ := e.post("bob", "ch_a", "two", ""); code != http.StatusTooManyRequests || eb.RetryAfterMs != 40_000 {
+		t.Fatalf("a post 20 s after one on another replica = %d %+v, want 429 with 40 s left", code, eb)
+	}
+	e.mustPost("carol", "ch_a", "another member")
+	e.advance(40 * time.Second)
+	e.mustPost("bob", "ch_a", "three")
+}
+
 // Agreeing to the rules (C16): a room that requires it refuses a member's
 // post until they agree to the current version, and asks again when the
 // rules change.

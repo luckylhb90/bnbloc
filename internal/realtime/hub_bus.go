@@ -119,6 +119,9 @@ func (h *Hub) syncBus(roomID string, br *busRoom) {
 	for _, ev := range early {
 		h.orderLocked(roomID, br, ev)
 	}
+	if h.Joined != nil {
+		go h.Joined(roomID)
+	}
 }
 
 // idleBusLocked schedules the room's leave from the bus after its last

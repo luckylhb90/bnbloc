@@ -82,6 +82,10 @@ type Service struct {
 	// (channelStore, roleStore).
 	roomState     *roomStateCache
 	roomStateOnce sync.Once
+	// viewsOnce makes Views (and Presence, Roster when not injected);
+	// viewsStop ends the views' refresh (Shutdown).
+	viewsOnce sync.Once
+	viewsStop chan struct{}
 	// postMarks are the members' last posts (slow mode) and their follow
 	// marks written behind (post_marks.go).
 	postMarks postMarks
@@ -98,6 +102,12 @@ type Service struct {
 	// gateway reaching any user's machine (remote-safe). Lazily created in
 	// Handler when not injected.
 	Roster *realtime.AgentRoster
+	// Claims, when set, decide slow mode for every replica at once (the
+	// bus's; nil: this replica's memory and the store decide).
+	Claims realtime.Claims
+	// Views join every replica's presence and roster into the room's
+	// (realtime.RoomViews); this replica's streams are told what changed.
+	Views *realtime.RoomViews
 	// Chat optionally persists room-feed messages for history paging. Nil keeps
 	// realtime in-memory-only (local dev / tests).
 	Chat ChatStore
@@ -271,13 +281,10 @@ type BridgeJobStore interface {
 // scope for the store layer (the gateway's Middleware keeps its verified value
 // when it ran first).
 func (s *Service) Handler() http.Handler {
-	// Presence and roster events are announced only by the room's owner.
-	if s.Presence == nil {
-		s.Presence = realtime.NewPresence(s.publishOwned)
-	}
-	if s.Roster == nil {
-		s.Roster = realtime.NewAgentRoster(s.publishOwned)
-	}
+	// Presence and the roster track this replica's streams; the views join
+	// them with the other replicas' (with a bus) and tell this replica's
+	// streams what changed in the room's.
+	s.viewsOnce.Do(s.initViews)
 	if s.PluginHooks == nil {
 		s.PluginHooks = NewPluginHookDispatcher(nil, nil, nil)
 	}
@@ -288,6 +295,9 @@ func (s *Service) Handler() http.Handler {
 	// state as its own do; their taps ran where they were published.
 	if s.Hub != nil && s.Hub.Received == nil {
 		s.Hub.Received = s.observeRemote
+	}
+	if s.Hub != nil && s.Hub.Joined == nil {
+		s.Hub.Joined = s.Views.Query
 	}
 	if s.PluginHooks.mayRead == nil {
 		s.PluginHooks.mayRead = s.memberMayReadChannel
@@ -729,10 +739,10 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 		defer t.Stop()
 		activityTick = t.C
 	}
-	// Who is here, written to this stream alone (Presence.Snapshot); joins
+	// Who is here, written to this stream alone (RoomViews.Snapshot); joins
 	// and leaves follow on the room's stream.
 	if !m.Preview {
-		send(s.Presence.Snapshot(roomID))
+		send(s.Views.Snapshot(roomID))
 	}
 	lastSeq := since
 	gapEvent := func() wire.Event {
@@ -805,7 +815,7 @@ func (s *Service) handleAgents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"agents": s.Roster.Snapshot(roomID)})
+	_ = json.NewEncoder(w).Encode(map[string]any{"agents": s.Views.Roster(roomID)})
 }
 
 // parseAgentRefs decodes the ?agents= advertisement param: a comma-separated

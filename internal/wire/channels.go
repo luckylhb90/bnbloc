@@ -588,6 +588,10 @@ type StreamScopeRequest struct {
 // stream carries it).
 const EventChannelFollow = "channel_follow"
 
+// EventRoomView (realtime's RoomViewPayload) is a realtime replica's view of
+// a room's live state, exchanged on the bus between replicas.
+const EventRoomView = "room_view"
+
 // ChannelFollowPayload names the member and the channel.
 type ChannelFollowPayload struct {
 	ChannelID string `json:"channelId"`

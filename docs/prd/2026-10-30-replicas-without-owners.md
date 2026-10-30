@@ -310,3 +310,22 @@ A's in §5.
   publishes and 1,056 receipts (the rooms' moments of two owners and their
   linger), dropped 42 duplicates (the hand-over watch and the bus both
   bringing one), held none, lost none.
+- **Slice 4, first part (2026-10-30): presence, the roster and slow mode
+  across replicas.** `realtime.RoomViews` joins each replica's view of a
+  room (who is here on its streams, which agents its bridge streams serve)
+  into the room's; each replica tells its own streams what changed in the
+  room's (`presence_delta`, `agent_roster`, now delivered locally:
+  `Hub.PublishLocal`), so a member on two replicas is here until gone from
+  both. Views go on the bus whole (`room_view`, an internal kind,
+  `Hub.Announce`) on every change and every 15 s; a replica that starts
+  receiving a room asks for the others' (`Hub.Joined` → `Query`); a view
+  not heard for 45 s (its replica died) is dropped. The stream's
+  `presence_snapshot`, the agents endpoint and `@here` read the room's
+  view. The owner-only announcement (`publishOwned`) is gone. Slow mode is
+  one claim per member and channel that every replica shares
+  (`realtime.Claims`, Redis `SET NX PX` on the bus's Redis), so a post
+  reaching another replica is still held; without a bus, memory and the
+  store decide as before.
+  Left for slice 5 with the ownership: a member's desktop plugin stream
+  and its deliveries (member-keyed routing), scheduled posts at the owner,
+  plugin events and catalog hints sent to peers.

@@ -2,6 +2,7 @@ package realtime
 
 import (
 	"sync"
+	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
@@ -102,4 +103,43 @@ func (e *memoryEndpoint) Subscribe(roomID string, deliver func(wire.Event), lost
 			delete(b.subs, roomID)
 		}
 	}, nil
+}
+
+// Claims is a claim on a key for a while, shared by every replica: the
+// first claim wins, a later one learns how long until the key is free
+// (slow mode: one post per member and channel in the gap, whichever replica
+// takes it).
+type Claims interface {
+	Claim(key string, ttl time.Duration) (ok bool, wait time.Duration, err error)
+}
+
+// MemoryClaims are Claims in one process (tests, and replicas sharing one
+// process); now is the clock (time.Now when nil).
+type MemoryClaims struct {
+	Now func() time.Time
+	mu  sync.Mutex
+	end map[string]time.Time
+}
+
+// Claim takes key for ttl unless it is taken.
+func (c *MemoryClaims) Claim(key string, ttl time.Duration) (bool, time.Duration, error) {
+	now := time.Now()
+	if c.Now != nil {
+		now = c.Now()
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if end, taken := c.end[key]; taken && now.Before(end) {
+		return false, end.Sub(now), nil
+	}
+	if c.end == nil {
+		c.end = map[string]time.Time{}
+	}
+	for k, end := range c.end {
+		if !now.Before(end) {
+			delete(c.end, k)
+		}
+	}
+	c.end[key] = now.Add(ttl)
+	return true, 0, nil
 }

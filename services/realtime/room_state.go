@@ -152,6 +152,10 @@ func (c *roomStateCache) observeRemote(ev wire.Event) {
 
 // observeRemote is what another replica's event changes here.
 func (s *Service) observeRemote(ev wire.Event) {
+	if ev.Kind == wire.EventRoomView {
+		s.Views.Remote(ev)
+		return
+	}
 	if s.roomState != nil {
 		s.roomState.observeRemote(ev)
 	}

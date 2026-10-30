@@ -194,3 +194,20 @@ func TestHubsShareARoomOverRedis(t *testing.T) {
 		}
 	}
 }
+
+// A claim is taken once until its time ends; the loser learns how long.
+func TestClaimOncePerTTL(t *testing.T) {
+	a, b := testBus(t), testBus(t)
+	key := testRoom(t)
+	if ok, _, err := a.Claim(key, 300*time.Millisecond); err != nil || !ok {
+		t.Fatalf("first claim ok=%v err=%v", ok, err)
+	}
+	ok, wait, err := b.Claim(key, 300*time.Millisecond)
+	if err != nil || ok || wait <= 0 || wait > 300*time.Millisecond {
+		t.Fatalf("second claim ok=%v wait=%v err=%v, want refused with a wait", ok, wait, err)
+	}
+	time.Sleep(wait + 20*time.Millisecond)
+	if ok, _, err := b.Claim(key, 300*time.Millisecond); err != nil || !ok {
+		t.Fatalf("after the wait ok=%v err=%v", ok, err)
+	}
+}

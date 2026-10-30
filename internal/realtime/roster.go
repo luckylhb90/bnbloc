@@ -154,15 +154,7 @@ func (r *AgentRoster) snapshotLocked(roomID string) []wire.RosterAgent {
 		}
 	}
 	// Stable order so the snapshot is deterministic (tests, dedup on the client).
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].OwnerUserID != out[j].OwnerUserID {
-			return out[i].OwnerUserID < out[j].OwnerUserID
-		}
-		if out[i].Core != out[j].Core {
-			return out[i].Core < out[j].Core
-		}
-		return out[i].Provider < out[j].Provider
-	})
+	sortRoster(out)
 	return out
 }
 
