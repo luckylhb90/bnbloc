@@ -275,6 +275,27 @@ func TestProviderFilesReachTheSandboxedWorkspace(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "stale")); err == nil {
 		t.Fatal("a stale provider file stayed")
 	}
+	// An unchanged file is not replaced: the folder and its files stay (a file removed and
+	// recreated on the host is missing in the guest for seconds, and the agent starts at once).
+	before, err := os.Stat(filepath.Join(dir, "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dirBefore, _ := os.Stat(dir)
+	b.sandbox.spaceEnv(context.Background(), workdir, "room-1", "job-4", own)
+	after, err := os.Stat(filepath.Join(dir, "config.yaml"))
+	if err != nil || !os.SameFile(before, after) {
+		t.Fatalf("an unchanged provider file was replaced: %v", err)
+	}
+	if dirAfter, _ := os.Stat(dir); !os.SameFile(dirBefore, dirAfter) {
+		t.Fatal("the provider folder was removed and made again")
+	}
+	// A changed file is rewritten in place.
+	_ = os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("tampered"), 0o644)
+	b.sandbox.spaceEnv(context.Background(), workdir, "room-1", "job-5", own)
+	if got, _ := os.ReadFile(filepath.Join(dir, "config.yaml")); string(got) != "model: x\n" {
+		t.Fatalf("a changed provider file was not put back: %q", got)
+	}
 	// A run that is not the member's own gets no files.
 	other := t.TempDir()
 	b.sandbox.spaceEnv(context.Background(), other, "room-1", "job-3", nil)

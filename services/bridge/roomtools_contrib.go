@@ -464,21 +464,38 @@ func (c *roomToolsContributor) sandboxEgressEnv(ctx context.Context, workdir, ro
 }
 
 // writeProviderFiles writes the local providers' files into the sandboxed
-// workspace (.room/egress/<provider>/, replaced whole at each turn: a provider
-// that hands none leaves none) and names the folder in env's `{files:<provider>}`
-// tokens. The folder is the agent's to read: a provider puts no credential
-// in it.
+// workspace (.room/egress/providers/<provider>/) and names the folder in env's
+// `{files:<provider>}` tokens. The folder is the agent's to read: a provider puts
+// no credential in it.
+//
+// The folder is kept as it is, never deleted and made again: the agent starts
+// right after this, and a file removed and recreated on the host is not there in
+// the guest for a few seconds (measured on the real sandbox: 2 to 5 s), so an agent
+// that started in that time read no configuration and fell back to its defaults. A
+// file whose content is already there is left alone, a changed one is rewritten in
+// place, and what the provider no longer hands (a provider that hands none leaves
+// none) is removed.
 func (c *roomToolsContributor) writeProviderFiles(workdir string, claims egressClaims, env map[string]string) {
 	base := filepath.Join(workdir, filepath.FromSlash(sandboxEgressDir))
 	for provider, files := range claims.files {
 		dir := filepath.Join(base, "providers", provider)
-		_ = os.RemoveAll(dir)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			slog.Warn("bnbloc bridge provider files not written", "event", "bnbloc.bridge.provider_files_failed", "provider", provider, "error", err)
 			continue
 		}
+		if ents, err := os.ReadDir(dir); err == nil {
+			for _, e := range ents {
+				if _, kept := files[e.Name()]; !kept {
+					_ = os.RemoveAll(filepath.Join(dir, e.Name()))
+				}
+			}
+		}
 		for name, content := range files {
-			if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			path := filepath.Join(dir, name)
+			if have, err := os.ReadFile(path); err == nil && string(have) == content {
+				continue
+			}
+			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 				slog.Warn("bnbloc bridge provider file not written", "event", "bnbloc.bridge.provider_files_failed", "provider", provider, "file", name, "error", err)
 			}
 		}
