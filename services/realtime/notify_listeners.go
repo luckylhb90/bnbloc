@@ -24,11 +24,11 @@ func (s *Service) notifyListeners(ctx context.Context, roomID, channelID, reach 
 	if s.Channels == nil {
 		return nil, nil
 	}
-	ch, ok, err := s.Channels.GetChannel(ctx, roomID, channelID)
+	ch, ok, err := s.channelStore().GetChannel(ctx, roomID, channelID)
 	if err != nil || !ok {
 		return nil, err
 	}
-	follows, err := s.Channels.ChannelFollowersOf(ctx, roomID, channelID)
+	follows, err := s.channelStore().ChannelFollowersOf(ctx, roomID, channelID)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +56,7 @@ func (s *Service) notifyListeners(ctx context.Context, roomID, channelID, reach 
 		}
 	}
 	if reach == notify.ReachChannel && s.RoomRoles != nil {
-		members, err := s.RoomRoles.Members(ctx, roomID)
+		members, err := s.roleStore().Members(ctx, roomID)
 		if err != nil {
 			return nil, err
 		}

@@ -80,6 +80,7 @@ export function PeopleChatPanel({
     historyLoaded: conversation.history.loaded,
     onMessageEvent: (e) => void conversation.applyEvent(e),
     onReconnect: noop,
+    onCatchUp: conversation.catchUp,
     onRevoked: onGone,
     scope: { channelOnly: true },
   });

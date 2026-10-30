@@ -129,6 +129,9 @@ func (ls *laneStream) note(ev wire.Event, now time.Time) (wire.Event, bool) {
 	if ev.Sequence > a.LastSeq {
 		a.LastSeq = ev.Sequence
 	}
+	if ev.Sequence > 0 && wire.PersistedFeedKind(ev.Kind) {
+		a.Messages++
+	}
 	if ev.Kind == wire.KindChatMessage && mentionsSubscriber(ev, ls.userID) {
 		a.Mention = true
 	}
@@ -183,11 +186,11 @@ func (ls *laneStream) forgetOpen() {
 // mentionsSubscriber reports whether a person's message mentions userID by
 // id, @channel or @here (the tokens notify reads, MentionCandidates).
 func mentionsSubscriber(ev wire.Event, userID string) bool {
-	p, ok := wire.DecodePayload[wire.ChatMessagePayload](ev.Payload)
-	if !ok || !strings.Contains(p.Text, "@") || p.UserID == userID {
+	author, text, ok := wire.ChatAuthorText(ev.Payload)
+	if !ok || !strings.Contains(text, "@") || author == userID {
 		return false
 	}
-	for _, c := range notify.MentionCandidates(p.Text) {
+	for _, c := range notify.MentionCandidates(text) {
 		if c == userID || c == notify.ReachChannel || c == notify.ReachHere {
 			return true
 		}

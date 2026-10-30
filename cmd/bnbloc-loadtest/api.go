@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -239,6 +240,29 @@ func (a *api) createChannel(ctx context.Context, owner *member, roomID, name str
 	return out.ChannelID, nil
 }
 
+// historyClientIDs returns the client ids of a channel's latest history
+// page: what a client reads to fill a stream gap.
+func (a *api) historyClientIDs(ctx context.Context, m *member, roomID, channelID string) ([]string, error) {
+	var out struct {
+		Messages []struct {
+			Payload struct {
+				ClientMsgID string `json:"clientMsgId"`
+			} `json:"payload"`
+		} `json:"messages"`
+	}
+	path := "/v1/rooms/" + url.PathEscape(roomID) + "/history?limit=100&channelId=" + url.QueryEscape(channelID)
+	if err := a.do(ctx, m, http.MethodGet, path, nil, nil, &out); err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(out.Messages))
+	for _, msg := range out.Messages {
+		if msg.Payload.ClientMsgID != "" {
+			ids = append(ids, msg.Payload.ClientMsgID)
+		}
+	}
+	return ids, nil
+}
+
 // sendChat posts one chat message exactly as the web client does
 // (api.sendChat): text, atUnixMs, clientMsgId, channelId, no recipient.
 func (a *api) sendChat(ctx context.Context, m *member, roomID, channelID, clientMsgID, text string) error {
@@ -257,8 +281,11 @@ func (a *api) sendChat(ctx context.Context, m *member, roomID, channelID, client
 // subscribeRoom with the room view's scope): the session token as the
 // access_token query param (EventSource cannot set headers), a lanes stream
 // with the member's channel open (and named as channelId), includePeople=1.
-func (a *api) eventsURL(m *member, roomID, channelID, tz string) string {
+func (a *api) eventsURL(m *member, roomID, channelID, tz string, since int64) string {
 	q := "access_token=" + url.QueryEscape(m.token) + "&channelId=" + url.QueryEscape(channelID) + "&lanes=1&open=" + url.QueryEscape(channelID) + "&includePeople=1"
+	if since > 0 {
+		q += "&since=" + strconv.FormatInt(since, 10)
+	}
 	if tz != "" {
 		q += "&tz=" + url.QueryEscape(tz)
 	}

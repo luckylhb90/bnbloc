@@ -45,7 +45,7 @@ func TestLanesStream(t *testing.T) {
 			firstActivity = &a
 		}
 	}
-	if firstActivity == nil || !firstActivity.Mention || firstActivity.Events != 1 {
+	if firstActivity == nil || !firstActivity.Mention || firstActivity.Events != 1 || firstActivity.Messages != 1 {
 		t.Fatalf("the first activity of ch_b = %+v, want one event mentioning bob", firstActivity)
 	}
 	// The second message of the window comes coalesced, a second later.
@@ -105,5 +105,28 @@ func TestLanesStreamReadersOnly(t *testing.T) {
 	}
 	if !sawOpen {
 		t.Fatal("an open channel's activity did not reach the stream")
+	}
+}
+
+// A stream reopened with the last sequence its client holds is sent only
+// what is newer; one whose room's buffer no longer reaches back is told to
+// fetch the difference (stream_gap), never left silently short.
+func TestStreamResumesSinceItsSequence(t *testing.T) {
+	srv, svc := newChannelTestServer(t)
+	openPeopleTestStream(t, srv, svc, "alice", "allChannels=1", 1) // keeps the room's buffer
+	s1 := postChat(t, srv, "alice", "one", "ch_a")
+	postChat(t, srv, "alice", "two", "ch_a")
+	bob := openPeopleTestStream(t, srv, svc, "bob", "allChannels=1&since="+itoaTest(s1), 2)
+	got := collectUntil(t, bob, chatIn("ch_a", "two"))
+	for _, ev := range got {
+		if ev.Kind == wire.KindChatMessage || ev.Kind == wire.EventStreamGap {
+			t.Fatalf("a resume after seq %d sent %s %d", s1, ev.Kind, ev.Sequence)
+		}
+	}
+	// A fresh owner's empty buffer cannot prove the client has everything.
+	srv2, other := newChannelTestServer(t)
+	carl := openPeopleTestStream(t, srv2, other, "bob", "allChannels=1&since=40", 1)
+	if gap := collectUntil(t, carl, func(ev wire.Event) bool { return ev.Kind == wire.EventStreamGap }); len(gap) > 3 {
+		t.Fatalf("events before the gap: %+v", gap)
 	}
 }

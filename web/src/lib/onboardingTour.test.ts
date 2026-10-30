@@ -157,7 +157,7 @@ function testRoomEventMapping(): void {
   assert(reply?.kind === "agent_reply" && reply.seq === 5, "assistant message is a reply");
   assert(onboardingEventFromRoomEvent({ kind: "agent_messages", text: "", author: "agent" }, "jack", ROOM, "stream") === null, "empty is nothing");
   assert(onboardingEventFromRoomEvent({ kind: "artifact_updated" }, "jack", ROOM, "stream")?.kind === "deliverable", "artifact_updated is a deliverable");
-  assert(onboardingEventFromRoomEvent({ kind: "presence_join" }, "jack", ROOM, "stream") === null, "other kinds are nothing");
+  assert(onboardingEventFromRoomEvent({ kind: "presence_delta" }, "jack", ROOM, "stream") === null, "other kinds are nothing");
 }
 
 async function testBus(): Promise<void> {

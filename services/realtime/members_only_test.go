@@ -148,6 +148,11 @@ func TestMembersOnlyChannelStream(t *testing.T) {
 			t.Fatalf("a member who left still receives the section's events: %+v", ev)
 		}
 	}
+	// The room state forgets carl's sections on the event: he posts there no
+	// more (room_state.go).
+	if code := statusOf(t, http.MethodPost, srv.URL+"/v1/rooms/room-1/chat", "carl", `{"text":"still here?","channelId":"ch_b"}`); code != http.StatusNotFound {
+		t.Fatalf("a member who left posting in the section's channel = %d, want 404", code)
+	}
 	if code := statusOf(t, http.MethodGet, srv.URL+"/v1/rooms/room-1/events?channelId=ch_b", "bob", ""); code != http.StatusNotFound {
 		t.Fatalf("a non-member's stream of the section's channel = %d, want 404", code)
 	}

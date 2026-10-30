@@ -176,3 +176,17 @@ func DecodePayload[T any](payload any) (T, bool) {
 	}
 	return out, true
 }
+
+// ChatAuthorText reads a chat message payload's author and text without a
+// JSON round trip when it is the map the chat path publishes (DecodePayload
+// otherwise): what a stream asks of every message it passes (a lanes stream
+// looking for a mention) stays a map lookup.
+func ChatAuthorText(payload any) (author, text string, ok bool) {
+	if m, isMap := payload.(map[string]any); isMap {
+		author, _ = m["userId"].(string)
+		text, _ = m["text"].(string)
+		return author, text, true
+	}
+	p, ok := DecodePayload[ChatMessagePayload](payload)
+	return p.UserID, p.Text, ok
+}

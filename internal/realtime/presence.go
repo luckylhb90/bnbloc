@@ -1,6 +1,7 @@
 package realtime
 
 import (
+	"sort"
 	"sync"
 	"time"
 
@@ -21,15 +22,27 @@ type Presence struct {
 	mu      sync.Mutex
 	rooms   map[string]map[string]int // roomID -> userID -> refcount
 	pending map[string]*time.Timer    // "roomID\x00userID" -> pending leave timer
+	// changes are a room's arrivals and departures not yet announced: they
+	// go out together as one presence_delta a flushEvery
+	// (docs/prd/2026-10-30-message-path-performance.md §4.3), so a room
+	// whose members all reconnect at once (a deploy) sends each stream a
+	// few deltas, not one event per member.
+	changes map[string]*presenceChanges
 	publish func(wire.Event)
 	after   func(time.Duration, func()) *time.Timer
 }
+
+type presenceChanges struct{ joined, left map[string]bool }
+
+// flushEvery is how often a room's presence changes are announced.
+const flushEvery = time.Second
 
 // NewPresence constructs a tracker that emits events via publish.
 func NewPresence(publish func(wire.Event)) *Presence {
 	return &Presence{
 		rooms:   map[string]map[string]int{},
 		pending: map[string]*time.Timer{},
+		changes: map[string]*presenceChanges{},
 		publish: publish,
 		after:   time.AfterFunc,
 	}
@@ -63,8 +76,51 @@ func (p *Presence) Enter(roomID, userID string) {
 	// Announce join only on a genuine first arrival, not a reconnect that a
 	// pending leave had not yet finalized.
 	if first && !reconnecting {
-		p.emit(roomID, wire.EventPresenceJoin, map[string]any{"userId": userID})
+		p.change(roomID, userID, true)
 	}
+}
+
+// change records an arrival (joined) or a departure for the room's next
+// delta; a departure cancels an arrival not yet announced, and the reverse.
+func (p *Presence) change(roomID, userID string, joined bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	c := p.changes[roomID]
+	if c == nil {
+		c = &presenceChanges{joined: map[string]bool{}, left: map[string]bool{}}
+		p.changes[roomID] = c
+		p.after(flushEvery, func() { p.flush(roomID) })
+	}
+	add, cancel := c.joined, c.left
+	if !joined {
+		add, cancel = c.left, c.joined
+	}
+	if cancel[userID] {
+		delete(cancel, userID)
+		return
+	}
+	add[userID] = true
+}
+
+// flush announces the room's changes as one presence_delta.
+func (p *Presence) flush(roomID string) {
+	p.mu.Lock()
+	c := p.changes[roomID]
+	delete(p.changes, roomID)
+	p.mu.Unlock()
+	if c == nil || len(c.joined)+len(c.left) == 0 {
+		return
+	}
+	p.emit(roomID, wire.EventPresenceDelta, wire.PresenceDeltaPayload{Joined: sortedKeys(c.joined), Left: sortedKeys(c.left)})
+}
+
+func sortedKeys(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // Snapshot is the presence_snapshot a stream writes to itself on opening.
@@ -110,7 +166,7 @@ func (p *Presence) finalizeLeave(roomID, userID string) {
 	delete(set, userID)
 	p.mu.Unlock()
 
-	p.emit(roomID, wire.EventPresenceLeave, map[string]any{"userId": userID})
+	p.change(roomID, userID, false)
 }
 
 // Members returns the current present users in a room.

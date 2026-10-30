@@ -53,3 +53,17 @@ func TestDecodePayloadEveryShape(t *testing.T) {
 		t.Fatalf("agent batch = %+v %v", p, ok)
 	}
 }
+
+// A chat payload's author and text read the same from the published map,
+// the typed payload and its JSON.
+func TestChatAuthorText(t *testing.T) {
+	for _, p := range []any{
+		map[string]any{"userId": "maya", "text": "hi @jack"},
+		ChatMessagePayload{UserID: "maya", Text: "hi @jack"},
+		json.RawMessage(`{"userId":"maya","text":"hi @jack"}`),
+	} {
+		if a, txt, ok := ChatAuthorText(p); !ok || a != "maya" || txt != "hi @jack" {
+			t.Errorf("%T: %q %q %v", p, a, txt, ok)
+		}
+	}
+}

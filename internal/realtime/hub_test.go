@@ -1,6 +1,7 @@
 package realtime
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -116,7 +117,7 @@ func TestTransientEventsDoNotConsumeSequences(t *testing.T) {
 	if ev, err := h.PublishCommit(wire.Event{RoomID: "r", Kind: wire.KindChatMessage}, commit); err != nil || ev.Sequence != 1 {
 		t.Fatalf("first chat seq=%d err=%v, want 1", ev.Sequence, err)
 	}
-	for _, kind := range []string{"presence_join", "presence_snapshot", "presence_typing", "agent_roster", "agent_job_created", "agent_session_state"} {
+	for _, kind := range []string{"presence_delta", "presence_snapshot", "presence_typing", "agent_roster", "agent_job_created", "agent_session_state"} {
 		before := j.calls()
 		ev, err := h.PublishCommit(wire.Event{RoomID: "r", Kind: kind}, commit)
 		if err != nil || ev.Sequence != 0 || j.calls() != before {
@@ -343,11 +344,12 @@ func TestReplayMaxAgeBelowRetentionMinimum(t *testing.T) {
 	}
 }
 
-// A subscriber that falls a whole buffer behind is closed, never silently
-// skipped: a skipped event leaves no trace on the stream, while a closed
-// stream makes the client reconnect and catch up from history. A group
-// commit delivers a batch as one burst, so this is load-bearing.
-func TestOverflowedSubscriberIsClosedNotSkipped(t *testing.T) {
+// A subscriber that falls a whole buffer behind is never silently skipped:
+// the first time it is marked gapped (its stream tells the client to fetch
+// the difference, TakeGap), and a second overflow before the stream took
+// the first closes it (the client reconnects and catches up from history).
+// A group commit delivers a batch as one burst, so this is load-bearing.
+func TestOverflowedSubscriberIsGappedThenClosed(t *testing.T) {
 	h := NewHub(16, 2)
 	slow := h.SubscribeLive("r")
 	fast := h.SubscribeLive("r")
@@ -356,10 +358,15 @@ func TestOverflowedSubscriberIsClosedNotSkipped(t *testing.T) {
 		h.Publish(wire.Event{RoomID: "r", Kind: wire.KindChatMessage})
 		<-fast.Events()
 	}
-	h.Publish(wire.Event{RoomID: "r", Kind: wire.KindChatMessage}) // slow's buffer is full
+	h.Publish(wire.Event{RoomID: "r", Kind: wire.KindChatMessage}) // slow's buffer is full: a gap
 	if ev := <-fast.Events(); ev.Sequence != 3 {
 		t.Fatalf("the keeping-up subscriber got seq %d, want 3", ev.Sequence)
 	}
+	if h.SubscriberCount("r") != 2 {
+		t.Fatal("the first overflow closed the subscriber")
+	}
+	h.Publish(wire.Event{RoomID: "r", Kind: wire.KindChatMessage}) // again, gap not taken: closed
+	<-fast.Events()
 	var got []int64
 	for ev := range slow.Events() { // ends: the stream was closed
 		got = append(got, ev.Sequence)
@@ -367,8 +374,75 @@ func TestOverflowedSubscriberIsClosedNotSkipped(t *testing.T) {
 	if len(got) != 2 || got[0] != 1 || got[1] != 2 {
 		t.Fatalf("overflowed subscriber received %v before closing, want [1 2]", got)
 	}
-	if n := h.SubscriberCount("r"); n != 1 {
-		t.Fatalf("subscribers = %d, want only the one keeping up", n)
+	// A subscriber whose stream takes the gap keeps its connection.
+	kept := h.SubscribeLive("r")
+	defer h.Unsubscribe("r", kept)
+	for i := 0; i < 3; i++ {
+		h.Publish(wire.Event{RoomID: "r", Kind: wire.KindChatMessage})
+		<-fast.Events()
+	}
+	<-kept.Events()
+	<-kept.Events()
+	if !kept.TakeGap() || kept.TakeGap() {
+		t.Fatal("the gap is reported once")
+	}
+	h.Publish(wire.Event{RoomID: "r", Kind: wire.KindChatMessage})
+	<-fast.Events()
+	if ev := <-kept.Events(); ev.Sequence != 8 {
+		t.Fatalf("after taking the gap the subscriber got %d, want 8", ev.Sequence)
+	}
+	if n := h.SubscriberCount("r"); n != 2 {
+		t.Fatalf("subscribers = %d, want the one keeping up and the gapped one", n)
 	}
 	h.Unsubscribe("r", slow) // the handler's deferred unsubscribe is a no-op
+}
+
+// A delivered event carries its JSON, encoded once for every stream: the same
+// bytes an encoding of the event gives. A committed client id is answered
+// from memory afterwards.
+func TestDeliveredEventIsEncodedOnce(t *testing.T) {
+	h := NewHub(4, 8)
+	sub := h.Subscribe("r")
+	defer h.Unsubscribe("r", sub)
+	pub, err := h.PublishCommit(wire.Event{RoomID: "r", ChannelID: "c", Kind: wire.KindChatMessage, Payload: map[string]any{"text": "hi"}},
+		Durable{Journal: store.NewMemoryChat(), Row: store.RoomMessage{TenantID: "t", ClientMsgID: "cm-1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := <-sub.Events()
+	want, _ := json.Marshal(wire.Event{Sequence: pub.Sequence, RoomID: "r", ChannelID: "c", Kind: wire.KindChatMessage, Payload: map[string]any{"text": "hi"}})
+	if string(got.Encoded) != string(want) {
+		t.Fatalf("encoded = %s, want %s", got.Encoded, want)
+	}
+	if seq, ok := h.RecentClientMsg("r", "cm-1"); !ok || seq != pub.Sequence {
+		t.Fatalf("recent client id = %d %v, want %d", seq, ok, pub.Sequence)
+	}
+	if _, ok := h.RecentClientMsg("r", "cm-2"); ok {
+		t.Fatal("an unknown client id answered")
+	}
+}
+
+// A client resuming from its last sequence is sent only what is newer; a
+// buffer that does not reach back to it is a gap.
+func TestSubscribeSinceSendsTheDifference(t *testing.T) {
+	h := NewHub(3, 16)
+	keep := h.SubscribeLive("r") // a room with nobody frees its buffer
+	defer h.Unsubscribe("r", keep)
+	for i := 0; i < 6; i++ {
+		h.Publish(wire.Event{RoomID: "r", Kind: wire.KindChatMessage})
+	}
+	// The buffer holds 4, 5, 6.
+	sub, gap := h.SubscribeSince("r", 4)
+	if gap || len(sub.Events()) != 2 || (<-sub.Events()).Sequence != 5 {
+		t.Fatalf("since 4: gap %v, %d queued", gap, len(sub.Events()))
+	}
+	h.Unsubscribe("r", sub)
+	if sub, gap = h.SubscribeSince("r", 1); !gap || len(sub.Events()) != 3 {
+		t.Fatalf("since 1: gap %v, %d queued; want a gap and 4..6", gap, len(sub.Events()))
+	}
+	h.Unsubscribe("r", sub)
+	if sub, gap = h.SubscribeSince("r", 6); gap || len(sub.Events()) != 0 {
+		t.Fatalf("since 6 (up to date): gap %v, %d queued", gap, len(sub.Events()))
+	}
+	h.Unsubscribe("r", sub)
 }

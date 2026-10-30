@@ -36,15 +36,32 @@ func newTestPresence(publish func(wire.Event)) (*Presence, *controllableTimers) 
 	return p, timers
 }
 
-// Entering emits join (the snapshot is each stream's own, Snapshot); a leave
-// is announced only after the grace window elapses (deferred).
+// deltas totals the arrivals and departures announced in events.
+func deltas(events []wire.Event) (joined, left []string) {
+	for _, ev := range events {
+		if ev.Kind != wire.EventPresenceDelta {
+			continue
+		}
+		d := ev.Payload.(wire.PresenceDeltaPayload)
+		joined, left = append(joined, d.Joined...), append(left, d.Left...)
+	}
+	return joined, left
+}
+
+// An arrival is announced in the room's next delta (the snapshot is each
+// stream's own, Snapshot); a departure only after the grace window, in the
+// delta after it.
 func TestPresenceJoinThenDeferredLeave(t *testing.T) {
 	var events []wire.Event
 	p, timers := newTestPresence(func(ev wire.Event) { events = append(events, ev) })
 
 	p.Enter("room-1", "alice")
-	if len(events) != 1 || events[0].Kind != "presence_join" {
-		t.Fatalf("enter events = %v, want join only", kinds(events))
+	if len(events) != 0 {
+		t.Fatalf("an arrival announced before the delta: %v", kinds(events))
+	}
+	timers.fire() // the delta
+	if j, l := deltas(events); len(j) != 1 || j[0] != "alice" || len(l) != 0 {
+		t.Fatalf("delta = joined %v left %v, want alice joined", j, l)
 	}
 	if snap := p.Snapshot("room-1"); snap.Kind != "presence_snapshot" || len(snap.Payload.(map[string]any)["members"].([]string)) != 1 {
 		t.Fatalf("snapshot = %+v", snap)
@@ -52,78 +69,79 @@ func TestPresenceJoinThenDeferredLeave(t *testing.T) {
 
 	events = nil
 	p.Leave("room-1", "alice")
-	// Leave is deferred: nothing emitted yet, and the member is still present.
 	if len(events) != 0 {
 		t.Fatalf("immediate leave events = %v, want none (deferred)", kinds(events))
 	}
 	if got := p.Members("room-1"); len(got) != 1 {
 		t.Fatalf("members during grace = %v, want [alice] still present", got)
 	}
-
 	timers.fire() // grace window elapses with no reconnect
-	if len(events) != 1 || events[0].Kind != "presence_leave" {
-		t.Fatalf("finalized leave events = %v, want leave only", kinds(events))
+	timers.fire() // the delta
+	if j, l := deltas(events); len(j) != 0 || len(l) != 1 || l[0] != "alice" {
+		t.Fatalf("delta = joined %v left %v, want alice left", j, l)
 	}
 	if got := p.Members("room-1"); len(got) != 0 {
 		t.Fatalf("members after leave = %v, want empty", got)
 	}
 }
 
+// Many arrivals in one window go out as one delta.
+func TestPresenceDeltaCoalesces(t *testing.T) {
+	var events []wire.Event
+	p, timers := newTestPresence(func(ev wire.Event) { events = append(events, ev) })
+	for _, u := range []string{"a", "b", "c"} {
+		p.Enter("r", u)
+	}
+	timers.fire()
+	if j, _ := deltas(events); len(events) != 1 || len(j) != 3 {
+		t.Fatalf("events = %v (joined %v), want one delta of three", kinds(events), j)
+	}
+}
+
 // A reconnect within the grace window cancels the pending leave and does not
-// re-announce a join — the roster never flickers.
+// re-announce an arrival — the roster never flickers.
 func TestPresenceReconnectCancelsLeave(t *testing.T) {
-	var joins, leaves int
-	p, timers := newTestPresence(func(ev wire.Event) {
-		switch ev.Kind {
-		case "presence_join":
-			joins++
-		case "presence_leave":
-			leaves++
-		}
-	})
-	p.Enter("r", "alice") // joins=1
+	var events []wire.Event
+	p, timers := newTestPresence(func(ev wire.Event) { events = append(events, ev) })
+	p.Enter("r", "alice")
+	timers.fire()         // the arrival's delta
 	p.Leave("r", "alice") // schedules deferred leave
 	p.Enter("r", "alice") // reconnect within grace: cancels pending leave
-
-	timers.fire() // any (cancelled) timer would fire here
-
-	if joins != 1 {
-		t.Fatalf("joins = %d, want 1 (reconnect must not re-announce join)", joins)
+	timers.fire()         // any (cancelled) timer would fire here
+	timers.fire()
+	joined, left := deltas(events)
+	if len(joined) != 1 {
+		t.Fatalf("joined = %v, want alice once (reconnect must not re-announce)", joined)
 	}
-	if leaves != 0 {
-		t.Fatalf("leaves = %d, want 0 (reconnect must cancel the leave)", leaves)
+	if len(left) != 0 {
+		t.Fatalf("left = %v, want none (reconnect must cancel the leave)", left)
 	}
 	if got := p.Members("r"); len(got) != 1 || got[0] != "alice" {
 		t.Fatalf("members = %v, want [alice] still present", got)
 	}
 }
 
-// A second device does not emit a duplicate join; the leave is scheduled only
-// when the last live reference goes.
+// A second device does not announce a second arrival; the leave is scheduled
+// only when the last live reference goes.
 func TestPresenceRefcountDefersOnLastLeave(t *testing.T) {
-	var joins, leaves int
-	p, timers := newTestPresence(func(ev wire.Event) {
-		switch ev.Kind {
-		case "presence_join":
-			joins++
-		case "presence_leave":
-			leaves++
-		}
-	})
+	var events []wire.Event
+	p, timers := newTestPresence(func(ev wire.Event) { events = append(events, ev) })
 	p.Enter("r", "alice")
 	p.Enter("r", "alice") // second device
-	if joins != 1 {
-		t.Fatalf("joins = %d, want 1", joins)
+	timers.fire()
+	if j, _ := deltas(events); len(j) != 1 {
+		t.Fatalf("joined = %v, want alice once", j)
 	}
 	p.Leave("r", "alice") // one device gone; still present, no schedule
 	timers.fire()
-	if leaves != 0 {
-		t.Fatalf("leaves after first device = %d, want 0", leaves)
+	if _, l := deltas(events); len(l) != 0 {
+		t.Fatalf("left after first device = %v, want none", l)
 	}
 	p.Leave("r", "alice") // last device gone; schedules deferred leave
 	timers.fire()
-	if leaves != 1 {
-		t.Fatalf("leaves after last device = %d, want 1", leaves)
+	timers.fire()
+	if _, l := deltas(events); len(l) != 1 {
+		t.Fatalf("left after last device = %v, want alice", l)
 	}
 }
 

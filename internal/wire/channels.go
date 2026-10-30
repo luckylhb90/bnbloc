@@ -547,13 +547,17 @@ const (
 const EventChannelActivity = "channel_activity"
 
 // ChannelActivityPayload is a channel's activity since the stream's last one
-// for it: its last sequence, how many events it stands for, and whether one of
-// them mentions the subscriber (by id, @channel or @here).
+// for it: its last sequence, how many events and new messages it stands for,
+// and whether one of them mentions the subscriber (by id, @channel or @here).
 type ChannelActivityPayload struct {
 	ChannelID string `json:"channelId"`
 	LastSeq   int64  `json:"lastSeq"`
 	Events    int    `json:"events"`
-	Mention   bool   `json:"mention,omitempty"`
+	// Messages counts the new messages (durable events) among them: what a
+	// client adds to the channel's unread badge (once per LastSeq) instead
+	// of reading every unread count again.
+	Messages int  `json:"messages"`
+	Mention  bool `json:"mention,omitempty"`
 }
 
 // EventStreamOpened (StreamOpenedPayload) is a lanes stream's first event:
@@ -576,4 +580,29 @@ const MaxStreamOpen = 4
 type StreamScopeRequest struct {
 	StreamID string   `json:"streamId"`
 	Open     []string `json:"open"`
+}
+
+// EventChannelFollow (ChannelFollowPayload) is published by bnbloc-room when
+// a member follows, leaves or changes their marks of a channel; realtime's
+// room state forgets what it kept of the channel's followers (internal: no
+// stream carries it).
+const EventChannelFollow = "channel_follow"
+
+// ChannelFollowPayload names the member and the channel.
+type ChannelFollowPayload struct {
+	ChannelID string `json:"channelId"`
+	UserID    string `json:"userId"`
+}
+
+// EventStreamGap (StreamGapPayload) tells a stream's client it lacks events:
+// it reopened after events its room's buffer no longer holds, or it fell a
+// whole buffer behind. The client fetches the difference (history after its
+// last sequence, unread counts) without reopening (Telegram's
+// updatesTooLong; docs/prd/2026-10-30-message-path-performance.md §4.4).
+const EventStreamGap = "stream_gap"
+
+// StreamGapPayload is the last sequence the stream wrote before the gap (0:
+// the client's own, from its since).
+type StreamGapPayload struct {
+	AfterSeq int64 `json:"afterSeq"`
 }

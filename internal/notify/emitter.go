@@ -380,6 +380,11 @@ func (e *Emitter) filter(ctx context.Context, tid string, ev Event, now time.Tim
 			out = append(out, r)
 			continue
 		}
+		// A recipient inside the type's collapse window costs nothing: no
+		// preference read (the notification would be dropped anyway).
+		if e.collapsed(tid, r, ev.RoomID, ev.Type, now) {
+			continue
+		}
 		prefs, ok, err := e.Prefs.GetNotificationPrefs(ctx, r)
 		if err != nil {
 			continue // fail closed for this member: a read error never spams
@@ -396,6 +401,27 @@ func (e *Emitter) filter(ctx context.Context, tid string, ev Event, now time.Tim
 		out = append(out, r)
 	}
 	return out
+}
+
+// collapsed reports whether user is inside the type's collapse window for
+// the room (admit's test, recording nothing).
+func (e *Emitter) collapsed(tid, user, roomID, typ string, now time.Time) bool {
+	window, ok := collapseWindow[typ]
+	if !ok {
+		return false
+	}
+	key := tid + "\x00" + user + "\x00" + roomID + "\x00" + typ
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	last, ok := e.lastSent[key]
+	return ok && now.Sub(last) < window
+}
+
+// forgetPrefs drops a member's cached preferences (Handlers.PrefsChanged).
+func (e *Emitter) forgetPrefs(ctx context.Context, userID string) {
+	if c, ok := e.Prefs.(*prefsCache); ok {
+		c.Forget(ctx, userID)
+	}
 }
 
 // admit applies the collapse window; it records the send when admitted.

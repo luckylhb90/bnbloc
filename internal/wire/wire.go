@@ -72,6 +72,11 @@ type Event struct {
 	Kind      string `json:"kind"`
 	Payload   any    `json:"payload"`
 	AtUnixMs  int64  `json:"atUnixMs"`
+	// Encoded is the event's JSON, made once by the hub as it delivers the
+	// event (never sent itself), so a room's streams write the same bytes
+	// instead of each encoding the event again. Whoever changes a delivered
+	// event's fields clears it.
+	Encoded []byte `json:"-"`
 }
 
 // Access-revocation event kinds. bnbloc-room publishes them (transient, never
@@ -85,6 +90,25 @@ const (
 	// EventRoomDeleted carries no payload; every stream in the room closes.
 	EventRoomDeleted = "room_deleted"
 )
+
+// EventRoomUpdated (RoomUpdatedPayload) is published by bnbloc-room when the
+// room's own settings change (its rules, the agreement it asks for) or a
+// member agrees to its rules: realtime's room state reads them again
+// (docs/prd/2026-10-30-message-path-performance.md §4.1).
+const EventRoomUpdated = "room_updated"
+
+// RoomUpdatedPayload names the member whose agreement changed ("" for the
+// room's own settings).
+type RoomUpdatedPayload struct {
+	UserID string `json:"userId,omitempty"`
+}
+
+// PresenceDeltaPayload is who came into a room and who left it since the
+// room's previous presence delta.
+type PresenceDeltaPayload struct {
+	Joined []string `json:"joined"`
+	Left   []string `json:"left"`
+}
 
 // MemberRemovedPayload is the payload of an EventMemberRemoved event.
 type MemberRemovedPayload struct {

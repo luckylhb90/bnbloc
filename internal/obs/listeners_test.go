@@ -60,11 +60,19 @@ func TestPublicListenerHidesMetrics(t *testing.T) {
 			t.Fatalf("public %s = %d, want 200", p, code)
 		}
 	}
-	internal := metricsMux(m)
+	internal := metricsMux(m, false)
 	if code := get(internal, "/metrics"); code != http.StatusOK {
 		t.Fatalf("internal /metrics = %d, want 200", code)
 	}
 	if code := get(internal, "/v1/rooms"); code != http.StatusNotFound {
 		t.Fatalf("internal listener served an app path: %d", code)
+	}
+	// The profiler only where it is turned on (serve mounts it only where
+	// /metrics is served, never on a public listener).
+	if code := get(internal, "/debug/pprof/"); code != http.StatusNotFound {
+		t.Fatalf("profiler served while off: %d", code)
+	}
+	if code := get(metricsMux(m, true), "/debug/pprof/"); code != http.StatusOK {
+		t.Fatalf("profiler on the internal listener = %d, want 200", code)
 	}
 }

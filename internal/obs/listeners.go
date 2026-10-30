@@ -2,6 +2,7 @@ package obs
 
 import (
 	"net/http"
+	"net/http/pprof"
 	"strings"
 )
 
@@ -11,6 +12,12 @@ import (
 // only on the private service network), while a public listener (the
 // gateway) serves no metrics at all.
 const MetricsAddrEnv = "BNBLOC_METRICS_ADDR"
+
+// ProfilerEnv, set to 1, serves Go's profiler (/debug/pprof/) where /metrics
+// is served (the internal listener, or an internal main listener), never on a
+// public one: CPU, heap, goroutine and mutex profiles of a running service
+// (docs/monitoring.md).
+const ProfilerEnv = "BNBLOC_PPROF"
 
 // ServeOption adjusts how a service's listeners are built.
 type ServeOption func(*listenerPlan)
@@ -64,9 +71,29 @@ func withoutMetrics(h http.Handler) http.Handler {
 	return mux
 }
 
-// metricsMux is the internal metrics listener's handler: /metrics only.
-func metricsMux(m *Metrics) http.Handler {
+// metricsMux is the internal metrics listener's handler: /metrics, and the
+// profiler when it is on.
+func metricsMux(m *Metrics, profiler bool) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", m.Handler())
+	if profiler {
+		mountProfiler(mux)
+	}
 	return mux
+}
+
+// withProfiler serves the profiler in front of h (an internal main listener).
+func withProfiler(h http.Handler) http.Handler {
+	mux := http.NewServeMux()
+	mountProfiler(mux)
+	mux.Handle("/", h)
+	return mux
+}
+
+func mountProfiler(mux *http.ServeMux) {
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 }

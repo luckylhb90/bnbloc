@@ -131,13 +131,13 @@ func TestPreviewEventKinds(t *testing.T) {
 		// A thread's root line in a channel a preview reads (§2.2).
 		EventThreadUpdated: true,
 		// A lanes stream's own: a preview's rail moves too (§2.4).
-		EventChannelActivity: true, EventStreamOpened: true,
+		EventChannelActivity: true, EventStreamOpened: true, EventStreamGap: true,
 	}
 	members := map[string]bool{
 		EventAgentJobCreated: true, EventAgentJobUpdated: true, EventAgentJobProgress: true, EventJobLiveFrame: true,
-		EventAgentSessionState: true, EventAgentRoster: true, EventPresenceJoin: true, EventPresenceLeave: true,
+		EventAgentSessionState: true, EventAgentRoster: true, EventPresenceDelta: true,
 		EventPresenceSnapshot: true, EventPresenceTyping: true, EventTaskUpdated: true, EventContentSaved: true,
-		EventContentUsesChanged: true, EventAppChanged: true, EventSectionMembership: true,
+		EventContentUsesChanged: true, EventAppChanged: true, EventSectionMembership: true, EventRoomUpdated: true, EventChannelFollow: true,
 	}
 	for _, k := range RoomEventKinds {
 		switch {
@@ -163,7 +163,7 @@ func TestPreviewEventKinds(t *testing.T) {
 func TestStreamLane(t *testing.T) {
 	open := func(c string) bool { return c == "ch_open" }
 	for _, c := range []struct{ kind, channel, want string }{
-		{EventPresenceJoin, "", LaneFull},
+		{EventPresenceDelta, "", LaneFull},
 		{KindChatMessage, "ch_open", LaneFull},
 		{KindChatMessage, "ch_other", LaneActivity},
 		{KindAgentMessages, "ch_other", LaneActivity},

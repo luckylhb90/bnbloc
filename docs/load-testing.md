@@ -425,3 +425,38 @@ bnbloc-loadtest --gateway http://localhost:17090 --forwarded-for \
 - **The p99 is the commit, not the fan-out.** Delivery p99 (266 ms)
   follows the POST p99 (253 ms), as in the baseline above: the target of
   100 ms is not met on this disk; the fan-out adds about nothing.
+
+## What a message costs the database (2026-10-30)
+
+Latency on a laptop moves with whatever else the host runs; the number of
+statements a message costs does not. It is the regression check of
+`docs/prd/2026-10-30-message-path-performance.md`: read MySQL's counters
+before and after two runs that differ only in length, and divide the
+difference by the difference in messages.
+
+```sh
+# the compose stack's MySQL counters
+stat() { docker exec bnbloc-loadtest-mysql-1 sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -N -e "SHOW GLOBAL STATUS WHERE Variable_name IN (\"Com_select\",\"Com_insert\",\"Innodb_os_log_fsyncs\")"'; }
+run() { stat > before; bnbloc-loadtest --gateway http://localhost:17090 --forwarded-for \
+  --members 40 --rooms 1 --channels 4 --rate 10 --duration "$1" --ramp-up 3s --json > "run-$1.json"; stat > after; }
+run 15s; run 75s   # (75 s minus 15 s) / 600 messages
+```
+
+`performance_schema.events_statements_summary_by_digest` (truncate it, run,
+order by `COUNT_STAR`) says which statement a count comes from.
+
+| Per message (40 members, 4 channels) | Before | After |
+| --- | --- | --- |
+| `SELECT` | 28.7 | 1.0 |
+| `INSERT` | 2.0 | 1.0 |
+| InnoDB log fsyncs | 4.5 | 3.2 |
+
+Before, the selects were the room's sections (an access check per post and
+per notification listener), notification preferences (one per listener per
+message), the channel, the room, the follow list, a client-id lookup and the
+channel's admission; the second insert was the poster's `channel_follows`
+upsert, which cost more database time than the message. After, the room's
+state is read from the owner's memory, preferences once per member per 30 s,
+the client id from the hub, and the follow mark is written behind, only when
+it changes something. The one select left is the room service's membership
+check.

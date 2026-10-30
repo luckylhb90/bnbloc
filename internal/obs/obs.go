@@ -171,13 +171,20 @@ func serve(service, addr string, handler http.Handler, metrics *Metrics, check f
 	if !plan.metricsOnMain {
 		main = withoutMetrics(main)
 	}
+	profiler := os.Getenv(ProfilerEnv) == "1"
+	if profiler && plan.metricsOnMain {
+		main = withProfiler(main)
+	}
+	if profiler && plan.public && plan.metricsAddr == "" {
+		logger.Warn("profiler off: the public listener never serves it; set " + MetricsAddrEnv + " to an internal address")
+	}
 	if !plan.public {
 		main = withVersion(service, main)
 	}
 	errc := make(chan error, 2)
 	if plan.metricsAddr != "" {
 		go func() {
-			err := newServer(plan.metricsAddr, metricsMux(metrics)).ListenAndServe()
+			err := newServer(plan.metricsAddr, metricsMux(metrics, profiler)).ListenAndServe()
 			errc <- fmt.Errorf("metrics listener %s: %w", plan.metricsAddr, err)
 		}()
 	}

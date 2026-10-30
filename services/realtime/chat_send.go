@@ -141,6 +141,7 @@ type ChatPosted struct {
 // (admitPost): both checked here, once, so no caller (a typed message, a
 // scheduled or dispatched post) can skip them.
 func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) {
+	step := s.chatSteps()
 	author, err := membership.RoomScope(ctx, s.Membership, p.RoomID, p.Author, membership.Chat)
 	if err != nil {
 		return ChatPosted{}, err
@@ -164,14 +165,12 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) 
 	if err != nil {
 		return ChatPosted{}, err
 	}
-	// Idempotency: a retry carrying a client id we already stored returns the
-	// original sequence without re-publishing (no duplicate message).
-	if p.ClientMsgID != "" && s.Chat != nil {
-		seq, found, err := s.Chat.LookupClientMsg(ctx, p.RoomID, p.ClientMsgID)
-		if err != nil {
-			return ChatPosted{}, err
-		}
-		if found {
+	// Idempotency: a retry carrying a client id this owner committed lately
+	// returns the original sequence without re-publishing, from memory; an
+	// older one is answered by the commit itself (store.ClientMsgConflict,
+	// ErrDuplicateClientMsg below), so a send costs no history read.
+	if p.ClientMsgID != "" && s.Hub != nil {
+		if seq, found := s.Hub.RecentClientMsg(p.RoomID, p.ClientMsgID); found {
 			return ChatPosted{Sequence: seq}, nil
 		}
 	}
@@ -217,11 +216,13 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) 
 	if err != nil {
 		return ChatPosted{}, err
 	}
+	step(realtime.ChatStepAccess)
 	// The channel's setup decides last, right before the post is stored: its
 	// slow-mode claim records the post.
 	if err := s.admitPost(ctx, p.RoomID, p.Author, author, channel); err != nil {
 		return ChatPosted{}, err
 	}
+	step(realtime.ChatStepAdmit)
 	payload := map[string]any{"userId": p.Author, "text": text}
 	if p.ClientMsgID != "" {
 		// Echo the sender's idempotency id so a client whose send response was
@@ -306,6 +307,8 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) 
 		log.Printf("realtime: persist room=%s kind=%s: %v", p.RoomID, ev.Kind, err)
 		return ChatPosted{}, fmt.Errorf("message persistence failed: %w", err)
 	}
+	step(realtime.ChatStepCommit)
+	defer step(realtime.ChatStepAfter)
 	posted := ChatPosted{Sequence: ev.Sequence}
 	s.pulseMessageSent(ctx, p.RoomID, ev.Sequence, agent, p.Author)
 	// decision: channels PRD C18 (being mentioned joins the channel).
@@ -375,6 +378,19 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) 
 		}
 	}
 	return posted, nil
+}
+
+// chatSteps times a chat post's steps (realtime.ObserveChatStep): each call
+// records the time since the previous one under its step.
+func (s *Service) chatSteps() func(step string) {
+	last := time.Now()
+	return func(step string) {
+		now := time.Now()
+		if s.Hub != nil {
+			realtime.ObserveChatStep(s.Hub.Metrics, step, now.Sub(last))
+		}
+		last = now
+	}
 }
 
 // agentTargetID is a job's target before the bridge resolves the core-local

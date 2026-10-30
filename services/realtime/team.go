@@ -231,7 +231,7 @@ func (s *Service) searchChannelKind(ctx context.Context, memo map[string]string,
 	if k, ok := memo[key]; ok {
 		return k
 	}
-	a, _, err := s.Channels.ChannelAdmission(ctx, roomID, channelID)
+	a, _, err := s.channelStore().ChannelAdmission(ctx, roomID, channelID)
 	if err != nil {
 		log.Printf("realtime: search: channel kind room=%s channel=%s: %v", roomID, channelID, err)
 	}

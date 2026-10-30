@@ -8,6 +8,8 @@ import { useScopedState } from "@/lib/useScopedState";
 import { maxSequence } from "@/views/room/feedModel";
 import { unreadBaseline } from "@/lib/unreadBaseline";
 import { roomAccessEnded, type RoomAccessEnd } from "@/lib/roomGone";
+import { applyChannelActivity } from "@/lib/channelActivity";
+import type { ChannelActivityPayload, PresenceDeltaPayload } from "@/lib/wire.gen";
 
 // Self match, mirrored from the feed's own isSelf: the agent (author "agent")
 // never equals the subject; user ids compare exactly (sameUser).
@@ -42,9 +44,10 @@ interface UseRoomStreamParams {
   // Access to the room ended (it was deleted, or this member was removed).
   // The stream is already stopped — it must not reconnect into a 403 loop.
   readonly onRevoked: (reason: RoomAccessEnd) => void;
-  // A lanes stream saw activity in the open channel itself (a message that
-  // landed while the stream was being re-scoped to it): the feed catches up.
-  readonly onOpenActivity?: () => void;
+  // The open channel may lack events: a lanes stream saw activity in it (a
+  // message that landed while the stream was re-scoped to it), or the
+  // stream said it has a gap (stream_gap). The feed catches up.
+  readonly onCatchUp?: () => void;
   // Which events the subscription receives (sse.RoomStreamScope): the room
   // view takes every channel including the people chat (its badge), the
   // people-chat panel only its own channel.
@@ -129,13 +132,15 @@ export function useRoomStream(params: UseRoomStreamParams): UseRoomStream {
   onReconnectRef.current = params.onReconnect;
   const onRevokedRef = useRef(params.onRevoked);
   onRevokedRef.current = params.onRevoked;
-  const onOpenActivityRef = useRef(params.onOpenActivity);
-  onOpenActivityRef.current = params.onOpenActivity;
+  const onCatchUpRef = useRef(params.onCatchUp);
+  onCatchUpRef.current = params.onCatchUp;
   // The active channel as the stream's handler reads it: a lanes stream is
   // not reopened when it changes.
   const channelRef = useRef(channelId);
   channelRef.current = channelId;
   const subRef = useRef<RoomSubscription | null>(null);
+  // The last activity sequence counted per channel (lib/channelActivity).
+  const activitySeen = useRef<Record<string, number>>({});
 
   const wasConnected = useRef(false);
   useEffect(() => {
@@ -245,13 +250,12 @@ export function useRoomStream(params: UseRoomStreamParams): UseRoomStream {
           setOnline(dedupeMembers(e.presenceMembers));
           return;
         }
-        if (e.kind === "presence_join" && e.presenceUser) {
-          const user = e.presenceUser;
-          setOnline((o) => dedupeMembers([...o, user]));
-          return;
-        }
-        if (e.kind === "presence_leave" && e.presenceUser) {
-          setOnline((o) => o.filter((u) => !sameUser(u, e.presenceUser)));
+        // Who came and who went since the room's last delta (one a second).
+        if (e.kind === "presence_delta") {
+          const d = e.payload as Partial<PresenceDeltaPayload> | undefined;
+          const joined = d?.joined ?? [];
+          const left = d?.left ?? [];
+          setOnline((o) => dedupeMembers([...o.filter((u) => !left.some((l) => sameUser(u, l))), ...joined]));
           return;
         }
         // The subscription is room-wide so cross-channel job/artifact events
@@ -260,13 +264,20 @@ export function useRoomStream(params: UseRoomStreamParams): UseRoomStream {
         // local increment: reconnect replays would double-count locally). A
         // lanes stream sends another channel's messages as its activity.
         const active = channelRef.current;
+        // The stream lacks events (it reopened past its room's buffer, or
+        // fell behind): fetch the difference as after a reconnect, without
+        // reopening (Telegram's updatesTooLong).
+        if (e.kind === "stream_gap") {
+          onCatchUpRef.current?.();
+          setLiveReload((n) => n + 1);
+          onReconnectRef.current();
+          return;
+        }
         if (e.kind === "channel_activity") {
-          if (e.channelId && e.channelId === active) onOpenActivityRef.current?.();
-          else if (unreadDirtyTimer.current === null) {
-            unreadDirtyTimer.current = window.setTimeout(() => {
-              unreadDirtyTimer.current = null;
-              setUnreadDirty((n) => n + 1);
-            }, 300);
+          if (e.channelId && e.channelId === active) onCatchUpRef.current?.();
+          else {
+            const a = e.payload as Partial<ChannelActivityPayload> | undefined;
+            setUnreadByChannel((cur) => applyChannelActivity(cur, activitySeen.current, a));
           }
           return;
         }

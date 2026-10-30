@@ -77,6 +77,14 @@ type Service struct {
 	// unreadSummaries holds each member's latest GET /v1/my/unread answer for
 	// a few seconds (unread_summary.go).
 	unreadSummaries unreadSummaryCache
+	// roomState is the rooms' state as realtime decides with it
+	// (room_state.go): every read of Channels and RoomRoles goes through it
+	// (channelStore, roleStore).
+	roomState     *roomStateCache
+	roomStateOnce sync.Once
+	// postMarks are the members' last posts (slow mode) and their follow
+	// marks written behind (post_marks.go).
+	postMarks postMarks
 	// lanes are the lanes streams this replica serves (lanes.go).
 	lanes      laneStreams
 	Hub        *realtime.Hub
@@ -202,7 +210,6 @@ type ChatStore interface {
 	UnreadCount(ctx context.Context, roomID, channelID, userID string) (int, error)
 	UnreadRooms(ctx context.Context, userID string, roomIDs []string, max int) (int, error)
 	MaxRoomSeq(ctx context.Context, roomID string) (int64, error)
-	LookupClientMsg(ctx context.Context, roomID, clientMsgID string) (int64, bool, error)
 	DeleteRoomMessage(ctx context.Context, roomID string, seq int64, requester string, atMs int64) (bool, error)
 	EditRoomMessage(ctx context.Context, roomID string, seq int64, requester, text string, atMs int64) (edited bool, err error)
 	RoomRevisions(ctx context.Context, roomID string, afterMs int64, limit int) ([]store.MessageRevision, int64, error)
@@ -270,6 +277,9 @@ func (s *Service) Handler() http.Handler {
 	if s.PluginHooks == nil {
 		s.PluginHooks = NewPluginHookDispatcher(nil, nil, nil)
 	}
+	// The room state at the owner (room_state.go): channels, sections and
+	// the room's members read from memory, kept by the room's events.
+	s.roomStateOnce.Do(s.initRoomState)
 	if s.PluginHooks.mayRead == nil {
 		s.PluginHooks.mayRead = s.memberMayReadChannel
 	}
@@ -386,7 +396,7 @@ func (s *Service) channelOf(ctx context.Context, roomID, channelID string) (stor
 		if s.Channels == nil {
 			return store.RoomChannel{ChannelID: channelID, RoomID: roomID}, nil
 		}
-		ch, ok, err := s.Channels.GetChannel(ctx, roomID, channelID)
+		ch, ok, err := s.channelStore().GetChannel(ctx, roomID, channelID)
 		if err != nil {
 			return store.RoomChannel{}, fmt.Errorf("%w: %w", errChannelLookup, err)
 		}
@@ -398,7 +408,7 @@ func (s *Service) channelOf(ctx context.Context, roomID, channelID string) (stor
 	if s.Channels == nil {
 		return store.RoomChannel{RoomID: roomID}, nil
 	}
-	def, ok, err := s.Channels.DefaultChannel(ctx, roomID)
+	def, ok, err := s.channelStore().DefaultChannel(ctx, roomID)
 	if err != nil {
 		return store.RoomChannel{}, fmt.Errorf("%w: %w", errChannelLookup, err)
 	}
@@ -416,7 +426,7 @@ func (s *Service) channelOf(ctx context.Context, roomID, channelID string) (stor
 func (s *Service) agentsBarred(ctx context.Context, roomID, channelID string) (bool, error) {
 	var r store.ChannelAdmissionReader
 	if s.Channels != nil {
-		r = s.Channels
+		r = s.channelStore()
 	}
 	admits, err := store.ChannelAdmitsAgents(ctx, r, roomID, channelID)
 	return !admits, err
@@ -577,10 +587,18 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 	// stream must reach the client as it is written.
 	w.Header().Set("X-Accel-Buffering", "no")
 
+	// since: the last sequence the client holds; the replay sends only what
+	// is newer, or a gap when the buffer does not reach back (lanes.go's
+	// Telegram-style resume).
 	var sub *realtime.Subscriber
-	if r.URL.Query().Get("replay") == "0" {
+	resumeGap := false
+	since, _ := strconv.ParseInt(r.URL.Query().Get("since"), 10, 64)
+	switch {
+	case r.URL.Query().Get("replay") == "0":
 		sub = s.Hub.SubscribeLive(roomID)
-	} else {
+	case since > 0:
+		sub, resumeGap = s.Hub.SubscribeSince(roomID, since)
+	default:
 		sub = s.Hub.Subscribe(roomID)
 	}
 	defer s.Hub.Unsubscribe(roomID, sub)
@@ -629,9 +647,12 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 	defer heartbeat.Stop()
 	// send writes one event to the stream (not flushed).
 	send := func(ev wire.Event) {
-		data, err := json.Marshal(ev)
-		if err != nil {
-			return
+		data := ev.Encoded
+		if data == nil {
+			var err error
+			if data, err = json.Marshal(ev); err != nil {
+				return
+			}
 		}
 		// Only durable events carry a sequence (the SSE id); a transient
 		// event has none and must not reset the stream's last event id.
@@ -645,6 +666,9 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 	// the stream closes rather than running until it reconnects.
 	write := func(ev wire.Event) (revoked bool) {
 		readers.observe(ev)
+		if wire.InternalKind(ev.Kind) {
+			return false
+		}
 		if !allChannels && ev.ChannelID != "" && ev.ChannelID != channelID && !wire.CrossChannelKind(ev.Kind) {
 			return false
 		}
@@ -697,6 +721,13 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 	if !m.Preview {
 		send(s.Presence.Snapshot(roomID))
 	}
+	lastSeq := since
+	gapEvent := func() wire.Event {
+		return wire.Event{RoomID: roomID, Kind: wire.EventStreamGap, AtUnixMs: time.Now().UnixMilli(), Payload: wire.StreamGapPayload{AfterSeq: lastSeq}}
+	}
+	if resumeGap {
+		send(gapEvent())
+	}
 	flusher.Flush()
 	for {
 		select {
@@ -729,10 +760,17 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 			// busy stream fall behind (and overflow, which closes it). Only
 			// this handler receives, so the queued receives never block.
 			revoked := write(ev)
+			lastSeq = max(lastSeq, ev.Sequence)
 			for n := len(sub.Events()); n > 0 && open && !revoked; n-- {
 				if ev, open = <-sub.Events(); open {
 					revoked = write(ev)
+					lastSeq = max(lastSeq, ev.Sequence)
 				}
+			}
+			// Fell a whole buffer behind once: the client fetches the
+			// difference after what it got (realtime.Subscriber.TakeGap).
+			if open && !revoked && sub.TakeGap() {
+				send(gapEvent())
 			}
 			flusher.Flush()
 			if revoked || !open {
@@ -952,6 +990,12 @@ func (s *Service) publish(ctx context.Context, ev wire.Event, d realtime.Durable
 	published, err := s.Hub.PublishCommit(ev, d)
 	if err != nil {
 		return published, err
+	}
+	if s.roomState != nil {
+		s.roomState.observe(ctx, published)
+	}
+	if published.Kind == wire.EventChannelFollow {
+		s.postMarks.forget(ctx, published)
 	}
 	s.afterPublish(ctx, published)
 	s.onMemberJoined(ctx, published)
@@ -1370,7 +1414,7 @@ func (s *Service) handleUnread(w http.ResponseWriter, r *http.Request) {
 					total = n
 				}
 			} else {
-				channels, err := s.Channels.ListChannels(ctx, roomID)
+				channels, err := s.channelStore().ListChannels(ctx, roomID)
 				if err != nil {
 					log.Printf("realtime: unread room=%s user=%s: channels: %v", roomID, userID, err)
 					continue

@@ -95,7 +95,7 @@ func (s *Service) OpenThread(ctx context.Context, roomID, userID string, m membe
 		// No thread of a thread, and none in the people chat.
 		return store.RoomChannel{}, errBadThread
 	}
-	if existing, found, err := s.Channels.ThreadOfRoot(ctx, roomID, parent.ChannelID, body.RootSeq); err != nil {
+	if existing, found, err := s.channelStore().ThreadOfRoot(ctx, roomID, parent.ChannelID, body.RootSeq); err != nil {
 		return store.RoomChannel{}, err
 	} else if found {
 		return existing, nil
@@ -128,10 +128,10 @@ func (s *Service) createThread(ctx context.Context, userID string, m membership.
 	if known := forumTags(parent.Settings, tags); len(known) > 0 {
 		th.Thread.Tags = known
 	}
-	if err := s.Channels.PutChannel(ctx, th); err != nil {
+	if err := s.channelStore().PutChannel(ctx, th); err != nil {
 		if errors.Is(err, store.ErrThreadExists) {
 			// Opened concurrently: the one that won is the thread.
-			existing, found, gerr := s.Channels.ThreadOfRoot(ctx, roomID, parent.ChannelID, root.Seq)
+			existing, found, gerr := s.channelStore().ThreadOfRoot(ctx, roomID, parent.ChannelID, root.Seq)
 			if gerr == nil && found {
 				return existing, nil
 			}
@@ -143,7 +143,7 @@ func (s *Service) createThread(ctx context.Context, userID string, m membership.
 		if u == "" || (u != userID && !membership.HumanMember(s.Membership, roomID, u)) {
 			continue
 		}
-		if err := s.Channels.FollowChannel(ctx, roomID, th.ChannelID, u, th.CreatedAtMs, store.FollowMarks{}); err != nil {
+		if err := s.channelStore().FollowChannel(ctx, roomID, th.ChannelID, u, th.CreatedAtMs, store.FollowMarks{}); err != nil {
 			log.Printf("realtime: room=%s thread=%s: follow for %s failed: %v", roomID, th.ChannelID, u, err)
 		}
 	}
@@ -253,7 +253,7 @@ func (s *Service) followedThreads(ctx context.Context, roomID, userID string, ch
 	if !slices.ContainsFunc(channels, store.RoomChannel.IsThread) {
 		return nil
 	}
-	fs, err := s.Channels.ChannelFollows(ctx, roomID, userID)
+	fs, err := s.channelStore().ChannelFollows(ctx, roomID, userID)
 	if err != nil {
 		log.Printf("realtime: room=%s user=%s: follows: %v", roomID, userID, err)
 		return nil
@@ -305,11 +305,11 @@ func (s *Service) noteThreadPost(ctx context.Context, roomID, channelID, author 
 	if s.Channels == nil || channelID == "" {
 		return
 	}
-	ch, found, err := s.Channels.GetChannel(ctx, roomID, channelID)
+	ch, found, err := s.channelStore().GetChannel(ctx, roomID, channelID)
 	if err != nil || !found || !ch.IsThread() {
 		return
 	}
-	th, err := s.Channels.NoteThreadReply(ctx, roomID, channelID, author, atMs)
+	th, err := s.channelStore().NoteThreadReply(ctx, roomID, channelID, author, atMs)
 	if err != nil {
 		log.Printf("realtime: room=%s thread=%s: reply count failed: %v", roomID, channelID, err)
 		return

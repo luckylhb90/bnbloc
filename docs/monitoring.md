@@ -35,6 +35,13 @@ listeners from a sidecar, or run the split deployment.
 
 Every series carries `service="bnbloc-<name>"`.
 
+**Profiling.** `BNBLOC_PPROF=1` serves Go's profiler (`/debug/pprof/`)
+where `/metrics` is served: the internal metrics listener, or an internal
+service's main listener; never a public one. For a CPU profile of realtime
+under load: `curl -o cpu.pprof http://realtime:8082/debug/pprof/profile?seconds=20`,
+then `go tool pprof -top cpu.pprof`. Leave it off in production unless you
+are looking at something.
+
 ## Metrics
 
 ### HTTP (every service)
@@ -58,6 +65,10 @@ route word missing from the vocabulary only reads as `:id`.
 | `bnbloc_realtime_feed_commits_total` | counter | `result` = `ok` \| `error` | Room feed group commits: each stores a batch of one room's durable events (chat, agent replies, imports) in one multi-row insert. `error` fails every member of the batch (store outage, or the scale-out fence); clients retry idempotently. |
 | `bnbloc_realtime_sse_overflows_total` | counter | — | Room streams closed because the client fell a whole buffer (64 events) behind. The client reconnects and catches up from history, so nothing is lost, but a steady rate means streams cannot keep up (slow clients or network, or an overloaded realtime). |
 | `bnbloc_realtime_stream_lane_events_total` | counter | `lane` | Room events on people's lanes streams (channels PRD §2.4) by lane: `full` delivered, `activity` folded into a `channel_activity`, `activity_sent` the `channel_activity` events written, `none` dropped (a closed channel's typing or job progress). `activity` against `full` is what the lanes save. |
+| `bnbloc_realtime_sse_gaps_total` | counter | — | Room streams that fell a whole buffer behind once and were told to fetch the difference (`stream_gap`) instead of being closed. A rate here with few overflows is streams riding out bursts; both rising is clients that cannot keep up. |
+| `bnbloc_realtime_chat_step_seconds` | histogram | `step` | A chat post's time by step: `access` (membership, channel, read access), `admit` (rules, who posts, slow mode), `commit` (waiting for the room's batch, its commit and delivery), `after` (mentions, thread counts, the agent job). `commit` is the database; any other step above a millisecond is a regression of the room state at the owner. |
+| `bnbloc_realtime_feed_commit_seconds` | histogram | — | One room batch's database commit. |
+| `bnbloc_realtime_feed_deliver_seconds` | histogram | — | One room batch's delivery to the room's streams (the hub's lock is held that long). |
 | `bnbloc_realtime_feed_commit_events_total` | counter | — | Durable events stored by `ok` commits. Divided by `feed_commits_total{result="ok"}` it is the mean batch size: near 1 when rooms are quiet, higher when one room's messages arrive faster than a commit takes. |
 | `bnbloc_notification_deliveries_total` | counter | `outcome` = `delivered` \| `retry` \| `failed` | Notification delivery attempts by this replica's outbox worker (`failed` = given up). |
 | `bnbloc_notification_outbox_items` | gauge | `state` = `queued` \| `retrying` \| `delivered` \| `failed` | Outbox items, every tenant: pending never attempted, pending after a failed attempt, and finished items still retained (pruned after 7 days). Refreshed every 30 s. |

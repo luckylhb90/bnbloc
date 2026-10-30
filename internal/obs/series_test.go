@@ -81,3 +81,30 @@ func TestRouteLabelPlatformTokensAndAlerts(t *testing.T) {
 		}
 	}
 }
+
+// A histogram renders cumulative buckets, the sum and the count; a counter
+// update of its name is dropped.
+func TestHistogramExposition(t *testing.T) {
+	m := NewMetrics("svc")
+	m.HistogramObserve("step_seconds", 0.003, L("step", "commit"))
+	m.HistogramObserve("step_seconds", 0.2, L("step", "commit"))
+	m.HistogramObserve("step_seconds", 30, L("step", "commit"))
+	m.CounterInc("step_seconds", L("step", "commit"))
+	rec := httptest.NewRecorder()
+	m.Handler()(rec, httptest.NewRequest("GET", "/metrics", nil))
+	body := rec.Body.String()
+	for _, want := range []string{
+		"# TYPE bnbloc_step_seconds histogram\n",
+		`bnbloc_step_seconds_bucket{service="svc",step="commit",le="0.001"} 0`,
+		`bnbloc_step_seconds_bucket{service="svc",step="commit",le="0.005"} 1`,
+		`bnbloc_step_seconds_bucket{service="svc",step="commit",le="0.25"} 2`,
+		`bnbloc_step_seconds_bucket{service="svc",step="commit",le="10"} 2`,
+		`bnbloc_step_seconds_bucket{service="svc",step="commit",le="+Inf"} 3`,
+		`bnbloc_step_seconds_sum{service="svc",step="commit"} 30.203`,
+		`bnbloc_step_seconds_count{service="svc",step="commit"} 3`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("missing %q in:\n%s", want, body)
+		}
+	}
+}

@@ -136,5 +136,6 @@ func (s *Service) handleAgreeRules(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	s.publishRoomUpdated(r.Context(), roomID, who.user)
 	s.writeRulesState(w, r, roomID, who.user)
 }

@@ -94,7 +94,7 @@ func (s *Service) canModerateSchedules(ctx context.Context, roomID, userID strin
 	if s.RoomRoles == nil {
 		return false, nil
 	}
-	role, ok, err := s.RoomRoles.MemberRole(ctx, roomID, userID)
+	role, ok, err := s.roleStore().MemberRole(ctx, roomID, userID)
 	return ok && role.CanInvite(), err
 }
 
@@ -571,7 +571,7 @@ func (s *Service) runClaimedSchedule(ctx context.Context, sc wire.RoomSchedule, 
 		// or made a visitor, pauses the schedule.
 		why := "the creator may no longer post in the room"
 		if s.RoomRoles != nil {
-			if _, err := s.RoomRoles.GetRoom(tctx, sc.RoomID); err != nil {
+			if _, err := s.roleStore().GetRoom(tctx, sc.RoomID); err != nil {
 				why = "the room no longer exists"
 			}
 		}

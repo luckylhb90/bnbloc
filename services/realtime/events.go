@@ -219,7 +219,7 @@ func (s *Service) roomOwners(ctx context.Context, roomID string) []string {
 	if s.RoomRoles == nil {
 		return nil
 	}
-	members, err := s.RoomRoles.Members(ctx, roomID)
+	members, err := s.roleStore().Members(ctx, roomID)
 	if err != nil {
 		slog.Warn("bnbloc realtime: read room owners failed", "room", roomID, "error", err)
 		return nil

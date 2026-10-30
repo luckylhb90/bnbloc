@@ -30,9 +30,14 @@ func L(name, value string) Label { return Label{Name: name, Value: value} }
 type seriesType string
 
 const (
-	seriesCounter seriesType = "counter"
-	seriesGauge   seriesType = "gauge"
+	seriesCounter   seriesType = "counter"
+	seriesGauge     seriesType = "gauge"
+	seriesHistogram seriesType = "histogram"
 )
+
+// histogramBucketsSec are the cumulative upper bounds (seconds) of every
+// domain histogram: a millisecond to ten seconds.
+var histogramBucketsSec = []float64{0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10}
 
 // family is one metric name with its type, help text and samples.
 type family struct {
@@ -44,6 +49,10 @@ type family struct {
 type sample struct {
 	labels string // rendered `,k="v"...` suffix (sorted by label name)
 	value  float64
+	// A histogram's bucket counts (histogramBucketsSec) and observation
+	// count; value is its sum.
+	buckets []uint64
+	count   uint64
 }
 
 // Describe sets the HELP text of a domain series (optional; rendered once).
@@ -85,6 +94,26 @@ func (m *Metrics) GaugeAdd(name string, d float64, labels ...Label) {
 		return
 	}
 	m.update(name, seriesGauge, labels, func(s *sample) { s.value += d })
+}
+
+// HistogramObserve records one observation (seconds) in the histogram
+// name{labels}.
+func (m *Metrics) HistogramObserve(name string, seconds float64, labels ...Label) {
+	if m == nil || seconds < 0 {
+		return
+	}
+	m.update(name, seriesHistogram, labels, func(s *sample) {
+		if s.buckets == nil {
+			s.buckets = make([]uint64, len(histogramBucketsSec))
+		}
+		for i, b := range histogramBucketsSec {
+			if seconds <= b {
+				s.buckets[i]++
+			}
+		}
+		s.count++
+		s.value += seconds
+	})
 }
 
 func (m *Metrics) update(name string, typ seriesType, labels []Label, fn func(*sample)) {
@@ -169,8 +198,18 @@ func (m *Metrics) writeSeriesLocked(w io.Writer) {
 		}
 		sort.Strings(keys)
 		for _, k := range keys {
+			smp := f.samples[k]
+			if f.typ == seriesHistogram {
+				for i, b := range histogramBucketsSec {
+					fmt.Fprintf(w, "%s_bucket{service=%q%s,le=%q} %d\n", metric, m.service, k, strconv.FormatFloat(b, 'f', -1, 64), smp.buckets[i])
+				}
+				fmt.Fprintf(w, "%s_bucket{service=%q%s,le=\"+Inf\"} %d\n", metric, m.service, k, smp.count)
+				fmt.Fprintf(w, "%s_sum{service=%q%s} %s\n", metric, m.service, k, strconv.FormatFloat(smp.value, 'f', -1, 64))
+				fmt.Fprintf(w, "%s_count{service=%q%s} %d\n", metric, m.service, k, smp.count)
+				continue
+			}
 			fmt.Fprintf(w, "%s{service=%q%s} %s\n", metric, m.service, k,
-				strconv.FormatFloat(f.samples[k].value, 'f', -1, 64))
+				strconv.FormatFloat(smp.value, 'f', -1, 64))
 		}
 	}
 }

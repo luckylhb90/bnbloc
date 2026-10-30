@@ -20,10 +20,10 @@ const (
 	// EventAgentRoster carries {"agents": [...]}: the agents members'
 	// bridges advertise in the room.
 	EventAgentRoster = "agent_roster"
-	// EventPresenceJoin / EventPresenceLeave carry {"userId"}; a
-	// EventPresenceSnapshot follows each with {"members": [...]}.
-	EventPresenceJoin     = "presence_join"
-	EventPresenceLeave    = "presence_leave"
+	// EventPresenceDelta carries PresenceDeltaPayload: a room's arrivals and
+	// departures, at most one a second; EventPresenceSnapshot carries
+	// {"members": [...]}, written to a stream alone when it opens.
+	EventPresenceDelta    = "presence_delta"
 	EventPresenceSnapshot = "presence_snapshot"
 	// EventPresenceTyping carries {"userId"}, scoped to the channel typed in.
 	EventPresenceTyping = "presence_typing"
@@ -70,6 +70,9 @@ type EventKindSpec struct {
 	// channel the reader may read, LaneActivity becomes a coalesced
 	// channel_activity outside the open channels.
 	Lane string `json:"lane,omitempty"`
+	// Internal kinds tell realtime itself something (its room state) and
+	// never reach a stream.
+	Internal bool `json:"internal,omitempty"`
 	// Preview kinds reach a preview's stream (a person reading a shared room
 	// they have not joined, docs/prd/2026-10-22-shared-room-preview.md): the
 	// kinds that match what a preview may read over REST, the feed and the
@@ -92,8 +95,7 @@ var RoomEventKinds = []EventKindSpec{
 	{Name: EventJobLiveFrame, ChannelScoped: true},
 	{Name: EventAgentSessionState},
 	{Name: EventAgentRoster},
-	{Name: EventPresenceJoin},
-	{Name: EventPresenceLeave},
+	{Name: EventPresenceDelta},
 	{Name: EventPresenceSnapshot},
 	{Name: EventPresenceTyping, ChannelScoped: true},
 	{Name: EventMessageDeleted, ChannelScoped: true, Preview: true, Lane: LaneActivity},
@@ -115,6 +117,12 @@ var RoomEventKinds = []EventKindSpec{
 	// room-wide, so listings reload and realtime re-scopes the member's
 	// streams at once (C11: never shown to a preview).
 	{Name: EventSectionMembership},
+	// The room's settings or a member's agreement changed (bnbloc-room):
+	// room-wide, so realtime's room state reads the room again.
+	{Name: EventRoomUpdated},
+	// A member followed, left or re-marked a channel (bnbloc-room): realtime
+	// forgets what it kept of the channel's followers; never on a stream.
+	{Name: EventChannelFollow, ChannelScoped: true, Internal: true},
 	// A thread opened, renamed, archived or replied in (realtime and
 	// bnbloc-room): scoped to the thread's parent channel, whose stream
 	// redraws the root's summary line.
@@ -124,6 +132,7 @@ var RoomEventKinds = []EventKindSpec{
 	// that re-scoping names.
 	{Name: EventChannelActivity, ChannelScoped: true, Preview: true},
 	{Name: EventStreamOpened, Preview: true},
+	{Name: EventStreamGap, Preview: true},
 }
 
 // The lanes of a lanes stream (EventKindSpec.Lane, StreamLane).
@@ -170,6 +179,9 @@ func PersistedFeedKind(kind string) bool { return eventKinds[kind].Durable }
 // CrossChannelKind reports whether kind reaches a one-channel stream of
 // another channel (EventKindSpec.CrossChannel).
 func CrossChannelKind(kind string) bool { return eventKinds[kind].CrossChannel }
+
+// InternalKind reports whether kind is realtime's own, never streamed.
+func InternalKind(kind string) bool { return eventKinds[kind].Internal }
 
 // PreviewedKind reports whether a preview's stream carries kind.
 func PreviewedKind(kind string) bool { return eventKinds[kind].Preview }

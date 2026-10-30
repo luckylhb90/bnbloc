@@ -46,7 +46,7 @@ type channelAccess struct {
 func (a *channelAccess) load() error {
 	var r store.ChannelAccessReader
 	if a.svc.Channels != nil {
-		r = a.svc.Channels
+		r = a.svc.channelStore()
 	}
 	acc, err := store.LoadChannelAccess(a.ctx, r, a.roomID, a.reader)
 	if err != nil {
@@ -78,7 +78,7 @@ func (a *channelAccess) mayRead(channelID string) bool {
 	if a.svc.Channels == nil {
 		return true
 	}
-	c, found, err := a.svc.Channels.GetChannel(a.ctx, a.roomID, channelID)
+	c, found, err := a.svc.channelStore().GetChannel(a.ctx, a.roomID, channelID)
 	if err != nil {
 		log.Printf("realtime: room=%s channel=%s lookup failed; withholding: %v", a.roomID, channelID, err)
 		return false

@@ -68,6 +68,10 @@ type Options struct {
 // mention candidates (a mention only counts for a room member).
 func NewService(st Stores, members membership.Reader, opts Options) *Service {
 	emitter := NewEmitter(st, opts.PublicURL)
+	// The room producer notifies on every message: it reads a member's
+	// preferences once per prefsTTL (prefs_cache.go). Other producers
+	// (alerts, reports, borrow requests) are rare and read them each time.
+	emitter.Prefs = newPrefsCache(st.Prefs, nil)
 	secrets := &componentcred.Store{Settings: st.Settings, Box: st.Box}
 	worker := &Worker{Outbox: st.Outbox, Notifiers: emitter.Notifiers, Secrets: secrets, Audit: st.Audit}
 	if st.Replies != nil {
@@ -90,6 +94,7 @@ func NewService(st Stores, members membership.Reader, opts Options) *Service {
 		Handlers: &Handlers{
 			Prefs: st.Prefs, Notifiers: emitter.Notifiers, Installs: st.Installs,
 			Secrets: secrets, PublicURL: emitter.PublicURL, Audit: st.Audit,
+			PrefsChanged: emitter.forgetPrefs,
 		},
 	}
 }

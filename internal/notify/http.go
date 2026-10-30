@@ -1,6 +1,7 @@
 package notify
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -45,6 +46,9 @@ type Handlers struct {
 	PublicURL string
 	Audit     store.ExtensionAuditStore
 	Now       func() time.Time
+	// PrefsChanged tells the producer a member saved their preferences
+	// (its cache forgets them; nil: nothing to tell).
+	PrefsChanged func(ctx context.Context, userID string)
 }
 
 // Register mounts the routes on mux.
@@ -118,6 +122,9 @@ func (h *Handlers) handlePutPrefs(w http.ResponseWriter, r *http.Request) {
 		obs.ServerError(w, "save notification prefs failed", err)
 		httpx.Error(w, "save notification prefs failed", http.StatusInternalServerError)
 		return
+	}
+	if h.PrefsChanged != nil {
+		h.PrefsChanged(r.Context(), user)
 	}
 	httpx.WriteJSON(w, http.StatusOK, prefsDTO(p))
 }

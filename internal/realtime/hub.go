@@ -8,10 +8,12 @@ package realtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/obs"
@@ -23,10 +25,19 @@ import (
 type Subscriber struct {
 	ch  chan wire.Event
 	seq int64
+	// gapped: the subscriber fell a whole buffer behind once and missed
+	// events (TakeGap); a second overflow before the stream took it closes
+	// the subscription.
+	gapped atomic.Bool
 }
 
 // Events exposes the receive channel for a subscriber.
 func (s *Subscriber) Events() <-chan wire.Event { return s.ch }
+
+// TakeGap reports, once, that the subscriber missed events because it fell
+// a whole buffer behind: its stream tells the client to fetch the
+// difference (wire.EventStreamGap) instead of being closed.
+func (s *Subscriber) TakeGap() bool { return s.gapped.Swap(false) }
 
 // Hub fans out events to per-room subscribers and retains a bounded replay
 // buffer so a late subscriber reconciles recent room state on subscribe.
@@ -53,7 +64,10 @@ type Hub struct {
 	// stopped and re-issues no number any client has seen.
 	seq map[string]int64
 	// queues holds each room's group commit queue (see the Hub doc).
-	queues      map[string]*roomQueue
+	queues map[string]*roomQueue
+	// recent holds each room's recently committed client message ids and
+	// their sequences (RecentClientMsg), under mu.
+	recent      map[string]*recentIDs
 	replayLimit int
 	buffer      int
 	// now is the replay clock (time.Now; tests move it).
@@ -91,6 +105,7 @@ func NewHub(replayLimit, buffer int) *Hub {
 		replay:      map[string][]replayEntry{},
 		seq:         map[string]int64{},
 		queues:      map[string]*roomQueue{},
+		recent:      map[string]*recentIDs{},
 		replayLimit: replayLimit,
 		buffer:      buffer,
 		now:         time.Now,
@@ -139,7 +154,34 @@ func (h *Hub) pruneReplayLocked(roomID string, now time.Time) []replayEntry {
 // Subscribe registers a subscriber for a room and returns it with the current
 // replay snapshot delivered first.
 func (h *Hub) Subscribe(roomID string) *Subscriber {
-	return h.subscribe(roomID, true)
+	sub, _ := h.SubscribeSince(roomID, 0)
+	return sub
+}
+
+// SubscribeSince is Subscribe for a client that holds the room's events up
+// to sequence since: the replay snapshot sends only later events (Telegram's
+// difference from the client's pts). gap reports that the buffer does not
+// reach back to since (the client fetches what lies between from history).
+// since 0 replays the whole snapshot.
+func (h *Hub) SubscribeSince(roomID string, since int64) (sub *Subscriber, gap bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	snapshot := h.pruneReplayLocked(roomID, h.now())
+	if since > 0 {
+		kept := snapshot[:0:0]
+		for _, e := range snapshot {
+			if e.ev.Sequence > since {
+				kept = append(kept, e)
+			}
+		}
+		// Unless the buffer reaches back to since, the client may lack
+		// events in between (the buffer was freed, evicted, or belongs to
+		// a new owner): it fetches the difference. A gap that holds
+		// nothing costs one history read.
+		gap = len(snapshot) == 0 || snapshot[0].ev.Sequence > since+1
+		snapshot = kept
+	}
+	return h.subscribeLocked(roomID, snapshot), gap
 }
 
 // SubscribeLive registers a subscriber for live events only. Bridge consumers
@@ -149,14 +191,18 @@ func (h *Hub) SubscribeLive(roomID string) *Subscriber {
 }
 
 func (h *Hub) subscribe(roomID string, replay bool) *Subscriber {
+	if replay {
+		return h.Subscribe(roomID)
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	buffer := h.buffer
-	var snapshot []replayEntry
-	if replay {
-		snapshot = h.pruneReplayLocked(roomID, h.now())
-		buffer += len(snapshot)
-	}
+	return h.subscribeLocked(roomID, nil)
+}
+
+// subscribeLocked registers a subscriber with snapshot queued first (h.mu
+// held).
+func (h *Hub) subscribeLocked(roomID string, snapshot []replayEntry) *Subscriber {
+	buffer := h.buffer + len(snapshot)
 	sub := &Subscriber{ch: make(chan wire.Event, buffer)}
 	if h.subs[roomID] == nil {
 		h.subs[roomID] = map[*Subscriber]struct{}{}
@@ -370,8 +416,12 @@ func (h *Hub) lead(q *roomQueue, first *pending) {
 	q.queue = append(q.queue[:0:0], q.queue[n:]...)
 	q.mu.Unlock()
 
+	t0 := time.Now()
 	h.commit(batch)
+	t1 := time.Now()
 	h.deliver(batch)
+	h.Metrics.HistogramObserve(metricFeedCommitTime, t1.Sub(t0).Seconds())
+	h.Metrics.HistogramObserve(metricFeedDeliverTime, time.Since(t1).Seconds())
 
 	q.mu.Lock()
 	var next *pending
@@ -507,7 +557,57 @@ func (h *Hub) commit(batch []*pending) {
 	}
 	h.mu.Lock()
 	h.seq[roomID] = last
+	for _, r := range rows {
+		if r.ClientMsgID != "" && last >= r.Seq {
+			h.recentLocked(roomID).add(r.ClientMsgID, r.Seq)
+		}
+	}
 	h.mu.Unlock()
+}
+
+// recentClientIDs bounds the client ids a room remembers: a retry comes
+// within seconds of its send, far fewer than this many messages later.
+const recentClientIDs = 2048
+
+// recentIDs is a room's ring of recently committed client ids.
+type recentIDs struct {
+	seq  map[string]int64
+	ring []string
+	next int
+}
+
+func (h *Hub) recentLocked(roomID string) *recentIDs {
+	r := h.recent[roomID]
+	if r == nil {
+		r = &recentIDs{seq: map[string]int64{}, ring: make([]string, recentClientIDs)}
+		h.recent[roomID] = r
+	}
+	return r
+}
+
+func (r *recentIDs) add(id string, seq int64) {
+	if old := r.ring[r.next]; old != "" {
+		delete(r.seq, old)
+	}
+	r.ring[r.next] = id
+	r.seq[id] = seq
+	r.next = (r.next + 1) % len(r.ring)
+}
+
+// RecentClientMsg answers a client message id this replica committed for the
+// room lately with its sequence: a send's retry is answered from memory,
+// without reading history. A miss is not proof the id is new (a restart, an
+// ownership move, an old send): the batch insert still answers a stored id
+// with its stored sequence (store.ClientMsgConflict).
+func (h *Hub) RecentClientMsg(roomID, clientMsgID string) (int64, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	r := h.recent[roomID]
+	if r == nil {
+		return 0, false
+	}
+	seq, ok := r.seq[clientMsgID]
+	return seq, ok
 }
 
 // store runs one batch insert through the journal (nil = in-memory mode,
@@ -539,11 +639,18 @@ func (h *Hub) deliver(batch []*pending) {
 			continue
 		}
 		ev := p.out
+		// One encoding for every stream of the room (and the replay buffer).
+		if len(h.subs[ev.RoomID]) > 0 || wire.ReplayedKind(ev.Kind) {
+			if b, err := json.Marshal(ev); err == nil {
+				ev.Encoded = b
+			}
+		}
 		switch {
 		case ev.Kind == wire.EventRoomDeleted:
 			// Nothing of a deleted room may replay into a later room that
 			// reuses its id, and the revocation itself must not either.
 			delete(h.replay, ev.RoomID)
+			delete(h.recent, ev.RoomID)
 		case wire.ReplayedKind(ev.Kind):
 			// Only replay kinds (wire.RoomEventKinds) are retained: a
 			// transient event (a typing hint, a toast, a badge, a stale
@@ -560,13 +667,17 @@ func (h *Hub) deliver(batch []*pending) {
 			select {
 			case sub.ch <- ev:
 			default:
-				// The stream fell a whole buffer behind. Skipping the event
-				// would leave the client silently without it: nothing on the
-				// stream reveals a gap, and a client pages history only when
-				// its stream ends. Ending the stream sends it down that path
-				// (reconnect, catch up from history) instead. A group commit
-				// delivers a batch as one burst, so this must never be a
-				// silent drop.
+				// The stream fell a whole buffer behind. Never a silent drop:
+				// the first time, the subscriber is marked gapped and its
+				// stream tells the client to fetch the difference from its
+				// last sequence (Telegram's updatesTooLong), keeping the
+				// connection; a second overflow before the stream took the
+				// first ends the stream (the client reconnects and catches up
+				// from history).
+				if sub.gapped.CompareAndSwap(false, true) {
+					h.Metrics.CounterInc(metricSSEGaps)
+					continue
+				}
 				h.dropLocked(ev.RoomID, sub)
 				h.Metrics.CounterInc(metricSSEOverflows)
 			}
@@ -622,6 +733,11 @@ func (h *Hub) ReleaseRooms(owned func(roomID string) bool) int {
 	for roomID := range h.seq {
 		if !owned(roomID) {
 			delete(h.seq, roomID)
+		}
+	}
+	for roomID := range h.recent {
+		if !owned(roomID) {
+			delete(h.recent, roomID)
 		}
 	}
 	return closed

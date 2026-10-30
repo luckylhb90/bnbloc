@@ -1,6 +1,7 @@
 // Delivery lanes (docs/prd/2026-10-28-channels-and-threads.md §2.4) in a
 // real browser: the room view opens one lanes stream with the open channel;
-// another channel's activity moves its badge while the first is open;
+// another channel's activity moves its badge while the first is open, from
+// the activity alone (no unread re-read);
 // opening another channel re-scopes the stream (POST .../events/scope) and
 // a reconnect opens with the channel now open. The gateway is mocked in the
 // browser. Run it like channels.mjs (README); CHROME names a local Chrome.
@@ -36,8 +37,10 @@ const streamServer = createServer((req, res) => {
   res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" });
   res.write(sse("stream_opened", { payload: { streamId: `st_${n}`, open: (u.searchParams.get("open") || "").split(",") } }));
   if (n === 1) {
-    s.designUnread = 3;
-    setTimeout(() => res.write(sse("channel_activity", { channelId: "ch_design", payload: { channelId: "ch_design", lastSeq: 9, events: 3, mention: true } })), 500);
+    // The badge moves from the activity itself, before any unread read
+    // could tell (the read would say 3 from now on, as the server would).
+    setTimeout(() => (s.designUnread = 3) && s.readsAtActivity === undefined && (s.readsAtActivity = s.unreadReads ?? 0), 500);
+    setTimeout(() => res.write(sse("channel_activity", { channelId: "ch_design", payload: { channelId: "ch_design", lastSeq: 9, events: 3, messages: 3, mention: true } })), 500);
     setTimeout(() => res.end(), 2000);
   }
 });
@@ -58,6 +61,7 @@ await ctx.route("**/v1/**", async (route) => {
     s.scopes.push(JSON.parse(req.postData() || "{}"));
     return route.fulfill({ status: 204 });
   }
+  if (p === "/v1/rooms-unread") s.unreadReads = (s.unreadReads ?? 0) + 1;
   if (p === "/v1/rooms-unread") return json({ unread: { r1: s.designUnread }, channels: { r1: [{ channelId: "ch_design", count: s.designUnread }] } });
   if (p === "/v1/rooms/r1/history") return json({ messages: [] });
   if (p === "/v1/rooms/r1/members") return json({ members: [{ userId: "maya", role: "owner" }, { userId: "jack", role: "member" }] });
@@ -87,7 +91,7 @@ try {
   // The activity moves #design's badge while #general stays open.
   const badge = page.locator("button", { hasText: "design" }).getByText("3");
   await badge.waitFor({ timeout: 8000 });
-  ok(true, "another channel's activity moves its badge while one is open");
+  ok((s.unreadReads ?? 0) === s.readsAtActivity, `another channel's activity moves its badge while one is open, without re-reading unread (${s.unreadReads} reads, ${s.readsAtActivity} before the activity)`);
   await page.screenshot({ path: `${shots}/lanes-badge.png` });
   // The stream reconnected (the server ended it); opening #design re-scopes it.
   await page.waitForTimeout(3500);

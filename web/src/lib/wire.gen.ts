@@ -2628,12 +2628,16 @@ export const AgentsNotAdmitted = "agents_not_admitted";
 export const EventChannelActivity = "channel_activity";
 
 // ChannelActivityPayload is a channel's activity since the stream's last one
-// for it: its last sequence, how many events it stands for, and whether one of
-// them mentions the subscriber (by id, @channel or @here).
+// for it: its last sequence, how many events and new messages it stands for,
+// and whether one of them mentions the subscriber (by id, @channel or @here).
 export interface ChannelActivityPayload {
   channelId: string;
   lastSeq: number;
   events: number;
+  // Messages counts the new messages (durable events) among them: what a
+  // client adds to the channel's unread badge (once per LastSeq) instead
+  // of reading every unread count again.
+  messages: number;
   mention?: boolean;
 }
 
@@ -2657,6 +2661,31 @@ export const MaxStreamOpen = 4;
 export interface StreamScopeRequest {
   streamId: string;
   open: string[];
+}
+
+// EventChannelFollow (ChannelFollowPayload) is published by bnbloc-room when
+// a member follows, leaves or changes their marks of a channel; realtime's
+// room state forgets what it kept of the channel's followers (internal: no
+// stream carries it).
+export const EventChannelFollow = "channel_follow";
+
+// ChannelFollowPayload names the member and the channel.
+export interface ChannelFollowPayload {
+  channelId: string;
+  userId: string;
+}
+
+// EventStreamGap (StreamGapPayload) tells a stream's client it lacks events:
+// it reopened after events its room's buffer no longer holds, or it fell a
+// whole buffer behind. The client fetches the difference (history after its
+// last sequence, unread counts) without reopening (Telegram's
+// updatesTooLong; docs/prd/2026-10-30-message-path-performance.md §4.4).
+export const EventStreamGap = "stream_gap";
+
+// StreamGapPayload is the last sequence the stream wrote before the gap (0:
+// the client's own, from its since).
+export interface StreamGapPayload {
+  afterSeq: number;
 }
 
 // ---- wire/client_config.go ----
@@ -4163,10 +4192,10 @@ export const EventAgentSessionState = "agent_session_state";
 // EventAgentRoster carries {"agents": [...]}: the agents members'
 // bridges advertise in the room.
 export const EventAgentRoster = "agent_roster";
-// EventPresenceJoin / EventPresenceLeave carry {"userId"}; a
-// EventPresenceSnapshot follows each with {"members": [...]}.
-export const EventPresenceJoin = "presence_join";
-export const EventPresenceLeave = "presence_leave";
+// EventPresenceDelta carries PresenceDeltaPayload: a room's arrivals and
+// departures, at most one a second; EventPresenceSnapshot carries
+// {"members": [...]}, written to a stream alone when it opens.
+export const EventPresenceDelta = "presence_delta";
 export const EventPresenceSnapshot = "presence_snapshot";
 // EventPresenceTyping carries {"userId"}, scoped to the channel typed in.
 export const EventPresenceTyping = "presence_typing";
@@ -4212,6 +4241,9 @@ export interface EventKindSpec {
   // channel the reader may read, LaneActivity becomes a coalesced
   // channel_activity outside the open channels.
   lane?: string;
+  // Internal kinds tell realtime itself something (its room state) and
+  // never reach a stream.
+  internal?: boolean;
   // Preview kinds reach a preview's stream (a person reading a shared room
   // they have not joined, docs/prd/2026-10-22-shared-room-preview.md): the
   // kinds that match what a preview may read over REST, the feed and the
@@ -4223,7 +4255,7 @@ export interface EventKindSpec {
 // RoomEventKinds is the registry of room event kinds. The web's
 // RoomEventKind union (and RoomEventKindValues) is generated from the Name
 // of each row: a kind registered here is a kind the web listens for.
-export const RoomEventKinds: readonly EventKindSpec[] = [{ name: "chat_message", durable: true, replay: true, channelScoped: true, lane: "activity", preview: true }, { name: "agent_messages", durable: true, replay: true, channelScoped: true, lane: "activity", preview: true }, { name: "agent_job_created", channelScoped: true, lane: "room" }, { name: "agent_job_updated", channelScoped: true, lane: "room" }, { name: "agent_job_progress", channelScoped: true }, { name: "job_live_frame", channelScoped: true }, { name: "agent_session_state" }, { name: "agent_roster" }, { name: "presence_join" }, { name: "presence_leave" }, { name: "presence_snapshot" }, { name: "presence_typing", channelScoped: true }, { name: "message_deleted", channelScoped: true, lane: "activity", preview: true }, { name: "message_edited", channelScoped: true, preview: true }, { name: "task_updated", channelScoped: true, lane: "room" }, { name: "artifact_updated", crossChannel: true, preview: true }, { name: "artifact_state", crossChannel: true, preview: true }, { name: "member_joined", preview: true }, { name: "member_removed", revocation: true, preview: true }, { name: "room_deleted", revocation: true, preview: true }, { name: "content_saved" }, { name: "content_uses_changed" }, { name: "app_changed" }, { name: "channel_updated", preview: true }, { name: "section_membership" }, { name: "thread_updated", channelScoped: true, lane: "room", preview: true }, { name: "channel_activity", channelScoped: true, preview: true }, { name: "stream_opened", preview: true }];
+export const RoomEventKinds: readonly EventKindSpec[] = [{ name: "chat_message", durable: true, replay: true, channelScoped: true, lane: "activity", preview: true }, { name: "agent_messages", durable: true, replay: true, channelScoped: true, lane: "activity", preview: true }, { name: "agent_job_created", channelScoped: true, lane: "room" }, { name: "agent_job_updated", channelScoped: true, lane: "room" }, { name: "agent_job_progress", channelScoped: true }, { name: "job_live_frame", channelScoped: true }, { name: "agent_session_state" }, { name: "agent_roster" }, { name: "presence_delta" }, { name: "presence_snapshot" }, { name: "presence_typing", channelScoped: true }, { name: "message_deleted", channelScoped: true, lane: "activity", preview: true }, { name: "message_edited", channelScoped: true, preview: true }, { name: "task_updated", channelScoped: true, lane: "room" }, { name: "artifact_updated", crossChannel: true, preview: true }, { name: "artifact_state", crossChannel: true, preview: true }, { name: "member_joined", preview: true }, { name: "member_removed", revocation: true, preview: true }, { name: "room_deleted", revocation: true, preview: true }, { name: "content_saved" }, { name: "content_uses_changed" }, { name: "app_changed" }, { name: "channel_updated", preview: true }, { name: "section_membership" }, { name: "room_updated" }, { name: "channel_follow", channelScoped: true, internal: true }, { name: "thread_updated", channelScoped: true, lane: "room", preview: true }, { name: "channel_activity", channelScoped: true, preview: true }, { name: "stream_opened", preview: true }, { name: "stream_gap", preview: true }];
 
 // The lanes of a lanes stream (EventKindSpec.Lane, StreamLane).
 export const LaneFull = "full";
@@ -7935,6 +7967,25 @@ export const EventMemberRemoved = "member_removed";
 // EventRoomDeleted carries no payload; every stream in the room closes.
 export const EventRoomDeleted = "room_deleted";
 
+// EventRoomUpdated (RoomUpdatedPayload) is published by bnbloc-room when the
+// room's own settings change (its rules, the agreement it asks for) or a
+// member agrees to its rules: realtime's room state reads them again
+// (docs/prd/2026-10-30-message-path-performance.md §4.1).
+export const EventRoomUpdated = "room_updated";
+
+// RoomUpdatedPayload names the member whose agreement changed ("" for the
+// room's own settings).
+export interface RoomUpdatedPayload {
+  userId?: string;
+}
+
+// PresenceDeltaPayload is who came into a room and who left it since the
+// room's previous presence delta.
+export interface PresenceDeltaPayload {
+  joined: string[];
+  left: string[];
+}
+
 // MemberRemovedPayload is the payload of an EventMemberRemoved event.
 export interface MemberRemovedPayload {
   userId: string;
@@ -8220,8 +8271,8 @@ export type ContentSavedAction = "saved" | "submitted" | "published";
 export const ContentSavedActionValues: readonly ContentSavedAction[] = ["saved", "submitted", "published"];
 export type DecisionQuestionType = "predicate" | "choice" | "score";
 export const DecisionQuestionTypeValues: readonly DecisionQuestionType[] = ["predicate", "choice", "score"];
-export type RoomEventKind = "chat_message" | "agent_messages" | "agent_job_created" | "agent_job_updated" | "agent_job_progress" | "job_live_frame" | "agent_session_state" | "agent_roster" | "presence_join" | "presence_leave" | "presence_snapshot" | "presence_typing" | "message_deleted" | "message_edited" | "task_updated" | "artifact_updated" | "artifact_state" | "member_joined" | "member_removed" | "room_deleted" | "content_saved" | "content_uses_changed" | "app_changed" | "channel_updated" | "section_membership" | "thread_updated" | "channel_activity" | "stream_opened";
-export const RoomEventKindValues: readonly RoomEventKind[] = ["chat_message", "agent_messages", "agent_job_created", "agent_job_updated", "agent_job_progress", "job_live_frame", "agent_session_state", "agent_roster", "presence_join", "presence_leave", "presence_snapshot", "presence_typing", "message_deleted", "message_edited", "task_updated", "artifact_updated", "artifact_state", "member_joined", "member_removed", "room_deleted", "content_saved", "content_uses_changed", "app_changed", "channel_updated", "section_membership", "thread_updated", "channel_activity", "stream_opened"];
+export type RoomEventKind = "chat_message" | "agent_messages" | "agent_job_created" | "agent_job_updated" | "agent_job_progress" | "job_live_frame" | "agent_session_state" | "agent_roster" | "presence_delta" | "presence_snapshot" | "presence_typing" | "message_deleted" | "message_edited" | "task_updated" | "artifact_updated" | "artifact_state" | "member_joined" | "member_removed" | "room_deleted" | "content_saved" | "content_uses_changed" | "app_changed" | "channel_updated" | "section_membership" | "room_updated" | "channel_follow" | "thread_updated" | "channel_activity" | "stream_opened" | "stream_gap";
+export const RoomEventKindValues: readonly RoomEventKind[] = ["chat_message", "agent_messages", "agent_job_created", "agent_job_updated", "agent_job_progress", "job_live_frame", "agent_session_state", "agent_roster", "presence_delta", "presence_snapshot", "presence_typing", "message_deleted", "message_edited", "task_updated", "artifact_updated", "artifact_state", "member_joined", "member_removed", "room_deleted", "content_saved", "content_uses_changed", "app_changed", "channel_updated", "section_membership", "room_updated", "channel_follow", "thread_updated", "channel_activity", "stream_opened", "stream_gap"];
 export type EventSubscriptionSource = "bnbloc/platform" | "bnbloc/room" | "bnbloc/member" | "webhook";
 export const EventSubscriptionSourceValues: readonly EventSubscriptionSource[] = ["bnbloc/platform", "bnbloc/room", "bnbloc/member", "webhook"];
 export type PlatformEventType = "platform.deployed" | "component.published" | "desktop.published";

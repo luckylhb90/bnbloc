@@ -966,6 +966,7 @@ func (s *Service) handlePatchRoom(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
+	s.publishRoomUpdated(r.Context(), roomID, "")
 	detail, err := s.roomDetail(r.Context(), rm)
 	if err != nil {
 		obs.ServerError(w, "count members failed", err)
@@ -973,6 +974,15 @@ func (s *Service) handlePatchRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, detail)
+}
+
+// publishRoomUpdated tells realtime the room's settings, or userID's
+// agreement to its rules, changed (wire.EventRoomUpdated).
+func (s *Service) publishRoomUpdated(ctx context.Context, roomID, userID string) {
+	if s.Publisher == nil {
+		return
+	}
+	s.Publisher.Publish(ctx, wire.Event{RoomID: roomID, Kind: wire.EventRoomUpdated, Payload: wire.RoomUpdatedPayload{UserID: userID}, AtUnixMs: s.Now()})
 }
 
 // handleDeleteRoom soft-deletes a room (owner-only).

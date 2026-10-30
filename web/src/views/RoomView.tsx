@@ -218,7 +218,7 @@ export function RoomView({
     onMessageEvent: (e) => dispatch.current(e),
     onReconnect: () => activityRef.current?.bumpFiles(),
     onRevoked: leaveGoneRoom,
-    onOpenActivity: () => conversation.catchUp(),
+    onCatchUp: () => conversation.catchUp(),
     // The room view also takes the people chat's events: its header badge
     // counts them (they never enter this feed). Its stream has lanes
     // (channels PRD §2.4): the open channel in full, the others' activity.

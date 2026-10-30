@@ -906,6 +906,10 @@ func (s *Service) handleFollowChannel(follow bool) http.HandlerFunc {
 			httpx.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		if s.Publisher != nil {
+			s.Publisher.Publish(r.Context(), wire.Event{RoomID: roomID, ChannelID: ch.ChannelID, Kind: wire.EventChannelFollow,
+				Payload: wire.ChannelFollowPayload{ChannelID: ch.ChannelID, UserID: who.user}, AtUnixMs: s.Now()})
+		}
 		s.viewFor(w, r, roomID, ch.ChannelID, who.user)
 	}
 }

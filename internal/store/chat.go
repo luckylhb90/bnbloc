@@ -15,8 +15,8 @@ import (
 
 // ErrDuplicateClientMsg reports that a message with the same client message id
 // is already stored in the room (a concurrent or retried send won the race).
-// The caller resolves the original sequence via LookupClientMsg and returns it
-// instead of publishing a second copy.
+// The caller answers with the original sequence (the hub's commit learns it
+// from ClientMsgConflict) instead of publishing a second copy.
 var ErrDuplicateClientMsg = errors.New("store: duplicate client message id")
 
 // ErrDuplicateSeq reports that the (room, seq) slot is already taken: the

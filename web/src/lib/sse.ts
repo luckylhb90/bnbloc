@@ -56,6 +56,10 @@ export function subscribeRoom(
   // which a reconnect opens with.
   let streamId = "";
   let open: readonly string[] = channelId ? [channelId] : [];
+  // The last sequence this subscription received: a reconnect asks for
+  // what is newer only (since), and the stream says when it cannot
+  // (stream_gap: the caller fetches the difference).
+  let lastSeq = 0;
   let closed = false;
   let attempts = 0;
   let timer: number | null = null;
@@ -80,6 +84,7 @@ export function subscribeRoom(
       streamId = typeof ev.payload?.streamId === "string" ? ev.payload.streamId : "";
       return;
     }
+    if (typeof ev.sequence === "number" && ev.sequence > lastSeq) lastSeq = ev.sequence;
     normalizeRoomEvent(ev, onEvent);
   };
 
@@ -125,13 +130,14 @@ export function subscribeRoom(
     const scopeQ = scope.channelOnly ? "" : `${scope.lanes ? "" : "&allChannels=1"}${scope.includePeople ? "&includePeople=1" : ""}`;
     // Member locations: the time zone is sent only when the organization has them
     // on (pulse_geography). Off, the zone never leaves the device.
+    const sinceQ = lastSeq > 0 ? `&since=${lastSeq}` : "";
     const tzQ = currentTenantPolicy()?.pulseGeography
       ? `&tz=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}`
       : "";
     const url = apiUrl(
       `${roomPath(roomId, "events")}?${
         token ? `access_token=${encodeURIComponent(token)}` : ""
-      }${channelQ}${scopeQ}${tzQ}`,
+      }${channelQ}${scopeQ}${sinceQ}${tzQ}`,
     );
     const src = new EventSource(url);
     es = src;

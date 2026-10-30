@@ -162,6 +162,9 @@ type StreamReport struct {
 	OpenAtEnd int `json:"openAtEnd"`
 	// ConnectMs is request start to response headers for successful opens.
 	ConnectMs Percentiles `json:"connectMs"`
+	// Gaps counts stream_gap events: a stream told it lacked events, which
+	// then read them from history (its deliveries count from there).
+	Gaps int `json:"gaps"`
 }
 
 func (r *Report) writeJSON(w io.Writer) error {
@@ -197,7 +200,7 @@ func (r *Report) writeText(w io.Writer) {
 	p("  latency ms        %s", formatPercentiles(r.Deliver.LatencyMs))
 	p("")
 	p("streams")
-	p("  opened %d, disconnects %d, reconnects %d, open at start %d, open at end %d", r.Streams.Opened, r.Streams.Disconnects, r.Streams.Reconnects, r.Streams.OpenAtStart, r.Streams.OpenAtEnd)
+	p("  opened %d, disconnects %d, reconnects %d, gaps %d, open at start %d, open at end %d", r.Streams.Opened, r.Streams.Disconnects, r.Streams.Reconnects, r.Streams.Gaps, r.Streams.OpenAtStart, r.Streams.OpenAtEnd)
 	if len(r.Streams.ConnectErrors) > 0 {
 		p("  connect errors: %s", formatCounts(r.Streams.ConnectErrors))
 	}

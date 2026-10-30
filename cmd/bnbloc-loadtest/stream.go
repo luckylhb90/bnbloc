@@ -47,6 +47,9 @@ type stream struct {
 
 	live   atomic.Bool
 	opened atomic.Bool
+	// resumeSeq is the last sequence the stream received: a reconnect asks
+	// for what is newer (the web client's since).
+	resumeSeq atomic.Int64
 }
 
 // streamStats aggregates every stream's counters.
@@ -57,6 +60,7 @@ type streamStats struct {
 	reconnects    int
 	outOfOrder    int
 	activity      int
+	gaps          int
 	connectErrors map[string]int
 	connect       []time.Duration
 }
@@ -103,7 +107,7 @@ func (st *stream) run(ctx context.Context) {
 func (st *stream) connectOnce(ctx context.Context) (opened bool, err error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, st.api.eventsURL(st.member, st.room.id, st.channel, st.tz), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, st.api.eventsURL(st.member, st.room.id, st.channel, st.tz, st.resumeSeq.Load()), nil)
 	if err != nil {
 		return false, err
 	}
@@ -159,6 +163,15 @@ func (st *stream) connectOnce(ctx context.Context) (opened bool, err error) {
 				st.stats.add(func(s *streamStats) { s.outOfOrder++ })
 			}
 			lastSeq = max(lastSeq, ev.Sequence)
+			if ev.Sequence > st.resumeSeq.Load() {
+				st.resumeSeq.Store(ev.Sequence)
+			}
+		}
+		if ev.gap {
+			// The stream lacks events: read the difference from history,
+			// as the web client does, and count what it recovers.
+			st.stats.add(func(s *streamStats) { s.gaps++ })
+			go st.fillGap()
 		}
 		if ev.clientMsgID != "" {
 			st.tracker.deliver(st.id, ev.clientMsgID, at)
@@ -183,6 +196,8 @@ type roomEvent struct {
 	clientMsgID string
 	// activityFrom is the channel of a channel_activity event.
 	activityFrom string
+	// gap: a stream_gap event.
+	gap bool
 }
 
 // decodeEvent decodes one SSE data payload. It reports false for data that is
@@ -208,6 +223,8 @@ func decodeEvent(kind string, data []byte) (roomEvent, bool) {
 		ev.clientMsgID = raw.Payload.ClientMsgID
 	case wire.EventChannelActivity:
 		ev.activityFrom = raw.ChannelID
+	case wire.EventStreamGap:
+		ev.gap = true
 	}
 	return ev, true
 }
@@ -241,4 +258,18 @@ func activityReport(streams []*stream, ss *streamStats) ActivityReport {
 		}
 	}
 	return r
+}
+
+// fillGap reads the channel's latest history after a stream_gap and counts
+// each message found there as delivered to this stream (a recovered one,
+// not a lost one).
+func (st *stream) fillGap() {
+	ids, err := st.api.historyClientIDs(context.Background(), st.member, st.room.id, st.channel)
+	if err != nil {
+		return
+	}
+	at := time.Now()
+	for _, id := range ids {
+		st.tracker.deliver(st.id, id, at)
+	}
 }

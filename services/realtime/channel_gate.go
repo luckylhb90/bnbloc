@@ -81,11 +81,12 @@ func (s *Service) admitPost(ctx context.Context, roomID, author string, m member
 	// platform default) and C18 (posting joins). Slow mode applies to every
 	// post of the member, typed, scheduled or dispatched as them, and to
 	// owners and admins alike (decision: pending owner; the PRD names no
-	// exemption, so none is made). The claim is written before the message
-	// is stored, so two posts cannot both pass; a post whose store then
-	// fails has still spent the interval (decision: pending owner).
+	// exemption, so none is made). The claim is taken in the owner's memory
+	// before the message is stored, so two posts cannot both pass; a post
+	// whose store then fails has still spent the interval (decision:
+	// pending owner). Its mark is written behind (post_marks.go).
 	gap := int64(ch.Settings.SlowModeSeconds) * 1000
-	wait, err := s.Channels.ClaimChannelPost(ctx, roomID, ch.ChannelID, author, s.now().UnixMilli(), gap)
+	wait, err := s.postMarks.claim(ctx, s, roomID, ch.ChannelID, author, s.now().UnixMilli(), gap)
 	if err != nil {
 		return fmt.Errorf("channel post claim failed: %w", err)
 	}
@@ -103,14 +104,14 @@ func (s *Service) checkRulesAgreed(ctx context.Context, roomID, author string) e
 	if s.RoomRoles == nil {
 		return nil
 	}
-	room, err := s.RoomRoles.GetRoom(ctx, roomID)
+	room, err := s.roleStore().GetRoom(ctx, roomID)
 	if err != nil {
 		return fmt.Errorf("room read failed: %w", err)
 	}
 	if !room.RequireRulesAgreement {
 		return nil
 	}
-	mem, ok, err := s.RoomRoles.GetMember(ctx, roomID, author)
+	mem, ok, err := s.roleStore().GetMember(ctx, roomID, author)
 	if err != nil {
 		return fmt.Errorf("membership read failed: %w", err)
 	}
@@ -137,7 +138,7 @@ func (s *Service) joinMentioned(ctx context.Context, roomID, channelID, author, 
 		if c == author || !membership.HumanMember(s.Membership, roomID, c) || !s.memberMayReadChannel(ctx, roomID, channelID, c) {
 			continue
 		}
-		if err := s.Channels.FollowChannel(ctx, roomID, channelID, c, s.now().UnixMilli(), store.FollowMarks{}); err != nil {
+		if err := s.channelStore().FollowChannel(ctx, roomID, channelID, c, s.now().UnixMilli(), store.FollowMarks{}); err != nil {
 			log.Printf("realtime: room=%s channel=%s: a mention's join failed for %s: %v", roomID, channelID, c, err)
 		}
 	}

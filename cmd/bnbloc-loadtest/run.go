@@ -186,6 +186,7 @@ func run(ctx context.Context, cfg config, logw io.Writer) (*Report, error) {
 	report.Streams.Reconnects = ss.reconnects
 	report.Streams.ConnectErrors = ss.connectErrors
 	report.Streams.ConnectMs = summarize(ss.connect)
+	report.Streams.Gaps = ss.gaps
 	report.Activity = activityReport(streams, ss)
 	report.Notes = append(notes, report.notes()...)
 	return report, nil

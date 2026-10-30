@@ -344,6 +344,9 @@ func (p *Peers) prune() {
 // non-owner.
 func (s *Service) reconcileOwnership(bool) {
 	rooms := s.Hub.ReleaseRooms(s.Peers.OwnsRoom)
+	if s.roomState != nil {
+		s.roomState.release(s.Peers.OwnsRoom)
+	}
 	members := s.PluginHooks.closeStreams(s.Peers.OwnsMember)
 	s.Peers.prune()
 	if rooms > 0 || members > 0 {

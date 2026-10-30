@@ -86,6 +86,16 @@ func (e *gateEnv) setSettings(channelID string, s wire.ChannelSettings) {
 	e.channelUpdated(channelID)
 }
 
+// roomUpdated announces a change of the room's settings or of userID's
+// agreement, as the room service does (wire.EventRoomUpdated).
+func (e *gateEnv) roomUpdated(userID string) {
+	e.t.Helper()
+	if _, err := e.svc.publish(dctx(), wire.Event{RoomID: "room-1", Kind: wire.EventRoomUpdated,
+		Payload: wire.RoomUpdatedPayload{UserID: userID}, AtUnixMs: 1}, realtime.Durable{}); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
 func (e *gateEnv) channelUpdated(channelID string) {
 	e.t.Helper()
 	if _, err := e.svc.publish(dctx(), wire.Event{RoomID: "room-1", Kind: wire.EventChannelUpdated,
@@ -130,6 +140,7 @@ func TestGateArchivedChannelIsReadOnly(t *testing.T) {
 	if err := e.rooms.Channels().SetChannelArchived(dctx(), "room-1", "ch_a", &at); err != nil {
 		t.Fatal(err)
 	}
+	e.channelUpdated("ch_a")
 	e.refused("bob", "ch_a", http.StatusForbidden, wire.ChannelArchived)
 	e.refused("alice", "ch_a", http.StatusForbidden, wire.ChannelArchived)
 	if got := historyTexts(t, e.srv, "carol", "?channelId=ch_a"); len(got) != 1 || got[0] != "before" {
@@ -138,6 +149,7 @@ func TestGateArchivedChannelIsReadOnly(t *testing.T) {
 	if err := e.rooms.Channels().SetChannelArchived(dctx(), "room-1", "ch_a", nil); err != nil {
 		t.Fatal(err)
 	}
+	e.channelUpdated("ch_a")
 	e.mustPost("bob", "ch_a", "after")
 }
 
@@ -173,6 +185,57 @@ func TestGateSlowMode(t *testing.T) {
 	e.mustPost("bob", "ch_a", "four")
 }
 
+// Posting joins once per owner's life, and again after the member left
+// (the room service's channel_follow): a later post rejoins.
+func TestPostingRejoinsAfterLeaving(t *testing.T) {
+	e := newGateEnv(t)
+	follows := func() bool {
+		t.Helper()
+		e.svc.postMarks.flush()
+		list, err := e.rooms.Channels().ChannelFollows(dctx(), "room-1", "bob")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range list {
+			if f.ChannelID == "ch_a" {
+				return true
+			}
+		}
+		return false
+	}
+	e.mustPost("bob", "ch_a", "one")
+	if !follows() {
+		t.Fatal("posting did not join")
+	}
+	if err := e.rooms.Channels().UnfollowChannel(dctx(), "room-1", "ch_a", "bob"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.publish(dctx(), wire.Event{RoomID: "room-1", ChannelID: "ch_a", Kind: wire.EventChannelFollow,
+		Payload: wire.ChannelFollowPayload{ChannelID: "ch_a", UserID: "bob"}, AtUnixMs: 1}, realtime.Durable{}); err != nil {
+		t.Fatal(err)
+	}
+	e.mustPost("bob", "ch_a", "two")
+	if !follows() {
+		t.Fatal("posting after leaving did not rejoin")
+	}
+}
+
+// Slow mode holds across a restart of the owner: the member's last post,
+// written behind as their follow mark, is read when memory has none.
+func TestGateSlowModeAcrossRestart(t *testing.T) {
+	e := newGateEnv(t)
+	e.setSettings("ch_a", wire.ChannelSettings{SlowModeSeconds: 60})
+	e.mustPost("bob", "ch_a", "one")
+	e.svc.postMarks.flush()
+	e.svc.postMarks = postMarks{} // the owner restarted: nothing in memory
+	e.advance(20 * time.Second)
+	if code, eb, _ := e.post("bob", "ch_a", "two", ""); code != http.StatusTooManyRequests || eb.RetryAfterMs != 40_000 {
+		t.Fatalf("a post 20 s after one before the restart = %d %+v, want 429 with 40 s left", code, eb)
+	}
+	e.advance(40 * time.Second)
+	e.mustPost("bob", "ch_a", "three")
+}
+
 // Agreeing to the rules (C16): a room that requires it refuses a member's
 // post until they agree to the current version, and asks again when the
 // rules change.
@@ -183,19 +246,23 @@ func TestGateRulesAgreement(t *testing.T) {
 	if err := e.rooms.UpdateRoom(ctx, "room-1", store.RoomPatch{Rules: ptr("Be kind."), RequireRulesAgreement: ptr(true)}); err != nil {
 		t.Fatal(err)
 	}
+	e.roomUpdated("")
 	e.refused("bob", "ch_a", http.StatusForbidden, wire.RulesAgreementRequired)
 	if err := e.rooms.AgreeRoomRules(ctx, "room-1", "bob", 1); err != nil {
 		t.Fatal(err)
 	}
+	e.roomUpdated("bob")
 	e.mustPost("bob", "ch_a", "agreed")
 	if err := e.rooms.UpdateRoom(ctx, "room-1", store.RoomPatch{Rules: ptr("Be kinder.")}); err != nil {
 		t.Fatal(err)
 	}
+	e.roomUpdated("")
 	e.refused("bob", "ch_a", http.StatusForbidden, wire.RulesAgreementRequired)
 	// Off again: nobody is asked.
 	if err := e.rooms.UpdateRoom(ctx, "room-1", store.RoomPatch{RequireRulesAgreement: ptr(false)}); err != nil {
 		t.Fatal(err)
 	}
+	e.roomUpdated("")
 	e.mustPost("bob", "ch_a", "not required")
 }
 
@@ -204,6 +271,8 @@ func TestGateRulesAgreement(t *testing.T) {
 func TestPostingAndMentionJoin(t *testing.T) {
 	e := newGateEnv(t)
 	e.mustPost("bob", "ch_a", "hi @carol and @mallory")
+	// The poster's mark is written behind (post_marks.go): write it now.
+	e.svc.postMarks.flush()
 	joined := func(user string) bool {
 		list, err := e.rooms.Channels().ChannelFollows(dctx(), "room-1", user)
 		if err != nil {
@@ -275,7 +344,7 @@ func TestAgentFilterFailsClosed(t *testing.T) {
 	if !f.skip(wire.Event{ChannelID: "ch_a", Kind: wire.KindChatMessage}) {
 		t.Fatal("a failed admission read delivered the event")
 	}
-	if f.skip(wire.Event{Kind: wire.EventPresenceJoin}) {
+	if f.skip(wire.Event{Kind: wire.EventPresenceDelta}) {
 		t.Fatal("a room-wide event was withheld")
 	}
 }
