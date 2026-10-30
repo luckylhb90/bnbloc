@@ -1,6 +1,7 @@
 # Replicas without owners: a simpler multi-replica realtime (2026-10-30)
 
-Status: research and proposal (2026-10-30), not built. The owner: "有没有更简单更
+Status: approved (2026-10-30: "这个方案可以啊", with "if there is a better
+one, dig further": §7 is that dig). Building: slices in §5. The owner: "有没有更简单更
 灵活高性能高可用的多副本部署方案？". Builds on
 `docs/prd/2026-10-30-high-availability.md` (what it took to make today's
 design survive a failover) and `docs/prd/2026-10-10-enterprise-scale.md` §2
@@ -178,6 +179,79 @@ a small organization gets high availability from one image.
    lost, about one reconnect per stream of the replica that went), a rolling
    deploy under load, a scale-out from 2 to 4 under load, a Redis failover
    under load.
+7. (B) One stream per client: the stream's open set spans rooms; unread
+   state on open, deltas after; the shell's polling goes; presence per
+   member.
+8. A longer resend for a 503 from the database; RDS Proxy in the deployment
+   guide.
+
+## 7. Digging further: is there something better?
+
+Each idea below was weighed against the proposal on the four words of the
+question: simpler, more flexible, faster, more available.
+
+**Better, and added: one stream per client, not per room (part B).** The
+web client today opens one room stream per open room and, besides it,
+polls every room's unread counts every 25 s (`web/src/views/Shell.tsx`). One
+poll asks `UnreadCount` per readable channel of every room, two queries
+each (`services/realtime/service.go` `handleUnread`): a member in 20 rooms
+of 5 channels costs 200 queries a poll; 1,024 clients cost about **8,000
+queries a second of polling**, far more than every message they send
+together. Slack and Discord hold **one connection per client** that
+carries every conversation: the initial state once, then deltas. With
+lanes and the bus that is a short step:
+
+- a client's stream carries full events for what it has open (a channel and
+  a thread, of any room) and one coalesced `channel_activity` for every
+  other channel of every room it may read;
+- on open the stream sends the unread state once (one batched query), then
+  only deltas; the polling goes;
+- opening another room re-scopes the stream as opening another channel does
+  now: no reconnect, no replay;
+- the replica holding the stream subscribes the bus to the member's rooms
+  (and the member's own channel: desktop plugin deliveries, notifications);
+- presence becomes a member's, not a room stream's.
+
+**Better, and added: subscribe, then read the difference.** A stream
+subscribes to the bus *before* it reads the difference from MySQL, and
+merges both by sequence: a message committed between the two is then in
+one of them, never in neither. The read goes to the primary (a replica's
+lag could hide the newest rows the subscription has not seen either).
+
+**Better, and added: a longer resend for a database failover.** Aurora's
+writer failover takes tens of seconds; the client's resend (400 ms, 1.2 s,
+3 s) covers a replica, not a database. Answers that name the database as
+unavailable (503) are resent with backoff up to 30 s, and RDS Proxy in front
+of the writer keeps connections through it.
+
+**Considered, not better:**
+
+- **MySQL as the bus** (each replica tails `room_messages` by a global id
+  every 50-100 ms): no new dependency, but adds the poll interval to every
+  delivery, and auto-increment ids are not commit order (a reader can pass
+  an id that commits later). And transient events (typing, a job's
+  progress, live frames, presence) do not belong in the database.
+- **A peer mesh of our own** (replicas stream events to the peers that
+  asked for a room, over the existing signed peer HTTP): no Redis, but we
+  would write and maintain a pub/sub (interest, backpressure, presence
+  gossip) that Redis gives. Kept possible behind the bus interface for
+  deployments without Redis; not first.
+- **Embedded NATS** (a NATS server inside each realtime replica, clustered
+  through the peer Service): a real pub/sub with interest routing and no
+  external service, but a large dependency for a module that keeps its
+  dependencies small, and a cluster hidden inside application pods.
+- **The gateway as the fan-out tier**: one hop fewer, but the access rule
+  and lanes would move into the public edge.
+- **One binary for every service**: the all-in-one image already ships them
+  together; once realtime has no owners, N copies of it behind a load
+  balancer are highly available. Merging processes saves loopback hops only.
+- **Cells** (a full stack per group of tenants, Slack's cellular
+  architecture for zone failures): the end-state of a multi-tenant service
+  at a large scale; one enterprise deployment is one cell.
+
+So the target is **A** (interchangeable realtime replicas over a bus, the
+sequence in MySQL) then **B** (one stream per client). Slices of B follow
+A's in §5.
 
 ## 6. Decisions pending owner
 
