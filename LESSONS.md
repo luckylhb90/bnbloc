@@ -586,7 +586,23 @@ moment, a resume from a high-water mark that hid a lower sequence, a
 matches each message to each stream.
 
 Evidence: docs/bugs/2026-10-30-owner-change-loses-messages.md,
-`scripts/failover-check.sh`, docs/load-testing.md ("Failover").
+`scripts/failover-check.sh`, docs/load-testing.md ("Failover");
+docs/bugs/2026-10-30-replay-across-a-hole.md (the same drill, repeated after
+an unrelated change, found a message lost when a replica died between its
+commit and its publish: three earlier passes had been lucky).
+Seen 1× (2026-10-30).
+
+### A replay buffer that can skip an event must start again after the skip
+
+The reorder hold delivers past a sequence that never arrived, so the
+replay buffer went on with a hole in it. A stream reopening below the hole
+was replayed from that buffer, which looked as if it reached back far
+enough, and never told to read the difference: 2 deliveries lost in 19,976.
+Anything that appends to a buffer used for resuming must keep it
+contiguous, or restart it, at the point it skips.
+
+Evidence: docs/bugs/2026-10-30-replay-across-a-hole.md,
+`TestBusResumeBelowAHoleReadsTheDifference`.
 Seen 1× (2026-10-30).
 
 ## Done right
