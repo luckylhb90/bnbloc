@@ -7,6 +7,7 @@
 // Run it like layout-regression.mjs (README): a web server on BNBLOC_E2E_URL
 // (default http://localhost:5173), `playwright-core` from a scratch install.
 import { chromium } from "playwright-core";
+import { channel, room } from "./fixtures.mjs";
 const B = (process.env.BNBLOC_E2E_URL || "http://localhost:5173").replace(/\/+$/, "");
 const b64 = (o) => Buffer.from(JSON.stringify(o)).toString("base64url");
 let failures = 0;
@@ -18,7 +19,7 @@ const history = [
   { sequence: 2, kind: "agent_messages", atUnixMs: Date.now() - 4000, payload: { cursor: 0, messages: [{ seq: 1, createdAtUnixMs: Date.now() - 4000, payload: { role: "assistant", text: "Click Create link below.", ownerUserId: "jack", provider: "codex", jobId: "job_1", sourceSeq: 1 } }] } },
   { sequence: 3, kind: "agent_messages", atUnixMs: Date.now() - 3000, payload: { cursor: 0, messages: [{ seq: 2, createdAtUnixMs: Date.now() - 3000, payload: { role: "assistant", text: "maya's agent offers a link to Landing page", ownerUserId: "jack", provider: "codex", jobId: "job_1", sourceSeq: 1, notice: "share-proposal", shareProposal: card } }] } },
 ];
-const browser = await chromium.launch();
+const browser = await chromium.launch(process.env.CHROME ? { executablePath: process.env.CHROME } : {});
 for (const who of ["maya", "jack"]) {
   const token = b64({ sub: who, tenant: "default", role: "member", exp: Math.floor(Date.now() / 1000) + 3600 }) + ".sig";
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, permissions: ["clipboard-read", "clipboard-write"] });
@@ -29,9 +30,9 @@ for (const who of ["maya", "jack"]) {
     const json = (b, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(b) });
     if (p.startsWith("/v1/auth/sso/config")) return json({ authProviderAvailable: false, directLoginAvailable: true });
     if (p === "/v1/rooms/r1/history") return json({ messages: history });
-    if (p === "/v1/rooms/r1/channels") return json({ channels: [{ channelId: "general", name: "general", isDefault: true, createdBy: "maya" }] });
+    if (p === "/v1/rooms/r1/channels") return json({ channels: [channel()], sections: [], groups: [] });
     if (p === "/v1/rooms/r1/members") return json({ members: [{ userId: who, role: "member" }] });
-    if (p === "/v1/rooms/r1") return json({ roomId: "r1", name: "r1", description: "", visibility: "private", previewable: false, syncMode: "live", createdBy: "maya", createdAtMs: 1 });
+    if (p === "/v1/rooms/r1") return json(room());
     if (p === `/v1/users/${who}/rooms`) return json({ rooms: [{ roomId: "r1", name: "r1", description: "", visibility: "private", syncMode: "live", role: "member", memberCount: 2, createdAtMs: 1 }] });
     if (p === "/v1/rooms/r1/artifacts/art_1/shares" && req.method() === "POST") {
       creates.push(JSON.parse(req.postData() || "{}"));

@@ -110,6 +110,8 @@ try {
   await panel.waitFor({ timeout: 5000 });
   ok(s.opened === 1, "Reply in thread opened (made) the root's thread");
   ok((await panel.getByRole("heading").innerText()).includes("Should we ship on Friday?"), "the panel is titled from the root");
+  // The rail reads the followed threads again after the thread is made.
+  await page.locator("[data-rail-threads] [data-thread-row]").first().waitFor({ timeout: 5000 }).catch(() => {});
   ok((await page.locator("[data-rail-threads] [data-thread-row]").count()) === 1, "the rail lists the followed thread");
   ok((await panel.locator("[data-thread-root]").innerText()).includes("Should we ship on Friday?"), "the panel shows the root above the replies");
   ok(/No replies yet/.test(await panel.innerText()) && !/This room is quiet/.test(await panel.innerText()), "an empty thread says it has no replies, not that the room is quiet");

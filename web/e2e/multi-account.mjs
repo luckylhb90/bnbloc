@@ -55,7 +55,7 @@ const who = async (page) => {
   return (await btn.first().getAttribute("aria-label")) ?? "";
 };
 
-const browser = await chromium.launch();
+const browser = await chromium.launch(process.env.CHROME ? { executablePath: process.env.CHROME } : {});
 // ---- 1. a new window binds to the account used last
 {
   const ctx = await browser.newContext({ viewport: { width: 1300, height: 800 } });

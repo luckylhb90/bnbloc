@@ -38,6 +38,19 @@ and exits non-zero with a per-assertion failure list if any invariant breaks.
 The test creates a plain room and message only; it depends on no specific agent
 core, so it runs identically on the public and internal builds.
 
+## Mocked gateways
+
+Most scripts answer `/v1/*` in the browser instead of a backend. A mock
+answers with the server's whole shape (`fixtures.mjs` builds rooms and
+channels as `internal/wire` sends them): a field the client reads and the
+mock leaves out crashes the view, and every check after it fails for the
+wrong reason. `CHROME` names a local Chrome when playwright's own browser is
+not installed:
+
+```sh
+CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" BNBLOC_E2E_URL=http://localhost:5173 node web/e2e/long-message.mjs
+```
+
 ## Multi-account (`multi-account.mjs`)
 
 The accounts of one app, in a real browser against a mocked gateway (the

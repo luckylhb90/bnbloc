@@ -6,6 +6,7 @@
 // Run it like layout-regression.mjs (README): a web server on BNBLOC_E2E_URL
 // (default http://localhost:5173), `playwright-core` from a scratch install.
 import { chromium } from "playwright-core";
+import { channel, room } from "./fixtures.mjs";
 const B = (process.env.BNBLOC_E2E_URL || "http://localhost:5173").replace(/\/+$/, "");
 const b64 = (o) => Buffer.from(JSON.stringify(o)).toString("base64url");
 const token = b64({ sub: "maya", tenant: "default", role: "member", exp: Math.floor(Date.now() / 1000) + 3600 }) + ".sig";
@@ -23,7 +24,7 @@ const EXPERTS = [
 const SKILL = comp("skill", "interactive-apps", "Interactive apps", "Builds any page people open from a link with the app SDK.");
 const REQUEST = "build a landing page with an AI assistant that answers questions about our products";
 
-const browser = await chromium.launch();
+const browser = await chromium.launch(process.env.CHROME ? { executablePath: process.env.CHROME } : {});
 // decision: "app" (it picks App builder, else the skill pack), "none", "limited" (429), "unavailable".
 const ONE_AGENT = [{ ownerUserId: "maya", provider: "codex", core: "acme" }];
 // A room holds one member's agents of several cores, the same provider under two of them: the
@@ -47,11 +48,11 @@ async function run(name, { catalog, decision = "app", roomRefuses = false, aiSet
     const json = (b, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(b) });
     if (p.startsWith("/v1/auth/sso/config")) return json({ authProviderAvailable: false, directLoginAvailable: true });
     if (p === "/v1/rooms/r1/history") return json({ messages: [] });
-    if (p === "/v1/rooms/r1/channels") return json({ channels: [{ channelId: "general", name: "general", isDefault: true, createdBy: "maya" }] });
+    if (p === "/v1/rooms/r1/channels") return json({ channels: [channel()], sections: [], groups: [] });
     if (p === "/v1/rooms/r1/members") return json({ members: [{ userId: "maya", role: "owner" }] });
     if (p === "/v1/rooms/r1/agents") return json({ agents });
     if (p === "/v1/rooms/r1/chat" && req.method() === "POST") { const b = JSON.parse(req.postData() || "{}"); chats.push(b); return json({ sequence: chats.length }); }
-    if (p === "/v1/rooms/r1") return json({ roomId: "r1", name: "r1", description: "", visibility: "private", previewable: false, syncMode: "live", createdBy: "maya", createdAtMs: 1 });
+    if (p === "/v1/rooms/r1") return json(room());
     if (p === "/v1/users/maya/rooms") return json({ rooms: [{ roomId: "r1", name: "r1", description: "", visibility: "private", syncMode: "live", role: "owner", memberCount: 1, createdAtMs: 1 }] });
     if (p === "/v1/content-components") return json({ components: catalog.filter((c) => !new URL(req.url()).searchParams.get("kind") || c.kind === new URL(req.url()).searchParams.get("kind")) });
     // A whole-catalog read (no ?kind=) is what suggesting must not do; the viewers' narrow read is not.
