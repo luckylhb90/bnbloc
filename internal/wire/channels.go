@@ -592,6 +592,10 @@ const EventChannelFollow = "channel_follow"
 // a room's live state, exchanged on the bus between replicas.
 const EventRoomView = "room_view"
 
+// EventReadMarked (ReadMarkedPayload) tells a member's activity streams
+// that they marked a channel read.
+const EventReadMarked = "read_marked"
+
 // ChannelFollowPayload names the member and the channel.
 type ChannelFollowPayload struct {
 	ChannelID string `json:"channelId"`

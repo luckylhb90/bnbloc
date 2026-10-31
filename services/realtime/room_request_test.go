@@ -25,7 +25,7 @@ func TestRoomPreambleOwned(t *testing.T) {
 		"service.go:handleInternalPublish":      "a service route (svcauth.RequireService): no member caller",
 		"app_events.go:handleInternalAppEvents": "the gateway's route (svcauth.RequireService): no member caller",
 		"service.go:handleInternalHistory":      "the gateway's consented read (svcauth.RequireService): no member caller",
-		"service.go:handleUnread":               "reads across the rooms the caller names, each checked with member",
+		"service.go:namedRooms":                 "the rooms a cross-room read names (unread, the activity stream), each checked with member where it is read",
 		"service.go:handleEvents":               "the open stream's re-check at every heartbeat",
 		"chat_send.go:PostChat":                 "the operation's own Chat check of the author, so no post path skips it",
 		"dispatch.go:checkDispatchAuthority":    "the dispatch guards: the bridge owner and the parent job's requester",

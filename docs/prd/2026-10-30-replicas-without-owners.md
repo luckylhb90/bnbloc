@@ -381,3 +381,19 @@ A's in §5.
   - realtime: the same Redis; its replica count is the census too.
   - A setting of the former designs refuses startup with the fix
     (`redisbus.FromEnv`).
+- **Slice 7, first part (2026-10-31): unread is pushed, not polled.** The
+  web shell polled every room's unread counts every 25 s (about 8,000
+  queries a second for 1,024 clients in 20 rooms of 5 channels). It now
+  keeps one activity stream per tab (`GET /v1/my/activity?rooms=`,
+  `member_activity.go`): the rooms' unread state once per connection, then
+  per second what changed (`unread_delta`: new messages that count by the
+  same rule, deletions, a mark of read on any device). The stream is one
+  hub subscriber across the member's rooms and their own key
+  (`Hub.SubscribeRooms`, `wire.MemberActivityKey`, where a mark of read
+  goes), so it works on any replica over the bus. The shell counts each
+  sequence once (`web/src/lib/unreadActivity.ts`), reads a room again when
+  it was marked read, and every room every five minutes as a safety net.
+  Cost per message: one in-memory access check per online member of the
+  room; per mark of read: one event to the member's own streams.
+  Not yet (the rest of part B): the open room still has its own stream
+  (one stream per client in all), and presence is still a room stream's.

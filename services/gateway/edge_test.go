@@ -167,8 +167,8 @@ func TestNoDaemonTokenBypass(t *testing.T) {
 	}
 }
 
-// BE-25: a URL-borne session token is accepted only by the SSE stream, never
-// by other routes (an attachment read takes a ticket instead,
+// BE-25: a URL-borne session token is accepted only by the SSE streams (a
+// room's, the member's activity), never by other routes (an attachment read takes a ticket instead,
 // TestAttachmentTicketReadsOneAttachment).
 func TestAccessTokenQueryOnlyOnStream(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
@@ -186,12 +186,14 @@ func TestAccessTokenQueryOnlyOnStream(t *testing.T) {
 		resp.Body.Close()
 		return resp.StatusCode
 	}
-	if c := get("/v1/rooms/room-1/events"); c != http.StatusOK {
-		t.Errorf("GET events with access_token: %d, want 200", c)
+	for _, stream := range []string{"/v1/rooms/room-1/events", "/v1/my/activity"} {
+		if c := get(stream); c != http.StatusOK {
+			t.Errorf("GET %s with access_token: %d, want 200", stream, c)
+		}
 	}
 	for _, bad := range []string{
 		"/v1/rooms/room-1/attachments/att-1", "/v1/rooms/room-1/artifacts/art_1/versions/2/content",
-		"/v1/rooms/room-1/members", "/v1/rooms/room-1/history", "/v1/users/alice/rooms",
+		"/v1/rooms/room-1/members", "/v1/rooms/room-1/history", "/v1/users/alice/rooms", "/v1/my/unread",
 	} {
 		if c := get(bad); c != http.StatusUnauthorized {
 			t.Errorf("GET %s with access_token: %d, want 401", bad, c)

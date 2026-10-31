@@ -360,3 +360,31 @@ func TestSubscribeSinceSendsTheDifference(t *testing.T) {
 	}
 	h.Unsubscribe("r", sub)
 }
+
+// One subscriber on several rooms gets every room's events on one channel;
+// leaving by any room takes it off them all, and an overflow drops it from
+// them all without a send on its closed channel.
+func TestSubscribeRooms(t *testing.T) {
+	h := NewHub(8, 2)
+	sub := h.SubscribeRooms([]string{"a", "b"}, 2)
+	h.Publish(wire.Event{RoomID: "a", Kind: "presence_typing"})
+	h.Publish(wire.Event{RoomID: "b", Kind: "presence_typing"})
+	if e1, e2 := <-sub.Events(), <-sub.Events(); e1.RoomID != "a" || e2.RoomID != "b" {
+		t.Fatalf("got %s, %s", e1.RoomID, e2.RoomID)
+	}
+	h.Unsubscribe("b", sub)
+	if h.SubscriberCount("a") != 0 || h.SubscriberCount("b") != 0 {
+		t.Fatal("still on a room after leaving")
+	}
+	if _, open := <-sub.Events(); open {
+		t.Fatal("channel still open")
+	}
+	over := h.SubscribeRooms([]string{"a", "b"}, 2)
+	for i := 0; i < 6; i++ { // two fill it, the third gaps it, the fourth drops it
+		h.Publish(wire.Event{RoomID: []string{"a", "b"}[i%2], Kind: "presence_typing"})
+	}
+	if h.SubscriberCount("a") != 0 || h.SubscriberCount("b") != 0 {
+		t.Fatal("an overflowed subscriber stayed on a room")
+	}
+	_ = over
+}

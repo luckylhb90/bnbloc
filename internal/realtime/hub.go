@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -25,6 +26,9 @@ import (
 type Subscriber struct {
 	ch  chan wire.Event
 	seq int64
+	// rooms are every room the subscriber is on when it is on more than
+	// one (SubscribeRooms): it leaves them all at once.
+	rooms []string
 	// gapped: the subscriber fell a whole buffer behind once and missed
 	// events (TakeGap); a second overflow before the stream took it closes
 	// the subscription.
@@ -244,10 +248,23 @@ func (h *Hub) dropLocked(roomID string, sub *Subscriber) {
 	if set == nil {
 		return
 	}
-	if _, ok := set[sub]; ok {
-		delete(set, sub)
-		close(sub.ch)
+	if _, ok := set[sub]; !ok {
+		return
 	}
+	rooms := sub.rooms
+	if rooms == nil {
+		rooms = []string{roomID}
+	}
+	for _, r := range rooms {
+		h.leaveRoomLocked(r, sub)
+	}
+	close(sub.ch)
+}
+
+// leaveRoomLocked takes sub off one room; the caller holds mu.
+func (h *Hub) leaveRoomLocked(roomID string, sub *Subscriber) {
+	set := h.subs[roomID]
+	delete(set, sub)
 	if len(set) == 0 {
 		delete(h.subs, roomID)
 		// Free the replay buffer for an empty room; it is only a latency
@@ -255,6 +272,26 @@ func (h *Hub) dropLocked(roomID string, sub *Subscriber) {
 		delete(h.replay, roomID)
 		h.idleBusLocked(roomID)
 	}
+}
+
+// SubscribeRooms registers one live subscriber (no replay) on every room of
+// rooms, with one buffer: a member's activity stream across their rooms
+// (and their own key, wire.MemberActivityKey). Unsubscribe with any of the
+// rooms takes it off them all.
+func (h *Hub) SubscribeRooms(rooms []string, buffer int) *Subscriber {
+	for _, r := range rooms {
+		h.joinBus(r)
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	sub := &Subscriber{ch: make(chan wire.Event, max(buffer, h.buffer)), rooms: slices.Clone(rooms)}
+	for _, r := range rooms {
+		if h.subs[r] == nil {
+			h.subs[r] = map[*Subscriber]struct{}{}
+		}
+		h.subs[r][sub] = struct{}{}
+	}
+	return sub
 }
 
 // Journal stores a room's durable events, the room feed, and numbers them:

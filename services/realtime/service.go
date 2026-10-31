@@ -322,6 +322,9 @@ func (s *Service) Handler() http.Handler {
 	mux.HandleFunc("PATCH /v1/rooms/{roomId}/messages/{seq}", s.handleEditMessage)
 	mux.HandleFunc("GET /v1/rooms-unread", s.handleUnread)
 	mux.HandleFunc("GET /v1/my/unread", s.handleMyUnread)
+	// The member's activity stream: unread across their rooms, pushed
+	// (member_activity.go).
+	mux.HandleFunc("GET /v1/my/activity", s.handleMyActivity)
 	// A job's live view (job_live.go).
 	mux.HandleFunc("GET /v1/rooms/{roomId}/jobs/{jobId}/live/frame", s.handleLiveFrame)
 	mux.HandleFunc("POST /v1/rooms/{roomId}/jobs/{jobId}/live/control", s.handleLiveControl)
@@ -1260,6 +1263,10 @@ func (s *Service) handleMarkRead(w http.ResponseWriter, r *http.Request) {
 			httpx.Error(w, "mark-read failed", http.StatusInternalServerError)
 			return
 		}
+		// The member's activity streams (any device) read the room's count
+		// again: on the member's own key, never a room's.
+		_, _ = s.publish(r.Context(), wire.Event{RoomID: wire.MemberActivityKey(userID), Kind: wire.EventReadMarked,
+			Payload: wire.ReadMarkedPayload{RoomID: roomID, ChannelID: channelID}, AtUnixMs: time.Now().UnixMilli()}, realtime.Durable{})
 	}
 	w.WriteHeader(http.StatusOK)
 }
@@ -1398,6 +1405,20 @@ func (s *Service) handleUnread(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	rooms, err := namedRooms(r)
+	if err != nil {
+		httpx.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	reply := s.unreadFor(r.Context(), userID, rooms)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(reply)
+}
+
+// namedRooms is the ?rooms= list a member's cross-room read names (unread,
+// the activity stream): normalized, each once, at most wire.MaxUnreadRooms.
+// Each is checked for membership where it is read.
+func namedRooms(r *http.Request) ([]string, error) {
 	var rooms []string
 	seen := map[string]bool{}
 	for _, raw := range strings.Split(r.URL.Query().Get("rooms"), ",") {
@@ -1409,9 +1430,16 @@ func (s *Service) handleUnread(w http.ResponseWriter, r *http.Request) {
 		rooms = append(rooms, roomID)
 	}
 	if len(rooms) > wire.MaxUnreadRooms {
-		httpx.Error(w, fmt.Sprintf("too many rooms (max %d per request)", wire.MaxUnreadRooms), http.StatusBadRequest)
-		return
+		return nil, fmt.Errorf("too many rooms (max %d)", wire.MaxUnreadRooms)
 	}
+	return rooms, nil
+}
+
+// unreadFor is the member's unread state in rooms (those they are a member
+// of; the others are skipped): per room the total over the channels they
+// may read (a thread only when they follow it), and the channels that have
+// any. GET /v1/rooms-unread and the activity stream answer with it.
+func (s *Service) unreadFor(ctx0 context.Context, userID string, rooms []string) wire.UnreadReply {
 	reply := wire.UnreadReply{Unread: map[string]int{}, Channels: map[string][]wire.ChannelUnread{}}
 	if s.Chat != nil && s.Membership != nil {
 		for _, roomID := range rooms {
@@ -1423,7 +1451,7 @@ func (s *Service) handleUnread(w http.ResponseWriter, r *http.Request) {
 			if !member {
 				continue
 			}
-			ctx := r.Context()
+			ctx := ctx0
 			if m.Tenant != "" {
 				ctx = tenant.NewContext(ctx, m.Tenant)
 			}
@@ -1463,8 +1491,7 @@ func (s *Service) handleUnread(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(reply)
+	return reply
 }
 
 // handleMyUnread answers how many of the caller's rooms have unread messages

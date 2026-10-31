@@ -138,7 +138,7 @@ func TestPreviewEventKinds(t *testing.T) {
 		EventAgentSessionState: true, EventAgentRoster: true, EventPresenceDelta: true,
 		EventPresenceSnapshot: true, EventPresenceTyping: true, EventTaskUpdated: true, EventContentSaved: true,
 		EventContentUsesChanged: true, EventAppChanged: true, EventSectionMembership: true, EventRoomUpdated: true, EventChannelFollow: true,
-		EventRoomView: true,
+		EventRoomView: true, EventReadMarked: true,
 	}
 	for _, k := range RoomEventKinds {
 		switch {

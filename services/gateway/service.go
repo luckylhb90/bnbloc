@@ -653,8 +653,8 @@ func (s *Service) proxyClaims(r *http.Request, p apiPath) (auth.Claims, bool) {
 	}
 	if token == "" && p.isEventStream(r.Method) {
 		// A browser's EventSource cannot set headers either, so ONLY the
-		// room event stream accepts the session token as an access_token
-		// query parameter. Everywhere else a URL-borne session (which leaks
+		// event streams (a room's, the member's activity) accept the session
+		// token as an access_token query parameter. Everywhere else a URL-borne session (which leaks
 		// into logs, history, and Referer) is not a credential.
 		token = strings.TrimSpace(r.URL.Query().Get("access_token"))
 	}

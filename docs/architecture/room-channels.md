@@ -217,6 +217,16 @@ message in a live channel, counted to 100 and over at most 500 rooms (`more`
 says the number is a floor). It is the cheap read for an account no window
 shows; `/v1/rooms-unread` below is the per-room, per-channel detail.
 
+`GET /v1/my/activity?rooms=` (SSE, at most 200 rooms) is what a client
+keeps open instead of polling: it sends `unread_state` (the
+`/v1/rooms-unread` answer for the rooms the caller is in) on every
+connection and whenever it may have missed something, then at most once a
+second `unread_delta`: per room the sequences of new messages that count
+(the same rule: channels the caller may read, a thread only when followed),
+the ones deleted, and `read: true` when the caller marked the room read on
+any device (the client reads that room's count again). The web shell keeps
+one per tab and reads every count again every five minutes as a safety net.
+
 `room_read_state` is keyed `(room_id, channel_id, user_id)` — one cursor per
 channel. `/v1/rooms-unread` is additive:
 

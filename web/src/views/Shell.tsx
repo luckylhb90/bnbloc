@@ -27,6 +27,9 @@ import { openGlobalSearch } from "@/lib/team";
 import { localFiles } from "@/lib/localFiles";
 import { requestLocalOpen } from "@/views/LocalFileOpener";
 import { onRoomGone, withoutRoom } from "@/lib/roomGone";
+import { subscribeActivity } from "@/lib/activityStream";
+import { applyUnreadDelta, noUnread, unreadFromState, type UnreadCounts } from "@/lib/unreadActivity";
+import { MaxUnreadRooms } from "@/lib/wire.gen";
 import { can } from "@/lib/permissions";
 import { StorageKey, readStored, writeStored } from "@/lib/storageKeys";
 
@@ -121,16 +124,16 @@ export function Shell({
   }, [subject, view, activeRoom]);
 
   // A room another surface found gone (detail 404/403, stream revoked) leaves
-  // the quick-access list at once, which also drops it from the unread poll.
+  // the quick-access list at once, which also drops it from the unread stream.
   useEffect(() => onRoomGone((id) => setRooms((cur) => withoutRoom(cur, id))), []);
 
-  // Per-room unread counts, polled periodically so the sidebar badges and the
-  // document title stay live without opening every room. `unreadError`
+  // Per-room unread counts, pushed by the activity stream so the sidebar
+  // badges and the document title stay live without opening every room. `unreadError`
   // distinguishes a failed fetch from a genuine zero so we never silently claim
   // "all read" when the count is actually unknown.
   const [unread, setUnread] = useState<Record<string, number>>({});
   const [unreadError, setUnreadError] = useState(false);
-  // Total unread across the last successful poll, kept in a ref so the poll can
+  // Total unread across the last update, kept in a ref so the stream can
   // detect an increase (new message) and fire a background notification without
   // re-subscribing on every change.
   const prevTotalRef = useRef(0);
@@ -151,19 +154,21 @@ export function Shell({
     };
   }, [subject]);
 
-  // The poll is keyed on the SET of room ids (a refetched but identical room
-  // list must not restart it), and reads names / the open callback through
-  // refs so a parent re-render never re-runs it.
+  // The stream is keyed on the SET of room ids (a refetched but identical
+  // room list must not reopen it), and reads names / the open callback
+  // through refs so a parent re-render never re-runs it.
   const roomIdsKey = useMemo(() => rooms.map((r) => r.roomId).join("\u0000"), [rooms]);
   const roomsRef = useRef(rooms);
   roomsRef.current = rooms;
   const onOpenRoomRef = useRef(onOpenRoom);
   onOpenRoomRef.current = onOpenRoom;
 
-  // Poll unread counts for the known rooms every 25s (and immediately when the
-  // room set changes). This is the one room-level unread poller. A rising
-  // total while the tab is hidden fires a desktop notification; the title
-  // reflects the current total.
+  // Unread counts for the known rooms, pushed by the member's activity
+  // stream (one per client, the rooms in chunks of MaxUnreadRooms): its
+  // state on every connection, then what changes. A room marked read on any
+  // device is read again; every few minutes all are, as a safety net. A
+  // rising total while the tab is hidden fires a desktop notification; the
+  // title reflects the current total.
   useEffect(() => {
     if (!subject) return;
     const ids = roomIdsKey ? roomIdsKey.split("\u0000") : [];
@@ -174,38 +179,63 @@ export function Shell({
       return;
     }
     let cancelled = false;
-    const poll = async () => {
+    let current: UnreadCounts = noUnread;
+    const publish = (next: UnreadCounts) => {
+      if (cancelled) return;
+      current = next;
+      const counts = next.counts;
+      setUnread({ ...counts });
+      const total = Object.values(counts).reduce((a, b) => a + (b || 0), 0);
+      if (total > prevTotalRef.current) {
+        // Name the room with new activity when there's exactly one, else a
+        // generic prompt. notify() self-gates on tab-hidden + permission.
+        const grew = ids.filter((id) => (counts[id] || 0) > 0);
+        const label =
+          grew.length === 1
+            ? roomsRef.current.find((r) => r.roomId === grew[0])?.name || grew[0]
+            : `${total} unread messages`;
+        notify("New activity in bnbloc", {
+          body: grew.length === 1 ? `New messages in ${label}` : label,
+          tag: "bnbloc-unread",
+          onClick: () => grew.length === 1 && onOpenRoomRef.current(grew[0]),
+        });
+      }
+      prevTotalRef.current = total;
+    };
+    const reread = async (rooms: string[]) => {
       try {
-        const res = await api.roomsUnread(ids);
-        if (cancelled) return;
-        const counts = res.unread || {};
-        setUnread(counts);
-        setUnreadError(false);
-        const total = Object.values(counts).reduce((a, b) => a + (b || 0), 0);
-        if (total > prevTotalRef.current) {
-          // Name the room with new activity when there's exactly one, else a
-          // generic prompt. notify() self-gates on tab-hidden + permission.
-          const grew = ids.filter((id) => (counts[id] || 0) > 0);
-          const label =
-            grew.length === 1
-              ? roomsRef.current.find((r) => r.roomId === grew[0])?.name || grew[0]
-              : `${total} unread messages`;
-          notify("New activity in bnbloc", {
-            body: grew.length === 1 ? `New messages in ${label}` : label,
-            tag: "bnbloc-unread",
-            onClick: () => grew.length === 1 && onOpenRoomRef.current(grew[0]),
-          });
-        }
-        prevTotalRef.current = total;
+        const res = await api.roomsUnread(rooms);
+        publish(unreadFromState(res, current, rooms));
+        if (!cancelled) setUnreadError(false);
       } catch {
         if (!cancelled) setUnreadError(true);
       }
     };
-    void poll();
-    const h = window.setInterval(poll, 25_000);
+    const closers: Array<() => void> = [];
+    for (let i = 0; i < ids.length; i += MaxUnreadRooms) {
+      const chunk = ids.slice(i, i + MaxUnreadRooms);
+      closers.push(
+        subscribeActivity(chunk, {
+          onState: (state) => {
+            publish(unreadFromState(state, current, chunk));
+            if (!cancelled) setUnreadError(false);
+          },
+          onDelta: (delta) => {
+            const { next, reread: again } = applyUnreadDelta(current, delta);
+            publish(next);
+            if (again.length > 0) void reread(again);
+          },
+          onStatus: (up) => {
+            if (!cancelled && !up) setUnreadError(true);
+          },
+        }),
+      );
+    }
+    const trueUp = window.setInterval(() => void reread(ids), 5 * 60_000);
     return () => {
       cancelled = true;
-      clearInterval(h);
+      clearInterval(trueUp);
+      for (const close of closers) close();
     };
   }, [subject, roomIdsKey]);
 

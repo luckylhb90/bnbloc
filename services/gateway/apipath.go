@@ -249,7 +249,7 @@ func (s *Service) route(p apiPath) string {
 		}
 		// How many of the member's rooms have unread messages (the account
 		// switcher): realtime owns the read cursors.
-		if p.is("v1", "my", "unread") {
+		if p.is("v1", "my", "unread") || p.is("v1", "my", "activity") {
 			return s.Backends.Realtime
 		}
 		// Which rooms were deleted (a member's bridge removes their agent
@@ -480,9 +480,10 @@ func isInviteRedeem(method string, p apiPath) bool {
 	return method == http.MethodPost && len(p.segs) == 4 && p.section() == "invites" && p.segs[3] == "redeem"
 }
 
-// isEventStream reports GET /v1/rooms/{id}/events (SSE).
+// isEventStream reports the streams a browser's EventSource opens (SSE):
+// GET /v1/rooms/{id}/events and the member's GET /v1/my/activity.
 func (p apiPath) isEventStream(method string) bool {
-	return method == http.MethodGet && len(p.segs) == 4 && p.RoomSub == "events"
+	return method == http.MethodGet && ((len(p.segs) == 4 && p.RoomSub == "events") || p.is("v1", "my", "activity"))
 }
 
 // isPreviewRead reports a request a non-member may make of a shared room

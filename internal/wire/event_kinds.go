@@ -127,6 +127,10 @@ var RoomEventKinds = []EventKindSpec{
 	// agents members' bridges serve), on the bus between replicas
 	// (realtime.RoomViews); never on a stream.
 	{Name: EventRoomView, Internal: true},
+	// A member marked a room's channel read (realtime): on the member's own
+	// key only (MemberActivityKey), for their activity streams; never on a
+	// room stream.
+	{Name: EventReadMarked, Internal: true},
 	// A thread opened, renamed, archived or replied in (realtime and
 	// bnbloc-room): scoped to the thread's parent channel, whose stream
 	// redraws the root's summary line.
