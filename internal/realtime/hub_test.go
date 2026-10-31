@@ -388,3 +388,32 @@ func TestSubscribeRooms(t *testing.T) {
 	}
 	_ = over
 }
+
+// A multi-room subscriber moves onto another set of rooms; a room's
+// snapshot is its replay after a sequence.
+func TestSetRoomsAndSnapshot(t *testing.T) {
+	h := NewHub(8, 8)
+	sub := h.SubscribeRooms([]string{"a", "b"}, 8)
+	if !h.SetRooms(sub, []string{"b", "c"}) {
+		t.Fatal("moved a live subscriber: false")
+	}
+	if h.SubscriberCount("a") != 0 || h.SubscriberCount("b") != 1 || h.SubscriberCount("c") != 1 {
+		t.Fatal("not on exactly b and c")
+	}
+	h.Publish(wire.Event{RoomID: "c", Kind: wire.KindChatMessage})
+	h.Publish(wire.Event{RoomID: "c", Kind: wire.KindChatMessage})
+	if got := (<-sub.Events()).RoomID; got != "c" {
+		t.Fatalf("got %s", got)
+	}
+	evs, gap := h.Snapshot("c", 1)
+	if gap || len(evs) != 1 || evs[0].Sequence != 2 {
+		t.Fatalf("snapshot after 1: %v gap=%v", evs, gap)
+	}
+	if _, gap := h.Snapshot("a", 5); !gap {
+		t.Fatal("an empty buffer reaches back")
+	}
+	h.Unsubscribe("b", sub)
+	if h.SetRooms(sub, []string{"a"}) {
+		t.Fatal("moved an unsubscribed subscriber")
+	}
+}

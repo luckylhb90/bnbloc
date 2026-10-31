@@ -75,7 +75,6 @@ type config struct {
 	MaxInflight    int
 	Timeout        time.Duration
 	StreamIdle     time.Duration
-	MemberActivity bool
 	Cleanup        bool
 	JSON           bool
 	Progress       time.Duration
@@ -103,7 +102,7 @@ func parseFlags(args []string, errOut io.Writer) (config, error) {
 	fs.IntVar(&c.Rooms, "rooms", 20, "rooms the tool creates (ignored with --room-ids)")
 	roomIDs := fs.String("room-ids", "", "comma-separated existing room ids to use instead of creating rooms; every assigned member must already be a member")
 	fs.IntVar(&c.MembersPerRoom, "members-per-room", 0, "members in each room (default members/rooms); above that a member holds one stream per room it is in")
-	fs.IntVar(&c.Channels, "channels", 1, "channels per room (the default plus channels the tool creates, or reuses in --room-ids rooms); members are spread over them round-robin, each holding the web room view's lanes stream with its channel open and posting in it")
+	fs.IntVar(&c.Channels, "channels", 1, "channels per room (the default plus channels the tool creates, or reuses in --room-ids rooms); members are spread over them round-robin, each holding a web tab's member stream showing its room with that channel open, and posting in it")
 	fs.Float64Var(&c.Rate, "rate", 50, "total chat sends per second, spread round-robin over every (room, member) pair")
 	fs.DurationVar(&c.Duration, "duration", 60*time.Second, "send window")
 	fs.DurationVar(&c.RampUp, "ramp-up", 10*time.Second, "streams open evenly over this period before sending starts")
@@ -113,7 +112,6 @@ func parseFlags(args []string, errOut io.Writer) (config, error) {
 	fs.IntVar(&c.MaxInflight, "max-inflight", 512, "outstanding sends; a send due while this many are in flight is skipped and counted")
 	fs.DurationVar(&c.Timeout, "timeout", 15*time.Second, "per-request timeout for sign-in, setup and sends")
 	fs.DurationVar(&c.StreamIdle, "stream-idle", 45*time.Second, "reopen a stream that delivered no bytes for this long (the server sends a keep-alive every 15s); 0 disables")
-	fs.BoolVar(&c.MemberActivity, "member-activity", true, "each member also holds one activity stream across their rooms (GET /v1/my/activity), as the web shell does for its unread badges")
 	fs.BoolVar(&c.Cleanup, "cleanup", true, "delete the rooms the tool created at the end")
 	fs.BoolVar(&c.JSON, "json", false, "print the report as JSON instead of text")
 	fs.DurationVar(&c.Progress, "progress", 5*time.Second, "progress line interval on stderr; 0 disables")

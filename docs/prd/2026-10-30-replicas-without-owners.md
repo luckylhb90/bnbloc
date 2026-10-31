@@ -395,8 +395,8 @@ A's in §5.
   it was marked read, and every room every five minutes as a safety net.
   Cost per message: one in-memory access check per online member of the
   room; per mark of read: one event to the member's own streams.
-  Not yet (the rest of part B): the open room still has its own stream
-  (one stream per client in all), and presence is still a room stream's.
+  Superseded the same day by part B (§9): the activity stream became the
+  member stream's unread.
 - **The revocation window, closed (2026-10-31).** A member removed through
   one replica and a message stored through another just after were not
   ordered with each other: for the bus's milliseconds the removed member's
@@ -410,5 +410,78 @@ A's in §5.
   publish was lost (its replica died between numbering and publishing) is
   waited for 300 ms like any missing sequence, then the room's streams read
   the difference and the removed member's stream ends at its next
-  membership check (every 15 s); section access changes
-  (`section_membership`) are not numbered.
+  membership check (every 15 s). Section access changes
+  (`section_membership`) are numbered too since part B.
+- **Part B built (2026-10-31): one stream per client (§9).**
+  `GET /v1/my/events` with `POST /v1/my/events/scope`
+  (`services/realtime/member_stream.go`); the open room's rules are the
+  room stream's own (`roomView`, `room_view.go`, one owner for both);
+  `/v1/my/activity` and the room stream's scope route are gone. A scope
+  reaching a replica that does not hold the stream is handed to the one
+  that does over the bus (the stream id names it). Web: one `MemberStream`
+  per tab in `sse.ts` (`watchRoom`, `watchUnread`); the room view, thread
+  and people-chat panels and the shell share it.
+  - **Found by the load run, not by the tests: a bus handler waited on the
+    bus.** A forwarded scope was answered inside the bus's receive loop;
+    applying it subscribes rooms, whose confirmation that same blocked
+    loop delivers. Each forwarded scope stalled the replica's whole bus
+    for the 5 s timeout: 119 of 300 streams failed to scope, 149 gaps,
+    delivery p99 1.6 s. Calls are answered on goroutines of their own
+    now, the `Topics` contract says deliver must not wait on the endpoint,
+    and the in-memory bus delivers from one receive loop per endpoint as
+    Redis does, so the replica tests deadlock as production did (checked:
+    the old handler fails `TestMemberStreamUnreadAcrossReplicas`).
+  - Results on the 3-replica HA stack (laptop load average 40 to 70):
+    300 members in 30 rooms of 3 channels at 50 msgs/s: 300 of 300 streams
+    open at start, connect p95 10 ms, 5,100 of 5,100 deliveries, p99
+    28 ms, 0 gaps, told of 15,000 of 15,000 new messages. 1,024 members in
+    one room of 16 channels at 100 msgs/s: 192,000 of 192,000, 0 gaps,
+    0 disconnects, 3,072,000 of 3,072,000 told. Failover drill (drain one
+    replica, crash another, under load): 19,885 of 19,885, 0 lost,
+    0 gaps, PASS.
+  - Needs a desktop release: the desktop app's bundled web client speaks
+    the old routes until then.
+
+## 9. Part B, the end state: one stream per client
+
+The owner (2026-10-31): "我们开发要保证一步到位，一劳永逸". A web tab held up
+to four streams: the room view's lanes stream, a thread panel's and the
+people-chat panel's one-channel streams, and the activity stream. The end
+state is one.
+
+- **`GET /v1/my/events`** (SSE, the web app's only stream): it opens with
+  `stream_opened {streamId}`; the client then scopes it with
+  **`POST /v1/my/events/scope`** `{streamId, rooms?, open?}` and again
+  whenever either changes, never reopening it.
+  - `rooms`: the rooms whose unread it carries (up to 500): `unread_state`
+    on every scope of rooms and after a gap, `unread_delta` each second
+    after (as the activity stream did).
+  - `open`: `{roomId, channels, since}`, the room the tab shows and the
+    channels open in it (the room view's, a thread's, the people chat's;
+    at most 4). For it the stream is what a room's lanes stream is: the
+    replay after `since` (or `stream_gap` when the buffer does not reach
+    back), the presence snapshot, full events of the open channels and
+    room-wide ones, `channel_activity` for the others, the access rule of
+    members-only sections, a preview's narrower kinds, presence counted
+    while it is open. Switching rooms leaves the old one (presence) and
+    opens the new one on the same connection. A room the member is not in
+    (a preview) is received while open.
+  - Access to the open room ending (removed, deleted, or found gone at the
+    15 s re-check) is told as the revocation event; the stream goes on.
+- The member stream is one hub subscriber on every room it carries
+  (`Hub.SubscribeRooms`, rooms added and removed as the scope changes) and
+  the member's own key. It runs on any replica over the bus.
+- **The room stream** (`/v1/rooms/{id}/events`) stays for what is not a
+  person's web tab: bridges and agent hosts (`presence=0`, `agents=`,
+  `replay=0`), and the standalone preview and live pages. The activity
+  stream (`/v1/my/activity`) is gone.
+- **Web**: one member stream per tab (`sse.ts`); the room view, thread
+  panel and people-chat panel watch their channels on it
+  (`useRoomStream`), the shell its unread. The load tool's clients hold one
+  member stream each.
+- **Section access is ordered too**: `section_membership` takes the room's
+  sequence as the revocation kinds do, so a message of a members-only
+  channel stored after a member left its section never reaches their
+  stream on another replica.
+
+Placement: platform (realtime's stream contract and the web client's).

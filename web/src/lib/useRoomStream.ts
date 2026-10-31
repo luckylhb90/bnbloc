@@ -1,14 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
-import { refreshSession } from "@/lib/session";
-import { subscribeRoom, type RoomStreamScope, type RoomSubscription } from "@/lib/sse";
+import { watchRoom, type RoomWatch } from "@/lib/sse";
 import type { RoomEvent } from "@/lib/roomEvents";
 import { dedupeMembers, sameUser } from "@/lib/format";
 import { useScopedState } from "@/lib/useScopedState";
 import { maxSequence } from "@/views/room/feedModel";
 import { unreadBaseline } from "@/lib/unreadBaseline";
 import { roomAccessEnded, type RoomAccessEnd } from "@/lib/roomGone";
-import { applyChannelActivity } from "@/lib/channelActivity";
+import { addChannelActivity, takeChannelActivity } from "@/lib/channelActivity";
 import type { ChannelActivityPayload, PresenceDeltaPayload } from "@/lib/wire.gen";
 
 // Self match, mirrored from the feed's own isSelf: the agent (author "agent")
@@ -48,10 +47,11 @@ interface UseRoomStreamParams {
   // message that landed while the stream was re-scoped to it), or the
   // stream said it has a gap (stream_gap). The feed catches up.
   readonly onCatchUp?: () => void;
-  // Which events the subscription receives (sse.RoomStreamScope): the room
-  // view takes every channel including the people chat (its badge), the
-  // people-chat panel only its own channel.
-  readonly scope?: RoomStreamScope;
+  // Which events the watch receives on the tab's member stream: the room
+  // view takes every event of the room (its channel in full, the others'
+  // activity, the people chat for its badge); a thread or the people-chat
+  // panel only its own channel (channelOnly).
+  readonly scope?: { readonly channelOnly?: boolean };
 }
 
 interface UseRoomStream {
@@ -102,9 +102,7 @@ function useAttentive(): boolean {
 // connection status, presence, typing, and the unread/read cursors.
 export function useRoomStream(params: UseRoomStreamParams): UseRoomStream {
   const { roomId, subject, joinedGen, channelId, feed, historyLoaded, preview = false } = params;
-  const includePeople = params.scope?.includePeople ?? false;
   const channelOnly = params.scope?.channelOnly ?? false;
-  const lanes = params.scope?.lanes ?? false;
   const scope = channelId ?? "";
 
   const [connected, setConnected] = useState(false);
@@ -137,11 +135,11 @@ export function useRoomStream(params: UseRoomStreamParams): UseRoomStream {
   onRevokedRef.current = params.onRevoked;
   const onCatchUpRef = useRef(params.onCatchUp);
   onCatchUpRef.current = params.onCatchUp;
-  // The active channel as the stream's handler reads it: a lanes stream is
-  // not reopened when it changes.
+  // The active channel as the stream's handler reads it: the watch is not
+  // reopened when it changes.
   const channelRef = useRef(channelId);
   channelRef.current = channelId;
-  const subRef = useRef<RoomSubscription | null>(null);
+  const watchRef = useRef<RoomWatch | null>(null);
   // The last activity sequence counted per channel (lib/channelActivity).
   const activitySeen = useRef<Record<string, number>>({});
 
@@ -218,26 +216,27 @@ export function useRoomStream(params: UseRoomStreamParams): UseRoomStream {
     return () => window.clearInterval(id);
   }, [typingUsers]);
 
-  // A lanes stream follows the active channel by re-scoping; any other
-  // stream is opened per channel.
-  const streamChannel = lanes ? (channelId ? "open" : null) : channelId;
+  // The watch follows the active channel (the member stream is re-scoped,
+  // not reopened); it opens once the rail has chosen one.
+  const hasChannel = channelId !== null;
   useEffect(() => {
     setTypingUsers({});
-    if (lanes && channelId) subRef.current?.rescope([channelId]);
-  }, [lanes, channelId]);
+    if (channelId) watchRef.current?.setChannel(channelId);
+  }, [channelId]);
 
   useEffect(() => {
     const opening = channelRef.current;
-    if (!streamChannel || !opening) return;
-    let off: RoomSubscription | null = null;
-    off = subscribeRoom(
+    if (!hasChannel || !opening) return;
+    let watch: RoomWatch | null = null;
+    watch = watchRoom(
       roomId,
+      opening,
+      channelOnly,
       (e: RoomEvent) => {
-        // Revocation ends this stream for good: stop BEFORE the server closes
-        // it, so the reconnect loop never starts.
+        // Revocation ends this watch for good (the member stream goes on).
         const ended = roomAccessEnded(e, subject);
         if (ended) {
-          off?.();
+          watch?.off();
           setConnected(false);
           onRevokedRef.current(ended);
           return;
@@ -284,7 +283,10 @@ export function useRoomStream(params: UseRoomStreamParams): UseRoomStream {
           if (e.channelId && e.channelId === active) onCatchUpRef.current?.();
           else {
             const a = e.payload as Partial<ChannelActivityPayload> | undefined;
-            setUnreadByChannel((cur) => applyChannelActivity(cur, activitySeen.current, a));
+            // Taken once here, added in a pure updater (React may call an
+            // updater twice).
+            const taken = takeChannelActivity(activitySeen.current, a);
+            if (taken) setUnreadByChannel((cur) => addChannelActivity(cur, taken));
           }
           return;
         }
@@ -303,20 +305,17 @@ export function useRoomStream(params: UseRoomStreamParams): UseRoomStream {
         onMessageEventRef.current(e);
       },
       setConnected,
-      refreshSession,
-      opening,
-      { includePeople, channelOnly, lanes },
     );
-    subRef.current = off;
+    watchRef.current = watch;
     return () => {
-      off?.();
-      subRef.current = null;
+      watch?.off();
+      watchRef.current = null;
       if (unreadDirtyTimer.current !== null) {
         window.clearTimeout(unreadDirtyTimer.current);
         unreadDirtyTimer.current = null;
       }
     };
-  }, [roomId, subject, joinedGen, streamChannel, includePeople, channelOnly, lanes]);
+  }, [roomId, subject, joinedGen, hasChannel, channelOnly]);
 
   return {
     connected,

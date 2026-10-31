@@ -14,6 +14,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 func fakeToken(subject string, exp time.Time) string {
@@ -42,6 +44,15 @@ type fakeGateway struct {
 	deleted   []string
 	connected map[string]bool // subject/room that already had a connection
 	badQuery  []string
+	streams   map[string]*fakeStream
+}
+
+// fakeStream is one member stream: its frames, and what it is scoped to.
+type fakeStream struct {
+	sub  string
+	ch   chan string
+	room *fakeRoom
+	drop chan struct{}
 }
 
 type fakeRoom struct {
@@ -66,7 +77,7 @@ func (rm *fakeRoom) hasChannel(id string) bool {
 }
 
 func newFakeGateway(t *testing.T) *fakeGateway {
-	return &fakeGateway{t: t, rooms: map[string]*fakeRoom{}, sent: map[string]int{}, connected: map[string]bool{}}
+	return &fakeGateway{t: t, rooms: map[string]*fakeRoom{}, sent: map[string]int{}, connected: map[string]bool{}, streams: map[string]*fakeStream{}}
 }
 
 func (g *fakeGateway) subject(r *http.Request) string {
@@ -214,60 +225,87 @@ func (g *fakeGateway) handler() http.Handler {
 		}
 		writeJSONT(w, map[string]int{"sequence": seq})
 	})
-	mux.HandleFunc("GET /v1/rooms/{id}/events", func(w http.ResponseWriter, r *http.Request) {
-		q := r.URL.Query()
-		id := r.PathValue("id")
+	mux.HandleFunc("GET /v1/my/events", func(w http.ResponseWriter, r *http.Request) {
 		sub := g.subject(r)
-		ch := make(chan string, 1024)
-		g.mu.Lock()
-		rm := g.rooms[id]
-		if rm == nil || !rm.members[sub] {
-			g.mu.Unlock()
-			http.Error(w, "not a member", http.StatusForbidden)
+		if sub == "" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		open := q.Get("open")
-		if q.Get("access_token") == "" || q.Get("lanes") != "1" || q.Get("includePeople") != "1" || !rm.hasChannel(open) || q.Has("allChannels") || r.Header.Get("Authorization") != "" {
+		if r.URL.Query().Get("access_token") == "" || r.Header.Get("Authorization") != "" {
+			g.mu.Lock()
 			g.badQuery = append(g.badQuery, r.URL.RawQuery)
+			g.mu.Unlock()
 		}
-		var replay []string
-		for _, e := range rm.events {
-			if e.channel == open {
-				replay = append(replay, e.frame)
-			}
-		}
-		rm.subs[ch] = open
-		key := sub + "/" + id
-		first := !g.connected[key]
-		g.connected[key] = true
+		st := &fakeStream{sub: sub, ch: make(chan string, 1024), drop: make(chan struct{})}
+		g.mu.Lock()
+		id := fmt.Sprintf("ms_%d", len(g.streams)+1)
+		g.streams[id] = st
 		g.mu.Unlock()
 		defer func() {
 			g.mu.Lock()
-			delete(rm.subs, ch)
+			if st.room != nil {
+				delete(st.room.subs, st.ch)
+			}
+			delete(g.streams, id)
 			g.mu.Unlock()
 		}()
 		w.Header().Set("Content-Type", "text/event-stream")
 		fl := w.(http.Flusher)
-		io.WriteString(w, ": connected\n\n")
-		for _, f := range replay {
-			io.WriteString(w, f)
-		}
+		data, _ := json.Marshal(map[string]any{"kind": "stream_opened", "payload": map[string]string{"streamId": id}})
+		fmt.Fprintf(w, "event: stream_opened\ndata: %s\n\n", data)
 		fl.Flush()
-		var drop <-chan time.Time
-		if first && g.dropAfter > 0 {
-			drop = time.After(g.dropAfter)
-		}
 		for {
 			select {
 			case <-r.Context().Done():
 				return
-			case <-drop:
+			case <-st.drop:
 				return
-			case f := <-ch:
+			case f := <-st.ch:
 				io.WriteString(w, f)
 				fl.Flush()
 			}
 		}
+	})
+	mux.HandleFunc("POST /v1/my/events/scope", func(w http.ResponseWriter, r *http.Request) {
+		var body wire.StreamScopeRequest
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		sub := g.subject(r)
+		g.mu.Lock()
+		defer g.mu.Unlock()
+		st := g.streams[body.StreamID]
+		if st == nil || st.sub != sub {
+			http.Error(w, "no such stream", http.StatusNotFound)
+			return
+		}
+		if body.Open == nil || len(body.Open.Channels) != 1 || body.Rooms == nil {
+			g.badQuery = append(g.badQuery, fmt.Sprintf("scope %+v", body))
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		rm := g.rooms[body.Open.RoomID]
+		if rm == nil || !rm.members[sub] || !rm.hasChannel(body.Open.Channels[0]) {
+			http.Error(w, "not a member", http.StatusForbidden)
+			return
+		}
+		open := body.Open.Channels[0]
+		if st.room != nil {
+			delete(st.room.subs, st.ch)
+		}
+		st.room = rm
+		// Like realtime: the room's replay after the client's sequence.
+		for k, e := range rm.events {
+			if e.channel == open && int64(k+1) > body.Open.Since {
+				st.ch <- e.frame
+			}
+		}
+		rm.subs[st.ch] = open
+		key := sub + "/" + body.Open.RoomID
+		if !g.connected[key] && g.dropAfter > 0 {
+			drop := st.drop
+			time.AfterFunc(g.dropAfter, func() { close(drop) })
+		}
+		g.connected[key] = true
+		w.WriteHeader(http.StatusNoContent)
 	})
 	return mux
 }
@@ -392,9 +430,9 @@ func TestEndToEndReconnectCatchesUpFromReplay(t *testing.T) {
 	if rep.Streams.Disconnects != 6 || rep.Streams.Reconnects != 6 || rep.Streams.Opened != 12 || rep.Streams.OpenAtEnd != 6 {
 		t.Fatalf("streams: %+v", rep.Streams)
 	}
-	// The replay redelivers what each stream already had (extra) and fills
-	// the gap, so nothing is lost.
-	if rep.Deliver.Lost != 0 || rep.Deliver.Extra == 0 {
+	// The reopened stream is scoped from its last sequence: the replay fills
+	// the gap (a message sent while it was down arrives as extra).
+	if rep.Deliver.Lost != 0 {
 		t.Fatalf("delivery: %+v", rep.Deliver)
 	}
 }

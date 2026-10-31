@@ -31,7 +31,8 @@ import (
 //     (replyTopic);
 //   - a plugin delivery's ack that reached another replica goes to the
 //     replica that sent the delivery (replicaTopic), named by the delivery
-//     id's prefix;
+//     id's prefix; a member stream's scope request likewise to the replica
+//     holding the stream (its id's prefix);
 //
 // A budget shared out per replica divides by the live count (count, the
 // Redis census).
@@ -85,7 +86,16 @@ type replicaMsg struct {
 	Catalog      *wire.ComponentsChanged  `json:"catalog,omitempty"`
 	Notification *wire.PluginNotification `json:"notification,omitempty"`
 	Ack          *replicaAck              `json:"ack,omitempty"`
+	Scope        *replicaScope            `json:"scope,omitempty"`
 	Reply        json.RawMessage          `json:"reply,omitempty"`
+}
+
+// replicaScope is a member stream's scope, checked by the replica that took
+// the request, for the replica holding the stream.
+type replicaScope struct {
+	StreamID string      `json:"streamId"`
+	UserID   string      `json:"userId"`
+	Scope    streamScope `json:"scope"`
 }
 
 type replicaAck struct {
@@ -271,11 +281,64 @@ func (p *Replicas) remoteAck(subject, id string, ack wire.PluginDeliveryAck) boo
 	return found
 }
 
+// onAck answers a call addressed to this replica (an ack, a stream's
+// scope) on a goroutine of its own: answering may wait on the bus (a scope
+// subscribes rooms), whose one receive loop delivers this message.
 func (p *Replicas) onAck(m replicaMsg) {
+	go p.answer(m)
+}
+
+func (p *Replicas) answer(m replicaMsg) {
+	if m.Scope != nil {
+		p.onScope(m)
+		return
+	}
 	if m.Ack == nil {
 		return
 	}
 	p.reply(m, p.svc.PluginHooks.ack(context.Background(), m.Ack.Subject, m.Ack.ID, m.Ack.Ack))
+}
+
+// ---------------------------------------------------------------- member streams
+
+// streamPrefix starts every member stream's id: the replica holding it, so
+// a scope request reaching another replica finds it (forwardScope).
+func (p *Replicas) streamPrefix() string {
+	if p == nil {
+		return ""
+	}
+	return p.origin + "."
+}
+
+// forwardScope hands a checked scope to the replica holding the stream
+// (its id's prefix names it).
+func (p *Replicas) forwardScope(streamID, userID string, sc streamScope) error {
+	origin, _, ok := strings.Cut(streamID, ".")
+	if !ok || origin == p.origin {
+		return errNoStream
+	}
+	r, err := p.call(replicaTopic(origin), replicaMsg{Scope: &replicaScope{StreamID: streamID, UserID: userID, Scope: sc}}, replicaCallTimeout)
+	if err != nil {
+		return errNoStream
+	}
+	var answer string
+	_ = json.Unmarshal(r, &answer)
+	switch answer {
+	case "":
+		return nil
+	case errNoStream.Error():
+		return errNoStream
+	default:
+		return errors.New(answer)
+	}
+}
+
+func (p *Replicas) onScope(m replicaMsg) {
+	answer := ""
+	if err := p.svc.applyScope(m.Scope.StreamID, m.Scope.UserID, m.Scope.Scope); err != nil {
+		answer = err.Error()
+	}
+	p.reply(m, answer)
 }
 
 // ---------------------------------------------------------------- members

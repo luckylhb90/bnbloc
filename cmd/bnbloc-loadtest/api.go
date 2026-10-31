@@ -12,11 +12,11 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/auth"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
 // api is the load generator's gateway client: the same public routes the web
@@ -316,19 +316,23 @@ func (a *api) sendChat(ctx context.Context, m *member, roomID, channelID, client
 	return a.do(ctx, m, http.MethodPost, "/v1/rooms/"+url.PathEscape(roomID)+"/chat", nil, body, nil)
 }
 
-// eventsURL is the room stream URL of the web room view (web/src/lib/sse.ts
-// subscribeRoom with the room view's scope): the session token as the
-// access_token query param (EventSource cannot set headers), a lanes stream
-// with the member's channel open (and named as channelId), includePeople=1.
-func (a *api) eventsURL(m *member, roomID, channelID, tz string, since int64) string {
-	q := "access_token=" + url.QueryEscape(m.token) + "&channelId=" + url.QueryEscape(channelID) + "&lanes=1&open=" + url.QueryEscape(channelID) + "&includePeople=1"
-	if since > 0 {
-		q += "&since=" + strconv.FormatInt(since, 10)
-	}
+// memberEventsURL is the web tab's member stream URL (web/src/lib/sse.ts):
+// the session token as the access_token query param (EventSource cannot
+// set headers). What it carries is scoped after it opens (scopeStream).
+func (a *api) memberEventsURL(m *member, tz string) string {
+	q := "access_token=" + url.QueryEscape(m.token)
 	if tz != "" {
 		q += "&tz=" + url.QueryEscape(tz)
 	}
-	return a.base + "/v1/rooms/" + url.PathEscape(roomID) + "/events?" + q
+	return a.base + "/v1/my/events?" + q
+}
+
+// scopeStream scopes a member stream: the rooms whose unread it carries and
+// the room and channel it shows, from the last sequence the client holds.
+func (a *api) scopeStream(ctx context.Context, m *member, streamID string, rooms []string, roomID, channelID string, since int64) error {
+	return a.do(ctx, m, http.MethodPost, "/v1/my/events/scope", nil, wire.StreamScopeRequest{
+		StreamID: streamID, Rooms: &rooms, Open: &wire.StreamOpen{RoomID: roomID, Channels: []string{channelID}, Since: since},
+	}, nil)
 }
 
 func truncate(s string, n int) string {

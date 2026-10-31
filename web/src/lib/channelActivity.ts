@@ -10,17 +10,27 @@ import type { ChannelActivityPayload } from "./wire.gen.ts";
 // The badge's ceiling: the server counts up to this many (store.MaxUnreadCount).
 const MAX_UNREAD = 100;
 
-/** The unread counts after one activity, and the last sequence seen per
- *  channel (the caller keeps it between activities). */
-export function applyChannelActivity(
-  unread: Readonly<Record<string, number>>,
+/** The new messages one activity adds to its channel's badge, or null when
+ *  it adds none (no messages, or a last sequence already seen). It records
+ *  the sequence in seen (the caller keeps it between activities), so it is
+ *  called once per activity, outside a state updater. */
+export function takeChannelActivity(
   seen: Record<string, number>,
   a: Partial<ChannelActivityPayload> | undefined,
-): Readonly<Record<string, number>> {
+): { readonly channelId: string; readonly messages: number } | null {
   const ch = a?.channelId;
   const last = a?.lastSeq ?? 0;
   const n = a?.messages ?? 0;
-  if (!ch || n <= 0 || last <= (seen[ch] ?? 0)) return unread;
+  if (!ch || n <= 0 || last <= (seen[ch] ?? 0)) return null;
   seen[ch] = last;
-  return { ...unread, [ch]: Math.min(MAX_UNREAD, (unread[ch] ?? 0) + n) };
+  return { channelId: ch, messages: n };
+}
+
+/** The unread counts with a taken activity added: pure, so it can be a
+ *  state updater (React may call one twice). */
+export function addChannelActivity(
+  unread: Readonly<Record<string, number>>,
+  taken: { readonly channelId: string; readonly messages: number },
+): Readonly<Record<string, number>> {
+  return { ...unread, [taken.channelId]: Math.min(MAX_UNREAD, (unread[taken.channelId] ?? 0) + taken.messages) };
 }

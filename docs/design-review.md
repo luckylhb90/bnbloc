@@ -235,7 +235,12 @@ dropped without a word; an agent's decks under `out/` never published
   require?
 - What does it do on error — does it signal failure the way we expect?
 - Does each test fake check what the real side checks (auth, conflicts,
-  uniqueness)? A fake that accepts what production refuses proves nothing.
+  uniqueness), and behave as it does (one delivery loop, async delivery, a
+  confirmation that comes through that loop)? A fake that accepts what
+  production refuses, or is kinder in timing, proves nothing: the in-memory
+  bus delivered on the publisher's goroutine, so a bus handler that waited
+  on the bus passed every test and stalled each replica for 5 s under load
+  (LESSONS.md, promoted 2026-10-31).
 - When the external side dies (a browser tab crashes, a daemon exits), does
   the person see that, in words, or a frozen picture? Read its own crash
   reports before guessing at causes.

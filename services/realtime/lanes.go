@@ -1,13 +1,10 @@
 package realtimehttp
 
 import (
-	"net/http"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/luckylhb90/bnbloc/internal/httpx"
-	"github.com/luckylhb90/bnbloc/internal/ids"
 	"github.com/luckylhb90/bnbloc/internal/notify"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/realtime"
@@ -15,21 +12,20 @@ import (
 )
 
 // Delivery lanes (docs/prd/2026-10-28-channels-and-threads.md §2.4): a
-// person's lanes stream (?lanes=1&open=<channel>,…) receives full events
-// only for the channels it has open, room-wide and room-lane events always
-// (wire.StreamLane, the one rule), and for every other channel it may read
-// a coalesced channel_activity, at most one a second per channel. Opening
-// another channel re-scopes the stream (POST .../events/scope) without
-// reopening it, so navigation replays nothing.
+// person's view of the room their member stream has open receives full
+// events only for the channels it has open, room-wide and room-lane events
+// always (wire.StreamLane, the one rule), and for every other channel it
+// may read a coalesced channel_activity, at most one a second per channel.
+// Opening another channel re-scopes the member stream (POST
+// /v1/my/events/scope) without reopening it, so navigation replays nothing.
 
 // activityEvery is the coalescing window of a channel's activity.
 const activityEvery = time.Second
 
-// laneStream is one lanes stream: its open channels (changed by a scope
-// request, on another goroutine) and its pending activity (the stream's
-// goroutine only).
+// laneStream is one view's lanes: its open channels and its pending
+// activity (the stream's goroutine only).
 type laneStream struct {
-	id, roomID, userID string
+	roomID, userID string
 
 	mu   sync.Mutex
 	open map[string]bool
@@ -38,34 +34,6 @@ type laneStream struct {
 	sentAt  map[string]time.Time
 	// counts are the events per lane since the last report (CountLaneEvents).
 	counts map[string]int
-}
-
-// laneStreams are the lanes streams this replica serves (a room's streams
-// live on its owner, where its scope requests are routed too).
-type laneStreams struct {
-	mu   sync.Mutex
-	byID map[string]*laneStream
-}
-
-func (l *laneStreams) add(ls *laneStream) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.byID == nil {
-		l.byID = map[string]*laneStream{}
-	}
-	l.byID[ls.id] = ls
-}
-
-func (l *laneStreams) remove(id string) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	delete(l.byID, id)
-}
-
-func (l *laneStreams) get(id string) *laneStream {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.byID[id]
 }
 
 // openSet parses the open channels (a comma list or a request's list):
@@ -84,7 +52,7 @@ func openSet(list []string) (map[string]bool, bool) {
 }
 
 func newLaneStream(roomID, userID string, open map[string]bool) *laneStream {
-	return &laneStream{id: ids.New("st_"), roomID: roomID, userID: userID, open: open,
+	return &laneStream{roomID: roomID, userID: userID, open: open,
 		pending: map[string]*wire.ChannelActivityPayload{}, sentAt: map[string]time.Time{}, counts: map[string]int{}}
 }
 
@@ -94,26 +62,10 @@ func (ls *laneStream) isOpen(channelID string) bool {
 	return ls.open[channelID]
 }
 
-func (ls *laneStream) openList() []string {
-	ls.mu.Lock()
-	defer ls.mu.Unlock()
-	out := make([]string, 0, len(ls.open))
-	for c := range ls.open {
-		out = append(out, c)
-	}
-	return out
-}
-
 func (ls *laneStream) setOpen(open map[string]bool) {
 	ls.mu.Lock()
 	defer ls.mu.Unlock()
 	ls.open = open
-}
-
-// opened is the stream's first event: its id and open channels.
-func (ls *laneStream) opened(now time.Time) wire.Event {
-	return wire.Event{Kind: wire.EventStreamOpened, RoomID: ls.roomID, AtUnixMs: now.UnixMilli(),
-		Payload: wire.StreamOpenedPayload{StreamID: ls.id, Open: ls.openList()}}
 }
 
 // note adds ev to its channel's activity. It returns the channel's activity
@@ -196,32 +148,4 @@ func mentionsSubscriber(ev wire.Event, userID string) bool {
 		}
 	}
 	return false
-}
-
-// handleStreamScope re-scopes the caller's lanes stream: the channels it has
-// open from now on. The stream is the caller's own in this room; read access
-// is asked of every event it delivers, so naming a channel grants nothing.
-func (s *Service) handleStreamScope(w http.ResponseWriter, r *http.Request) {
-	roomID, userID, ok := s.roomCaller(w, r)
-	if !ok {
-		return
-	}
-	var body wire.StreamScopeRequest
-	if !httpx.DecodeJSON(w, r, 4<<10, &body) {
-		return
-	}
-	open, ok := openSet(body.Open)
-	if !ok {
-		httpx.Error(w, "open: at most 4 channel ids", http.StatusBadRequest)
-		return
-	}
-	ls := s.lanes.get(body.StreamID)
-	if ls == nil || ls.roomID != roomID || ls.userID != userID {
-		// Gone (closed, or served by another replica after an ownership
-		// move): the client's stream reconnects with its open channels.
-		httpx.Error(w, "no such stream", http.StatusNotFound)
-		return
-	}
-	ls.setOpen(open)
-	w.WriteHeader(http.StatusNoContent)
 }

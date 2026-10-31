@@ -399,21 +399,6 @@ wrong or skip; ask only for what the platform cannot know.
 Evidence: commits de4f5bae, e8ee14e3 (and private 499b177).
 Seen 1× (2026-10-17).
 
-### Make a test fake refuse what the real side refuses
-
-The media tool's unit test passed against a fake gateway that took calls with
-no bearer; the real gateway answered every call 401, and no test published two
-images into one room, where every image got one artifact id. A day later a
-browser component's fake decision model answered a one-choice question that
-the real API refuses, so every step on a page with one link failed. A fake
-that accepts what production refuses is a test that cannot fail: give it the
-real side's auth, conflict and bounds checks.
-
-Evidence: docs/bugs/2026-10-17-media-tools-never-reach-the-gateway.md (fixed
-in 01a44b7f on 2026-10-18; lens 9 now asks); the browser component's commit
-"Ask the decision API only what it accepts" (0.4.11).
-Seen 2× (2026-10-18, 2026-10-19).
-
 ### Run `scripts/ci.sh go` before every push, not only before a release
 
 A store change added tables to `internal/store/schema.sql` without the
@@ -674,6 +659,16 @@ Evidence: commit e8589cdc (the test as landed).
 Seen 1× (2026-10-16).
 
 ## Promoted
+
+- **Make a test fake refuse what the real side refuses, and time things as
+  it does.** Seen 3× (2026-10-18 a fake gateway took calls with no bearer;
+  2026-10-19 a fake decision model answered a question the real API
+  refuses; 2026-10-31 the in-memory bus delivered on the publisher's
+  goroutine, so a member stream's forwarded scope, answered inside the
+  Redis bus's one receive loop and waiting on a subscription that loop
+  confirms, passed every test and stalled each replica's bus for 5 s in the
+  first load run). Promoted 2026-10-31 → `docs/design-review.md` lens 9 and
+  AGENTS.md "Hard-won traps" (a bus handler never waits on the bus).
 
 - **Stop and delete only what you started, by its own handle, never by a
   pattern.** Seen 3× (2026-10-13 a cleanup removed every directory under a

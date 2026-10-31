@@ -105,10 +105,19 @@ func run(ctx context.Context, cfg config, logw io.Writer) (*Report, error) {
 
 	tr := newTracker()
 	ss := newStreamStats()
+	astats := newActivityStats()
+	// Every tab of a member carries the unread of all the member's rooms.
+	memberRooms := map[*member][]string{}
+	for _, r := range rooms {
+		for _, m := range r.members {
+			memberRooms[m] = append(memberRooms[m], r.id)
+		}
+	}
 	var streams []*stream
 	for _, r := range rooms {
 		for k, m := range r.members {
-			st := &stream{id: len(streams), room: r, channel: r.channels[k%len(r.channels)], member: m, api: a, tracker: tr, stats: ss, idle: cfg.StreamIdle, tz: tzFor(cfg.TZ, len(streams))}
+			st := &stream{id: len(streams), room: r, channel: r.channels[k%len(r.channels)], member: m, api: a, tracker: tr, stats: ss,
+				rooms: memberRooms[m], unread: astats, idle: cfg.StreamIdle, tz: tzFor(cfg.TZ, len(streams))}
 			r.streams = append(r.streams, st)
 			streams = append(streams, st)
 		}
@@ -148,26 +157,6 @@ func run(ctx context.Context, cfg config, logw io.Writer) (*Report, error) {
 		stopStreams()
 		streamWG.Wait()
 	}
-	// Each member's activity stream (the web shell's), opened over the same
-	// ramp-up.
-	astats := newActivityStats()
-	var activities []*memberActivity
-	if cfg.MemberActivity {
-		activities = activitiesFor(rooms, a, astats, cfg.StreamIdle)
-		for i, ma := range activities {
-			delay := cfg.RampUp * time.Duration(i) / time.Duration(max(len(activities), 1))
-			streamWG.Add(1)
-			go func() {
-				defer streamWG.Done()
-				select {
-				case <-streamCtx.Done():
-					return
-				case <-time.After(delay):
-				}
-				ma.run(streamCtx)
-			}()
-		}
-	}
 	logf("opening %d streams over %s", len(streams), cfg.RampUp)
 	if !sleepCtx(ctx, cfg.RampUp) || !waitAllLive(ctx, streams, cfg.Settle) {
 		stopAll()
@@ -187,12 +176,10 @@ func run(ctx context.Context, cfg config, logw io.Writer) (*Report, error) {
 	}
 	stopProgress()
 	report.Streams.OpenAtEnd = countLive(streams)
-	if cfg.MemberActivity {
-		// Activity streams send what changed once a second: wait out the
-		// last one.
-		sleepCtx(ctx, activityLastFlush)
-		report.MemberActivity = memberActivityReport(activities, astats, rooms)
-	}
+	// The streams send what changed in their unread once a second: wait
+	// out the last one.
+	sleepCtx(ctx, activityLastFlush)
+	report.Unread = unreadReport(streams, astats, rooms)
 	stopAll()
 
 	res := tr.result()

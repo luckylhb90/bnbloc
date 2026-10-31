@@ -2,8 +2,11 @@ package realtime
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
+	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/wire"
@@ -23,6 +26,12 @@ type Topics interface {
 	// subscription is in place: a message published after that is
 	// delivered. lost reports that messages may have been missed (a broken
 	// connection that came back). One subscription per topic and endpoint.
+	//
+	// An endpoint delivers every topic's messages, and confirms each
+	// subscription, from one receive loop (a Redis subscriber connection):
+	// deliver and lost must not block, nor wait on anything that waits on
+	// the endpoint (a Subscribe, a call answered through it). Work that
+	// may wait runs on a goroutine of its own.
 	Subscribe(topic string, deliver func(msg []byte), lost func()) (cancel func(), err error)
 }
 
@@ -64,27 +73,45 @@ func (b roomBus) Subscribe(roomID string, deliver func(wire.Event), lost func())
 }
 
 // MemoryBus connects endpoints in one process: replicas in tests, and
-// anything else that runs several hubs side by side.
+// anything else that runs several hubs side by side. Each endpoint delivers
+// from one receive loop of its own, as a Redis subscriber connection does
+// (Topics.Subscribe), so a handler that waits on its endpoint stalls here
+// too.
 type MemoryBus struct {
 	mu   sync.Mutex
 	subs map[string]map[*memorySub]struct{}
+	eps  []*memoryEndpoint
 }
 
 type memorySub struct {
 	from    *memoryEndpoint
 	deliver func([]byte)
 	lost    func()
-	// mu orders one subscription's deliveries.
-	mu sync.Mutex
+	// gone is set at cancel: a message queued before it is dropped.
+	gone atomic.Bool
 }
 
-type memoryEndpoint struct{ bus *MemoryBus }
+// memoryEndpoint is one replica's endpoint: its receive loop runs queued
+// work in order.
+type memoryEndpoint struct {
+	bus   *MemoryBus
+	mu    sync.Mutex
+	queue []func()
+	wake  chan struct{}
+}
 
 // NewMemoryBus returns an empty in-process bus.
 func NewMemoryBus() *MemoryBus { return &MemoryBus{subs: map[string]map[*memorySub]struct{}{}} }
 
 // Endpoint returns a new endpoint of the bus (one per replica).
-func (b *MemoryBus) Endpoint() Topics { return &memoryEndpoint{bus: b} }
+func (b *MemoryBus) Endpoint() Topics {
+	e := &memoryEndpoint{bus: b, wake: make(chan struct{}, 1)}
+	b.mu.Lock()
+	b.eps = append(b.eps, e)
+	b.mu.Unlock()
+	go e.receive()
+	return e
+}
 
 // Lose tells every subscription it may have missed messages, as a broken
 // connection would (tests).
@@ -98,7 +125,24 @@ func (b *MemoryBus) Lose() {
 	}
 	b.mu.Unlock()
 	for _, s := range subs {
-		s.lost()
+		s.from.enqueue(func() {
+			if !s.gone.Load() {
+				s.lost()
+			}
+		})
+	}
+}
+
+// Settle waits until every endpoint has delivered what was published
+// before it was called (tests).
+func (b *MemoryBus) Settle() {
+	b.mu.Lock()
+	eps := slices.Clone(b.eps)
+	b.mu.Unlock()
+	for _, e := range eps {
+		done := make(chan struct{})
+		e.enqueue(func() { close(done) })
+		<-done
 	}
 }
 
@@ -107,6 +151,32 @@ func (b *MemoryBus) Subscribers(topic string) int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return len(b.subs[topic])
+}
+
+func (e *memoryEndpoint) enqueue(f func()) {
+	e.mu.Lock()
+	e.queue = append(e.queue, f)
+	e.mu.Unlock()
+	select {
+	case e.wake <- struct{}{}:
+	default:
+	}
+}
+
+func (e *memoryEndpoint) receive() {
+	for range e.wake {
+		for {
+			e.mu.Lock()
+			if len(e.queue) == 0 {
+				e.mu.Unlock()
+				break
+			}
+			f := e.queue[0]
+			e.queue = e.queue[1:]
+			e.mu.Unlock()
+			f()
+		}
+	}
 }
 
 func (e *memoryEndpoint) Publish(topic string, msg []byte) error {
@@ -120,9 +190,11 @@ func (e *memoryEndpoint) Publish(topic string, msg []byte) error {
 	}
 	b.mu.Unlock()
 	for _, s := range to {
-		s.mu.Lock()
-		s.deliver(msg)
-		s.mu.Unlock()
+		s.from.enqueue(func() {
+			if !s.gone.Load() {
+				s.deliver(msg)
+			}
+		})
 	}
 	return nil
 }
@@ -136,14 +208,30 @@ func (e *memoryEndpoint) Subscribe(topic string, deliver func([]byte), lost func
 	}
 	b.subs[topic][s] = struct{}{}
 	b.mu.Unlock()
-	return func() {
-		b.mu.Lock()
-		defer b.mu.Unlock()
-		delete(b.subs[topic], s)
-		if len(b.subs[topic]) == 0 {
-			delete(b.subs, topic)
-		}
-	}, nil
+	// The confirmation comes through the receive loop, as Redis's does.
+	confirmed := make(chan struct{})
+	e.enqueue(func() { close(confirmed) })
+	select {
+	case <-confirmed:
+	case <-time.After(memorySubscribeTimeout):
+		b.forget(topic, s)
+		return nil, fmt.Errorf("realtime bus: subscribe %s: not confirmed in %s (the receive loop is blocked)", topic, memorySubscribeTimeout)
+	}
+	return func() { b.forget(topic, s) }, nil
+}
+
+// memorySubscribeTimeout is how long a subscription waits for its
+// confirmation, as the Redis bus's does.
+const memorySubscribeTimeout = 5 * time.Second
+
+func (b *MemoryBus) forget(topic string, s *memorySub) {
+	s.gone.Store(true)
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	delete(b.subs[topic], s)
+	if len(b.subs[topic]) == 0 {
+		delete(b.subs, topic)
+	}
 }
 
 // Claims is a claim on a key for a while, shared by every replica: the

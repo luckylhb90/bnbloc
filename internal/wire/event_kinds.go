@@ -52,9 +52,14 @@ type EventKindSpec struct {
 	Replay bool `json:"replay,omitempty"`
 	// Revocation kinds end access to the room (a member removed, the room
 	// deleted): the affected streams close after delivering them, and they
-	// are never replayed. They store nothing but take the room's sequence,
-	// so every replica delivers them in order with the room's messages.
+	// are never replayed.
 	Revocation bool `json:"revocation,omitempty"`
+	// Sequenced kinds change who may read what (the revocations, a
+	// section's membership): they store nothing but take the room's
+	// sequence, so every replica delivers them in order with the room's
+	// messages and a message stored after one never reaches a reader it
+	// took access from.
+	Sequenced bool `json:"sequenced,omitempty"`
 	// ChannelScoped kinds carry the channelId of the message or channel they
 	// concern; a single-channel stream receives them only for its channel.
 	ChannelScoped bool `json:"channelScoped,omitempty"`
@@ -105,8 +110,8 @@ var RoomEventKinds = []EventKindSpec{
 	{Name: EventArtifactUpdated, CrossChannel: true, Preview: true},
 	{Name: EventArtifactState, CrossChannel: true, Preview: true},
 	{Name: EventMemberJoined, Preview: true},
-	{Name: EventMemberRemoved, Revocation: true, Preview: true},
-	{Name: EventRoomDeleted, Revocation: true, Preview: true},
+	{Name: EventMemberRemoved, Revocation: true, Sequenced: true, Preview: true},
+	{Name: EventRoomDeleted, Revocation: true, Sequenced: true, Preview: true},
 	{Name: EventContentSaved},
 	{Name: EventContentUsesChanged},
 	{Name: EventAppChanged},
@@ -117,7 +122,7 @@ var RoomEventKinds = []EventKindSpec{
 	// A members-only section's membership changed (bnbloc-room):
 	// room-wide, so listings reload and realtime re-scopes the member's
 	// streams at once (C11: never shown to a preview).
-	{Name: EventSectionMembership},
+	{Name: EventSectionMembership, Sequenced: true},
 	// The room's settings or a member's agreement changed (bnbloc-room):
 	// room-wide, so realtime's room state reads the room again.
 	{Name: EventRoomUpdated},

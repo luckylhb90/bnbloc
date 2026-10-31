@@ -935,7 +935,8 @@ hour; `@channel` is open to every member who may post (C5's proposal).
 **Slice 4, delivery lanes** (§2.4):
 
 - A person's stream may be a lanes stream (`?lanes=1&open=<channel>,…`, at
-  most `wire.MaxStreamOpen` open): full events for the open channels;
+  most `wire.MaxStreamOpen` open; since 2026-10-31 the open room of the
+  member stream, `docs/prd/2026-10-30-replicas-without-owners.md` §9): full events for the open channels;
   room-wide kinds and the room lane (agent jobs' state, tasks, thread
   summaries, deliverables) always; for every other channel the reader may
   read, a `channel_activity` (its last sequence, how many events, whether

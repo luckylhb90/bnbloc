@@ -75,6 +75,7 @@ func TestBusDeliversOtherReplicasMessages(t *testing.T) {
 	if _, err := b.PublishCommit(chatEvent("r", "three"), chatDurable(j, "three")); err != nil {
 		t.Fatal(err)
 	}
+	bus.Settle() // "three" reached replica a before its typing hint
 	a.Publish(wire.Event{RoomID: "r", Kind: "presence_typing"})
 	for _, sub := range []*Subscriber{onA, onB} {
 		for want := int64(1); want <= 3; want++ {
@@ -187,6 +188,7 @@ func TestBusLostReadsTheDifference(t *testing.T) {
 		}
 	}
 	bus.Lose()
+	bus.Settle()
 	if !sub.TakeGap() {
 		t.Fatal("a lost subscription did not tell the stream to read the difference")
 	}

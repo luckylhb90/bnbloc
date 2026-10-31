@@ -88,11 +88,12 @@ type Service struct {
 	// postMarks are the members' last posts (slow mode) and their follow
 	// marks written behind (post_marks.go).
 	postMarks postMarks
-	// lanes are the lanes streams this replica serves (lanes.go).
-	lanes      laneStreams
-	Hub        *realtime.Hub
-	Membership membership.Directory
-	Presence   *realtime.Presence
+	// memberStreams are the member streams this replica serves
+	// (member_stream.go).
+	memberStreams memberStreams
+	Hub           *realtime.Hub
+	Membership    membership.Directory
+	Presence      *realtime.Presence
 	// Roster tracks which agents each member's bridge advertises as reachable in
 	// a room, so the composer picker offers real drivable agents without the
 	// gateway reaching any user's machine (remote-safe). Lazily created in
@@ -312,7 +313,6 @@ func (s *Service) Handler() http.Handler {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/rooms/{roomId}/events", s.handleEvents)
-	mux.HandleFunc("POST /v1/rooms/{roomId}/events/scope", s.handleStreamScope)
 	mux.HandleFunc("GET /v1/rooms/{roomId}/agents", s.handleAgents)
 	mux.HandleFunc("POST /v1/rooms/{roomId}/chat", s.handleChat)
 	mux.HandleFunc("POST /v1/rooms/{roomId}/threads", s.handleOpenThread)
@@ -327,9 +327,10 @@ func (s *Service) Handler() http.Handler {
 	mux.HandleFunc("PATCH /v1/rooms/{roomId}/messages/{seq}", s.handleEditMessage)
 	mux.HandleFunc("GET /v1/rooms-unread", s.handleUnread)
 	mux.HandleFunc("GET /v1/my/unread", s.handleMyUnread)
-	// The member's activity stream: unread across their rooms, pushed
-	// (member_activity.go).
-	mux.HandleFunc("GET /v1/my/activity", s.handleMyActivity)
+	// The member stream, a web tab's one stream: its rooms' unread and the
+	// room it shows (member_stream.go).
+	mux.HandleFunc("GET /v1/my/events", s.handleMyEvents)
+	mux.HandleFunc("POST /v1/my/events/scope", s.handleMyEventsScope)
 	// A job's live view (job_live.go).
 	mux.HandleFunc("GET /v1/rooms/{roomId}/jobs/{jobId}/live/frame", s.handleLiveFrame)
 	mux.HandleFunc("POST /v1/rooms/{roomId}/jobs/{jobId}/live/control", s.handleLiveControl)
@@ -558,22 +559,6 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 	// such a channel's event can never reach an agent's stream. Room-wide
 	// events (empty ChannelID: presence, roster, agent state) always deliver.
 	allChannels := r.URL.Query().Get("allChannels") == "1"
-	// A person's lanes stream (lanes.go): every channel they may read, full
-	// only where open; anyone else's ?lanes=1 is an allChannels stream.
-	var lane *laneStream
-	if r.URL.Query().Get("lanes") == "1" {
-		allChannels = true
-		if human {
-			open, ok := openSet(strings.Split(r.URL.Query().Get("open"), ","))
-			if !ok {
-				httpx.Error(w, "open: at most 4 channel ids", http.StatusBadRequest)
-				return
-			}
-			lane = newLaneStream(roomID, userID, open)
-			s.lanes.add(lane)
-			defer s.lanes.remove(lane.id)
-		}
-	}
 	var agents *agentFilter
 	if allChannels && (r.URL.Query().Get("includePeople") != "1" || !human) {
 		agents = &agentFilter{svc: s, ctx: r.Context(), roomID: roomID, verdict: map[string]bool{}}
@@ -682,61 +667,13 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 		}
 		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Kind, data)
 	}
-	// write streams one event; it reports whether the subscriber's access
-	// ended (member removed / room deleted): the client has been told why, so
-	// the stream closes rather than running until it reconnects.
-	write := func(ev wire.Event) (revoked bool) {
-		readers.observe(ev)
-		if wire.InternalKind(ev.Kind) {
-			return false
-		}
-		if !allChannels && ev.ChannelID != "" && ev.ChannelID != channelID && !wire.CrossChannelKind(ev.Kind) {
-			return false
-		}
-		if agents != nil && agents.skip(ev) {
-			return false
-		}
-		if ev.ChannelID != "" && !readers.mayRead(ev.ChannelID) {
-			// A one-channel stream whose channel the reader no longer
-			// reads (they left its section, or it moved into one) ends:
-			// its reader reopens into the refusal.
-			return !allChannels && ev.ChannelID == channelID
-		}
-		// A one-channel stream that is not a person's was admitted to its
-		// channel when it opened; a settings change can bar agents since:
-		// the stream ends (on a failed lookup too, fail closed), and the
-		// reader reopens into the refusal.
-		if ev.Kind == wire.EventChannelUpdated && !allChannels && !human {
-			if barred, err := s.agentsBarred(ctx, roomID, channelID); err != nil || barred {
-				return true
-			}
-		}
-		// A preview reads the feed and the deliverables, not the room's agent
-		// runs, tasks, live views or rosters (wire.PreviewedKind).
-		if m.Preview && !wire.PreviewedKind(ev.Kind) {
-			return false
-		}
-		if lane != nil {
-			switch lane.lane(ev) {
-			case wire.LaneNone:
-				return false
-			case wire.LaneActivity:
-				if a, due := lane.note(ev, time.Now()); due {
-					send(a)
-				}
-				return accessRevoked(ev, userID)
-			}
-		}
-		send(ev)
-		return accessRevoked(ev, userID)
-	}
-	var activityTick <-chan time.Time
-	if lane != nil {
-		send(lane.opened(time.Now()))
-		t := time.NewTicker(activityEvery)
-		defer t.Stop()
-		activityTick = t.C
-	}
+	// write streams one event through the room's view; it reports whether
+	// the subscriber's access ended (member removed / room deleted): the
+	// client has been told why, so the stream closes rather than running
+	// until it reconnects.
+	view := &roomView{s: s, ctx: ctx, roomID: roomID, userID: userID, m: m, human: human,
+		allChannels: allChannels, channelID: channelID, agents: agents, readers: readers}
+	write := func(ev wire.Event) (revoked bool) { return view.write(ev, send) }
 	// Who is here, written to this stream alone (RoomViews.Snapshot); joins
 	// and leaves follow on the room's stream.
 	if !m.Preview {
@@ -754,15 +691,6 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-ctx.Done():
 			return
-		case now := <-activityTick:
-			lane.report(s.Hub.Metrics)
-			lane.forgetOpen()
-			if due := lane.flush(now); len(due) > 0 {
-				for _, a := range due {
-					send(a)
-				}
-				flusher.Flush()
-			}
 		case <-heartbeat.C:
 			// The revocation event is live-only and may never reach this
 			// replica (an ownership move, a failed ingest): the stream
@@ -1069,7 +997,7 @@ func (s *Service) messageChannel(ctx context.Context, roomID string, seq int64) 
 // publisher. clientMsgID is the optional send-idempotency id (chat only; ""
 // otherwise). With no chat store (in-memory dev) nothing is stored.
 func (s *Service) durable(ctx context.Context, ev wire.Event, author, clientMsgID string) (realtime.Durable, error) {
-	if spec, _ := wire.LookupEventKind(ev.Kind); s.Chat != nil && spec.Revocation {
+	if spec, _ := wire.LookupEventKind(ev.Kind); s.Chat != nil && spec.Sequenced {
 		// Stored nothing of, but numbered by the store with the room's
 		// messages (realtime.Sequencer): ordered with them on every replica.
 		tid, err := tenant.Require(ctx)
@@ -1429,24 +1357,11 @@ func (s *Service) handleUnread(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(reply)
 }
 
-// namedRooms is the ?rooms= list a member's cross-room read names (unread,
-// the activity stream): normalized, each once, at most wire.MaxUnreadRooms.
-// Each is checked for membership where it is read.
+// namedRooms is the ?rooms= list a cross-room read names
+// (normalizeRooms), at most wire.MaxUnreadRooms. Each is checked for
+// membership where it is read.
 func namedRooms(r *http.Request) ([]string, error) {
-	var rooms []string
-	seen := map[string]bool{}
-	for _, raw := range strings.Split(r.URL.Query().Get("rooms"), ",") {
-		roomID, err := roomctx.Normalize(strings.TrimSpace(raw))
-		if err != nil || roomID == "" || seen[roomID] {
-			continue
-		}
-		seen[roomID] = true
-		rooms = append(rooms, roomID)
-	}
-	if len(rooms) > wire.MaxUnreadRooms {
-		return nil, fmt.Errorf("too many rooms (max %d)", wire.MaxUnreadRooms)
-	}
-	return rooms, nil
+	return normalizeRooms(strings.Split(r.URL.Query().Get("rooms"), ","), wire.MaxUnreadRooms)
 }
 
 // unreadFor is the member's unread state in rooms (those they are a member

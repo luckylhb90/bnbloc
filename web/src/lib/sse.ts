@@ -6,57 +6,341 @@ import { normalizeRoomEvent, type RoomEvent } from "./roomEvents.ts";
 import { ROOM_EVENT_KINDS } from "./roomEventKinds.ts";
 import { roomPath } from "./roomId.ts";
 import { currentTenantPolicy } from "./tenantPolicy.ts";
-import { UnreadDeltaKind, UnreadStateKind, type UnreadDeltaPayload, type UnreadReply } from "./wire.gen.ts";
+import {
+  MaxStreamOpen,
+  MaxStreamRooms,
+  RoomEventKinds,
+  UnreadDeltaKind,
+  UnreadStateKind,
+  type StreamOpenedPayload,
+  type StreamScopeRequest,
+  type UnreadDeltaPayload,
+  type UnreadReply,
+} from "./wire.gen.ts";
 
-// Which events a room subscription receives. The default (the room view)
-// is every channel; includePeople also admits the room's people chat, which
-// the server withholds from every all-channels stream that does not ask for
-// it (agent streams never do). channelOnly narrows the stream to channelId
-// (plus room-wide events) — the people-chat panel's own stream.
-export interface RoomStreamScope {
-  readonly includePeople?: boolean;
-  readonly channelOnly?: boolean;
-  // lanes: full events only for the open channel (channelId), a coalesced
-  // channel_activity for every other (channels PRD §2.4); rescope changes
-  // the open channel without reopening the stream.
-  readonly lanes?: boolean;
-}
-
-// A room subscription: call it to unsubscribe; rescope moves a lanes
-// stream to other open channels (a no-op for any other stream).
-export interface RoomSubscription {
-  (): void;
-  readonly rescope: (open: readonly string[]) => void;
-}
-
-// subscribeRoom opens an SSE stream for a room's live events. EventSource cannot
-// set headers, so the session token is passed as an access_token query param
-// (the gateway accepts it). Returns an unsubscribe function.
+// The event streams (SSE). A web tab holds ONE: the member stream (GET
+// /v1/my/events, docs/prd/2026-10-30-replicas-without-owners.md §9), which
+// carries the unread of the tab's rooms and the room the tab shows. The
+// room view, a thread panel and the people-chat panel watch their channels
+// on it (watchRoom), the shell its unread (watchUnread); what they watch is
+// told to the server as the stream's scope (POST /v1/my/events/scope),
+// never by reopening it. subscribeRoom is a room's own stream, for the
+// pages that are one room and nothing else (the standalone preview and
+// live views).
 //
-// EventSource on its own dies permanently on a 401/403 (or keeps retrying with a
-// now-stale token) and gives up on some network drops, so the room silently goes
-// dark. We wrap it in a bounded exponential-backoff reconnect loop: on error we
-// close the socket, report status:down, and re-open with a fresh token after a
-// growing (capped) delay. After a run of consecutive failures — the signature of
-// a stale token EventSource can't recover from — we invoke onAuthError to mint a
-// fresh session token, then reconnect with it. onStatus(true) fires on a live
-// connection and onStatus(false) while reconnecting, so the UI can show
-// live/reconnecting. The returned unsubscribe stops all of this permanently.
+// EventSource cannot set headers, so the session token is passed as an
+// access_token query param (the gateway accepts it on these two streams
+// only). EventSource on its own dies on a 401/403 or keeps retrying with a
+// stale token, so both are wrapped in a bounded exponential-backoff
+// reconnect loop that mints a fresh session after a run of failures.
+
+const BASE_DELAY_MS = 1000;
+// A replica that stops ends only its own streams: one that failed a few
+// times must not then wait half a minute (the reopen resumes cheaply).
+const MAX_DELAY_MS = 8_000;
+// After this many consecutive failures the token is refreshed before the
+// next attempt.
+const REAUTH_AFTER = 3;
+
+function backoff(attempts: number): number {
+  const delay = Math.min(MAX_DELAY_MS, BASE_DELAY_MS * 2 ** Math.min(attempts, 5));
+  return delay * (0.5 + Math.random() * 0.5);
+}
+
+function tzQuery(): string {
+  // Member locations: the time zone is sent only when the organization has
+  // them on (pulse_geography). Off, the zone never leaves the device.
+  return currentTenantPolicy()?.pulseGeography ? `&tz=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}` : "";
+}
+
+function parse(raw: string): RoomEvent | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as RoomEvent;
+  } catch {
+    // Not an event (a proxy's error page, a truncated frame): dropped,
+    // never rendered as a kindless row the feed takes for an agent reply.
+    return null;
+  }
+}
+
+const crossChannel = new Set(RoomEventKinds.filter((k) => k.crossChannel).map((k) => k.name as string));
+
+// ---------------------------------------------------------------- the member stream
+
+/** One channel of a room a surface shows (the room view's channel, an
+ * open thread, the people chat). channelOnly: only that channel's events
+ * (and room-wide and cross-channel ones); else every event of the room. */
+export interface RoomWatch {
+  /** Moves the watch to another channel of its room (no reopen). */
+  readonly setChannel: (channelId: string) => void;
+  /** Ends the watch. */
+  readonly off: () => void;
+}
+
+export interface UnreadHandlers {
+  readonly onState: (state: UnreadReply) => void;
+  readonly onDelta: (delta: UnreadDeltaPayload) => void;
+  readonly onStatus?: (up: boolean) => void;
+}
+
+interface Watcher {
+  roomId: string;
+  channelId: string;
+  channelOnly: boolean;
+  onEvent: (e: RoomEvent) => void;
+  onStatus?: (up: boolean) => void;
+}
+
+// The open-room key of a stream showing none.
+const NO_ROOM = "\u0000";
+
+class MemberStream {
+  private es: EventSource | null = null;
+  private streamId = "";
+  private attempts = 0;
+  private timer: number | null = null;
+  private reauthing = false;
+  private up = false;
+  private readonly watchers: Watcher[] = [];
+  private readonly unread = new Set<UnreadHandlers>();
+  private rooms: readonly string[] = [];
+  // What the server was last told: the rooms (by key) and the open room.
+  private sentRooms: string | null = null;
+  private sentOpen: string | null = null;
+  // The open room and the last sequence received of it (a reconnect asks
+  // for what is newer).
+  private openRoom = "";
+  private lastSeq = 0;
+  private scopeQueued = false;
+
+  watchRoom(roomId: string, channelId: string, channelOnly: boolean, onEvent: (e: RoomEvent) => void, onStatus?: (up: boolean) => void): RoomWatch {
+    const w: Watcher = { roomId, channelId, channelOnly, onEvent, onStatus };
+    this.watchers.push(w);
+    this.ensure();
+    if (this.up) onStatus?.(true);
+    this.scope();
+    return {
+      setChannel: (ch) => {
+        if (w.channelId === ch) return;
+        w.channelId = ch;
+        this.scope();
+      },
+      off: () => {
+        const i = this.watchers.indexOf(w);
+        if (i >= 0) this.watchers.splice(i, 1);
+        this.scope();
+        this.closeIfIdle();
+      },
+    };
+  }
+
+  watchUnread(rooms: readonly string[], h: UnreadHandlers): () => void {
+    this.rooms = rooms.slice(0, MaxStreamRooms);
+    this.unread.add(h);
+    this.ensure();
+    if (this.up) h.onStatus?.(true);
+    this.sentRooms = null; // a new watcher needs the state
+    this.scope();
+    return () => {
+      this.unread.delete(h);
+      if (this.unread.size === 0) this.rooms = [];
+      this.scope();
+      this.closeIfIdle();
+    };
+  }
+
+  // The room the stream shows: the latest watched one, with every watched
+  // channel of it open (at most MaxStreamOpen).
+  private desiredOpen(): { roomId: string; channels: string[] } {
+    const last = this.watchers[this.watchers.length - 1];
+    if (!last) return { roomId: "", channels: [] };
+    const channels: string[] = [];
+    for (const w of this.watchers) {
+      if (w.roomId === last.roomId && w.channelId && !channels.includes(w.channelId)) channels.push(w.channelId);
+    }
+    return { roomId: last.roomId, channels: channels.slice(0, MaxStreamOpen) };
+  }
+
+  private scope() {
+    if (this.scopeQueued) return;
+    this.scopeQueued = true;
+    queueMicrotask(() => {
+      this.scopeQueued = false;
+      void this.sendScope();
+    });
+  }
+
+  private async sendScope() {
+    if (!this.streamId) return; // the stream's opening sends it
+    const body: StreamScopeRequest = { streamId: this.streamId };
+    const roomsKey = this.rooms.join(",");
+    if (roomsKey !== this.sentRooms) body.rooms = [...this.rooms];
+    const open = this.desiredOpen();
+    const openKey = `${open.roomId}\u0000${open.channels.join(",")}`;
+    if (openKey !== this.sentOpen) {
+      if (open.roomId !== this.openRoom) {
+        this.openRoom = open.roomId;
+        this.lastSeq = 0;
+      }
+      body.open = { roomId: open.roomId, channels: open.channels, since: this.lastSeq };
+    }
+    if (!body.rooms && !body.open) return;
+    const streamId = this.streamId;
+    this.sentRooms = roomsKey;
+    this.sentOpen = openKey;
+    try {
+      await req<void>("/v1/my/events/scope", { method: "POST", body: JSON.stringify(body), as: "none" });
+    } catch (e) {
+      if (streamId !== this.streamId) return;
+      if (e instanceof ApiError && e.status === 403) {
+        // The open room is not readable (any more): its watchers learn it
+        // from their own reads; the stream goes on.
+        for (const w of this.watchers) if (w.roomId === open.roomId) w.onStatus?.(false);
+        return;
+      }
+      // Gone (another replica restarted, the stream closed): reopen.
+      this.reconnectNow();
+    }
+  }
+
+  private ensure() {
+    if (!this.es && this.timer === null) void this.connect();
+  }
+
+  private closeIfIdle() {
+    if (this.watchers.length > 0 || this.unread.size > 0) return;
+    if (this.timer !== null) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+    this.es?.close();
+    this.es = null;
+    this.streamId = "";
+    this.setUp(false);
+  }
+
+  private setUp(up: boolean) {
+    if (this.up === up) return;
+    this.up = up;
+    for (const w of this.watchers) w.onStatus?.(up);
+    for (const h of this.unread) h.onStatus?.(up);
+  }
+
+  private reconnectNow() {
+    this.es?.close();
+    this.es = null;
+    this.streamId = "";
+    void this.connect();
+  }
+
+  private scheduleReconnect() {
+    if (this.timer !== null || (this.watchers.length === 0 && this.unread.size === 0)) return;
+    this.timer = window.setTimeout(() => {
+      this.timer = null;
+      void this.connect();
+    }, backoff(this.attempts));
+  }
+
+  private async connect() {
+    if (this.attempts >= REAUTH_AFTER && !this.reauthing) {
+      this.reauthing = true;
+      try {
+        if (await refreshSession().catch(() => false)) this.attempts = 0;
+      } finally {
+        this.reauthing = false;
+      }
+    }
+    if (this.watchers.length === 0 && this.unread.size === 0) return;
+    const token = getToken();
+    const src = new EventSource(apiUrl(`/v1/my/events?${token ? `access_token=${encodeURIComponent(token)}` : ""}${tzQuery()}`));
+    this.es = src;
+    this.streamId = "";
+    // A new stream knows nothing: everything is told again (it opens
+    // showing no room).
+    this.sentRooms = null;
+    this.sentOpen = NO_ROOM;
+    src.onerror = () => {
+      this.setUp(false);
+      if (this.es !== src) return;
+      src.close();
+      this.es = null;
+      this.streamId = "";
+      this.attempts += 1;
+      this.scheduleReconnect();
+    };
+    src.addEventListener("stream_opened", (e) => {
+      const p = parse((e as MessageEvent).data)?.payload as Partial<StreamOpenedPayload> | undefined;
+      if (this.es !== src || !p?.streamId) return;
+      this.streamId = p.streamId;
+      this.attempts = 0;
+      this.setUp(true);
+      void this.sendScope();
+    });
+    src.addEventListener(UnreadStateKind, (e) => {
+      const p = parse((e as MessageEvent).data)?.payload;
+      if (p && typeof p === "object") for (const h of this.unread) h.onState(p as unknown as UnreadReply);
+    });
+    src.addEventListener(UnreadDeltaKind, (e) => {
+      const p = parse((e as MessageEvent).data)?.payload;
+      if (p && typeof p === "object") for (const h of this.unread) h.onDelta(p as unknown as UnreadDeltaPayload);
+    });
+    for (const kind of ROOM_EVENT_KINDS) {
+      if (kind === "stream_opened") continue;
+      src.addEventListener(kind, (e) => this.route((e as MessageEvent).data));
+    }
+  }
+
+  // route hands one event of the open room to the watchers it concerns.
+  private route(raw: string) {
+    const ev = parse(raw);
+    if (!ev || !ev.roomId || ev.roomId !== this.openRoom) return;
+    if (typeof ev.sequence === "number" && ev.sequence > this.lastSeq) this.lastSeq = ev.sequence;
+    for (const w of [...this.watchers]) {
+      if (w.roomId !== ev.roomId) continue;
+      if (w.channelOnly && ev.channelId && ev.channelId !== w.channelId && !crossChannel.has(ev.kind ?? "")) continue;
+      normalizeRoomEvent(ev, w.onEvent);
+    }
+  }
+}
+
+let member: MemberStream | null = null;
+
+function memberStream(): MemberStream {
+  member ??= new MemberStream();
+  return member;
+}
+
+/** Watches a channel of a room on the tab's member stream. */
+export function watchRoom(
+  roomId: string,
+  channelId: string,
+  channelOnly: boolean,
+  onEvent: (e: RoomEvent) => void,
+  onStatus?: (up: boolean) => void,
+): RoomWatch {
+  return memberStream().watchRoom(roomId, channelId, channelOnly, onEvent, onStatus);
+}
+
+/** Watches the unread of rooms (at most MaxStreamRooms) on the tab's
+ * member stream; returns the function that stops it. */
+export function watchUnread(rooms: readonly string[], h: UnreadHandlers): () => void {
+  return memberStream().watchUnread(rooms, h);
+}
+
+// ---------------------------------------------------------------- a room's own stream
+
+// subscribeRoom opens a room's own stream, every channel of it: for a page
+// that is one room (the standalone preview and live views). Returns an
+// unsubscribe function. onStatus(true) fires on a live connection and
+// onStatus(false) while reconnecting.
 export function subscribeRoom(
   roomId: string,
   onEvent: (e: RoomEvent) => void,
   onStatus?: (up: boolean) => void,
-  // Mints a fresh session after a run of failures; defaults to the app's
-  // own refresh, so no subscriber goes dark after a signing-key rotation.
   onAuthError: () => Promise<boolean> = refreshSession,
-  channelId?: string,
-  scope: RoomStreamScope = {},
-): RoomSubscription {
+): () => void {
   let es: EventSource | null = null;
-  // A lanes stream: its id (its first event) and the channels it has open,
-  // which a reconnect opens with.
-  let streamId = "";
-  let open: readonly string[] = channelId ? [channelId] : [];
   // The last sequence this subscription received: a reconnect asks for
   // what is newer only (since), and the stream says when it cannot
   // (stream_gap: the caller fetches the difference).
@@ -65,100 +349,46 @@ export function subscribeRoom(
   let attempts = 0;
   let timer: number | null = null;
   let reauthing = false;
-  // After this many consecutive failures we treat it as an auth problem and try
-  // to refresh the token before the next attempt.
-  const REAUTH_AFTER = 3;
-  const BASE_DELAY_MS = 1000;
-  // A replica that stops hands its rooms to the others within seconds: a
-  // stream that failed a few times while that happened must not then wait
-  // half a minute (the reopen resumes from its last sequence, cheaply).
-  const MAX_DELAY_MS = 8_000;
 
   const handle = (raw: string) => {
-    if (!raw) return;
-    let ev: RoomEvent;
-    try {
-      ev = JSON.parse(raw);
-    } catch {
-      // Not an event (a proxy's error page, a truncated frame): dropped,
-      // never rendered as a kindless row the feed takes for an agent reply.
-      return;
-    }
-    if (ev.kind === "stream_opened") {
-      streamId = typeof ev.payload?.streamId === "string" ? ev.payload.streamId : "";
-      return;
-    }
+    const ev = parse(raw);
+    if (!ev) return;
     if (typeof ev.sequence === "number" && ev.sequence > lastSeq) lastSeq = ev.sequence;
     normalizeRoomEvent(ev, onEvent);
   };
 
-  const scheduleReconnect = () => {
-    if (closed || timer !== null) return;
-    // Exponential backoff with a cap; jitter avoids a thundering herd of tabs.
-    const delay = Math.min(MAX_DELAY_MS, BASE_DELAY_MS * 2 ** Math.min(attempts, 5));
-    const jittered = delay * (0.5 + Math.random() * 0.5);
-    timer = window.setTimeout(() => {
-      timer = null;
-      void connect();
-    }, jittered);
-  };
-
   const connect = async () => {
     if (closed) return;
-    // A run of failures usually means the token went stale (signing-key
-    // rotation) — EventSource can't recover on its own, so refresh once before
-    // reconnecting, then reset the failure counter on success.
     if (attempts >= REAUTH_AFTER && !reauthing) {
       reauthing = true;
       try {
-        const ok = await onAuthError().catch(() => false);
-        if (ok) attempts = 0;
+        if (await onAuthError().catch(() => false)) attempts = 0;
       } finally {
         reauthing = false;
       }
       if (closed) return;
     }
     const token = getToken();
-    streamId = "";
-    // A lanes stream names its first open channel as channelId too: a
-    // realtime replica without lanes serves that channel alone.
-    const channelQ = scope.lanes
-      ? `&lanes=1&open=${open.map(encodeURIComponent).join(",")}${open[0] ? `&channelId=${encodeURIComponent(open[0])}` : ""}`
-      : channelId
-        ? `&channelId=${encodeURIComponent(channelId)}`
-        : "";
-    // allChannels: the room view needs cross-channel events — agent-job rows
-    // and artifact updates carry the channel they originated in, while the
-    // Files panel lists room-wide deliverables. Feed kinds are filtered to the
-    // active channel by the caller.
-    const scopeQ = scope.channelOnly ? "" : `${scope.lanes ? "" : "&allChannels=1"}${scope.includePeople ? "&includePeople=1" : ""}`;
-    // Member locations: the time zone is sent only when the organization has them
-    // on (pulse_geography). Off, the zone never leaves the device.
     const sinceQ = lastSeq > 0 ? `&since=${lastSeq}` : "";
-    const tzQ = currentTenantPolicy()?.pulseGeography
-      ? `&tz=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}`
-      : "";
-    const url = apiUrl(
-      `${roomPath(roomId, "events")}?${
-        token ? `access_token=${encodeURIComponent(token)}` : ""
-      }${channelQ}${scopeQ}${sinceQ}${tzQ}`,
+    const src = new EventSource(
+      apiUrl(`${roomPath(roomId, "events")}?${token ? `access_token=${encodeURIComponent(token)}` : ""}&allChannels=1${sinceQ}${tzQuery()}`),
     );
-    const src = new EventSource(url);
     es = src;
     src.onopen = () => {
       attempts = 0;
       onStatus?.(true);
     };
     src.onerror = () => {
-      // EventSource fires onerror on both transient blips and hard closes; close
-      // it ourselves and drive our own backoff loop for deterministic behavior.
       onStatus?.(false);
-      if (es === src) {
-        src.close();
-        es = null;
-        attempts += 1;
-        scheduleReconnect();
-      }
+      if (es !== src) return;
+      src.close();
+      es = null;
+      attempts += 1;
+      if (closed || timer !== null) return;
+      timer = window.setTimeout(() => {
+        timer = null;
+        void connect();
+      }, backoff(attempts));
     };
     for (const kind of ROOM_EVENT_KINDS) {
       src.addEventListener(kind, (e) => handle((e as MessageEvent).data));
@@ -169,126 +399,12 @@ export function subscribeRoom(
 
   void connect();
 
-  const reconnectNow = () => {
-    if (closed) return;
-    if (es) {
-      es.close();
-      es = null;
-    }
-    void connect();
-  };
-
-  const rescope = (next: readonly string[]) => {
-    if (!scope.lanes || closed) return;
-    open = next;
-    // Not open yet (or reconnecting): the next connection opens with it.
-    if (!streamId) return;
-    rescopeStream(roomId, streamId, next).then((found) => {
-      // The stream is gone on the server (closed, or moved replicas):
-      // reopen with the open channels.
-      if (!found) reconnectNow();
-    }, reconnectNow);
-  };
-
-  const off = () => {
+  return () => {
     closed = true;
     if (timer !== null) {
       clearTimeout(timer);
       timer = null;
     }
-    if (es) {
-      es.close();
-      es = null;
-    }
-  };
-  return Object.assign(off, { rescope });
-}
-
-// rescopeStream asks realtime to move a lanes stream to other open channels
-// (POST .../events/scope); false when the stream is gone.
-async function rescopeStream(roomId: string, streamId: string, open: readonly string[]): Promise<boolean> {
-  try {
-    await req<void>(roomPath(roomId, "events", "scope"), { method: "POST", body: JSON.stringify({ streamId, open }), as: "none" });
-    return true;
-  } catch (e) {
-    if (e instanceof ApiError && e.status === 404) return false;
-    throw e;
-  }
-}
-
-// subscribeActivity opens the member's activity stream (GET
-// /v1/my/activity?rooms=): the rooms' unread state, then what changes,
-// pushed instead of polled (docs/prd/2026-10-30-replicas-without-owners.md,
-// part B). It reconnects on its own, as the room streams do, and every
-// connection starts with the state again.
-export interface ActivityHandlers {
-  readonly onState: (state: UnreadReply) => void;
-  readonly onDelta: (delta: UnreadDeltaPayload) => void;
-  readonly onStatus?: (up: boolean) => void;
-}
-
-const ACTIVITY_BASE_DELAY_MS = 1000;
-const ACTIVITY_MAX_DELAY_MS = 8_000;
-const ACTIVITY_REAUTH_AFTER = 3;
-
-/** Opens the stream for roomIds (at most wire's MaxUnreadRooms); returns
- * the function that closes it. */
-export function subscribeActivity(roomIds: readonly string[], h: ActivityHandlers): () => void {
-  let es: EventSource | null = null;
-  let closed = false;
-  let attempts = 0;
-  let timer: number | null = null;
-
-  const payloadOf = (raw: string): unknown => {
-    try {
-      return (JSON.parse(raw) as { payload?: unknown }).payload;
-    } catch {
-      return undefined;
-    }
-  };
-
-  const connect = async () => {
-    if (closed) return;
-    if (attempts >= ACTIVITY_REAUTH_AFTER) {
-      if (await refreshSession().catch(() => false)) attempts = 0;
-      if (closed) return;
-    }
-    const token = getToken();
-    const src = new EventSource(
-      apiUrl(`/v1/my/activity?rooms=${encodeURIComponent(roomIds.join(","))}${token ? `&access_token=${encodeURIComponent(token)}` : ""}`),
-    );
-    es = src;
-    src.onopen = () => {
-      attempts = 0;
-      h.onStatus?.(true);
-    };
-    src.onerror = () => {
-      h.onStatus?.(false);
-      if (es !== src) return;
-      src.close();
-      es = null;
-      attempts += 1;
-      if (closed || timer !== null) return;
-      const delay = Math.min(ACTIVITY_MAX_DELAY_MS, ACTIVITY_BASE_DELAY_MS * 2 ** Math.min(attempts, 5));
-      timer = window.setTimeout(() => {
-        timer = null;
-        void connect();
-      }, delay * (0.5 + Math.random() * 0.5));
-    };
-    src.addEventListener(UnreadStateKind, (e) => {
-      const p = payloadOf((e as MessageEvent).data);
-      if (p && typeof p === "object") h.onState(p as UnreadReply);
-    });
-    src.addEventListener(UnreadDeltaKind, (e) => {
-      const p = payloadOf((e as MessageEvent).data);
-      if (p && typeof p === "object") h.onDelta(p as UnreadDeltaPayload);
-    });
-  };
-
-  void connect();
-  return () => {
-    closed = true;
-    if (timer !== null) clearTimeout(timer);
     es?.close();
     es = null;
   };

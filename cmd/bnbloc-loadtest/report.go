@@ -70,8 +70,9 @@ type Report struct {
 	Streams StreamReport  `json:"streams"`
 	// Activity covers the lanes streams' channel_activity (--channels > 1).
 	Activity ActivityReport `json:"activity"`
-	// MemberActivity covers the members' activity streams (--member-activity).
-	MemberActivity ActivityStreamReport `json:"memberActivity"`
+	// Unread covers the unread the streams carry (each scoped to its
+	// member's rooms, as a web tab is).
+	Unread ActivityStreamReport `json:"unread"`
 	// Interrupted is true when SIGINT ended the send window early.
 	Interrupted bool     `json:"interrupted"`
 	Notes       []string `json:"notes,omitempty"`
@@ -211,12 +212,8 @@ func (r *Report) writeText(w io.Writer) {
 		p("activity (channels not open)")
 		p("  events %d; streams that heard of every other channel %d of %d", r.Activity.Events, r.Activity.Complete, r.Activity.Streams)
 	}
-	if r.MemberActivity.Streams > 0 {
-		p("member activity streams (unread badges)")
-		p("  %d streams, open at end %d, disconnects %d; states %d, deltas %d; told of %d of %d new messages",
-			r.MemberActivity.Streams, r.MemberActivity.OpenAtEnd, r.MemberActivity.Disconnects, r.MemberActivity.States,
-			r.MemberActivity.Deltas, r.MemberActivity.Told, r.MemberActivity.Expected)
-	}
+	p("unread (badges)")
+	p("  states %d, deltas %d; told of %d of %d new messages", r.Unread.States, r.Unread.Deltas, r.Unread.Told, r.Unread.Expected)
 	for _, n := range r.Notes {
 		p("")
 		p("note: %s", n)

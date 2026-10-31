@@ -91,8 +91,8 @@ func TestViewerMayMarkReadTypeJoinLeave(t *testing.T) {
 			t.Errorf("viewer refused POST /%s (perm %s)", sub, perm)
 		}
 	}
-	if perm := requiredPermission(http.MethodPost, mustParseAPIPath(t, http.MethodPost, "/v1/rooms/r/events/scope")); !rbac.Can(string(rbac.RoleViewer), perm) {
-		t.Errorf("viewer refused re-scoping their stream (perm %s)", perm)
+	if perm := requiredPermission(http.MethodPost, mustParseAPIPath(t, http.MethodPost, "/v1/my/events/scope")); !rbac.Can(string(rbac.RoleViewer), perm) {
+		t.Errorf("viewer refused scoping their stream (perm %s)", perm)
 	}
 	for _, path := range []string{"/v1/rooms/r/chat", "/v1/rooms/r/shared-agents/x/authorization", "/v1/rooms", "/v1/rooms/r/read/extra"} {
 		perm := requiredPermission(http.MethodPost, mustParseAPIPath(t, http.MethodPost, path))
@@ -186,14 +186,14 @@ func TestAccessTokenQueryOnlyOnStream(t *testing.T) {
 		resp.Body.Close()
 		return resp.StatusCode
 	}
-	for _, stream := range []string{"/v1/rooms/room-1/events", "/v1/my/activity"} {
+	for _, stream := range []string{"/v1/rooms/room-1/events", "/v1/my/events"} {
 		if c := get(stream); c != http.StatusOK {
 			t.Errorf("GET %s with access_token: %d, want 200", stream, c)
 		}
 	}
 	for _, bad := range []string{
 		"/v1/rooms/room-1/attachments/att-1", "/v1/rooms/room-1/artifacts/art_1/versions/2/content",
-		"/v1/rooms/room-1/members", "/v1/rooms/room-1/history", "/v1/users/alice/rooms", "/v1/my/unread",
+		"/v1/rooms/room-1/members", "/v1/rooms/room-1/history", "/v1/users/alice/rooms", "/v1/my/unread", "/v1/my/events/scope",
 	} {
 		if c := get(bad); c != http.StatusUnauthorized {
 			t.Errorf("GET %s with access_token: %d, want 401", bad, c)

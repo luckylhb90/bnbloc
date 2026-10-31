@@ -217,15 +217,15 @@ message in a live channel, counted to 100 and over at most 500 rooms (`more`
 says the number is a floor). It is the cheap read for an account no window
 shows; `/v1/rooms-unread` below is the per-room, per-channel detail.
 
-`GET /v1/my/activity?rooms=` (SSE, at most 200 rooms) is what a client
-keeps open instead of polling: it sends `unread_state` (the
-`/v1/rooms-unread` answer for the rooms the caller is in) on every
-connection and whenever it may have missed something, then at most once a
-second `unread_delta`: per room the sequences of new messages that count
-(the same rule: channels the caller may read, a thread only when followed),
-the ones deleted, and `read: true` when the caller marked the room read on
-any device (the client reads that room's count again). The web shell keeps
-one per tab and reads every count again every five minutes as a safety net.
+A web tab does not poll: its member stream (below) carries the unread of
+the rooms it is scoped to: `unread_state` (the `/v1/rooms-unread` answer
+for the rooms the caller is in) on every scope of rooms and whenever it may
+have missed something, then at most once a second `unread_delta`: per room
+the sequences of new messages that count (the same rule: channels the
+caller may read, a thread only when followed), the ones deleted, and
+`read: true` when the caller marked the room read on any device (the client
+reads that room's count again). The shell reads every count again every
+five minutes as a safety net.
 
 `room_read_state` is keyed `(room_id, channel_id, user_id)` — one cursor per
 channel. `/v1/rooms-unread` is additive:
@@ -252,23 +252,30 @@ default-first. The web channel rail consumes the per-channel list.
 
 ## Stream scopes
 
-A room stream (`GET /v1/rooms/{id}/events`) is one of three scopes:
+A web tab holds one stream, the **member stream** (`GET /v1/my/events`,
+docs/prd/2026-10-30-replicas-without-owners.md §9). Its first event,
+`stream_opened`, names it; `POST /v1/my/events/scope {streamId, rooms?,
+open?}` scopes it, again whenever the tab changes, never reopening it:
+`rooms` are the rooms whose unread it carries, `open` `{roomId, channels,
+since}` the room the tab shows and the channels open there (the room
+view's, a thread's, the people chat's; at most 4). For the open room it is
+a person's **lanes** view: full events for the open channels, the room lane
+always, and one coalesced `channel_activity` a second for every other
+channel they may read (`wire.StreamLane`,
+docs/prd/2026-10-28-channels-and-threads.md §2.4), after the replay newer
+than `since`.
+
+A room's own stream (`GET /v1/rooms/{id}/events`) serves what is not a
+person's tab, in one of two scopes:
 
 - **one channel** (`channelId`, default the room's default channel): that
-  channel's events and the room-wide ones (the people-chat panel, the
-  thread panel);
+  channel's events and the room-wide ones;
 - **all channels** (`allChannels=1`): every channel the subscriber may
   read, agents' streams without the channels agents are not admitted to
-  (the bridge);
-- **lanes** (`lanes=1&open=<id>,…`, a person's only; the web room view):
-  full events for the open channels, the room lane always, and one
-  coalesced `channel_activity` a second for every other channel it may
-  read (`wire.StreamLane`, docs/prd/2026-10-28-channels-and-threads.md
-  §2.4). Its first event, `stream_opened`, names it; `POST
-  .../events/scope {streamId, open}` moves it to other open channels
-  without reopening.
+  (the bridge; the standalone preview and live pages).
 
-Every scope asks `store.MayReadChannel` of every channel-scoped event.
+Both ask `store.MayReadChannel` of every channel-scoped event (`roomView`,
+one set of rules for both).
 
 ## Semantics of the empty channel id
 

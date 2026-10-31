@@ -1,8 +1,8 @@
-// The shell's unread counts from the member's activity stream (GET
-// /v1/my/activity): the state the stream opens with, then its deltas. A new
-// message counts once (by sequence), a deleted one it counted no longer
-// does, and a room the member marked read (on any device) is read again
-// from the server (the rooms returned for it).
+// The shell's unread counts from the member stream (GET /v1/my/events,
+// scoped to the member's rooms): the state it sends on each scope of
+// rooms, then its deltas. A new message counts once (by sequence), a
+// deleted one it counted no longer does, and a room the member marked read
+// (on any device) is read again from the server (the rooms returned for it).
 
 import type { UnreadDeltaPayload, UnreadReply } from "./wire.gen.ts";
 

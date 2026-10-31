@@ -1,10 +1,11 @@
-// Delivery lanes (docs/prd/2026-10-28-channels-and-threads.md §2.4) in a
-// real browser: the room view opens one lanes stream with the open channel;
-// another channel's activity moves its badge while the first is open, from
-// the activity alone (no unread re-read);
-// opening another channel re-scopes the stream (POST .../events/scope) and
-// a reconnect opens with the channel now open. The gateway is mocked in the
-// browser. Run it like channels.mjs (README); CHROME names a local Chrome.
+// The member stream (docs/prd/2026-10-30-replicas-without-owners.md §9) in
+// a real browser: the tab holds ONE stream (GET /v1/my/events) and no room
+// stream; it scopes it with the room it shows and the channel open there;
+// another channel's activity moves its badge from the activity alone (no
+// unread re-read); opening another channel re-scopes it (POST
+// /v1/my/events/scope) without reopening; a reconnect scopes the new
+// stream with the channel then open. The gateway is mocked in the browser.
+// Run it like channels.mjs (README); CHROME names a local Chrome.
 import { createServer } from "node:http";
 import { chromium } from "playwright-core";
 const B = (process.env.BNBLOC_E2E_URL || "http://localhost:5173").replace(/\/+$/, "");
@@ -28,38 +29,50 @@ const s = {
 const sse = (kind, ev) => `event: ${kind}\ndata: ${JSON.stringify({ kind, roomId: "r1", ...ev })}\n\n`;
 
 // A real event stream (a fulfilled route can only answer at once): each
-// connection sends stream_opened, the first also another channel's activity,
-// and the first ends after a while, as a dropped stream does.
+// connection sends stream_opened; the first, once scoped to r1, another
+// channel's activity, and it ends after a while, as a dropped stream does.
+const open = new Map(); // streamId -> res
 const streamServer = createServer((req, res) => {
-  const u = new URL(req.url, "http://x");
-  s.streams.push(Object.fromEntries(u.searchParams));
+  s.streams.push(req.url);
   const n = s.streams.length;
+  const id = `ms_${n}`;
+  open.set(id, res);
   res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" });
-  res.write(sse("stream_opened", { payload: { streamId: `st_${n}`, open: (u.searchParams.get("open") || "").split(",") } }));
-  if (n === 1) {
-    // The badge moves from the activity itself, before any unread read
-    // could tell (the read would say 3 from now on, as the server would).
-    setTimeout(() => (s.designUnread = 3) && s.readsAtActivity === undefined && (s.readsAtActivity = s.unreadReads ?? 0), 500);
-    setTimeout(() => res.write(sse("channel_activity", { channelId: "ch_design", payload: { channelId: "ch_design", lastSeq: 9, events: 3, messages: 3, mention: true } })), 500);
-    setTimeout(() => res.end(), 2000);
-  }
+  res.write(sse("stream_opened", { roomId: "", payload: { streamId: id } }));
+  if (n === 1) setTimeout(() => res.end(), 4000);
 });
-await new Promise((r) => streamServer.listen(0, "127.0.0.1", r));
-const streamURL = `http://127.0.0.1:${streamServer.address().port}`;
+const onScope = (body) => {
+  s.scopes.push(body);
+  const res = open.get(body.streamId);
+  if (!res || body.streamId !== "ms_1" || body.open?.roomId !== "r1" || s.activitySent) return;
+  s.activitySent = true;
+  // The badge moves from the activity itself, before any unread read could
+  // tell (the read would say 3 from now on, as the server would).
+  setTimeout(() => (s.designUnread = 3) && s.readsAtActivity === undefined && (s.readsAtActivity = s.unreadReads ?? 0), 1000);
+  setTimeout(() => res.write(sse("channel_activity", { channelId: "ch_design", payload: { channelId: "ch_design", lastSeq: 9, events: 3, messages: 3, mention: true } })), 1000);
+};
+// The stream must reach the page as it is written: a route the browser
+// context intercepts is answered whole, so the stream is left to the
+// network, where the dev server proxies /v1 to this port (vite.config.ts).
+const STREAM_PORT = Number(process.env.STREAM_PORT || 7090);
+await new Promise((r) => streamServer.listen(STREAM_PORT, "127.0.0.1", r));
 
 const browser = await chromium.launch(process.env.CHROME ? { executablePath: process.env.CHROME } : {});
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-await ctx.route("**/v1/**", async (route) => {
+await ctx.route((url) => url.pathname.startsWith("/v1/") && url.pathname !== "/v1/my/events", async (route) => {
   const req = route.request();
   const u = new URL(req.url());
   const p = u.pathname;
   const m = req.method();
   const json = (b, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(b) });
   if (p.startsWith("/v1/auth/sso/config")) return json({ authProviderAvailable: false, directLoginAvailable: true });
-  if (p === "/v1/rooms/r1/events") return route.continue({ url: streamURL + p + u.search });
-  if (p === "/v1/rooms/r1/events/scope" && m === "POST") {
-    s.scopes.push(JSON.parse(req.postData() || "{}"));
+  if (p === "/v1/my/events/scope" && m === "POST") {
+    onScope(JSON.parse(req.postData() || "{}"));
     return route.fulfill({ status: 204 });
+  }
+  if (p.endsWith("/events")) {
+    s.roomStreams = (s.roomStreams ?? 0) + 1;
+    return route.fulfill({ status: 200, contentType: "text/event-stream", body: ": connected\n\n" });
   }
   if (p === "/v1/rooms-unread") s.unreadReads = (s.unreadReads ?? 0) + 1;
   if (p === "/v1/rooms-unread") return json({ unread: { r1: s.designUnread }, channels: { r1: [{ channelId: "ch_design", count: s.designUnread }] } });
@@ -79,6 +92,7 @@ await ctx.route("**/v1/**", async (route) => {
   return json({}, 404);
 });
 const page = await ctx.newPage();
+if (process.env.DEBUG) page.on("console", (m) => console.log("console:", m.text()));
 const errors = [];
 page.on("pageerror", (e) => errors.push(String(e)));
 await page.addInitScript(([t, who]) => { if (!localStorage.getItem("bnbloc.vault")) localStorage.setItem("bnbloc.vault", JSON.stringify({ rev: 1, accounts: [{ gateway: "", record: { token: t, refreshToken: "r-1", apiToken: null, subject: who, tenant: "default", role: "member" }, lastUsed: Date.now(), lastView: "", signedOut: false }] })); }, [tok(me), me]);
@@ -86,26 +100,30 @@ await page.goto(B + "/#/room/r1", { waitUntil: "load" });
 try {
   await page.getByRole("button", { name: /general/ }).first().waitFor({ timeout: 20000 });
   await page.waitForTimeout(800);
-  const first = s.streams[0] ?? {};
-  ok(first.lanes === "1" && first.open === "ch_gen" && first.channelId === "ch_gen" && first.includePeople === "1" && !first.allChannels, `one lanes stream with the open channel: ${JSON.stringify(first)}`);
+  const opened = s.scopes.find((b) => b.streamId === "ms_1" && b.open?.roomId);
+  ok(s.streams.length === 1 && !s.roomStreams, `one member stream and no room stream: ${s.streams.length} member, ${s.roomStreams ?? 0} room`);
+  ok(opened && opened.open.roomId === "r1" && JSON.stringify(opened.open.channels) === JSON.stringify(["ch_gen"]), `scoped to the room and its open channel: ${JSON.stringify(s.scopes)}`);
+  ok(s.scopes.some((b) => b.streamId === "ms_1" && Array.isArray(b.rooms) && b.rooms.includes("r1")), "scoped with the shell's rooms for their unread");
   // The activity moves #design's badge while #general stays open.
   const badge = page.locator("button", { hasText: "design" }).getByText("3");
   await badge.waitFor({ timeout: 8000 });
   ok((s.unreadReads ?? 0) === s.readsAtActivity, `another channel's activity moves its badge while one is open, without re-reading unread (${s.unreadReads} reads, ${s.readsAtActivity} before the activity)`);
-  await page.screenshot({ path: `${shots}/lanes-badge.png` });
-  // The stream reconnected (the server ended it); opening #design re-scopes it.
-  await page.waitForTimeout(3500);
+  await page.screenshot({ path: `${shots}/member-stream-badge.png` });
+  // Opening #design re-scopes the stream, no reopen.
   const before = s.streams.length;
   await page.getByRole("button", { name: /design/ }).first().click();
   await page.waitForTimeout(800);
   const last = s.scopes.at(-1);
-  ok(last && last.streamId && JSON.stringify(last.open) === JSON.stringify(["ch_design"]), `opening a channel re-scopes the stream: ${JSON.stringify(s.scopes)}`);
+  ok(last && last.streamId === "ms_1" && last.open && JSON.stringify(last.open.channels) === JSON.stringify(["ch_design"]), `opening a channel re-scopes the stream: ${JSON.stringify(last)}`);
   ok(s.streams.length === before, `no stream reopened by navigation (${before} → ${s.streams.length})`);
-  ok(s.streams.length >= 2 && s.streams[1].open === "ch_gen", "a reconnect opens with the channel then open");
+  // The first stream ends; the next is scoped with the channel now open.
+  await page.waitForTimeout(5000);
+  const again = s.scopes.find((b) => b.streamId === "ms_2" && b.open?.roomId);
+  ok(s.streams.length >= 2 && again && JSON.stringify(again.open.channels) === JSON.stringify(["ch_design"]) && Array.isArray(again.rooms), `a reconnect scopes the new stream with the channel then open: ${JSON.stringify(again)}`);
 } catch (e) {
   failures++;
   console.log("FAIL: threw", e.message);
-  await page.screenshot({ path: `${shots}/fail-lanes.png` });
+  await page.screenshot({ path: `${shots}/fail-member-stream.png` });
 }
 ok(errors.length === 0, `no page errors (${errors.join(" | ")})`);
 await browser.close();

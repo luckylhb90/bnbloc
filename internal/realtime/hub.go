@@ -274,6 +274,61 @@ func (h *Hub) leaveRoomLocked(roomID string, sub *Subscriber) {
 	}
 }
 
+// SetRooms moves a SubscribeRooms subscriber onto exactly rooms: it joins
+// the ones it is not on and leaves the others (a member's stream as its
+// rooms or its open room change). It reports false for a subscriber the
+// hub dropped (it overflowed twice, or was unsubscribed).
+func (h *Hub) SetRooms(sub *Subscriber, rooms []string) bool {
+	for _, r := range rooms {
+		h.joinBus(r)
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(sub.rooms) == 0 || h.subs[sub.rooms[0]] == nil {
+		return false
+	}
+	if _, on := h.subs[sub.rooms[0]][sub]; !on {
+		return false
+	}
+	want := map[string]bool{}
+	for _, r := range rooms {
+		want[r] = true
+	}
+	for _, r := range sub.rooms {
+		if !want[r] {
+			h.leaveRoomLocked(r, sub)
+		}
+	}
+	for _, r := range rooms {
+		if h.subs[r] == nil {
+			h.subs[r] = map[*Subscriber]struct{}{}
+		}
+		h.subs[r][sub] = struct{}{}
+	}
+	sub.rooms = slices.Clone(rooms)
+	return true
+}
+
+// Snapshot is the room's replay after since (all of it with since 0), as
+// SubscribeSince would send it, for a subscriber already on the room; gap
+// reports that it does not reach back to since. Events it shares with what
+// the subscriber receives meanwhile repeat; the reader drops a repeat by
+// its sequence.
+func (h *Hub) Snapshot(roomID string, since int64) (events []wire.Event, gap bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	snapshot := h.pruneReplayLocked(roomID, h.now())
+	for _, e := range snapshot {
+		if e.ev.Sequence > since {
+			events = append(events, e.ev)
+		}
+	}
+	if since > 0 {
+		gap = len(snapshot) == 0 || snapshot[0].ev.Sequence > since+1
+	}
+	return events, gap
+}
+
 // SubscribeRooms registers one live subscriber (no replay) on every room of
 // rooms, with one buffer: a member's activity stream across their rooms
 // (and their own key, wire.MemberActivityKey). Unsubscribe with any of the
@@ -350,13 +405,14 @@ func (h *Hub) Publish(ev wire.Event) wire.Event {
 // store.ErrDuplicateClientMsg.
 //
 // A transient kind carries no sequence and never waits on a commit: it is
-// delivered immediately. The revocation kinds (member_removed, room_deleted)
-// are the exception: they queue behind the room's in-flight durable events,
-// so a message committed before a revocation is never delivered after it,
-// and with a journal that is a Sequencer they take the room's next sequence
-// (storing nothing): every replica then delivers them in order with the
-// room's messages, so one stored after a revocation never reaches a stream
-// the revocation ends, whichever replica stored it.
+// delivered immediately. The sequenced kinds (wire.EventKindSpec.Sequenced:
+// the revocations, a section's membership) are the exception: they queue
+// behind the room's in-flight durable events, so a message committed before
+// one is never delivered after it, and with a journal that is a Sequencer
+// they take the room's next sequence (storing nothing): every replica then
+// delivers them in order with the room's messages, so one stored after a
+// change of access never reaches a reader it took access from, whichever
+// replica stored it.
 //
 // A subscriber whose buffer is full never blocks the hub: its stream is
 // closed (see deliver), and the client reconnects and catches up from
@@ -366,9 +422,9 @@ func (h *Hub) PublishCommit(ev wire.Event, d Durable) (wire.Event, error) {
 	switch {
 	case spec.Durable:
 		return h.enqueue(&pending{ev: ev, d: d, durable: true, deliver: true})
-	case spec.Revocation:
+	case spec.Sequenced:
 		ev.Sequence = 0
-		return h.enqueue(&pending{ev: ev, d: d, deliver: true, revocation: true})
+		return h.enqueue(&pending{ev: ev, d: d, deliver: true, sequenced: true})
 	default:
 		ev.Sequence = 0
 		h.deliver([]*pending{{ev: ev, out: ev, deliver: true}}, true)
@@ -422,8 +478,8 @@ type pending struct {
 	d       Durable
 	durable bool // sequenced and stored
 	deliver bool // retained for replay and delivered once committed
-	// revocation: sequenced (Sequencer) but not stored; it ends its batch.
-	revocation bool
+	// sequenced: numbered (Sequencer) but not stored; it ends its batch.
+	sequenced bool
 	// wake is closed when out/err are set, or when lead is set: this publish
 	// leads the room's next batch.
 	wake chan struct{}
@@ -475,9 +531,9 @@ func (h *Hub) lead(q *roomQueue, first *pending) {
 	journal, haveJournal := first.d.Journal, first.durable
 	bytes := len(first.d.Row.Payload)
 	n := 0
-	// A revocation ends its batch: what queued after it is numbered after
-	// it (sequenceRevocation).
-	for ; !first.revocation && n < len(q.queue) && len(batch) < maxBatchWrites; n++ {
+	// A sequenced kind ends its batch: what queued after it is numbered
+	// after it (sequenceLast).
+	for ; !first.sequenced && n < len(q.queue) && len(batch) < maxBatchWrites; n++ {
 		next := q.queue[n]
 		if next.durable {
 			if !haveJournal {
@@ -491,7 +547,7 @@ func (h *Hub) lead(q *roomQueue, first *pending) {
 		}
 		bytes += len(next.d.Row.Payload)
 		batch = append(batch, next)
-		if next.revocation {
+		if next.sequenced {
 			n++
 			break
 		}
@@ -501,7 +557,7 @@ func (h *Hub) lead(q *roomQueue, first *pending) {
 
 	t0 := time.Now()
 	h.commit(batch)
-	h.sequenceRevocation(batch)
+	h.sequenceLast(batch)
 	t1 := time.Now()
 	h.deliver(batch, true)
 	h.Metrics.HistogramObserve(metricFeedCommitTime, t1.Sub(t0).Seconds())
@@ -531,12 +587,13 @@ type Sequencer interface {
 	NextRoomSeq(ctx context.Context, roomID, tenantID string) (int64, error)
 }
 
-// sequenceRevocation gives the batch's revocation (its last member, after
-// its messages were numbered) the room's next sequence. Without one it is
-// delivered unsequenced, as with no journal: ordered on this replica only.
-func (h *Hub) sequenceRevocation(batch []*pending) {
+// sequenceLast gives the batch's sequenced event (its last member, after
+// its messages were numbered) the room's next sequence. Without a
+// Sequencer it is delivered unsequenced, as with no journal: ordered on
+// this replica only.
+func (h *Hub) sequenceLast(batch []*pending) {
 	p := batch[len(batch)-1]
-	if !p.revocation {
+	if !p.sequenced {
 		return
 	}
 	sq, ok := p.d.Journal.(Sequencer)

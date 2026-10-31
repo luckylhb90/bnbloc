@@ -27,9 +27,8 @@ import { openGlobalSearch } from "@/lib/team";
 import { localFiles } from "@/lib/localFiles";
 import { requestLocalOpen } from "@/views/LocalFileOpener";
 import { onRoomGone, withoutRoom } from "@/lib/roomGone";
-import { subscribeActivity } from "@/lib/sse";
+import { watchUnread } from "@/lib/sse";
 import { applyUnreadDelta, noUnread, unreadFromState, type UnreadCounts } from "@/lib/unreadActivity";
-import { MaxUnreadRooms } from "@/lib/wire.gen";
 import { can } from "@/lib/permissions";
 import { StorageKey, readStored, writeStored } from "@/lib/storageKeys";
 
@@ -163,12 +162,11 @@ export function Shell({
   const onOpenRoomRef = useRef(onOpenRoom);
   onOpenRoomRef.current = onOpenRoom;
 
-  // Unread counts for the known rooms, pushed by the member's activity
-  // stream (one per client, the rooms in chunks of MaxUnreadRooms): its
-  // state on every connection, then what changes. A room marked read on any
-  // device is read again; every few minutes all are, as a safety net. A
-  // rising total while the tab is hidden fires a desktop notification; the
-  // title reflects the current total.
+  // Unread counts for the known rooms, pushed by the tab's member stream
+  // (sse.watchUnread): their state on every connection, then what changes.
+  // A room marked read on any device is read again; every few minutes all
+  // are, as a safety net. A rising total while the tab is hidden fires a
+  // desktop notification; the title reflects the current total.
   useEffect(() => {
     if (!subject) return;
     const ids = roomIdsKey ? roomIdsKey.split("\u0000") : [];
@@ -211,31 +209,25 @@ export function Shell({
         if (!cancelled) setUnreadError(true);
       }
     };
-    const closers: Array<() => void> = [];
-    for (let i = 0; i < ids.length; i += MaxUnreadRooms) {
-      const chunk = ids.slice(i, i + MaxUnreadRooms);
-      closers.push(
-        subscribeActivity(chunk, {
-          onState: (state) => {
-            publish(unreadFromState(state, current, chunk));
-            if (!cancelled) setUnreadError(false);
-          },
-          onDelta: (delta) => {
-            const { next, reread: again } = applyUnreadDelta(current, delta);
-            publish(next);
-            if (again.length > 0) void reread(again);
-          },
-          onStatus: (up) => {
-            if (!cancelled && !up) setUnreadError(true);
-          },
-        }),
-      );
-    }
+    const close = watchUnread(ids, {
+      onState: (state) => {
+        publish(unreadFromState(state, current));
+        if (!cancelled) setUnreadError(false);
+      },
+      onDelta: (delta) => {
+        const { next, reread: again } = applyUnreadDelta(current, delta);
+        publish(next);
+        if (again.length > 0) void reread(again);
+      },
+      onStatus: (up) => {
+        if (!cancelled && !up) setUnreadError(true);
+      },
+    });
     const trueUp = window.setInterval(() => void reread(ids), 5 * 60_000);
     return () => {
       cancelled = true;
       clearInterval(trueUp);
-      for (const close of closers) close();
+      close();
     };
   }, [subject, roomIdsKey]);
 

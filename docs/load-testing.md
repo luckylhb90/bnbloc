@@ -15,11 +15,13 @@ for a deployment and to compare runs before and after a change.
    that, members wrap into more rooms and hold one stream per room, like a
    person with several tabs. The first member of a room owns it and adds the
    others.
-3. **Streams.** Every member holds the room SSE stream the web room view
-   holds, as `web/src/lib/sse.ts` `subscribeRoom` opens it, a lanes stream
-   (channels PRD §2.4):
-   `GET /v1/rooms/{id}/events?access_token=…&channelId=<channel>&lanes=1&open=<channel>&includePeople=1`.
-   With `--channels C` (default 1) each room has C channels (its default
+3. **Streams.** Every member holds what a web tab holds
+   (`web/src/lib/sse.ts`): one member stream,
+   `GET /v1/my/events?access_token=…`, scoped after it opens
+   (`POST /v1/my/events/scope`) to the member's rooms (their unread) and to
+   the room it shows with the member's channel open (channels PRD §2.4,
+   from the last sequence it holds on a reopen). With `--channels C`
+   (default 1) each room has C channels (its default
    plus ones the tool creates, or reuses in `--room-ids` rooms), and the
    room's members are spread over them round-robin: member k has channel
    k mod C open. The streams count as present members and receive presence
@@ -164,7 +166,6 @@ docker run --rm --network bnbloc-loadtest_default curlimages/curl -s http://real
 | `--timeout` | 15s | Per-request timeout for sign-in, setup and sends |
 | `--stream-idle` | 45s | Reopen a stream silent for this long (the server sends a keep-alive every 15 s) |
 | `--login-parallel` | 16 | Concurrent sign-in and setup requests |
-| `--member-activity` | true | Each member also holds one activity stream across their rooms (`GET /v1/my/activity`), as the web shell does for its unread badges |
 | `--cleanup` | true | Delete the rooms the tool created |
 | `--json` | false | Print the report as JSON |
 | `--progress` | 5s | Progress interval on stderr; 0 disables |
@@ -199,10 +200,10 @@ docker run --rm --network bnbloc-loadtest_default curlimages/curl -s http://real
   - failed opens by status;
   - streams open when sending started and at the end;
   - connect time, from request to response headers.
-- **member activity streams** (`--member-activity`): one per member across
-  their rooms. `told` counts the new messages they were told of (one per
-  member and message, in `unread_delta`), `expected` every stored send
-  times its room's members; a stream that reopened is sent the state
+- **unread (badges):** each stream carries its member's rooms' unread.
+  `told` counts the new messages the streams were told of (one per stream
+  and message, in `unread_delta`), `expected` for every stream every stored
+  send of the rooms it carries; a stream that reopened is sent the state
   instead, so `told` falls short of `expected` only by what reopening
   covered.
 
@@ -439,8 +440,9 @@ bnbloc-loadtest --gateway http://localhost:17090 --forwarded-for \
 ## Unread pushed, not polled (2026-10-31)
 
 Every member also holds the web shell's activity stream
-(`GET /v1/my/activity`) instead of polling its rooms' unread counts every
-25 s. On the 3-replica HA stack (`compose.ha.yml`), this laptop under a load
+(`GET /v1/my/activity`, since folded into the member stream: §9 of
+`docs/prd/2026-10-30-replicas-without-owners.md`) instead of polling its
+rooms' unread counts every 25 s. On the 3-replica HA stack (`compose.ha.yml`), this laptop under a load
 average of 35 to 45:
 
 | Run | Sends | Deliveries | Activity streams | Told of new messages |
@@ -452,6 +454,33 @@ The polling it replaces would have cost those 1,024 clients a
 `/v1/rooms-unread` of 16 channels every 25 s: about 1,300 database queries a
 second, more with every room a member is in; the stream costs an in-memory
 access check per member and message and one delta a second per client.
+
+## One stream per client (2026-10-31)
+
+Each member holds one member stream (`GET /v1/my/events`), as a web tab
+now does: its rooms' unread and the open room with its channel, scoped
+after it opens (§9 of `docs/prd/2026-10-30-replicas-without-owners.md`).
+3-replica HA stack, the gateway spreading requests over the replicas, so
+most scopes reach a replica that does not hold the stream and are handed
+on over the bus. Laptop load average 40 to 70.
+
+| Run | Streams open at start | Connect p95 | Deliveries | Delivery p50 / p95 / p99 (ms) | Gaps | Told of new messages |
+| --- | --- | --- | --- | --- | --- | --- |
+| 300 members, 30 rooms of 3 channels, 50 msgs/s, 30 s; scope answered in the bus loop | 262 of 300 (119 scopes 404 after 5 s) | 5,600 ms | 5,015 of 5,015 | — / — / 1,619 | 149 | 14,181 of 15,000 |
+| same, scope answered off the loop | 300 of 300 | 10 ms | 5,100 of 5,100 | 4 / 12 / 28 | 0 | 15,000 of 15,000 |
+| 1,024 members, 1 room of 16 channels, 100 msgs/s, 30 s | 1,024 of 1,024 | 11 ms | 192,000 of 192,000 | 47 / 375 / 1,013 | 0 | 3,072,000 of 3,072,000 |
+| failover drill (`scripts/failover-check.sh replicas`): 300 members, 2 min, one replica drained, another killed | 300 of 300 | — | 19,885 of 19,885 | p99 459 | 0 | — |
+
+- **The first run found a deadlock no test had.** A scope handed on to the
+  replica holding the stream was answered inside that replica's bus
+  receive loop; applying it subscribes rooms, and Redis confirms a
+  subscription through that same loop. Every handed-on scope stalled the
+  replica's bus for the 5 s timeout, and with it every room's delivery.
+  Calls are answered on goroutines of their own now; the in-memory bus
+  delivers from one loop per endpoint as Redis does, so the replica tests
+  catch it (AGENTS.md "A bus handler never waits on the bus").
+- The big room's tail follows its POST p99 (655 ms) on this loaded host,
+  as before: the commit, not the fan-out.
 
 ## What a message costs the database (2026-10-30)
 

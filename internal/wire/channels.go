@@ -560,26 +560,41 @@ type ChannelActivityPayload struct {
 	Mention  bool `json:"mention,omitempty"`
 }
 
-// EventStreamOpened (StreamOpenedPayload) is a lanes stream's first event:
-// its id, which POST /v1/rooms/{roomId}/events/scope names to change the
-// channels it has open without reopening it.
+// EventStreamOpened (StreamOpenedPayload) is a member stream's first event
+// (GET /v1/my/events): its id, which POST /v1/my/events/scope names to
+// change what it carries without reopening it.
 const EventStreamOpened = "stream_opened"
 
-// StreamOpenedPayload names a lanes stream and the channels it opened with.
+// StreamOpenedPayload names a member stream.
 type StreamOpenedPayload struct {
-	StreamID string   `json:"streamId"`
-	Open     []string `json:"open"`
+	StreamID string `json:"streamId"`
 }
 
-// MaxStreamOpen bounds the channels a lanes stream has open at once (the
-// room view's channel and its open thread, with room to spare).
+// MaxStreamOpen bounds the channels a member stream has open at once in its
+// open room (the room view's channel, an open thread, the people chat, with
+// room to spare).
 const MaxStreamOpen = 4
 
-// StreamScopeRequest re-scopes a lanes stream (POST .../events/scope): the
-// channels it has open from now on, replacing the previous ones.
+// MaxStreamRooms bounds the rooms whose unread a member stream carries.
+const MaxStreamRooms = 500
+
+// StreamScopeRequest scopes a member stream (POST /v1/my/events/scope).
+// Rooms, when set, replaces the rooms whose unread it carries; Open, when
+// set, replaces the room it shows in full (an empty RoomID: none).
 type StreamScopeRequest struct {
-	StreamID string   `json:"streamId"`
-	Open     []string `json:"open"`
+	StreamID string      `json:"streamId"`
+	Rooms    *[]string   `json:"rooms,omitempty"`
+	Open     *StreamOpen `json:"open,omitempty"`
+}
+
+// StreamOpen is the room a member stream shows in full: the channels open in
+// it (full events there, channel_activity for the others) and the last
+// sequence the client holds of it (the replay sends what is newer, or a
+// stream_gap when the room's buffer does not reach back).
+type StreamOpen struct {
+	RoomID   string   `json:"roomId"`
+	Channels []string `json:"channels"`
+	Since    int64    `json:"since,omitempty"`
 }
 
 // EventChannelFollow (ChannelFollowPayload) is published by bnbloc-room when
@@ -592,7 +607,7 @@ const EventChannelFollow = "channel_follow"
 // a room's live state, exchanged on the bus between replicas.
 const EventRoomView = "room_view"
 
-// EventReadMarked (ReadMarkedPayload) tells a member's activity streams
+// EventReadMarked (ReadMarkedPayload) tells a member's streams
 // that they marked a channel read.
 const EventReadMarked = "read_marked"
 

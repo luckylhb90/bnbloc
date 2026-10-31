@@ -1208,12 +1208,20 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   again (in-memory mode with no journal is the only exception), and never
   derive a sequence from the replay-buffer length (it plateaus, sequences
   repeat, and the client's dedup drops later events).
-- **Only durable kinds (`chat_message`, `agent_messages`) and the revocation
-  kinds (`member_removed`, `room_deleted`) take a sequence.** A revocation
-  stores no row but takes the room's next sequence (`NextRoomSeq`), so every
-  replica orders it with the room's messages and one stored after it never
-  reaches a stream it ends. Other transient events carry sequence 0 and no
+- **Only durable kinds (`chat_message`, `agent_messages`) and the sequenced
+  kinds (`member_removed`, `room_deleted`, `section_membership`:
+  `EventKindSpec.Sequenced`) take a sequence.** A sequenced kind stores no
+  row but takes the room's next sequence (`NextRoomSeq`), so every replica
+  orders it with the room's messages and one stored after a change of
+  access never reaches a reader it took access from. Other transient events carry sequence 0 and no
   SSE `id:`. Do not reintroduce transient sequencing.
+- **A bus handler never waits on the bus.** A replica's endpoint delivers
+  every topic, and confirms every subscription, from one receive loop (a
+  Redis subscriber connection; `realtime.Topics`). A handler that blocks,
+  or waits on work that subscribes (a forwarded member-stream scope), stalls
+  that replica's whole bus until a timeout. Answer calls on a goroutine of
+  their own (`Replicas.onAck`). `MemoryBus` delivers the same way, so a
+  replica test deadlocks as production would; keep it that way.
 - **Durable publishes group-commit per room** (`Hub.PublishCommit`). One
   leader at a time takes what queued during the previous commit, stores the
   batch in ONE `AppendNextRoomMessages` transaction (which numbers it), and

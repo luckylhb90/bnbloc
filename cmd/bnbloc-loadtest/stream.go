@@ -24,8 +24,10 @@ var (
 	reconnectMax  = 8 * time.Second
 )
 
-// stream is one member's room SSE subscription, held for the whole run and
-// reopened with the web client's backoff when it drops.
+// stream is one web tab: a member's member stream (GET /v1/my/events),
+// scoped to the member's rooms (their unread) and showing one room and
+// channel, held for the whole run and reopened with the web client's backoff
+// when it drops.
 type stream struct {
 	id      int
 	room    *room
@@ -33,6 +35,9 @@ type stream struct {
 	api     *api
 	tracker *tracker
 	stats   *streamStats
+	// rooms are the member's rooms, whose unread the stream carries.
+	rooms  []string
+	unread *activityStats
 	// channel is the channel the stream has open (a lanes stream: full
 	// events there, channel_activity for the room's others).
 	channel string
@@ -107,7 +112,7 @@ func (st *stream) run(ctx context.Context) {
 func (st *stream) connectOnce(ctx context.Context) (opened bool, err error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, st.api.eventsURL(st.member, st.room.id, st.channel, st.tz, st.resumeSeq.Load()), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, st.api.memberEventsURL(st.member, st.tz), nil)
 	if err != nil {
 		return false, err
 	}
@@ -120,7 +125,23 @@ func (st *stream) connectOnce(ctx context.Context) (opened bool, err error) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return false, &statusError{method: http.MethodGet, path: "/v1/rooms/{id}/events", status: resp.StatusCode, body: string(body)}
+		return false, &statusError{method: http.MethodGet, path: "/v1/my/events", status: resp.StatusCode, body: string(body)}
+	}
+	// The stream opens with its id; the tab then scopes it, as the web
+	// client does: its rooms, and the room and channel it shows.
+	rd := sse.NewReader(resp.Body)
+	first, err := rd.Next()
+	if err != nil {
+		return false, fmt.Errorf("read: %w", err)
+	}
+	var hello struct {
+		Payload wire.StreamOpenedPayload `json:"payload"`
+	}
+	if first.Name != wire.EventStreamOpened || json.Unmarshal(first.Data, &hello) != nil || hello.Payload.StreamID == "" {
+		return false, fmt.Errorf("the stream did not open with %s", wire.EventStreamOpened)
+	}
+	if err := st.api.scopeStream(ctx, st.member, hello.Payload.StreamID, st.rooms, st.room.id, st.channel, st.resumeSeq.Load()); err != nil {
+		return false, err
 	}
 	reopen := st.opened.Swap(true)
 	st.live.Store(true)
@@ -141,7 +162,6 @@ func (st *stream) connectOnce(ctx context.Context) (opened bool, err error) {
 		defer watchdog.Stop()
 	}
 	lastSeq := int64(-1)
-	rd := sse.NewReader(resp.Body)
 	if watchdog != nil {
 		rd.OnLine = func() { watchdog.Reset(st.idle) }
 	}
@@ -154,8 +174,11 @@ func (st *stream) connectOnce(ctx context.Context) (opened bool, err error) {
 			return true, fmt.Errorf("read: %w", err)
 		}
 		at := time.Now()
+		if st.unread.note(st.id, raw.Name, raw.Data) {
+			continue
+		}
 		ev, ok := decodeEvent(raw.Name, raw.Data)
-		if !ok {
+		if !ok || (ev.roomID != "" && ev.roomID != st.room.id) {
 			continue
 		}
 		if ev.Sequence > 0 {
@@ -193,6 +216,7 @@ func (st *stream) connectOnce(ctx context.Context) (opened bool, err error) {
 // chat_message only.
 type roomEvent struct {
 	Sequence    int64 `json:"sequence"`
+	roomID      string
 	clientMsgID string
 	// activityFrom is the channel of a channel_activity event.
 	activityFrom string
@@ -205,6 +229,7 @@ type roomEvent struct {
 func decodeEvent(kind string, data []byte) (roomEvent, bool) {
 	var raw struct {
 		Sequence  int64  `json:"sequence"`
+		RoomID    string `json:"roomId"`
 		Kind      string `json:"kind"`
 		ChannelID string `json:"channelId"`
 		Payload   struct {
@@ -217,7 +242,7 @@ func decodeEvent(kind string, data []byte) (roomEvent, bool) {
 	if raw.Kind == "" {
 		raw.Kind = kind
 	}
-	ev := roomEvent{Sequence: raw.Sequence}
+	ev := roomEvent{Sequence: raw.Sequence, roomID: raw.RoomID}
 	switch raw.Kind {
 	case wire.KindChatMessage:
 		ev.clientMsgID = raw.Payload.ClientMsgID

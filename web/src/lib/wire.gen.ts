@@ -2641,26 +2641,41 @@ export interface ChannelActivityPayload {
   mention?: boolean;
 }
 
-// EventStreamOpened (StreamOpenedPayload) is a lanes stream's first event:
-// its id, which POST /v1/rooms/{roomId}/events/scope names to change the
-// channels it has open without reopening it.
+// EventStreamOpened (StreamOpenedPayload) is a member stream's first event
+// (GET /v1/my/events): its id, which POST /v1/my/events/scope names to
+// change what it carries without reopening it.
 export const EventStreamOpened = "stream_opened";
 
-// StreamOpenedPayload names a lanes stream and the channels it opened with.
+// StreamOpenedPayload names a member stream.
 export interface StreamOpenedPayload {
   streamId: string;
-  open: string[];
 }
 
-// MaxStreamOpen bounds the channels a lanes stream has open at once (the
-// room view's channel and its open thread, with room to spare).
+// MaxStreamOpen bounds the channels a member stream has open at once in its
+// open room (the room view's channel, an open thread, the people chat, with
+// room to spare).
 export const MaxStreamOpen = 4;
 
-// StreamScopeRequest re-scopes a lanes stream (POST .../events/scope): the
-// channels it has open from now on, replacing the previous ones.
+// MaxStreamRooms bounds the rooms whose unread a member stream carries.
+export const MaxStreamRooms = 500;
+
+// StreamScopeRequest scopes a member stream (POST /v1/my/events/scope).
+// Rooms, when set, replaces the rooms whose unread it carries; Open, when
+// set, replaces the room it shows in full (an empty RoomID: none).
 export interface StreamScopeRequest {
   streamId: string;
-  open: string[];
+  rooms?: string[];
+  open?: StreamOpen;
+}
+
+// StreamOpen is the room a member stream shows in full: the channels open in
+// it (full events there, channel_activity for the others) and the last
+// sequence the client holds of it (the replay sends what is newer, or a
+// stream_gap when the room's buffer does not reach back).
+export interface StreamOpen {
+  roomId: string;
+  channels: string[];
+  since?: number;
 }
 
 // EventChannelFollow (ChannelFollowPayload) is published by bnbloc-room when
@@ -2673,7 +2688,7 @@ export const EventChannelFollow = "channel_follow";
 // a room's live state, exchanged on the bus between replicas.
 export const EventRoomView = "room_view";
 
-// EventReadMarked (ReadMarkedPayload) tells a member's activity streams
+// EventReadMarked (ReadMarkedPayload) tells a member's streams
 // that they marked a channel read.
 export const EventReadMarked = "read_marked";
 
@@ -4231,9 +4246,14 @@ export interface EventKindSpec {
   replay?: boolean;
   // Revocation kinds end access to the room (a member removed, the room
   // deleted): the affected streams close after delivering them, and they
-  // are never replayed. They store nothing but take the room's sequence,
-  // so every replica delivers them in order with the room's messages.
+  // are never replayed.
   revocation?: boolean;
+  // Sequenced kinds change who may read what (the revocations, a
+  // section's membership): they store nothing but take the room's
+  // sequence, so every replica delivers them in order with the room's
+  // messages and a message stored after one never reaches a reader it
+  // took access from.
+  sequenced?: boolean;
   // ChannelScoped kinds carry the channelId of the message or channel they
   // concern; a single-channel stream receives them only for its channel.
   channelScoped?: boolean;
@@ -4264,7 +4284,7 @@ export interface EventKindSpec {
 // RoomEventKinds is the registry of room event kinds. The web's
 // RoomEventKind union (and RoomEventKindValues) is generated from the Name
 // of each row: a kind registered here is a kind the web listens for.
-export const RoomEventKinds: readonly EventKindSpec[] = [{ name: "chat_message", durable: true, replay: true, channelScoped: true, lane: "activity", preview: true }, { name: "agent_messages", durable: true, replay: true, channelScoped: true, lane: "activity", preview: true }, { name: "agent_job_created", channelScoped: true, lane: "room" }, { name: "agent_job_updated", channelScoped: true, lane: "room" }, { name: "agent_job_progress", channelScoped: true }, { name: "job_live_frame", channelScoped: true }, { name: "agent_session_state" }, { name: "agent_roster" }, { name: "presence_delta" }, { name: "presence_snapshot" }, { name: "presence_typing", channelScoped: true }, { name: "message_deleted", channelScoped: true, lane: "activity", preview: true }, { name: "message_edited", channelScoped: true, preview: true }, { name: "task_updated", channelScoped: true, lane: "room" }, { name: "artifact_updated", crossChannel: true, preview: true }, { name: "artifact_state", crossChannel: true, preview: true }, { name: "member_joined", preview: true }, { name: "member_removed", revocation: true, preview: true }, { name: "room_deleted", revocation: true, preview: true }, { name: "content_saved" }, { name: "content_uses_changed" }, { name: "app_changed" }, { name: "channel_updated", preview: true }, { name: "section_membership" }, { name: "room_updated" }, { name: "channel_follow", channelScoped: true, internal: true }, { name: "room_view", internal: true }, { name: "read_marked", internal: true }, { name: "thread_updated", channelScoped: true, lane: "room", preview: true }, { name: "channel_activity", channelScoped: true, preview: true }, { name: "stream_opened", preview: true }, { name: "stream_gap", preview: true }];
+export const RoomEventKinds: readonly EventKindSpec[] = [{ name: "chat_message", durable: true, replay: true, channelScoped: true, lane: "activity", preview: true }, { name: "agent_messages", durable: true, replay: true, channelScoped: true, lane: "activity", preview: true }, { name: "agent_job_created", channelScoped: true, lane: "room" }, { name: "agent_job_updated", channelScoped: true, lane: "room" }, { name: "agent_job_progress", channelScoped: true }, { name: "job_live_frame", channelScoped: true }, { name: "agent_session_state" }, { name: "agent_roster" }, { name: "presence_delta" }, { name: "presence_snapshot" }, { name: "presence_typing", channelScoped: true }, { name: "message_deleted", channelScoped: true, lane: "activity", preview: true }, { name: "message_edited", channelScoped: true, preview: true }, { name: "task_updated", channelScoped: true, lane: "room" }, { name: "artifact_updated", crossChannel: true, preview: true }, { name: "artifact_state", crossChannel: true, preview: true }, { name: "member_joined", preview: true }, { name: "member_removed", revocation: true, sequenced: true, preview: true }, { name: "room_deleted", revocation: true, sequenced: true, preview: true }, { name: "content_saved" }, { name: "content_uses_changed" }, { name: "app_changed" }, { name: "channel_updated", preview: true }, { name: "section_membership", sequenced: true }, { name: "room_updated" }, { name: "channel_follow", channelScoped: true, internal: true }, { name: "room_view", internal: true }, { name: "read_marked", internal: true }, { name: "thread_updated", channelScoped: true, lane: "room", preview: true }, { name: "channel_activity", channelScoped: true, preview: true }, { name: "stream_opened", preview: true }, { name: "stream_gap", preview: true }];
 
 // The lanes of a lanes stream (EventKindSpec.Lane, StreamLane).
 export const LaneFull = "full";
@@ -6754,12 +6774,11 @@ export interface UnreadReply {
   channels: Record<string, ChannelUnread[]>;
 }
 
-// The member's activity stream (GET /v1/my/activity?rooms=, SSE): one per
-// client, across the rooms it names, instead of polling their unread counts
-// (docs/prd/2026-10-30-replicas-without-owners.md, part B). On opening, and
-// again whenever the stream may have missed something, it sends the rooms'
-// unread state (UnreadStateKind, an UnreadReply); after that only what
-// changed (UnreadDeltaKind, at most once a second).
+// A member stream (GET /v1/my/events) carries the unread state of the
+// rooms it is scoped to (UnreadStateKind, an UnreadReply) on every scope of
+// them and after a gap, and after that only what changed (UnreadDeltaKind,
+// at most once a second), instead of a client polling every room's count
+// (docs/prd/2026-10-30-replicas-without-owners.md §9).
 export const UnreadStateKind = "unread_state";
 export const UnreadDeltaKind = "unread_delta";
 
@@ -6781,7 +6800,7 @@ export interface RoomUnreadDelta {
 }
 
 // ReadMarkedPayload is EventReadMarked: a member marked a room's channel
-// read, sent to that member's own activity streams only.
+// read, sent to that member's own streams only.
 export interface ReadMarkedPayload {
   roomId: string;
   channelId: string;

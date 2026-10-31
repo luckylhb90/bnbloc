@@ -155,12 +155,11 @@ type UnreadReply struct {
 	Channels map[string][]ChannelUnread `json:"channels"`
 }
 
-// The member's activity stream (GET /v1/my/activity?rooms=, SSE): one per
-// client, across the rooms it names, instead of polling their unread counts
-// (docs/prd/2026-10-30-replicas-without-owners.md, part B). On opening, and
-// again whenever the stream may have missed something, it sends the rooms'
-// unread state (UnreadStateKind, an UnreadReply); after that only what
-// changed (UnreadDeltaKind, at most once a second).
+// A member stream (GET /v1/my/events) carries the unread state of the
+// rooms it is scoped to (UnreadStateKind, an UnreadReply) on every scope of
+// them and after a gap, and after that only what changed (UnreadDeltaKind,
+// at most once a second), instead of a client polling every room's count
+// (docs/prd/2026-10-30-replicas-without-owners.md §9).
 const (
 	UnreadStateKind = "unread_state"
 	UnreadDeltaKind = "unread_delta"
@@ -184,14 +183,14 @@ type RoomUnreadDelta struct {
 }
 
 // ReadMarkedPayload is EventReadMarked: a member marked a room's channel
-// read, sent to that member's own activity streams only.
+// read, sent to that member's own streams only.
 type ReadMarkedPayload struct {
 	RoomID    string `json:"roomId"`
 	ChannelID string `json:"channelId"`
 }
 
 // MemberActivityKey is the hub key a member's own events go on (their
-// activity streams subscribe to it beside their rooms).
+// member streams subscribe to it beside their rooms).
 func MemberActivityKey(userID string) string { return "member:" + userID }
 
 // UnreadSummary is GET /v1/my/unread: how many of the caller's rooms (in the
