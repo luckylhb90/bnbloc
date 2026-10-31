@@ -217,6 +217,7 @@ func (s *Service) Handler() http.Handler {
 	mux.HandleFunc("PUT /v1/rooms/{roomId}/agent-prefs", s.handlePutAgentPrefs)
 	mux.HandleFunc("GET /v1/rooms/{roomId}/members/{userId}", s.handleGetMember)
 	mux.HandleFunc("GET /v1/rooms/{roomId}/membership/{userId}", s.handleMembershipProbe)
+	mux.HandleFunc("GET /v1/users/{userId}/memberships", s.handleMembershipsProbe)
 	mux.HandleFunc("GET /v1/rooms/{roomId}/tenant", s.handleRoomTenant)
 	mux.HandleFunc("DELETE /v1/rooms/{roomId}/members/{userId}", s.handleRemoveMember)
 	mux.HandleFunc("POST /v1/rooms/{roomId}/invites", s.handleCreateInvite)
@@ -555,6 +556,41 @@ func (s *Service) handleMembershipProbe(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, membership.ProbeAnswer{Member: true, Role: string(m.Role), AgentHost: m.AgentHost, TenantID: m.TenantID})
+}
+
+// handleMembershipsProbe is the membership probe for many rooms of one
+// user (?rooms=a,b, at most membership.MaxProbeRooms): {"rooms": {roomId:
+// answer}}, a room the user is not in left out. A stream naming its
+// member's rooms asks once, not once a room. Only the user themselves may
+// ask (the signed caller is the queried subject), so it tells nobody else
+// which rooms a person is in.
+func (s *Service) handleMembershipsProbe(w http.ResponseWriter, r *http.Request) {
+	userID := r.PathValue("userId")
+	if caller(r) != userID {
+		httpx.Error(w, "only the member may ask for their memberships", http.StatusForbidden)
+		return
+	}
+	var rooms []string
+	for _, id := range strings.Split(r.URL.Query().Get("rooms"), ",") {
+		if id = strings.TrimSpace(id); id != "" {
+			rooms = append(rooms, id)
+		}
+	}
+	if len(rooms) > membership.MaxProbeRooms {
+		httpx.Error(w, fmt.Sprintf("rooms: at most %d", membership.MaxProbeRooms), http.StatusBadRequest)
+		return
+	}
+	ms, err := s.Store.MembershipsAnyTenant(r.Context(), userID, rooms)
+	if err != nil {
+		obs.ServerError(w, "read memberships failed", err)
+		httpx.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	out := membership.ProbeAnswers{Rooms: make(map[string]membership.ProbeAnswer, len(ms))}
+	for id, m := range ms {
+		out.Rooms[id] = membership.ProbeAnswer{Member: true, Role: string(m.Role), AgentHost: m.AgentHost, TenantID: m.TenantID}
+	}
+	httpx.WriteJSON(w, http.StatusOK, out)
 }
 
 // isHumanMember reports whether user is a member of the room whose

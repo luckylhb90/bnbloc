@@ -16,6 +16,7 @@ import (
 // narrower interface it needs (Directory, Reader) on its own fields.
 type Service interface {
 	Directory
+	ManyReader
 	MemberRooms(ctx context.Context, userID, tenantID string) ([]RoomRef, error)
 	MemberRoomIDs(ctx context.Context, userID, tenantID string) ([]string, error)
 	PutAgentHost(ctx context.Context, tenantID, roomID, userID string) error

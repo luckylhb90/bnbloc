@@ -441,6 +441,23 @@ A's in §5.
     0 gaps, PASS.
   - Needs a desktop release: the desktop app's bundled web client speaks
     the old routes until then.
+- **A stream's unread state costs about one query (2026-10-31).** The
+  member stream sends its rooms' unread state on every connection, so a
+  deploy that reconnects everyone asks it of every member at once. It was
+  two queries per channel of every room (`UnreadCount` for each), and one
+  membership probe per room. Now:
+  - one query per tenant and 200 rooms finds the channels with anything
+    unread (`ChatStore.UnreadChannels`, the candidate test of
+    `UnreadRooms`, one SQL owner for both), and only those are counted;
+  - one membership probe per 200 rooms (`GET /v1/users/{id}/memberships`
+    on bnbloc-room, answered only to the member themselves;
+    `membership.LookupMany`), with fresh cached answers not asked again;
+  - the membership cache sweeps expired answers once a TTL instead of
+    scanning the whole cache on every answer it keeps (a reconnect burst
+    was quadratic under the cache's lock).
+  Measured on the HA stack, 800 streams of members in 4 rooms of 8
+  channels: 66,995 statements to open them before, 12,500 after (the
+  unread part 51,000 to 950, about one per stream); connect p95 75 to 7 ms.
 
 ## 9. Part B, the end state: one stream per client
 

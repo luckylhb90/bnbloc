@@ -274,8 +274,15 @@ func TestContractRoomStoreDetailedTenantScoped(t *testing.T) {
 	})
 }
 
-// memberAnyTenant reports whether MembershipAnyTenant finds a membership.
+// memberAnyTenant reports whether MembershipAnyTenant finds a membership,
+// and checks that MembershipsAnyTenant, asked with the room among others,
+// finds the same one.
 func memberAnyTenant(t testing.TB, s RoomStore, ctx context.Context, roomID, userID string) bool {
-	_, ok := must2(s.MembershipAnyTenant(ctx, roomID, userID))(t)
+	t.Helper()
+	m, ok := must2(s.MembershipAnyTenant(ctx, roomID, userID))(t)
+	many := must(s.MembershipsAnyTenant(ctx, userID, []string{uniq("room-none-"), roomID}))(t)
+	if bm, bok := many[roomID]; bok != ok || bm != m || len(many) > 1 {
+		t.Fatalf("MembershipsAnyTenant(%s, %s) = %+v, MembershipAnyTenant = %+v %v", roomID, userID, many, m, ok)
+	}
 	return ok
 }

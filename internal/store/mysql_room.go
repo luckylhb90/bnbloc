@@ -337,10 +337,35 @@ func (s *MySQLRoom) IsMember(ctx context.Context, roomID, userID string) (bool, 
 // tenant and the room must be live: a membership row under any other tenant
 // (e.g. a stray row planted by hand) never grants access.
 func (s *MySQLRoom) MembershipAnyTenant(ctx context.Context, roomID, userID string) (Membership, bool, error) {
-	return scanOneMembership(s.DB.QueryRowContext(ctx,
+	ms, err := s.MembershipsAnyTenant(ctx, userID, []string{roomID})
+	m, ok := ms[roomID]
+	return m, ok, err
+}
+
+// MembershipsAnyTenant reads the user's memberships of the live rooms among
+// roomIDs, in one query on the members' primary key (room_id, user_id).
+func (s *MySQLRoom) MembershipsAnyTenant(ctx context.Context, userID string, roomIDs []string) (map[string]Membership, error) {
+	out := map[string]Membership{}
+	if len(roomIDs) == 0 {
+		return out, nil
+	}
+	marks := strings.TrimSuffix(strings.Repeat("?,", len(roomIDs)), ",")
+	args := make([]any, 0, len(roomIDs)+1)
+	for _, id := range roomIDs {
+		args = append(args, id)
+	}
+	args = append(args, userID)
+	ms, err := queryAll(ctx, s.DB,
 		`SELECT m.tenant_id, m.room_id, m.user_id, m.role, m.joined_at_ms, m.agent_host, m.rules_agreed_version FROM room_members m
 		 JOIN rooms r ON r.room_id = m.room_id AND r.tenant_id = m.tenant_id AND r.`+sqlNotDeleted+`
-		 WHERE m.room_id = ? AND m.user_id = ? LIMIT 1`, roomID, userID))
+		 WHERE m.room_id IN (`+marks+`) AND m.user_id = ?`, scanMembership, args...)
+	if err != nil {
+		return nil, err
+	}
+	for _, m := range ms {
+		out[m.RoomID] = m
+	}
+	return out, nil
 }
 
 // membershipColumns is the column list scanMembership reads, in its order.

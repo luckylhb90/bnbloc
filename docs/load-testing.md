@@ -481,6 +481,13 @@ on over the bus. Laptop load average 40 to 70.
   catch it (AGENTS.md "A bus handler never waits on the bus").
 - The big room's tail follows its POST p99 (655 ms) on this loaded host,
   as before: the commit, not the fan-out.
+- **What opening the streams costs the database.** 200 members, each in 4
+  rooms of 8 channels and holding a stream per room (800 streams, each
+  carrying 4 rooms' unread), counted from MySQL's statement digests:
+  66,995 statements before the unread state was batched, 12,500 after;
+  the unread part went from 51,000 (two per channel of every room) to 950
+  (one per stream), connect p95 from 75 to 7 ms. What is left is the
+  setup of the rooms (members added).
 
 ## What a message costs the database (2026-10-30)
 

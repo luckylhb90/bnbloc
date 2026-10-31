@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -27,6 +28,7 @@ type RoomClient struct {
 	mu       sync.Mutex
 	cache    map[string]cachedMember // memberKey(room, user) -> membership
 	previews map[string]cachedMember // memberKey(room, user) -> preview
+	swept    time.Time               // the caches' last sweep of expired answers
 }
 
 type cachedMember struct {
@@ -112,16 +114,22 @@ func (c *RoomClient) probe(roomID, userID string, preview bool) (ProbeAnswer, bo
 	return out, true
 }
 
-// remember caches m for (room, user) in cache (c.mu held), first evicting
-// expired entries so the cache cannot grow unbounded with ephemeral rooms /
-// churning users. TTL is short (seconds), so the map stays small and this
-// scan is cheap.
+// remember caches m for (room, user) in cache (c.mu held). Expired answers
+// are swept from both caches at most once a TTL, so a cache holds at most
+// two TTLs of answers whatever the churn, and a burst of lookups (every
+// stream of a replica reconnecting after a deploy, each naming its member's
+// rooms) costs a sweep per TTL, not a scan of the whole cache per answer.
 func (c *RoomClient) remember(cache map[string]cachedMember, roomID, userID string, m Member) {
 	now := c.Now()
-	for k, hit := range cache {
-		if now.After(hit.exp) {
-			delete(cache, k)
+	if !now.Before(c.swept.Add(c.TTL)) {
+		for _, cc := range []map[string]cachedMember{c.cache, c.previews} {
+			for k, hit := range cc {
+				if now.After(hit.exp) {
+					delete(cc, k)
+				}
+			}
 		}
+		c.swept = now
 	}
 	cache[memberKey(roomID, userID)] = cachedMember{m: m, exp: now.Add(c.TTL)}
 }
@@ -139,6 +147,75 @@ func (c *RoomClient) Fresh(roomID, userID string) (Member, bool) {
 	c.remember(c.cache, roomID, userID, m)
 	c.mu.Unlock()
 	return m, true
+}
+
+// MaxProbeRooms bounds one probe of many rooms (bnbloc-room's GET
+// /v1/users/{id}/memberships?rooms=): LookupMany asks in pages of it.
+const MaxProbeRooms = 200
+
+// ProbeAnswers is the many-rooms probe's answer: the user's memberships by
+// room id, a room they are not in left out.
+type ProbeAnswers struct {
+	Rooms map[string]ProbeAnswer `json:"rooms"`
+}
+
+// LookupMany is Lookup for many rooms of one user: fresh cached answers,
+// and the rest from the room service's many-rooms probe, MaxProbeRooms a
+// call (a stream naming its member's rooms costs a call per page, not a
+// probe per room). A page that fails is no member (fail closed).
+func (c *RoomClient) LookupMany(roomIDs []string, userID string) map[string]Member {
+	out := make(map[string]Member, len(roomIDs))
+	var ask []string
+	c.mu.Lock()
+	now := c.Now()
+	for _, id := range roomIDs {
+		if hit, ok := c.cache[memberKey(id, userID)]; ok && now.Before(hit.exp) {
+			out[id] = hit.m
+		} else {
+			ask = append(ask, id)
+		}
+	}
+	c.mu.Unlock()
+	for page := range slices.Chunk(ask, MaxProbeRooms) {
+		answers, ok := c.probeMany(page, userID)
+		if !ok {
+			continue
+		}
+		c.mu.Lock()
+		for id, a := range answers.Rooms {
+			if !a.Member || a.TenantID == "" || !slices.Contains(page, id) {
+				continue
+			}
+			m := Member{Role: store.Role(a.Role), AgentHost: a.AgentHost, Tenant: a.TenantID}
+			c.remember(c.cache, id, userID, m)
+			out[id] = m
+		}
+		c.mu.Unlock()
+	}
+	return out
+}
+
+func (c *RoomClient) probeMany(roomIDs []string, userID string) (ProbeAnswers, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	endpoint := c.BaseURL + "/v1/users/" + url.PathEscape(userID) + "/memberships?rooms=" + url.QueryEscape(strings.Join(roomIDs, ","))
+	req, err := svcauth.NewRequest(ctx, http.MethodGet, endpoint, nil, userID, "")
+	if err != nil {
+		return ProbeAnswers{}, false
+	}
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return ProbeAnswers{}, false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return ProbeAnswers{}, false
+	}
+	var out ProbeAnswers
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return ProbeAnswers{}, false
+	}
+	return out, true
 }
 
 // Preview implements Directory.Preview from the probe: userID is no member

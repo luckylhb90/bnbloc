@@ -151,11 +151,17 @@ func TestContractUnreadRoomsThreadsForFollowers(t *testing.T) {
 		if n := must(b.Chat.UnreadRooms(ctx, "jack", []string{room}, 10))(t); n != 0 {
 			t.Fatalf("a non-follower's unread rooms = %d, want 0", n)
 		}
+		if got := must(b.Chat.UnreadChannels(ctx, "jack", []string{room}))(t); len(got) != 0 {
+			t.Fatalf("a non-follower's unread channels = %v, want none", got)
+		}
 		if err := b.Channel.FollowChannel(ctx, room, th.ChannelID, "jack", 3, FollowMarks{}); err != nil {
 			t.Fatal(err)
 		}
 		if n := must(b.Chat.UnreadRooms(ctx, "jack", []string{room}, 10))(t); n != 1 {
 			t.Fatalf("a follower's unread rooms = %d, want 1", n)
+		}
+		if got := must(b.Chat.UnreadChannels(ctx, "jack", []string{room}))(t); !slices.Equal(got[room], []string{th.ChannelID}) {
+			t.Fatalf("a follower's unread channels = %v, want the thread", got)
 		}
 	})
 }

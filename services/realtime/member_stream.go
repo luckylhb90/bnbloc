@@ -452,9 +452,10 @@ func (s *Service) handleMyEventsScope(w http.ResponseWriter, r *http.Request) {
 			httpx.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		rooms := make([]scopedRoom, 0, len(named))
+		members := membership.LookupMany(s.Membership, named, userID)
+		rooms := make([]scopedRoom, 0, len(members))
 		for _, id := range named {
-			if m, member := s.Membership.Lookup(id, userID); member && !m.Preview {
+			if m, member := members[id]; member && !m.Preview {
 				rooms = append(rooms, scopedRoom{ID: id, M: m})
 			}
 		}

@@ -66,6 +66,31 @@ type Reader interface {
 	Lookup(roomID, userID string) (Member, bool)
 }
 
+// ManyReader is a Reader that answers many rooms of one user in one read
+// (RoomClient: one probe a page instead of one a room).
+type ManyReader interface {
+	LookupMany(roomIDs []string, userID string) map[string]Member
+}
+
+// LookupMany is the user's memberships among roomIDs, by room id (a room
+// they are not in is absent): in one read when r can, else room by room.
+func LookupMany(r Reader, roomIDs []string, userID string) map[string]Member {
+	if mr, ok := r.(ManyReader); ok {
+		return mr.LookupMany(roomIDs, userID)
+	}
+	return lookupEach(r, roomIDs, userID)
+}
+
+func lookupEach(r Reader, roomIDs []string, userID string) map[string]Member {
+	out := make(map[string]Member, len(roomIDs))
+	for _, id := range roomIDs {
+		if m, ok := r.Lookup(id, userID); ok {
+			out[id] = m
+		}
+	}
+	return out
+}
+
 // Directory answers room membership for request handlers. Fresh always asks
 // the authority (a stream open); Forget drops the cached answers for (room,
 // user), or for the whole room when userID is "" (a member removed, a room
@@ -248,6 +273,11 @@ func (s *Static) Lookup(roomID, userID string) (Member, bool) {
 	m, ok := s.members[roomID][userID]
 	m.Tenant = s.tenants[roomID]
 	return m, ok
+}
+
+// LookupMany is Lookup room by room: the static set is in memory.
+func (s *Static) LookupMany(roomIDs []string, userID string) map[string]Member {
+	return lookupEach(s, roomIDs, userID)
 }
 
 // Fresh is Lookup: the static set has no cache.

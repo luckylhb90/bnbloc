@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -224,6 +225,7 @@ type ChatStore interface {
 	ChannelReadersSince(ctx context.Context, roomID, channelID string, sinceMs int64) ([]string, error)
 	UnreadCount(ctx context.Context, roomID, channelID, userID string) (int, error)
 	UnreadRooms(ctx context.Context, userID string, roomIDs []string, max int) (int, error)
+	UnreadChannels(ctx context.Context, userID string, roomIDs []string) (map[string][]string, error)
 	MaxRoomSeq(ctx context.Context, roomID string) (int64, error)
 	DeleteRoomMessage(ctx context.Context, roomID string, seq int64, requester string, atMs int64) (bool, error)
 	EditRoomMessage(ctx context.Context, roomID string, seq int64, requester, text string, atMs int64) (edited bool, err error)
@@ -1367,60 +1369,94 @@ func namedRooms(r *http.Request) ([]string, error) {
 // unreadFor is the member's unread state in rooms (those they are a member
 // of; the others are skipped): per room the total over the channels they
 // may read (a thread only when they follow it), and the channels that have
-// any. GET /v1/rooms-unread and the activity stream answer with it.
+// any. GET /v1/rooms-unread and the member stream answer with it. One query
+// per tenant and MaxUnreadRooms rooms finds the channels with anything
+// unread (UnreadChannels); only those are counted, so a member's state costs
+// about one query plus two per channel with news, not two per channel of
+// every room (the member stream sends it on every connection: a deploy
+// reconnects everyone).
 func (s *Service) unreadFor(ctx0 context.Context, userID string, rooms []string) wire.UnreadReply {
 	reply := wire.UnreadReply{Unread: map[string]int{}, Channels: map[string][]wire.ChannelUnread{}}
-	if s.Chat != nil && s.Membership != nil {
-		for _, roomID := range rooms {
-			// A read across rooms the caller names: each room is read in its own
-			// tenant (the membership probe answers it), so a member of rooms in
-			// several organizations gets every room's count whatever tenant the
-			// request is signed for.
-			m, member := s.Membership.Lookup(roomID, userID)
-			if !member {
+	if s.Chat == nil || s.Membership == nil {
+		return reply
+	}
+	// Each room is read in its own tenant (the membership probe answers
+	// it), so a member of rooms in several organizations gets every room's
+	// count whatever tenant the request is signed for.
+	members := membership.LookupMany(s.Membership, rooms, userID)
+	var tenants []string
+	byTenant := map[string][]string{}
+	for _, roomID := range rooms {
+		m, member := members[roomID]
+		if !member {
+			continue
+		}
+		if byTenant[m.Tenant] == nil {
+			tenants = append(tenants, m.Tenant)
+		}
+		byTenant[m.Tenant] = append(byTenant[m.Tenant], roomID)
+	}
+	for _, tid := range tenants {
+		ctx := ctx0
+		if tid != "" {
+			ctx = tenant.NewContext(ctx, tid)
+		}
+		for chunk := range slices.Chunk(byTenant[tid], wire.MaxUnreadRooms) {
+			unread, err := s.Chat.UnreadChannels(ctx, userID, chunk)
+			if err != nil {
+				log.Printf("realtime: unread user=%s: %v", userID, err)
 				continue
 			}
-			ctx := ctx0
-			if m.Tenant != "" {
-				ctx = tenant.NewContext(ctx, m.Tenant)
-			}
-			total := 0
-			if s.Channels == nil {
-				// In-memory dev: every message is on the room-wide stream.
-				if n, err := s.Chat.UnreadCount(ctx, roomID, "", userID); err == nil {
-					total = n
-				}
-			} else {
-				channels, err := s.channelStore().ListChannels(ctx, roomID)
-				if err != nil {
-					log.Printf("realtime: unread room=%s user=%s: channels: %v", roomID, userID, err)
+			for _, roomID := range chunk {
+				channels := unread[roomID]
+				if len(channels) == 0 {
 					continue
 				}
-				access := &channelAccess{svc: s, ctx: ctx, roomID: roomID, reader: readerOf(userID, m)}
-				followed := s.followedThreads(ctx, roomID, userID, channels)
+				slices.Sort(channels)
+				access := &channelAccess{svc: s, ctx: ctx, roomID: roomID, reader: readerOf(userID, members[roomID])}
+				followed := s.followedAmong(ctx, roomID, userID, channels)
+				total := 0
 				for _, ch := range channels {
-					if !access.mayRead(ch.ChannelID) {
+					if !access.mayRead(ch) || !followed(ch) {
 						continue
 					}
-					// A thread's unread is its followers' (C4: followed
-					// threads all; anyone else sees its root's line).
-					if ch.IsThread() && !followed[ch.ChannelID] {
-						continue
-					}
-					n, err := s.Chat.UnreadCount(ctx, roomID, ch.ChannelID, userID)
+					n, err := s.Chat.UnreadCount(ctx, roomID, ch, userID)
 					if err != nil || n == 0 {
 						continue
 					}
 					total += n
-					reply.Channels[roomID] = append(reply.Channels[roomID], wire.ChannelUnread{ChannelID: ch.ChannelID, Count: n})
+					reply.Channels[roomID] = append(reply.Channels[roomID], wire.ChannelUnread{ChannelID: ch, Count: n})
 				}
-			}
-			if total > 0 {
-				reply.Unread[roomID] = total
+				if total > 0 {
+					reply.Unread[roomID] = total
+				}
 			}
 		}
 	}
 	return reply
+}
+
+// followedAmong tells, for channels of a room, whether each counts for the
+// member's unread: any channel but a thread they do not follow (channels
+// PRD C4). The store's query applies the rule already; it is asked again
+// here from the cached channels, so the count does not depend on a store
+// that knows threads (the in-memory one does not), and only for rooms with
+// something unread.
+func (s *Service) followedAmong(ctx context.Context, roomID, userID string, channels []string) func(string) bool {
+	cs := s.channelStore()
+	if cs == nil {
+		return func(string) bool { return true }
+	}
+	var threads []store.RoomChannel
+	thread := map[string]bool{}
+	for _, id := range channels {
+		if c, found, err := cs.GetChannel(ctx, roomID, id); err == nil && found && c.IsThread() {
+			threads = append(threads, c)
+			thread[id] = true
+		}
+	}
+	followed := s.followedThreads(ctx, roomID, userID, threads)
+	return func(id string) bool { return !thread[id] || followed[id] }
 }
 
 // handleMyUnread answers how many of the caller's rooms have unread messages

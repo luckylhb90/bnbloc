@@ -3,8 +3,10 @@ package room
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/luckylhb90/bnbloc/internal/membership"
 	"github.com/luckylhb90/bnbloc/internal/store"
 )
 
@@ -135,6 +137,30 @@ func TestMembershipProbeAnswersPreview(t *testing.T) {
 	plain := decodeJSON(t, artifactRequest(t, e.srv, http.MethodGet, "/v1/rooms/pub/membership/jack", "jack", nil))
 	if plain["member"] != false || plain["preview"] != nil {
 		t.Fatalf("probe without ?preview=1 = %v, want a plain non-member", plain)
+	}
+}
+
+// The probe of many rooms answers the member's memberships among them,
+// leaves out rooms they are not in, and answers only the member themselves.
+func TestMembershipsProbe(t *testing.T) {
+	e := newPreviewEnv(t)
+	got := decodeJSON(t, artifactRequest(t, e.srv, http.MethodGet, "/v1/users/alice/memberships?rooms=pub,priv,missing", "alice", nil))
+	rooms, _ := got["rooms"].(map[string]any)
+	if len(rooms) != 2 || rooms["pub"] == nil || rooms["priv"] == nil {
+		t.Fatalf("alice's memberships = %v, want pub and priv", got)
+	}
+	if a := rooms["pub"].(map[string]any); a["member"] != true || a["role"] != "owner" || a["tenantId"] == "" {
+		t.Fatalf("alice in pub = %v, want an owner with the room's tenant", a)
+	}
+	if got := decodeJSON(t, artifactRequest(t, e.srv, http.MethodGet, "/v1/users/jack/memberships?rooms=pub,priv", "jack", nil)); len(got["rooms"].(map[string]any)) != 0 {
+		t.Fatalf("jack's memberships = %v, want none (a shared room is a preview, not a membership)", got)
+	}
+	if code := e.status(t, http.MethodGet, "/v1/users/alice/memberships?rooms=pub", "jack"); code != http.StatusForbidden {
+		t.Fatalf("jack asking for alice's memberships = %d, want 403", code)
+	}
+	many := strings.TrimSuffix(strings.Repeat("r,", membership.MaxProbeRooms+1), ",")
+	if code := e.status(t, http.MethodGet, "/v1/users/alice/memberships?rooms="+many, "alice"); code != http.StatusBadRequest {
+		t.Fatalf("a probe of %d rooms = %d, want 400", membership.MaxProbeRooms+1, code)
 	}
 }
 

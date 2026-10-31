@@ -261,6 +261,10 @@ type RoomStore interface {
 	// member whose room lives in a different tenant than their token. Only a
 	// membership in the room's own tenant, of a live room, counts.
 	MembershipAnyTenant(ctx context.Context, roomID, userID string) (Membership, bool, error)
+	// MembershipsAnyTenant is MembershipAnyTenant for many rooms in one
+	// read: the user's memberships among roomIDs, by room id (a room they
+	// are not in is absent).
+	MembershipsAnyTenant(ctx context.Context, userID string, roomIDs []string) (map[string]Membership, error)
 	// Members returns every membership of a room, agent hosts flagged, in
 	// join order (then user id).
 	Members(ctx context.Context, roomID string) ([]Membership, error)
@@ -653,6 +657,21 @@ func (s *MemoryRoom) MembershipAnyTenant(ctx context.Context, roomID, userID str
 	}
 	m, member := s.members[key][userID]
 	return m, member, nil
+}
+
+// MembershipsAnyTenant is MembershipAnyTenant for many rooms.
+func (s *MemoryRoom) MembershipsAnyTenant(ctx context.Context, userID string, roomIDs []string) (map[string]Membership, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := map[string]Membership{}
+	for _, roomID := range roomIDs {
+		if key, ok := s.liveRoomKeyLocked(roomID); ok {
+			if m, member := s.members[key][userID]; member {
+				out[roomID] = m
+			}
+		}
+	}
+	return out, nil
 }
 
 // AddAgentHost adds an agent-host membership unless userID is already a
