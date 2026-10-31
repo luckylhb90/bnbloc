@@ -64,10 +64,12 @@ func TestCreateRoomRejectsOversizedBody(t *testing.T) {
 // streams immediately. Events carry the room's tenant in the publish context.
 func TestAccessRevocationPublishesEvents(t *testing.T) {
 	srv, svc := newTestServer(t)
-	pub := &capturePublisher{}
-	svc.Publisher = pub
 	resp := do(t, http.MethodPost, srv.URL+"/v1/rooms", "alice", map[string]string{"roomId": "room-1", "name": "Team"})
 	resp.Body.Close()
+	// What ending access publishes, from here on (the creation announced
+	// alice's join).
+	pub := &capturePublisher{}
+	svc.Publisher = pub
 	for _, u := range []string{"bob", "carol"} {
 		if err := svc.Store.AddMember(dctx(), store.Membership{RoomID: "room-1", UserID: u, Role: store.RoleMember}); err != nil {
 			t.Fatal(err)
@@ -102,10 +104,12 @@ func TestAccessRevocationPublishesEvents(t *testing.T) {
 // A refused removal (owner, non-admin caller) publishes nothing.
 func TestRefusedRemovalPublishesNothing(t *testing.T) {
 	srv, svc := newTestServer(t)
-	pub := &capturePublisher{}
-	svc.Publisher = pub
 	resp := do(t, http.MethodPost, srv.URL+"/v1/rooms", "alice", map[string]string{"roomId": "room-1", "name": "Team"})
 	resp.Body.Close()
+	// What ending access publishes, from here on (the creation announced
+	// alice's join).
+	pub := &capturePublisher{}
+	svc.Publisher = pub
 	_ = svc.Store.AddMember(dctx(), store.Membership{RoomID: "room-1", UserID: "bob", Role: store.RoleMember})
 	resp = do(t, http.MethodDelete, srv.URL+"/v1/rooms/room-1/members/alice", "bob", nil)
 	resp.Body.Close()
@@ -122,6 +126,10 @@ func TestJoinsPublishMemberJoined(t *testing.T) {
 	svc.Publisher = pub
 	resp := do(t, http.MethodPost, srv.URL+"/v1/rooms", "alice", map[string]string{"roomId": "room-1", "name": "Team", "visibility": "shared"})
 	resp.Body.Close()
+	// The creator's join is announced too: their other tabs carry the room.
+	if len(pub.events) != 1 || pub.events[0].Kind != wire.EventMemberJoined || pub.events[0].Payload.(wire.MemberJoinedPayload).UserID != "alice" {
+		t.Fatalf("creating the room published %+v, want alice's member_joined", pub.events)
+	}
 	pub.events = nil
 	steps := []struct {
 		user, method, path string

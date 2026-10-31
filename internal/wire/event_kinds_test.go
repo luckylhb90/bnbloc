@@ -139,6 +139,8 @@ func TestPreviewEventKinds(t *testing.T) {
 		EventPresenceSnapshot: true, EventPresenceTyping: true, EventTaskUpdated: true, EventContentSaved: true,
 		EventContentUsesChanged: true, EventAppChanged: true, EventSectionMembership: true, EventRoomUpdated: true, EventChannelFollow: true,
 		EventRoomView: true, EventReadMarked: true,
+		// A member stream's own: the member's rooms, never a preview's.
+		EventMemberRooms: true,
 	}
 	for _, k := range RoomEventKinds {
 		switch {

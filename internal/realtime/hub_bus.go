@@ -3,6 +3,7 @@ package realtime
 import (
 	"log"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/obs"
@@ -92,6 +93,34 @@ func (h *Hub) joinBus(roomID string) {
 	br.cancel = cancel
 	h.mu.Unlock()
 	h.syncBus(roomID, br)
+}
+
+// joinBusConcurrency bounds how many rooms joinBusAll joins at once.
+const joinBusConcurrency = 16
+
+// joinBusAll joins many rooms (a member stream's, which may be every room
+// of a member) a few at a time: each join waits for the bus to confirm its
+// subscription and reads the room's head, so one after another they would
+// cost the stream a round trip and a query per room before it opens.
+func (h *Hub) joinBusAll(rooms []string) {
+	if h.Bus == nil {
+		return
+	}
+	if len(rooms) == 1 {
+		h.joinBus(rooms[0])
+		return
+	}
+	var wg sync.WaitGroup
+	slots := make(chan struct{}, joinBusConcurrency)
+	for _, r := range rooms {
+		slots <- struct{}{}
+		wg.Add(1)
+		go func() {
+			defer func() { <-slots; wg.Done() }()
+			h.joinBus(r)
+		}()
+	}
+	wg.Wait()
 }
 
 // Watch has the hub receive roomID from the bus for lingerFor (renewed by

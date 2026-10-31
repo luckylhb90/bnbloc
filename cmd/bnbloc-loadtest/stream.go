@@ -25,8 +25,8 @@ var (
 )
 
 // stream is one web tab: a member's member stream (GET /v1/my/events),
-// scoped to the member's rooms (their unread) and showing one room and
-// channel, held for the whole run and reopened with the web client's backoff
+// carrying the member's rooms (their unread; the stream reads them itself)
+// and showing one room and channel, held for the whole run and reopened with the web client's backoff
 // when it drops.
 type stream struct {
 	id      int
@@ -35,7 +35,8 @@ type stream struct {
 	api     *api
 	tracker *tracker
 	stats   *streamStats
-	// rooms are the member's rooms, whose unread the stream carries.
+	// rooms are the member's rooms, whose unread the stream carries (what
+	// the report expects the stream to be told of).
 	rooms  []string
 	unread *activityStats
 	// channel is the channel the stream has open (a lanes stream: full
@@ -128,7 +129,7 @@ func (st *stream) connectOnce(ctx context.Context) (opened bool, err error) {
 		return false, &statusError{method: http.MethodGet, path: "/v1/my/events", status: resp.StatusCode, body: string(body)}
 	}
 	// The stream opens with its id; the tab then scopes it, as the web
-	// client does: its rooms, and the room and channel it shows.
+	// client does: the room and channel it shows.
 	rd := sse.NewReader(resp.Body)
 	first, err := rd.Next()
 	if err != nil {
@@ -140,7 +141,7 @@ func (st *stream) connectOnce(ctx context.Context) (opened bool, err error) {
 	if first.Name != wire.EventStreamOpened || json.Unmarshal(first.Data, &hello) != nil || hello.Payload.StreamID == "" {
 		return false, fmt.Errorf("the stream did not open with %s", wire.EventStreamOpened)
 	}
-	if err := st.api.scopeStream(ctx, st.member, hello.Payload.StreamID, st.rooms, st.room.id, st.channel, st.resumeSeq.Load()); err != nil {
+	if err := st.api.scopeStream(ctx, st.member, hello.Payload.StreamID, st.room.id, st.channel, st.resumeSeq.Load()); err != nil {
 		return false, err
 	}
 	reopen := st.opened.Swap(true)

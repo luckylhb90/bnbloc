@@ -51,6 +51,7 @@ func newChannelTestServer(t *testing.T) (*httptest.Server, *Service) {
 	svc := &Service{
 		Hub:        realtime.NewHub(64, 16),
 		Membership: mem,
+		Rooms:      mem,
 		Chat:       store.NewMemoryChat(),
 		Channels:   channels,
 	}

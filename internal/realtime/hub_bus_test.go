@@ -3,6 +3,7 @@ package realtime
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -293,6 +294,42 @@ func TestRevocationTakesTheRoomsNextSequence(t *testing.T) {
 	for _, want := range []int64{1, 2, 3} {
 		if ev := recv(t, sub); ev.Sequence != want {
 			t.Fatalf("delivered %d, want %d", ev.Sequence, want)
+		}
+	}
+}
+
+// A stream of many rooms joins them a few at a time, not one after
+// another: each join waits for its room's head (a query).
+func TestSubscribeRoomsJoinsConcurrently(t *testing.T) {
+	bus := NewMemoryBus()
+	h := NewHub(64, 64)
+	h.Bus = RoomBus(bus.Endpoint())
+	h.lingerFor = time.Hour
+	var mu sync.Mutex
+	inFlight, most := 0, 0
+	h.RoomHead = func(string) (int64, error) {
+		mu.Lock()
+		inFlight++
+		most = max(most, inFlight)
+		mu.Unlock()
+		time.Sleep(20 * time.Millisecond)
+		mu.Lock()
+		inFlight--
+		mu.Unlock()
+		return 0, nil
+	}
+	rooms := make([]string, 4*joinBusConcurrency)
+	for i := range rooms {
+		rooms[i] = fmt.Sprintf("r%d", i)
+	}
+	sub := h.SubscribeRooms(rooms, 16)
+	defer h.Unsubscribe(rooms[0], sub)
+	if most < 2 || most > joinBusConcurrency {
+		t.Fatalf("rooms joined %d at a time, want between 2 and %d", most, joinBusConcurrency)
+	}
+	for _, r := range rooms {
+		if bus.Subscribers(RoomTopic(r)) != 1 {
+			t.Fatalf("room %s not joined", r)
 		}
 	}
 }

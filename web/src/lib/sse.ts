@@ -7,11 +7,12 @@ import { ROOM_EVENT_KINDS } from "./roomEventKinds.ts";
 import { roomPath } from "./roomId.ts";
 import { currentTenantPolicy } from "./tenantPolicy.ts";
 import {
+  EventMemberRooms,
   MaxStreamOpen,
-  MaxStreamRooms,
   RoomEventKinds,
   UnreadDeltaKind,
   UnreadStateKind,
+  type MemberRoomsPayload,
   type StreamOpenedPayload,
   type StreamScopeRequest,
   type UnreadDeltaPayload,
@@ -20,11 +21,12 @@ import {
 
 // The event streams (SSE). A web tab holds ONE: the member stream (GET
 // /v1/my/events, docs/prd/2026-10-30-replicas-without-owners.md §9), which
-// carries the unread of the tab's rooms and the room the tab shows. The
+// carries the unread of the member's rooms (the server's to know, and it
+// tells when they change: member_rooms) and the room the tab shows. The
 // room view, a thread panel and the people-chat panel watch their channels
-// on it (watchRoom), the shell its unread (watchUnread); what they watch is
-// told to the server as the stream's scope (POST /v1/my/events/scope),
-// never by reopening it. subscribeRoom is a room's own stream, for the
+// on it (watchRoom), the shell its unread and rooms (watchUnread); the room
+// shown is told to the server as the stream's scope (POST
+// /v1/my/events/scope), never by reopening it. subscribeRoom is a room's own stream, for the
 // pages that are one room and nothing else (the standalone preview and
 // live views).
 //
@@ -81,6 +83,8 @@ export interface RoomWatch {
 export interface UnreadHandlers {
   readonly onState: (state: UnreadReply) => void;
   readonly onDelta: (delta: UnreadDeltaPayload) => void;
+  /** The member's rooms changed (joined somewhere, removed, a room deleted). */
+  readonly onRooms?: (change: MemberRoomsPayload) => void;
   readonly onStatus?: (up: boolean) => void;
 }
 
@@ -104,10 +108,10 @@ class MemberStream {
   private up = false;
   private readonly watchers: Watcher[] = [];
   private readonly unread = new Set<UnreadHandlers>();
-  private rooms: readonly string[] = [];
-  // What the server was last told: the rooms (by key) and the open room.
-  private sentRooms: string | null = null;
+  // What the server was last told of the open room; wantState: a watcher
+  // of the unread came after the stream sent its state.
   private sentOpen: string | null = null;
+  private wantState = false;
   // The open room and the last sequence received of it (a reconnect asks
   // for what is newer).
   private openRoom = "";
@@ -135,17 +139,17 @@ class MemberStream {
     };
   }
 
-  watchUnread(rooms: readonly string[], h: UnreadHandlers): () => void {
-    this.rooms = rooms.slice(0, MaxStreamRooms);
+  watchUnread(h: UnreadHandlers): () => void {
     this.unread.add(h);
     this.ensure();
-    if (this.up) h.onStatus?.(true);
-    this.sentRooms = null; // a new watcher needs the state
-    this.scope();
+    if (this.up) {
+      h.onStatus?.(true);
+      // The stream sent its state when it opened: this watcher asks again.
+      this.wantState = true;
+      this.scope();
+    }
     return () => {
       this.unread.delete(h);
-      if (this.unread.size === 0) this.rooms = [];
-      this.scope();
       this.closeIfIdle();
     };
   }
@@ -174,8 +178,7 @@ class MemberStream {
   private async sendScope() {
     if (!this.streamId) return; // the stream's opening sends it
     const body: StreamScopeRequest = { streamId: this.streamId };
-    const roomsKey = this.rooms.join(",");
-    if (roomsKey !== this.sentRooms) body.rooms = [...this.rooms];
+    if (this.wantState) body.state = true;
     const open = this.desiredOpen();
     const openKey = `${open.roomId}\u0000${open.channels.join(",")}`;
     if (openKey !== this.sentOpen) {
@@ -185,9 +188,9 @@ class MemberStream {
       }
       body.open = { roomId: open.roomId, channels: open.channels, since: this.lastSeq };
     }
-    if (!body.rooms && !body.open) return;
+    if (!body.state && !body.open) return;
     const streamId = this.streamId;
-    this.sentRooms = roomsKey;
+    this.wantState = false;
     this.sentOpen = openKey;
     try {
       await req<void>("/v1/my/events/scope", { method: "POST", body: JSON.stringify(body), as: "none" });
@@ -256,9 +259,8 @@ class MemberStream {
     const src = new EventSource(apiUrl(`/v1/my/events?${token ? `access_token=${encodeURIComponent(token)}` : ""}${tzQuery()}`));
     this.es = src;
     this.streamId = "";
-    // A new stream knows nothing: everything is told again (it opens
-    // showing no room).
-    this.sentRooms = null;
+    // A new stream shows no room (it sends the unread state itself).
+    this.wantState = false;
     this.sentOpen = NO_ROOM;
     src.onerror = () => {
       this.setUp(false);
@@ -285,8 +287,12 @@ class MemberStream {
       const p = parse((e as MessageEvent).data)?.payload;
       if (p && typeof p === "object") for (const h of this.unread) h.onDelta(p as unknown as UnreadDeltaPayload);
     });
+    src.addEventListener(EventMemberRooms, (e) => {
+      const p = parse((e as MessageEvent).data)?.payload;
+      if (p && typeof p === "object") for (const h of this.unread) h.onRooms?.(p as unknown as MemberRoomsPayload);
+    });
     for (const kind of ROOM_EVENT_KINDS) {
-      if (kind === "stream_opened") continue;
+      if (kind === "stream_opened" || kind === EventMemberRooms) continue;
       src.addEventListener(kind, (e) => this.route((e as MessageEvent).data));
     }
   }
@@ -322,10 +328,10 @@ export function watchRoom(
   return memberStream().watchRoom(roomId, channelId, channelOnly, onEvent, onStatus);
 }
 
-/** Watches the unread of rooms (at most MaxStreamRooms) on the tab's
- * member stream; returns the function that stops it. */
-export function watchUnread(rooms: readonly string[], h: UnreadHandlers): () => void {
-  return memberStream().watchUnread(rooms, h);
+/** Watches the unread of the member's rooms, and their changes, on the
+ * tab's member stream; returns the function that stops it. */
+export function watchUnread(h: UnreadHandlers): () => void {
+  return memberStream().watchUnread(h);
 }
 
 // ---------------------------------------------------------------- a room's own stream

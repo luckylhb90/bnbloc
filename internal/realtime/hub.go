@@ -279,9 +279,7 @@ func (h *Hub) leaveRoomLocked(roomID string, sub *Subscriber) {
 // rooms or its open room change). It reports false for a subscriber the
 // hub dropped (it overflowed twice, or was unsubscribed).
 func (h *Hub) SetRooms(sub *Subscriber, rooms []string) bool {
-	for _, r := range rooms {
-		h.joinBus(r)
-	}
+	h.joinBusAll(rooms)
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if len(sub.rooms) == 0 || h.subs[sub.rooms[0]] == nil {
@@ -334,9 +332,7 @@ func (h *Hub) Snapshot(roomID string, since int64) (events []wire.Event, gap boo
 // (and their own key, wire.MemberActivityKey). Unsubscribe with any of the
 // rooms takes it off them all.
 func (h *Hub) SubscribeRooms(rooms []string, buffer int) *Subscriber {
-	for _, r := range rooms {
-		h.joinBus(r)
-	}
+	h.joinBusAll(rooms)
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	sub := &Subscriber{ch: make(chan wire.Event, max(buffer, h.buffer)), rooms: slices.Clone(rooms)}

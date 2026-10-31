@@ -458,6 +458,17 @@ A's in §5.
   Measured on the HA stack, 800 streams of members in 4 rooms of 8
   channels: 66,995 statements to open them before, 12,500 after (the
   unread part 51,000 to 950, about one per stream); connect p95 75 to 7 ms.
+- **The stream reads its rooms itself (2026-10-31).** The client named the
+  rooms whose unread it carried, at most 500: a member in more rooms had
+  no live unread for the rest, every name was checked on every scope, and
+  a room someone added the member to stayed off the sidebar until the next
+  navigation. The stream now reads the member's rooms from the room
+  directory and follows joins and departures (§9 "Rooms are the
+  server's"). Every writer of a membership announces it: the creator's
+  join is announced too, and org sync announces its joins through realtime
+  (it wrote memberships without `member_joined`, so its members also
+  missed the room's standing content shares);
+  `TestMembershipWritersAnnounce` fails on a writer that does not.
 
 ## 9. Part B, the end state: one stream per client
 
@@ -467,12 +478,22 @@ people-chat panel's one-channel streams, and the activity stream. The end
 state is one.
 
 - **`GET /v1/my/events`** (SSE, the web app's only stream): it opens with
-  `stream_opened {streamId}`; the client then scopes it with
-  **`POST /v1/my/events/scope`** `{streamId, rooms?, open?}` and again
-  whenever either changes, never reopening it.
-  - `rooms`: the rooms whose unread it carries (up to 500): `unread_state`
-    on every scope of rooms and after a gap, `unread_delta` each second
-    after (as the activity stream did).
+  `stream_opened {streamId}` and the unread state; the client then scopes
+  it with **`POST /v1/my/events/scope`** `{streamId, open?, state?}` and
+  again whenever the room it shows changes, never reopening it.
+  - **Rooms are the server's.** The stream carries the member's rooms in
+    its tenant, read from the room directory when it opens and after a gap
+    (`MemberRoomIDs`, then one membership probe a page), and follows them:
+    a join reaches it on the member's own key (`member_rooms`, which
+    realtime announces when bnbloc-room publishes `member_joined`, the
+    creator's join and org sync's included), a removal or a deletion on the
+    room itself. It tells its client (`member_rooms {joined, left}`), whose
+    sidebar reads its rooms again, and sends the unread state again. The
+    client names no rooms: there is no list to check, no bound on it, and a
+    room someone else adds the member to appears at once.
+  - Unread: `unread_state` when the stream opens, when its rooms change,
+    after a gap and on `state: true` (a new watcher), `unread_delta` each
+    second after.
   - `open`: `{roomId, channels, since}`, the room the tab shows and the
     channels open in it (the room view's, a thread's, the people chat's;
     at most 4). For it the stream is what a room's lanes stream is: the
@@ -486,16 +507,17 @@ state is one.
   - Access to the open room ending (removed, deleted, or found gone at the
     15 s re-check) is told as the revocation event; the stream goes on.
 - The member stream is one hub subscriber on every room it carries
-  (`Hub.SubscribeRooms`, rooms added and removed as the scope changes) and
-  the member's own key. It runs on any replica over the bus.
+  (`Hub.SubscribeRooms`, rooms added and removed as they change; a replica
+  joins a stream's rooms on the bus 16 at a time) and the member's own
+  key. It runs on any replica over the bus.
 - **The room stream** (`/v1/rooms/{id}/events`) stays for what is not a
   person's web tab: bridges and agent hosts (`presence=0`, `agents=`,
   `replay=0`), and the standalone preview and live pages. The activity
   stream (`/v1/my/activity`) is gone.
 - **Web**: one member stream per tab (`sse.ts`); the room view, thread
   panel and people-chat panel watch their channels on it
-  (`useRoomStream`), the shell its unread. The load tool's clients hold one
-  member stream each.
+  (`useRoomStream`), the shell its unread and its rooms. The load tool's
+  clients hold one member stream each.
 - **Section access is ordered too**: `section_membership` takes the room's
   sequence as the revocation kinds do, so a message of a members-only
   channel stored after a member left its section never reaches their

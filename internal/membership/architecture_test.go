@@ -31,7 +31,7 @@ import (
 func TestNoMembershipFailOpen(t *testing.T) {
 	ownDirectory := regexp.MustCompile(`membership\.(NewRoomClient|NewStatic)\(`)
 	failOpen := regexp.MustCompile(`Membership\s*!=\s*nil\s*&&`)
-	directRead := regexp.MustCompile(`\.Membership\.(Lookup|Fresh)\(`)
+	directRead := regexp.MustCompile(`\.Membership\.(Lookup|Fresh|LookupMany)\(|membership\.LookupMany\(\s*s\.Membership\b`)
 	visitor := regexp.MustCompile(`\bRoleVisitor\b`)
 	readNeed := regexp.MustCompile(`membership\.Read\b`)
 	// The files whose routes serve a preview: realtime's history and event
@@ -41,10 +41,12 @@ func TestNoMembershipFailOpen(t *testing.T) {
 	readNeedAllowed := map[string]bool{"services/realtime/service.go": true, "services/realtime/member_stream.go": true}
 	// A directory read that is not a request's membership check, with why.
 	directReadAllowed := map[string]string{
-		// A read across rooms the caller names: each room in its own tenant
-		// (the unread counts; the rooms a member stream carries).
+		// A read across rooms: each room in its own tenant (the unread
+		// counts of the rooms the caller names), and the rooms a member
+		// stream carries, read from the room directory or announced as a
+		// join and checked here.
 		"services/realtime/service.go":       "unreadFor",
-		"services/realtime/member_stream.go": "handleMyEventsScope",
+		"services/realtime/member_stream.go": "carriedRooms",
 		// Converging a host's agent-host membership, not authorizing a caller.
 		"services/shareagent/platform_agents.go": "reconcileAgentHost",
 		// The edge's one live lookup (any tenant): it decides reach and room

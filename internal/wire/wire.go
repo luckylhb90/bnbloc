@@ -127,6 +127,12 @@ type MemberJoinedPayload struct {
 	UserID string `json:"userId"`
 }
 
+// MemberJoinedEvent is the member_joined event of userID joining roomID, as
+// every writer of a membership announces it (bnbloc-room, org sync).
+func MemberJoinedEvent(roomID, userID string, atMs int64) Event {
+	return Event{RoomID: roomID, Kind: EventMemberJoined, Payload: MemberJoinedPayload{UserID: userID}, AtUnixMs: atMs}
+}
+
 // Job notices. A synthetic assistant row about a job (a refused borrow, a
 // failed or swept turn) is reported under the job's OWN activity session,
 // never a real agent session: activity dedupes replies per

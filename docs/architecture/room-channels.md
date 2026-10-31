@@ -218,9 +218,11 @@ says the number is a floor). It is the cheap read for an account no window
 shows; `/v1/rooms-unread` below is the per-room, per-channel detail.
 
 A web tab does not poll: its member stream (below) carries the unread of
-the rooms it is scoped to: `unread_state` (the `/v1/rooms-unread` answer
-for the rooms the caller is in) on every scope of rooms and whenever it may
-have missed something, then at most once a second `unread_delta`: per room
+the member's rooms in its tenant, which the stream reads and follows itself
+(`member_rooms` tells the client when they change): `unread_state` (the
+`/v1/rooms-unread` answer for those rooms) when it opens, when the rooms
+change and whenever it may have missed something, then at most once a
+second `unread_delta`: per room
 the sequences of new messages that count (the same rule: channels the
 caller may read, a thread only when followed), the ones deleted, and
 `read: true` when the caller marked the room read on any device (the client
@@ -254,10 +256,9 @@ default-first. The web channel rail consumes the per-channel list.
 
 A web tab holds one stream, the **member stream** (`GET /v1/my/events`,
 docs/prd/2026-10-30-replicas-without-owners.md §9). Its first event,
-`stream_opened`, names it; `POST /v1/my/events/scope {streamId, rooms?,
-open?}` scopes it, again whenever the tab changes, never reopening it:
-`rooms` are the rooms whose unread it carries, `open` `{roomId, channels,
-since}` the room the tab shows and the channels open there (the room
+`stream_opened`, names it; `POST /v1/my/events/scope {streamId, open?,
+state?}` scopes it, again whenever the tab changes, never reopening it:
+`open` `{roomId, channels, since}` is the room the tab shows and the channels open there (the room
 view's, a thread's, the people chat's; at most 4). For the open room it is
 a person's **lanes** view: full events for the open channels, the room lane
 always, and one coalesced `channel_activity` a second for every other

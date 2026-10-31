@@ -957,6 +957,7 @@ func (s *Service) publish(ctx context.Context, ev wire.Event, d realtime.Durable
 	}
 	s.afterPublish(ctx, published)
 	s.onMemberJoined(ctx, published)
+	s.announceJoin(ctx, published)
 	s.emitRoomEvents(ctx, published)
 	return published, nil
 }

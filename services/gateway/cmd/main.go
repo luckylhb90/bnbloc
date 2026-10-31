@@ -23,10 +23,12 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/orgsync"
 	"github.com/luckylhb90/bnbloc/internal/provisioning"
+	"github.com/luckylhb90/bnbloc/internal/realtime"
 	"github.com/luckylhb90/bnbloc/internal/redisbus"
 	"github.com/luckylhb90/bnbloc/internal/sealbox"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/svcauth"
+	"github.com/luckylhb90/bnbloc/internal/wire"
 	"github.com/luckylhb90/bnbloc/services/gateway"
 	"github.com/luckylhb90/bnbloc/services/gateway/webui"
 )
@@ -243,6 +245,7 @@ func resolveTenantWiring() tenantWiring {
 		OrgSync: &orgsync.Syncer{
 			Settings: backends.Settings, Tenants: backends.Tenant, Rooms: backends.Room,
 			State: backends.OrgSync, Sessions: backends.RefreshTokens, Audit: backends.ExtAudit,
+			Joined: orgSyncJoined(realtime.NewHTTPPublisher(config.FromEnvRaw("BNBLOC_REALTIME_BASE_URL"), "gateway")),
 		},
 		// Producer-only emitter for admin alerts (the one producer path:
 		// notifiers, desktop notification plugins, browser push); the
@@ -456,3 +459,11 @@ func resolveTrustedProxies() []netip.Prefix {
 // list (verified subject ids or emails), read the one way for login
 // provisioning, admin alerts and the bootstrap token.
 func superAdmins() []string { return config.List("BNBLOC_SUPER_ADMINS") }
+
+// orgSyncJoined announces a membership org sync added through realtime, as
+// bnbloc-room announces its own joins.
+func orgSyncJoined(p *realtime.HTTPPublisher) func(ctx context.Context, roomID, userID string) {
+	return func(ctx context.Context, roomID, userID string) {
+		p.Publish(ctx, wire.MemberJoinedEvent(roomID, userID, time.Now().UnixMilli()))
+	}
+}

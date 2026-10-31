@@ -26,14 +26,21 @@ import (
 // The member stream (GET /v1/my/events,
 // docs/prd/2026-10-30-replicas-without-owners.md §9): a web tab's one
 // stream. It opens with stream_opened; the client scopes it (POST
-// /v1/my/events/scope) with the rooms whose unread it carries and the room
-// it shows in full, and scopes it again when either changes, never
-// reopening it.
+// /v1/my/events/scope) with the room it shows in full, and scopes it again
+// when that changes, never reopening it.
 //
-//   - Unread: the scoped rooms' state (unread_state) on every scope of
-//     rooms and after a gap, then at most once an unreadFlush what changed
-//     (unread_delta): new messages that count by unreadFor's rule,
-//     deletions, a mark of read on any device.
+//   - Rooms: the member's rooms in the stream's tenant, read by the stream
+//     itself from the room directory when it opens and after a gap, and
+//     followed: a join reaches it on the member's own key (member_rooms,
+//     announced when bnbloc-room publishes member_joined), a removal or a
+//     deletion on the room. A change is told to the client (member_rooms),
+//     which reads its room list again. The client never names rooms, so
+//     there is no list to check and no bound on it.
+//   - Unread: the rooms' state (unread_state) when the stream opens, when
+//     its rooms change, after a gap and when asked (a new watcher), then
+//     at most once an unreadFlush what changed (unread_delta): new
+//     messages that count by unreadFor's rule, deletions, a mark of read on
+//     any device.
 //   - The open room: what a person's view of the room shows (roomView, the
 //     same rules as a room's own stream): its replay after the client's
 //     sequence, the presence snapshot, full events of the open channels,
@@ -80,11 +87,11 @@ type scopeRequest struct {
 // streamScope is a scope request checked by the replica that took it (it
 // may be another than the stream's, which it reaches over the bus).
 type streamScope struct {
-	Rooms *[]scopedRoom `json:"rooms,omitempty"`
-	Open  *openRoom     `json:"open,omitempty"`
+	Open  *openRoom `json:"open,omitempty"`
+	State bool      `json:"state,omitempty"`
 }
 
-// scopedRoom is a room the member is in, checked when it was scoped.
+// scopedRoom is a room the stream carries: the member's, in its tenant.
 type scopedRoom struct {
 	ID string            `json:"id"`
 	M  membership.Member `json:"m"`
@@ -133,12 +140,21 @@ func (s *Service) handleMyEvents(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, "streaming unsupported", http.StatusInternalServerError)
 		return
 	}
-	st := &memberStream{id: s.Replicas.streamPrefix() + ids.New("ms_"), userID: userID, scopes: make(chan scopeRequest)}
-	s.memberStreams.add(st)
-	defer s.memberStreams.remove(st.id)
+	ctx := r.Context()
+	// The member's key first: a join announced while the rooms are read is
+	// not missed (the rooms then include it, and the join adds nothing).
 	memberKey := wire.MemberActivityKey(userID)
 	sub := s.Hub.SubscribeRooms([]string{memberKey}, memberStreamBuffer)
 	defer s.Hub.Unsubscribe(memberKey, sub)
+	rooms, err := s.memberRooms(ctx, userID)
+	if err != nil {
+		obs.ServerError(w, "room directory unavailable", err)
+		httpx.Error(w, "room directory unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	st := &memberStream{id: s.Replicas.streamPrefix() + ids.New("ms_"), userID: userID, scopes: make(chan scopeRequest)}
+	s.memberStreams.add(st)
+	defer s.memberStreams.remove(st.id)
 	defer realtime.TrackSSE(s.Hub.Metrics, realtime.SSEKindMember)()
 
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -158,14 +174,11 @@ func (s *Service) handleMyEvents(w http.ResponseWriter, r *http.Request) {
 		}
 		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Kind, data)
 	}
-	ctx := r.Context()
 	tz := r.URL.Query().Get("tz")
 	now := func() int64 { return time.Now().UnixMilli() }
-	send(wire.Event{Kind: wire.EventStreamOpened, AtUnixMs: now(), Payload: wire.StreamOpenedPayload{StreamID: st.id}})
-	flusher.Flush()
-
 	m := &memberStreamState{s: s, ctx: ctx, userID: userID, tz: tz, send: send, rooms: map[string]*activityRoom{}, delta: map[string]*wire.RoomUnreadDelta{}}
 	defer m.closeOpen()
+	m.setRooms(rooms)
 	keys := func() []string {
 		out := []string{memberKey}
 		for id := range m.rooms {
@@ -175,6 +188,22 @@ func (s *Service) handleMyEvents(w http.ResponseWriter, r *http.Request) {
 			out = append(out, m.open.roomID)
 		}
 		return out
+	}
+
+	if !s.Hub.SetRooms(sub, keys()) {
+		return
+	}
+	send(wire.Event{Kind: wire.EventStreamOpened, AtUnixMs: now(), Payload: wire.StreamOpenedPayload{StreamID: st.id}})
+	m.sendState()
+	flusher.Flush()
+	// roomsChanged applies what the events of the rooms changed of them
+	// (joins, removals): the subscription follows, the client is told, the
+	// unread state is sent again.
+	roomsChanged := func() bool {
+		if !m.applyRooms() {
+			return true
+		}
+		return s.Hub.SetRooms(sub, keys())
 	}
 
 	unreadTick := time.NewTicker(unreadFlush)
@@ -190,9 +219,6 @@ func (s *Service) handleMyEvents(w http.ResponseWriter, r *http.Request) {
 		case <-obs.Draining():
 			return
 		case req := <-st.scopes:
-			if req.Rooms != nil {
-				m.setRooms(*req.Rooms)
-			}
 			var err error
 			replay := false
 			switch {
@@ -213,7 +239,7 @@ func (s *Service) handleMyEvents(w http.ResponseWriter, r *http.Request) {
 				req.done <- errNoStream
 				return
 			}
-			if req.Rooms != nil {
+			if req.State {
 				m.sendState()
 			}
 			if replay {
@@ -249,9 +275,19 @@ func (s *Service) handleMyEvents(w http.ResponseWriter, r *http.Request) {
 					m.event(ev)
 				}
 			}
+			if open && !roomsChanged() {
+				return
+			}
 			if open && sub.TakeGap() {
-				// Something may have been missed: the unread starts again
-				// from the state, the open room from history.
+				// Something may have been missed (a join or a removal too):
+				// the rooms are read again, the unread starts again from
+				// the state, the open room from history.
+				if rooms, err := s.memberRooms(ctx, userID); err == nil {
+					m.replaceRooms(rooms)
+					if !roomsChanged() {
+						return
+					}
+				}
 				m.delta = map[string]*wire.RoomUnreadDelta{}
 				m.sendState()
 				if m.open != nil {
@@ -276,6 +312,11 @@ type memberStreamState struct {
 	rooms  map[string]*activityRoom
 	delta  map[string]*wire.RoomUnreadDelta
 	open   *openView
+	// joined and left are the room changes the stream's events brought
+	// since applyRooms last ran; joinedChecked says the joins were read
+	// from the directory (replaceRooms), not announced (to be checked).
+	joined, left  []string
+	joinedChecked bool
 }
 
 // openView is the open room as the stream shows it.
@@ -289,6 +330,7 @@ type openView struct {
 	leave   func()
 }
 
+// setRooms makes rooms the ones the stream carries.
 func (m *memberStreamState) setRooms(rooms []scopedRoom) {
 	next := make(map[string]*activityRoom, len(rooms))
 	for _, r := range rooms {
@@ -296,11 +338,7 @@ func (m *memberStreamState) setRooms(rooms []scopedRoom) {
 			next[r.ID] = cur
 			continue
 		}
-		ctx := m.ctx
-		if r.M.Tenant != "" {
-			ctx = tenant.NewContext(ctx, r.M.Tenant)
-		}
-		next[r.ID] = &activityRoom{ctx: ctx, access: &channelAccess{svc: m.s, ctx: ctx, roomID: r.ID, reader: readerOf(m.userID, r.M)}}
+		next[r.ID] = m.newRoom(r)
 	}
 	m.rooms = next
 	for id := range m.delta {
@@ -308,6 +346,77 @@ func (m *memberStreamState) setRooms(rooms []scopedRoom) {
 			delete(m.delta, id)
 		}
 	}
+}
+
+func (m *memberStreamState) newRoom(r scopedRoom) *activityRoom {
+	ctx := m.ctx
+	if r.M.Tenant != "" {
+		ctx = tenant.NewContext(ctx, r.M.Tenant)
+	}
+	return &activityRoom{ctx: ctx, access: &channelAccess{svc: m.s, ctx: ctx, roomID: r.ID, reader: readerOf(m.userID, r.M)}}
+}
+
+// replaceRooms makes rooms (read again from the directory) the ones the
+// stream carries, noting the difference as joins and departures for
+// applyRooms to tell.
+func (m *memberStreamState) replaceRooms(rooms []scopedRoom) {
+	next := make(map[string]bool, len(rooms))
+	for _, r := range rooms {
+		next[r.ID] = true
+		if m.rooms[r.ID] == nil {
+			m.rooms[r.ID] = m.newRoom(r)
+			m.joined = append(m.joined, r.ID)
+		}
+	}
+	for id := range m.rooms {
+		if !next[id] {
+			m.leave(id)
+		}
+	}
+	// Joins found here are checked already.
+	m.joinedChecked = true
+}
+
+// leave stops carrying a room the member is no longer in.
+func (m *memberStreamState) leave(roomID string) {
+	if m.rooms[roomID] == nil {
+		return
+	}
+	delete(m.rooms, roomID)
+	delete(m.delta, roomID)
+	m.left = append(m.left, roomID)
+}
+
+// applyRooms checks the rooms joined since it last ran (the member's rooms
+// in the stream's tenant only), and, when the rooms changed, tells the
+// client (member_rooms) and sends the unread state again. It reports
+// whether they changed.
+func (m *memberStreamState) applyRooms() bool {
+	if len(m.joined) == 0 && len(m.left) == 0 {
+		return false
+	}
+	joined := m.joined
+	if !m.joinedChecked {
+		joined = nil
+		var ask []string
+		for _, id := range m.joined {
+			if m.rooms[id] == nil && !slices.Contains(ask, id) {
+				ask = append(ask, id)
+			}
+		}
+		for _, r := range m.s.carriedRooms(m.ctx, ask, m.userID) {
+			m.rooms[r.ID] = m.newRoom(r)
+			joined = append(joined, r.ID)
+		}
+	}
+	left := m.left
+	m.joined, m.left, m.joinedChecked = nil, nil, false
+	if len(joined) == 0 && len(left) == 0 {
+		return false
+	}
+	m.send(wire.Event{Kind: wire.EventMemberRooms, AtUnixMs: time.Now().UnixMilli(), Payload: wire.MemberRoomsPayload{Joined: joined, Left: left}})
+	m.sendState()
+	return true
 }
 
 func (m *memberStreamState) sendState() {
@@ -407,11 +516,25 @@ func (m *memberStreamState) endOpen() {
 	roomID := m.open.roomID
 	m.closeOpen()
 	m.send(wire.Event{RoomID: roomID, Kind: wire.EventMemberRemoved, AtUnixMs: time.Now().UnixMilli(), Payload: wire.MemberRemovedPayload{UserID: m.userID}})
-	delete(m.rooms, roomID)
+	m.leave(roomID)
 }
 
-// event handles one event of the rooms the stream carries.
+// event handles one event of the rooms the stream carries (and of the
+// member's own key).
 func (m *memberStreamState) event(ev wire.Event) {
+	switch ev.Kind {
+	case wire.EventMemberRooms:
+		if p, ok := wire.DecodePayload[wire.MemberRoomsPayload](ev.Payload); ok && ev.RoomID == wire.MemberActivityKey(m.userID) {
+			m.joined = append(m.joined, p.Joined...)
+		}
+		return
+	case wire.EventMemberRemoved:
+		if p, ok := wire.DecodePayload[wire.MemberRemovedPayload](ev.Payload); ok && p.UserID == m.userID {
+			m.leave(ev.RoomID)
+		}
+	case wire.EventRoomDeleted:
+		m.leave(ev.RoomID)
+	}
 	m.s.noteActivity(m.userID, m.rooms, ev, m.at)
 	if m.open != nil && ev.RoomID == m.open.roomID {
 		m.openEvent(ev)
@@ -432,10 +555,8 @@ func (m *memberStreamState) openEvent(ev wire.Event) {
 	}
 }
 
-// handleMyEventsScope scopes the caller's member stream. Every room named
-// is checked here: the rooms whose unread it carries must be the caller's
-// (others are left out), the open room readable by them (a member's, or a
-// preview's).
+// handleMyEventsScope scopes the caller's member stream. The open room is
+// checked here: readable by the caller (a member's, or a preview's).
 func (s *Service) handleMyEventsScope(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireSubject(w, r)
 	if !ok {
@@ -445,22 +566,7 @@ func (s *Service) handleMyEventsScope(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, 64<<10, &body) {
 		return
 	}
-	var sc streamScope
-	if body.Rooms != nil {
-		named, err := normalizeRooms(*body.Rooms, wire.MaxStreamRooms)
-		if err != nil {
-			httpx.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		members := membership.LookupMany(s.Membership, named, userID)
-		rooms := make([]scopedRoom, 0, len(members))
-		for _, id := range named {
-			if m, member := members[id]; member && !m.Preview {
-				rooms = append(rooms, scopedRoom{ID: id, M: m})
-			}
-		}
-		sc.Rooms = &rooms
-	}
+	sc := streamScope{State: body.State}
 	if body.Open != nil {
 		o := openRoom{}
 		if body.Open.RoomID != "" {
@@ -500,6 +606,59 @@ func (s *Service) handleMyEventsScope(w http.ResponseWriter, r *http.Request) {
 		obs.ServerError(w, "stream scope failed", err)
 		httpx.Error(w, "stream scope failed", http.StatusInternalServerError)
 	}
+}
+
+// announceJoin carries a join to the member's streams on every replica:
+// bnbloc-room's member_joined is published to the room, which their streams
+// do not carry yet, so it is told again on the member's own key. The
+// stream checks it with the authority (carriedRooms).
+func (s *Service) announceJoin(ctx context.Context, ev wire.Event) {
+	if ev.Kind != wire.EventMemberJoined {
+		return
+	}
+	user := joinedMember(ev)
+	if user == "" {
+		return
+	}
+	if _, err := s.publish(ctx, wire.Event{RoomID: wire.MemberActivityKey(user), Kind: wire.EventMemberRooms,
+		Payload: wire.MemberRoomsPayload{Joined: []string{ev.RoomID}}, AtUnixMs: ev.AtUnixMs}, realtime.Durable{}); err != nil {
+		log.Printf("realtime: room=%s: the join of %s not told to their streams: %v", ev.RoomID, user, err)
+	}
+}
+
+// memberRooms are the rooms a member stream of ctx's tenant carries, read
+// from the authority: the room directory's ids, then their memberships in
+// one probe a page.
+func (s *Service) memberRooms(ctx context.Context, userID string) ([]scopedRoom, error) {
+	if s.Rooms == nil || s.Membership == nil {
+		return nil, nil
+	}
+	ids, err := s.Rooms.MemberRoomIDs(ctx, userID, tenant.FromContext(ctx))
+	if err != nil {
+		return nil, err
+	}
+	return s.carriedRooms(ctx, ids, userID), nil
+}
+
+// carriedRooms keeps, of ids, the rooms a member stream of ctx's tenant
+// carries: the user's own (human) memberships of rooms of that tenant. A
+// join announced on the member's key is checked here too, so nothing but
+// the authority decides what a stream carries.
+func (s *Service) carriedRooms(ctx context.Context, ids []string, userID string) []scopedRoom {
+	if len(ids) == 0 || s.Membership == nil {
+		return nil
+	}
+	tid := tenant.FromContext(ctx)
+	members := membership.LookupMany(s.Membership, ids, userID)
+	out := make([]scopedRoom, 0, len(members))
+	for _, id := range ids {
+		m, ok := members[id]
+		if !ok || !m.IsHuman() || m.Preview || (m.Tenant != "" && tid != "" && m.Tenant != tid) {
+			continue
+		}
+		out = append(out, scopedRoom{ID: id, M: m})
+	}
+	return out
 }
 
 // applyScope hands a checked scope to the caller's stream on this replica
@@ -564,12 +723,6 @@ func (s *Service) noteActivity(userID string, rooms map[string]*activityRoom, ev
 		if rm := rooms[ev.RoomID]; rm != nil {
 			rm.access = &channelAccess{svc: s, ctx: rm.ctx, roomID: ev.RoomID, reader: rm.access.reader}
 		}
-	case wire.EventMemberRemoved:
-		if p, ok := wire.DecodePayload[wire.MemberRemovedPayload](ev.Payload); ok && p.UserID == userID {
-			delete(rooms, ev.RoomID)
-		}
-	case wire.EventRoomDeleted:
-		delete(rooms, ev.RoomID)
 	}
 }
 

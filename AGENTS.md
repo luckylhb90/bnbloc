@@ -1222,6 +1222,14 @@ bridge --reply--> gateway --> activity (dedup + store) --> realtime hub --> clie
   that replica's whole bus until a timeout. Answer calls on a goroutine of
   their own (`Replicas.onAck`). `MemoryBus` delivers the same way, so a
   replica test deadlocks as production would; keep it that way.
+- **A member stream's rooms are the server's, and every membership write
+  announces itself.** The stream reads the member's rooms from the room
+  directory and follows joins by `member_joined` (re-told on the member's
+  key, `member_rooms`). A new way to make someone a member (an import, a
+  sync, an admin tool) must announce `member_joined`
+  (`wire.MemberJoinedEvent`), or the member's tabs never carry the room;
+  `TestMembershipWritersAnnounce` lists the writers. Never let a client
+  name the rooms a stream carries.
 - **Durable publishes group-commit per room** (`Hub.PublishCommit`). One
   leader at a time takes what queued during the previous commit, stores the
   batch in ONE `AppendNextRoomMessages` transaction (which numbers it), and

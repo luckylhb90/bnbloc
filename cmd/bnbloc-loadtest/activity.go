@@ -9,9 +9,15 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
-// activityLastFlush outlasts the server's delta interval (one second), so
-// the report counts the last delta.
-const activityLastFlush = 1500 * time.Millisecond
+// After the drain the report waits for the streams to be told of every
+// stored message: a delta follows its message by up to the server's
+// interval (one second), more on a loaded host, so a fixed wait would count
+// a late delta as never sent. It stops when nothing more was told for
+// activityQuiet (deltas stopped coming), or after activitySettle.
+const (
+	activityQuiet  = 2 * time.Second
+	activitySettle = 10 * time.Second
+)
 
 // activityStats aggregates every activity stream.
 type activityStats struct {

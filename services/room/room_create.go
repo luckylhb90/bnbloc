@@ -21,7 +21,9 @@ import (
 // .../members, joining a shared room, redeeming an invite) goes through
 // addMember or redeemInvite, so their invariants (default channel created
 // atomically, owner never granted or changed by an add) hold for every
-// caller and each join announces member_joined (TestJoinsAnnounced).
+// caller and each join, the creator's included, announces member_joined
+// (TestJoinsAnnounced). Org sync, the one writer outside this service,
+// announces through its Joined hook.
 
 // createRoom atomically creates room with owner as its owner and its default
 // channel (named defaultChannel, "general" when empty). It returns the
@@ -55,6 +57,9 @@ func (s *Service) createRoom(ctx context.Context, room store.Room, owner, defaul
 			log.Printf("room: room=%s: the creator's follow of the default channel failed: %v", room.RoomID, err)
 		}
 	}
+	// The creator's other tabs and devices carry the room from now on (their
+	// member streams follow joins), as for any join.
+	s.publishMemberJoined(ctx, room.RoomID, owner)
 	return def, nil
 }
 
@@ -119,12 +124,7 @@ func (s *Service) publishMemberJoined(ctx context.Context, roomID, userID string
 	if s.Publisher == nil {
 		return
 	}
-	s.Publisher.Publish(ctx, wire.Event{
-		RoomID:   roomID,
-		Kind:     wire.EventMemberJoined,
-		Payload:  wire.MemberJoinedPayload{UserID: userID},
-		AtUnixMs: s.Now(),
-	})
+	s.Publisher.Publish(ctx, wire.MemberJoinedEvent(roomID, userID, s.Now()))
 }
 
 // writeMemberErr maps an addMember error to its HTTP status.

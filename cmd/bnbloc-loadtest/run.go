@@ -177,9 +177,18 @@ func run(ctx context.Context, cfg config, logw io.Writer) (*Report, error) {
 	stopProgress()
 	report.Streams.OpenAtEnd = countLive(streams)
 	// The streams send what changed in their unread once a second: wait
-	// out the last one.
-	sleepCtx(ctx, activityLastFlush)
+	// until they told of every stored message (activitySettle).
 	report.Unread = unreadReport(streams, astats, rooms)
+	for end, moved := time.Now().Add(activitySettle), time.Now(); report.Unread.Told < report.Unread.Expected &&
+		time.Now().Before(end) && time.Since(moved) < activityQuiet; {
+		if !sleepCtx(ctx, 100*time.Millisecond) {
+			break
+		}
+		told := report.Unread.Told
+		if report.Unread = unreadReport(streams, astats, rooms); report.Unread.Told > told {
+			moved = time.Now()
+		}
+	}
 	stopAll()
 
 	res := tr.result()

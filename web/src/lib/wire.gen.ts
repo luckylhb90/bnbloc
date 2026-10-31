@@ -2656,16 +2656,30 @@ export interface StreamOpenedPayload {
 // room to spare).
 export const MaxStreamOpen = 4;
 
-// MaxStreamRooms bounds the rooms whose unread a member stream carries.
-export const MaxStreamRooms = 500;
-
 // StreamScopeRequest scopes a member stream (POST /v1/my/events/scope).
-// Rooms, when set, replaces the rooms whose unread it carries; Open, when
-// set, replaces the room it shows in full (an empty RoomID: none).
+// Open, when set, replaces the room it shows in full (an empty RoomID:
+// none); State asks for the unread state again (a new watcher of it). The
+// rooms whose unread the stream carries are not the client's to name: they
+// are the member's rooms in the stream's tenant, which the stream reads
+// itself and follows (member_rooms).
 export interface StreamScopeRequest {
   streamId: string;
-  rooms?: string[];
   open?: StreamOpen;
+  state?: boolean;
+}
+
+// EventMemberRooms (MemberRoomsPayload) tells a member stream that the
+// member's rooms changed: rooms joined and rooms left (removed, deleted). On
+// the member's own key it carries a join to every replica's streams of the
+// member (realtime announces it when bnbloc-room's member_joined is
+// published); the stream then tells its client, which reads its room list
+// again, and sends the unread state of the rooms it now carries.
+export const EventMemberRooms = "member_rooms";
+
+// MemberRoomsPayload is the payload of an EventMemberRooms event.
+export interface MemberRoomsPayload {
+  joined?: string[];
+  left?: string[];
 }
 
 // StreamOpen is the room a member stream shows in full: the channels open in
@@ -4284,7 +4298,7 @@ export interface EventKindSpec {
 // RoomEventKinds is the registry of room event kinds. The web's
 // RoomEventKind union (and RoomEventKindValues) is generated from the Name
 // of each row: a kind registered here is a kind the web listens for.
-export const RoomEventKinds: readonly EventKindSpec[] = [{ name: "chat_message", durable: true, replay: true, channelScoped: true, lane: "activity", preview: true }, { name: "agent_messages", durable: true, replay: true, channelScoped: true, lane: "activity", preview: true }, { name: "agent_job_created", channelScoped: true, lane: "room" }, { name: "agent_job_updated", channelScoped: true, lane: "room" }, { name: "agent_job_progress", channelScoped: true }, { name: "job_live_frame", channelScoped: true }, { name: "agent_session_state" }, { name: "agent_roster" }, { name: "presence_delta" }, { name: "presence_snapshot" }, { name: "presence_typing", channelScoped: true }, { name: "message_deleted", channelScoped: true, lane: "activity", preview: true }, { name: "message_edited", channelScoped: true, preview: true }, { name: "task_updated", channelScoped: true, lane: "room" }, { name: "artifact_updated", crossChannel: true, preview: true }, { name: "artifact_state", crossChannel: true, preview: true }, { name: "member_joined", preview: true }, { name: "member_removed", revocation: true, sequenced: true, preview: true }, { name: "room_deleted", revocation: true, sequenced: true, preview: true }, { name: "content_saved" }, { name: "content_uses_changed" }, { name: "app_changed" }, { name: "channel_updated", preview: true }, { name: "section_membership", sequenced: true }, { name: "room_updated" }, { name: "channel_follow", channelScoped: true, internal: true }, { name: "room_view", internal: true }, { name: "read_marked", internal: true }, { name: "thread_updated", channelScoped: true, lane: "room", preview: true }, { name: "channel_activity", channelScoped: true, preview: true }, { name: "stream_opened", preview: true }, { name: "stream_gap", preview: true }];
+export const RoomEventKinds: readonly EventKindSpec[] = [{ name: "chat_message", durable: true, replay: true, channelScoped: true, lane: "activity", preview: true }, { name: "agent_messages", durable: true, replay: true, channelScoped: true, lane: "activity", preview: true }, { name: "agent_job_created", channelScoped: true, lane: "room" }, { name: "agent_job_updated", channelScoped: true, lane: "room" }, { name: "agent_job_progress", channelScoped: true }, { name: "job_live_frame", channelScoped: true }, { name: "agent_session_state" }, { name: "agent_roster" }, { name: "presence_delta" }, { name: "presence_snapshot" }, { name: "presence_typing", channelScoped: true }, { name: "message_deleted", channelScoped: true, lane: "activity", preview: true }, { name: "message_edited", channelScoped: true, preview: true }, { name: "task_updated", channelScoped: true, lane: "room" }, { name: "artifact_updated", crossChannel: true, preview: true }, { name: "artifact_state", crossChannel: true, preview: true }, { name: "member_joined", preview: true }, { name: "member_removed", revocation: true, sequenced: true, preview: true }, { name: "room_deleted", revocation: true, sequenced: true, preview: true }, { name: "content_saved" }, { name: "content_uses_changed" }, { name: "app_changed" }, { name: "channel_updated", preview: true }, { name: "section_membership", sequenced: true }, { name: "room_updated" }, { name: "channel_follow", channelScoped: true, internal: true }, { name: "room_view", internal: true }, { name: "read_marked", internal: true }, { name: "member_rooms" }, { name: "thread_updated", channelScoped: true, lane: "room", preview: true }, { name: "channel_activity", channelScoped: true, preview: true }, { name: "stream_opened", preview: true }, { name: "stream_gap", preview: true }];
 
 // The lanes of a lanes stream (EventKindSpec.Lane, StreamLane).
 export const LaneFull = "full";
@@ -8332,8 +8346,8 @@ export type ContentSavedAction = "saved" | "submitted" | "published";
 export const ContentSavedActionValues: readonly ContentSavedAction[] = ["saved", "submitted", "published"];
 export type DecisionQuestionType = "predicate" | "choice" | "score";
 export const DecisionQuestionTypeValues: readonly DecisionQuestionType[] = ["predicate", "choice", "score"];
-export type RoomEventKind = "chat_message" | "agent_messages" | "agent_job_created" | "agent_job_updated" | "agent_job_progress" | "job_live_frame" | "agent_session_state" | "agent_roster" | "presence_delta" | "presence_snapshot" | "presence_typing" | "message_deleted" | "message_edited" | "task_updated" | "artifact_updated" | "artifact_state" | "member_joined" | "member_removed" | "room_deleted" | "content_saved" | "content_uses_changed" | "app_changed" | "channel_updated" | "section_membership" | "room_updated" | "channel_follow" | "room_view" | "read_marked" | "thread_updated" | "channel_activity" | "stream_opened" | "stream_gap";
-export const RoomEventKindValues: readonly RoomEventKind[] = ["chat_message", "agent_messages", "agent_job_created", "agent_job_updated", "agent_job_progress", "job_live_frame", "agent_session_state", "agent_roster", "presence_delta", "presence_snapshot", "presence_typing", "message_deleted", "message_edited", "task_updated", "artifact_updated", "artifact_state", "member_joined", "member_removed", "room_deleted", "content_saved", "content_uses_changed", "app_changed", "channel_updated", "section_membership", "room_updated", "channel_follow", "room_view", "read_marked", "thread_updated", "channel_activity", "stream_opened", "stream_gap"];
+export type RoomEventKind = "chat_message" | "agent_messages" | "agent_job_created" | "agent_job_updated" | "agent_job_progress" | "job_live_frame" | "agent_session_state" | "agent_roster" | "presence_delta" | "presence_snapshot" | "presence_typing" | "message_deleted" | "message_edited" | "task_updated" | "artifact_updated" | "artifact_state" | "member_joined" | "member_removed" | "room_deleted" | "content_saved" | "content_uses_changed" | "app_changed" | "channel_updated" | "section_membership" | "room_updated" | "channel_follow" | "room_view" | "read_marked" | "member_rooms" | "thread_updated" | "channel_activity" | "stream_opened" | "stream_gap";
+export const RoomEventKindValues: readonly RoomEventKind[] = ["chat_message", "agent_messages", "agent_job_created", "agent_job_updated", "agent_job_progress", "job_live_frame", "agent_session_state", "agent_roster", "presence_delta", "presence_snapshot", "presence_typing", "message_deleted", "message_edited", "task_updated", "artifact_updated", "artifact_state", "member_joined", "member_removed", "room_deleted", "content_saved", "content_uses_changed", "app_changed", "channel_updated", "section_membership", "room_updated", "channel_follow", "room_view", "read_marked", "member_rooms", "thread_updated", "channel_activity", "stream_opened", "stream_gap"];
 export type EventSubscriptionSource = "bnbloc/platform" | "bnbloc/room" | "bnbloc/member" | "webhook";
 export const EventSubscriptionSourceValues: readonly EventSubscriptionSource[] = ["bnbloc/platform", "bnbloc/room", "bnbloc/member", "webhook"];
 export type PlatformEventType = "platform.deployed" | "component.published" | "desktop.published";

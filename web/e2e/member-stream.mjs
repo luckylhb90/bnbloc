@@ -1,8 +1,10 @@
 // The member stream (docs/prd/2026-10-30-replicas-without-owners.md §9) in
 // a real browser: the tab holds ONE stream (GET /v1/my/events) and no room
-// stream; it scopes it with the room it shows and the channel open there;
-// another channel's activity moves its badge from the activity alone (no
-// unread re-read); opening another channel re-scopes it (POST
+// stream; it scopes it with the room it shows and the channel open there,
+// never with a list of rooms (the server knows the member's rooms); another
+// channel's activity moves its badge from the activity alone (no unread
+// re-read); a room joined elsewhere (member_rooms) appears in the sidebar
+// with its unread; opening another channel re-scopes it (POST
 // /v1/my/events/scope) without reopening; a reconnect scopes the new
 // stream with the channel then open. The gateway is mocked in the browser.
 // Run it like channels.mjs (README); CHROME names a local Chrome.
@@ -39,6 +41,8 @@ const streamServer = createServer((req, res) => {
   open.set(id, res);
   res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" });
   res.write(sse("stream_opened", { roomId: "", payload: { streamId: id } }));
+  // The server's own rooms of the member, their state on every connection.
+  res.write(sse("unread_state", { roomId: "", payload: { unread: s.joinedR2 ? { r2: 2 } : {}, channels: {} } }));
   if (n === 1) setTimeout(() => res.end(), 4000);
 });
 const onScope = (body) => {
@@ -86,7 +90,12 @@ await ctx.route((url) => url.pathname.startsWith("/v1/") && url.pathname !== "/v
   if (p === "/v1/rooms/r1/agent-prefs") return route.fulfill({ status: 204 });
   if (p === "/v1/rooms/r1/rules") return json({ rules: "", version: 0, required: false, agreedVersion: 0 });
   if (p === "/v1/rooms/r1") return json(s.room);
-  if (p === `/v1/users/${me}/rooms`) return json({ rooms: [{ roomId: "r1", name: "Team", description: "", visibility: "private", syncMode: "none", role: "owner", memberCount: 2, createdAtMs: 1 }] });
+  if (p === `/v1/users/${me}/rooms`) {
+    s.roomListReads = (s.roomListReads ?? 0) + 1;
+    const rooms = [{ roomId: "r1", name: "Team", description: "", visibility: "private", syncMode: "none", role: "owner", memberCount: 2, createdAtMs: 1 }];
+    if (s.joinedR2) rooms.push({ roomId: "r2", name: "Launch", description: "", visibility: "private", syncMode: "none", role: "member", memberCount: 3, createdAtMs: 2 });
+    return json({ rooms });
+  }
   if (p === "/v1/assist") return json({ available: false, tasks: [] });
   if (["/v1/my/agents", "/v1/platform-agents"].includes(p)) return json([]);
   return json({}, 404);
@@ -103,12 +112,23 @@ try {
   const opened = s.scopes.find((b) => b.streamId === "ms_1" && b.open?.roomId);
   ok(s.streams.length === 1 && !s.roomStreams, `one member stream and no room stream: ${s.streams.length} member, ${s.roomStreams ?? 0} room`);
   ok(opened && opened.open.roomId === "r1" && JSON.stringify(opened.open.channels) === JSON.stringify(["ch_gen"]), `scoped to the room and its open channel: ${JSON.stringify(s.scopes)}`);
-  ok(s.scopes.some((b) => b.streamId === "ms_1" && Array.isArray(b.rooms) && b.rooms.includes("r1")), "scoped with the shell's rooms for their unread");
+  ok(s.scopes.length > 0 && s.scopes.every((b) => !("rooms" in b)), `no scope names rooms (the server knows them): ${JSON.stringify(s.scopes)}`);
   // The activity moves #design's badge while #general stays open.
   const badge = page.locator("button", { hasText: "design" }).getByText("3");
   await badge.waitFor({ timeout: 8000 });
   ok((s.unreadReads ?? 0) === s.readsAtActivity, `another channel's activity moves its badge while one is open, without re-reading unread (${s.unreadReads} reads, ${s.readsAtActivity} before the activity)`);
   await page.screenshot({ path: `${shots}/member-stream-badge.png` });
+  // Added to a room elsewhere: the stream says so with its unread, and the
+  // sidebar reads its rooms again and shows it.
+  const listReads = s.roomListReads ?? 0;
+  s.joinedR2 = true;
+  open.get("ms_1").write(sse("member_rooms", { roomId: "", payload: { joined: ["r2"] } }));
+  open.get("ms_1").write(sse("unread_state", { roomId: "", payload: { unread: { r2: 2 }, channels: {} } }));
+  const launch = page.getByRole("button", { name: /Launch/ }).first();
+  await launch.waitFor({ timeout: 5000 }).catch(() => {});
+  ok((s.roomListReads ?? 0) > listReads && (await launch.isVisible().catch(() => false)), `a room joined elsewhere appears in the sidebar (${listReads} → ${s.roomListReads} list reads)`);
+  ok(await page.getByRole("button", { name: /Launch/ }).first().getByText("2").isVisible().catch(() => false), "with its unread from the stream's state");
+  await page.screenshot({ path: `${shots}/member-stream-joined.png` });
   // Opening #design re-scopes the stream, no reopen.
   const before = s.streams.length;
   await page.getByRole("button", { name: /design/ }).first().click();
@@ -119,7 +139,7 @@ try {
   // The first stream ends; the next is scoped with the channel now open.
   await page.waitForTimeout(5000);
   const again = s.scopes.find((b) => b.streamId === "ms_2" && b.open?.roomId);
-  ok(s.streams.length >= 2 && again && JSON.stringify(again.open.channels) === JSON.stringify(["ch_design"]) && Array.isArray(again.rooms), `a reconnect scopes the new stream with the channel then open: ${JSON.stringify(again)}`);
+  ok(s.streams.length >= 2 && again && JSON.stringify(again.open.channels) === JSON.stringify(["ch_design"]), `a reconnect scopes the new stream with the channel then open: ${JSON.stringify(again)}`);
 } catch (e) {
   failures++;
   console.log("FAIL: threw", e.message);

@@ -575,16 +575,30 @@ type StreamOpenedPayload struct {
 // room to spare).
 const MaxStreamOpen = 4
 
-// MaxStreamRooms bounds the rooms whose unread a member stream carries.
-const MaxStreamRooms = 500
-
 // StreamScopeRequest scopes a member stream (POST /v1/my/events/scope).
-// Rooms, when set, replaces the rooms whose unread it carries; Open, when
-// set, replaces the room it shows in full (an empty RoomID: none).
+// Open, when set, replaces the room it shows in full (an empty RoomID:
+// none); State asks for the unread state again (a new watcher of it). The
+// rooms whose unread the stream carries are not the client's to name: they
+// are the member's rooms in the stream's tenant, which the stream reads
+// itself and follows (member_rooms).
 type StreamScopeRequest struct {
 	StreamID string      `json:"streamId"`
-	Rooms    *[]string   `json:"rooms,omitempty"`
 	Open     *StreamOpen `json:"open,omitempty"`
+	State    bool        `json:"state,omitempty"`
+}
+
+// EventMemberRooms (MemberRoomsPayload) tells a member stream that the
+// member's rooms changed: rooms joined and rooms left (removed, deleted). On
+// the member's own key it carries a join to every replica's streams of the
+// member (realtime announces it when bnbloc-room's member_joined is
+// published); the stream then tells its client, which reads its room list
+// again, and sends the unread state of the rooms it now carries.
+const EventMemberRooms = "member_rooms"
+
+// MemberRoomsPayload is the payload of an EventMemberRooms event.
+type MemberRoomsPayload struct {
+	Joined []string `json:"joined,omitempty"`
+	Left   []string `json:"left,omitempty"`
 }
 
 // StreamOpen is the room a member stream shows in full: the channels open in

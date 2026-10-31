@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Select } from "@/ui/Select";
 import {
   SquaresFourIcon,
@@ -111,7 +111,10 @@ export function Shell({
   }, [isSuper]);
 
   // Quick-access room list in the sidebar (recent rooms), refreshed when the
-  // view changes or a room opens so newly created/joined rooms appear.
+  // view changes, a room opens, or the member stream says the member's rooms
+  // changed (roomsChanged: joined on another device, added by someone,
+  // removed), so a room appears and goes as it happens.
+  const [roomsChanged, setRoomsChanged] = useState(0);
   useEffect(() => {
     if (!subject) return;
     api
@@ -120,7 +123,7 @@ export function Shell({
       // A failed refresh keeps the last list: blanking it would claim the
       // member has no rooms (web L13).
       .catch(() => {});
-  }, [subject, view, activeRoom]);
+  }, [subject, view, activeRoom, roomsChanged]);
 
   // A room another surface found gone (detail 404/403, stream revoked) leaves
   // the quick-access list at once, which also drops it from the unread stream.
@@ -153,29 +156,22 @@ export function Shell({
     };
   }, [subject]);
 
-  // The stream is keyed on the SET of room ids (a refetched but identical
-  // room list must not reopen it), and reads names / the open callback
-  // through refs so a parent re-render never re-runs it.
-  const roomIdsKey = useMemo(() => rooms.map((r) => r.roomId).join("\u0000"), [rooms]);
+  // The watch reads names / the open callback through refs so a parent
+  // re-render never re-runs it.
   const roomsRef = useRef(rooms);
   roomsRef.current = rooms;
   const onOpenRoomRef = useRef(onOpenRoom);
   onOpenRoomRef.current = onOpenRoom;
 
-  // Unread counts for the known rooms, pushed by the tab's member stream
-  // (sse.watchUnread): their state on every connection, then what changes.
-  // A room marked read on any device is read again; every few minutes all
-  // are, as a safety net. A rising total while the tab is hidden fires a
-  // desktop notification; the title reflects the current total.
+  // Unread counts of the member's rooms, pushed by the tab's member stream
+  // (sse.watchUnread; the server knows the rooms): their state on every
+  // connection and whenever the rooms change, then what changes. A room
+  // marked read on any device is read again; every few minutes the
+  // sidebar's rooms are, as a safety net. A rising total while the tab is
+  // hidden fires a desktop notification; the title reflects the current
+  // total.
   useEffect(() => {
     if (!subject) return;
-    const ids = roomIdsKey ? roomIdsKey.split("\u0000") : [];
-    if (ids.length === 0) {
-      setUnread({});
-      setUnreadError(false);
-      prevTotalRef.current = 0;
-      return;
-    }
     let cancelled = false;
     let current: UnreadCounts = noUnread;
     const publish = (next: UnreadCounts) => {
@@ -187,7 +183,7 @@ export function Shell({
       if (total > prevTotalRef.current) {
         // Name the room with new activity when there's exactly one, else a
         // generic prompt. notify() self-gates on tab-hidden + permission.
-        const grew = ids.filter((id) => (counts[id] || 0) > 0);
+        const grew = Object.keys(counts).filter((id) => (counts[id] || 0) > 0);
         const label =
           grew.length === 1
             ? roomsRef.current.find((r) => r.roomId === grew[0])?.name || grew[0]
@@ -209,7 +205,7 @@ export function Shell({
         if (!cancelled) setUnreadError(true);
       }
     };
-    const close = watchUnread(ids, {
+    const close = watchUnread({
       onState: (state) => {
         publish(unreadFromState(state, current));
         if (!cancelled) setUnreadError(false);
@@ -219,17 +215,23 @@ export function Shell({
         publish(next);
         if (again.length > 0) void reread(again);
       },
+      onRooms: () => {
+        if (!cancelled) setRoomsChanged((n) => n + 1);
+      },
       onStatus: (up) => {
         if (!cancelled && !up) setUnreadError(true);
       },
     });
-    const trueUp = window.setInterval(() => void reread(ids), 5 * 60_000);
+    const trueUp = window.setInterval(() => {
+      const ids = roomsRef.current.map((r) => r.roomId);
+      if (ids.length > 0) void reread(ids);
+    }, 5 * 60_000);
     return () => {
       cancelled = true;
       clearInterval(trueUp);
       close();
     };
-  }, [subject, roomIdsKey]);
+  }, [subject]);
 
   // Reflect total unread in the document title, e.g. "(3) bnbloc", restoring
   // the original title when everything is read.

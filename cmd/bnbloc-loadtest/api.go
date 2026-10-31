@@ -327,11 +327,12 @@ func (a *api) memberEventsURL(m *member, tz string) string {
 	return a.base + "/v1/my/events?" + q
 }
 
-// scopeStream scopes a member stream: the rooms whose unread it carries and
-// the room and channel it shows, from the last sequence the client holds.
-func (a *api) scopeStream(ctx context.Context, m *member, streamID string, rooms []string, roomID, channelID string, since int64) error {
+// scopeStream scopes a member stream: the room and channel it shows, from
+// the last sequence the client holds (its rooms are the member's, which
+// the stream reads itself).
+func (a *api) scopeStream(ctx context.Context, m *member, streamID string, roomID, channelID string, since int64) error {
 	return a.do(ctx, m, http.MethodPost, "/v1/my/events/scope", nil, wire.StreamScopeRequest{
-		StreamID: streamID, Rooms: &rooms, Open: &wire.StreamOpen{RoomID: roomID, Channels: []string{channelID}, Since: since},
+		StreamID: streamID, Open: &wire.StreamOpen{RoomID: roomID, Channels: []string{channelID}, Since: since},
 	}, nil)
 }
 

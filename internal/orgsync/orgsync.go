@@ -233,7 +233,12 @@ type Syncer struct {
 	State    store.OrgSyncStore
 	Sessions SessionRevoker
 	Audit    store.ExtensionAuditStore
-	Now      func() time.Time
+	// Joined announces a membership sync added (bnbloc-room's member_joined
+	// for its other joins), so what follows joins sees this one too: the
+	// member's streams carry the room, the room's standing content shares
+	// reach them. Nil announces nothing.
+	Joined func(ctx context.Context, roomID, userID string)
+	Now    func() time.Time
 }
 
 func (s *Syncer) now() time.Time {
@@ -468,6 +473,9 @@ func (s *Syncer) defaultRooms(ctx context.Context, userID string, t Target, res 
 				return fmt.Errorf("org sync: add to room %s: %w", room, err)
 			}
 			s.audit(ctx, userID, t.Tenant, ActionRoom, actor, room)
+			if s.Joined != nil {
+				s.Joined(tctx, room, userID)
+			}
 		}
 		if err := s.State.RecordDefaultRoom(ctx, userID, room, s.now().UnixMilli()); err != nil {
 			return fmt.Errorf("org sync: record default room %s: %w", room, err)

@@ -243,6 +243,10 @@ func TestApply_addsDefaultRoomsOnce(t *testing.T) {
 	f.room(t, "acme", "lobby")
 	f.save(t, Rule{Match: Match{EmailDomain: "acme.com"}, Tenant: "acme", DefaultRooms: []string{"lobby"}})
 	tctx := tenant.NewContext(context.Background(), "acme")
+	var joined []string
+	f.sync.Joined = func(ctx context.Context, roomID, userID string) {
+		joined = append(joined, tenant.FromContext(ctx)+"/"+roomID+"/"+userID)
+	}
 	attrs := Attributes{UserID: "cy@acme.com", Email: "cy@acme.com"}
 	f.apply(t, attrs)
 	isMember, err := f.rooms.IsMember(tctx, "lobby", "cy@acme.com")
@@ -251,6 +255,11 @@ func TestApply_addsDefaultRoomsOnce(t *testing.T) {
 	}
 	if !isMember {
 		t.Fatal("not added to the default room")
+	}
+	// The join is announced, in the room's tenant (the member's streams
+	// carry the room, its standing shares reach them).
+	if len(joined) != 1 || joined[0] != "acme/lobby/cy@acme.com" {
+		t.Fatalf("announced joins = %v, want the one into lobby", joined)
 	}
 	// When the member leaves the room and signs in again.
 	if err := f.rooms.RemoveMember(tctx, "lobby", "cy@acme.com"); err != nil {

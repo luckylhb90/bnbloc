@@ -171,8 +171,7 @@ func TestMemberStreamOpensSinceItsSequence(t *testing.T) {
 func TestMemberStreamSwitchesRooms(t *testing.T) {
 	srv, svc := newChannelTestServer(t)
 	bob, id := openMemberStream(t, srv, "bob")
-	rooms := []string{"room-1"}
-	scopeStream(t, srv, "bob", wire.StreamScopeRequest{StreamID: id, Rooms: &rooms, Open: openIn("room-1", 0, "ch_a")})
+	scopeStream(t, srv, "bob", wire.StreamScopeRequest{StreamID: id, Open: openIn("room-1", 0, "ch_a")})
 	if !waitFor(func() bool { return slices.Contains(svc.Presence.Members("room-1"), "bob") }) {
 		t.Fatal("bob is not here in the room he opened")
 	}
@@ -223,9 +222,11 @@ func memberPayload[T any](t *testing.T, f sseFrame) T {
 	return ev.Payload
 }
 
-// The stream's unread, across replicas: the state of the member's scoped
-// rooms (none of the others), then what changes: a message posted through
-// another replica, a mark of read on any device, a message deleted.
+// The stream's unread, across replicas: the state of the member's own
+// rooms, read by the stream (none of the others), then what changes: a
+// message posted through another replica, a mark of read on any device, a
+// message deleted. A scope reaching the replica that does not hold the
+// stream is handed on.
 func TestMemberStreamUnreadAcrossReplicas(t *testing.T) {
 	c := newCluster(t, 2)
 	a, b := c.reps[0], c.reps[1]
@@ -237,8 +238,11 @@ func TestMemberStreamUnreadAcrossReplicas(t *testing.T) {
 
 	s := c.open(a, "/v1/my/events", "maya")
 	id := memberPayload[wire.StreamOpenedPayload](t, s.next(t, wire.EventStreamOpened)).StreamID
-	rooms := []string{"room-1", "room-2", "room-3"}
-	resp, err := http.DefaultClient.Do(c.request(b, http.MethodPost, "/v1/my/events/scope", "maya", wire.StreamScopeRequest{StreamID: id, Rooms: &rooms}))
+	st := memberPayload[wire.UnreadReply](t, s.next(t, wire.UnreadStateKind))
+	if st.Unread["room-1"] != 1 || st.Unread["room-2"] != 0 || st.Unread["room-3"] != 0 {
+		t.Fatalf("state %+v, want room-1: 1 and nothing of room-3", st.Unread)
+	}
+	resp, err := http.DefaultClient.Do(c.request(b, http.MethodPost, "/v1/my/events/scope", "maya", wire.StreamScopeRequest{StreamID: id, State: true}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,9 +250,8 @@ func TestMemberStreamUnreadAcrossReplicas(t *testing.T) {
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("scoping the stream through a replica that does not hold it = %d, want 204 (handed on)", resp.StatusCode)
 	}
-	st := memberPayload[wire.UnreadReply](t, s.next(t, wire.UnreadStateKind))
-	if st.Unread["room-1"] != 1 || st.Unread["room-2"] != 0 || st.Unread["room-3"] != 0 {
-		t.Fatalf("state %+v, want room-1: 1 and nothing of room-3", st.Unread)
+	if again := memberPayload[wire.UnreadReply](t, s.next(t, wire.UnreadStateKind)); again.Unread["room-1"] != 1 {
+		t.Fatalf("the state asked again = %+v", again.Unread)
 	}
 
 	seq := c.chatVia(b, "room-1", "jack", "hello", "m-1")
@@ -270,5 +273,57 @@ func TestMemberStreamUnreadAcrossReplicas(t *testing.T) {
 	resp.Body.Close()
 	if d := memberPayload[wire.UnreadDeltaPayload](t, s.next(t, wire.UnreadDeltaKind)); !slices.Equal(d.Rooms["room-1"].Deleted, []int64{1}) {
 		t.Fatalf("after a delete: %+v, want room-1 deleted 1", d.Rooms)
+	}
+}
+
+// The stream follows the member's rooms: a join through another replica
+// (bnbloc-room's member_joined) adds the room, tells the client and sends
+// the state with it; a join announced for a room of another tenant, or
+// one the directory does not confirm, adds nothing; a removal drops the
+// room.
+func TestMemberStreamFollowsTheMembersRooms(t *testing.T) {
+	c := newCluster(t, 2)
+	a, b := c.reps[0], c.reps[1]
+	c.members.Add("room-1", "maya")
+	s := c.open(a, "/v1/my/events", "maya")
+	s.next(t, wire.EventStreamOpened)
+	s.next(t, wire.UnreadStateKind)
+
+	publish := func(room, body string) {
+		t.Helper()
+		resp, err := http.DefaultClient.Do(c.request(b, http.MethodPost, "/internal/v1/rooms/"+room+"/publish", "service:room", json.RawMessage(body)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode/100 != 2 {
+			t.Fatalf("publish to %s = %d", room, resp.StatusCode)
+		}
+	}
+	// Announced but not a membership the directory knows: nothing.
+	publish("room-x", `{"kind":"member_joined","payload":{"userId":"maya"}}`)
+	c.members.Add("room-2", "maya")
+	c.members.Add("room-2", "jack")
+	c.chatVia(b, "room-2", "jack", "waiting", "m-1")
+	publish("room-2", `{"kind":"member_joined","payload":{"userId":"maya"}}`)
+	got := memberPayload[wire.MemberRoomsPayload](t, s.next(t, wire.EventMemberRooms))
+	if !slices.Equal(got.Joined, []string{"room-2"}) || len(got.Left) != 0 {
+		t.Fatalf("member_rooms = %+v, want room-2 joined (and not room-x)", got)
+	}
+	if st := memberPayload[wire.UnreadReply](t, s.next(t, wire.UnreadStateKind)); st.Unread["room-2"] != 1 {
+		t.Fatalf("state after the join = %+v, want room-2's message", st.Unread)
+	}
+	seq := c.chatVia(b, "room-2", "jack", "after the join", "m-2")
+	if d := memberPayload[wire.UnreadDeltaPayload](t, s.next(t, wire.UnreadDeltaKind)); !slices.Equal(d.Rooms["room-2"].Seqs, []int64{seq}) {
+		t.Fatalf("delta %+v, want room-2 seq %d", d.Rooms, seq)
+	}
+
+	c.members.Remove("room-2", "maya")
+	publish("room-2", `{"kind":"member_removed","payload":{"userId":"maya"}}`)
+	if got := memberPayload[wire.MemberRoomsPayload](t, s.next(t, wire.EventMemberRooms)); !slices.Equal(got.Left, []string{"room-2"}) {
+		t.Fatalf("member_rooms = %+v, want room-2 left", got)
+	}
+	if st := memberPayload[wire.UnreadReply](t, s.next(t, wire.UnreadStateKind)); st.Unread["room-2"] != 0 {
+		t.Fatalf("state after leaving = %+v, want no room-2", st.Unread)
 	}
 }

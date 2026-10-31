@@ -137,6 +137,10 @@ var RoomEventKinds = []EventKindSpec{
 	// key only (MemberActivityKey), for their activity streams; never on a
 	// room stream.
 	{Name: EventReadMarked, Internal: true},
+	// The member's rooms changed (realtime): a join on the member's own key
+	// (MemberActivityKey), and what a member stream tells its client when
+	// it carries other rooms; never on a room stream.
+	{Name: EventMemberRooms},
 	// A thread opened, renamed, archived or replied in (realtime and
 	// bnbloc-room): scoped to the thread's parent channel, whose stream
 	// redraws the root's summary line.

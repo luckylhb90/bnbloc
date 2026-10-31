@@ -277,7 +277,7 @@ func (g *fakeGateway) handler() http.Handler {
 			http.Error(w, "no such stream", http.StatusNotFound)
 			return
 		}
-		if body.Open == nil || len(body.Open.Channels) != 1 || body.Rooms == nil {
+		if body.Open == nil || len(body.Open.Channels) != 1 {
 			g.badQuery = append(g.badQuery, fmt.Sprintf("scope %+v", body))
 			w.WriteHeader(http.StatusNoContent)
 			return

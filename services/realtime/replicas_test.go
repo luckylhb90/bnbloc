@@ -70,7 +70,7 @@ func newCluster(t *testing.T, n int) *cluster {
 		hub.Bus = realtime.RoomBus(topics)
 		hub.RoomHead = func(room string) (int64, error) { return c.chat.RoomSeqHead(context.Background(), room) }
 		r.svc = &Service{
-			Hub: hub, Membership: c.members, Chat: c.chat, BridgeJobs: jobs, Dispatches: jobs,
+			Hub: hub, Membership: c.members, Rooms: c.members, Chat: c.chat, BridgeJobs: jobs, Dispatches: jobs,
 			Schedules: c.sched, RoomRoles: schedRoles{anyRoom: true},
 			PluginHooks: fix.dispatcher, Claims: claims, Replicas: NewReplicas(topics, marks, func() int { return n }),
 		}

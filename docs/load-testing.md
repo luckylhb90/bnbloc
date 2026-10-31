@@ -17,9 +17,10 @@ for a deployment and to compare runs before and after a change.
    others.
 3. **Streams.** Every member holds what a web tab holds
    (`web/src/lib/sse.ts`): one member stream,
-   `GET /v1/my/events?access_token=…`, scoped after it opens
-   (`POST /v1/my/events/scope`) to the member's rooms (their unread) and to
-   the room it shows with the member's channel open (channels PRD §2.4,
+   `GET /v1/my/events?access_token=…`, carrying the member's rooms (their
+   unread; the stream reads them itself) and scoped after it opens
+   (`POST /v1/my/events/scope`) to the room it shows with the member's
+   channel open (channels PRD §2.4,
    from the last sequence it holds on a reopen). With `--channels C`
    (default 1) each room has C channels (its default
    plus ones the tool creates, or reuses in `--room-ids` rooms), and the
@@ -205,7 +206,9 @@ docker run --rm --network bnbloc-loadtest_default curlimages/curl -s http://real
   and message, in `unread_delta`), `expected` for every stream every stored
   send of the rooms it carries; a stream that reopened is sent the state
   instead, so `told` falls short of `expected` only by what reopening
-  covered.
+  covered. After the drain the report waits, up to 10 s and while deltas
+  keep coming, for the last ones: on a loaded host a delta can follow its
+  message by more than a second.
 
 Percentiles use the nearest-rank method, so every reported value is a real
 observation. Latencies are measured in one process on one monotonic clock.
@@ -488,6 +491,13 @@ on over the bus. Laptop load average 40 to 70.
   the unread part went from 51,000 (two per channel of every room) to 950
   (one per stream), connect p95 from 75 to 7 ms. What is left is the
   setup of the rooms (members added).
+- **The stream reads its rooms itself** (no list from the client, joins
+  followed): the same 800 streams cost 13,571 statements (one room listing
+  more per stream than when the client named its rooms), connect p95 7 ms;
+  300 members in 30 rooms: 5,100 of 5,100 delivered, 15,000 of 15,000
+  told; 1,024 members in one room of 16 channels: 192,000 of 192,000,
+  3,072,000 of 3,072,000 told; failover drill PASS (19,960 of 19,960, p99
+  136 ms).
 
 ## What a message costs the database (2026-10-30)
 
