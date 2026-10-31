@@ -6,6 +6,7 @@ import { normalizeRoomEvent, type RoomEvent } from "./roomEvents.ts";
 import { ROOM_EVENT_KINDS } from "./roomEventKinds.ts";
 import { roomPath } from "./roomId.ts";
 import { currentTenantPolicy } from "./tenantPolicy.ts";
+import { UnreadDeltaKind, UnreadStateKind, type UnreadDeltaPayload, type UnreadReply } from "./wire.gen.ts";
 
 // Which events a room subscription receives. The default (the room view)
 // is every channel; includePeople also admits the room's people chat, which
@@ -213,4 +214,82 @@ async function rescopeStream(roomId: string, streamId: string, open: readonly st
     if (e instanceof ApiError && e.status === 404) return false;
     throw e;
   }
+}
+
+// subscribeActivity opens the member's activity stream (GET
+// /v1/my/activity?rooms=): the rooms' unread state, then what changes,
+// pushed instead of polled (docs/prd/2026-10-30-replicas-without-owners.md,
+// part B). It reconnects on its own, as the room streams do, and every
+// connection starts with the state again.
+export interface ActivityHandlers {
+  readonly onState: (state: UnreadReply) => void;
+  readonly onDelta: (delta: UnreadDeltaPayload) => void;
+  readonly onStatus?: (up: boolean) => void;
+}
+
+const ACTIVITY_BASE_DELAY_MS = 1000;
+const ACTIVITY_MAX_DELAY_MS = 8_000;
+const ACTIVITY_REAUTH_AFTER = 3;
+
+/** Opens the stream for roomIds (at most wire's MaxUnreadRooms); returns
+ * the function that closes it. */
+export function subscribeActivity(roomIds: readonly string[], h: ActivityHandlers): () => void {
+  let es: EventSource | null = null;
+  let closed = false;
+  let attempts = 0;
+  let timer: number | null = null;
+
+  const payloadOf = (raw: string): unknown => {
+    try {
+      return (JSON.parse(raw) as { payload?: unknown }).payload;
+    } catch {
+      return undefined;
+    }
+  };
+
+  const connect = async () => {
+    if (closed) return;
+    if (attempts >= ACTIVITY_REAUTH_AFTER) {
+      if (await refreshSession().catch(() => false)) attempts = 0;
+      if (closed) return;
+    }
+    const token = getToken();
+    const src = new EventSource(
+      apiUrl(`/v1/my/activity?rooms=${encodeURIComponent(roomIds.join(","))}${token ? `&access_token=${encodeURIComponent(token)}` : ""}`),
+    );
+    es = src;
+    src.onopen = () => {
+      attempts = 0;
+      h.onStatus?.(true);
+    };
+    src.onerror = () => {
+      h.onStatus?.(false);
+      if (es !== src) return;
+      src.close();
+      es = null;
+      attempts += 1;
+      if (closed || timer !== null) return;
+      const delay = Math.min(ACTIVITY_MAX_DELAY_MS, ACTIVITY_BASE_DELAY_MS * 2 ** Math.min(attempts, 5));
+      timer = window.setTimeout(() => {
+        timer = null;
+        void connect();
+      }, delay * (0.5 + Math.random() * 0.5));
+    };
+    src.addEventListener(UnreadStateKind, (e) => {
+      const p = payloadOf((e as MessageEvent).data);
+      if (p && typeof p === "object") h.onState(p as UnreadReply);
+    });
+    src.addEventListener(UnreadDeltaKind, (e) => {
+      const p = payloadOf((e as MessageEvent).data);
+      if (p && typeof p === "object") h.onDelta(p as UnreadDeltaPayload);
+    });
+  };
+
+  void connect();
+  return () => {
+    closed = true;
+    if (timer !== null) clearTimeout(timer);
+    es?.close();
+    es = null;
+  };
 }

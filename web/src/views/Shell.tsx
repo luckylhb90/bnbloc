@@ -27,7 +27,7 @@ import { openGlobalSearch } from "@/lib/team";
 import { localFiles } from "@/lib/localFiles";
 import { requestLocalOpen } from "@/views/LocalFileOpener";
 import { onRoomGone, withoutRoom } from "@/lib/roomGone";
-import { subscribeActivity } from "@/lib/activityStream";
+import { subscribeActivity } from "@/lib/sse";
 import { applyUnreadDelta, noUnread, unreadFromState, type UnreadCounts } from "@/lib/unreadActivity";
 import { MaxUnreadRooms } from "@/lib/wire.gen";
 import { can } from "@/lib/permissions";

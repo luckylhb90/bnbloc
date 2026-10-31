@@ -140,9 +140,9 @@ export const RULES = [
   },
   {
     id: 6,
-    name: "the session token rides a URL only on the room event stream",
+    name: "the session token rides a URL only on the event streams",
     // EventSource cannot set headers, so sse.ts passes the session as
-    // access_token; every other link (attachments, downloads) carries a
+    // access_token (a room's stream, the member's activity stream); every other link (attachments, downloads) carries a
     // per-resource ticket instead (web H10).
     pattern: /access_token=/,
     allowed: ["lib/sse.ts"],
