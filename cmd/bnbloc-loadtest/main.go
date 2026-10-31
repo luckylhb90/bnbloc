@@ -75,6 +75,7 @@ type config struct {
 	MaxInflight    int
 	Timeout        time.Duration
 	StreamIdle     time.Duration
+	MemberActivity bool
 	Cleanup        bool
 	JSON           bool
 	Progress       time.Duration
@@ -112,6 +113,7 @@ func parseFlags(args []string, errOut io.Writer) (config, error) {
 	fs.IntVar(&c.MaxInflight, "max-inflight", 512, "outstanding sends; a send due while this many are in flight is skipped and counted")
 	fs.DurationVar(&c.Timeout, "timeout", 15*time.Second, "per-request timeout for sign-in, setup and sends")
 	fs.DurationVar(&c.StreamIdle, "stream-idle", 45*time.Second, "reopen a stream that delivered no bytes for this long (the server sends a keep-alive every 15s); 0 disables")
+	fs.BoolVar(&c.MemberActivity, "member-activity", true, "each member also holds one activity stream across their rooms (GET /v1/my/activity), as the web shell does for its unread badges")
 	fs.BoolVar(&c.Cleanup, "cleanup", true, "delete the rooms the tool created at the end")
 	fs.BoolVar(&c.JSON, "json", false, "print the report as JSON instead of text")
 	fs.DurationVar(&c.Progress, "progress", 5*time.Second, "progress line interval on stderr; 0 disables")

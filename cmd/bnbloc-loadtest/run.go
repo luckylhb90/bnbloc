@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -22,6 +23,8 @@ type room struct {
 	members  []*member
 	streams  []*stream
 	created  bool
+	// stored counts the sends stored in the room.
+	stored atomic.Int64
 }
 
 // liveStreams returns the ids of the room's currently open streams that
@@ -145,6 +148,26 @@ func run(ctx context.Context, cfg config, logw io.Writer) (*Report, error) {
 		stopStreams()
 		streamWG.Wait()
 	}
+	// Each member's activity stream (the web shell's), opened over the same
+	// ramp-up.
+	astats := newActivityStats()
+	var activities []*memberActivity
+	if cfg.MemberActivity {
+		activities = activitiesFor(rooms, a, astats, cfg.StreamIdle)
+		for i, ma := range activities {
+			delay := cfg.RampUp * time.Duration(i) / time.Duration(max(len(activities), 1))
+			streamWG.Add(1)
+			go func() {
+				defer streamWG.Done()
+				select {
+				case <-streamCtx.Done():
+					return
+				case <-time.After(delay):
+				}
+				ma.run(streamCtx)
+			}()
+		}
+	}
 	logf("opening %d streams over %s", len(streams), cfg.RampUp)
 	if !sleepCtx(ctx, cfg.RampUp) || !waitAllLive(ctx, streams, cfg.Settle) {
 		stopAll()
@@ -164,6 +187,12 @@ func run(ctx context.Context, cfg config, logw io.Writer) (*Report, error) {
 	}
 	stopProgress()
 	report.Streams.OpenAtEnd = countLive(streams)
+	if cfg.MemberActivity {
+		// Activity streams send what changed once a second: wait out the
+		// last one.
+		sleepCtx(ctx, activityLastFlush)
+		report.MemberActivity = memberActivityReport(activities, astats, rooms)
+	}
 	stopAll()
 
 	res := tr.result()
@@ -466,6 +495,7 @@ loop:
 					return
 				}
 				tr.commit(id)
+				p.r.stored.Add(1)
 				st.ok++
 				st.latencies = append(st.latencies, took)
 			}()

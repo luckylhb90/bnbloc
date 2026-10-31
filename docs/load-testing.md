@@ -164,6 +164,7 @@ docker run --rm --network bnbloc-loadtest_default curlimages/curl -s http://real
 | `--timeout` | 15s | Per-request timeout for sign-in, setup and sends |
 | `--stream-idle` | 45s | Reopen a stream silent for this long (the server sends a keep-alive every 15 s) |
 | `--login-parallel` | 16 | Concurrent sign-in and setup requests |
+| `--member-activity` | true | Each member also holds one activity stream across their rooms (`GET /v1/my/activity`), as the web shell does for its unread badges |
 | `--cleanup` | true | Delete the rooms the tool created |
 | `--json` | false | Print the report as JSON |
 | `--progress` | 5s | Progress interval on stderr; 0 disables |
@@ -198,6 +199,12 @@ docker run --rm --network bnbloc-loadtest_default curlimages/curl -s http://real
   - failed opens by status;
   - streams open when sending started and at the end;
   - connect time, from request to response headers.
+- **member activity streams** (`--member-activity`): one per member across
+  their rooms. `told` counts the new messages they were told of (one per
+  member and message, in `unread_delta`), `expected` every stored send
+  times its room's members; a stream that reopened is sent the state
+  instead, so `told` falls short of `expected` only by what reopening
+  covered.
 
 Percentiles use the nearest-rank method, so every reported value is a real
 observation. Latencies are measured in one process on one monotonic clock.
@@ -428,6 +435,23 @@ bnbloc-loadtest --gateway http://localhost:17090 --forwarded-for \
 - **The p99 is the commit, not the fan-out.** Delivery p99 (266 ms)
   follows the POST p99 (253 ms), as in the baseline above: the target of
   100 ms is not met on this disk; the fan-out adds about nothing.
+
+## Unread pushed, not polled (2026-10-31)
+
+Every member also holds the web shell's activity stream
+(`GET /v1/my/activity`) instead of polling its rooms' unread counts every
+25 s. On the 3-replica HA stack (`compose.ha.yml`), this laptop under a load
+average of 35 to 45:
+
+| Run | Sends | Deliveries | Activity streams | Told of new messages |
+| --- | --- | --- | --- | --- |
+| 300 members, 30 rooms of 3 channels, 50 msgs/s, 30 s | 1,500 of 1,500 | all, 0 lost | 300, 0 disconnects | 15,000 of 15,000 |
+| 1,024 members in 1 room of 16 channels, 100 msgs/s, 30 s | 3,000 of 3,000 | 192,000 of 192,000 | 1,024, 0 disconnects | 3,072,000 of 3,072,000 |
+
+The polling it replaces would have cost those 1,024 clients a
+`/v1/rooms-unread` of 16 channels every 25 s: about 1,300 database queries a
+second, more with every room a member is in; the stream costs an in-memory
+access check per member and message and one delta a second per client.
 
 ## What a message costs the database (2026-10-30)
 
