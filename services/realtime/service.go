@@ -210,6 +210,11 @@ type ChatStore interface {
 	// room's group commit stores and numbers each batch of durable events
 	// through it.
 	AppendNextRoomMessages(ctx context.Context, rows []store.RoomMessage) error
+	// NextRoomSeq numbers a revocation with the room's messages (the hub's
+	// realtime.Sequencer); RoomSeqHead is where a room's live order starts
+	// on a replica that begins receiving it.
+	NextRoomSeq(ctx context.Context, roomID, tenantID string) (int64, error)
+	RoomSeqHead(ctx context.Context, roomID string) (int64, error)
 	RoomHistory(ctx context.Context, roomID, channelID string, before int64, limit int) ([]store.RoomMessage, error)
 	RoomFeed(ctx context.Context, roomID string, after int64, limit int) ([]store.RoomMessage, error)
 	MarkRead(ctx context.Context, roomID, channelID, userID string, seq, atMs int64) error
@@ -1064,6 +1069,15 @@ func (s *Service) messageChannel(ctx context.Context, roomID string, seq int64) 
 // publisher. clientMsgID is the optional send-idempotency id (chat only; ""
 // otherwise). With no chat store (in-memory dev) nothing is stored.
 func (s *Service) durable(ctx context.Context, ev wire.Event, author, clientMsgID string) (realtime.Durable, error) {
+	if spec, _ := wire.LookupEventKind(ev.Kind); s.Chat != nil && spec.Revocation {
+		// Stored nothing of, but numbered by the store with the room's
+		// messages (realtime.Sequencer): ordered with them on every replica.
+		tid, err := tenant.Require(ctx)
+		if err != nil {
+			return realtime.Durable{}, err
+		}
+		return realtime.Durable{Journal: s.Chat, Row: store.RoomMessage{TenantID: tid}}, nil
+	}
 	if s.Chat == nil || !wire.PersistedFeedKind(ev.Kind) {
 		return realtime.Durable{}, nil
 	}

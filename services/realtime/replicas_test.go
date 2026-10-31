@@ -68,7 +68,7 @@ func newCluster(t *testing.T, n int) *cluster {
 		topics := c.bus.Endpoint()
 		hub := realtime.NewHub(64, 64)
 		hub.Bus = realtime.RoomBus(topics)
-		hub.RoomHead = func(room string) (int64, error) { return c.chat.MaxRoomSeq(context.Background(), room) }
+		hub.RoomHead = func(room string) (int64, error) { return c.chat.RoomSeqHead(context.Background(), room) }
 		r.svc = &Service{
 			Hub: hub, Membership: c.members, Chat: c.chat, BridgeJobs: jobs, Dispatches: jobs,
 			Schedules: c.sched, RoomRoles: schedRoles{anyRoom: true},
@@ -479,5 +479,52 @@ func TestReplicasScheduledPostReachesEveryReplica(t *testing.T) {
 	got, err := c.sched.GetSchedule(tenant.NewContext(context.Background(), tenant.Default), room, sc.ScheduleID)
 	if err != nil || got.LastStatus != wire.ScheduleRunOK || got.LastSeq != 1 {
 		t.Fatalf("schedule after run = %+v, %v", got, err)
+	}
+}
+
+// A member removed through one replica while a message is posted through
+// another: the removal takes the room's sequence, so every replica delivers
+// it before the message; the removed member's stream ends without it.
+func TestReplicasRevocationIsOrderedWithMessages(t *testing.T) {
+	c := newCluster(t, 3)
+	a, b, poster := c.reps[0], c.reps[1], c.reps[2]
+	room := "room-1"
+	c.members.Add(room, "maya")
+	c.members.Add(room, "jack")
+	maya := c.open(a, "/v1/rooms/"+room+"/events?allChannels=1", "maya")
+	jack := c.open(a, "/v1/rooms/"+room+"/events?allChannels=1", "jack")
+	waitSubscribers(t, a, room, 2)
+
+	resp, err := http.DefaultClient.Do(c.request(b, http.MethodPost, "/internal/v1/rooms/"+room+"/publish", svcauth.ServiceSubject("room"),
+		wire.Event{Kind: wire.EventMemberRemoved, Payload: wire.MemberRemovedPayload{UserID: "maya"}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		t.Fatalf("removal publish = %d", resp.StatusCode)
+	}
+	seq := c.chatVia(poster, room, "jack", "after the removal", "m-after")
+
+	removal := eventOf(t, jack.next(t, wire.EventMemberRemoved))
+	if removal.Sequence <= 0 || removal.Sequence >= seq {
+		t.Fatalf("removal seq %d, message seq %d: want the removal numbered before the message", removal.Sequence, seq)
+	}
+	if ev := eventOf(t, jack.next(t, "chat_message")); ev.Sequence != seq {
+		t.Fatalf("jack got %d, want %d", ev.Sequence, seq)
+	}
+	maya.next(t, wire.EventMemberRemoved)
+	for {
+		select {
+		case f, open := <-maya.frames:
+			if !open {
+				return // ended after the removal, the message never written
+			}
+			if f.event == "chat_message" {
+				t.Fatal("the removed member's stream got the message posted after the removal")
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("the removed member's stream did not end")
+		}
 	}
 }

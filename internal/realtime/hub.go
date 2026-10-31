@@ -352,7 +352,11 @@ func (h *Hub) Publish(ev wire.Event) wire.Event {
 // A transient kind carries no sequence and never waits on a commit: it is
 // delivered immediately. The revocation kinds (member_removed, room_deleted)
 // are the exception: they queue behind the room's in-flight durable events,
-// so a message committed before a revocation is never delivered after it.
+// so a message committed before a revocation is never delivered after it,
+// and with a journal that is a Sequencer they take the room's next sequence
+// (storing nothing): every replica then delivers them in order with the
+// room's messages, so one stored after a revocation never reaches a stream
+// the revocation ends, whichever replica stored it.
 //
 // A subscriber whose buffer is full never blocks the hub: its stream is
 // closed (see deliver), and the client reconnects and catches up from
@@ -364,7 +368,7 @@ func (h *Hub) PublishCommit(ev wire.Event, d Durable) (wire.Event, error) {
 		return h.enqueue(&pending{ev: ev, d: d, durable: true, deliver: true})
 	case spec.Revocation:
 		ev.Sequence = 0
-		return h.enqueue(&pending{ev: ev, deliver: true})
+		return h.enqueue(&pending{ev: ev, d: d, deliver: true, revocation: true})
 	default:
 		ev.Sequence = 0
 		h.deliver([]*pending{{ev: ev, out: ev, deliver: true}}, true)
@@ -418,6 +422,8 @@ type pending struct {
 	d       Durable
 	durable bool // sequenced and stored
 	deliver bool // retained for replay and delivered once committed
+	// revocation: sequenced (Sequencer) but not stored; it ends its batch.
+	revocation bool
 	// wake is closed when out/err are set, or when lead is set: this publish
 	// leads the room's next batch.
 	wake chan struct{}
@@ -469,7 +475,9 @@ func (h *Hub) lead(q *roomQueue, first *pending) {
 	journal, haveJournal := first.d.Journal, first.durable
 	bytes := len(first.d.Row.Payload)
 	n := 0
-	for ; n < len(q.queue) && len(batch) < maxBatchWrites; n++ {
+	// A revocation ends its batch: what queued after it is numbered after
+	// it (sequenceRevocation).
+	for ; !first.revocation && n < len(q.queue) && len(batch) < maxBatchWrites; n++ {
 		next := q.queue[n]
 		if next.durable {
 			if !haveJournal {
@@ -483,12 +491,17 @@ func (h *Hub) lead(q *roomQueue, first *pending) {
 		}
 		bytes += len(next.d.Row.Payload)
 		batch = append(batch, next)
+		if next.revocation {
+			n++
+			break
+		}
 	}
 	q.queue = append(q.queue[:0:0], q.queue[n:]...)
 	q.mu.Unlock()
 
 	t0 := time.Now()
 	h.commit(batch)
+	h.sequenceRevocation(batch)
 	t1 := time.Now()
 	h.deliver(batch, true)
 	h.Metrics.HistogramObserve(metricFeedCommitTime, t1.Sub(t0).Seconds())
@@ -510,6 +523,34 @@ func (h *Hub) lead(q *roomQueue, first *pending) {
 	if next != nil {
 		close(next.wake)
 	}
+}
+
+// Sequencer is a Journal that also numbers an event it stores nothing of
+// (store.ChatStore.NextRoomSeq).
+type Sequencer interface {
+	NextRoomSeq(ctx context.Context, roomID, tenantID string) (int64, error)
+}
+
+// sequenceRevocation gives the batch's revocation (its last member, after
+// its messages were numbered) the room's next sequence. Without one it is
+// delivered unsequenced, as with no journal: ordered on this replica only.
+func (h *Hub) sequenceRevocation(batch []*pending) {
+	p := batch[len(batch)-1]
+	if !p.revocation {
+		return
+	}
+	sq, ok := p.d.Journal.(Sequencer)
+	if !ok || sq == nil {
+		return
+	}
+	seq, err := guard("sequence", func() (int64, error) {
+		return sq.NextRoomSeq(context.Background(), p.ev.RoomID, p.d.Row.TenantID)
+	})
+	if err != nil {
+		log.Printf("realtime: hub: %s for room=%s unsequenced: %v", p.ev.Kind, p.ev.RoomID, err)
+		return
+	}
+	p.out.Sequence = seq
 }
 
 // commit stores the durable members of a batch, numbered by the journal,

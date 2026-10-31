@@ -4231,7 +4231,8 @@ export interface EventKindSpec {
   replay?: boolean;
   // Revocation kinds end access to the room (a member removed, the room
   // deleted): the affected streams close after delivering them, and they
-  // are never replayed.
+  // are never replayed. They store nothing but take the room's sequence,
+  // so every replica delivers them in order with the room's messages.
   revocation?: boolean;
   // ChannelScoped kinds carry the channelId of the message or channel they
   // concern; a single-channel stream receives them only for its channel.

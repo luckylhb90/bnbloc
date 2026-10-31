@@ -397,3 +397,18 @@ A's in §5.
   room; per mark of read: one event to the member's own streams.
   Not yet (the rest of part B): the open room still has its own stream
   (one stream per client in all), and presence is still a room stream's.
+- **The revocation window, closed (2026-10-31).** A member removed through
+  one replica and a message stored through another just after were not
+  ordered with each other: for the bus's milliseconds the removed member's
+  stream on a third replica could get the message. A revocation
+  (`member_removed`, `room_deleted`) now takes the room's next sequence
+  (`ChatStore.NextRoomSeq`, one statement on the counter; it stores no row)
+  and ends its batch, so a message stored after it has a higher sequence and
+  every replica's reorder hold delivers the revocation first. A replica's
+  live order starts at the counter (`RoomSeqHead`), not the highest row, so
+  a revocation last in a room holds nothing. Left: a revocation whose
+  publish was lost (its replica died between numbering and publishing) is
+  waited for 300 ms like any missing sequence, then the room's streams read
+  the difference and the removed member's stream ends at its next
+  membership check (every 15 s); section access changes
+  (`section_membership`) are not numbered.

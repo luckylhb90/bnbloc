@@ -248,3 +248,49 @@ func TestBusResumeBelowAHoleReadsTheDifference(t *testing.T) {
 		t.Fatal("a stream resuming at 2 was replayed past the missing 3 without a gap")
 	}
 }
+
+// A revocation carries the room's sequence: a message stored after it that
+// reaches a replica first waits for it, so the revocation (which ends the
+// removed member's stream) is delivered first.
+func TestBusOrdersARevocationBeforeTheMessageAfterIt(t *testing.T) {
+	bus, chat := NewMemoryBus(), store.NewMemoryChat()
+	h := busHub(bus, chat)
+	h.holdFor = time.Second
+	sub := h.SubscribeLive("r")
+	defer h.Unsubscribe("r", sub)
+	other := RoomBus(bus.Endpoint())
+	_ = other.Publish(encodedEvent("r", 2)) // stored after the removal, here first
+	removal := wire.Event{RoomID: "r", Kind: wire.EventMemberRemoved, Sequence: 1, Payload: wire.MemberRemovedPayload{UserID: "maya"}}
+	removal.Encoded, _ = json.Marshal(removal)
+	_ = other.Publish(removal)
+	if first, second := recv(t, sub), recv(t, sub); first.Kind != wire.EventMemberRemoved || second.Sequence != 2 {
+		t.Fatalf("delivered %s then %s/%d; want the removal before the message", first.Kind, second.Kind, second.Sequence)
+	}
+}
+
+// The hub numbers a revocation with a Sequencer journal, after the
+// messages queued before it.
+func TestRevocationTakesTheRoomsNextSequence(t *testing.T) {
+	chat := store.NewMemoryChat()
+	h := NewHub(8, 8)
+	sub := h.SubscribeLive("r")
+	defer h.Unsubscribe("r", sub)
+	msg, err := h.PublishCommit(chatEvent("r", "x"), chatDurable(chat, "x"))
+	if err != nil || msg.Sequence != 1 {
+		t.Fatalf("message seq=%d err=%v", msg.Sequence, err)
+	}
+	rev, err := h.PublishCommit(wire.Event{RoomID: "r", Kind: wire.EventMemberRemoved, Payload: wire.MemberRemovedPayload{UserID: "maya"}},
+		Durable{Journal: chat, Row: store.RoomMessage{TenantID: testTenantID}})
+	if err != nil || rev.Sequence != 2 {
+		t.Fatalf("revocation seq=%d err=%v, want 2", rev.Sequence, err)
+	}
+	next, _ := h.PublishCommit(chatEvent("r", "y"), chatDurable(chat, "y"))
+	if next.Sequence != 3 {
+		t.Fatalf("the message after it seq=%d, want 3", next.Sequence)
+	}
+	for _, want := range []int64{1, 2, 3} {
+		if ev := recv(t, sub); ev.Sequence != want {
+			t.Fatalf("delivered %d, want %d", ev.Sequence, want)
+		}
+	}
+}

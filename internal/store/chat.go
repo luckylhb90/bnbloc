@@ -86,6 +86,16 @@ type ChatStore interface {
 	// The other rules are AppendRoomMessages'; a *ClientMsgConflict stores
 	// nothing and consumes no sequence.
 	AppendNextRoomMessages(ctx context.Context, rows []RoomMessage) error
+	// NextRoomSeq takes the room's next sequence for an event that stores
+	// no row (a revocation: member_removed, room_deleted), so every replica
+	// delivers it in order with the room's messages: a message stored after
+	// it has a higher sequence. tenantID is the room's (it starts a counter).
+	NextRoomSeq(ctx context.Context, roomID, tenantID string) (int64, error)
+	// RoomSeqHead is the room's last sequence handed out: the counter, or
+	// the stored max where that is higher (rows written at chosen
+	// sequences). It is where the room's live order starts on a replica
+	// that begins receiving it.
+	RoomSeqHead(ctx context.Context, roomID string) (int64, error)
 	// RoomHistory returns the newest clampLimit(limit, DefaultRoomHistoryPage,
 	// MaxRoomHistoryPage) live messages with seq < before (before<=0 means
 	// "latest"), ascending by seq, within one channel. It is the page older
@@ -269,6 +279,21 @@ func (s *MemoryChat) AppendNextRoomMessages(ctx context.Context, rows []RoomMess
 		rows[i].Seq = numbered[i].Seq
 	}
 	return nil
+}
+
+// NextRoomSeq takes the room's next sequence (see ChatStore).
+func (s *MemoryChat) NextRoomSeq(_ context.Context, roomID, _ string) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.last[roomID]++
+	return s.last[roomID], nil
+}
+
+// RoomSeqHead is the room's last sequence handed out (see ChatStore).
+func (s *MemoryChat) RoomSeqHead(_ context.Context, roomID string) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.last[roomID], nil
 }
 
 // appendOne is AppendRoomMessage for every ChatStore: one row under the
@@ -715,6 +740,39 @@ func (s *MySQLChat) appendNext(ctx context.Context, rows []RoomMessage) error {
 		return s.classifyDup(ctx, rows, err)
 	}
 	return tx.Commit()
+}
+
+// NextRoomSeq takes the room's next sequence (see ChatStore): one statement
+// on its counter, started at the stored max on the room's first.
+func (s *MySQLChat) NextRoomSeq(ctx context.Context, roomID, tenantID string) (int64, error) {
+	for attempt := 0; attempt < 2; attempt++ {
+		// cross-tenant: a room's sequence is the room's (room ids are
+		// global), as its (room, seq) key is.
+		res, err := s.DB.ExecContext(ctx, `UPDATE room_counters SET seq = LAST_INSERT_ID(seq + 1) WHERE room_id = ?`, roomID)
+		if err != nil {
+			return 0, err
+		}
+		if n, err := res.RowsAffected(); err != nil {
+			return 0, err
+		} else if n == 1 {
+			return res.LastInsertId()
+		}
+		if err := s.catchUpCounter(ctx, RoomMessage{RoomID: roomID, TenantID: tenantID}); err != nil {
+			return 0, err
+		}
+	}
+	return 0, fmt.Errorf("store: room counter for %s did not start", roomID)
+}
+
+// RoomSeqHead is the room's last sequence handed out (see ChatStore), read
+// on the primary: a replica's could be behind.
+func (s *MySQLChat) RoomSeqHead(ctx context.Context, roomID string) (int64, error) {
+	// cross-tenant: a room's sequence is the room's (room ids are global).
+	var head int64
+	err := s.DB.primary.QueryRowContext(ctx, `SELECT GREATEST(
+		COALESCE((SELECT seq FROM room_counters WHERE room_id = ?), 0),
+		COALESCE((SELECT MAX(seq) FROM room_messages WHERE room_id = ?), 0))`, roomID, roomID).Scan(&head)
+	return head, err
 }
 
 // catchUpCounter starts the room's counter at the room's stored max, or

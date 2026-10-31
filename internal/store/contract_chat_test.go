@@ -696,3 +696,40 @@ func TestContractChatStoreAppendNext(t *testing.T) {
 		}
 	})
 }
+
+// A sequence taken for an event that stores no row is the room's next, the
+// next stored message comes after it, and the room's head says so.
+func TestContractChatStoreNextRoomSeq(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) {
+		tid, room := uniq("t-seq-"), uniq("room-")
+		ctx := tenantCtx(tid)
+		s := b.Chat
+		if head := must(s.RoomSeqHead(bg(), room))(t); head != 0 {
+			t.Fatalf("an empty room's head = %d", head)
+		}
+		if seq := must(s.NextRoomSeq(bg(), room, tid))(t); seq != 1 {
+			t.Fatalf("first sequence of an empty room = %d, want 1", seq)
+		}
+		rows := []RoomMessage{chatRow(tid, room, "", 0, "after")}
+		if err := s.AppendNextRoomMessages(ctx, rows); err != nil || rows[0].Seq != 2 {
+			t.Fatalf("the message after it: seq %d err %v, want 2", rows[0].Seq, err)
+		}
+		if seq := must(s.NextRoomSeq(bg(), room, tid))(t); seq != 3 {
+			t.Fatalf("next = %d, want 3", seq)
+		}
+		if head := must(s.RoomSeqHead(bg(), room))(t); head != 3 {
+			t.Fatalf("head = %d, want 3 (the sequence with no row counts)", head)
+		}
+		// A room written before counters existed: the sequence follows its rows.
+		old := uniq("room-")
+		if err := s.AppendRoomMessages(ctx, []RoomMessage{chatRow(tid, old, "", 5, "old")}); err != nil {
+			t.Fatal(err)
+		}
+		if head := must(s.RoomSeqHead(bg(), old))(t); head != 5 {
+			t.Fatalf("head of an old room = %d, want 5", head)
+		}
+		if seq := must(s.NextRoomSeq(bg(), old, tid))(t); seq != 6 {
+			t.Fatalf("next of an old room = %d, want 6", seq)
+		}
+	})
+}
