@@ -1,4 +1,4 @@
-import { artifactLinkUrl, parseHashRoute, routeHash, shareHash, shareTokenFromHash } from "./hashRoute.ts";
+import { artifactLinkUrl, messageLinkUrl, parseHashRoute, routeHash, shareHash, shareTokenFromHash } from "./hashRoute.ts";
 
 // Local runner (the web tsconfig has no node types); a failure throws.
 function test(name: string, fn: () => void): void {
@@ -83,4 +83,12 @@ test("the public share route", () => {
   for (const bad of ["", "#/share/", "#/share/short", "#/share/a%2Fb_cdefgh", "#/share/abc/def/ghi", `#/share/${token}?x=1`, "#/room/r1"]) {
     eq(shareTokenFromHash(bad), null, `rejects ${bad}`);
   }
+});
+
+test("a message link is the room's deep link to that message", () => {
+  const url = messageLinkUrl("https://gw.example.com/app/#/room/other?seq=9", "r 1", 42, "ch_1");
+  eq(url, "https://gw.example.com/app/#/room/r%201?seq=42&channel=ch_1", "with channel");
+  const back = parseHashRoute(url.slice(url.indexOf("#")));
+  eq(back, { kind: "room", roomId: "r 1", seq: 42, channelId: "ch_1" }, "round trip");
+  eq(messageLinkUrl("https://gw.example.com", "r1", 5), "https://gw.example.com/#/room/r1?seq=5", "default channel");
 });

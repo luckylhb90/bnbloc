@@ -39,6 +39,7 @@ export function MessageBody({
         className={cn(
           "relative text-sm [overflow-wrap:anywhere]",
           !onAccent && "text-[var(--color-fg)]",
+          onAccent && "[&_a]:!text-inherit [&_blockquote]:!text-inherit [&_blockquote]:!border-current",
           long && !expanded && "max-h-96 overflow-hidden",
           className,
         )}

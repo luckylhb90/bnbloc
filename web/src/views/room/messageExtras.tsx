@@ -1,5 +1,5 @@
 import { createContext, useContext } from "react";
-import { ArrowBendUpLeftIcon, BookmarkSimpleIcon, ChatsCircleIcon, CheckSquareIcon, ListChecksIcon } from "@phosphor-icons/react";
+import { ArrowBendUpLeftIcon, BookmarkSimpleIcon, ChatsCircleIcon, CheckSquareIcon, LinkSimpleIcon, ListChecksIcon } from "@phosphor-icons/react";
 import { rootLine, type ThreadSummary } from "@/lib/threads";
 import type { MessageTask, TaskStatus } from "@/lib/api";
 import { cn } from "@/lib/cn";
@@ -22,6 +22,9 @@ export interface MessageExtras {
   readonly onOpenThread?: (rootSeq: number) => void;
   // A reply's quote jumps to the message it answers.
   readonly onJumpTo?: (seq: number) => void;
+  // Copies the link to a message of this feed's channel (absent where a
+  // message has no link of its own: a thread's panel, the people chat).
+  readonly onCopyLink?: (seq: number) => void;
   readonly onSaveAsPrompt: (item: FeedItem) => void;
   readonly onMarkTask: (seq: number) => void;
   readonly onUnmarkTask: (seq: number) => void;
@@ -88,6 +91,18 @@ export function MessageExtraActions({ item, floating }: { item: FeedItem; floati
           className={iconButton}
         >
           <ChatsCircleIcon size={12} />
+        </button>
+      )}
+      {extras.onCopyLink && (
+        <button
+          type="button"
+          data-copy-message-link
+          onClick={() => extras.onCopyLink?.(seq)}
+          title="Copy link"
+          aria-label="Copy link to message"
+          className={iconButton}
+        >
+          <LinkSimpleIcon size={12} />
         </button>
       )}
       <FindAWayButton item={item} />

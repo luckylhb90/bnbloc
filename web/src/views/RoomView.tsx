@@ -16,6 +16,7 @@ import { useWorkbench } from "@/views/workbench/useWorkbench";
 import { applyAppChanged } from "@/views/workbench/AppDataLine";
 import { desktop } from "@/lib/desktop";
 import { inDesktopShell } from "@/lib/config";
+import { useFeedExtras } from "@/views/room/useFeedExtras";
 import { liveRouteHash } from "@/lib/previewRoute";
 import { useLocalAgent } from "@/lib/useLocalAgent";
 import { useToast } from "@/ui/Toast";
@@ -512,10 +513,13 @@ export function RoomView({
     divertJump: peopleChat.divertJump,
   });
 
-  const threadExtras = useMemo(
-    () => (member && !readOnly ? { ...team.extras, threadsByRoot: threads.byRoot, onOpenThread: openThreadPanel } : { ...team.extras, threadsByRoot: threads.byRoot }),
-    [member, readOnly, team.extras, threads.byRoot, openThreadPanel],
-  );
+  const threadExtras = useFeedExtras({
+    roomId,
+    channelId,
+    team: team.extras,
+    threadsByRoot: threads.byRoot,
+    onOpenThread: member && !readOnly ? openThreadPanel : undefined,
+  });
   const threadPanel = (th: NonNullable<typeof threads.open>) => (
     <RoomThreadPanel
       key={th.channelId}

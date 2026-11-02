@@ -341,14 +341,14 @@ export const Message = memo(function Message({
             {item.text && (
               <div
                 className={
-                  "min-w-0 rounded-2xl rounded-br-md px-4 py-2.5 text-sm whitespace-pre-wrap leading-relaxed animate-in transition-shadow duration-500 data-[flash=true]:ring-2 data-[flash=true]:ring-[var(--color-accent)]/60 [overflow-wrap:anywhere] " +
+                  "min-w-0 max-w-full rounded-2xl rounded-br-md px-4 py-2.5 text-sm leading-relaxed animate-in transition-shadow duration-500 data-[flash=true]:ring-2 data-[flash=true]:ring-[var(--color-accent)]/60 [overflow-wrap:anywhere] " +
                   (failed
                     ? "bg-[var(--color-danger)]/20 text-[var(--color-fg)]"
                     : "bg-[var(--color-accent)] text-[var(--color-accent-fg)]") +
                   (pending ? " opacity-70" : "")
                 }
               >
-                <MessageBody text={item.text} onAccent={!failed} fadeClassName="to-[var(--color-danger)]/20" />
+                <MessageBody text={item.text} markdown onAccent={!failed} fadeClassName="to-[var(--color-danger)]/20" />
               </div>
             )}
             <MessageAttachments roomId={roomId} attachments={item.attachments} />
@@ -506,7 +506,7 @@ export const Message = memo(function Message({
           <ThinkingDisclosure thinking={item.thinking} metrics={item.metrics} />
         ) : null}
         <ReplyQuote item={item} className="mb-1" />
-        <MessageBody text={shown} markdown={isAgent} />
+        <MessageBody text={shown} markdown />
         {isAgent && item.metrics ? <TurnMetricsFooter metrics={item.metrics} /> : null}
         <MessageAttachments roomId={roomId} attachments={item.attachments} className="mt-2" />
         <FileRefTag roomId={roomId} fileRef={item.fileRef} className="mt-1" />

@@ -110,3 +110,13 @@ Copy and opens the Share dialog from More options.
 ```sh
 BNBLOC_E2E_URL=http://localhost:5173 node web/e2e/share-proposal.mjs
 ```
+
+## People's Markdown and a message's link (`message-markdown.mjs`)
+
+A member's own message and another member's both render Markdown (bold,
+code, lists), an image in a message is a link and is never fetched, and a
+message's "Copy link" copies the room's deep link to it.
+
+```sh
+BNBLOC_E2E_URL=http://localhost:5173 node web/e2e/message-markdown.mjs
+```

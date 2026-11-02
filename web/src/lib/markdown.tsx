@@ -215,6 +215,26 @@ const components: Components = {
       </a>
     );
   },
+  // An image is never fetched: loading a remote one would tell its server who
+  // read the message (decision: channels PRD C7). It shows as a link the
+  // reader may open.
+  img({ src, alt }) {
+    const href = typeof src === "string" ? src : "";
+    return (
+      <a
+        data-markdown-image
+        href={href}
+        rel="noopener noreferrer"
+        onClick={(event) => {
+          event.preventDefault();
+          if (href) void openExternal(href);
+        }}
+        className="text-[var(--color-accent)] underline underline-offset-2 hover:opacity-80"
+      >
+        {alt || "image"}
+      </a>
+    );
+  },
   table({ children }) {
     return (
       <div className="my-2 overflow-x-auto">

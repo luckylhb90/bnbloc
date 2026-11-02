@@ -1,6 +1,6 @@
-// A member's own message with very long unbroken text (a pasted token) stays
-// inside its column, wraps, and folds behind "Show more" like everyone
-// else's long text. The gateway is mocked in the browser (no backend needed).
+// A message with very long unbroken text (a pasted token), a member's own
+// bubble and another member's row alike (both render Markdown), stays inside
+// its column, wraps, and folds behind "Show more". The gateway is mocked in the browser (no backend needed).
 //
 // Run it like layout-regression.mjs (README): a web server on BNBLOC_E2E_URL
 // (default http://localhost:5173), `playwright-core` from a scratch install.
@@ -15,13 +15,13 @@ let failures = 0;
 const ok = (c, m) => { if (!c) { failures++; console.log("FAIL:", m); } else console.log("ok:", m); };
 
 const browser = await chromium.launch(process.env.CHROME ? { executablePath: process.env.CHROME } : {});
-for (const width of [1440, 390]) {
+for (const [width, author] of [[1440, "maya"], [390, "maya"], [1440, "jack"], [390, "jack"]]) {
   const ctx = await browser.newContext({ viewport: { width, height: 900 } });
   await ctx.route("**/v1/**", async (route) => {
     const p = new URL(route.request().url()).pathname;
     const json = (body, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
     if (p.startsWith("/v1/auth/sso/config")) return json({ authProviderAvailable: false, directLoginAvailable: true });
-    if (p === "/v1/rooms/r1/history") return json({ messages: [{ sequence: 1, kind: "chat_message", payload: { userId: "maya", text }, atUnixMs: Date.now() }] });
+    if (p === "/v1/rooms/r1/history") return json({ messages: [{ sequence: 1, kind: "chat_message", channelId: "general", payload: { userId: author, text, clientMsgId: "c1" }, atUnixMs: Date.now() }] });
     if (p === "/v1/rooms/r1/channels") return json({ channels: [channel()], sections: [], groups: [] });
     if (p === "/v1/rooms/r1/members") return json({ members: [{ userId: "maya", role: "owner" }] });
     if (p === "/v1/rooms/r1") return json(room());
@@ -36,16 +36,16 @@ for (const width of [1440, 390]) {
   const more = page.getByRole("button", { name: "Show more" });
   await more.waitFor({ timeout: 10000 }).catch(() => {});
   const m = await page.evaluate(() => {
-    const row = document.querySelector("[id^=msg-]");
-    const bubble = row?.firstElementChild?.firstElementChild;
+    const row = document.querySelector("[data-room-message-feed] [data-seq='1']");
+    const bubble = row?.querySelector(".text-sm");
     const b = bubble?.getBoundingClientRect(), r = row?.getBoundingClientRect();
     return { bubble: b && { l: b.left, r: b.right, h: b.height }, row: r && { l: r.left, r: r.right } };
   });
-  ok(m.bubble && m.bubble.l >= m.row.l - 1 && m.bubble.r <= m.row.r + 1, `${width}px: the bubble stays inside its column (${JSON.stringify(m)})`);
-  ok(m.bubble && m.bubble.h < 700, `${width}px: a long message is folded (${Math.round(m.bubble?.h ?? 0)}px)`);
-  ok(await more.isVisible().catch(() => false), `${width}px: "Show more" is reachable`);
+  ok(m.bubble && m.bubble.l >= m.row.l - 1 && m.bubble.r <= m.row.r + 1, `${width}px ${author}: the bubble stays inside its column (${JSON.stringify(m)})`);
+  ok(m.bubble && m.bubble.h < 700, `${width}px ${author}: a long message is folded (${Math.round(m.bubble?.h ?? 0)}px)`);
+  ok(await more.isVisible().catch(() => false), `${width}px ${author}: "Show more" is reachable`);
   await more.click().catch(() => {});
-  ok(await page.getByRole("button", { name: "Show less" }).isVisible().catch(() => false), `${width}px: it unfolds`);
+  ok(await page.getByRole("button", { name: "Show less" }).isVisible().catch(() => false), `${width}px ${author}: it unfolds`);
   await ctx.close();
 }
 await browser.close();

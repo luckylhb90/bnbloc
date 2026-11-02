@@ -976,3 +976,18 @@ hour; `@channel` is open to every member who may post (C5's proposal).
   snapshots broadcast to every stream on every arrival (n² in a large room,
   `docs/bugs/2026-10-30-presence-snapshot-storm.md`): a stream now writes
   its own snapshot on opening.
+
+**Slice 5a, people's Markdown and a message's link** (§2.3, C7):
+
+- A person's message renders with the agents' renderer (`lib/markdown.tsx`),
+  in their own bubble and in another member's row. The renderer never fetches
+  an image: `![alt](url)` shows as a link (`img`, decision C7), for agents'
+  replies too. The own bubble keeps its colours for links and quotes, and is
+  held to its column (`max-w-full`) so a long token still wraps.
+- "Copy link" on every stored message of the feed copies the room's deep link
+  to it (`messageLinkUrl` over `routeHash`, the one owner of the shape;
+  `useFeedExtras`).
+- Tests: `lib/hashRoute.test.ts`, `web/e2e/message-markdown.mjs` (both rows,
+  no remote image fetched, the copied link), `web/e2e/long-message.mjs` now
+  covers another member's row too.
+- Not in it: drafts on the server (C6), the rest of slice 5.

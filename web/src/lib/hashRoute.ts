@@ -110,6 +110,13 @@ export function roomLinkUrl(base: string, roomId: string): string {
   return appRoot(base) + routeHash({ kind: "room", roomId });
 }
 
+// messageLinkUrl is the absolute link to one message of a room's channel:
+// the room route with its message anchor, the same deep link a notification
+// carries. Opening it scrolls the feed to the message.
+export function messageLinkUrl(base: string, roomId: string, seq: number, channelId?: string): string {
+  return appRoot(base) + routeHash({ kind: "room", roomId, seq, channelId });
+}
+
 // appRoot is the app's document URL without query or fragment. A directory
 // base gains its trailing slash; a document base (".../index.html") is kept.
 export function appRoot(base: string): string {
