@@ -21,7 +21,8 @@ type roomAgent struct {
 	Online    bool   `json:"online"`
 	Sandboxed bool   `json:"sandboxed,omitempty"`
 	// You marks the agent this session drives (never a valid ask_agent
-	// target).
+	// target): the row whose owner, core and provider are all the
+	// session's. A row or a session without a core is never "you".
 	You bool `json:"you,omitempty"`
 }
 
@@ -54,7 +55,7 @@ func roomAgents(ctx context.Context, env *Env) ([]roomAgent, error) {
 		out = append(out, roomAgent{
 			Handle: handle, Owner: a.OwnerUserID, Core: a.Core, Provider: a.Provider,
 			Online: true, Sandboxed: a.Sandboxed,
-			You: a.OwnerUserID == scope.Owner && a.Provider == scope.Provider && (a.Core == "" || scope.Core == "" || a.Core == scope.Core),
+			You: a.Core != "" && a.OwnerUserID == scope.Owner && a.Core == scope.Core && a.Provider == scope.Provider,
 		})
 	}
 	return out, nil
