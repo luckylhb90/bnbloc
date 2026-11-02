@@ -307,6 +307,18 @@ type FollowMarks struct {
 	Level *string
 }
 
+// ChannelDraft is what a member typed in a channel's or thread's composer
+// and has not sent (C6): theirs only, kept on the server so every device
+// shows it.
+type ChannelDraft struct {
+	TenantID    string
+	RoomID      string
+	ChannelID   string
+	UserID      string
+	Text        string
+	UpdatedAtMs int64
+}
+
 // ChannelGroup is one member's own group of their channel rail (C24): a
 // folder only they see, never a section; their follows name it.
 type ChannelGroup struct {
@@ -442,6 +454,14 @@ type ChannelStore interface {
 	// DeleteChannelGroup deletes one of userID's groups and takes their
 	// channels out of it, at once. An absent group is a no-op.
 	DeleteChannelGroup(ctx context.Context, roomID, userID, groupID string) error
+	// PutChannelDraft writes userID's draft of one channel or thread (latest
+	// write wins, one per member and channel).
+	PutChannelDraft(ctx context.Context, d ChannelDraft) error
+	// ChannelDraft reads userID's draft of a channel; found false when none.
+	ChannelDraft(ctx context.Context, roomID, channelID, userID string) (d ChannelDraft, found bool, err error)
+	// DeleteChannelDraft removes userID's draft of a channel (sent, or
+	// emptied). An absent draft is a no-op.
+	DeleteChannelDraft(ctx context.Context, roomID, channelID, userID string) error
 	// ClaimChannelPost records userID's post in the channel at atMs and
 	// makes them follow it (posting joins, C18). With minGapMs > 0 (slow
 	// mode) the claim is refused when their last post there is less than
@@ -582,6 +602,44 @@ func followKey(tenantID, roomID, channelID, userID string) string {
 
 func groupKey(tenantID, roomID, userID, groupID string) string {
 	return tenantID + "\x00" + roomID + "\x00" + userID + "\x00" + groupID
+}
+
+func draftKey(tenantID, roomID, channelID, userID string) string {
+	return tenantID + "\x00" + roomID + "\x00" + channelID + "\x00" + userID
+}
+
+func (s *MemoryChannel) PutChannelDraft(ctx context.Context, d ChannelDraft) error {
+	tnt, err := tenant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	s.room.mu.Lock()
+	defer s.room.mu.Unlock()
+	d.TenantID = tnt
+	s.room.drafts[draftKey(tnt, d.RoomID, d.ChannelID, d.UserID)] = d
+	return nil
+}
+
+func (s *MemoryChannel) ChannelDraft(ctx context.Context, roomID, channelID, userID string) (ChannelDraft, bool, error) {
+	tnt, err := tenant.Require(ctx)
+	if err != nil {
+		return ChannelDraft{}, false, err
+	}
+	s.room.mu.Lock()
+	defer s.room.mu.Unlock()
+	d, ok := s.room.drafts[draftKey(tnt, roomID, channelID, userID)]
+	return d, ok, nil
+}
+
+func (s *MemoryChannel) DeleteChannelDraft(ctx context.Context, roomID, channelID, userID string) error {
+	tnt, err := tenant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	s.room.mu.Lock()
+	defer s.room.mu.Unlock()
+	delete(s.room.drafts, draftKey(tnt, roomID, channelID, userID))
+	return nil
 }
 
 // sortChannelGroups orders a member's groups by position, then created_at,

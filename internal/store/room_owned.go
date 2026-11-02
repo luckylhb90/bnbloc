@@ -52,6 +52,7 @@ var roomOwnedTables = []roomOwnedTable{
 	byTenantRoom("room_sections"),
 	byTenantRoom("channel_follows"),
 	byTenantRoom("channel_groups"),
+	byTenantRoom("channel_drafts"),
 	byTenantRoom("section_members"),
 	byTenantRoom("section_join_requests"),
 	// A task's title is a snapshot of the message text: it must not outlive

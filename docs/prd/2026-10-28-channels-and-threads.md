@@ -990,4 +990,29 @@ hour; `@channel` is open to every member who may post (C5's proposal).
 - Tests: `lib/hashRoute.test.ts`, `web/e2e/message-markdown.mjs` (both rows,
   no remote image fetched, the copied link), `web/e2e/long-message.mjs` now
   covers another member's row too.
-- Not in it: drafts on the server (C6), the rest of slice 5.
+- Drafts on the server (C6): a member's unsent text of a channel's or
+  thread's composer, theirs only (`channel_drafts`, migration
+  `2026_11_channel_drafts`, a new table; a room's row of `roomOwnedTables`).
+  `GET/PUT/DELETE /v1/rooms/{id}/channels/{channelId}/draft` in the room
+  service (`channel_drafts.go`): a human member who may post (a visitor
+  composes nothing), on a channel they may read (`liveChannel`: 404
+  otherwise), at most `wire.MaxChatTextBytes` (413), blank text removes it.
+  The room's main composer reads it when a channel opens (what was already
+  typed wins), saves it when typing pauses and clears it on send
+  (`useChannelDraft`, the rules in `lib/channelDrafts.ts`); the people chat's
+  and a file panel's composers keep none. No agent and no other member ever
+  reads a draft.
+- Tests: `TestContractChannelStoreDrafts`, `TestChannelDraftsAreTheMembersOwn`
+  (a non-member, a visitor and a member outside a members-only section are
+  refused), `lib/channelDrafts.test.ts`, `web/e2e/channel-drafts.mjs` (saved,
+  back after a reload, another channel's composer empty, gone after a send).
+- Not in it: the rest of slice 5 (reactions, pins, saved, forward, @-group
+  mentions, catch-up, digest, translation).
+
+**Decisions pending owner, slice 5a:**
+
+1. An image in any message (a person's or an agent's) is shown as a link,
+   never loaded (C7 says "no remote images"; a `data:` image is a link too).
+2. A draft is saved after 800 ms without typing (`SAVE_AFTER_MS`).
+3. A visitor keeps no drafts (they cannot post); a draft of a channel is kept
+   after the member leaves it, and deleted with the room.

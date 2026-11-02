@@ -2365,6 +2365,20 @@ export interface ChannelGroup {
   createdAtMs: number;
 }
 
+// ChannelDraft is GET and PUT /v1/rooms/{id}/channels/{channelId}/draft:
+// the caller's unsent text of one channel's or thread's composer (C6),
+// theirs only; empty text and zero time when there is none.
+export interface ChannelDraft {
+  text: string;
+  updatedAtMs: number;
+}
+
+// ChannelDraftRequest is PUT /v1/rooms/{id}/channels/{channelId}/draft:
+// blank text removes the draft.
+export interface ChannelDraftRequest {
+  text: string;
+}
+
 // ChannelGroupCreateRequest is POST /v1/rooms/{id}/channel-groups.
 export interface ChannelGroupCreateRequest {
   name: string;

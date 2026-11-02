@@ -461,3 +461,43 @@ func TestContractRoomStoreRules(t *testing.T) {
 		}
 	})
 }
+
+func TestContractChannelStoreDrafts(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) {
+		ctx := tenantCtx(uniq("t-draft-"))
+		s := b.Channel
+		room := newContractRoom(t, ctx, b, "maya")
+		ch := uniq("ch-")
+		if _, found, err := s.ChannelDraft(ctx, room, ch, "maya"); err != nil || found {
+			t.Fatalf("no draft yet = %v %v", found, err)
+		}
+		for _, d := range []ChannelDraft{
+			{RoomID: room, ChannelID: ch, UserID: "maya", Text: "first", UpdatedAtMs: 10},
+			{RoomID: room, ChannelID: ch, UserID: "maya", Text: "second", UpdatedAtMs: 20},
+			{RoomID: room, ChannelID: ch, UserID: "Maya", Text: "another member", UpdatedAtMs: 30},
+		} {
+			if err := s.PutChannelDraft(ctx, d); err != nil {
+				t.Fatal(err)
+			}
+		}
+		d, found, err := s.ChannelDraft(ctx, room, ch, "maya")
+		if err != nil || !found || d.Text != "second" || d.UpdatedAtMs != 20 {
+			t.Fatalf("maya's draft = %+v %v %v (the latest write, never another member's)", d, found, err)
+		}
+		if _, found, _ := s.ChannelDraft(tenantCtx(uniq("t-other-")), room, ch, "maya"); found {
+			t.Fatal("another tenant reads the draft")
+		}
+		if err := s.DeleteChannelDraft(ctx, room, ch, "maya"); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.DeleteChannelDraft(ctx, room, ch, "maya"); err != nil {
+			t.Fatalf("deleting an absent draft = %v", err)
+		}
+		if _, found, _ := s.ChannelDraft(ctx, room, ch, "maya"); found {
+			t.Fatal("the draft is still there after delete")
+		}
+		if d, found, _ := s.ChannelDraft(ctx, room, ch, "Maya"); !found || d.Text != "another member" {
+			t.Fatalf("the other member's draft = %+v %v", d, found)
+		}
+	})
+}

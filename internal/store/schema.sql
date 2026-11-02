@@ -310,6 +310,18 @@ CREATE TABLE IF NOT EXISTS channel_follows (
   KEY idx_follow_user (tenant_id, room_id, user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- A member's unsent text of a channel's or thread's composer (C6): theirs
+-- only, latest write wins, one per member and channel.
+CREATE TABLE IF NOT EXISTS channel_drafts (
+  tenant_id     VARCHAR(64) NOT NULL,
+  room_id       VARCHAR(64) NOT NULL,
+  channel_id    VARCHAR(64) NOT NULL,
+  user_id       VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  text          MEDIUMTEXT NOT NULL,
+  updated_at_ms BIGINT NOT NULL,
+  PRIMARY KEY (tenant_id, room_id, channel_id, user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- A member's own groups of their channel rail (C24): folders only they see,
 -- named and ordered by them; a follow's group_id places a channel in one.
 CREATE TABLE IF NOT EXISTS channel_groups (

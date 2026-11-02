@@ -120,3 +120,13 @@ message's "Copy link" copies the room's deep link to it.
 ```sh
 BNBLOC_E2E_URL=http://localhost:5173 node web/e2e/message-markdown.mjs
 ```
+
+## A channel's draft on the server (`channel-drafts.mjs`)
+
+What is typed in a channel's composer is saved, is back after a reload (as on
+another device), stays apart from another channel's composer and is removed by
+sending it.
+
+```sh
+BNBLOC_E2E_URL=http://localhost:5173 node web/e2e/channel-drafts.mjs
+```

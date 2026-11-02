@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useChannelDraft } from "@/views/composer/useChannelDraft";
 import { useInjectedAgent, useInjectedAttachments, useInjectedDraft, useInjectedFilePick, useInjectedReferences } from "@/views/composer/useInjectedDraft";
 import {
   PaperPlaneRightIcon,
@@ -127,6 +128,9 @@ export function Composer({
   // A prompt "Used" from the library, and references asked from the people
   // chat, land in the room's main composer only (never the people chat's).
   useInjectedDraft(roomId, main ? channelId : null, setText, taRef);
+  // The text of a channel's or thread's composer is kept on the server (C6);
+  // the people chat's and a file panel's are not.
+  useChannelDraft(roomId, main ? channelId : null, text, setText);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // A find-a-way card's "Attach a file" opens the picker here.
   const openFilePicker = useCallback(() => fileInputRef.current?.click(), []);

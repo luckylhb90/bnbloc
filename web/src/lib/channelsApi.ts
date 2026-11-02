@@ -7,6 +7,7 @@ import { roomPath } from "./roomId.ts";
 import type {
   ChannelCreateRequest,
   ChannelDirectory,
+  ChannelDraft,
   ChannelFollowRequest,
   ChannelGroup,
   ChannelGroupCreateRequest,
@@ -71,6 +72,11 @@ export const channelsApi = {
   createGroup: (roomId: string, body: ChannelGroupCreateRequest) => req<ChannelGroup>(roomPath(roomId, "channel-groups"), json("POST", body)),
   patchGroup: (roomId: string, groupId: string, body: ChannelGroupPatchRequest) => req<ChannelGroup>(roomPath(roomId, "channel-groups", groupId), json("PATCH", body)),
   removeGroup: (roomId: string, groupId: string) => req<void>(roomPath(roomId, "channel-groups", groupId), { method: "DELETE", as: "none" }),
+  /** The caller's own unsent text of a channel's or thread's composer (C6). */
+  draft: (roomId: string, channelId: string) => req<ChannelDraft>(roomPath(roomId, "channels", channelId, "draft")),
+  saveDraft: (roomId: string, channelId: string, text: string) =>
+    req<ChannelDraft>(roomPath(roomId, "channels", channelId, "draft"), json("PUT", { text })),
+  clearDraft: (roomId: string, channelId: string) => req<void>(roomPath(roomId, "channels", channelId, "draft"), { method: "DELETE", as: "none" }),
   rules: (roomId: string) => req<RoomRulesState>(roomPath(roomId, "rules")),
   agree: (roomId: string, version: number) => req<RoomRulesState>(roomPath(roomId, "rules", "agree"), json("POST", { version })),
   /** The room's rules, agreement switch, recommended channels and creation

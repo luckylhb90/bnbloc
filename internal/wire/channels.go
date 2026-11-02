@@ -261,6 +261,20 @@ type ChannelGroup struct {
 	CreatedAtMs int64  `json:"createdAtMs"`
 }
 
+// ChannelDraft is GET and PUT /v1/rooms/{id}/channels/{channelId}/draft:
+// the caller's unsent text of one channel's or thread's composer (C6),
+// theirs only; empty text and zero time when there is none.
+type ChannelDraft struct {
+	Text        string `json:"text"`
+	UpdatedAtMs int64  `json:"updatedAtMs"`
+}
+
+// ChannelDraftRequest is PUT /v1/rooms/{id}/channels/{channelId}/draft:
+// blank text removes the draft.
+type ChannelDraftRequest struct {
+	Text string `json:"text"`
+}
+
 // ChannelGroupCreateRequest is POST /v1/rooms/{id}/channel-groups.
 type ChannelGroupCreateRequest struct {
 	Name     string `json:"name"`

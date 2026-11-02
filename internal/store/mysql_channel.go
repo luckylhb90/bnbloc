@@ -812,3 +812,45 @@ SELECT last_posted_at_ms FROM channel_follows WHERE tenant_id = ? AND room_id = 
 	}
 	return last + minGapMs - atMs, nil
 }
+
+func (m *MySQLChannel) PutChannelDraft(ctx context.Context, d ChannelDraft) error {
+	tnt, err := tenant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = m.DB.ExecContext(ctx, `
+INSERT INTO channel_drafts (tenant_id, room_id, channel_id, user_id, text, updated_at_ms)
+VALUES (?, ?, ?, ?, ?, ?)
+ON DUPLICATE KEY UPDATE text = VALUES(text), updated_at_ms = VALUES(updated_at_ms)`,
+		tnt, d.RoomID, d.ChannelID, d.UserID, d.Text, d.UpdatedAtMs)
+	return err
+}
+
+func (m *MySQLChannel) ChannelDraft(ctx context.Context, roomID, channelID, userID string) (ChannelDraft, bool, error) {
+	tnt, err := tenant.Require(ctx)
+	if err != nil {
+		return ChannelDraft{}, false, err
+	}
+	var d ChannelDraft
+	err = m.DB.QueryRowContext(ctx, `
+SELECT tenant_id, room_id, channel_id, user_id, text, updated_at_ms FROM channel_drafts
+WHERE tenant_id = ? AND room_id = ? AND channel_id = ? AND user_id = ?`, tnt, roomID, channelID, userID).
+		Scan(&d.TenantID, &d.RoomID, &d.ChannelID, &d.UserID, &d.Text, &d.UpdatedAtMs)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ChannelDraft{}, false, nil
+	}
+	if err != nil {
+		return ChannelDraft{}, false, err
+	}
+	return d, true, nil
+}
+
+func (m *MySQLChannel) DeleteChannelDraft(ctx context.Context, roomID, channelID, userID string) error {
+	tnt, err := tenant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = m.DB.ExecContext(ctx, `DELETE FROM channel_drafts WHERE tenant_id = ? AND room_id = ? AND channel_id = ? AND user_id = ?`,
+		tnt, roomID, channelID, userID)
+	return err
+}
