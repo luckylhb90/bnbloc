@@ -85,6 +85,7 @@ const (
 	PurgedRoomMessages     = "room_messages"
 	PurgedRoomMessagesKept = "room_messages_redacted"
 	PurgedMessageTasks     = "message_tasks"
+	PurgedMessageMarks     = "message_marks"
 	PurgedAgentMessages    = "agent_messages"
 	PurgedAttachments      = "attachments"
 	PurgedArtifactVersions = "artifact_versions"
@@ -273,6 +274,7 @@ func NewRetention(b *Backends) RetentionStore {
 	m := &MemoryRetention{Settings: b.Settings}
 	m.Chat, _ = b.Chat.(*MemoryChat)
 	m.Tasks, _ = b.MessageTasks.(*MemoryMessageTasks)
+	m.Marks, _ = b.MessageMarks.(*MemoryMessageMarks)
 	m.Activity, _ = b.Activity.(*Memory)
 	m.Attachments, _ = b.Attachments.(*MemoryAttachments)
 	m.AppDocs, _ = b.AppDocs.(*MemoryAppDocs)
@@ -289,6 +291,7 @@ func NewRetention(b *Backends) RetentionStore {
 type MemoryRetention struct {
 	Chat        *MemoryChat
 	Tasks       *MemoryMessageTasks
+	Marks       *MemoryMessageMarks
 	Activity    *Memory
 	Attachments *MemoryAttachments
 	Artifacts   *MemoryArtifacts
@@ -385,6 +388,20 @@ func (m *MemoryRetention) purgeMessages(req PurgeRequest, out PurgeResult) {
 			c.msgs[rk] = kept
 		}
 		c.mu.Unlock()
+	}
+	if mk := m.Marks; mk != nil && len(gone) > 0 {
+		byRoom := map[string]map[int64]bool{}
+		for _, g := range gone {
+			if byRoom[g.room] == nil {
+				byRoom[g.room] = map[int64]bool{}
+			}
+			byRoom[g.room][g.seq] = true
+		}
+		mk.mu.Lock()
+		for room, seqs := range byRoom {
+			out[PurgedMessageMarks] += int64(mk.dropSeqs(req.TenantID, room, seqs))
+		}
+		mk.mu.Unlock()
 	}
 	if t := m.Tasks; t != nil && len(gone) > 0 {
 		t.mu.Lock()

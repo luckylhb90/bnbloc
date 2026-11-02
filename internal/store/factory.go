@@ -200,6 +200,8 @@ type Backends struct {
 	ComponentInstalls ComponentInstallStore
 	// MessageTasks holds room messages marked as tasks (F6).
 	MessageTasks MessageTaskStore
+	// MessageMarks holds reactions, pins and saved messages (§2.3).
+	MessageMarks MessageMarkStore
 	// QuotaRequests holds borrowers' requests for more runs on an owner's
 	// room authorization (borrow billing, F3).
 	QuotaRequests QuotaRequestStore
@@ -299,6 +301,7 @@ func NewBackendsWithReplica(dsn, replicaDSN string) (*Backends, error) {
 			AgentPrefs:        NewMemoryAgentPrefs(),
 			ComponentInstalls: NewMemoryComponentInstall(),
 			MessageTasks:      NewMemoryMessageTasks(),
+			MessageMarks:      NewMemoryMessageMarks(),
 			QuotaRequests:     NewMemoryQuotaRequests(),
 			Notifications:     NewMemoryNotifications(),
 			ReplyTokens:       NewMemoryNotificationReplies(),
@@ -321,7 +324,7 @@ func NewBackendsWithReplica(dsn, replicaDSN string) (*Backends, error) {
 		// DeleteRoom clears every memory store holding room-owned rows, as
 		// the MySQL DeleteRoom clears roomOwnedTables.
 		for _, s := range []any{b.Activity, b.Grant, b.Chat, b.BridgeJobs, b.Artifacts, b.Attachments, b.AgentPrefs,
-			b.MessageTasks, b.QuotaRequests, b.ReplyTokens, b.RoomImports, b.Schedules, b.OrgSync, b.ContentComponents, b.AppDocs, b.RoomGroups, b.RoomSources} {
+			b.MessageTasks, b.MessageMarks, b.QuotaRequests, b.ReplyTokens, b.RoomImports, b.Schedules, b.OrgSync, b.ContentComponents, b.AppDocs, b.RoomGroups, b.RoomSources} {
 			rooms.cascadeDeleteTo(s.(roomRowsOwner))
 		}
 		return b, nil
@@ -364,6 +367,7 @@ func newMySQLBackends(db *DB) *Backends {
 		AgentPrefs:        NewMySQLAgentPrefs(db),
 		ComponentInstalls: NewMySQLComponentInstall(db),
 		MessageTasks:      NewMySQLMessageTasks(db),
+		MessageMarks:      NewMySQLMessageMarks(db),
 		QuotaRequests:     NewMySQLQuotaRequests(db),
 		Notifications:     NewMySQLNotifications(db),
 		ReplyTokens:       NewMySQLNotificationReplies(db),

@@ -1964,6 +1964,15 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return createSchemaTable(ctx, db, "channel_drafts")
 		},
 	},
+	{
+		// Reactions, pins and saved messages
+		// (docs/prd/2026-10-28-channels-and-threads.md §2.3): a new table the
+		// previous release never reads.
+		id: "2026_11_message_marks",
+		run: func(ctx context.Context, db sqlConn) error {
+			return createSchemaTable(ctx, db, "message_marks")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

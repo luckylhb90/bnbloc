@@ -28,7 +28,7 @@ import {
 
 // ---- The rules (mirrors of services/room's owners) ----
 
-/** mayManageChannel mirrors the room service's mayManageChannel: the room's
+/** mayManageChannel mirrors the store's MayManageChannel: the room's
  *  owner and admins, the channel's owner, the owners of its section; never
  *  a visitor. Rename, purpose, rules, section, position, settings, archive,
  *  restore. */

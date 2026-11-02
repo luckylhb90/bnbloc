@@ -2,10 +2,12 @@ import { createContext, useContext } from "react";
 import { ArrowBendUpLeftIcon, BookmarkSimpleIcon, ChatsCircleIcon, CheckSquareIcon, LinkSimpleIcon, ListChecksIcon } from "@phosphor-icons/react";
 import { rootLine, type ThreadSummary } from "@/lib/threads";
 import type { MessageTask, TaskStatus } from "@/lib/api";
+import type { MessageMark, MessageMarkKind } from "@/lib/wire.gen";
 import { cn } from "@/lib/cn";
 import type { FeedItem } from "@/views/room/types";
 import { useDisplayName } from "@/lib/useDisplayName";
 import { FindAWayButton } from "@/views/room/DeadEndCard";
+import { MarkActions } from "@/views/room/MessageMarks";
 
 // Team actions on a feed row — "Save as prompt" (prompt packs), "Mark as
 // task" (F6) and an agent reply's "Find a way" (DeadEndCard.tsx)
@@ -29,9 +31,15 @@ export interface MessageExtras {
   readonly onMarkTask: (seq: number) => void;
   readonly onUnmarkTask: (seq: number) => void;
   readonly onSetTaskStatus: (seq: number, status: TaskStatus) => void;
+  // Reactions, pins and the member's saved messages (channels PRD §2.3).
+  readonly marks?: readonly MessageMark[];
+  readonly me?: string | null;
+  readonly onSetMark?: (seq: number, kind: MessageMarkKind, on: boolean, value?: string) => void;
+  // Whether the member may pin in this feed's channel (store.MayManageChannel).
+  readonly mayPin?: boolean;
 }
 
-const MessageExtrasContext = createContext<MessageExtras | null>(null);
+export const MessageExtrasContext = createContext<MessageExtras | null>(null);
 export const MessageExtrasProvider = MessageExtrasContext.Provider;
 
 // Only persisted rows (a server sequence, not pending/failed) can be saved or
@@ -105,6 +113,7 @@ export function MessageExtraActions({ item, floating }: { item: FeedItem; floati
           <LinkSimpleIcon size={12} />
         </button>
       )}
+      <MarkActions seq={seq} />
       <FindAWayButton item={item} />
     </span>
   );

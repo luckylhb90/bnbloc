@@ -6,13 +6,16 @@ import type { PromptDraft } from "@/lib/promptPacks";
 import { PromptPackEditorDialog, type PromptPackTarget } from "@/views/library/PromptPackEditorDialog";
 import type { MessageExtras } from "@/views/room/messageExtras";
 import { RoomTasksStrip } from "@/views/room/RoomTasksStrip";
+import { PinnedStrip } from "@/views/room/MessageMarks";
 import { SavePromptDialog, type PromptSource } from "@/views/room/SavePromptDialog";
 import type { FeedItem } from "@/views/room/types";
 import { useMessageJump } from "@/views/room/useMessageJump";
+import { useRoomMarks } from "@/views/room/useRoomMarks";
 import { useRoomTasks } from "@/views/room/useRoomTasks";
 
 // useRoomTeam wires the team features into one room view: message tasks
-// (strip + badges + live task_updated), "Save as prompt", and jump-to-message
+// (strip + badges + live task_updated), reactions, pins and saved messages
+// (live message_marked), "Save as prompt", and jump-to-message
 // (from global search or a task). RoomView renders `strip` over the feed,
 // provides `extras` to the feed rows, mounts `dialogs`, and routes stream
 // events through `applyEvent` first.
@@ -46,6 +49,7 @@ export function useRoomTeam({
   const [packing, setPacking] = useState<PromptPackTarget | null>(null);
 
   const { subject } = useAuth();
+  const marks = useRoomMarks(roomId, joinedGen, subject ?? null);
   useEffect(() => {
     if (subject) rememberLastRoom(subject, roomId);
   }, [subject, roomId]);
@@ -58,16 +62,22 @@ export function useRoomTeam({
       onMarkTask: mark,
       onUnmarkTask: unmark,
       onSetTaskStatus: setStatus,
+      marks: marks.marks,
+      me: subject ?? null,
+      onSetMark: marks.setMark,
     }),
-    [bySeq, mark, unmark, setStatus],
+    [bySeq, mark, unmark, setStatus, marks.marks, marks.setMark, subject],
   );
 
   const strip = (
-    <RoomTasksStrip
-      tasks={tasks.tasks}
-      onSetStatus={setStatus}
-      onJump={(t) => jump({ seq: t.seq, channelId: t.channelId || undefined })}
-    />
+    <>
+      <PinnedStrip marks={marks.marks} channelId={channelId} feed={feed} onJump={(seq, ch) => jump({ seq, channelId: ch || undefined })} />
+      <RoomTasksStrip
+        tasks={tasks.tasks}
+        onSetStatus={setStatus}
+        onJump={(t) => jump({ seq: t.seq, channelId: t.channelId || undefined })}
+      />
+    </>
   );
   const dialogs = (
     <>
@@ -80,7 +90,7 @@ export function useRoomTeam({
       <PromptPackEditorDialog target={packing} onClose={() => setPacking(null)} />
     </>
   );
-  const applyEvent = (e: RoomEvent) => tasks.applyEvent(e);
+  const applyEvent = (e: RoomEvent) => tasks.applyEvent(e) || marks.applyEvent(e);
 
   return { extras, strip, dialogs, applyEvent };
 }

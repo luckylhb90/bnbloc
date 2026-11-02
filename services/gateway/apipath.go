@@ -284,7 +284,7 @@ func (s *Service) route(p apiPath) string {
 		case "shared-agents", "shared-agents-usage", "platform-agents":
 			// A room's platform agents are platform grants (shareagent).
 			return s.Backends.ShareAgent
-		case "events", "agents", "chat", "attachments", "history", "typing", "read", "messages", "tasks":
+		case "events", "agents", "chat", "attachments", "history", "typing", "read", "messages", "tasks", "marks":
 			return s.Backends.Realtime
 		case "threads":
 			// Realtime opens a thread (it holds the root message); the room

@@ -275,3 +275,52 @@ func TestContractOrgSyncStore(t *testing.T) {
 		}
 	})
 }
+
+func TestContractMessageMarkStore(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) {
+		ctx := tenantCtx(uniq("t-mark-"))
+		s := b.MessageMarks
+		room := newContractRoom(t, ctx, b, "maya")
+		put := func(m MessageMark) bool {
+			t.Helper()
+			created, err := s.PutMessageMark(ctx, m)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return created
+		}
+		thumbs := MessageMark{RoomID: room, ChannelID: "ch", Seq: 7, Kind: wire.MarkReaction, UserID: "maya", Value: "+1", By: "maya", CreatedAtMs: 10}
+		if !put(thumbs) || put(thumbs) {
+			t.Fatal("a reaction is created once, then left as it was")
+		}
+		put(MessageMark{RoomID: room, ChannelID: "ch", Seq: 7, Kind: wire.MarkReaction, UserID: "Maya", Value: "+1", By: "Maya", CreatedAtMs: 11})
+		put(MessageMark{RoomID: room, ChannelID: "ch", Seq: 7, Kind: wire.MarkReaction, UserID: "maya", Value: "tada", By: "maya", CreatedAtMs: 12})
+		put(MessageMark{RoomID: room, ChannelID: "ch", Seq: 7, Kind: wire.MarkPin, By: "jack", CreatedAtMs: 13})
+		put(MessageMark{RoomID: room, ChannelID: "ch", Seq: 3, Kind: wire.MarkSaved, UserID: "maya", By: "maya", CreatedAtMs: 14})
+		if n := must(s.CountMessageReactions(ctx, room, 7))(t); n != 2 {
+			t.Fatalf("distinct reactions = %d, want 2", n)
+		}
+		got := must(s.ListMessageMarks(ctx, room, 0))(t)
+		if len(got) != 5 || got[0].Seq != 7 || got[len(got)-1].Seq != 3 {
+			t.Fatalf("marks = %+v (newest message first)", got)
+		}
+		if other := must(s.ListMessageMarks(tenantCtx(uniq("t-other-")), room, 0))(t); len(other) != 0 {
+			t.Fatalf("another tenant lists %+v", other)
+		}
+		if removed := must(s.DeleteMessageMark(ctx, room, 7, wire.MarkReaction, "maya", "+1"))(t); !removed {
+			t.Fatal("removing maya's +1")
+		}
+		if removed := must(s.DeleteMessageMark(ctx, room, 7, wire.MarkReaction, "maya", "+1"))(t); removed {
+			t.Fatal("removing it twice")
+		}
+		if n := must(s.CountMessageReactions(ctx, room, 7))(t); n != 2 {
+			t.Fatalf("another member's +1 stays: %d", n)
+		}
+		if err := s.DeleteMessageMarks(ctx, room, 7); err != nil {
+			t.Fatal(err)
+		}
+		if got := must(s.ListMessageMarks(ctx, room, 0))(t); len(got) != 1 || got[0].Kind != wire.MarkSaved {
+			t.Fatalf("after the message's marks went = %+v", got)
+		}
+	})
+}

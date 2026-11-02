@@ -1016,3 +1016,42 @@ hour; `@channel` is open to every member who may post (C5's proposal).
 2. A draft is saved after 800 ms without typing (`SAVE_AFTER_MS`).
 3. A visitor keeps no drafts (they cannot post); a draft of a channel is kept
    after the member leaves it, and deleted with the room.
+
+**Slice 5b, reactions, pins and saved messages** (§2.3):
+
+- One store of what people put on a stored message (`message_marks`,
+  migration `2026_11_message_marks`, a new table; a room's row of
+  `roomOwnedTables`, purged with its message by retention and deleted with a
+  deleted message): a member's reaction (one emoji, `value`), the channel's
+  pin (one per message), a member's own save. realtime serves them beside
+  the messages (`services/realtime/marks.go`): `GET /v1/rooms/{id}/marks`
+  (the channels the caller may read, their own saves only, newest message
+  first, at most `wire.MaxRoomMarks`), `PUT/DELETE
+  /v1/rooms/{id}/messages/{seq}/marks`. A reaction needs a member who may
+  post; a pin needs who manages the channel (`store.MayManageChannel`, moved
+  from the room service so realtime asks the same rule); a save any person in
+  the room. A message of a channel the caller may not read is a 404. A
+  reaction or a pin is announced on its channel (`message_marked`, transient,
+  members' kind); a save is announced to nobody.
+- Web: `lib/messageMarks.ts` (the one fold of a put or removal, counts by
+  emoji, pins of a channel), `useRoomMarks` (listing, live events, changes;
+  joined to `useRoomTeam`), `views/room/MessageMarks.tsx` (a row's reaction
+  picker, pin and save; the reactions under a message; the open channel's
+  pinned strip, which jumps to a pin).
+- Tests: `TestContractMessageMarkStore` (memory and MySQL),
+  `TestMessageMarks` (who may react, pin and save; a members-only message;
+  the reaction bound; a deleted message's marks), `TestMessageMarkedEvent`,
+  `lib/messageMarks.test.ts`, `web/e2e/message-marks.mjs`.
+- Not in it: a "Saved" view across rooms (the saves are listed per room),
+  forward, @-group mentions, catch-up, digest, translation (slice 5c).
+
+**Decisions pending owner, slice 5b:**
+
+1. Pinning is for who manages the channel (the room's owners and admins,
+   the channel's owner, its section's owners); the PRD names no one.
+2. At most 20 different reactions on one message (joining an existing one is
+   always allowed), a reaction at most 32 bytes; the picker offers six emoji
+   and the server takes any one.
+3. A visitor saves messages (their own, like stars) but neither reacts nor
+   pins.
+

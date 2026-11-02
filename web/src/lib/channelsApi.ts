@@ -13,6 +13,9 @@ import type {
   ChannelGroupCreateRequest,
   ChannelGroupPatchRequest,
   ChannelList,
+  MessageMark,
+  MessageMarkRequest,
+  MessageMarks,
   ChannelPatchRequest,
   RoomChannel,
   RoomDetail,
@@ -77,6 +80,12 @@ export const channelsApi = {
   saveDraft: (roomId: string, channelId: string, text: string) =>
     req<ChannelDraft>(roomPath(roomId, "channels", channelId, "draft"), json("PUT", { text })),
   clearDraft: (roomId: string, channelId: string) => req<void>(roomPath(roomId, "channels", channelId, "draft"), { method: "DELETE", as: "none" }),
+  /** Reactions, pins and the caller's saved messages (§2.3): the channels
+   *  the caller may read, newest message first. */
+  marks: (roomId: string) => req<MessageMarks>(roomPath(roomId, "marks")),
+  putMark: (roomId: string, seq: number, body: MessageMarkRequest) => req<MessageMark>(roomPath(roomId, "messages", seq, "marks"), json("PUT", body)),
+  removeMark: (roomId: string, seq: number, body: MessageMarkRequest) =>
+    req<void>(roomPath(roomId, "messages", seq, "marks"), { ...json("DELETE", body), as: "none" }),
   rules: (roomId: string) => req<RoomRulesState>(roomPath(roomId, "rules")),
   agree: (roomId: string, version: number) => req<RoomRulesState>(roomPath(roomId, "rules", "agree"), json("POST", { version })),
   /** The room's rules, agreement switch, recommended channels and creation

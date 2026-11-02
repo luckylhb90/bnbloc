@@ -4,7 +4,7 @@
 // shape) into feed-ready events. Pure (no browser APIs), so it is
 // unit-tested; sse.ts owns the live subscription.
 import { replyRefOf } from "./threads.ts";
-import type { ReplyRef, ThreadUpdatedPayload } from "./wire.gen.ts";
+import type { MessageMarkedPayload, ReplyRef, ThreadUpdatedPayload } from "./wire.gen.ts";
 import type { ChatAttachment, TurnMetrics } from "./api";
 import type { TaskUpdate } from "./teamModels";
 import { NoticeComponentCard, NoticePublishProposal, NoticeShareProposal, type FileRef, type RoomEventKind } from "./wire.gen.ts";
@@ -110,6 +110,8 @@ export interface RoomEvent {
   sourceSeq?: number;
   // For task_updated: a message task was marked, toggled or unmarked.
   taskUpdate?: TaskUpdate;
+  // For message_marked: a reaction or a pin put on or taken off.
+  markUpdate?: MessageMarkedPayload;
   // For chat_message: whether it was addressed to an agent (payload
   // recipient with a provider). False is a people-only message — agents
   // still read it as room context, they just do not reply.
@@ -287,6 +289,9 @@ export function normalizeRoomEvent(ev: RoomEvent, emit: (e: RoomEvent) => void):
     if (typeof p.userId === "string") ev.removedUser = p.userId;
   } else if (ev.kind === "task_updated") {
     if (typeof p.seq === "number") ev.taskUpdate = p as unknown as TaskUpdate;
+  } else if (ev.kind === "message_marked") {
+    const mark = p.mark as { seq?: unknown } | undefined;
+    if (mark && typeof mark.seq === "number") ev.markUpdate = p as unknown as MessageMarkedPayload;
   } else if (ev.kind === "thread_updated") {
     if (typeof p.threadId === "string" && p.thread && typeof p.thread === "object") ev.threadUpdate = p as unknown as ThreadUpdatedPayload;
   } else if (ev.kind === "message_deleted") {

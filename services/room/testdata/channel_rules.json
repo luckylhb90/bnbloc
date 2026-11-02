@@ -1,5 +1,5 @@
 {
-  "_": "The room service's channel rules (mayManageChannel, mayPlaceChannel, mayCreateSection, mayManageSection, may delete a channel), case by case. Read by services/room/channel_rules_test.go and web/src/lib/channelRules.test.ts: the web shows a control only where the server allows the act.",
+  "_": "The room service's channel rules (store.MayManageChannel, mayPlaceChannel, mayCreateSection, mayManageSection, may delete a channel), case by case. Read by services/room/channel_rules_test.go and web/src/lib/channelRules.test.ts: the web shows a control only where the server allows the act.",
   "manageChannel": [
     { "role": "owner", "user": "alice", "channelOwner": "bob", "sectionOwners": [], "want": true },
     { "role": "admin", "user": "erin", "channelOwner": "bob", "sectionOwners": [], "want": true },

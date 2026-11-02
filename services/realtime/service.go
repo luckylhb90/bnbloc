@@ -129,7 +129,10 @@ type Service struct {
 	// Team features (team.go): message tasks and global search. A nil
 	// store answers its routes 503 (search skips that kind); Rooms is the
 	// server-side membership listing search is scoped to.
-	Tasks     store.MessageTaskStore
+	Tasks store.MessageTaskStore
+	// Marks are reactions, pins and saved messages (marks.go); nil answers
+	// their routes 503.
+	Marks     store.MessageMarkStore
 	Artifacts ArtifactReader
 	Rooms     RoomDirectory
 	// Search is the message search backend (internal/search): the store's
@@ -339,6 +342,7 @@ func (s *Service) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/rooms/{roomId}/jobs/{jobId}/live/input", s.handleLiveInput)
 	mux.HandleFunc("GET /v1/rooms/{roomId}/live", s.handleLiveList)
 	s.registerTeamRoutes(mux)
+	s.registerMarkRoutes(mux)
 	s.registerScheduleRoutes(mux)
 	s.registerHookRoutes(mux)
 	s.registerMemberEventRoutes(mux)
@@ -1254,6 +1258,12 @@ func (s *Service) handleDeleteMessage(w http.ResponseWriter, r *http.Request) {
 		// Not the author, or no such message. Do not reveal which.
 		httpx.Error(w, "cannot delete this message", http.StatusForbidden)
 		return
+	}
+	if s.Marks != nil {
+		// A deleted message's reactions, pin and saves go with it.
+		if err := s.Marks.DeleteMessageMarks(r.Context(), roomID, seq); err != nil {
+			log.Printf("realtime: room=%s seq=%d drop marks of a deleted message: %v", roomID, seq, err)
+		}
 	}
 	s.SearchUpdates.Enqueue(store.MessageKey{TenantID: tenant.FromContext(r.Context()), RoomID: roomID, Seq: seq})
 	// Transient: tell live clients to drop the message. Not persisted (it is not

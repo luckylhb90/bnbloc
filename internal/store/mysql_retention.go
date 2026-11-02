@@ -232,6 +232,11 @@ WHERE tenant_id = ? AND room_id IN (`+inPlaceholders(len(roomList))+`) GROUP BY 
 		return 0, fmt.Errorf("purge message_tasks: %w", err)
 	}
 	out[PurgedMessageTasks] += n
+	n, err = execRoomSeqs(ctx, tx, `DELETE FROM message_marks WHERE tenant_id = ? AND (room_id, seq) IN (%s)`, req.TenantID, gone)
+	if err != nil {
+		return 0, fmt.Errorf("purge message_marks: %w", err)
+	}
+	out[PurgedMessageMarks] += n
 	// Artifact versions anchored to a gone message lose the anchor.
 	byRoom := map[string][]any{}
 	for _, g := range gone {

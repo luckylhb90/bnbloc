@@ -136,7 +136,7 @@ func TestPreviewEventKinds(t *testing.T) {
 	members := map[string]bool{
 		EventAgentJobCreated: true, EventAgentJobUpdated: true, EventAgentJobProgress: true, EventJobLiveFrame: true,
 		EventAgentSessionState: true, EventAgentRoster: true, EventPresenceDelta: true,
-		EventPresenceSnapshot: true, EventPresenceTyping: true, EventTaskUpdated: true, EventContentSaved: true,
+		EventPresenceSnapshot: true, EventPresenceTyping: true, EventTaskUpdated: true, EventMessageMarked: true, EventContentSaved: true,
 		EventContentUsesChanged: true, EventAppChanged: true, EventSectionMembership: true, EventRoomUpdated: true, EventChannelFollow: true,
 		EventRoomView: true, EventReadMarked: true,
 		// A member stream's own: the member's rooms, never a preview's.

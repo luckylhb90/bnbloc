@@ -258,6 +258,23 @@ type RoomSection struct {
 // compare exactly).
 func (s RoomSection) IsOwner(user string) bool { return user != "" && slices.Contains(s.Owners, user) }
 
+// MayManageChannel is the ONE rule of who changes a channel's setup
+// (rename, purpose, rules, section, position, owner, settings, archive,
+// restore, pinning its messages): the room's owner and admins, the
+// channel's owner, and the owners of its section. decision: channels PRD
+// C10 (and §2.1 "set by the room's owners and admins, and the channel's
+// creator", whose owner it is by default, §2.1b); pins: decision: pending
+// owner (the PRD names no one).
+func MayManageChannel(role Role, user string, ch RoomChannel, sec *RoomSection) bool {
+	if role.CanInvite() {
+		return true
+	}
+	if role == RoleVisitor {
+		return false
+	}
+	return (ch.OwnerID != "" && ch.OwnerID == user) || (sec != nil && sec.IsOwner(user))
+}
+
 func (s RoomSection) cloned() RoomSection {
 	s.Owners = slices.Clone(s.Owners)
 	if s.Owners == nil {

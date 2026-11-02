@@ -107,6 +107,7 @@ var RoomEventKinds = []EventKindSpec{
 	{Name: EventMessageDeleted, ChannelScoped: true, Preview: true, Lane: LaneActivity},
 	{Name: EventMessageEdited, ChannelScoped: true, Preview: true},
 	{Name: EventTaskUpdated, ChannelScoped: true, Lane: LaneRoom},
+	{Name: EventMessageMarked, ChannelScoped: true},
 	{Name: EventArtifactUpdated, CrossChannel: true, Preview: true},
 	{Name: EventArtifactState, CrossChannel: true, Preview: true},
 	{Name: EventMemberJoined, Preview: true},

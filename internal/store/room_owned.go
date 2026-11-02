@@ -58,6 +58,7 @@ var roomOwnedTables = []roomOwnedTable{
 	// A task's title is a snapshot of the message text: it must not outlive
 	// the message.
 	byTenantRoom("message_tasks"),
+	byTenantRoom("message_marks"),
 	byTenantRoom("agent_sessions"),
 	byTenantRoom("agent_messages"),
 	byTenantRoom("agent_jobs"),

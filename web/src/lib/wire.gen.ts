@@ -4312,7 +4312,7 @@ export interface EventKindSpec {
 // RoomEventKinds is the registry of room event kinds. The web's
 // RoomEventKind union (and RoomEventKindValues) is generated from the Name
 // of each row: a kind registered here is a kind the web listens for.
-export const RoomEventKinds: readonly EventKindSpec[] = [{ name: "chat_message", durable: true, replay: true, channelScoped: true, lane: "activity", preview: true }, { name: "agent_messages", durable: true, replay: true, channelScoped: true, lane: "activity", preview: true }, { name: "agent_job_created", channelScoped: true, lane: "room" }, { name: "agent_job_updated", channelScoped: true, lane: "room" }, { name: "agent_job_progress", channelScoped: true }, { name: "job_live_frame", channelScoped: true }, { name: "agent_session_state" }, { name: "agent_roster" }, { name: "presence_delta" }, { name: "presence_snapshot" }, { name: "presence_typing", channelScoped: true }, { name: "message_deleted", channelScoped: true, lane: "activity", preview: true }, { name: "message_edited", channelScoped: true, preview: true }, { name: "task_updated", channelScoped: true, lane: "room" }, { name: "artifact_updated", crossChannel: true, preview: true }, { name: "artifact_state", crossChannel: true, preview: true }, { name: "member_joined", preview: true }, { name: "member_removed", revocation: true, sequenced: true, preview: true }, { name: "room_deleted", revocation: true, sequenced: true, preview: true }, { name: "content_saved" }, { name: "content_uses_changed" }, { name: "app_changed" }, { name: "channel_updated", preview: true }, { name: "section_membership", sequenced: true }, { name: "room_updated" }, { name: "channel_follow", channelScoped: true, internal: true }, { name: "room_view", internal: true }, { name: "read_marked", internal: true }, { name: "member_rooms" }, { name: "thread_updated", channelScoped: true, lane: "room", preview: true }, { name: "channel_activity", channelScoped: true, preview: true }, { name: "stream_opened", preview: true }, { name: "stream_gap", preview: true }];
+export const RoomEventKinds: readonly EventKindSpec[] = [{ name: "chat_message", durable: true, replay: true, channelScoped: true, lane: "activity", preview: true }, { name: "agent_messages", durable: true, replay: true, channelScoped: true, lane: "activity", preview: true }, { name: "agent_job_created", channelScoped: true, lane: "room" }, { name: "agent_job_updated", channelScoped: true, lane: "room" }, { name: "agent_job_progress", channelScoped: true }, { name: "job_live_frame", channelScoped: true }, { name: "agent_session_state" }, { name: "agent_roster" }, { name: "presence_delta" }, { name: "presence_snapshot" }, { name: "presence_typing", channelScoped: true }, { name: "message_deleted", channelScoped: true, lane: "activity", preview: true }, { name: "message_edited", channelScoped: true, preview: true }, { name: "task_updated", channelScoped: true, lane: "room" }, { name: "message_marked", channelScoped: true }, { name: "artifact_updated", crossChannel: true, preview: true }, { name: "artifact_state", crossChannel: true, preview: true }, { name: "member_joined", preview: true }, { name: "member_removed", revocation: true, sequenced: true, preview: true }, { name: "room_deleted", revocation: true, sequenced: true, preview: true }, { name: "content_saved" }, { name: "content_uses_changed" }, { name: "app_changed" }, { name: "channel_updated", preview: true }, { name: "section_membership", sequenced: true }, { name: "room_updated" }, { name: "channel_follow", channelScoped: true, internal: true }, { name: "room_view", internal: true }, { name: "read_marked", internal: true }, { name: "member_rooms" }, { name: "thread_updated", channelScoped: true, lane: "room", preview: true }, { name: "channel_activity", channelScoped: true, preview: true }, { name: "stream_opened", preview: true }, { name: "stream_gap", preview: true }];
 
 // The lanes of a lanes stream (EventKindSpec.Lane, StreamLane).
 export const LaneFull = "full";
@@ -5088,6 +5088,13 @@ export const MaxRoomRules = 8000;
 // decision: pending owner, the PRD gives no bound).
 export const MaxChannelGroupName = 64;
 export const MaxChannelGroups = 50;
+// Message marks (§2.3): at most MaxMessageReactions distinct reactions
+// on one message, each at most MaxReactionBytes (one emoji with its
+// modifiers); a room's marks listing answers at most MaxRoomMarks
+// (decision: pending owner, the PRD gives no bounds).
+export const MaxMessageReactions = 20;
+export const MaxReactionBytes = 32;
+export const MaxRoomMarks = 2000;
 // A forum's vocabulary (C20): at most MaxChannelTags tags and
 // MaxChannelStatuses statuses, each name at most MaxChannelTagName
 // characters, a thread at most MaxThreadTags tags; a post template at
@@ -5466,6 +5473,56 @@ export interface MediaVideoReply {
   artifactId?: string;
   fileName?: string;
   bytes?: number;
+}
+
+// ---- wire/message_marks.go ----
+
+// Mark kinds.
+// MarkReaction is a member's emoji on a message, seen by the channel's
+// readers.
+export const MarkReaction = "reaction";
+// MarkPin is a message pinned in its channel (one pin per message), seen
+// by the channel's readers.
+export const MarkPin = "pin";
+// MarkSaved is a message a member saved for themselves: theirs only.
+export const MarkSaved = "saved";
+
+// EventMessageMarked is the transient room event published when a reaction
+// or a pin is put on or taken off a message (never a save: it is the
+// member's own). It carries MessageMarkedPayload and is never persisted.
+export const EventMessageMarked = "message_marked";
+
+// MessageMark is one mark on a message. UserID is the member a reaction or a
+// save belongs to ("" for a pin); Value a reaction's emoji; By who made it.
+export interface MessageMark {
+  channelId?: string;
+  seq: number;
+  kind: MessageMarkKind;
+  userId?: string;
+  value?: string;
+  by: string;
+  createdAtMs: number;
+}
+
+// MessageMarks is GET /v1/rooms/{id}/marks: the reactions and pins of the
+// channels the caller may read and the caller's own saves, newest message
+// first.
+export interface MessageMarks {
+  marks: MessageMark[];
+}
+
+// MessageMarkRequest is PUT and DELETE /v1/rooms/{id}/messages/{seq}/marks:
+// the kind, and a reaction's emoji.
+export interface MessageMarkRequest {
+  kind: MessageMarkKind;
+  value?: string;
+}
+
+// MessageMarkedPayload is the payload of an EventMessageMarked event: the
+// mark that was put on (Removed false) or taken off.
+export interface MessageMarkedPayload {
+  mark: MessageMark;
+  removed?: boolean;
 }
 
 // ---- wire/my_agents.go ----
@@ -8360,8 +8417,8 @@ export type ContentSavedAction = "saved" | "submitted" | "published";
 export const ContentSavedActionValues: readonly ContentSavedAction[] = ["saved", "submitted", "published"];
 export type DecisionQuestionType = "predicate" | "choice" | "score";
 export const DecisionQuestionTypeValues: readonly DecisionQuestionType[] = ["predicate", "choice", "score"];
-export type RoomEventKind = "chat_message" | "agent_messages" | "agent_job_created" | "agent_job_updated" | "agent_job_progress" | "job_live_frame" | "agent_session_state" | "agent_roster" | "presence_delta" | "presence_snapshot" | "presence_typing" | "message_deleted" | "message_edited" | "task_updated" | "artifact_updated" | "artifact_state" | "member_joined" | "member_removed" | "room_deleted" | "content_saved" | "content_uses_changed" | "app_changed" | "channel_updated" | "section_membership" | "room_updated" | "channel_follow" | "room_view" | "read_marked" | "member_rooms" | "thread_updated" | "channel_activity" | "stream_opened" | "stream_gap";
-export const RoomEventKindValues: readonly RoomEventKind[] = ["chat_message", "agent_messages", "agent_job_created", "agent_job_updated", "agent_job_progress", "job_live_frame", "agent_session_state", "agent_roster", "presence_delta", "presence_snapshot", "presence_typing", "message_deleted", "message_edited", "task_updated", "artifact_updated", "artifact_state", "member_joined", "member_removed", "room_deleted", "content_saved", "content_uses_changed", "app_changed", "channel_updated", "section_membership", "room_updated", "channel_follow", "room_view", "read_marked", "member_rooms", "thread_updated", "channel_activity", "stream_opened", "stream_gap"];
+export type RoomEventKind = "chat_message" | "agent_messages" | "agent_job_created" | "agent_job_updated" | "agent_job_progress" | "job_live_frame" | "agent_session_state" | "agent_roster" | "presence_delta" | "presence_snapshot" | "presence_typing" | "message_deleted" | "message_edited" | "task_updated" | "message_marked" | "artifact_updated" | "artifact_state" | "member_joined" | "member_removed" | "room_deleted" | "content_saved" | "content_uses_changed" | "app_changed" | "channel_updated" | "section_membership" | "room_updated" | "channel_follow" | "room_view" | "read_marked" | "member_rooms" | "thread_updated" | "channel_activity" | "stream_opened" | "stream_gap";
+export const RoomEventKindValues: readonly RoomEventKind[] = ["chat_message", "agent_messages", "agent_job_created", "agent_job_updated", "agent_job_progress", "job_live_frame", "agent_session_state", "agent_roster", "presence_delta", "presence_snapshot", "presence_typing", "message_deleted", "message_edited", "task_updated", "message_marked", "artifact_updated", "artifact_state", "member_joined", "member_removed", "room_deleted", "content_saved", "content_uses_changed", "app_changed", "channel_updated", "section_membership", "room_updated", "channel_follow", "room_view", "read_marked", "member_rooms", "thread_updated", "channel_activity", "stream_opened", "stream_gap"];
 export type EventSubscriptionSource = "bnbloc/platform" | "bnbloc/room" | "bnbloc/member" | "webhook";
 export const EventSubscriptionSourceValues: readonly EventSubscriptionSource[] = ["bnbloc/platform", "bnbloc/room", "bnbloc/member", "webhook"];
 export type PlatformEventType = "platform.deployed" | "component.published" | "desktop.published";
@@ -8376,6 +8433,8 @@ export type MediaVideoAspect = "16:9" | "9:16";
 export const MediaVideoAspectValues: readonly MediaVideoAspect[] = ["16:9", "9:16"];
 export type MediaVideoStatus = "rendering" | "done" | "failed";
 export const MediaVideoStatusValues: readonly MediaVideoStatus[] = ["rendering", "done", "failed"];
+export type MessageMarkKind = "reaction" | "pin" | "saved";
+export const MessageMarkKindValues: readonly MessageMarkKind[] = ["reaction", "pin", "saved"];
 export type NotifyLevel = "" | "all" | "mentions" | "muted";
 export const NotifyLevelValues: readonly NotifyLevel[] = ["", "all", "mentions", "muted"];
 export type FeedLayout = "time" | "request";

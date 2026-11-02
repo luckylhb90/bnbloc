@@ -35,22 +35,6 @@ import (
 // Every change publishes channel_updated (room-wide): clients reload the
 // listing, and realtime's agent stream filters forget their verdicts.
 
-// mayManageChannel is the ONE rule of who changes a channel's setup
-// (rename, purpose, rules, section, position, owner, settings, archive,
-// restore): the room's owner and admins, the channel's owner, and the owners
-// of its section. decision: channels PRD C10 (and §2.1 "set by the room's
-// owners and admins, and the channel's creator", whose owner it is by
-// default, §2.1b).
-func mayManageChannel(role store.Role, user string, ch store.RoomChannel, sec *store.RoomSection) bool {
-	if role.CanInvite() {
-		return true
-	}
-	if role == store.RoleVisitor {
-		return false
-	}
-	return (ch.OwnerID != "" && ch.OwnerID == user) || (sec != nil && sec.IsOwner(user))
-}
-
 // mayPlaceChannel is the ONE rule of where a member may put a channel
 // (creating it, or moving it): sec nil is the room's top level. The room's
 // owner and admins place anywhere; visitors nowhere; anyone else by the
@@ -620,7 +604,7 @@ func (s *Service) createChannel(ctx context.Context, roomID, creator string, req
 	return ch, nil
 }
 
-// handlePatchChannel changes a channel's setup (mayManageChannel). The
+// handlePatchChannel changes a channel's setup (store.MayManageChannel). The
 // people chat is not configurable; the default channel keeps its name (it
 // is renamed by no one) and never bars agents.
 func (s *Service) handlePatchChannel(w http.ResponseWriter, r *http.Request) {
@@ -641,7 +625,7 @@ func (s *Service) handlePatchChannel(w http.ResponseWriter, r *http.Request) {
 		s.patchThread(w, r, roomID, who, ch)
 		return
 	}
-	if !mayManageChannel(who.role, who.user, ch, sec) {
+	if !store.MayManageChannel(who.role, who.user, ch, sec) {
 		httpx.Error(w, "only the room's owner, an admin, the channel's owner or its section's owners change this channel", http.StatusForbidden)
 		return
 	}
@@ -764,7 +748,7 @@ func (s *Service) channelPatch(r *http.Request, roomID string, who channelCaller
 }
 
 // handleArchiveChannel archives (archive true) or restores a channel
-// (mayManageChannel). The default channel and the people chat are never
+// (store.MayManageChannel). The default channel and the people chat are never
 // archived. decision: channels PRD C10.
 func (s *Service) handleArchiveChannel(archive bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -789,7 +773,7 @@ func (s *Service) handleArchiveChannel(archive bool) http.HandlerFunc {
 				httpx.Error(w, "visitors do not archive threads", http.StatusForbidden)
 				return
 			}
-		} else if !mayManageChannel(who.role, who.user, ch, sec) {
+		} else if !store.MayManageChannel(who.role, who.user, ch, sec) {
 			httpx.Error(w, "only the room's owner, an admin, the channel's owner or its section's owners archive or restore this channel", http.StatusForbidden)
 			return
 		}

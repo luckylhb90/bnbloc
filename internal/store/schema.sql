@@ -503,6 +503,22 @@ CREATE TABLE IF NOT EXISTS room_counters (
   PRIMARY KEY (room_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- What people put on a stored room message (channels PRD §2.3): a member's
+-- reaction (value: the emoji), the channel's pin (user_id ''), a member's
+-- own save. One row per (message, kind, member, value).
+CREATE TABLE IF NOT EXISTS message_marks (
+  tenant_id     VARCHAR(64) NOT NULL,
+  room_id       VARCHAR(64) NOT NULL,
+  channel_id    VARCHAR(64) NOT NULL DEFAULT '',
+  seq           BIGINT NOT NULL,
+  kind          VARCHAR(16) NOT NULL,
+  user_id       VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '',
+  value         VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '',
+  created_by    VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
+  created_at_ms BIGINT NOT NULL,
+  PRIMARY KEY (tenant_id, room_id, seq, kind, user_id, value)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- Message tasks (F6): a persisted room message (by room sequence) marked as a
 -- task. title/message_author are snapshots taken when the task was marked.
 CREATE TABLE IF NOT EXISTS message_tasks (

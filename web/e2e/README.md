@@ -130,3 +130,14 @@ sending it.
 ```sh
 BNBLOC_E2E_URL=http://localhost:5173 node web/e2e/channel-drafts.mjs
 ```
+
+## Reactions, pins and saved messages (`message-marks.mjs`)
+
+A reaction shows under its message with a count and is taken off by a second
+click; a member who does not manage the channel is offered no pin; the pinned
+strip lists the channel's pins; a save fills the bookmark and is back after a
+reload.
+
+```sh
+BNBLOC_E2E_URL=http://localhost:5173 node web/e2e/message-marks.mjs
+```

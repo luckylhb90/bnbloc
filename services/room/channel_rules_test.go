@@ -58,8 +58,8 @@ func TestChannelRulesFixture(t *testing.T) {
 		if len(k.SectionOwners) > 0 {
 			sec = &store.RoomSection{Owners: k.SectionOwners}
 		}
-		if got := mayManageChannel(k.Role, k.User, store.RoomChannel{OwnerID: k.ChannelOwner}, sec); got != k.Want {
-			t.Errorf("mayManageChannel(%+v) = %v", k, got)
+		if got := store.MayManageChannel(k.Role, k.User, store.RoomChannel{OwnerID: k.ChannelOwner}, sec); got != k.Want {
+			t.Errorf("MayManageChannel(%+v) = %v", k, got)
 		}
 	}
 	for _, k := range c.PlaceChannel {

@@ -47,6 +47,13 @@ const (
 	// decision: pending owner, the PRD gives no bound).
 	MaxChannelGroupName = 64
 	MaxChannelGroups    = 50
+	// Message marks (§2.3): at most MaxMessageReactions distinct reactions
+	// on one message, each at most MaxReactionBytes (one emoji with its
+	// modifiers); a room's marks listing answers at most MaxRoomMarks
+	// (decision: pending owner, the PRD gives no bounds).
+	MaxMessageReactions = 20
+	MaxReactionBytes    = 32
+	MaxRoomMarks        = 2000
 	// A forum's vocabulary (C20): at most MaxChannelTags tags and
 	// MaxChannelStatuses statuses, each name at most MaxChannelTagName
 	// characters, a thread at most MaxThreadTags tags; a post template at

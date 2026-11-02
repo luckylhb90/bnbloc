@@ -101,6 +101,7 @@ func main() {
 	// Team features: message tasks and global search over the room feed
 	// this service persists.
 	svc.Tasks = backends.MessageTasks
+	svc.Marks = backends.MessageMarks
 	svc.Artifacts = backends.Artifacts
 	// Message search backend (docs/prd/2026-10-10-enterprise-scale.md §4):
 	// the store's FULLTEXT index, or OpenSearch when

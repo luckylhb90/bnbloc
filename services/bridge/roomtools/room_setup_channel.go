@@ -16,7 +16,7 @@ import (
 // §2.6): a channel made or set up as the person who asked, on the routes the
 // room's channel menu uses (POST .../channels, PATCH .../channels/{id},
 // POST .../archive and .../restore), through the agent door. The room
-// service decides who may (mayManageChannel, mayPlaceChannel); a refusal
+// service decides who may (store.MayManageChannel, mayPlaceChannel); a refusal
 // comes back as its own words. Deleting a channel, its owner and who is in a
 // section are never an agent's act (the door refuses them).
 
