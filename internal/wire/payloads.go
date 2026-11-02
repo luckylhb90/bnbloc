@@ -28,6 +28,18 @@ type ChatMessagePayload struct {
 	// ReplyTo is the message this one answers (§2.3), as its sender quoted
 	// it: its sequence, author and the start of its text, fixed at send.
 	ReplyTo *ReplyRef `json:"replyTo,omitempty"`
+	// ForwardOf is the message this one forwards (§2.3): only where it is,
+	// never its text, so forwarding widens nobody's access. A reader opens
+	// it through the source room's own read (GET .../messages/{seq}).
+	ForwardOf *ForwardRef `json:"forwardOf,omitempty"`
+}
+
+// ForwardRef names a forwarded message by its room and sequence; ChannelID
+// is the source's channel, filled by the server.
+type ForwardRef struct {
+	RoomID    string `json:"roomId"`
+	ChannelID string `json:"channelId,omitempty"`
+	Seq       int64  `json:"seq"`
 }
 
 // ReplyRef is the message a chat message answers (ChatMessagePayload.ReplyTo):

@@ -328,6 +328,7 @@ func (s *Service) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/rooms/{roomId}/history/revisions", s.handleRevisions)
 	mux.HandleFunc("POST /v1/rooms/{roomId}/typing", s.handleTyping)
 	mux.HandleFunc("POST /v1/rooms/{roomId}/read", s.handleMarkRead)
+	mux.HandleFunc("GET /v1/rooms/{roomId}/messages/{seq}", s.handleGetMessage)
 	mux.HandleFunc("DELETE /v1/rooms/{roomId}/messages/{seq}", s.handleDeleteMessage)
 	mux.HandleFunc("PATCH /v1/rooms/{roomId}/messages/{seq}", s.handleEditMessage)
 	mux.HandleFunc("GET /v1/rooms-unread", s.handleUnread)
@@ -812,6 +813,8 @@ func (s *Service) handleChat(w http.ResponseWriter, r *http.Request) {
 		FileRef *wire.FileRef `json:"fileRef,omitempty"`
 		// ReplyTo is the sequence of the message this one answers (§2.3).
 		ReplyTo int64 `json:"replyTo,omitempty"`
+		// ForwardOf is the message this one forwards (§2.3).
+		ForwardOf *wire.ForwardRef `json:"forwardOf,omitempty"`
 		// A forum post's thread title and tags (§2.1c).
 		wire.ChatThreadFields
 	}
@@ -832,6 +835,7 @@ func (s *Service) handleChat(w http.ResponseWriter, r *http.Request) {
 		Expert:        body.Expert,
 		FileRef:       body.FileRef,
 		ReplyTo:       body.ReplyTo,
+		ForwardOf:     body.ForwardOf,
 		Thread:        &body.ChatThreadFields,
 	})
 	if err != nil {
@@ -867,7 +871,7 @@ func writeChatPostErr(w http.ResponseWriter, err error) {
 		httpx.Error(w, err.Error(), http.StatusBadRequest)
 	case errors.Is(err, errUnknownChannel):
 		httpx.Error(w, err.Error(), http.StatusNotFound)
-	case errors.Is(err, errBadReply):
+	case errors.Is(err, errBadReply), errors.Is(err, errBadForward):
 		httpx.Error(w, err.Error(), http.StatusBadRequest)
 	case store.Unavailable(err):
 		// The database is failing over: nothing was stored, and the client

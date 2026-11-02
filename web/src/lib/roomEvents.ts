@@ -4,7 +4,7 @@
 // shape) into feed-ready events. Pure (no browser APIs), so it is
 // unit-tested; sse.ts owns the live subscription.
 import { replyRefOf } from "./threads.ts";
-import type { MessageMarkedPayload, ReplyRef, ThreadUpdatedPayload } from "./wire.gen.ts";
+import type { ForwardRef, MessageMarkedPayload, ReplyRef, ThreadUpdatedPayload } from "./wire.gen.ts";
 import type { ChatAttachment, TurnMetrics } from "./api";
 import type { TaskUpdate } from "./teamModels";
 import { NoticeComponentCard, NoticePublishProposal, NoticeShareProposal, type FileRef, type RoomEventKind } from "./wire.gen.ts";
@@ -118,6 +118,9 @@ export interface RoomEvent {
   toAgent?: boolean;
   // For chat_message answering another message (payload.replyTo).
   replyTo?: ReplyRef;
+  // For chat_message forwarding another message (payload.forwardOf): where
+  // it is, never its text.
+  forwardOf?: ForwardRef;
   // For chat_message: asked of the channel's agent by its participation
   // (payload.agentAuto, C19), not by its author's choice.
   agentAuto?: boolean;
@@ -259,6 +262,7 @@ export function normalizeRoomEvent(ev: RoomEvent, emit: (e: RoomEvent) => void):
     ev.expert = expertMarker(p);
     ev.fileRef = fileRefOf(p.fileRef);
     ev.replyTo = replyRefOf(p.replyTo);
+    ev.forwardOf = forwardRefOf(p.forwardOf);
     if (p.agentAuto === true) ev.agentAuto = true;
     const recipient = p.recipient as { provider?: unknown } | undefined;
     ev.toAgent = typeof recipient?.provider === "string" && recipient.provider !== "";
@@ -306,6 +310,14 @@ export function normalizeRoomEvent(ev: RoomEvent, emit: (e: RoomEvent) => void):
 
 // fileRefOf reads a chat message's payload.fileRef (undefined when absent
 // or malformed).
+/** forwardRefOf reads payload.forwardOf (undefined when absent or malformed). */
+export function forwardRefOf(v: unknown): ForwardRef | undefined {
+  if (!v || typeof v !== "object") return undefined;
+  const r = v as Record<string, unknown>;
+  if (typeof r.roomId !== "string" || !r.roomId || typeof r.seq !== "number" || r.seq < 1) return undefined;
+  return { roomId: r.roomId, seq: r.seq, ...(typeof r.channelId === "string" && r.channelId ? { channelId: r.channelId } : {}) };
+}
+
 export function fileRefOf(v: unknown): FileRef | undefined {
   if (!v || typeof v !== "object") return undefined;
   const r = v as Record<string, unknown>;

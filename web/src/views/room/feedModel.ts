@@ -16,7 +16,7 @@ import { cardShownTo } from "../../lib/componentCard.ts";
 // that arrived on the stream: agent replies among them animate in.
 export function feedItemFromEvent(e: RoomEvent, subject: string | null, live: boolean): FeedItem | null {
   const text = e.text ?? "";
-  if (!text && (!e.attachments || e.attachments.length === 0)) return null;
+  if (!text && (!e.attachments || e.attachments.length === 0) && !e.forwardOf) return null;
   // A publish card is only for the person the agent asked for.
   if (e.proposal && !proposalShownTo(e.proposal, subject)) return null;
   // A link the agent offers, too: only for the person it asked for.
@@ -55,6 +55,7 @@ export function feedItemFromEvent(e: RoomEvent, subject: string | null, live: bo
     sourceSeq: e.sourceSeq,
     peopleOnly: e.kind === "chat_message" && e.toAgent === false ? true : undefined,
     ...(e.replyTo ? { replyTo: e.replyTo } : {}),
+    ...(e.forwardOf ? { forwardOf: e.forwardOf } : {}),
     ...(e.agentAuto ? { agentAuto: true } : {}),
     status: self ? "sent" : undefined,
     animate: live && author === "agent" ? true : undefined,

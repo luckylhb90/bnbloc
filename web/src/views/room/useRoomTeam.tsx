@@ -7,6 +7,8 @@ import { PromptPackEditorDialog, type PromptPackTarget } from "@/views/library/P
 import type { MessageExtras } from "@/views/room/messageExtras";
 import { RoomTasksStrip } from "@/views/room/RoomTasksStrip";
 import { PinnedStrip } from "@/views/room/MessageMarks";
+import { ForwardDialog } from "@/views/room/Forward";
+import type { ForwardRef } from "@/lib/wire.gen";
 import { SavePromptDialog, type PromptSource } from "@/views/room/SavePromptDialog";
 import type { FeedItem } from "@/views/room/types";
 import { useMessageJump } from "@/views/room/useMessageJump";
@@ -47,6 +49,8 @@ export function useRoomTeam({
   const [saving, setSaving] = useState<PromptSource | null>(null);
   // Several messages saved as prompts continue in the prompt pack form.
   const [packing, setPacking] = useState<PromptPackTarget | null>(null);
+  // The message being forwarded (§2.3), from this feed's channel.
+  const [forwarding, setForwarding] = useState<ForwardRef | null>(null);
 
   const { subject } = useAuth();
   const marks = useRoomMarks(roomId, joinedGen, subject ?? null);
@@ -65,8 +69,9 @@ export function useRoomTeam({
       marks: marks.marks,
       me: subject ?? null,
       onSetMark: marks.setMark,
+      onForward: (seq: number) => setForwarding({ roomId, seq, ...(channelId ? { channelId } : {}) }),
     }),
-    [bySeq, mark, unmark, setStatus, marks.marks, marks.setMark, subject],
+    [bySeq, mark, unmark, setStatus, marks.marks, marks.setMark, subject, roomId, channelId],
   );
 
   const strip = (
@@ -88,6 +93,7 @@ export function useRoomTeam({
         onContinue={(drafts: PromptDraft[]) => setPacking({ drafts })}
       />
       <PromptPackEditorDialog target={packing} onClose={() => setPacking(null)} />
+      <ForwardDialog source={forwarding} onClose={() => setForwarding(null)} />
     </>
   );
   const applyEvent = (e: RoomEvent) => tasks.applyEvent(e) || marks.applyEvent(e);

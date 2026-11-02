@@ -30,6 +30,7 @@ func TestRoomPreambleOwned(t *testing.T) {
 		"member_stream.go:handleMyEvents":       "the member stream's re-check of its open room at every heartbeat",
 		"service.go:handleEvents":               "the open stream's re-check at every heartbeat",
 		"chat_send.go:PostChat":                 "the operation's own Chat check of the author, so no post path skips it",
+		"forward.go:forwardSource":              "a forward's source room, named in the body (may be another room): the author must read the source there",
 		"dispatch.go:checkDispatchAuthority":    "the dispatch guards: the bridge owner and the parent job's requester",
 	}
 	files, err := filepath.Glob("*.go")

@@ -13,6 +13,8 @@ import type {
   ChannelGroupCreateRequest,
   ChannelGroupPatchRequest,
   ChannelList,
+  FeedMessage,
+  ForwardRef,
   MessageMark,
   MessageMarkRequest,
   MessageMarks,
@@ -86,6 +88,13 @@ export const channelsApi = {
   putMark: (roomId: string, seq: number, body: MessageMarkRequest) => req<MessageMark>(roomPath(roomId, "messages", seq, "marks"), json("PUT", body)),
   removeMark: (roomId: string, seq: number, body: MessageMarkRequest) =>
     req<void>(roomPath(roomId, "messages", seq, "marks"), { ...json("DELETE", body), as: "none" }),
+  /** One message of a room, for a reader of its channel (a forward's
+   *  source); 404 for anyone else. */
+  message: (roomId: string, seq: number) => req<FeedMessage>(roomPath(roomId, "messages", seq)),
+  /** Forwards a message into a channel of a room (§2.3): the new message
+   *  names the source and carries only the forwarder's own words. */
+  forward: (roomId: string, channelId: string, source: ForwardRef, text: string) =>
+    req<ChatPostReply>(roomPath(roomId, "chat"), json("POST", { text, channelId, forwardOf: source, clientMsgId: crypto.randomUUID(), atUnixMs: Date.now() })),
   rules: (roomId: string) => req<RoomRulesState>(roomPath(roomId, "rules")),
   agree: (roomId: string, version: number) => req<RoomRulesState>(roomPath(roomId, "rules", "agree"), json("POST", { version })),
   /** The room's rules, agreement switch, recommended channels and creation

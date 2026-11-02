@@ -5891,6 +5891,18 @@ export interface ChatMessagePayload {
   // ReplyTo is the message this one answers (§2.3), as its sender quoted
   // it: its sequence, author and the start of its text, fixed at send.
   replyTo?: ReplyRef;
+  // ForwardOf is the message this one forwards (§2.3): only where it is,
+  // never its text, so forwarding widens nobody's access. A reader opens
+  // it through the source room's own read (GET .../messages/{seq}).
+  forwardOf?: ForwardRef;
+}
+
+// ForwardRef names a forwarded message by its room and sequence; ChannelID
+// is the source's channel, filled by the server.
+export interface ForwardRef {
+  roomId: string;
+  channelId?: string;
+  seq: number;
 }
 
 // ReplyRef is the message a chat message answers (ChatMessagePayload.ReplyTo):

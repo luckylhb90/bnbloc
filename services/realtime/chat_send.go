@@ -107,6 +107,10 @@ type ChatPost struct {
 	// the thread's root. Completed (author, excerpt) on post. In a thread it
 	// is the root when the post names none (§2.2: a thread answers its root).
 	ReplyTo int64
+	// ForwardOf is the message this one forwards (§2.3): a live message the
+	// author may read now, in this room or another of theirs; the text may
+	// then be empty (the forward is the message).
+	ForwardOf *wire.ForwardRef
 	// Thread is a forum post's thread (ChannelSettings.Forum): the post in
 	// such a channel is the root of a new thread, titled and tagged so. A
 	// post in a forum without it opens one too, titled from its words.
@@ -154,7 +158,15 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) 
 	if err != nil {
 		return ChatPosted{}, errBadAttachment{err}
 	}
-	if text == "" && len(attachments) == 0 {
+	var forward *wire.ForwardRef
+	if p.ForwardOf != nil {
+		ref, err := s.forwardSource(ctx, p.Author, *p.ForwardOf)
+		if err != nil {
+			return ChatPosted{}, err
+		}
+		forward = &ref
+	}
+	if text == "" && len(attachments) == 0 && forward == nil {
 		return ChatPosted{}, errEmptyMessage
 	}
 	fileRef, err := s.resolveFileRef(ctx, p.RoomID, p.FileRef, func(channelID string) bool {
@@ -246,6 +258,9 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) 
 			return ChatPosted{}, err
 		}
 		payload["replyTo"] = ref
+	}
+	if forward != nil {
+		payload["forwardOf"] = *forward
 	}
 	if p.Scheduled != nil {
 		payload["scheduled"] = map[string]any{"scheduleId": p.Scheduled.ScheduleID}

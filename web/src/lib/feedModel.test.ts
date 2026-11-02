@@ -162,3 +162,11 @@ function testExpertMarkerReachesTheRowAndTheSend(): void {
   assert(outgoingMessage("x", null, null, [], { id: "cc_rev" }).expert === undefined, "a people-only send carries no expert");
 }
 testExpertMarkerReachesTheRowAndTheSend();
+
+// A forward with no note of its own is still a row (the forward is its
+// content); an empty message with nothing at all is not.
+{
+  const fwd = feedItemFromEvent({ kind: "chat_message", sequence: 9, author: "bob", text: "", forwardOf: { roomId: "r1", seq: 1 } }, me, false);
+  assert(fwd !== null && fwd.forwardOf?.seq === 1, "a text-less forward keeps its row");
+  assert(feedItemFromEvent({ kind: "chat_message", sequence: 10, author: "bob", text: "" }, me, false) === null, "an empty message has no row");
+}

@@ -141,3 +141,13 @@ reload.
 ```sh
 BNBLOC_E2E_URL=http://localhost:5173 node web/e2e/message-marks.mjs
 ```
+
+## Forwarding (`forward.mjs`)
+
+A message's Forward sends its source by reference with the member's note to
+a channel they pick; a forward shows its source as the source room answers
+it, and a source the reader may not open is said so, never shown.
+
+```sh
+BNBLOC_E2E_URL=http://localhost:5173 node web/e2e/forward.mjs
+```

@@ -1055,3 +1055,33 @@ hour; `@channel` is open to every member who may post (C5's proposal).
 3. A visitor saves messages (their own, like stars) but neither reacts nor
    pins.
 
+**Slice 5c, forward** (§2.3):
+
+- A forward is a new chat message whose `payload.forwardOf` names its
+  source (room, sequence, the source's channel filled by the server) and
+  carries none of its text: the forwarder's own words are the message's text,
+  which may be empty. realtime's `PostChat` admits it only when the author
+  may read the source now (a person in its room, a reader of its channel:
+  `forwardSource`, 400 otherwise), and posts it like any message (the target
+  channel's gate and the author's Chat check unchanged).
+- A reader opens the source through `GET /v1/rooms/{id}/messages/{seq}`
+  (realtime, `handleGetMessage`): a member who may read the message's channel
+  only, 404 for anyone else. So a forward into an open channel of a
+  members-only message shows its readers "a message you cannot open here",
+  never its words: forwarding widens nobody's access.
+- Web: `lib/forward.ts` (the source's words and author as its room answers
+  them), `views/room/Forward.tsx` (the card under a forward, read as the
+  reader, linking to the source; a stored message's Forward; the dialog: a
+  room the member may post in, one of its channels, an optional note). The
+  feed keeps a forward that has no note of its own (`feedItemFromEvent`).
+- Tests: `TestForwardKeepsTheSourcesAccess`, `lib/forward.test.ts`,
+  `lib/feedModel.test.ts` (a text-less forward keeps its row),
+  `web/e2e/forward.mjs`.
+- Not in it: the catch-up, digest, routing and thread-suggestion assists and
+  translation (each an assist task with its contract and its prompt in the
+  default content repository: a slice of their own).
+
+**Decision pending owner, slice 5c:** a forward carries a reference only
+(PRD: "a new message that links its source"); a member who wants the words
+copied into the new room pastes them as their note, as their own act.
+

@@ -1,5 +1,5 @@
 import type { ChatAttachment, TurnMetrics } from "@/lib/api";
-import type { ReplyRef } from "../../lib/wire.gen.ts";
+import type { ForwardRef, ReplyRef } from "../../lib/wire.gen.ts";
 import type { AgentOptions } from "@/views/composer/types";
 import type { DispatchAttribution } from "@/lib/dispatch";
 import type { ChatExpert, ExpertMarker } from "@/lib/contentComponents";
@@ -113,6 +113,8 @@ export interface FeedItem {
   peopleOnly?: boolean;
   // The message this one answers (payload.replyTo): shown as a quote.
   replyTo?: ReplyRef;
+  // The message this one forwards (payload.forwardOf): opened where it is.
+  forwardOf?: ForwardRef;
   // Sent to the channel's agent by its participation (C19), not chosen.
   agentAuto?: boolean;
 }
