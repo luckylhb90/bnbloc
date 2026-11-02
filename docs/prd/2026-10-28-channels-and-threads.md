@@ -1085,3 +1085,33 @@ hour; `@channel` is open to every member who may post (C5's proposal).
 (PRD: "a new message that links its source"); a member who wants the words
 copied into the new room pastes them as their note, as their own act.
 
+**Slice 5d, catch me up and translate** (§4):
+
+- Two assist tasks with their output contracts (`wire.AssistContracts`):
+  `catch-up` (JSON: `summary`, `decided`, `open`, `forYou`) and `translate`
+  (text). The prompts are content (`bnbloc-default-content`); the platform
+  names only the tasks and what each answers.
+- Catch me up: while the open channel has messages the member has not read,
+  a pill offers "Catch me up (N)"; the AI is asked with those messages only
+  (from the visit's first unread, `useRoomStream`'s baseline), the newest
+  kept when they do not all fit (`lib/catchUp.ts`), and its answer shows to
+  the member alone. Translate: a stored message's Translate asks the
+  `translate` task in the browser's language and shows the answer under the
+  original, the member's alone, never sent. Both run on the member's assist
+  budget; with no model or no task, neither control is offered.
+- Tests: `lib/catchUp.test.ts`, `lib/assistModel.test.ts` (the web's tasks
+  are the contracts'), `TestAssistContractsAreWellFormed` (21 tasks),
+  `web/e2e/catch-up.mjs`.
+- Not in it: a catch-up of the whole room (one channel at a time), the
+  digest (a member's scheduled AI task: a schedule kind of its own), thread
+  and routing suggestions (they act on the feed as it is written: a gated
+  assist each), saving an answer to the room's knowledge.
+
+**Decisions pending owner, slice 5d:**
+
+1. Translate writes in the browser's language (`navigator.language`); the
+   member has no language setting yet.
+2. Catch me up reads the open channel's unread messages as this browser
+   loaded them (the visit's first unread on); messages older than the loaded
+   history are not read.
+

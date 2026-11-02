@@ -9,6 +9,7 @@ import { useDisplayName } from "@/lib/useDisplayName";
 import { FindAWayButton } from "@/views/room/DeadEndCard";
 import { MarkActions } from "@/views/room/MessageMarks";
 import { ForwardButton } from "@/views/room/Forward";
+import { TranslateButton, type Translations } from "@/views/room/CatchUp";
 
 // Team actions on a feed row — "Save as prompt" (prompt packs), "Mark as
 // task" (F6) and an agent reply's "Find a way" (DeadEndCard.tsx)
@@ -38,6 +39,8 @@ export interface MessageExtras {
   readonly onSetMark?: (seq: number, kind: MessageMarkKind, on: boolean, value?: string) => void;
   // Opens the forward dialog for a stored message (§2.3).
   readonly onForward?: (seq: number) => void;
+  // The member's translations of messages (§4), asked one at a time.
+  readonly translations?: Translations;
   // Whether the member may pin in this feed's channel (store.MayManageChannel).
   readonly mayPin?: boolean;
 }
@@ -118,6 +121,7 @@ export function MessageExtraActions({ item, floating }: { item: FeedItem; floati
       )}
       <MarkActions seq={seq} />
       <ForwardButton seq={seq} />
+      <TranslateButton item={item} />
       <FindAWayButton item={item} />
     </span>
   );

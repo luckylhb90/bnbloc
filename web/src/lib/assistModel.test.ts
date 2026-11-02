@@ -8,6 +8,7 @@ import { SUGGEST_SKILL_DIRS } from "./skillDirs.ts";
 import { REVIEW_SKILL } from "./skillReview.ts";
 import { publishWorkForm } from "./workGallery.ts";
 import { AssistContracts, AssistTaskNameValues, MaxAssistProblemRunes, MaxAssistProblems, MaxAssistRounds, type AssistJSONReply, type AssistRequest, type AssistStatus } from "./wire.gen.ts";
+import { CATCH_UP, TRANSLATE } from "./catchUp.ts";
 
 function assert(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
@@ -86,7 +87,7 @@ eq(parse(["event: delta\n\ndata: y\n\n"]), [{ event: "message", data: "y" }], "a
 {
   const web = [ENHANCE_PROMPT, DESCRIBE_WORK, DESCRIBE_ROOM, DRAFT_EXPERT, DRAFT_SKILL_PACK, DRAFT_PROMPT_PACK, PLAN_ROOM, DRAFT_SCHEDULE,
     EXPLAIN_SOURCE_USE, REVIEW_SKILL, FILL_SETTINGS, SUGGEST_SKILL_DIRS, FIND_A_WAY, DRAFT_CHANNEL_PURPOSE, DRAFT_ROOM_RULES, FIND_CHANNEL,
-    DRAFT_THREAD_TITLE, SUMMARIZE_THREAD, DRAFT_CHANNEL_PRESET];
+    DRAFT_THREAD_TITLE, SUMMARIZE_THREAD, DRAFT_CHANNEL_PRESET, CATCH_UP, TRANSLATE];
   eq([...web].sort(), [...AssistTaskNameValues].sort(), "the web's tasks are the contracts' names");
   eq(AssistContracts.map((c) => c.task).sort(), [...AssistTaskNameValues].sort(), "one contract per task");
 }

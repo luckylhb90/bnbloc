@@ -512,6 +512,8 @@ export function RoomView({
     selectChannel,
     jumpReady: peopleChat.resolved,
     divertJump: peopleChat.divertJump,
+    unreadFromSeq: stream.unreadFromSeq,
+    channelName: roomChannels.current?.name ?? "",
   });
 
   const mayPin = !!me && !readOnly && !!roomChannels.current && mayManageChannel(me, subject, roomChannels.current, sectionOf(roomChannels.current, roomChannels.sections));

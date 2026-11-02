@@ -45,6 +45,12 @@ const (
 	// answers first"); the web shows it as a preset's preview and the member
 	// applies or saves what they accept.
 	AssistTaskDraftChannelPreset = "draft-channel-preset"
+	// Catch me up (§4): what happened in a channel since the member last
+	// read it (the web sends those messages); and translate (§4): a
+	// message in the member's language, the original kept. Both run on the
+	// member's assist budget and show only to them.
+	AssistTaskCatchUp   = "catch-up"
+	AssistTaskTranslate = "translate"
 )
 
 // AssistContract is what an assist named Task must answer: its output, the
@@ -158,6 +164,10 @@ var AssistContracts = []AssistContract{
 	{Task: AssistTaskSummarizeThread, Output: AssistOutputJSON, Fields: []AssistContractField{
 		{Name: "decided", Type: AssistFieldList}, {Name: "open", Type: AssistFieldList}, {Name: "summary"},
 	}},
+	{Task: AssistTaskCatchUp, Output: AssistOutputJSON, Fields: []AssistContractField{
+		{Name: "summary"}, {Name: "decided", Type: AssistFieldList}, {Name: "open", Type: AssistFieldList}, {Name: "forYou", Type: AssistFieldList},
+	}},
+	{Task: AssistTaskTranslate, Output: AssistOutputText},
 	{Task: AssistTaskFindChannel, Output: AssistOutputJSON, Fields: []AssistContractField{
 		{Name: "answer"},
 		{Name: "channels", Type: AssistFieldItems, Item: []AssistContractField{{Name: "channelId"}, {Name: "why"}}},

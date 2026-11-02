@@ -28,6 +28,7 @@ import { TurnMetricsFooter } from "@/views/room/TurnMetricsFooter";
 import { MessageExtraActions, TaskBadge, ReplyQuote, ThreadLine } from "@/views/room/messageExtras";
 import { Reactions } from "@/views/room/MessageMarks";
 import { ForwardCard } from "@/views/room/Forward";
+import { Translation } from "@/views/room/CatchUp";
 import { dispatchLine, type DispatchAttribution } from "@/lib/dispatch";
 import { ExpertTag } from "@/views/room/ExpertTag";
 import { FileRefTag } from "@/views/room/FileRefTag";
@@ -356,6 +357,7 @@ export const Message = memo(function Message({
             <MessageAttachments roomId={roomId} attachments={item.attachments} />
             <FileRefTag roomId={roomId} fileRef={item.fileRef} />
             <ForwardCard item={item} />
+            <Translation item={item} />
             <ThreadLine item={item} />
             <Reactions item={item} className="justify-end" />
           </div>
@@ -515,6 +517,7 @@ export const Message = memo(function Message({
         <MessageAttachments roomId={roomId} attachments={item.attachments} className="mt-2" />
         <FileRefTag roomId={roomId} fileRef={item.fileRef} className="mt-1" />
         <ForwardCard item={item} className="mt-1" />
+        <Translation item={item} />
         <ThreadLine item={item} className="mt-1 -ml-1.5" />
         <Reactions item={item} className="mt-1" />
         {isAgent && <DeadEndCard item={item} />}

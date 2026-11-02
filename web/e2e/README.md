@@ -151,3 +151,14 @@ it, and a source the reader may not open is said so, never shown.
 ```sh
 BNBLOC_E2E_URL=http://localhost:5173 node web/e2e/forward.mjs
 ```
+
+## Catch me up and translate (`catch-up.mjs`)
+
+A channel with unread messages offers "Catch me up"; the AI is asked with
+those messages only and its answer shows to the member; a message's
+Translate shows the translation under the original; with no assist, neither
+control is offered.
+
+```sh
+BNBLOC_E2E_URL=http://localhost:5173 node web/e2e/catch-up.mjs
+```

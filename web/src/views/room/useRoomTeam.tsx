@@ -8,6 +8,7 @@ import type { MessageExtras } from "@/views/room/messageExtras";
 import { RoomTasksStrip } from "@/views/room/RoomTasksStrip";
 import { PinnedStrip } from "@/views/room/MessageMarks";
 import { ForwardDialog } from "@/views/room/Forward";
+import { CatchUpPill, useTranslations } from "@/views/room/CatchUp";
 import type { ForwardRef } from "@/lib/wire.gen";
 import { SavePromptDialog, type PromptSource } from "@/views/room/SavePromptDialog";
 import type { FeedItem } from "@/views/room/types";
@@ -31,6 +32,8 @@ export function useRoomTeam({
   selectChannel,
   jumpReady,
   divertJump,
+  unreadFromSeq = null,
+  channelName = "",
 }: {
   readonly roomId: string;
   readonly channelId: string | null;
@@ -43,6 +46,10 @@ export function useRoomTeam({
   // a jump into the people chat opens the panel instead of the main feed.
   readonly jumpReady?: boolean;
   readonly divertJump?: Parameters<typeof useMessageJump>[0]["divert"];
+  // The open channel's first unread message (the catch-up reads from it) and
+  // its name.
+  readonly unreadFromSeq?: number | null;
+  readonly channelName?: string;
 }) {
   const tasks = useRoomTasks(roomId, joinedGen);
   const jump = useMessageJump({ roomId, channelId, feed, history, loadEarlier, selectChannel, ready: jumpReady, divert: divertJump });
@@ -54,6 +61,7 @@ export function useRoomTeam({
 
   const { subject } = useAuth();
   const marks = useRoomMarks(roomId, joinedGen, subject ?? null);
+  const translations = useTranslations(roomId, channelId);
   useEffect(() => {
     if (subject) rememberLastRoom(subject, roomId);
   }, [subject, roomId]);
@@ -70,12 +78,14 @@ export function useRoomTeam({
       me: subject ?? null,
       onSetMark: marks.setMark,
       onForward: (seq: number) => setForwarding({ roomId, seq, ...(channelId ? { channelId } : {}) }),
+      translations,
     }),
-    [bySeq, mark, unmark, setStatus, marks.marks, marks.setMark, subject, roomId, channelId],
+    [bySeq, mark, unmark, setStatus, marks.marks, marks.setMark, subject, roomId, channelId, translations],
   );
 
   const strip = (
     <>
+      <CatchUpPill roomId={roomId} channelId={channelId} channelName={channelName} me={subject ?? null} feed={feed} unreadFromSeq={unreadFromSeq} />
       <PinnedStrip marks={marks.marks} channelId={channelId} feed={feed} onJump={(seq, ch) => jump({ seq, channelId: ch || undefined })} />
       <RoomTasksStrip
         tasks={tasks.tasks}
