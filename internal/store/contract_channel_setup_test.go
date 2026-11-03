@@ -501,3 +501,43 @@ func TestContractChannelStoreDrafts(t *testing.T) {
 		}
 	})
 }
+
+// The retention worker's read (C22, E1): channels with days of their own and
+// the threads of such channels, the tenant's only; a thread follows its
+// parent unless its own days are shorter.
+func TestContractChannelStoreRetentions(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) {
+		ctx := tenantCtx(uniq("t-ret-"))
+		s := b.Channel
+		room := newContractRoom(t, ctx, b, "maya")
+		mk := func(c RoomChannel) {
+			t.Helper()
+			c.TenantID, c.RoomID, c.CreatedBy, c.CreatedAtMs = tenantOf(ctx), room, "maya", 1
+			if err := s.PutChannel(ctx, c); err != nil {
+				t.Fatal(err)
+			}
+		}
+		eph, plain, short := uniq("eph-"), uniq("plain-"), uniq("short-")
+		mk(RoomChannel{ChannelID: eph, Name: "eph", Settings: wire.ChannelSettings{RetentionDays: 7}})
+		mk(RoomChannel{ChannelID: plain, Name: "plain"})
+		th, own, other := uniq("th-"), uniq("th-"), uniq("th-")
+		mk(RoomChannel{ChannelID: th, Name: "t", Kind: ChannelKindThread, ParentID: eph, RootSeq: 1})
+		mk(RoomChannel{ChannelID: own, Name: "t2", Kind: ChannelKindThread, ParentID: eph, RootSeq: 2, Settings: wire.ChannelSettings{RetentionDays: 2}})
+		mk(RoomChannel{ChannelID: other, Name: "t3", Kind: ChannelKindThread, ParentID: plain, RootSeq: 3})
+		mk(RoomChannel{ChannelID: short, Name: "short", Settings: wire.ChannelSettings{RetentionDays: 1}})
+		rows := must(s.ChannelRetentions(ctx, 0))(t)
+		got := RetainedChannels(rows)[room]
+		want := map[string]int{eph: 7, th: 7, own: 2, short: 1}
+		if len(got) != len(want) {
+			t.Fatalf("retained = %v, want %v", got, want)
+		}
+		for id, d := range want {
+			if got[id] != d {
+				t.Fatalf("retained[%s] = %d, want %d (all %v)", id, got[id], d, got)
+			}
+		}
+		if rows := must(s.ChannelRetentions(tenantCtx(uniq("t-other-")), 0))(t); len(rows) != 0 {
+			t.Fatalf("another tenant reads %v", rows)
+		}
+	})
+}

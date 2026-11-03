@@ -155,6 +155,42 @@ func threadSettings(parent wire.ChannelSettings) wire.ChannelSettings {
 	return wire.ChannelSettings{NoAgents: parent.NoAgents}
 }
 
+// ChannelRetention is one channel's own message retention as the retention
+// worker reads it: the channel (a thread names its parent) and its days.
+type ChannelRetention struct {
+	RoomID    string
+	ChannelID string
+	ParentID  string
+	Days      int
+}
+
+// RetainedChannels groups a tenant's channel retentions by room, each
+// thread under its parent's days unless its own are shorter (E1): the
+// rooms and channels a channel-scoped purge reaches, with their days.
+func RetainedChannels(rows []ChannelRetention) map[string]map[string]int {
+	own := map[string]int{}
+	for _, r := range rows {
+		own[r.RoomID+"\x00"+r.ChannelID] = r.Days
+	}
+	out := map[string]map[string]int{}
+	for _, r := range rows {
+		d := r.Days
+		if r.ParentID != "" {
+			if p := own[r.RoomID+"\x00"+r.ParentID]; p > 0 && (d <= 0 || p < d) {
+				d = p
+			}
+		}
+		if d <= 0 {
+			continue
+		}
+		if out[r.RoomID] == nil {
+			out[r.RoomID] = map[string]int{}
+		}
+		out[r.RoomID][r.ChannelID] = d
+	}
+	return out
+}
+
 // ThreadInfo is the wire view of a thread's parent, root and activity
 // (zero for a channel that is no thread); ThreadUpdated the payload that
 // tells its parent's stream. The one projection of both, for realtime and
@@ -392,6 +428,10 @@ type ChannelStore interface {
 	// position, then by created_at ascending, then by channel id. Callers
 	// that present or copy ordinary channels filter themselves.
 	ListChannels(ctx context.Context, roomID string) ([]RoomChannel, error)
+	// ChannelRetentions lists the tenant's live channels that keep their
+	// messages for days of their own, and the threads of such channels
+	// (cross-room: the retention worker's read), at most limit rows.
+	ChannelRetentions(ctx context.Context, limit int) ([]ChannelRetention, error)
 	// DefaultChannel returns a room's default channel, found=false when none.
 	DefaultChannel(ctx context.Context, roomID string) (RoomChannel, bool, error)
 	// DeleteChannel soft-deletes a channel. Deleting an absent or already
@@ -847,6 +887,44 @@ func (s *MemoryChannel) GetChannel(ctx context.Context, roomID, channelID string
 		return RoomChannel{}, false, nil
 	}
 	return c.cloned(), true, nil
+}
+
+func (s *MemoryChannel) ChannelRetentions(ctx context.Context, limit int) ([]ChannelRetention, error) {
+	tnt, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.room.mu.Lock()
+	defer s.room.mu.Unlock()
+	keeps := map[string]bool{}
+	var all []RoomChannel
+	for _, room := range s.room.channels {
+		for _, c := range room {
+			if c.TenantID != tnt || c.DeletedAtMs != nil {
+				continue
+			}
+			all = append(all, c)
+			if c.Settings.RetentionDays > 0 {
+				keeps[c.RoomID+"\x00"+c.ChannelID] = true
+			}
+		}
+	}
+	out := []ChannelRetention{}
+	for _, c := range all {
+		if c.Settings.RetentionDays > 0 || (c.ParentID != "" && keeps[c.RoomID+"\x00"+c.ParentID]) {
+			out = append(out, ChannelRetention{RoomID: c.RoomID, ChannelID: c.ChannelID, ParentID: c.ParentID, Days: c.Settings.RetentionDays})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].RoomID != out[j].RoomID {
+			return out[i].RoomID < out[j].RoomID
+		}
+		return out[i].ChannelID < out[j].ChannelID
+	})
+	if n := clampLimit(limit, 10000, 10000); len(out) > n {
+		out = out[:n]
+	}
+	return out, nil
 }
 
 func (s *MemoryChannel) ListChannels(ctx context.Context, roomID string) ([]RoomChannel, error) {

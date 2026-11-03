@@ -34,6 +34,7 @@ import type { RoomAgent } from "@/views/composer/types";
 import { useChannelAssist } from "@/views/room/useChannelAssist";
 import { useApplyPreset } from "@/views/room/ChannelPresetDialogs";
 import { ChannelPresetPicker } from "@/views/room/ChannelPresetPicker";
+import { ChannelKeepAndTabs, retentionFrom } from "@/views/room/ChannelKeepAndTabs";
 
 // The channel and section dialogs of the rail (docs/prd/2026-10-28-channels-
 // and-threads.md §2.1, §2.1a, §8 slice 1). Each says a refusal inside
@@ -183,6 +184,7 @@ export function ChannelSettingsDialog({
   const [sectionId, setSectionId] = useState(sectionOf(c, sections) ? c.sectionId : "");
   const [s, setS] = useState<ChannelSettings>(c.settings ?? {});
   const [slow, setSlow] = useState(String(c.settings?.slowModeSeconds ?? 0));
+  const [keep, setKeep] = useState(String(c.settings?.retentionDays ?? 0));
   // A forum's vocabulary, one name a line (lib/forum: ids from names).
   const [tagLines, setTagLines] = useState(linesOf(c.settings?.tags));
   const [statusLines, setStatusLines] = useState(linesOf(c.settings?.statuses));
@@ -204,6 +206,11 @@ export function ChannelSettingsDialog({
       setErr("Slow mode is a whole number of seconds (0 is off)");
       return;
     }
+    const retentionDays = retentionFrom(keep);
+    if (retentionDays === null) {
+      setErr("Keep messages is a whole number of days (0 follows the organization)");
+      return;
+    }
     setBusy(true);
     setErr("");
     try {
@@ -215,6 +222,7 @@ export function ChannelSettingsDialog({
         settings: {
           ...s,
           slowModeSeconds: seconds,
+          retentionDays: retentionDays || undefined,
           ...(isForum(s)
             ? { tags: tagsFromLines(tagLines, c.settings?.tags), statuses: statusesFromLines(statusLines, c.settings?.statuses) }
             : { tags: undefined, statuses: undefined, postTemplate: undefined }),
@@ -364,6 +372,7 @@ export function ChannelSettingsDialog({
         <Field label="Slow mode (seconds)" hint="The least time between two posts of one member here; 0 is off.">
           <Input type="number" min={0} step={1} value={slow} onChange={(e) => setSlow(e.target.value)} className="max-w-40" />
         </Field>
+        <ChannelKeepAndTabs roomId={roomId} settings={s} retention={keep} onRetention={setKeep} onTabs={(tabs) => setS((x) => ({ ...x, tabs: tabs.length ? tabs : undefined }))} />
         {err && <p role="alert" className="text-sm text-[var(--color-danger)]">{err}</p>}
       </div>
     </Dialog>

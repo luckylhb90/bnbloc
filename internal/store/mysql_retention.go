@@ -109,6 +109,9 @@ type roomSeq struct {
 // row), their tasks and artifact source links, then fences the rooms moved
 // past, the activity copy of agent replies and the attachments.
 func (s *MySQLRetention) purgeMessages(ctx context.Context, req PurgeRequest, out PurgeResult) error {
+	if req.scoped() {
+		return s.purgeChannelMessages(ctx, req, out)
+	}
 	// The tenant's kinds, one index dive each (a loose scan of
 	// idx_room_messages_retention; SELECT DISTINCT would read every entry).
 	var kinds []string
@@ -161,12 +164,48 @@ WHERE tenant_id = ? AND created_at_ms > 0 AND created_at_ms < ? LIMIT ?`, req.Te
 WHERE tenant_id = ? AND created_at_ms < ? LIMIT ?`, req.TenantID, req.BeforeMs, req.batch())
 }
 
+// purgeChannelMessages is a channel-scoped messages purge: the expired
+// feed rows of req's channels of req's room, along idx_room_channel_seq
+// (one room, one channel at a time), then the room's fences it moved past.
+// The activity copy and the attachments are left to the organization's
+// policy (they carry no channel).
+func (s *MySQLRetention) purgeChannelMessages(ctx context.Context, req PurgeRequest, out PurgeResult) error {
+	for _, ch := range req.Scope.ChannelIDs {
+		for {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			n, err := s.purgeMessageRows(ctx, req, out, `SELECT room_id, seq FROM room_messages
+WHERE tenant_id = ? AND room_id = ? AND channel_id = ? AND kind <> ? AND created_at_ms < ?
+ORDER BY seq LIMIT ?`, req.TenantID, req.Scope.RoomID, ch, RetentionFenceKind, req.BeforeMs, req.batch())
+			if err != nil {
+				return err
+			}
+			if n < req.batch() {
+				break
+			}
+		}
+	}
+	return s.deleteBatches(ctx, out, PurgedRoomMessages, `DELETE f FROM room_messages f
+JOIN (SELECT c.room_id, c.seq FROM room_messages c
+      WHERE c.tenant_id = ? AND c.room_id = ? AND c.kind = ?
+        AND EXISTS (SELECT 1 FROM room_messages n FORCE INDEX (PRIMARY) WHERE n.room_id = c.room_id AND n.seq > c.seq)
+      LIMIT ?) d ON d.room_id = f.room_id AND d.seq = f.seq`, req.TenantID, req.Scope.RoomID, RetentionFenceKind, req.batch())
+}
+
 // purgeMessageBatch handles one batch of expired rows of one kind and
 // returns how many candidates it read.
 func (s *MySQLRetention) purgeMessageBatch(ctx context.Context, req PurgeRequest, kind string, out PurgeResult) (int, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT room_id, seq FROM room_messages
+	return s.purgeMessageRows(ctx, req, out, `SELECT room_id, seq FROM room_messages
 WHERE tenant_id = ? AND kind = ? AND created_at_ms < ?
 ORDER BY created_at_ms LIMIT ?`, req.TenantID, kind, req.BeforeMs, req.batch())
+}
+
+// purgeMessageRows deletes (or fences, for a room's max-seq row) one batch
+// of the feed rows the select names, with their tasks, marks and artifact
+// anchors, and returns how many candidates it read.
+func (s *MySQLRetention) purgeMessageRows(ctx context.Context, req PurgeRequest, out PurgeResult, sel string, args ...any) (int, error) {
+	rows, err := s.DB.QueryContext(ctx, sel, args...)
 	if err != nil {
 		return 0, fmt.Errorf("purge room_messages: select: %w", err)
 	}
@@ -190,13 +229,13 @@ ORDER BY created_at_ms LIMIT ?`, req.TenantID, kind, req.BeforeMs, req.batch())
 	// deletes the fence).
 	roomList := sortedSet(rooms)
 	maxSeq := make(map[string]int64, len(roomList))
-	args := make([]any, 0, len(roomList)+1)
-	args = append(args, req.TenantID)
+	maxArgs := make([]any, 0, len(roomList)+1)
+	maxArgs = append(maxArgs, req.TenantID)
 	for _, r := range roomList {
-		args = append(args, r)
+		maxArgs = append(maxArgs, r)
 	}
 	mrows, err := s.DB.QueryContext(ctx, `SELECT room_id, MAX(seq) FROM room_messages
-WHERE tenant_id = ? AND room_id IN (`+inPlaceholders(len(roomList))+`) GROUP BY room_id`, args...)
+WHERE tenant_id = ? AND room_id IN (`+inPlaceholders(len(roomList))+`) GROUP BY room_id`, maxArgs...)
 	if err != nil {
 		return 0, fmt.Errorf("purge room_messages: max seq: %w", err)
 	}

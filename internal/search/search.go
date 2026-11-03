@@ -55,8 +55,10 @@ type Index interface {
 	Apply(ctx context.Context, keys []store.MessageKey) error
 	// PurgeBefore removes the documents of tenantID's messages created
 	// before beforeMs: data retention deleted (or fenced) every such row.
-	// It returns how many documents it removed.
-	PurgeBefore(ctx context.Context, tenantID string, beforeMs int64) (int64, error)
+	// A scope with a room narrows it to that room's channels (a channel's
+	// own retention); the zero scope is the whole tenant. It returns how
+	// many documents it removed.
+	PurgeBefore(ctx context.Context, tenantID string, scope store.PurgeScope, beforeMs int64) (int64, error)
 	// Status reports the backend's health for the platform status route.
 	Status(ctx context.Context) wire.SearchStatus
 }
@@ -90,7 +92,9 @@ func (s *Store) Reindex(_ context.Context, cursor string, _ int) (store.SearchRe
 func (s *Store) Apply(context.Context, []store.MessageKey) error { return nil }
 
 // PurgeBefore has nothing to do: the FULLTEXT index follows the rows.
-func (s *Store) PurgeBefore(context.Context, string, int64) (int64, error) { return 0, nil }
+func (s *Store) PurgeBefore(context.Context, string, store.PurgeScope, int64) (int64, error) {
+	return 0, nil
+}
 
 // Status is always ready: the index lives in the database.
 func (s *Store) Status(context.Context) wire.SearchStatus {

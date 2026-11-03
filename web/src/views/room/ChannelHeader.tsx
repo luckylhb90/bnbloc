@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { ArchiveIcon, HashIcon, ScrollIcon } from "@phosphor-icons/react";
+import { AppWindowIcon, ArchiveIcon, HashIcon, ScrollIcon } from "@phosphor-icons/react";
+import { routeHash } from "@/lib/hashRoute";
 import type { Channel, RoomDetail } from "@/lib/api";
 import type { RoomSection } from "@/lib/wire.gen";
 import { Dialog } from "@/ui/Dialog";
@@ -31,7 +32,31 @@ export function ChannelHeader({ channel, section, room }: { readonly channel: Ch
         </Button>
       )}
       {rulesOpen && <RulesSheet room={room} section={section} channel={channel} onClose={() => setRulesOpen(false)} />}
+      <ChannelTabs roomId={room?.roomId ?? ""} channel={channel} />
     </div>
+  );
+}
+
+// ChannelTabs are the channel's pinned deliverables (E5) after its name: a
+// tab opens the deliverable in the room's preview, through the room's own
+// deep link, so the room service still decides who may read it.
+function ChannelTabs({ roomId, channel }: { readonly roomId: string; readonly channel: Channel }) {
+  const tabs = channel.settings?.tabs ?? [];
+  if (!roomId || tabs.length === 0) return null;
+  return (
+    <nav aria-label="Channel tabs" className="flex shrink-0 items-center gap-1">
+      {tabs.map((t) => (
+        <a
+          key={t.artifactId}
+          data-channel-tab={t.artifactId}
+          href={routeHash({ kind: "room", roomId, artifactId: t.artifactId })}
+          className="tactile flex max-w-40 items-center gap-1 rounded-[var(--radius)] px-2 py-0.5 text-xs text-[var(--color-fg-muted)] no-underline hover:bg-[var(--color-surface-2)] hover:text-[var(--color-fg)]"
+        >
+          <AppWindowIcon size={12} className="shrink-0" />
+          <span className="truncate">{t.title || "Tab"}</span>
+        </a>
+      ))}
+    </nav>
   );
 }
 

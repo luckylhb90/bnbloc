@@ -25,6 +25,7 @@ import (
 	"github.com/luckylhb90/bnbloc/internal/blobstore"
 	"github.com/luckylhb90/bnbloc/internal/obs"
 	"github.com/luckylhb90/bnbloc/internal/store"
+	"github.com/luckylhb90/bnbloc/internal/tenant"
 	"github.com/luckylhb90/bnbloc/internal/wire"
 )
 
@@ -72,13 +73,22 @@ func RegisterMetrics(m *obs.Metrics) {
 type SearchIndex interface {
 	// PurgeBefore removes the documents of tenantID's messages created
 	// before beforeMs, returning how many it removed.
-	PurgeBefore(ctx context.Context, tenantID string, beforeMs int64) (int64, error)
+	PurgeBefore(ctx context.Context, tenantID string, scope store.PurgeScope, beforeMs int64) (int64, error)
+}
+
+// ChannelRetentions is the store read of the channels with a retention of
+// their own (store.ChannelStore satisfies it).
+type ChannelRetentions interface {
+	ChannelRetentions(ctx context.Context, limit int) ([]store.ChannelRetention, error)
 }
 
 // Worker deletes expired rows and unreferenced blobs.
 type Worker struct {
-	Store    store.RetentionStore
-	Tenants  store.TenantStore
+	Store   store.RetentionStore
+	Tenants store.TenantStore
+	// Channels lists each tenant's channels that keep their messages for
+	// days of their own (C22); nil = no channel retention.
+	Channels ChannelRetentions
 	Settings store.PlatformSettingsStore
 	// Audit receives one record per tenant and kind a pass deleted from
 	// (kind retention, action purge), so the deletion itself is on record.
@@ -270,6 +280,65 @@ func (w *Worker) purgeAll(ctx context.Context, now time.Time, out store.PurgeRes
 				w.auditPurge(ctx, sc.tenant, kind, *days, before, res)
 			}
 		}
+		if sc.tenant != "" {
+			firstErr = errors.Join(firstErr, w.purgeChannels(ctx, now, sc.tenant, sc.policy.Days(wire.RetentionMessages), out))
+		}
+	}
+	return firstErr
+}
+
+// purgeChannels applies the tenant's channels' own message retention
+// (channels PRD C22): each channel (a thread under its parent's days unless
+// its own are shorter, E1) keeps the shorter of its days and the
+// organization's (E2, wire.EffectiveChannelRetention), so only a channel
+// shorter than the organization purges here; the organization's pass above
+// already reached the rest. Each channel purged is one audit row (E3), and
+// its search documents go with it (E4).
+func (w *Worker) purgeChannels(ctx context.Context, now time.Time, tenantID string, orgDays *int, out store.PurgeResult) error {
+	if w.Channels == nil {
+		return nil
+	}
+	tctx := tenant.NewContext(ctx, tenantID)
+	rows, err := w.Channels.ChannelRetentions(tctx, 0)
+	if err != nil {
+		slog.Error("bnbloc retention: channel retentions unreadable", "event", "bnbloc.retention.error", "what", "channels", "tenant", tenantID, "error", err)
+		return fmt.Errorf("channel retentions %s: %w", tenantID, err)
+	}
+	var firstErr error
+	for room, channels := range store.RetainedChannels(rows) {
+		byDays := map[int][]string{}
+		for ch, d := range channels {
+			eff := wire.EffectiveChannelRetention(d, orgDays)
+			if eff == nil || (orgDays != nil && *orgDays > 0 && *eff >= *orgDays) {
+				continue
+			}
+			byDays[*eff] = append(byDays[*eff], ch)
+		}
+		for days, ids := range byDays {
+			sort.Strings(ids)
+			if err := ctx.Err(); err != nil {
+				return errors.Join(firstErr, err)
+			}
+			before := now.Add(-time.Duration(days) * 24 * time.Hour).UnixMilli()
+			scope := store.PurgeScope{RoomID: room, ChannelIDs: ids}
+			res, err := w.Store.Purge(tctx, store.PurgeRequest{Kind: wire.RetentionMessages, TenantID: tenantID, BeforeMs: before, Batch: w.Batch, NowMs: now.UnixMilli(), Scope: scope})
+			if w.Search != nil && err == nil {
+				n, serr := w.Search.PurgeBefore(tctx, tenantID, scope, before)
+				res[store.PurgedSearchDocuments] += n
+				if serr != nil {
+					err = fmt.Errorf("search index: %w", serr)
+				}
+			}
+			out.Add(res)
+			if err != nil {
+				slog.Error("bnbloc retention: channel purge failed", "event", "bnbloc.retention.error", "what", "channel",
+					"tenant", tenantID, "room", room, "channels", ids, "error", err)
+				firstErr = errors.Join(firstErr, fmt.Errorf("purge %s/%s: %w", tenantID, room, err))
+			}
+			if sum(res) > 0 {
+				w.auditChannelPurge(tctx, tenantID, room, ids, days, before, res)
+			}
+		}
 	}
 	return firstErr
 }
@@ -285,7 +354,7 @@ func (w *Worker) purgeSearch(ctx context.Context, tenantID string, before int64,
 	if w.Search == nil {
 		return nil
 	}
-	n, err := w.Search.PurgeBefore(ctx, tenantID, before)
+	n, err := w.Search.PurgeBefore(ctx, tenantID, store.PurgeScope{}, before)
 	res[store.PurgedSearchDocuments] += n
 	if err != nil {
 		return fmt.Errorf("search index: %w", err)
@@ -308,6 +377,27 @@ func (w *Worker) auditPurge(ctx context.Context, tenantID string, kind wire.Rete
 	detail := "older than " + strconv.Itoa(days) + " days (before " + time.UnixMilli(before).UTC().Format(time.RFC3339) + "): " + strings.Join(items, " ")
 	audit.Record(ctx, w.Audit, store.ExtAuditRecord{
 		Kind: wire.AuditKindRetention, Name: string(kind), Action: "purge", Actor: "retention",
+		TenantID: tenantID, Outcome: wire.AuditOutcomeOK, Detail: detail, AtMs: w.now().UnixMilli(),
+	})
+}
+
+// auditChannelPurge records one channel-scoped purge (E3): the room, the
+// channels, the days and what went.
+func (w *Worker) auditChannelPurge(ctx context.Context, tenantID, room string, channels []string, days int, before int64, res store.PurgeResult) {
+	if w.Audit == nil {
+		return
+	}
+	items := make([]string, 0, len(res))
+	for item, n := range res {
+		if n > 0 {
+			items = append(items, item+"="+strconv.FormatInt(n, 10))
+		}
+	}
+	sort.Strings(items)
+	detail := "room " + room + " channels " + strings.Join(channels, ",") + ": older than " + strconv.Itoa(days) +
+		" days (before " + time.UnixMilli(before).UTC().Format(time.RFC3339) + "): " + strings.Join(items, " ")
+	audit.Record(ctx, w.Audit, store.ExtAuditRecord{
+		Kind: wire.AuditKindRetention, Name: string(wire.RetentionMessages), Action: "purge-channel", Actor: "retention",
 		TenantID: tenantID, Outcome: wire.AuditOutcomeOK, Detail: detail, AtMs: w.now().UnixMilli(),
 	})
 }

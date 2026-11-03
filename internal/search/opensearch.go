@@ -581,14 +581,20 @@ func (o *OpenSearch) Reindex(ctx context.Context, cursor string, batch int) (sto
 
 // PurgeBefore deletes the tenant's documents created before beforeMs with
 // one delete-by-query (it may run for a while on a large index).
-func (o *OpenSearch) PurgeBefore(ctx context.Context, tenantID string, beforeMs int64) (int64, error) {
+func (o *OpenSearch) PurgeBefore(ctx context.Context, tenantID string, scope store.PurgeScope, beforeMs int64) (int64, error) {
 	if err := o.ensure(ctx); err != nil {
 		return 0, err
 	}
-	body := map[string]any{"query": map[string]any{"bool": map[string]any{"filter": []any{
+	filter := []any{
 		map[string]any{"term": map[string]any{"tenant": tenantID}},
 		map[string]any{"range": map[string]any{"createdAt": map[string]any{"lt": beforeMs}}},
-	}}}}
+	}
+	if scope.Scoped() {
+		filter = append(filter,
+			map[string]any{"term": map[string]any{"room": scope.RoomID}},
+			map[string]any{"terms": map[string]any{"channel": scope.ChannelIDs}})
+	}
+	body := map[string]any{"query": map[string]any{"bool": map[string]any{"filter": filter}}}
 	q := url.Values{"conflicts": {"proceed"}, "wait_for_completion": {"true"}, "slices": {"auto"}}
 	var res struct {
 		Deleted  int64             `json:"deleted"`

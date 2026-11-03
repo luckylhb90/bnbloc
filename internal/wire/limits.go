@@ -54,6 +54,13 @@ const (
 	MaxMessageReactions = 20
 	MaxReactionBytes    = 32
 	MaxRoomMarks        = 2000
+	// A channel pins at most MaxChannelTabs tabs (E5), each titled at most
+	// MaxChannelTabTitle characters; its own retention is at most
+	// MaxChannelRetentionDays (ten years: a longer one keeps forever in
+	// practice and reads as a typo).
+	MaxChannelTabs          = 5
+	MaxChannelTabTitle      = 40
+	MaxChannelRetentionDays = 3650
 	// A forum's vocabulary (C20): at most MaxChannelTags tags and
 	// MaxChannelStatuses statuses, each name at most MaxChannelTagName
 	// characters, a thread at most MaxThreadTags tags; a post template at

@@ -108,6 +108,14 @@ func cleanChannelSettings(s wire.ChannelSettings) (wire.ChannelSettings, error) 
 		return s, err
 	}
 	s.Statuses = statuses
+	if s.RetentionDays < 0 || s.RetentionDays > wire.MaxChannelRetentionDays {
+		return s, errBadRequest("settings.retentionDays is 0 (the organization's) or a number of days up to " + strconv.Itoa(wire.MaxChannelRetentionDays))
+	}
+	tabs, err := cleanTabs(s.Tabs)
+	if err != nil {
+		return s, err
+	}
+	s.Tabs = tabs
 	if a := s.DefaultAgent; a != nil {
 		// An agent is named by its key (owner, core, provider): a default
 		// agent without an owner or a provider names none.
@@ -118,6 +126,36 @@ func cleanChannelSettings(s wire.ChannelSettings) (wire.ChannelSettings, error) 
 		s.DefaultAgent = &cp
 	}
 	return s, nil
+}
+
+// cleanTabs checks a channel's pinned tabs (E5): at most MaxChannelTabs,
+// each an artifact id once, titles one line and bounded. Whether the
+// artifact is the room's and the caller may read it is asked where a tab
+// opens (the artifact routes), so a tab never widens a reader's access.
+func cleanTabs(in []wire.ChannelTab) ([]wire.ChannelTab, error) {
+	if len(in) == 0 {
+		return nil, nil
+	}
+	if len(in) > wire.MaxChannelTabs {
+		return nil, errBadRequest("settings.tabs: at most " + strconv.Itoa(wire.MaxChannelTabs) + " tabs")
+	}
+	seen := map[string]bool{}
+	out := make([]wire.ChannelTab, 0, len(in))
+	for _, t := range in {
+		id := strings.TrimSpace(t.ArtifactID)
+		title := strings.Join(strings.Fields(t.Title), " ")
+		switch {
+		case id == "" || len(id) > 128:
+			return nil, errBadRequest("settings.tabs: each tab names an artifactId")
+		case seen[id]:
+			return nil, errBadRequest("settings.tabs: a deliverable is pinned once")
+		case utf8.RuneCountInString(title) > wire.MaxChannelTabTitle:
+			return nil, errBadRequest("settings.tabs: a tab's title is too long")
+		}
+		seen[id] = true
+		out = append(out, wire.ChannelTab{ArtifactID: id, Title: title})
+	}
+	return out, nil
 }
 
 // cleanVocabulary checks a forum's tags or statuses (C20): at most max, each

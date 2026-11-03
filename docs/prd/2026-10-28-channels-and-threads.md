@@ -1132,3 +1132,29 @@ copied into the new room pastes them as their note, as their own act.
   into the shared workspace, so a channel whose expert differs from the
   room's runs in a workspace of its own, said before the setting is saved.
 
+**Slice 6b, a channel's own retention and its tabs** (§2.1c, C22, E1-E5):
+
+- `settings.retentionDays` keeps a channel's messages that many days, never
+  longer than the organization's (`wire.EffectiveChannelRetention`, the one
+  rule: the shorter applies, E2); a thread follows its parent unless its own
+  are shorter (`store.RetainedChannels`, E1). The retention worker reads the
+  tenant's channels with days of their own (`ChannelStore.ChannelRetentions`)
+  and purges each room's shorter channels with one scoped request
+  (`store.PurgeScope`: the room feed of those channels, with their tasks,
+  marks, artifact anchors and the room's fence, along
+  `idx_room_channel_seq`, checked with EXPLAIN on MySQL 8.4); the activity
+  copy of replies and the attachments carry no channel and stay under the
+  organization's policy. Each channel purge is one audit row
+  (`purge-channel`, E3), and the search index drops the same channels'
+  documents (`search.Index.PurgeBefore` with the scope, E4).
+- `settings.tabs` pins at most `wire.MaxChannelTabs` (5) of the room's
+  deliverables, each by its artifact id with a title (E5); the channel's
+  header shows them after its name and each opens the deliverable's room
+  link, so the room service still decides who may read it.
+- Tests: `TestEffectiveChannelRetention`, `TestContractChannelStoreRetentions`,
+  `TestContractRetentionStorePurgeChannelMessages` (memory and MySQL),
+  `TestWorkerPurgesChannelRetention`, the settings bounds in
+  `TestChannelPatchAuthority`, `web/e2e/channel-tabs.mjs`.
+- Not in it: a channel retention summary in the organization console (the
+  audit log has each purge).
+

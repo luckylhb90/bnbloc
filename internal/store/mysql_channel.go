@@ -854,3 +854,31 @@ func (m *MySQLChannel) DeleteChannelDraft(ctx context.Context, roomID, channelID
 		tnt, roomID, channelID, userID)
 	return err
 }
+
+// ChannelRetentions reads the tenant's channels with a retention of their
+// own and the threads of such channels. cross-room: the retention worker
+// purges per channel across the tenant's rooms (tenant_id names the scope).
+func (m *MySQLChannel) ChannelRetentions(ctx context.Context, limit int) ([]ChannelRetention, error) {
+	tnt, err := tenant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	days := `COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(settings_json, '$.retentionDays')) AS SIGNED), 0)`
+	out, err := queryAll(ctx, m.DB, `
+SELECT room_id, channel_id, parent_id, `+days+` FROM room_channels
+WHERE tenant_id = ? AND `+sqlNotDeleted+`
+  AND (`+days+` > 0 OR (parent_id <> '' AND (room_id, parent_id) IN (
+    SELECT room_id, channel_id FROM (
+      SELECT room_id, channel_id FROM room_channels
+      WHERE tenant_id = ? AND `+sqlNotDeleted+` AND `+days+` > 0) kept)))
+ORDER BY room_id, channel_id
+LIMIT ?`, func(sc rowScanner) (ChannelRetention, error) {
+		var r ChannelRetention
+		err := sc.Scan(&r.RoomID, &r.ChannelID, &r.ParentID, &r.Days)
+		return r, err
+	}, tnt, tnt, clampLimit(limit, 10000, 10000))
+	if out == nil && err == nil {
+		out = []ChannelRetention{}
+	}
+	return out, err
+}

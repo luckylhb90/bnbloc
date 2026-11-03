@@ -2238,6 +2238,22 @@ export interface ChannelSettings {
   // PostTemplate is what a new post in a forum starts from in the
   // composer (fields to fill).
   postTemplate?: string;
+  // RetentionDays keeps the channel's messages that many days (C22): the
+  // shorter of it and the organization's message retention applies
+  // (EffectiveChannelRetention); 0 follows the organization alone. A
+  // thread follows its parent unless its own is shorter (E1).
+  retentionDays?: number;
+  // Tabs are what the channel pins beside its chat (§2.1c, E5): at most
+  // MaxChannelTabs, each an interactive app or a file of the room.
+  tabs?: ChannelTab[];
+}
+
+// ChannelTab is one pinned tab of a channel: a deliverable of the room (an
+// interactive app or a file), named by its artifact id; Title is the tab's
+// label ("" shows the deliverable's own title).
+export interface ChannelTab {
+  artifactId: string;
+  title?: string;
 }
 
 // RoomChannel is one channel of a room as the room service answers it
@@ -5101,6 +5117,13 @@ export const MaxChannelGroups = 50;
 export const MaxMessageReactions = 20;
 export const MaxReactionBytes = 32;
 export const MaxRoomMarks = 2000;
+// A channel pins at most MaxChannelTabs tabs (E5), each titled at most
+// MaxChannelTabTitle characters; its own retention is at most
+// MaxChannelRetentionDays (ten years: a longer one keeps forever in
+// practice and reads as a typo).
+export const MaxChannelTabs = 5;
+export const MaxChannelTabTitle = 40;
+export const MaxChannelRetentionDays = 3650;
 // A forum's vocabulary (C20): at most MaxChannelTags tags and
 // MaxChannelStatuses statuses, each name at most MaxChannelTagName
 // characters, a thread at most MaxThreadTags tags; a post template at

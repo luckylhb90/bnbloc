@@ -216,7 +216,7 @@ func main() {
 	// touches the store and the blob store, never a room hub.
 	retention.RegisterMetrics(metrics)
 	go (&retention.Worker{
-		Store: store.NewRetention(backends), Tenants: backends.Tenant, Settings: backends.Settings,
+		Store: store.NewRetention(backends), Tenants: backends.Tenant, Channels: backends.Channel, Settings: backends.Settings,
 		Audit: backends.ExtAudit, Blobs: blobs, Metrics: metrics,
 		Search: searchIndex,
 	}).Run(context.Background())

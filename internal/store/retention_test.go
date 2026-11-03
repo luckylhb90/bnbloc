@@ -339,3 +339,74 @@ func TestTenantRetentionOverride(t *testing.T) {
 		}
 	})
 }
+
+func appendIn(t *testing.T, ctx context.Context, b *Backends, room, channel string, seq, at int64) {
+	t.Helper()
+	payload, _ := json.Marshal(map[string]any{"text": "m", "userId": "maya"})
+	if err := b.Chat.AppendRoomMessage(ctx, RoomMessage{RoomID: room, ChannelID: channel, Seq: seq, Kind: "chat_message", Author: "maya",
+		ClientMsgID: uniq("c"), Payload: payload, CreatedAtMs: at}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A channel's own retention (channels PRD C22): a scoped purge removes the
+// expired feed rows of the named channels of one room, with their tasks and
+// marks, and nothing else: another channel of the room, the same channel
+// id's rows in another room, the room's activity copies and attachments (no
+// channel) stay; the room's max-seq row is still fenced, never deleted.
+func TestContractRetentionStorePurgeChannelMessages(t *testing.T) {
+	forEachBackend(t, func(t *testing.T, b *Backends) {
+		r := NewRetention(b)
+		tid := uniq("acme-")
+		ctx := tenantCtx(tid)
+		now := time.Now().UnixMilli()
+		old, cutoff := now-10*day, now-7*day
+		room, otherRoom := uniq("room-"), uniq("room-")
+		ephemeral, keep := uniq("eph-"), uniq("keep-")
+		appendIn(t, ctx, b, room, ephemeral, 1, old)
+		appendIn(t, ctx, b, room, keep, 2, old)
+		appendIn(t, ctx, b, room, ephemeral, 3, old+1)
+		appendIn(t, ctx, b, room, keep, 4, now)
+		appendIn(t, ctx, b, otherRoom, ephemeral, 1, old)
+		if _, err := b.MessageTasks.PutMessageTask(ctx, wire.MessageTask{RoomID: room, ChannelID: ephemeral, Seq: 1, Status: "open", Title: "t", CreatedBy: "maya", CreatedAtMs: old}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := b.MessageMarks.PutMessageMark(ctx, MessageMark{RoomID: room, ChannelID: ephemeral, Seq: 3, Kind: wire.MarkSaved, UserID: "maya", By: "maya", CreatedAtMs: old}); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.Attachments.PutAttachment(ctx, Attachment{ID: uniq("att"), RoomID: room, Uploader: "maya", Filename: "f.txt", ContentType: "text/plain", Size: 1, SHA256: "x", BlobKey: "sha256/x", CreatedAtMs: old}); err != nil {
+			t.Fatal(err)
+		}
+
+		res, err := r.Purge(ctx, PurgeRequest{Kind: wire.RetentionMessages, TenantID: tid, BeforeMs: cutoff, NowMs: now, Batch: 1, Scope: PurgeScope{RoomID: room, ChannelIDs: []string{ephemeral}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res[PurgedRoomMessages] != 2 || res[PurgedMessageTasks] != 1 || res[PurgedMessageMarks] != 1 || res[PurgedAttachments] != 0 || res[PurgedAgentMessages] != 0 {
+			t.Fatalf("scoped purge = %v", res)
+		}
+		if msgs, _ := b.Chat.RoomHistory(ctx, room, ephemeral, 0, 50); len(msgs) != 0 {
+			t.Fatalf("the ephemeral channel kept %d rows", len(msgs))
+		}
+		if msgs, _ := b.Chat.RoomHistory(ctx, room, keep, 0, 50); len(msgs) != 2 {
+			t.Fatalf("another channel of the room lost rows: %d left", len(msgs))
+		}
+		if msgs, _ := b.Chat.RoomHistory(ctx, otherRoom, ephemeral, 0, 50); len(msgs) != 1 {
+			t.Fatalf("the same channel id in another room lost rows: %d left", len(msgs))
+		}
+		if got, _ := b.Chat.MaxRoomSeq(ctx, room); got != 4 {
+			t.Fatalf("MaxRoomSeq = %d", got)
+		}
+
+		// The room's max-seq row is fenced when it is the channel's expired row.
+		quiet := uniq("quiet-")
+		appendIn(t, ctx, b, quiet, ephemeral, 1, old)
+		res, err = r.Purge(ctx, PurgeRequest{Kind: wire.RetentionMessages, TenantID: tid, BeforeMs: cutoff, NowMs: now, Scope: PurgeScope{RoomID: quiet, ChannelIDs: []string{ephemeral}}})
+		if err != nil || res[PurgedRoomMessagesKept] != 1 {
+			t.Fatalf("fence = %v, %v", res, err)
+		}
+		if got, _ := b.Chat.MaxRoomSeq(ctx, quiet); got != 1 {
+			t.Fatalf("a fenced room's MaxRoomSeq = %d", got)
+		}
+	})
+}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -125,9 +126,36 @@ type PurgeRequest struct {
 	Batch    int
 	// NowMs stamps fenced rows' deleted_at_ms.
 	NowMs int64
+	// Scope narrows a messages purge to the room feed of some channels of
+	// one room (a channel's own retention, channels PRD C22): only
+	// room_messages and what hangs off them (tasks, marks, artifact anchors,
+	// the room's fence); the activity copy of replies and the attachments
+	// carry no channel and follow the organization's policy.
+	Scope PurgeScope
+}
+
+// PurgeScope is a channel-scoped purge's room and channels; the zero value
+// is the whole tenant. The one rule of which rows a scoped purge reaches,
+// in the store and the search index alike.
+type PurgeScope struct {
+	RoomID     string
+	ChannelIDs []string
+}
+
+// Scoped reports a channel-scoped purge.
+func (p PurgeScope) Scoped() bool { return p.RoomID != "" && len(p.ChannelIDs) > 0 }
+
+// Reaches reports whether a room feed row is one the scope purges.
+func (p PurgeScope) Reaches(roomID, channelID string) bool {
+	if !p.Scoped() {
+		return true
+	}
+	return roomID == p.RoomID && slices.Contains(p.ChannelIDs, channelID)
 }
 
 func (r PurgeRequest) batch() int { return clampLimit(r.Batch, 500, 5000) }
+
+func (r PurgeRequest) scoped() bool { return r.Scope.Scoped() }
 
 // PurgeResult counts deleted rows by item (Purged* names).
 type PurgeResult map[string]int64
@@ -352,6 +380,9 @@ func (m *MemoryRetention) purgeMessages(req PurgeRequest, out PurgeResult) {
 				continue
 			}
 			room := strings.TrimPrefix(rk, prefix)
+			if req.scoped() && room != req.Scope.RoomID {
+				continue
+			}
 			var mx int64
 			for _, msg := range msgs {
 				mx = max(mx, msg.Seq)
@@ -364,7 +395,7 @@ func (m *MemoryRetention) purgeMessages(req PurgeRequest, out PurgeResult) {
 					// A fence the room moved past.
 					delete(c.deleted, dk)
 					out[PurgedRoomMessages]++
-				case msg.Kind == RetentionFenceKind || msg.CreatedAtMs >= req.BeforeMs:
+				case msg.Kind == RetentionFenceKind || msg.CreatedAtMs >= req.BeforeMs || !req.Scope.Reaches(room, msg.ChannelID):
 					kept = append(kept, msg)
 				case msg.Seq == mx:
 					// The room's max-seq row is redacted, never deleted.
@@ -432,6 +463,11 @@ func (m *MemoryRetention) purgeMessages(req PurgeRequest, out PurgeResult) {
 			}
 		}
 		a.mu.Unlock()
+	}
+	if req.scoped() {
+		// The activity copy and the attachments carry no channel: the
+		// organization's policy alone removes them.
+		return
 	}
 	if act := m.Activity; act != nil {
 		act.mu.Lock()

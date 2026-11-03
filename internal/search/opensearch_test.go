@@ -379,7 +379,7 @@ func TestPurgeBeforeAndReindex(t *testing.T) {
 	}
 
 	fake.ResetRequests()
-	n, err := o.PurgeBefore(context.Background(), acme, 500)
+	n, err := o.PurgeBefore(context.Background(), acme, store.PurgeScope{}, 500)
 	if err != nil || n != 1 {
 		t.Fatalf("purge = %d %v, want 1", n, err)
 	}

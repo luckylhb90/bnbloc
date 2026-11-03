@@ -162,3 +162,12 @@ control is offered.
 ```sh
 BNBLOC_E2E_URL=http://localhost:5173 node web/e2e/catch-up.mjs
 ```
+
+## A channel's own retention and tabs (`channel-tabs.mjs`)
+
+The channel settings save "Keep messages" and a pinned deliverable; the tab
+shows in the channel's header and opens the deliverable's room link.
+
+```sh
+BNBLOC_E2E_URL=http://localhost:5173 node web/e2e/channel-tabs.mjs
+```

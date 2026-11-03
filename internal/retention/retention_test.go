@@ -339,8 +339,12 @@ type fakeSearch struct {
 	err   error
 }
 
-func (f *fakeSearch) PurgeBefore(_ context.Context, tenantID string, beforeMs int64) (int64, error) {
-	f.calls = append(f.calls, tenantID+"@"+strconv.FormatInt(beforeMs, 10))
+func (f *fakeSearch) PurgeBefore(_ context.Context, tenantID string, scope store.PurgeScope, beforeMs int64) (int64, error) {
+	call := tenantID + "@" + strconv.FormatInt(beforeMs, 10)
+	if scope.Scoped() {
+		call += "#" + scope.RoomID + "/" + strings.Join(scope.ChannelIDs, ",")
+	}
+	f.calls = append(f.calls, call)
 	return 3, f.err
 }
 
@@ -407,5 +411,96 @@ func TestWorkerPurgesExpiredDrafts(t *testing.T) {
 	}
 	if !r.exists(live) || r.exists(expired) {
 		t.Fatalf("blobs: live=%v expired=%v; want only the live draft's bundle kept", r.exists(live), r.exists(expired))
+	}
+}
+
+func (r *rig) chanMsg(t *testing.T, tid, room, channel string, seq int64, age time.Duration) {
+	t.Helper()
+	payload, _ := json.Marshal(map[string]any{"text": "hello", "userId": "maya"})
+	if err := r.b.Chat.AppendRoomMessage(tenant.NewContext(context.Background(), tid), store.RoomMessage{
+		RoomID: room, ChannelID: channel, Seq: seq, Kind: "chat_message", Author: "maya", Payload: payload, CreatedAtMs: r.now.Add(-age).UnixMilli(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A channel's own retention (C22, E1-E4): a channel shorter than its
+// organization purges its messages older than its days; one longer keeps
+// the organization's (a channel only shortens); a thread follows its parent;
+// another channel of the room is untouched; each channel purge is one audit
+// row and one scoped search purge.
+func TestWorkerPurgesChannelRetention(t *testing.T) {
+	r := newRig(t)
+	ctx := context.Background()
+	if _, err := r.b.Tenant.SetTenantRetention(ctx, "acme", wire.RetentionPolicy{MessagesDays: days(90)}); err != nil {
+		t.Fatal(err)
+	}
+	actx := tenant.NewContext(ctx, "acme")
+	put := func(c store.RoomChannel) {
+		t.Helper()
+		c.TenantID, c.RoomID, c.CreatedBy, c.CreatedAtMs = "acme", "room-1", "maya", 1
+		if err := r.b.Channel.PutChannel(actx, c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	put(store.RoomChannel{ChannelID: "eph", Name: "eph", Settings: wire.ChannelSettings{RetentionDays: 7}})
+	put(store.RoomChannel{ChannelID: "long", Name: "long", Settings: wire.ChannelSettings{RetentionDays: 365}})
+	put(store.RoomChannel{ChannelID: "plain", Name: "plain"})
+	put(store.RoomChannel{ChannelID: "th", Name: "t", Kind: store.ChannelKindThread, ParentID: "eph", RootSeq: 1})
+	r.chanMsg(t, "acme", "room-1", "eph", 1, 10*day)
+	r.chanMsg(t, "acme", "room-1", "th", 2, 10*day)
+	r.chanMsg(t, "acme", "room-1", "long", 3, 120*day)
+	r.chanMsg(t, "acme", "room-1", "long", 4, 30*day)
+	r.chanMsg(t, "acme", "room-1", "plain", 5, 10*day)
+	r.chanMsg(t, "acme", "room-1", "eph", 6, time.Hour)
+	idx := &fakeSearch{}
+	r.w.Search, r.w.Channels = idx, r.b.Channel
+
+	if _, err := r.w.RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	seqs := func(ch string) []int64 {
+		msgs, err := r.b.Chat.RoomHistory(actx, "room-1", ch, 0, 50)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []int64
+		for _, m := range msgs {
+			out = append(out, m.Seq)
+		}
+		return out
+	}
+	if got := seqs("eph"); len(got) != 1 || got[0] != 6 {
+		t.Fatalf("the 7-day channel = %v, want only its new message", got)
+	}
+	if got := seqs("th"); len(got) != 0 {
+		t.Fatalf("its thread = %v, want its parent's days applied", got)
+	}
+	if got := seqs("long"); len(got) != 1 || got[0] != 4 {
+		t.Fatalf("the 365-day channel = %v, want the organization's 90 days", got)
+	}
+	if got := seqs("plain"); len(got) != 1 {
+		t.Fatalf("a channel without its own retention lost its message: %v", got)
+	}
+	wantScope := "acme@" + strconv.FormatInt(r.now.Add(-7*day).UnixMilli(), 10) + "#room-1/eph,th"
+	found := false
+	for _, c := range idx.calls {
+		found = found || c == wantScope
+	}
+	if !found {
+		t.Fatalf("search purges = %v, want %s", idx.calls, wantScope)
+	}
+	recs, _ := r.b.ExtAudit.(store.AuditLogReader).AuditLog(ctx, store.AuditLogQuery{AllTenants: true, Limit: 100})
+	n := 0
+	for _, rec := range recs {
+		if rec.Action == "purge-channel" {
+			n++
+			if !strings.Contains(rec.Detail, "room-1") || !strings.Contains(rec.Detail, "eph,th") || !strings.Contains(rec.Detail, "7 days") {
+				t.Fatalf("the channel purge's audit = %q", rec.Detail)
+			}
+		}
+	}
+	if n != 1 {
+		t.Fatalf("%d channel purge audit rows, want 1", n)
 	}
 }

@@ -124,6 +124,37 @@ type ChannelSettings struct {
 	// PostTemplate is what a new post in a forum starts from in the
 	// composer (fields to fill).
 	PostTemplate string `json:"postTemplate,omitempty"`
+	// RetentionDays keeps the channel's messages that many days (C22): the
+	// shorter of it and the organization's message retention applies
+	// (EffectiveChannelRetention); 0 follows the organization alone. A
+	// thread follows its parent unless its own is shorter (E1).
+	RetentionDays int `json:"retentionDays,omitempty"`
+	// Tabs are what the channel pins beside its chat (§2.1c, E5): at most
+	// MaxChannelTabs, each an interactive app or a file of the room.
+	Tabs []ChannelTab `json:"tabs,omitempty"`
+}
+
+// ChannelTab is one pinned tab of a channel: a deliverable of the room (an
+// interactive app or a file), named by its artifact id; Title is the tab's
+// label ("" shows the deliverable's own title).
+type ChannelTab struct {
+	ArtifactID string `json:"artifactId"`
+	Title      string `json:"title,omitempty"`
+}
+
+// EffectiveChannelRetention is the days a channel's messages are kept: the
+// shorter of the channel's own (0 = none) and the organization's (nil =
+// none); nil when neither limits it (E2: a channel only shortens). The one
+// rule of a channel's retention.
+func EffectiveChannelRetention(channelDays int, orgDays *int) *int {
+	switch {
+	case channelDays <= 0:
+		return orgDays
+	case orgDays != nil && *orgDays > 0 && *orgDays < channelDays:
+		return orgDays
+	}
+	d := channelDays
+	return &d
 }
 
 // Forum reports whether a channel of these settings takes every top-level

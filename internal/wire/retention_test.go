@@ -54,3 +54,32 @@ func TestEffectiveRetention(t *testing.T) {
 		t.Fatalf("json = %s", raw)
 	}
 }
+
+// A channel only shortens the organization's retention (C22, E2): the
+// shorter applies; no channel setting follows the organization; neither
+// keeps forever.
+func TestEffectiveChannelRetention(t *testing.T) {
+	d := func(n int) *int { return &n }
+	val := func(p *int) int {
+		if p == nil {
+			return -1
+		}
+		return *p
+	}
+	for _, c := range []struct {
+		channel int
+		org     *int
+		want    int
+	}{
+		{0, nil, -1},
+		{0, d(90), 90},
+		{7, nil, 7},
+		{7, d(90), 7},
+		{120, d(90), 90},
+		{30, d(0), 30},
+	} {
+		if got := val(EffectiveChannelRetention(c.channel, c.org)); got != c.want {
+			t.Errorf("EffectiveChannelRetention(%d, %v) = %d, want %d", c.channel, val(c.org), got, c.want)
+		}
+	}
+}

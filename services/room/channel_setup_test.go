@@ -145,6 +145,12 @@ func TestChannelPatchAuthority(t *testing.T) {
 		{"agentParticipation": "always"},
 		{"slowModeSeconds": -1},
 		{"defaultAgent": map[string]any{"provider": "codex"}},
+		{"retentionDays": -1},
+		{"retentionDays": wire.MaxChannelRetentionDays + 1},
+		{"tabs": []map[string]any{{"artifactId": ""}}},
+		{"tabs": []map[string]any{{"artifactId": "a1"}, {"artifactId": "a1"}}},
+		{"tabs": []map[string]any{{"artifactId": "a1", "title": strings.Repeat("t", wire.MaxChannelTabTitle+1)}}},
+		{"tabs": []map[string]any{{"artifactId": "a1"}, {"artifactId": "a2"}, {"artifactId": "a3"}, {"artifactId": "a4"}, {"artifactId": "a5"}, {"artifactId": "a6"}}},
 	} {
 		e.patch("bob", design.ChannelID, map[string]any{"settings": bad}, http.StatusBadRequest)
 	}
@@ -152,6 +158,12 @@ func TestChannelPatchAuthority(t *testing.T) {
 		"whoPosts": "admins", "noAgents": true, "slowModeSeconds": 30, "agentParticipation": "questions",
 		"defaultAgent": map[string]any{"ownerId": " jack ", "core": "nimbus", "provider": "codex"},
 	}}, http.StatusOK)
+	kept := e.patch("bob", design.ChannelID, map[string]any{"settings": map[string]any{
+		"retentionDays": 7, "tabs": []map[string]any{{"artifactId": " a1 ", "title": " Run  book "}},
+	}}, http.StatusOK)
+	if kept.Settings.RetentionDays != 7 || len(kept.Settings.Tabs) != 1 || kept.Settings.Tabs[0] != (wire.ChannelTab{ArtifactID: "a1", Title: "Run book"}) {
+		t.Fatalf("retention and tabs = %+v", kept.Settings)
+	}
 	if s := got.Settings; s.WhoPosts != "admins" || !s.NoAgents || s.SlowModeSeconds != 30 || s.AgentParticipation != "questions" ||
 		s.DefaultAgent == nil || *s.DefaultAgent != (wire.ChannelAgent{OwnerID: "jack", Core: "nimbus", Provider: "codex"}) {
 		t.Fatalf("settings = %+v", got.Settings)
