@@ -74,7 +74,10 @@ func TestRoomJobEventsOnAJobsEnd(t *testing.T) {
 	f.publishRoom("room-1", jobUpdated(reviewer, store.AgentJobReplied, ""))
 	eventually(t, "the review channel's job set its task", func() bool { return taken(inReview.ScheduleID) != nil })
 
-	for _, c := range []struct {
+	// Each outcome has its own task (filtered to its job): a task keeps the
+	// latest event only, and job events dispatch concurrently, so one task
+	// shared by the cases could hold any of them.
+	for i, c := range []struct {
 		status store.AgentJobStatus
 		reason store.AgentJobFailureReason
 		want   string
@@ -83,17 +86,18 @@ func TestRoomJobEventsOnAJobsEnd(t *testing.T) {
 		{store.AgentJobTimedOut, "", wire.RoomJobFailed},
 		{store.AgentJobCancelled, "", wire.RoomJobCancelled},
 	} {
-		j := f.putJob(store.AgentJob{JobID: "job_" + string(c.status), ChannelID: "ch_write", MessageSeq: 20 + int64(len(c.status))})
+		jobID := "job_" + string(c.status)
+		body := eventBody("Note "+jobID+".", room, "bnbloc/room", "room.job.*")
+		body["recurrence"].(map[string]any)["filter"] = map[string]any{"subject": jobID}
+		one := f.create("alice", body)
+		j := f.putJob(store.AgentJob{JobID: jobID, ChannelID: "ch_write", MessageSeq: 20 + int64(i)})
 		f.publishRoom("room-1", jobUpdated(j, c.status, c.reason))
-		eventually(t, c.want+" for "+string(c.status), func() bool {
-			ev := taken(all.ScheduleID)
-			return ev != nil && ev.Subject == j.JobID
-		})
-		ev := taken(all.ScheduleID)
-		data = wire.RoomJobEndedData{}
-		_ = json.Unmarshal(ev.Data, &data)
-		if ev.Type != c.want || data.Status != string(c.status) || data.FailureReason != string(c.reason) {
-			t.Fatalf("%s: event %s, data %+v", c.status, ev.Type, data)
+		var ev *wire.CloudEvent
+		eventually(t, c.want+" for "+string(c.status), func() bool { ev = taken(one.ScheduleID); return ev != nil })
+		got := wire.RoomJobEndedData{}
+		_ = json.Unmarshal(ev.Data, &got)
+		if ev.Type != c.want || ev.Subject != jobID || got.Status != string(c.status) || got.FailureReason != string(c.reason) {
+			t.Fatalf("%s: event %s %s, data %+v", c.status, ev.Type, ev.Subject, got)
 		}
 	}
 }
