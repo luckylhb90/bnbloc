@@ -125,6 +125,12 @@ const (
 	// derive from a provider name without listing targets (a manifest's
 	// targetIdPrefix). Endpoint-independent like CapabilityDiscover.
 	CapabilityResolveTarget Capability = "resolveTarget"
+	// CapabilityPendingTargets (PendingTargetsLister): the core says which of
+	// its agents it is still checking (an agent just (re)started, not yet
+	// answered): neither available nor gone. A caller keeps what it knew of
+	// such an agent instead of taking it for removed
+	// (docs/bugs/2026-11-03-room-roster-stuck-on-a-short-list.md).
+	CapabilityPendingTargets Capability = "pendingTargets"
 )
 
 // ErrCapabilityMissing matches (errors.Is) every refusal of a request a core
@@ -273,6 +279,15 @@ type SessionFiles interface {
 	// ListSessionFiles. The bytes are exact only when the core also reports
 	// CapabilitySessionFileBytes; otherwise they are the core's text rendering.
 	ReadSessionFile(ctx context.Context, ep Endpoint, workspaceID, sessionID, relPath string) ([]byte, error)
+}
+
+// PendingTargetsLister is implemented by cores that list, with their
+// available targets, the agents they are still checking (by target id):
+// ListTargets answers the available ones; PendingTargets the ones that are
+// neither available nor gone yet. Asked through As with
+// CapabilityPendingTargets.
+type PendingTargetsLister interface {
+	ListTargetsPending(ctx context.Context, ep Endpoint) (targets []Target, pending []string, err error)
 }
 
 // SessionWorkdirReporter is implemented by cores that report an agent

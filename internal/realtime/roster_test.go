@@ -1,6 +1,7 @@
 package realtime
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/luckylhb90/bnbloc/internal/wire"
@@ -19,7 +20,7 @@ func TestRosterAdvertiseThenDeferredWithdraw(t *testing.T) {
 	var events []wire.Event
 	r, timers := newTestRoster(func(ev wire.Event) { events = append(events, ev) })
 
-	r.Advertise("room-1", "alice", []AgentRef{{Core: "acme", Provider: "codex"}})
+	sub := r.Advertise("room-1", "alice", []AgentRef{{Core: "acme", Provider: "codex"}})
 	if len(events) != 1 || events[0].Kind != "agent_roster" {
 		t.Fatalf("advertise events = %v, want one agent_roster", kinds(events))
 	}
@@ -27,7 +28,7 @@ func TestRosterAdvertiseThenDeferredWithdraw(t *testing.T) {
 		t.Fatalf("snapshot = %+v, want alice/codex", got)
 	}
 
-	r.Withdraw("room-1", "alice")
+	r.Withdraw(sub)
 	// Withdraw is deferred: nothing emitted yet, and the agent is still listed.
 	if len(events) != 1 {
 		t.Fatalf("after withdraw events = %v, want no new event before grace", kinds(events))
@@ -51,8 +52,7 @@ func TestRosterReadvertiseCancelsWithdrawNoChurn(t *testing.T) {
 	var events []wire.Event
 	r, timers := newTestRoster(func(ev wire.Event) { events = append(events, ev) })
 
-	r.Advertise("room-1", "alice", []AgentRef{{Core: "acme", Provider: "codex"}})
-	r.Withdraw("room-1", "alice")
+	r.Withdraw(r.Advertise("room-1", "alice", []AgentRef{{Core: "acme", Provider: "codex"}}))
 	// Reconnect with the same set: cancels withdraw, emits nothing (no change).
 	r.Advertise("room-1", "alice", []AgentRef{{Core: "acme", Provider: "codex"}})
 	if len(events) != 1 {
@@ -93,14 +93,14 @@ func TestRosterRefcountDefersOnLastWithdraw(t *testing.T) {
 	var events []wire.Event
 	r, timers := newTestRoster(func(ev wire.Event) { events = append(events, ev) })
 
-	r.Advertise("room-1", "alice", []AgentRef{{Provider: "codex"}})
-	r.Advertise("room-1", "alice", []AgentRef{{Provider: "codex"}}) // second device
-	r.Withdraw("room-1", "alice")                                   // one reference remains
+	first := r.Advertise("room-1", "alice", []AgentRef{{Provider: "codex"}})
+	second := r.Advertise("room-1", "alice", []AgentRef{{Provider: "codex"}}) // second device
+	r.Withdraw(first)                                                         // one reference remains
 	timers.fire()
 	if got := r.Snapshot("room-1"); len(got) != 1 {
 		t.Fatalf("snapshot with one live ref = %+v, want agent retained", got)
 	}
-	r.Withdraw("room-1", "alice") // last reference
+	r.Withdraw(second) // last reference
 	timers.fire()
 	if got := r.Snapshot("room-1"); len(got) != 0 {
 		t.Fatalf("snapshot after last withdraw = %+v, want empty", got)
@@ -134,4 +134,85 @@ func rosterAgents(ev wire.Event) []wire.RosterAgent {
 		return nil
 	}
 	return agents
+}
+
+// Two live subscriptions of one owner with different lists (the bridge
+// re-subscribed after its list changed; the older stream is still closing, or
+// its retry lands late): the room shows the NEWEST subscription's list, and
+// closing either one, in either order, never leaves an older list behind
+// (docs/bugs/2026-11-03-room-roster-stuck-on-a-short-list.md).
+func TestRosterNewestSubscriptionWinsInEitherOrder(t *testing.T) {
+	short := []AgentRef{{Core: "acp", Provider: "kilo-sandbox"}}
+	full := []AgentRef{{Core: "acp", Provider: "kilo-sandbox"}, {Core: "acp", Provider: "opencode"}}
+	providers := func(r *AgentRoster) string {
+		var p []string
+		for _, a := range r.Snapshot("room-1") {
+			p = append(p, a.Provider)
+		}
+		return strings.Join(p, ",")
+	}
+	for _, c := range []struct {
+		name  string
+		steps func(r *AgentRoster)
+		want  string
+	}{
+		{"the short stream closes after the full one opened", func(r *AgentRoster) {
+			old := r.Advertise("room-1", "me", short)
+			r.Advertise("room-1", "me", full)
+			r.Withdraw(old)
+		}, "kilo-sandbox,opencode"},
+		{"the full stream opens after the short one closed", func(r *AgentRoster) {
+			r.Withdraw(r.Advertise("room-1", "me", short))
+			r.Advertise("room-1", "me", full)
+		}, "kilo-sandbox,opencode"},
+		{"an older stream's late advertisement does not overwrite the newer one (the stuck room)", func(r *AgentRoster) {
+			gone := r.Advertise("room-1", "me", full) // before the core restart
+			newer := r.Advertise("room-1", "me", full)
+			r.Withdraw(gone)
+			late := r.Advertise("room-1", "me", short) // a retry from before the restart, landing now
+			_ = newer
+			r.Withdraw(late) // it closes when the bridge sees it is stale
+		}, "kilo-sandbox,opencode"},
+		{"both live: the newer one is the owner's list", func(r *AgentRoster) {
+			r.Advertise("room-1", "me", short)
+			r.Advertise("room-1", "me", full)
+		}, "kilo-sandbox,opencode"},
+		{"a newer short list replaces a full one (an agent really went)", func(r *AgentRoster) {
+			old := r.Advertise("room-1", "me", full)
+			r.Advertise("room-1", "me", short)
+			r.Withdraw(old)
+		}, "kilo-sandbox"},
+		{"the newer stream closes first: the older one's list is all that is live", func(r *AgentRoster) {
+			r.Advertise("room-1", "me", short)
+			r.Withdraw(r.Advertise("room-1", "me", full))
+		}, "kilo-sandbox"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			r, _ := newTestRoster(nil)
+			c.steps(r)
+			if got := providers(r); got != c.want {
+				t.Fatalf("roster = %s, want %s", got, c.want)
+			}
+		})
+	}
+}
+
+// A withdrawn subscription's handle does nothing a second time, and an
+// unknown one is ignored.
+func TestRosterWithdrawIsOnceAndByHandle(t *testing.T) {
+	r, timers := newTestRoster(nil)
+	a := r.Advertise("room-1", "me", []AgentRef{{Provider: "codex"}})
+	b := r.Advertise("room-1", "me", []AgentRef{{Provider: "codex"}})
+	r.Withdraw(a)
+	r.Withdraw(a)
+	r.Withdraw(RosterSub{room: "room-1", owner: "me", seq: 999})
+	timers.fire()
+	if got := r.Snapshot("room-1"); len(got) != 1 {
+		t.Fatalf("a repeated withdraw removed a live subscription: %+v", got)
+	}
+	r.Withdraw(b)
+	timers.fire()
+	if got := r.Snapshot("room-1"); len(got) != 0 {
+		t.Fatalf("after the last withdraw: %+v", got)
+	}
 }

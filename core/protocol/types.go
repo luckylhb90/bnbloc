@@ -63,6 +63,9 @@ const (
 	// CapabilityExecutionRefresh: PUT .../sessions/{sid}/execution hands a
 	// running sandboxed session a fresh Execution (its renewed exec token).
 	CapabilityExecutionRefresh = string(core.CapabilityExecutionRefresh)
+	// CapabilityPendingTargets: GET /core/v1/targets also lists, in
+	// `pending`, the target ids of agents the core is still checking.
+	CapabilityPendingTargets = string(core.CapabilityPendingTargets)
 )
 
 // Capabilities lists every Core Protocol capability name: the one registry
@@ -72,6 +75,7 @@ var Capabilities = []string{
 	CapabilityInterrupt, CapabilitySteer, CapabilityWriteFile, CapabilityDeleteWorkspace, CapabilitySandboxExec,
 	CapabilitySessionFiles, CapabilitySessionFileBytes, CapabilityAgentProfile, CapabilityDiscover,
 	CapabilityTurnActivity, CapabilityExecutionRefresh, CapabilityEgressProvider, CapabilityProfilePerSession,
+	CapabilityPendingTargets,
 }
 
 // KnownCapability reports whether name is a Core Protocol capability.
@@ -442,6 +446,9 @@ type Target struct {
 
 type ListTargetsResponse struct {
 	Targets []Target `json:"targets"`
+	// Pending are the ids of agents the core is still checking (neither in
+	// Targets nor gone): a core advertising pendingTargets fills it.
+	Pending []string `json:"pending,omitempty"`
 }
 
 // Message is one session message on the wire (see core.Message). Version is

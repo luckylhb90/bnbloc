@@ -175,14 +175,30 @@ func (c *Client) SendInput(ctx context.Context, ep core.Endpoint, workspaceID, s
 }
 
 func (c *Client) ListTargets(ctx context.Context, ep core.Endpoint) ([]core.Target, error) {
+	ts, _, err := c.listTargets(ctx, ep)
+	return ts, err
+}
+
+// ListTargetsPending implements core.PendingTargetsLister (usable when the
+// core advertises pendingTargets; without it a call returns
+// capability_missing, so a caller never reads an absent list as "nothing is
+// pending").
+func (c *Client) ListTargetsPending(ctx context.Context, ep core.Endpoint) ([]core.Target, []string, error) {
+	if err := c.requireCapability(ctx, ep, CapabilityPendingTargets); err != nil {
+		return nil, nil, err
+	}
+	return c.listTargets(ctx, ep)
+}
+
+func (c *Client) listTargets(ctx context.Context, ep core.Endpoint) ([]core.Target, []string, error) {
 	if _, err := c.Discovery(ctx, ep); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var out ListTargetsResponse
 	if err := c.getJSON(ctx, ep, PathTargets, &out); err != nil {
-		return nil, fmt.Errorf("list targets: %w", err)
+		return nil, nil, fmt.Errorf("list targets: %w", err)
 	}
-	return out.Core(), nil
+	return out.Core(), out.Pending, nil
 }
 
 func (c *Client) Messages(ctx context.Context, ep core.Endpoint, workspaceID, sessionID string, after int64) ([]core.Message, int64, error) {

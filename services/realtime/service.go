@@ -640,8 +640,8 @@ func (s *Service) handleEvents(w http.ResponseWriter, r *http.Request) {
 	// An agent host advertises nothing: a platform agent is offered through
 	// the room's platform-agent listing, not as the host's own roster.
 	if adv := parseAgentRefs(r.URL.Query().Get("agents"), r.URL.Query().Get("sandboxed")); human && len(adv) > 0 {
-		s.Roster.Advertise(roomID, userID, adv)
-		defer s.Roster.Withdraw(roomID, userID)
+		sub := s.Roster.Advertise(roomID, userID, adv)
+		defer s.Roster.Withdraw(sub)
 	}
 	// Open the stream with body bytes: an edge proxy may hold the response
 	// headers until the first body byte, so a quiet room would otherwise

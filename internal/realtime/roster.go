@@ -26,23 +26,53 @@ type AgentRef struct {
 // user's laptop to list their agents, but the user's own bridge dials OUTBOUND
 // and advertises exactly what it serves.
 //
-// Liveness mirrors Presence: the roster is refcounted per (room, owner) so a
-// bridge's reconnect (SSE drop + retry) does not churn, and an owner's agents
-// are withdrawn only after a short grace window with no live subscription. A
-// snapshot is emitted whenever the room's advertised set actually changes.
+// Each subscription's advertisement is its own (Advertise returns its handle,
+// Withdraw takes it): an owner's agents in a room are those of the owner's
+// newest live subscription, never whichever subscription advertised last. A
+// bridge re-subscribes when its list changes, so an older subscription still
+// open (closing, or a retry that lands late) carries an older list; with one
+// list per owner it overwrote the newer one, and nothing corrected it
+// (docs/bugs/2026-11-03-room-roster-stuck-on-a-short-list.md). Liveness
+// mirrors Presence: when an owner's last subscription closes their agents are
+// withdrawn after a short grace window, so a reconnect (SSE drop + retry) does
+// not churn. A snapshot is emitted whenever the room's advertised set changes.
 type AgentRoster struct {
 	mu      sync.Mutex
 	rooms   map[string]map[string]*rosterOwner // roomID -> ownerID -> state
 	pending map[string]*time.Timer             // "roomID\x00ownerID" -> pending withdraw
+	seq     uint64                             // the last subscription's order
 	publish func(wire.Event)
 	after   func(time.Duration, func()) *time.Timer
 }
 
-// rosterOwner is one owner's advertised agents in a room, refcounted by live
-// subscriptions so multiple devices/reconnects collapse to one entry.
+// rosterOwner is one owner's live subscriptions in a room, by handle, and the
+// list kept through a pending withdraw (the grace window).
 type rosterOwner struct {
-	refs   int
-	agents []AgentRef
+	subs    map[uint64][]AgentRef
+	lingers []AgentRef
+}
+
+// RosterSub is one subscription's advertisement: the handle Withdraw takes.
+type RosterSub struct {
+	room, owner string
+	seq         uint64
+}
+
+// agents is the owner's current list: the newest live subscription's, else
+// the one kept through a pending withdraw.
+func (o *rosterOwner) agents() []AgentRef {
+	var newest uint64
+	var out []AgentRef
+	found := false
+	for seq, a := range o.subs {
+		if !found || seq > newest {
+			newest, out, found = seq, a, true
+		}
+	}
+	if !found {
+		return o.lingers
+	}
+	return out
 }
 
 // NewAgentRoster constructs a tracker that emits snapshots via publish.
@@ -57,11 +87,10 @@ func NewAgentRoster(publish func(wire.Event)) *AgentRoster {
 
 func rosterKey(roomID, ownerID string) string { return roomID + "\x00" + ownerID }
 
-// Advertise records that ownerID's bridge serves agents in roomID. The first
-// live reference (or one arriving during a pending withdraw) publishes the new
-// snapshot; a reconnect within the grace window cancels the withdraw without
-// churn. Refreshing an owner's agent set to a new value also republishes.
-func (r *AgentRoster) Advertise(roomID, ownerID string, agents []AgentRef) {
+// Advertise records a new subscription of ownerID's bridge in roomID serving
+// agents, and returns its handle. A subscription opened during a pending
+// withdraw cancels it; the room's snapshot is published when its set changed.
+func (r *AgentRoster) Advertise(roomID, ownerID string, agents []AgentRef) RosterSub {
 	agents = normalizeAgents(agents)
 	r.mu.Lock()
 	if r.rooms[roomID] == nil {
@@ -74,57 +103,68 @@ func (r *AgentRoster) Advertise(roomID, ownerID string, agents []AgentRef) {
 	}
 	cur := r.rooms[roomID][ownerID]
 	if cur == nil {
-		cur = &rosterOwner{}
+		cur = &rosterOwner{subs: map[uint64][]AgentRef{}}
 		r.rooms[roomID][ownerID] = cur
 	}
-	changed := !sameAgents(cur.agents, agents)
-	cur.refs++
-	cur.agents = agents
-	snapshot := r.snapshotLocked(roomID)
+	before := r.snapshotLocked(roomID)
+	r.seq++
+	sub := RosterSub{room: roomID, owner: ownerID, seq: r.seq}
+	cur.subs[sub.seq] = agents
+	cur.lingers = nil
+	after := r.snapshotLocked(roomID)
 	r.mu.Unlock()
-
 	// Publish only on a genuine change to the room's advertised set, so a
 	// reconnect that re-advertises the same agents does not churn subscribers.
-	if changed {
-		r.emit(roomID, snapshot)
+	if !sameRoster(before, after) {
+		r.emit(roomID, after)
 	}
+	return sub
 }
 
-// Withdraw drops one live reference for ownerID in roomID. When the last
-// reference goes, the withdraw is deferred by leaveGrace; a re-Advertise within
-// the window cancels it, so a flaky bridge connection never flickers the roster.
-func (r *AgentRoster) Withdraw(roomID, ownerID string) {
+// Withdraw ends one subscription. Its list stops counting at once (an older
+// subscription closing never leaves its list behind); when it was the owner's
+// last, their agents stay through leaveGrace and go unless a new
+// subscription arrives, so a flaky bridge connection never flickers the
+// roster.
+func (r *AgentRoster) Withdraw(sub RosterSub) {
 	r.mu.Lock()
-	owners := r.rooms[roomID]
-	cur := owners[ownerID]
-	if cur == nil || cur.refs == 0 {
+	cur := r.rooms[sub.room][sub.owner]
+	if cur == nil {
 		r.mu.Unlock()
 		return
 	}
-	cur.refs--
-	if cur.refs > 0 {
+	if _, live := cur.subs[sub.seq]; !live {
 		r.mu.Unlock()
-		return // other live subscriptions remain
+		return
 	}
-	key := rosterKey(roomID, ownerID)
-	if t := r.pending[key]; t != nil {
-		t.Stop()
+	before := r.snapshotLocked(sub.room)
+	last := cur.agents()
+	delete(cur.subs, sub.seq)
+	if len(cur.subs) == 0 {
+		cur.lingers = last
+		key := rosterKey(sub.room, sub.owner)
+		if t := r.pending[key]; t != nil {
+			t.Stop()
+		}
+		r.pending[key] = r.after(leaveGrace, func() { r.finalizeWithdraw(sub.room, sub.owner) })
 	}
-	r.pending[key] = r.after(leaveGrace, func() { r.finalizeWithdraw(roomID, ownerID) })
+	after := r.snapshotLocked(sub.room)
 	r.mu.Unlock()
+	if !sameRoster(before, after) {
+		r.emit(sub.room, after)
+	}
 }
 
-// finalizeWithdraw removes an owner whose grace window elapsed with no
-// re-advertise, then publishes the shrunken snapshot.
+// finalizeWithdraw removes an owner whose grace window elapsed with no new
+// subscription, then publishes the shrunken snapshot.
 func (r *AgentRoster) finalizeWithdraw(roomID, ownerID string) {
 	r.mu.Lock()
 	key := rosterKey(roomID, ownerID)
 	delete(r.pending, key)
 	owners := r.rooms[roomID]
 	cur := owners[ownerID]
-	// A re-advertise during the window would have incremented refs; only
-	// finalize if still at zero live references.
-	if cur == nil || cur.refs > 0 {
+	// A subscription that arrived during the window keeps the owner.
+	if cur == nil || len(cur.subs) > 0 {
 		r.mu.Unlock()
 		return
 	}
@@ -149,7 +189,7 @@ func (r *AgentRoster) snapshotLocked(roomID string) []wire.RosterAgent {
 	owners := r.rooms[roomID]
 	out := make([]wire.RosterAgent, 0)
 	for owner, st := range owners {
-		for _, a := range st.agents {
+		for _, a := range st.agents() {
 			out = append(out, wire.RosterAgent{OwnerUserID: owner, Core: a.Core, Provider: a.Provider, Sandboxed: a.Sandboxed})
 		}
 	}
@@ -193,8 +233,8 @@ func normalizeAgents(in []AgentRef) []AgentRef {
 	return out
 }
 
-// sameAgents reports whether two normalized agent sets are equal.
-func sameAgents(a, b []AgentRef) bool {
+// sameRoster reports whether two snapshots are equal.
+func sameRoster(a, b []wire.RosterAgent) bool {
 	if len(a) != len(b) {
 		return false
 	}

@@ -26,12 +26,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	corepkg "github.com/luckylhb90/bnbloc/core"
@@ -1056,7 +1058,7 @@ func (b *Bridge) refreshTargets(ctx context.Context) {
 		if !ok || !entry.endpoint.OK() {
 			continue
 		}
-		if ts, err := entry.provider.ListTargets(listCtx, entry.endpoint); err == nil {
+		if ts, ok := listTargetsKeepingPending(listCtx, entry, b.cachedTargets(name)); ok {
 			b.cacheTargets(name, ts)
 		}
 	}
@@ -1419,6 +1421,10 @@ func (b *Bridge) streamRoom(ctx context.Context, room string) {
 		if ctx.Err() != nil {
 			return
 		}
+		if errors.Is(err, errReadvertise) {
+			backoff = time.Second
+			continue // reopened on purpose: at once, no warning
+		}
 		if errors.Is(err, errRoomDeleted) {
 			// The room said it was deleted: evidence for the cleanup sweep.
 			b.workspaces.markGone(room, b.clock().UnixMilli())
@@ -1486,9 +1492,23 @@ func (b *Bridge) consumeRoom(ctx context.Context, room string) error {
 	// Bridge v2 never drives work from SSE — durable jobs carry the prompt. The
 	// one thing worth listening for is a job leaving this bridge's hands: a member
 	// pressing stop must halt the local turn now, not at the next lease renewal.
+	// The subscription is reopened after rosterReadvertise (a stagger per
+	// room), so the room's roster is re-confirmed from this bridge's current
+	// list even when nothing changed here: whatever the server lost or kept
+	// stale (a replica restart, a missed message) heals within that time.
+	// decision: owner accepted 2026-11-03 (roster bug, periodic re-advertise)
+	var reopening atomic.Bool
+	readvertise := time.AfterFunc(rosterReadvertiseAfter(room), func() {
+		reopening.Store(true)
+		_ = resp.Body.Close()
+	})
+	defer readvertise.Stop()
 	rd := sse.NewReader(resp.Body)
 	for {
 		ev, err := rd.Next()
+		if reopening.Load() {
+			return errReadvertise
+		}
 		if errors.Is(err, io.EOF) {
 			return nil
 		}
@@ -1508,6 +1528,22 @@ func (b *Bridge) consumeRoom(ctx context.Context, room string) error {
 			b.recordGesture(room, parseGesture(string(ev.Data)))
 		}
 	}
+}
+
+// errReadvertise ends a room stream reopened on purpose (consumeRoom).
+var errReadvertise = errors.New("room stream reopened to re-advertise the roster")
+
+// rosterReadvertise is how often a room subscription is reopened to
+// re-advertise the roster (consumeRoom).
+var rosterReadvertise = 10 * time.Minute
+
+// rosterReadvertiseAfter is the room's reopen time: rosterReadvertise plus a
+// stagger of up to a fifth of it, from the room id, so a bridge's rooms do not
+// all reconnect at once.
+func rosterReadvertiseAfter(room string) time.Duration {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(room))
+	return rosterReadvertise + time.Duration(h.Sum32()%1000)*rosterReadvertise/5000
 }
 
 // maxLiveGestures bounds a room's trail: the newest kept.
@@ -2275,6 +2311,40 @@ func (b *Bridge) cacheTargets(name string, ts []corepkg.Target) {
 	}
 	b.targetCache[name] = ts
 	b.rosterMu.Unlock()
+}
+
+// listTargetsKeepingPending lists a core's targets for the roster. An agent
+// the core says it is still checking (pendingTargets: it just restarted and
+// has not answered yet) keeps its entry from before, so a core restart never
+// reads as the member's agents going away and coming back
+// (docs/bugs/2026-11-03-room-roster-stuck-on-a-short-list.md). A core without
+// the capability is listed as it answers. ok is false when the list failed
+// (the cache is kept).
+// decision: owner accepted 2026-11-03 (roster bug, option A)
+func listTargetsKeepingPending(ctx context.Context, entry coreEntry, before []corepkg.Target) ([]corepkg.Target, bool) {
+	lister, has := corepkg.As[corepkg.PendingTargetsLister](ctx, entry.provider, entry.endpoint, corepkg.CapabilityPendingTargets)
+	if !has {
+		ts, err := entry.provider.ListTargets(ctx, entry.endpoint)
+		return ts, err == nil
+	}
+	ts, pending, err := lister.ListTargetsPending(ctx, entry.endpoint)
+	if err != nil {
+		return nil, false
+	}
+	listed := map[string]bool{}
+	for _, t := range ts {
+		listed[t.ID] = true
+	}
+	stillChecking := map[string]bool{}
+	for _, id := range pending {
+		stillChecking[id] = true
+	}
+	for _, t := range before {
+		if stillChecking[t.ID] && !listed[t.ID] {
+			ts = append(ts, t)
+		}
+	}
+	return ts, true
 }
 
 func (b *Bridge) cachedTargets(name string) []corepkg.Target {

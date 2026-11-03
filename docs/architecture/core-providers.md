@@ -120,6 +120,12 @@ the confined CLI and the guest see them; `execution.sandbox.workdir` must equal
 it. Design:
 [`docs/prd/2026-10-09-agent-vm-sandbox.md`](../prd/2026-10-09-agent-vm-sandbox.md).
 
+`pendingTargets` says `GET /core/v1/targets` also lists, in `pending`, the
+target ids of agents the core is still checking (it just started and they have
+not answered yet). The bridge keeps such an agent in the rooms' roster from
+its last list instead of taking it for removed; a core without the capability
+is read as it answers (an agent it does not list is gone).
+
 `profilePerSession` says an `agentProfile` core gives each session its own
 instructions and never writes them into the shared workspace (an ACP
 adapter's per-session meta, say). Without it the bridge takes the core to
@@ -633,7 +639,7 @@ The bridge/gateway drive it through the protocol client with
    Advertise only the optional
    capabilities you actually serve (`interrupt`, `writeFile`,
    `deleteWorkspace`, `sandboxExec`, `executionRefresh`, `agentProfile`,
-   `profilePerSession`, `turnActivity`, `sessionFiles` + `sessionFileBytes`) —
+   `profilePerSession`, `pendingTargets`, `turnActivity`, `sessionFiles` + `sessionFileBytes`) —
    clients degrade gracefully when a capability is absent.
    **Deliverables** (`sessionFiles` + `sessionFileBytes`, advertised
    together — the wire has only the exact-bytes read):
