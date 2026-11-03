@@ -201,6 +201,9 @@ func (s *Service) Dispatch(ctx context.Context, roomID, caller string, in wire.D
 		Dispatched:  &wire.DispatchMarker{JobID: parent.JobID, ParentSeq: parent.MessageSeq, Depth: depth, Via: agentHandle(parent.OwnerUserID, parent.Provider), Role: in.Role},
 		Expert:      in.Expert,
 		Draft:       strings.TrimSpace(in.Draft),
+		// A dispatched job is the same line of work as its parent.
+		CauseEventID: parent.CauseEventID,
+		ChainEventID: parent.ChainEventID,
 	})
 	refusal, refused := isPostRefusal(err)
 	switch {

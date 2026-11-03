@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/luckylhb90/bnbloc/internal/ids"
+	"github.com/luckylhb90/bnbloc/internal/roomlog"
 	"github.com/luckylhb90/bnbloc/internal/schedule"
 	"github.com/luckylhb90/bnbloc/internal/store"
 	"github.com/luckylhb90/bnbloc/internal/tenant"
@@ -63,24 +64,55 @@ func (s *Service) emitRoomEvents(ctx context.Context, ev wire.Event) {
 		if subject == "" {
 			subject = strings.TrimSpace(p.Title)
 		}
-		s.goRoomEvent(ctx, ev, wire.RoomFileAdded, subject, p.SourceJobID, wire.RoomFileAddedData{
+		s.goRoomEvent(ctx, ev, roomEventOf{typ: wire.RoomFileAdded, subject: subject, causeJob: p.SourceJobID}, wire.RoomFileAddedData{
 			ArtifactID: p.ArtifactID, Kind: p.Kind, Title: p.Title, FileName: p.FileName, MimeType: p.MimeType,
 			Version: p.CurrentVersion, By: p.UpdatedBy,
 		})
 	case wire.EventMemberJoined:
 		if member := joinedMember(ev); member != "" {
-			s.goRoomEvent(ctx, ev, wire.RoomMemberJoined, member, "", wire.RoomMemberJoinedData{UserID: member})
+			s.goRoomEvent(ctx, ev, roomEventOf{typ: wire.RoomMemberJoined, subject: member}, wire.RoomMemberJoinedData{UserID: member})
 		}
 	case wire.EventAppChanged:
 		if c, ok := wire.DecodePayload[wire.AppChanged](ev.Payload); ok && c.AppID != "" {
 			s.appChanged(ctx, ev, c)
 		}
+	case wire.EventAgentJobUpdated:
+		if j, ok := wire.DecodePayload[wire.AgentJob](ev.Payload); ok && j.JobID != "" {
+			if typ := jobEventType(j.Status); typ != "" {
+				s.goRoomEvent(ctx, ev, roomEventOf{typ: typ, subject: j.JobID, causeJob: j.JobID, channel: j.ChannelID, ended: &j}, nil)
+			}
+		}
 	}
+}
+
+// jobEventType is the room event a job status ends with ("" for a status
+// that is not final: a failure the platform retries is requeued, never
+// "failed").
+func jobEventType(status string) string {
+	switch store.AgentJobStatus(status) {
+	case store.AgentJobReplied:
+		return wire.RoomJobReplied
+	case store.AgentJobFailed, store.AgentJobTimedOut:
+		return wire.RoomJobFailed
+	case store.AgentJobCancelled:
+		return wire.RoomJobCancelled
+	}
+	return ""
+}
+
+// roomEventOf is what a room event says before its data: its type and
+// subject, the channel it happened in, and the job that caused it (its
+// cause and chain come from that job). ended is the job update a job
+// event stands for: how the job ended is that update's, never the stored
+// row's (which may lag the update just published).
+type roomEventOf struct {
+	typ, subject, causeJob, channel string
+	ended                           *wire.AgentJob
 }
 
 // goRoomEvent dispatches one room event in the background, under the
 // publish's tenant.
-func (s *Service) goRoomEvent(ctx context.Context, ev wire.Event, typ, subject, causeJob string, data any) {
+func (s *Service) goRoomEvent(ctx context.Context, ev wire.Event, of roomEventOf, data any) {
 	tid := tenant.FromContext(ctx)
 	if tid == "" {
 		return
@@ -88,27 +120,65 @@ func (s *Service) goRoomEvent(ctx context.Context, ev wire.Event, typ, subject, 
 	go func() {
 		ctx, cancel := context.WithTimeout(tenant.NewContext(context.WithoutCancel(ctx), tid), roomEventTimeout)
 		defer cancel()
-		s.dispatchRoomEvent(ctx, tid, ev.RoomID, typ, subject, causeJob, data, time.UnixMilli(serverTimeIfUnset(ev.AtUnixMs)))
+		s.dispatchRoomEvent(ctx, tid, ev.RoomID, of, data, time.UnixMilli(serverTimeIfUnset(ev.AtUnixMs)))
 	}()
 }
 
-// dispatchRoomEvent builds the room's event and dispatches it to the
+// dispatchRoomEvent builds the room's event (with its channel, and the
+// cause and chain of the job that caused it) and dispatches it to the
 // room's own tasks.
-func (s *Service) dispatchRoomEvent(ctx context.Context, tid, roomID, typ, subject, causeJob string, data any, at time.Time) {
+func (s *Service) dispatchRoomEvent(ctx context.Context, tid, roomID string, of roomEventOf, data any, at time.Time) {
+	job, found := s.causeJob(ctx, roomID, of.causeJob)
+	if of.ended != nil {
+		if !found {
+			return // a job event names its job; one that cannot be read emits nothing
+		}
+		data = jobEndedData(*of.ended, job)
+	}
 	raw, err := json.Marshal(data)
 	if err != nil {
 		return
 	}
-	ce, err := wire.ValidEvent(wire.CloudEvent{ID: ids.New("evt_"), Source: wire.SourceRoomPrefix + roomID, Type: typ,
-		Time: wire.EventTime(at), Subject: subject, Data: raw})
+	ce := wire.WithLineage(wire.CloudEvent{ID: ids.New("evt_"), Source: wire.SourceRoomPrefix + roomID, Type: of.typ,
+		Time: wire.EventTime(at), Subject: of.subject, Data: raw}, of.channel, job.CauseEventID, job.ChainEventID)
+	ce, err = wire.ValidEvent(ce)
 	if err != nil {
-		slog.Warn("bnbloc realtime: room event invalid", "room", roomID, "type", typ, "error", err)
+		slog.Warn("bnbloc realtime: room event invalid", "room", roomID, "type", of.typ, "error", err)
 		return
 	}
-	d := eventDelivery{event: ce, reach: store.EventScheduleQuery{Tenants: []string{tid}, RoomID: roomID}, causeRoom: s.causeRoom(ctx, roomID, causeJob)}
+	d := eventDelivery{event: ce, reach: store.EventScheduleQuery{Tenants: []string{tid}, RoomID: roomID}, causeRoom: s.causeRoom(ctx, roomID, of.causeJob)}
 	if _, _, err := s.dispatchEvent(ctx, d, time.Now()); err != nil {
-		slog.Warn("bnbloc realtime: room event dispatch failed", "event", "bnbloc.schedule.room_event_failed", "room", roomID, "type", typ, "error", err)
+		slog.Warn("bnbloc realtime: room event dispatch failed", "event", "bnbloc.schedule.room_event_failed", "room", roomID, "type", of.typ, "error", err)
 	}
+}
+
+// causeJob reads the job that caused a room event (found false for none,
+// or one that cannot be read: the event then starts a chain of its own).
+func (s *Service) causeJob(ctx context.Context, roomID, jobID string) (store.AgentJob, bool) {
+	if jobID == "" || s.Dispatches == nil {
+		return store.AgentJob{}, false
+	}
+	j, err := s.Dispatches.GetAgentRun(ctx, jobID)
+	if err != nil || j.RoomID != roomID {
+		if err != nil && !errors.Is(err, store.ErrAgentJobNotFound) {
+			slog.Warn("bnbloc realtime: a room event's job could not be read", "room", roomID, "job", jobID, "error", err)
+		}
+		return store.AgentJob{}, false
+	}
+	return j, true
+}
+
+// jobEndedData is a job event's data: the job, its agent and requester and
+// how it ended (the update's), and its reply (the stored run's, cut to
+// wire.MaxJobEventReplyBytes).
+func jobEndedData(u wire.AgentJob, j store.AgentJob) wire.RoomJobEndedData {
+	d := wire.RoomJobEndedData{JobID: u.JobID, OwnerID: u.OwnerUserID, Core: u.Core, Provider: u.Provider, Requester: u.RequesterUserID,
+		Status: u.Status, FailureReason: u.FailureReason}
+	if reply, ok := store.RunDiag[wire.AgentRunReply](j, wire.RunDiagReply); ok {
+		d.Reply = roomlog.Truncate(reply.Text, wire.MaxJobEventReplyBytes)
+		d.ReplyCut = len(d.Reply) < len(reply.Text)
+	}
+	return d
 }
 
 // causeRoom is the room whose scheduled run caused what job did ("" for
@@ -177,7 +247,7 @@ func (s *Service) appChanged(ctx context.Context, ev wire.Event, c wire.AppChang
 	}
 	w.open[key] = &appWindow{}
 	w.mu.Unlock()
-	s.goRoomEvent(ctx, ev, wire.RoomAppDataChanged, c.AppID, c.SourceJobID, wire.RoomAppDataChangedData{AppID: c.AppID, Collection: c.Collection, Changes: 1})
+	s.goRoomEvent(ctx, ev, roomEventOf{typ: wire.RoomAppDataChanged, subject: c.AppID, causeJob: c.SourceJobID}, wire.RoomAppDataChangedData{AppID: c.AppID, Collection: c.Collection, Changes: 1})
 	s.closeAppWindowLater(ctx, ev, c, key)
 }
 
@@ -202,7 +272,7 @@ func (s *Service) closeAppWindowLater(ctx context.Context, ev wire.Event, c wire
 		w.mu.Unlock()
 		at := ev
 		at.AtUnixMs = time.Now().UnixMilli()
-		s.goRoomEvent(ctx, at, wire.RoomAppDataChanged, c.AppID, c.SourceJobID, wire.RoomAppDataChangedData{AppID: c.AppID, Collection: collection, Changes: n})
+		s.goRoomEvent(ctx, at, roomEventOf{typ: wire.RoomAppDataChanged, subject: c.AppID, causeJob: c.SourceJobID}, wire.RoomAppDataChangedData{AppID: c.AppID, Collection: collection, Changes: n})
 		s.closeAppWindowLater(ctx, ev, c, key)
 	})
 }

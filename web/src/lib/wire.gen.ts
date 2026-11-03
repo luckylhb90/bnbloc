@@ -4469,10 +4469,38 @@ export const RoomMemberJoined = "room.member.joined";
 // RoomAppDataChanged: an interactive app's data changed, coalesced per
 // app (subject: the app id; data: appId, collection, changes).
 export const RoomAppDataChanged = "room.app.data.changed";
+// RoomJobReplied, RoomJobFailed, RoomJobCancelled: an agent job of the
+// room ended (docs/prd/2026-10-26-rooms-work-together.md §2.3): replied;
+// failed or timed out (data.failureReason says which), on its final
+// attempt only; or stopped by a person (subject: the job id; data:
+// RoomJobEndedData; channel: the job's).
+// decision: owner accepted 2026-11-03 (cancelled is its own type)
+export const RoomJobReplied = "room.job.replied";
+export const RoomJobFailed = "room.job.failed";
+export const RoomJobCancelled = "room.job.cancelled";
 
 // RoomEventTypes is the closed list of room event types, in the order an
 // editor shows them.
-export const RoomEventTypes: readonly string[] = ["room.file.added", "room.member.joined", "room.app.data.changed"];
+export const RoomEventTypes: readonly string[] = ["room.file.added", "room.member.joined", "room.app.data.changed", "room.job.replied", "room.job.failed", "room.job.cancelled"];
+
+// RoomJobEndedData is the data of the room's job events: the job, its
+// agent and requester, how it ended, and the reply's text (cut to
+// MaxJobEventReplyBytes, the cut said in ReplyCut).
+export interface RoomJobEndedData {
+  jobId: string;
+  ownerId: string;
+  core?: string;
+  provider: string;
+  requester: string;
+  status: AgentJobStatus;
+  failureReason?: AgentJobFailureReason;
+  reply?: string;
+  replyCut?: boolean;
+}
+
+// MaxJobEventReplyBytes bounds the reply text a job event carries, so the
+// event stays within MaxEventDataBytes.
+export const MaxJobEventReplyBytes = 12288;
 
 // RoomFileAddedData is the data of RoomFileAdded: the file, the version it
 // got and who published it.
@@ -4510,6 +4538,15 @@ export interface CloudEvent {
   type: string;
   time: string;
   subject?: string;
+  // Channel, Cause and Chain are CloudEvents extension attributes the
+  // platform sets (an emitter's own values are replaced,
+  // docs/prd/2026-10-26-rooms-work-together.md §2.1, §2.2): the room's
+  // channel it happened in ("" room-wide); the event whose run produced
+  // this one ("" for none); the first event of its line of work (an event
+  // with no cause starts one: its own id).
+  channel?: string;
+  cause?: string;
+  chain?: string;
   data?: unknown;
 }
 
@@ -7051,6 +7088,9 @@ export interface ScheduleRecurrence {
 // number or boolean, as its JSON text without quotes) equals the given
 // one. Equality and prefix only: no expressions.
 export interface EventFilter {
+  // Channel takes only events of that channel of the room (the event's
+  // channel attribute, equals).
+  channel?: string;
   subject?: string;
   subjectPrefix?: string;
   data?: Record<string, string>;
@@ -8478,8 +8518,8 @@ export type EventSubscriptionSource = "bnbloc/platform" | "bnbloc/room" | "bnblo
 export const EventSubscriptionSourceValues: readonly EventSubscriptionSource[] = ["bnbloc/platform", "bnbloc/room", "bnbloc/member", "webhook"];
 export type PlatformEventType = "platform.deployed" | "component.published" | "desktop.published";
 export const PlatformEventTypeValues: readonly PlatformEventType[] = ["platform.deployed", "component.published", "desktop.published"];
-export type RoomEventType = "room.file.added" | "room.member.joined" | "room.app.data.changed";
-export const RoomEventTypeValues: readonly RoomEventType[] = ["room.file.added", "room.member.joined", "room.app.data.changed"];
+export type RoomEventType = "room.file.added" | "room.member.joined" | "room.app.data.changed" | "room.job.replied" | "room.job.failed" | "room.job.cancelled";
+export const RoomEventTypeValues: readonly RoomEventType[] = ["room.file.added", "room.member.joined", "room.app.data.changed", "room.job.replied", "room.job.failed", "room.job.cancelled"];
 export type JobActivityKind = "tool" | "thinking" | "text";
 export const JobActivityKindValues: readonly JobActivityKind[] = ["tool", "thinking", "text"];
 export type MediaImageAspect = "square" | "landscape" | "portrait";

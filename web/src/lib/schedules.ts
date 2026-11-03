@@ -75,6 +75,9 @@ const EVENT_LABELS: Record<string, string> = {
   "room.file.added": "a file is added or updated",
   "room.member.joined": "someone joins",
   "room.app.data.changed": "an app's data changes",
+  "room.job.replied": "an agent replies",
+  "room.job.failed": "an agent's job fails",
+  "room.job.cancelled": "someone stops an agent's job",
 };
 
 // Where a trigger's events come from, in words.

@@ -109,9 +109,12 @@ func validateFilter(f *wire.EventFilter) (*wire.EventFilter, error) {
 	if f == nil {
 		return nil, nil
 	}
-	out := wire.EventFilter{Subject: strings.TrimSpace(f.Subject), SubjectPrefix: strings.TrimSpace(f.SubjectPrefix)}
+	out := wire.EventFilter{Channel: strings.TrimSpace(f.Channel), Subject: strings.TrimSpace(f.Subject), SubjectPrefix: strings.TrimSpace(f.SubjectPrefix)}
 	if len(out.Subject) > maxFilterTextLen || len(out.SubjectPrefix) > maxFilterTextLen {
 		return nil, fmt.Errorf("recurrence: a filter's subject is at most %d characters", maxFilterTextLen)
+	}
+	if len(out.Channel) > maxFilterTextLen {
+		return nil, fmt.Errorf("recurrence: a filter's channel is at most %d characters", maxFilterTextLen)
 	}
 	if len(f.Data) > maxFilterDataFields {
 		return nil, fmt.Errorf("recurrence: a filter checks at most %d data fields", maxFilterDataFields)
@@ -126,7 +129,7 @@ func validateFilter(f *wire.EventFilter) (*wire.EventFilter, error) {
 		}
 		out.Data[k] = v
 	}
-	if out.Subject == "" && out.SubjectPrefix == "" && len(out.Data) == 0 {
+	if out.Channel == "" && out.Subject == "" && out.SubjectPrefix == "" && len(out.Data) == 0 {
 		return nil, nil
 	}
 	return &out, nil
@@ -140,6 +143,9 @@ func TriggerText(rec wire.ScheduleRecurrence) string {
 	out := "on " + rec.Source + " " + strings.Join(rec.Types, ", ")
 	var where []string
 	if f := rec.Filter; f != nil {
+		if f.Channel != "" {
+			where = append(where, "channel="+f.Channel)
+		}
 		if f.Subject != "" {
 			where = append(where, "subject="+f.Subject)
 		}
@@ -203,7 +209,7 @@ func filterMatches(f *wire.EventFilter, ev wire.CloudEvent) bool {
 	if f == nil {
 		return true
 	}
-	if (f.Subject != "" && ev.Subject != f.Subject) || (f.SubjectPrefix != "" && !strings.HasPrefix(ev.Subject, f.SubjectPrefix)) {
+	if (f.Channel != "" && ev.Channel != f.Channel) || (f.Subject != "" && ev.Subject != f.Subject) || (f.SubjectPrefix != "" && !strings.HasPrefix(ev.Subject, f.SubjectPrefix)) {
 		return false
 	}
 	if len(f.Data) == 0 {
@@ -345,6 +351,12 @@ func eventBlock(ev wire.CloudEvent) string {
 		fmt.Fprintf(&b, "subject: %s\n", ev.Subject)
 	}
 	fmt.Fprintf(&b, "time: %s\nid: %s\n", ev.Time, ev.ID)
+	if ev.Channel != "" {
+		fmt.Fprintf(&b, "channel: %s\n", ev.Channel)
+	}
+	if ev.Cause != "" {
+		fmt.Fprintf(&b, "cause: %s\nchain: %s\n", ev.Cause, ev.Chain)
+	}
 	if len(ev.Data) > 0 {
 		room := maxRunEventBytes - b.Len() - len("data: ") - 80
 		data := string(ev.Data)

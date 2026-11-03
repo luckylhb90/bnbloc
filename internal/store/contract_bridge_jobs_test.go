@@ -127,6 +127,7 @@ func TestContractBridgeJobStorePutIsIdempotentByOrigin(t *testing.T) {
 			j.Model, j.ReasoningEffort, j.AttachmentIDs = "gpt-5.5", "high", []string{"att-1"}
 			j.ExpertID, j.ExpertVersion, j.ExpertName = "cc-rev", "1.0.0", "Reviewer"
 			j.FileRef = &wire.FileRef{ArtifactID: "artf_deck", Version: 3, Name: "deck.pptx"}
+			j.CauseEventID, j.ChainEventID = "evt_order", "evt_root"
 		})
 		if first.Status != AgentJobQueued || first.TenantID != r.tid || first.UpdatedAtMs != 100 {
 			t.Fatalf("stored job = %+v; want queued in the ctx tenant, updated = created", first)
@@ -139,7 +140,8 @@ func TestContractBridgeJobStorePutIsIdempotentByOrigin(t *testing.T) {
 		got, err := b.AgentRuns().GetAgentRun(r.ctx, first.JobID)
 		if err != nil || got.Model != "gpt-5.5" || got.ReasoningEffort != "high" || !slices.Equal(got.AttachmentIDs, []string{"att-1"}) ||
 			got.TargetID != r.core+"/codex" || got.ExpertName != "Reviewer" || got.ChannelID != "ch" || got.RequesterUserID != "jack" ||
-			got.FileRef == nil || *got.FileRef != (wire.FileRef{ArtifactID: "artf_deck", Version: 3, Name: "deck.pptx"}) {
+			got.FileRef == nil || *got.FileRef != (wire.FileRef{ArtifactID: "artf_deck", Version: 3, Name: "deck.pptx"}) ||
+			got.CauseEventID != "evt_order" || got.ChainEventID != "evt_root" {
 			t.Fatalf("read back = %+v, %v", got, err)
 		}
 		// The id is global: another origin (in this tenant or another) cannot take it.

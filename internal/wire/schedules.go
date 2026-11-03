@@ -102,6 +102,9 @@ type ScheduleRecurrence struct {
 // number or boolean, as its JSON text without quotes) equals the given
 // one. Equality and prefix only: no expressions.
 type EventFilter struct {
+	// Channel takes only events of that channel of the room (the event's
+	// channel attribute, equals).
+	Channel       string            `json:"channel,omitempty"`
 	Subject       string            `json:"subject,omitempty"`
 	SubjectPrefix string            `json:"subjectPrefix,omitempty"`
 	Data          map[string]string `json:"data,omitempty"`

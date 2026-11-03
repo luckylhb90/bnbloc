@@ -1973,6 +1973,19 @@ WHERE r.channel_id = '' AND d.user_id IS NULL`)
 			return createSchemaTable(ctx, db, "message_marks")
 		},
 	},
+	{
+		// The event a job's run answered and its chain
+		// (docs/prd/2026-10-26-rooms-work-together.md §2.2): two columns
+		// with defaults, which the previous release neither reads nor
+		// writes.
+		id: "2026_11_agent_job_lineage",
+		run: func(ctx context.Context, db sqlConn) error {
+			if err := addColumnIfMissing(ctx, db, "agent_jobs", "cause_event_id", "VARCHAR(256) NOT NULL DEFAULT '' AFTER file_ref_json"); err != nil {
+				return err
+			}
+			return addColumnIfMissing(ctx, db, "agent_jobs", "chain_event_id", "VARCHAR(256) NOT NULL DEFAULT '' AFTER cause_event_id")
+		},
+	},
 }
 
 // sqlConn is the statement surface a migration runs on. runMigrations passes

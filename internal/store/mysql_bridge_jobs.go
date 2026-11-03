@@ -24,9 +24,9 @@ func (m *MySQLBridgeJobs) PutAgentJob(ctx context.Context, j AgentJob) (AgentJob
 	}
 	j = j.normalize(tid)
 	if _, err := m.DB.ExecContext(ctx, `
-INSERT INTO agent_jobs (job_id, tenant_id, room_id, channel_id, message_seq, client_msg_id, requester_user_id, owner_user_id, core, provider, target_id, message_text, attachment_ids, model, reasoning_effort, status, failure_reason, attempt, lease_bridge_id, lease_expires_at_ms, created_at_ms, updated_at_ms, started_at_ms, finished_at_ms, diagnostics_json, dispatched_by_job_id, dispatch_depth, expert_id, expert_version, expert_name, file_ref_json)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-ON DUPLICATE KEY UPDATE job_id = job_id`, j.JobID, tid, j.RoomID, j.ChannelID, j.MessageSeq, j.ClientMsgID, j.RequesterUserID, j.OwnerUserID, j.Core, j.Provider, j.TargetID, j.MessageText, jsonStringSlice(j.AttachmentIDs), j.Model, j.ReasoningEffort, string(j.Status), string(j.FailureReason), j.Attempt, j.LeaseBridgeID, j.LeaseExpiresAtMs, j.CreatedAtMs, j.UpdatedAtMs, j.StartedAtMs, j.FinishedAtMs, nullIfZero(string(j.DiagnosticsJSON)), j.DispatchedByJobID, j.DispatchDepth, j.ExpertID, j.ExpertVersion, j.ExpertName, fileRefArg(j.FileRef)); err != nil {
+INSERT INTO agent_jobs (job_id, tenant_id, room_id, channel_id, message_seq, client_msg_id, requester_user_id, owner_user_id, core, provider, target_id, message_text, attachment_ids, model, reasoning_effort, status, failure_reason, attempt, lease_bridge_id, lease_expires_at_ms, created_at_ms, updated_at_ms, started_at_ms, finished_at_ms, diagnostics_json, dispatched_by_job_id, dispatch_depth, expert_id, expert_version, expert_name, file_ref_json, cause_event_id, chain_event_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON DUPLICATE KEY UPDATE job_id = job_id`, j.JobID, tid, j.RoomID, j.ChannelID, j.MessageSeq, j.ClientMsgID, j.RequesterUserID, j.OwnerUserID, j.Core, j.Provider, j.TargetID, j.MessageText, jsonStringSlice(j.AttachmentIDs), j.Model, j.ReasoningEffort, string(j.Status), string(j.FailureReason), j.Attempt, j.LeaseBridgeID, j.LeaseExpiresAtMs, j.CreatedAtMs, j.UpdatedAtMs, j.StartedAtMs, j.FinishedAtMs, nullIfZero(string(j.DiagnosticsJSON)), j.DispatchedByJobID, j.DispatchDepth, j.ExpertID, j.ExpertVersion, j.ExpertName, fileRefArg(j.FileRef), j.CauseEventID, j.ChainEventID); err != nil {
 		return AgentJob{}, err
 	}
 	// The insert stored the job, or met its origin (the idempotent re-put:
@@ -420,7 +420,7 @@ func (m *MySQLBridgeJobs) scanAgentJob(ctx context.Context, q string, args ...an
 
 // agentJobColumns is the one column list every agent_jobs read selects, in
 // scanAgentJobRow's order.
-const agentJobColumns = `job_id, tenant_id, room_id, channel_id, message_seq, client_msg_id, requester_user_id, owner_user_id, core, provider, target_id, message_text, attachment_ids, model, reasoning_effort, status, failure_reason, attempt, lease_bridge_id, lease_expires_at_ms, created_at_ms, updated_at_ms, started_at_ms, finished_at_ms, diagnostics_json, claimed_at_ms, dispatched_by_job_id, dispatch_depth, expert_id, expert_version, expert_name, room_expert_id, room_expert_version, room_expert_name, attempts_json, not_before_ms, file_ref_json`
+const agentJobColumns = `job_id, tenant_id, room_id, channel_id, message_seq, client_msg_id, requester_user_id, owner_user_id, core, provider, target_id, message_text, attachment_ids, model, reasoning_effort, status, failure_reason, attempt, lease_bridge_id, lease_expires_at_ms, created_at_ms, updated_at_ms, started_at_ms, finished_at_ms, diagnostics_json, claimed_at_ms, dispatched_by_job_id, dispatch_depth, expert_id, expert_version, expert_name, room_expert_id, room_expert_version, room_expert_name, attempts_json, not_before_ms, file_ref_json, cause_event_id, chain_event_id`
 
 func scanAgentJobRow(row rowScanner) (AgentJob, error) {
 	var j AgentJob
@@ -428,7 +428,7 @@ func scanAgentJobRow(row rowScanner) (AgentJob, error) {
 	var messageText, model, reasoningEffort sql.NullString
 	var attachmentIDs []byte
 	var diag, attempts, fileRef []byte
-	err := row.Scan(&j.JobID, &j.TenantID, &j.RoomID, &j.ChannelID, &j.MessageSeq, &j.ClientMsgID, &j.RequesterUserID, &j.OwnerUserID, &j.Core, &j.Provider, &j.TargetID, &messageText, &attachmentIDs, &model, &reasoningEffort, &status, &reason, &j.Attempt, &j.LeaseBridgeID, &j.LeaseExpiresAtMs, &j.CreatedAtMs, &j.UpdatedAtMs, &j.StartedAtMs, &j.FinishedAtMs, &diag, &j.ClaimedAtMs, &j.DispatchedByJobID, &j.DispatchDepth, &j.ExpertID, &j.ExpertVersion, &j.ExpertName, &j.RoomExpertID, &j.RoomExpertVersion, &j.RoomExpertName, &attempts, &j.NotBeforeMs, &fileRef)
+	err := row.Scan(&j.JobID, &j.TenantID, &j.RoomID, &j.ChannelID, &j.MessageSeq, &j.ClientMsgID, &j.RequesterUserID, &j.OwnerUserID, &j.Core, &j.Provider, &j.TargetID, &messageText, &attachmentIDs, &model, &reasoningEffort, &status, &reason, &j.Attempt, &j.LeaseBridgeID, &j.LeaseExpiresAtMs, &j.CreatedAtMs, &j.UpdatedAtMs, &j.StartedAtMs, &j.FinishedAtMs, &diag, &j.ClaimedAtMs, &j.DispatchedByJobID, &j.DispatchDepth, &j.ExpertID, &j.ExpertVersion, &j.ExpertName, &j.RoomExpertID, &j.RoomExpertVersion, &j.RoomExpertName, &attempts, &j.NotBeforeMs, &fileRef, &j.CauseEventID, &j.ChainEventID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return AgentJob{}, ErrAgentJobNotFound
 	}

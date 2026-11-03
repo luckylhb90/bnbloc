@@ -119,6 +119,11 @@ type ChatPost struct {
 	// by its agent participation (C19), not by its author's choice
 	// (payload.agentAuto): the web says so, and a person can stop it.
 	AgentAuto bool
+	// CauseEventID / ChainEventID are the event whose run made this post and
+	// its chain (a scheduled run answering an event; a dispatch carries its
+	// parent job's): the job it queues keeps them, so what the job causes
+	// names its cause (docs/prd/2026-10-26-rooms-work-together.md §2.2).
+	CauseEventID, ChainEventID string
 }
 
 // ChatPosted is what PostChat did: the message's sequence and, for an agent
@@ -367,6 +372,8 @@ func (s *Service) PostChat(ctx context.Context, p ChatPost) (ChatPosted, error) 
 			UpdatedAtMs:       nowMs,
 			DispatchedByJobID: parentJobID,
 			DispatchDepth:     depth,
+			CauseEventID:      p.CauseEventID,
+			ChainEventID:      p.ChainEventID,
 		}
 		if expert != nil {
 			aj.ExpertID, aj.ExpertVersion, aj.ExpertName = expert.ID, expert.Version, expert.label()

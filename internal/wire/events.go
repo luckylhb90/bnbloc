@@ -161,11 +161,39 @@ const (
 	// RoomAppDataChanged: an interactive app's data changed, coalesced per
 	// app (subject: the app id; data: appId, collection, changes).
 	RoomAppDataChanged = "room.app.data.changed"
+	// RoomJobReplied, RoomJobFailed, RoomJobCancelled: an agent job of the
+	// room ended (docs/prd/2026-10-26-rooms-work-together.md §2.3): replied;
+	// failed or timed out (data.failureReason says which), on its final
+	// attempt only; or stopped by a person (subject: the job id; data:
+	// RoomJobEndedData; channel: the job's).
+	// decision: owner accepted 2026-11-03 (cancelled is its own type)
+	RoomJobReplied   = "room.job.replied"
+	RoomJobFailed    = "room.job.failed"
+	RoomJobCancelled = "room.job.cancelled"
 )
 
 // RoomEventTypes is the closed list of room event types, in the order an
 // editor shows them.
-var RoomEventTypes = []string{RoomFileAdded, RoomMemberJoined, RoomAppDataChanged}
+var RoomEventTypes = []string{RoomFileAdded, RoomMemberJoined, RoomAppDataChanged, RoomJobReplied, RoomJobFailed, RoomJobCancelled}
+
+// RoomJobEndedData is the data of the room's job events: the job, its
+// agent and requester, how it ended, and the reply's text (cut to
+// MaxJobEventReplyBytes, the cut said in ReplyCut).
+type RoomJobEndedData struct {
+	JobID         string `json:"jobId"`
+	OwnerID       string `json:"ownerId"`
+	Core          string `json:"core,omitempty"`
+	Provider      string `json:"provider"`
+	Requester     string `json:"requester"`
+	Status        string `json:"status" tstype:"AgentJobStatus"`
+	FailureReason string `json:"failureReason,omitempty" tstype:"AgentJobFailureReason"`
+	Reply         string `json:"reply,omitempty"`
+	ReplyCut      bool   `json:"replyCut,omitempty"`
+}
+
+// MaxJobEventReplyBytes bounds the reply text a job event carries, so the
+// event stays within MaxEventDataBytes.
+const MaxJobEventReplyBytes = 12 * 1024
 
 // RoomFileAddedData is the data of RoomFileAdded: the file, the version it
 // got and who published it.
@@ -197,13 +225,42 @@ type RoomAppDataChangedData struct {
 // data (JSON, at most MaxEventDataBytes). Data is the emitter's, untrusted:
 // a run reads it fenced as data, never as instructions.
 type CloudEvent struct {
-	SpecVersion string          `json:"specversion"`
-	ID          string          `json:"id"`
-	Source      string          `json:"source"`
-	Type        string          `json:"type"`
-	Time        string          `json:"time"`
-	Subject     string          `json:"subject,omitempty"`
-	Data        json.RawMessage `json:"data,omitempty"`
+	SpecVersion string `json:"specversion"`
+	ID          string `json:"id"`
+	Source      string `json:"source"`
+	Type        string `json:"type"`
+	Time        string `json:"time"`
+	Subject     string `json:"subject,omitempty"`
+	// Channel, Cause and Chain are CloudEvents extension attributes the
+	// platform sets (an emitter's own values are replaced,
+	// docs/prd/2026-10-26-rooms-work-together.md §2.1, §2.2): the room's
+	// channel it happened in ("" room-wide); the event whose run produced
+	// this one ("" for none); the first event of its line of work (an event
+	// with no cause starts one: its own id).
+	Channel string          `json:"channel,omitempty"`
+	Cause   string          `json:"cause,omitempty"`
+	Chain   string          `json:"chain,omitempty"`
+	Data    json.RawMessage `json:"data,omitempty"`
+}
+
+// WithLineage is ev with the platform's channel and lineage: cause and chain
+// from what produced it (its run's event), else no cause and a chain of its
+// own (ev's id).
+func WithLineage(ev CloudEvent, channel, cause, chain string) CloudEvent {
+	ev.Channel, ev.Cause, ev.Chain = channel, cause, chain
+	if cause == "" || chain == "" {
+		ev.Cause, ev.Chain = "", ev.ID
+	}
+	return ev
+}
+
+// ChainOf is the chain an event carries on to what it causes: its chain, or
+// itself when it has none.
+func ChainOf(ev CloudEvent) string {
+	if ev.Chain != "" {
+		return ev.Chain
+	}
+	return ev.ID
 }
 
 // ErrEventDataTooLarge reports data over MaxEventDataBytes.
@@ -232,6 +289,11 @@ func ValidEvent(e CloudEvent) (CloudEvent, error) {
 	}
 	if len(e.Subject) > maxEventSubjectLen || strings.IndexFunc(e.Subject, unicode.IsControl) >= 0 {
 		return e, fmt.Errorf("event: subject is at most %d printable characters", maxEventSubjectLen)
+	}
+	for _, f := range []struct{ name, v string }{{"channel", e.Channel}, {"cause", e.Cause}, {"chain", e.Chain}} {
+		if len(f.v) > maxEventIDLen || strings.IndexFunc(f.v, notEventToken) >= 0 {
+			return e, fmt.Errorf("event: %s is at most %d printable characters, no spaces", f.name, maxEventIDLen)
+		}
 	}
 	at, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(e.Time))
 	if err != nil {

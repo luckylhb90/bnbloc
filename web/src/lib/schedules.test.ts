@@ -130,7 +130,7 @@ eq(recipientLabel({ kind: "notice", to: "group:Infra", title: "t" }), "notice to
     "the sources are the server's list, in its order",
   );
   eq(sourceTypes("bnbloc/platform").map((t) => t.value), ["platform.deployed", "component.published", "desktop.published"], "the platform's types");
-  eq(sourceTypes("bnbloc/room").map((t) => t.label), ["a file is added or updated", "someone joins", "an app's data changes"], "the room's types in words");
+  eq(sourceTypes("bnbloc/room").map((t) => t.label), ["a file is added or updated", "someone joins", "an app's data changes", "an agent replies", "an agent's job fails", "someone stops an agent's job"], "the room's types in words");
   eq(sourceTypes("webhook"), [], "a webhook's types are open");
 
   const f = { ...formFromRecurrence(undefined, "UTC", now), kind: "event" as const };

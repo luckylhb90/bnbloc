@@ -371,6 +371,13 @@ type AgentJob struct {
 	// NotBeforeMs is when a requeued job may be claimed again (its retry
 	// delay, retryDelayMs); 0 = at once.
 	NotBeforeMs int64 `json:"notBeforeMs,omitempty"`
+	// CauseEventID / ChainEventID are the event whose run started this job
+	// and that event's chain ("" for a job a person started): what the job
+	// causes (its job events, its files) carries them on as cause and chain
+	// (docs/prd/2026-10-26-rooms-work-together.md §2.2). A dispatched job
+	// carries its parent's.
+	CauseEventID string `json:"causeEventId,omitempty"`
+	ChainEventID string `json:"chainEventId,omitempty"`
 }
 
 // BridgeHeartbeat records one desktop bridge's liveness in a tenant.

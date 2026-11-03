@@ -39,6 +39,7 @@ func TestChannelReadsAskTheRule(t *testing.T) {
 		"services/realtime/continue.go:Continue":           "the job of the decider's own card (the gateway admitted the card)",
 		"services/realtime/dispatch.go:checkDispatchChain": "walks the dispatch chain's job ids for its depth, never content",
 		"services/realtime/room_events.go:causeRoom":       "reads a job's room and client id to name an event's cause",
+		"services/realtime/room_events.go:causeJob":        "reads a job of the event's own room for its lineage and reply; the event reaches only that room's tasks, which run as their creators through PostChat's channel check",
 		"services/realtime/handoff.go:handleInternalFeed":  "the room service's handoff export only, which filters by the exporter's access (handoff_export.go)",
 		"services/realtime/service.go:messageChannel":      "reads a message's channel id for its caller to check (edit, delete)",
 		"services/realtime/threads.go:replyRef":            "reads the quoted message only when it is of the channel the poster may read (PostChat asked) or that thread's root",

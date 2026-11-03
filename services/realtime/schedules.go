@@ -466,6 +466,9 @@ func (s *Service) postScheduled(ctx context.Context, sc wire.RoomSchedule, slot 
 		ChannelID:   sc.ChannelID,
 		Scheduled:   &wire.ScheduledMarker{ScheduleID: sc.ScheduleID},
 	}
+	if ev := schedule.RunEvent(sc); ev != nil {
+		post.CauseEventID, post.ChainEventID = ev.ID, wire.ChainOf(*ev)
+	}
 	if sc.Recipient.Kind == wire.ScheduleRecipientAgent {
 		post.Recipient = &ChatRecipient{OwnerID: sc.Recipient.OwnerID, Provider: sc.Recipient.Provider, Core: sc.Recipient.Core}
 	}

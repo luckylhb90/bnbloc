@@ -1094,3 +1094,33 @@ What it adds:
 5. **No speed-up was shown at this size**: overheads (environment setup,
    conflicts, duplicates) outweighed four agents on eight small functions. The
    swarm's value has to be measured on a goal large enough to split by module.
+
+## 12. Progress
+
+**Slice 1a (2026-11-03): channel, cause and chain; job events.**
+
+- The envelope carries the extension attributes `channel`, `cause` and `chain`
+  (`wire.CloudEvent`, bounded by `wire.ValidEvent`), set by the platform only
+  (`wire.WithLineage`; an event with no cause starts its own chain). A
+  trigger's filter takes `channel` (equals; `schedule.TriggerText` says it).
+- A job remembers the event whose run started it (`agent_jobs.cause_event_id`,
+  `chain_event_id`, migration `2026_11_agent_job_lineage`, additive): a
+  scheduled run answering an event posts with it (`postScheduled`), a
+  dispatched job carries its parent's (`Dispatch`). What the job causes
+  (its job events, its files, its app writes) names that event as its cause
+  and keeps the chain (`dispatchRoomEvent`).
+- Job events from realtime's publish tap: `room.job.replied`;
+  `room.job.failed` for failed and timed out (final attempts only: a retry is
+  requeued, never failed); `room.job.cancelled` when a person stops a job
+  (decision 2026-11-03: its own type, so a retry-on-failure task never
+  re-runs stopped work). Subject the job id, channel the job's, data
+  `wire.RoomJobEndedData` (job, agent, requester, status, reason, reply cut
+  to `wire.MaxJobEventReplyBytes`). The web names them in the trigger
+  editor.
+- Tests: `TestRoomJobEventsOnAJobsEnd` (every outcome, not on a non-final
+  status, the channel filter), `TestRoomJobEventCarriesItsCause`,
+  `TestScheduledRunGivesItsJobTheEvent`, the job store contract's lineage
+  round trip (memory and MySQL); each red-checked with its change removed.
+- Not yet: D7's "under the link's consent" applies when links exist (1d);
+  `room.job.quiet` (D6) needs the bridge's idle report and comes with 1b.
+

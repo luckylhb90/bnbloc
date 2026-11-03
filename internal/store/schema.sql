@@ -139,6 +139,8 @@ CREATE TABLE IF NOT EXISTS agent_jobs (
   attempts_json       JSON NULL,
   not_before_ms       BIGINT NOT NULL DEFAULT 0,
   file_ref_json       JSON NULL,
+  cause_event_id      VARCHAR(256) NOT NULL DEFAULT '',
+  chain_event_id      VARCHAR(256) NOT NULL DEFAULT '',
   UNIQUE KEY uq_agent_job_origin (tenant_id, room_id, message_seq, owner_user_id, core, provider),
   KEY idx_agent_jobs_claim (tenant_id, owner_user_id, status, lease_expires_at_ms),
   KEY idx_agent_jobs_room (tenant_id, room_id, channel_id, updated_at_ms),
