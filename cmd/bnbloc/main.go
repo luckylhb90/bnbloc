@@ -132,7 +132,7 @@ Room schedules (as the signed-in member, or BNBLOC_API_TOKEN's subject):
                                           tell the room something happened: its tasks taking it run
 
 Post-deploy smoke:
-  bnbloc smoke [--agent <provider|core/provider|targetId|owner/provider>] [--timeout 120s] [--keep]
+  bnbloc smoke [--agent <provider|core/provider|targetId|owner/provider>] [--model <model>] [--timeout 120s] [--keep]
         throwaway room: stream-first chat echo, history, optional agent reply, delete;
         one PASS/FAIL line per step, non-zero exit on any FAIL
         [--alert-on-failure [--alert-to id,...]]  alert platform admins when the run fails

@@ -64,6 +64,7 @@ unreachable service prints a `SKEW …` line and exits non-zero.
 ```sh
 bnbloc smoke --gateway https://bnbloc.example.com                 # message path only
 bnbloc smoke --agent codex --timeout 180s                         # also wait for your agent's reply
+bnbloc smoke --agent acp/opencode --model acme/small-model         # its turn asks for that model (the room picker's value)
 bnbloc smoke --keep                                               # leave the room for inspection
 ```
 

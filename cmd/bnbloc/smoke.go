@@ -43,6 +43,8 @@ import (
 type smokeOptions struct {
 	// Agent addresses the optional agent-reply step ("" skips it).
 	Agent string
+	// Model is the model the agent's turns ask for ("" = its default).
+	Model string
 	// AgentTimeout bounds the wait for the agent reply.
 	AgentTimeout time.Duration
 	// StepTimeout bounds every other wait (stream open, echo).
@@ -87,6 +89,7 @@ func runSmoke(args []string) error {
 	fs := flag.NewFlagSet("smoke", flag.ContinueOnError)
 	gw := addGatewayFlags(fs)
 	agent := fs.String("agent", "", "also wait for a reply from this agent: provider | core/provider | target id of your own agent, or owner/provider | owner/core/provider")
+	model := fs.String("model", "", "the model the agent's turns use, as the room's picker offers it (e.g. acme/small-model); default: the agent's own")
 	timeout := fs.Duration("timeout", 120*time.Second, "how long to wait for the agent reply (each turn of a scenario; default 4m for one)")
 	scenario := fs.String("scenario", "", `run a scenario instead of the single agent reply: "long-task", "two-members" or "steer" (all need --agent)`)
 	teammateToken := fs.String("teammate-token", "", "two-members: the teammate's API token (prefer "+teammateTokenEnv+": argv is visible to other processes)")
@@ -106,12 +109,14 @@ func runSmoke(args []string) error {
 	defer stop()
 	c := gw.client()
 	fmt.Printf("smoke against %s\n", c.cfg.Gateway)
-	opts := smokeOptions{Agent: strings.TrimSpace(*agent), AgentTimeout: *timeout, StepTimeout: apiTimeout, Keep: *keep, Now: time.Now,
+	opts := smokeOptions{Agent: strings.TrimSpace(*agent), Model: strings.TrimSpace(*model), AgentTimeout: *timeout, StepTimeout: apiTimeout, Keep: *keep, Now: time.Now,
 		Scenario: strings.TrimSpace(*scenario), Between: strings.TrimSpace(*between),
 		TeammateToken: teammateTokenFrom(*teammateToken, os.Getenv), TeammateAgent: strings.TrimSpace(*teammateAgent)}
 	switch {
 	case opts.Scenario != "" && opts.Scenario != scenarioLongTask && opts.Scenario != scenarioTwoMembers && opts.Scenario != scenarioSteer:
 		return fmt.Errorf("smoke: unknown --scenario %q (want %s, %s or %s)", opts.Scenario, scenarioLongTask, scenarioTwoMembers, scenarioSteer)
+	case opts.Model != "" && opts.Agent == "":
+		return errors.New("smoke: --model needs --agent")
 	case opts.Scenario != "" && opts.Agent == "":
 		return fmt.Errorf("smoke: --scenario %s needs --agent", opts.Scenario)
 	case opts.Between != "" && opts.Scenario != scenarioLongTask:
@@ -516,9 +521,24 @@ func (w *smokeWaiter) wait(timeout time.Duration, what string, match func(smokeE
 
 // smokeRecipient is the chat recipient shape the web composer sends.
 type smokeRecipient struct {
-	OwnerID  string `json:"ownerId"`
-	Provider string `json:"provider"`
-	Core     string `json:"core,omitempty"`
+	OwnerID      string             `json:"ownerId"`
+	Provider     string             `json:"provider"`
+	Core         string             `json:"core,omitempty"`
+	AgentOptions *smokeAgentOptions `json:"agentOptions,omitempty"`
+}
+
+// smokeAgentOptions is the composer's model choice for the agent's turns
+// (--model): the agent's default when absent.
+type smokeAgentOptions struct {
+	Model string `json:"model,omitempty"`
+}
+
+// withModel is rcpt asking for model ("" = the agent's default).
+func (rcpt smokeRecipient) withModel(model string) smokeRecipient {
+	if model != "" {
+		rcpt.AgentOptions = &smokeAgentOptions{Model: model}
+	}
+	return rcpt
 }
 
 // myAgent is one row of GET /v1/my/agents.
@@ -580,6 +600,7 @@ func smokeAgentReply(ctx context.Context, c *client, w *smokeWaiter, roomID, sub
 	if err != nil {
 		return "", err
 	}
+	rcpt = rcpt.withModel(opts.Model)
 	msgID, err := smokeID()
 	if err != nil {
 		return "", err

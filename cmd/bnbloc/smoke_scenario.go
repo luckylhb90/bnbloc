@@ -184,7 +184,8 @@ func smokeResolveAgent(ctx context.Context, c *client, subject string, opts smok
 	if err := c.call(ctx, opts.StepTimeout, http.MethodGet, "/v1/my/agents", nil, &mine); err != nil {
 		return smokeRecipient{}, err
 	}
-	return resolveSmokeAgent(opts.Agent, subject, mine.Agents)
+	rcpt, err := resolveSmokeAgent(opts.Agent, subject, mine.Agents)
+	return rcpt.withModel(opts.Model), err
 }
 
 // smokeAgentOnline waits (up to AgentTimeout) until the caller's agent is

@@ -313,8 +313,25 @@ func TestSmokeAgentReply(t *testing.T) {
 	}
 	var rcpt smokeRecipient
 	_ = json.Unmarshal(g.lastRcpt, &rcpt)
-	if rcpt != (smokeRecipient{OwnerID: "alice", Provider: "codex", Core: "acme"}) {
+	if rcpt.OwnerID != "alice" || rcpt.Provider != "codex" || rcpt.Core != "acme" || rcpt.AgentOptions != nil {
 		t.Fatalf("recipient = %+v", rcpt)
+	}
+}
+
+// --model reaches the agent's turn as the composer's model choice.
+func TestSmokeAgentReplyAsksForTheModel(t *testing.T) {
+	g := newFakeSmokeGateway(t)
+	g.agentReply = true
+	g.agents = []myAgent{{Core: "acme", Provider: "codex", TargetID: "acme/local:codex", Online: true}}
+	opts := smokeTestOptions()
+	opts.Agent, opts.Model = "acme/local:codex", "acme/small-model"
+	if out, err := runFakeSmoke(t, g, opts); err != nil {
+		t.Fatalf("smoke failed: %v\n%s", err, out)
+	}
+	var rcpt smokeRecipient
+	_ = json.Unmarshal(g.lastRcpt, &rcpt)
+	if rcpt.AgentOptions == nil || rcpt.AgentOptions.Model != "acme/small-model" {
+		t.Fatalf("recipient = %s", g.lastRcpt)
 	}
 }
 
