@@ -145,22 +145,27 @@ func smokeTwoMembers(ctx context.Context, c *client, w *smokeWaiter, roomID, sub
 	if replyErr != nil && reply != "" && strings.HasPrefix(replyErr.Error(), "the reply does not hold") {
 		replyErr = nil // B's agent answered: the lines below say what it lacked
 	}
-	check := func(name, what string, want ...string) {
+	// Each fact is read from its own "key=value" line, never as a bare
+	// substring: a 3-digit price also occurs inside a budget, a date or a
+	// codename, and a reply that could not read it passed.
+	check := func(name, what string, want ...[2]string) {
 		run.step(name, func() (string, error) {
 			if replyErr != nil {
 				return "", replyErr
 			}
-			for _, s := range want {
-				if !strings.Contains(reply, s) {
-					return "", fmt.Errorf("B's agent did not read %s (%s): %q", what, s, truncateRunes(reply, 160))
+			var got []string
+			for _, kv := range want {
+				if !factLine(kv[0], kv[1]).MatchString(reply) {
+					return "", fmt.Errorf("B's agent did not read %s (%s=%s): %q", what, kv[0], kv[1], truncateRunes(reply, 160))
 				}
+				got = append(got, kv[1])
 			}
-			return strings.Join(want, " "), nil
+			return strings.Join(got, " "), nil
 		})
 	}
-	check("others' messages", "A's message", facts.Codename, facts.Date)
-	check("others' deliverables", "report.md of A's agent", facts.Budget)
-	check("others' attachments", "pricing.md A uploaded", facts.Price)
+	check("others' messages", "A's message", [2]string{"codename", facts.Codename}, [2]string{"date", facts.Date})
+	check("others' deliverables", "report.md of A's agent", [2]string{"budget", facts.Budget})
+	check("others' attachments", "pricing.md A uploaded", [2]string{"price", facts.Price})
 	fmt.Fprintf(run.out, "INFO names: %s\n", smokeNamesNote(ctx, c, subject, reply, opts))
 
 	// Borrowing A's agent: refused until A approves the request it raised.
@@ -361,4 +366,10 @@ func teammateTokenFrom(flagValue string, getenv func(string) string) string {
 		return v
 	}
 	return strings.TrimSpace(getenv(teammateTokenEnv))
+}
+
+// factLine matches a reply line "key=value" (any case, spaces around "=",
+// leading list marks allowed), the value whole.
+func factLine(key, value string) *regexp.Regexp {
+	return regexp.MustCompile(`(?mi)^[\s*\-` + "`" + `]*` + regexp.QuoteMeta(key) + `\s*[=:]\s*` + "`?" + regexp.QuoteMeta(value) + "`?" + `\s*$`)
 }
