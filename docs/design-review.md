@@ -294,13 +294,18 @@ unnecessary.
 - When one side changes where it writes files another process reads, does
   a test build that layout from the writer's own code or constants, not a
   fixture the reader made up?
+- State we prepared for something we do not own (a CLI's version, a
+  package, the sandbox helper, an agent's config): what names what it was
+  prepared for, and what happens when that thing changes and we do not? Is
+  there a test that prepares it for one version and uses it with the next?
 
 *Test:* the upgrade itself, with existing state, before and after; a mixed
 deployment; the change run under the confinement it meets in use.
 *Seen:* a destructive migration that broke a mixed deploy; an upgrade
 that lost in-use workspace bindings; updates applied mid-task; a browser
 closed for an upgrade from inside the agent's sandbox, where no new one
-could start.
+could start; an opencode upgrade that left the core's prepared config
+pinned to the old version, failing every sandboxed session.
 
 ### 12. Observability
 
