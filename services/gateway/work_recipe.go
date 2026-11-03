@@ -12,7 +12,6 @@ import (
 
 	"github.com/luckylhb90/bnbloc/internal/auth"
 	"github.com/luckylhb90/bnbloc/internal/contentpkg"
-	"github.com/luckylhb90/bnbloc/internal/contentuse"
 	"github.com/luckylhb90/bnbloc/internal/extpipe"
 	"github.com/luckylhb90/bnbloc/internal/httpx"
 	"github.com/luckylhb90/bnbloc/internal/obs"
@@ -76,7 +75,7 @@ func (s *Service) deliverableRecipe(ctx context.Context, claims auth.Claims, roo
 		job.TenantID = claims.Tenant
 	}
 	r := &wire.WorkRecipe{Prompt: strings.TrimSpace(job.MessageText), Agent: &wire.WorkRecipeAgent{Core: p.Core, Provider: p.Provider}}
-	eff, err := contentuse.Effective(ctx, s.ContentComponents, job)
+	eff, err := s.effectiveContent(ctx, job)
 	if err != nil {
 		return capturedRecipe{}, err
 	}

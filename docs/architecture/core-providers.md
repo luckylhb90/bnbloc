@@ -120,6 +120,14 @@ the confined CLI and the guest see them; `execution.sandbox.workdir` must equal
 it. Design:
 [`docs/prd/2026-10-09-agent-vm-sandbox.md`](../prd/2026-10-09-agent-vm-sandbox.md).
 
+`profilePerSession` says an `agentProfile` core gives each session its own
+instructions and never writes them into the shared workspace (an ACP
+adapter's per-session meta, say). Without it the bridge takes the core to
+write them as workspace files, so a channel that wears an expert of its own
+(channels PRD C9) runs in a workspace of its own (`driveKey.apart`), where it
+cannot overwrite another channel's instructions; with it the channel shares
+the agent's workspace.
+
 `agentProfile` is the second request-carrying capability (also asked through
 `core.Supports`): a core advertising it receives a `profile` on session
 create (`core/protocol` `AgentProfile`, in process `core.SessionRequest.Profile`),
@@ -625,7 +633,7 @@ The bridge/gateway drive it through the protocol client with
    Advertise only the optional
    capabilities you actually serve (`interrupt`, `writeFile`,
    `deleteWorkspace`, `sandboxExec`, `executionRefresh`, `agentProfile`,
-   `turnActivity`, `sessionFiles` + `sessionFileBytes`) —
+   `profilePerSession`, `turnActivity`, `sessionFiles` + `sessionFileBytes`) —
    clients degrade gracefully when a capability is absent.
    **Deliverables** (`sessionFiles` + `sessionFileBytes`, advertised
    together — the wire has only the exact-bytes read):

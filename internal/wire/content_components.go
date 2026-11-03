@@ -184,6 +184,10 @@ const (
 	// ContentUseRoomExpert is a room's expert: one of its pinned experts
 	// every agent turn in the room wears (scope id = the room).
 	ContentUseRoomExpert = "room-expert"
+	// ContentUseChannelExpert is a channel's expert (channels PRD C9): one
+	// of the room's pinned experts that turns in that channel (and its
+	// threads) wear instead of the room's. The request names the channel.
+	ContentUseChannelExpert = "channel-expert"
 )
 
 // ContentUse is where a component is enabled (a member's skill packs, a
@@ -209,12 +213,17 @@ type ContentUsesReply struct {
 	// RoomExpert is the id of the room's expert (one of its pinned
 	// experts), when it has one.
 	RoomExpert string `json:"roomExpert,omitempty"`
+	// ChannelExperts are the room's channels' experts, by channel id
+	// (channels PRD C9).
+	ChannelExperts map[string]string `json:"channelExperts,omitempty"`
 }
 
 // ContentUseRequest is PUT /v1/content-uses.
 type ContentUseRequest struct {
-	Scope       string `json:"scope"`
-	RoomID      string `json:"roomId,omitempty"`
+	Scope  string `json:"scope"`
+	RoomID string `json:"roomId,omitempty"`
+	// ChannelID names the channel of a channel-expert use.
+	ChannelID   string `json:"channelId,omitempty"`
 	ComponentID string `json:"componentId"`
 	// Version pins a version; empty follows the latest.
 	Version string `json:"version,omitempty"`
@@ -266,6 +275,11 @@ type ContentEffective struct {
 	// RoomExpert is the room's expert, worn under the chat's own (absent
 	// when the room has none, or it is the chat's expert).
 	RoomExpert *ContentRef `json:"roomExpert,omitempty"`
+	// ExpertChannel is the channel whose own expert RoomExpert is (channels
+	// PRD C9; "" = the room's): on a core that writes its instructions into
+	// the shared workspace the bridge runs that channel in a workspace of
+	// its own (core.CapabilityProfilePerSession).
+	ExpertChannel string `json:"expertChannel,omitempty"`
 	// Team is the chat expert's roster when it is a team, each member's
 	// expert resolved as the requester.
 	Team       *ContentTeam `json:"team,omitempty"`

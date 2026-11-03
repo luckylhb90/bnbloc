@@ -187,7 +187,7 @@ func Effective(ctx context.Context, st store.ContentComponentStore, job store.Ag
 		}
 	}
 	// The room's expert is worn under the chat's own, with what it requires.
-	switch rc, rv, missing, err := roomExpert(ctx, st, requester, job); {
+	switch rc, rv, missing, channel, err := roomExpert(ctx, st, requester, job); {
 	case err != nil:
 		return out, err
 	case missing != "":
@@ -198,6 +198,9 @@ func Effective(ctx context.Context, st store.ContentComponentStore, job store.Ag
 			return out, err
 		}
 		out.RoomExpert = &ref
+		if channel {
+			out.ExpertChannel = job.ChannelID
+		}
 		seen[rc.ID] = true
 		m, err := Manifest(rv)
 		if err != nil {

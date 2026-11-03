@@ -60,17 +60,40 @@ func ResolveTeam(ctx context.Context, st store.ContentComponentStore, requester 
 	return out, nil
 }
 
-// roomExpert resolves the room's expert for a job's turn (nil when the room
-// has none, or it is the chat's own expert). It must still be usable in the
-// room: a room expert whose pin was removed is reported missing.
-func roomExpert(ctx context.Context, st store.ContentComponentStore, requester extpipe.Viewer, job store.AgentJob) (store.ContentComponent, store.ContentComponentVersion, string, error) {
-	uses, err := st.ListContentUses(ctx, store.ContentUseRoomExpert, job.RoomID)
-	if err != nil || len(uses) == 0 {
-		return store.ContentComponent{}, store.ContentComponentVersion{}, "", err
+// ChannelExpertID is the expert a channel names for its turns (channels PRD
+// C9): "" for none. The one read of a channel's expert; a thread's turns
+// wear its parent's (the caller passes the parent, the gateway's
+// effectiveContent).
+func ChannelExpertID(ctx context.Context, st store.ContentComponentStore, roomID, channelID string) (string, error) {
+	if channelID == "" {
+		return "", nil
 	}
-	id := uses[0].ComponentID
+	uses, err := st.ListContentUses(ctx, store.ContentUseChannelExpert, store.ChannelExpertScopeID(roomID, channelID))
+	if err != nil || len(uses) == 0 {
+		return "", err
+	}
+	return uses[0].ComponentID, nil
+}
+
+// roomExpert resolves the expert a job's turn wears under the chat's own:
+// its channel's (C9), else the room's (nil when there is none, or it is the
+// chat's own expert). It must still be usable in the room: one whose pin was
+// removed is reported missing.
+func roomExpert(ctx context.Context, st store.ContentComponentStore, requester extpipe.Viewer, job store.AgentJob) (store.ContentComponent, store.ContentComponentVersion, string, bool, error) {
+	id, err := ChannelExpertID(ctx, st, job.RoomID, job.ChannelID)
+	if err != nil {
+		return store.ContentComponent{}, store.ContentComponentVersion{}, "", false, err
+	}
+	channel := id != ""
+	if id == "" {
+		uses, err := st.ListContentUses(ctx, store.ContentUseRoomExpert, job.RoomID)
+		if err != nil || len(uses) == 0 {
+			return store.ContentComponent{}, store.ContentComponentVersion{}, "", false, err
+		}
+		id = uses[0].ComponentID
+	}
 	if id == job.ExpertID {
-		return store.ContentComponent{}, store.ContentComponentVersion{}, "", nil
+		return store.ContentComponent{}, store.ContentComponentVersion{}, "", false, nil
 	}
 	c, v, err := Usable(ctx, st, requester, job.RoomID, id, "")
 	if errors.Is(err, ErrNotUsable) {
@@ -78,7 +101,7 @@ func roomExpert(ctx context.Context, st store.ContentComponentStore, requester e
 		if gone, gerr := st.GetContentComponent(ctx, id); gerr == nil {
 			name = firstNonEmpty(gone.DisplayName, gone.Name)
 		}
-		return store.ContentComponent{}, store.ContentComponentVersion{}, "room expert " + name, nil
+		return store.ContentComponent{}, store.ContentComponentVersion{}, "room expert " + name, false, nil
 	}
-	return c, v, "", err
+	return c, v, "", channel, err
 }

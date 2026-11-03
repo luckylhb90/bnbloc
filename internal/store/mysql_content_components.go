@@ -314,6 +314,21 @@ func (s *MySQLContentComponents) ListContentUses(ctx context.Context, scopeKind 
 	}, string(scopeKind), scopeID, MaxContentList)
 }
 
+// ChannelExperts reads a room's channels' experts: the primary key's
+// (scope_kind, scope_id) range from "<room>:" (exact prefix, no LIKE).
+func (s *MySQLContentComponents) ChannelExperts(ctx context.Context, roomID string) ([]ContentUse, error) {
+	prefix := roomID + ":"
+	return queryAll(ctx, s.DB, `SELECT scope_kind, scope_id, component_id, tenant_id, kind, pinned_version, created_by, created_at_ms
+  FROM content_component_uses WHERE scope_kind = ? AND scope_id >= ? AND LEFT(scope_id, CHAR_LENGTH(?)) = ?
+  ORDER BY scope_id LIMIT ?`, func(r rowScanner) (ContentUse, error) {
+		var u ContentUse
+		var sk string
+		err := r.Scan(&sk, &u.ScopeID, &u.ComponentID, &u.TenantID, &u.Kind, &u.PinnedVersion, &u.CreatedBy, &u.CreatedAtMs)
+		u.ScopeKind = ContentUseScope(sk)
+		return u, err
+	}, string(ContentUseChannelExpert), prefix, prefix, prefix, MaxContentList)
+}
+
 // CountContentUses counts tenant's uses on idx_content_uses_component,
 // bounded per component at MaxUsageCount (a badge count, like
 // CountMemberUses).

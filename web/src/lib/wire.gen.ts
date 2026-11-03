@@ -3516,6 +3516,10 @@ export const ContentUseRoom = "room";
 // ContentUseRoomExpert is a room's expert: one of its pinned experts
 // every agent turn in the room wears (scope id = the room).
 export const ContentUseRoomExpert = "room-expert";
+// ContentUseChannelExpert is a channel's expert (channels PRD C9): one
+// of the room's pinned experts that turns in that channel (and its
+// threads) wear instead of the room's. The request names the channel.
+export const ContentUseChannelExpert = "channel-expert";
 
 // ContentUse is where a component is enabled (a member's skill packs, a
 // room's skill packs) or pinned (a room's experts).
@@ -3540,12 +3544,17 @@ export interface ContentUsesReply {
   // RoomExpert is the id of the room's expert (one of its pinned
   // experts), when it has one.
   roomExpert?: string;
+  // ChannelExperts are the room's channels' experts, by channel id
+  // (channels PRD C9).
+  channelExperts?: Record<string, string>;
 }
 
 // ContentUseRequest is PUT /v1/content-uses.
 export interface ContentUseRequest {
   scope: string;
   roomId?: string;
+  // ChannelID names the channel of a channel-expert use.
+  channelId?: string;
   componentId: string;
   // Version pins a version; empty follows the latest.
   version?: string;
@@ -3595,6 +3604,11 @@ export interface ContentEffective {
   // RoomExpert is the room's expert, worn under the chat's own (absent
   // when the room has none, or it is the chat's expert).
   roomExpert?: ContentRef;
+  // ExpertChannel is the channel whose own expert RoomExpert is (channels
+  // PRD C9; "" = the room's): on a core that writes its instructions into
+  // the shared workspace the bridge runs that channel in a workspace of
+  // its own (core.CapabilityProfilePerSession).
+  expertChannel?: string;
   // Team is the chat expert's roster when it is a team, each member's
   // expert resolved as the requester.
   team?: ContentTeam;
@@ -8452,8 +8466,8 @@ export type ComponentSettingType = "text" | "secret" | "url" | "number" | "boole
 export const ComponentSettingTypeValues: readonly ComponentSettingType[] = ["text", "secret", "url", "number", "boolean", "choice", "path", "lines"];
 export type ComponentSettingScope = "platform" | "org" | "member";
 export const ComponentSettingScopeValues: readonly ComponentSettingScope[] = ["platform", "org", "member"];
-export type ContentUseScope = "member" | "room" | "room-expert";
-export const ContentUseScopeValues: readonly ContentUseScope[] = ["member", "room", "room-expert"];
+export type ContentUseScope = "member" | "room" | "room-expert" | "channel-expert";
+export const ContentUseScopeValues: readonly ContentUseScope[] = ["member", "room", "room-expert", "channel-expert"];
 export type ContentSavedAction = "saved" | "submitted" | "published";
 export const ContentSavedActionValues: readonly ContentSavedAction[] = ["saved", "submitted", "published"];
 export type DecisionQuestionType = "predicate" | "choice" | "score";

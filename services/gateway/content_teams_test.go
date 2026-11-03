@@ -239,3 +239,86 @@ func TestContentEffectiveRecordsRoomExpert(t *testing.T) {
 		t.Fatalf("audit uses = %+v", uses)
 	}
 }
+
+// A channel's expert (channels PRD C9): one of the room's pinned experts,
+// set by the room's owner or admins for one channel, listed with the room's
+// uses; a job in that channel wears it instead of the room's, a job in
+// another channel wears the room's; unpinning it clears it.
+func TestContentChannelExpert(t *testing.T) {
+	g := newContentGateway(t)
+	house := g.create("maya", map[string]any{"kind": "expert", "name": "house-style", "instructions": "Write plainly."})
+	review := g.create("maya", map[string]any{"kind": "expert", "name": "reviewer", "instructions": "Review it."})
+	for _, req := range []wire.ContentUseRequest{
+		{Scope: "room", RoomID: "room-1", ComponentID: house.ID},
+		{Scope: wire.ContentUseRoomExpert, RoomID: "room-1", ComponentID: house.ID},
+	} {
+		if code, raw := g.json("maya", http.MethodPut, "/v1/content-uses", req); code != http.StatusNoContent {
+			t.Fatalf("use %s = %d %s", req.Scope, code, raw)
+		}
+	}
+	chanExpert := wire.ContentUseRequest{Scope: wire.ContentUseChannelExpert, RoomID: "room-1", ChannelID: "ch-review", ComponentID: review.ID}
+	if code, raw := g.json("maya", http.MethodPut, "/v1/content-uses", chanExpert); code != http.StatusBadRequest || !strings.Contains(string(raw), "pin the expert") {
+		t.Fatalf("an unpinned channel expert = %d %s", code, raw)
+	}
+	if code, raw := g.json("maya", http.MethodPut, "/v1/content-uses", wire.ContentUseRequest{Scope: "room", RoomID: "room-1", ComponentID: review.ID}); code != http.StatusNoContent {
+		t.Fatalf("pin = %d %s", code, raw)
+	}
+	if code, _ := g.json("jack", http.MethodPut, "/v1/content-uses", chanExpert); code != http.StatusForbidden {
+		t.Fatalf("a member set a channel expert: %d", code)
+	}
+	if code, raw := g.json("maya", http.MethodPut, "/v1/content-uses", wire.ContentUseRequest{Scope: wire.ContentUseChannelExpert, RoomID: "room-1", ComponentID: review.ID}); code != http.StatusBadRequest {
+		t.Fatalf("a channel expert without a channel = %d %s", code, raw)
+	}
+	if code, raw := g.json("maya", http.MethodPut, "/v1/content-uses", chanExpert); code != http.StatusNoContent {
+		t.Fatalf("channel expert = %d %s", code, raw)
+	}
+	code, raw := g.json("jack", http.MethodGet, "/v1/content-uses?room=room-1", nil)
+	var uses wire.ContentUsesReply
+	if code != http.StatusOK || json.Unmarshal(raw, &uses) != nil || uses.ChannelExperts["ch-review"] != review.ID || uses.RoomExpert != house.ID {
+		t.Fatalf("uses = %d %s", code, raw)
+	}
+
+	ctx := tenant.NewContext(context.Background(), "home")
+	if err := g.jobs.PutBridgeHeartbeat(ctx, store.BridgeHeartbeat{BridgeID: "br-jack", OwnerUserID: "jack", Status: store.BridgeOnline, LastSeenAtMs: time.Now().UnixMilli()}); err != nil {
+		t.Fatal(err)
+	}
+	worn := func(id, channel string, seq int64) string {
+		t.Helper()
+		job, err := g.jobs.PutAgentJob(ctx, store.AgentJob{JobID: id, RoomID: "room-1", ChannelID: channel, MessageSeq: seq, RequesterUserID: "maya", OwnerUserID: "jack", Core: "acme", Provider: "codex",
+			Status: store.AgentJobRunning, LeaseBridgeID: "br-jack", CreatedAtMs: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		code, raw := g.do("jack", http.MethodGet, "/v1/content-components/effective?job="+job.JobID+"&room=room-1", "", nil)
+		var eff wire.ContentEffective
+		if code != http.StatusOK || json.Unmarshal(raw, &eff) != nil || eff.RoomExpert == nil {
+			t.Fatalf("effective = %d %s", code, raw)
+		}
+		return eff.RoomExpert.ComponentID
+	}
+	if got := worn("job-review", "ch-review", 4); got != review.ID {
+		t.Fatalf("the channel's job wears %s, want its channel's expert", got)
+	}
+	if got := worn("job-general", "ch-general", 5); got != house.ID {
+		t.Fatalf("another channel's job wears %s, want the room's expert", got)
+	}
+	// A thread names no expert: its turns wear its parent channel's.
+	g.svc.ChannelInfo = func(_ context.Context, room, ch string) (store.RoomChannel, bool, error) {
+		if room == "room-1" && ch == "th-1" {
+			return store.RoomChannel{ChannelID: "th-1", RoomID: room, Kind: store.ChannelKindThread, ParentID: "ch-review", RootSeq: 3}, true, nil
+		}
+		return store.RoomChannel{}, false, nil
+	}
+	if got := worn("job-thread", "th-1", 6); got != review.ID {
+		t.Fatalf("a thread of the review channel wears %s, want its parent's expert", got)
+	}
+
+	if code, raw := g.json("maya", http.MethodDelete, "/v1/content-uses?scope=room&roomId=room-1&componentId="+review.ID, nil); code != http.StatusNoContent {
+		t.Fatalf("unpin = %d %s", code, raw)
+	}
+	code, raw = g.json("jack", http.MethodGet, "/v1/content-uses?room=room-1", nil)
+	uses = wire.ContentUsesReply{}
+	if code != http.StatusOK || json.Unmarshal(raw, &uses) != nil || len(uses.ChannelExperts) != 0 {
+		t.Fatalf("after unpin = %d %s", code, raw)
+	}
+}

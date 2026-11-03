@@ -35,6 +35,7 @@ import { useChannelAssist } from "@/views/room/useChannelAssist";
 import { useApplyPreset } from "@/views/room/ChannelPresetDialogs";
 import { ChannelPresetPicker } from "@/views/room/ChannelPresetPicker";
 import { ChannelKeepAndTabs, retentionFrom } from "@/views/room/ChannelKeepAndTabs";
+import { ChannelExpertField, saveChannelExpert, useChannelExpert } from "@/views/room/ChannelExpertField";
 
 // The channel and section dialogs of the rail (docs/prd/2026-10-28-channels-
 // and-threads.md §2.1, §2.1a, §8 slice 1). Each says a refusal inside
@@ -191,6 +192,7 @@ export function ChannelSettingsDialog({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const draft = useChannelAssist(DRAFT_CHANNEL_PURPOSE, "draft a purpose");
+  const expert = useChannelExpert(roomId, c.channelId);
   // The default agent is one of the room's agents, by its key; one stored
   // that is no longer in the room is still shown (and kept) by its key.
   const current = s.defaultAgent ? { ownerId: s.defaultAgent.ownerId, core: s.defaultAgent.core || undefined, provider: s.defaultAgent.provider } : null;
@@ -228,6 +230,7 @@ export function ChannelSettingsDialog({
             : { tags: undefined, statuses: undefined, postTemplate: undefined }),
         },
       });
+      await saveChannelExpert(roomId, c.channelId, expert);
       onSaved();
     } catch (e) {
       setErr(errorText(e, "Could not save the channel"));
@@ -305,6 +308,7 @@ export function ChannelSettingsDialog({
             ))}
           </Select>
         </Field>
+        <ChannelExpertField st={expert} />
         <Field label="Who posts">
           <Segment<ChannelWhoPosts>
             value={(s.whoPosts ?? "") as ChannelWhoPosts}

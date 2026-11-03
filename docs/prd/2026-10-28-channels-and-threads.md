@@ -1158,3 +1158,28 @@ copied into the new room pastes them as their note, as their own act.
 - Not in it: a channel retention summary in the organization console (the
   audit log has each purge).
 
+**Slice 6c, a channel's expert** (C9, E6):
+
+- A channel's expert is a `channel-expert` content use scoped
+  `<room>:<channel>` (`store.ChannelExpertScopeID`): one of the room's pinned
+  experts (never a team), set by the room's owner or admins
+  (`putChannelExpert` over `setScopedExpert`, the one writer of a room's or
+  channel's expert), listed with the room's uses (`channelExperts`, read by
+  `ContentComponentStore.ChannelExperts` along the primary key), cleared
+  when its expert is unpinned and deleted with the room (`roomOwnedTables`).
+- A turn wears it instead of the room's expert (`contentuse.ChannelExpertID`,
+  read by `roomExpert`); a thread's turns wear its parent channel's (the
+  gateway's `effectiveContent`, every resolution of a job's content).
+  `ContentEffective.expertChannel` names the channel.
+- A core declares `profilePerSession` when each session's instructions are
+  its own; on any other core the bridge runs such a channel in a workspace
+  of its own (`driveKey.apart`: its own sessions, sandbox space and
+  deliverable ids), and the channel's settings say so before it is saved
+  (`ChannelExpertField`).
+- Tests: `TestContentChannelExpert` (set, list, worn by its channel and its
+  threads, not by another, cleared with its pin),
+  `TestContractContentComponentStoreChannelExperts` (memory and MySQL, with a
+  room whose id extends the room's), `TestChannelExpertWorkspaceApart`.
+- Not run: a real core on the member's machine with a resumed session before
+  and after a channel expert is set (needs the owner; release rule "proven on
+  a resumed session").

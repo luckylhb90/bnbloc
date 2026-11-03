@@ -168,6 +168,10 @@ type Service struct {
 	// and refuses every read_records call.
 	RoomSources store.RoomSourceStore
 	RoomInfo    func(ctx context.Context, roomID string) (store.Room, error)
+	// ChannelInfo reads a channel of the ctx tenant: a thread's turns wear
+	// its parent channel's expert (effectiveContent). nil = a job's channel
+	// is taken as it is.
+	ChannelInfo func(ctx context.Context, roomID, channelID string) (store.RoomChannel, bool, error)
 	AgentRuns   store.AgentRunReader
 	// NotifierReplies resolves the reply tokens of delivered notifications
 	// for POST /v1/notifier/replies (N1); uninstalling a notifier deletes

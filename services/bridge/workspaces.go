@@ -138,8 +138,10 @@ type workspaceRecord struct {
 	OwnMachine bool `json:"ownMachine,omitempty"`
 	// SeatOwner and Requester are the slot's seat (driveKey): empty for
 	// the owner's own.
-	SeatOwner   string            `json:"seatOwner,omitempty"`
-	Requester   string            `json:"requester,omitempty"`
+	SeatOwner string `json:"seatOwner,omitempty"`
+	Requester string `json:"requester,omitempty"`
+	// Apart is the channel the slot keeps apart (driveKey.apart).
+	Apart       string            `json:"apart,omitempty"`
 	WorkspaceID string            `json:"workspaceId"`
 	Copies      roomlog.CopyState `json:"copies,omitempty"`
 	Fence       string            `json:"fence,omitempty"`
@@ -180,6 +182,7 @@ type placeRecord struct {
 	Provider  string `json:"provider"`
 	SeatOwner string `json:"seatOwner,omitempty"`
 	Requester string `json:"requester,omitempty"`
+	Apart     string `json:"apart,omitempty"`
 	Place     string `json:"place"`
 }
 
@@ -212,7 +215,7 @@ func newAgentWorkspaces(dir string) *agentWorkspaces {
 		if r.WorkspaceID == "" {
 			continue
 		}
-		k := driveKey{room: r.Room, core: r.Core, provider: r.Provider, sandboxed: r.Sandboxed, ownMachine: r.OwnMachine, owner: r.SeatOwner, requester: r.Requester}
+		k := driveKey{room: r.Room, core: r.Core, provider: r.Provider, sandboxed: r.Sandboxed, ownMachine: r.OwnMachine, owner: r.SeatOwner, requester: r.Requester, apart: r.Apart}
 		shared := &workspaceShared{fence: r.Fence}
 		if r.Records != nil {
 			shared.room = *r.Records
@@ -237,7 +240,7 @@ func newAgentWorkspaces(dir string) *agentWorkspaces {
 	}
 	for _, r := range doc.Places {
 		if r.Place != "" {
-			w.places[sessionKey{driveKey: driveKey{room: r.Room, core: r.Core, provider: r.Provider, owner: r.SeatOwner, requester: r.Requester}, channel: r.Channel}] = r.Place
+			w.places[sessionKey{driveKey: driveKey{room: r.Room, core: r.Core, provider: r.Provider, owner: r.SeatOwner, requester: r.Requester, apart: r.Apart}, channel: r.Channel}] = r.Place
 		}
 	}
 	return w
@@ -533,7 +536,7 @@ func (w *agentWorkspaces) saveLocked() {
 	}
 	doc := workspacesDoc{Workspaces: make([]workspaceRecord, 0, len(w.m))}
 	for k, ws := range w.m {
-		rec := workspaceRecord{Room: k.room, Core: k.core, Provider: k.provider, Sandboxed: k.sandboxed, OwnMachine: k.ownMachine, SeatOwner: k.owner, Requester: k.requester, WorkspaceID: ws.id, Copies: ws.copies}
+		rec := workspaceRecord{Room: k.room, Core: k.core, Provider: k.provider, Sandboxed: k.sandboxed, OwnMachine: k.ownMachine, SeatOwner: k.owner, Requester: k.requester, Apart: k.apart, WorkspaceID: ws.id, Copies: ws.copies}
 		if ws.shared != nil {
 			ws.shared.mu.Lock()
 			rec.Fence = ws.shared.fence
@@ -557,7 +560,7 @@ func (w *agentWorkspaces) saveLocked() {
 	}
 	sort.Slice(doc.Gone, func(i, j int) bool { return doc.Gone[i].Room < doc.Gone[j].Room })
 	for sk, place := range w.places {
-		doc.Places = append(doc.Places, placeRecord{Room: sk.room, Channel: sk.channel, Core: sk.core, Provider: sk.provider, SeatOwner: sk.owner, Requester: sk.requester, Place: place})
+		doc.Places = append(doc.Places, placeRecord{Room: sk.room, Channel: sk.channel, Core: sk.core, Provider: sk.provider, SeatOwner: sk.owner, Requester: sk.requester, Apart: sk.apart, Place: place})
 	}
 	sort.Slice(doc.Places, func(i, j int) bool {
 		a, b := doc.Places[i], doc.Places[j]

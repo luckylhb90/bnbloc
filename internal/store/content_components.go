@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/luckylhb90/bnbloc/internal/tenant"
@@ -231,6 +232,9 @@ type ContentComponentStore interface {
 	// ListContentUses returns a scope's uses, oldest first (then by
 	// component id), at most MaxContentList.
 	ListContentUses(ctx context.Context, scopeKind ContentUseScope, scopeID string) ([]ContentUse, error)
+	// ChannelExperts lists a room's channels' experts (channels PRD C9):
+	// the uses whose scope id is "<room>:<channel>".
+	ChannelExperts(ctx context.Context, roomID string) ([]ContentUse, error)
 	// CountContentUses returns, per component, how many of tenant's scopes
 	// use it (room experts excluded; capped at MaxUsageCount, a badge
 	// count). Built-in and platform content is used across tenants; a
@@ -566,6 +570,22 @@ func (s *MemoryContentComponents) DeleteContentUse(_ context.Context, scopeKind 
 	defer s.mu.Unlock()
 	delete(s.uses, contentUseKey(scopeKind, scopeID, componentID))
 	return nil
+}
+
+func (s *MemoryContentComponents) ChannelExperts(_ context.Context, roomID string) ([]ContentUse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := []ContentUse{}
+	for _, u := range s.uses {
+		if u.ScopeKind == ContentUseChannelExpert && strings.HasPrefix(u.ScopeID, roomID+":") {
+			out = append(out, u)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ScopeID < out[j].ScopeID })
+	if len(out) > MaxContentList {
+		out = out[:MaxContentList]
+	}
+	return out, nil
 }
 
 func (s *MemoryContentComponents) ListContentUses(_ context.Context, scopeKind ContentUseScope, scopeID string) ([]ContentUse, error) {

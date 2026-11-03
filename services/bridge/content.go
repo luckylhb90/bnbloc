@@ -54,6 +54,9 @@ type jobContent struct {
 	expert *wire.ContentRef
 	// roomExpert is the room's expert, worn under the chat's own.
 	roomExpert *wire.ContentRef
+	// expertChannel is the channel whose own expert roomExpert is ("" =
+	// the room's; channels PRD C9).
+	expertChannel string
 	// team is the roster when the expert is a team (team.go).
 	team  *roomtools.Team
 	packs []wire.ContentRef
@@ -205,7 +208,7 @@ func (b *Bridge) resolveJobContent(ctx context.Context, job bridgeJob, owner str
 	if job.ExpertID != "" && eff.Expert == nil {
 		return nil, &contentUnavailableError{expert: firstNonEmpty(job.ExpertName, job.ExpertID)}
 	}
-	c := &jobContent{expert: eff.Expert, roomExpert: eff.RoomExpert, packs: eff.SkillPacks, missing: eff.Missing}
+	c := &jobContent{expert: eff.Expert, roomExpert: eff.RoomExpert, expertChannel: eff.ExpertChannel, packs: eff.SkillPacks, missing: eff.Missing}
 	refs := eff.SkillPacks
 	if eff.Expert != nil {
 		refs = append([]wire.ContentRef{*eff.Expert}, refs...)

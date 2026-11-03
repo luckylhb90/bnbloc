@@ -689,7 +689,7 @@ func (b *Bridge) planSandbox(ctx context.Context, d *drive) (refuse string) {
 	// runs on the own machine.
 	d.ownMachine = dec.ownerEnv && s.cfg.OwnMachine != ""
 	owner := d.owner
-	key := driveKey{room: d.job.RoomID, core: d.core, provider: d.job.Provider, sandboxed: true, ownMachine: d.ownMachine, owner: d.seatOwner, requester: d.seatRequester()}
+	key := driveKey{room: d.job.RoomID, core: d.core, provider: d.job.Provider, sandboxed: true, ownMachine: d.ownMachine, owner: d.seatOwner, requester: d.seatRequester(), apart: d.apartChannel()}
 	d.prepareExec = func(ctx context.Context) (*corepkg.Execution, error) {
 		// What the host-run tools keep private is read-denied to the confined
 		// agent (docs/prd/2026-10-22-host-run-mcp-tools.md §2.4); when it

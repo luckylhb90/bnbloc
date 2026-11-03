@@ -109,18 +109,25 @@ export const contentApi = {
     req<void>(`/v1/content-components/${enc(id)}/versions/${enc(version)}/ack${roomQuery(roomId)}`, { method: "POST", as: "none" }),
   uses: (roomId?: string) => req<ContentUsesReply>(`/v1/content-uses${roomQuery(roomId)}`),
   // A use changes what a list shows as on and what a composer offers.
-  putUse: (scope: ContentUseScope, componentId: string, opts: { roomId?: string; version?: string } = {}) =>
+  putUse: (scope: ContentUseScope, componentId: string, opts: { roomId?: string; channelId?: string; version?: string } = {}) =>
     changing(
       req<void>("/v1/content-uses", {
         method: "PUT",
-        body: JSON.stringify({ scope, componentId, ...(opts.roomId ? { roomId: opts.roomId } : {}), ...(opts.version ? { version: opts.version } : {}) }),
+        body: JSON.stringify({
+          scope,
+          componentId,
+          ...(opts.roomId ? { roomId: opts.roomId } : {}),
+          ...(opts.channelId ? { channelId: opts.channelId } : {}),
+          ...(opts.version ? { version: opts.version } : {}),
+        }),
         as: "none",
       }),
       null,
     ),
-  removeUse: (scope: ContentUseScope, componentId: string, roomId?: string) => {
+  removeUse: (scope: ContentUseScope, componentId: string, roomId?: string, channelId?: string) => {
     const q = new URLSearchParams({ scope, componentId });
     if (roomId) q.set("roomId", roomId);
+    if (channelId) q.set("channelId", channelId);
     return changing(req<void>(`/v1/content-uses?${q}`, { method: "DELETE", as: "none" }), null);
   },
   // The bundle archive (download through the artifact entitlement).

@@ -26,6 +26,11 @@ func tenantTenantRoomArgs(tenantID, roomID string) []any { return []any{tenantID
 
 func roomOnlyArgs(_, roomID string) []any { return []any{roomID} }
 
+// roomUsesArgs are the room's content uses: its id, then "<room>:" for its
+// channels' experts, matched exactly (no LIKE pattern, so a room id's own
+// characters are never wildcards).
+func roomUsesArgs(_, roomID string) []any { return []any{roomID, roomID + ":", roomID + ":"} }
+
 // byTenantRoom is a table keyed on (tenant_id, room_id).
 func byTenantRoom(table string) roomOwnedTable {
 	return roomOwnedTable{table: table, where: `tenant_id = ? AND room_id = ?`, args: tenantRoomArgs}
@@ -84,9 +89,11 @@ var roomOwnedTables = []roomOwnedTable{
 	// A room's asks for sources and its owner's opt-ins (room_sources.go).
 	byTenantRoom("room_source_grants"),
 	byTenantRoom("room_source_opt_ins"),
-	// Room-scoped enables and the room expert (scope_id is the room id).
-	{table: "content_component_uses", args: roomOnlyArgs,
-		where: `scope_kind IN ('` + string(ContentUseRoom) + `', '` + string(ContentUseRoomExpert) + `') AND scope_id = ?`},
+	// Room-scoped enables and the room expert (scope_id is the room id), and
+	// its channels' experts (scope_id "<room>:<channel>").
+	{table: "content_component_uses", args: roomUsesArgs,
+		where: `(scope_kind IN ('` + string(ContentUseRoom) + `', '` + string(ContentUseRoomExpert) + `') AND scope_id = ?)
+  OR (scope_kind = '` + string(ContentUseChannelExpert) + `' AND LEFT(scope_id, CHAR_LENGTH(?)) = ?)`},
 	// Default-room grants of organization sync (room ids are global).
 	{table: "org_sync_default_rooms", args: roomOnlyArgs, where: `room_id = ?`},
 	// Interactive apps' data is crypto-shredded: the transaction destroys

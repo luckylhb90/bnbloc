@@ -96,6 +96,13 @@ const (
 // (contentUseScope). The one writer of a room's expert (the Library's
 // use route and a room package's install).
 func (s *Service) setRoomExpert(ctx context.Context, claims auth.Claims, roomID string, c store.ContentComponent) error {
+	return s.setScopedExpert(ctx, claims, roomID, store.ContentUseRoomExpert, roomID, c)
+}
+
+// setScopedExpert is the one writer of a room's or a channel's expert (the
+// use scope and its id): c must be one of the room's pinned experts and no
+// team, and it replaces the scope's previous one.
+func (s *Service) setScopedExpert(ctx context.Context, claims auth.Claims, roomID string, scope store.ContentUseScope, scopeID string, c store.ContentComponent) error {
 	if c.Kind != contentpkg.KindExpert {
 		return errRoomExpertKind
 	}
@@ -123,7 +130,7 @@ func (s *Service) setRoomExpert(ctx context.Context, claims auth.Claims, roomID 
 	if m.Team != nil {
 		return errRoomExpertTeam
 	}
-	current, err := s.ContentComponents.ListContentUses(ctx, store.ContentUseRoomExpert, roomID)
+	current, err := s.ContentComponents.ListContentUses(ctx, scope, scopeID)
 	if err != nil {
 		return err
 	}
@@ -131,11 +138,11 @@ func (s *Service) setRoomExpert(ctx context.Context, claims auth.Claims, roomID 
 		if u.ComponentID == c.ID {
 			continue
 		}
-		if err := s.ContentComponents.DeleteContentUse(ctx, store.ContentUseRoomExpert, roomID, u.ComponentID); err != nil {
+		if err := s.ContentComponents.DeleteContentUse(ctx, scope, scopeID, u.ComponentID); err != nil {
 			return err
 		}
 	}
-	u := store.ContentUse{TenantID: claims.Tenant, ScopeKind: store.ContentUseRoomExpert, ScopeID: roomID, ComponentID: c.ID, Kind: c.Kind,
+	u := store.ContentUse{TenantID: claims.Tenant, ScopeKind: scope, ScopeID: scopeID, ComponentID: c.ID, Kind: c.Kind,
 		CreatedBy: claims.Subject, CreatedAtMs: s.nowTime().UnixMilli()}
 	if err := s.ContentComponents.PutContentUse(ctx, u); err != nil {
 		return err
@@ -144,14 +151,43 @@ func (s *Service) setRoomExpert(ctx context.Context, claims auth.Claims, roomID 
 	return nil
 }
 
+// putChannelExpert makes one of a room's pinned experts a channel's expert
+// (channels PRD C9) and answers the refusal: turns in that channel and its
+// threads wear it instead of the room's. The same rules as the room's
+// (setRoomExpert): an expert, pinned in the room, never a team.
+func (s *Service) putChannelExpert(w http.ResponseWriter, r *http.Request, claims auth.Claims, roomID, channelID string, c store.ContentComponent) {
+	var refused errRoomExpert
+	switch err := s.setScopedExpert(r.Context(), claims, roomID, store.ContentUseChannelExpert, store.ChannelExpertScopeID(roomID, channelID), c); {
+	case err == nil:
+		w.WriteHeader(http.StatusNoContent)
+	case errors.As(err, &refused):
+		httpx.Error(w, refused.Error(), http.StatusBadRequest)
+	default:
+		contentStoreErr(w, "set the channel expert failed", err)
+	}
+}
+
 // unpinRoomExpert clears the room's expert when its pin is removed (a room
 // expert is always one of the room's pinned experts).
 func (s *Service) unpinRoomExpert(ctx context.Context, roomID, componentID string) error {
 	err := s.ContentComponents.DeleteContentUse(ctx, store.ContentUseRoomExpert, roomID, componentID)
-	if errors.Is(err, store.ErrContentNotFound) {
-		return nil
+	if err != nil && !errors.Is(err, store.ErrContentNotFound) {
+		return err
 	}
-	return err
+	// A channel's expert is one of the room's pinned experts too.
+	experts, err := s.ContentComponents.ChannelExperts(ctx, roomID)
+	if err != nil {
+		return err
+	}
+	for _, u := range experts {
+		if u.ComponentID != componentID {
+			continue
+		}
+		if err := s.ContentComponents.DeleteContentUse(ctx, store.ContentUseChannelExpert, u.ScopeID, componentID); err != nil && !errors.Is(err, store.ErrContentNotFound) {
+			return err
+		}
+	}
+	return nil
 }
 
 // contentSaved tells the job's room that the room tools saved (or asked to
@@ -188,4 +224,21 @@ func (s *Service) contentUsesChanged(ctx context.Context, claims auth.Claims, sc
 		Payload:  wire.ContentUsesChanged{Scope: string(scope), ComponentID: componentID},
 		AtUnixMs: s.nowTime().UnixMilli(),
 	})
+}
+
+// effectiveContent is what a job's turn wears (contentuse.Effective), with
+// a thread's turns taking its parent channel's expert (channels PRD C9: a
+// thread names no expert of its own). Every gateway resolution of a job's
+// content goes through it.
+func (s *Service) effectiveContent(ctx context.Context, job store.AgentJob) (wire.ContentEffective, error) {
+	if s.ChannelInfo != nil && job.ChannelID != "" {
+		ch, ok, err := s.ChannelInfo(tenant.NewContext(ctx, job.TenantID), job.RoomID, job.ChannelID)
+		if err != nil {
+			return wire.ContentEffective{}, err
+		}
+		if ok && ch.IsThread() && ch.ParentID != "" {
+			job.ChannelID = ch.ParentID
+		}
+	}
+	return contentuse.Effective(ctx, s.ContentComponents, job)
 }

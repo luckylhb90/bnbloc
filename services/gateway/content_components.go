@@ -988,6 +988,18 @@ func (s *Service) handleListContentUses(w http.ResponseWriter, r *http.Request, 
 			httpx.Error(w, "list room expert failed", http.StatusInternalServerError)
 			return
 		}
+		experts, err := s.ContentComponents.ChannelExperts(ctx, room)
+		if err != nil {
+			obs.ServerError(w, "list channel experts failed", err)
+			httpx.Error(w, "list channel experts failed", http.StatusInternalServerError)
+			return
+		}
+		for _, u := range experts {
+			if out.ChannelExperts == nil {
+				out.ChannelExperts = map[string]string{}
+			}
+			out.ChannelExperts[strings.TrimPrefix(u.ScopeID, room+":")] = u.ComponentID
+		}
 	}
 	httpx.WriteJSON(w, http.StatusOK, out)
 }
@@ -1071,7 +1083,7 @@ func (s *Service) handlePutContentUse(w http.ResponseWriter, r *http.Request, ca
 	if req.Scope != wire.ContentUseMember {
 		room, what = strings.TrimSpace(req.RoomID), "component "+strings.TrimSpace(req.ComponentID)
 	}
-	claims, scope, scopeID, ok := s.contentUseScope(w, claims, req.Scope, req.RoomID)
+	claims, scope, scopeID, ok := s.contentUseScope(w, claims, req.Scope, req.RoomID, req.ChannelID)
 	if !ok {
 		return
 	}
@@ -1087,6 +1099,9 @@ func (s *Service) handlePutContentUse(w http.ResponseWriter, r *http.Request, ca
 	if scope == store.ContentUseRoomExpert {
 		what += " as the room's expert"
 	}
+	if scope == store.ContentUseChannelExpert {
+		what += " as the channel's expert"
+	}
 	spec, _ := contentpkg.Lookup(c.Kind)
 	if !spec.Use {
 		httpx.Error(w, fmt.Sprintf("a %s is not turned on in a room or for a member", spec.Short), http.StatusBadRequest)
@@ -1094,6 +1109,10 @@ func (s *Service) handlePutContentUse(w http.ResponseWriter, r *http.Request, ca
 	}
 	if scope == store.ContentUseRoomExpert {
 		s.putRoomExpert(w, r, claims, scopeID, c)
+		return
+	}
+	if scope == store.ContentUseChannelExpert {
+		s.putChannelExpert(w, r, claims, strings.TrimSpace(req.RoomID), strings.TrimSpace(req.ChannelID), c)
 		return
 	}
 	if scope == store.ContentUseMember && !spec.MemberUse {
@@ -1127,14 +1146,27 @@ func (s *Service) putContentUse(ctx context.Context, claims auth.Claims, scope s
 	return nil
 }
 
-// contentUseScope validates a use scope: "member" is the caller; "room"
-// and "room-expert" need the room's owner or an admin, and act in the
-// room's tenant (tenant_scope.go): the returned claims are the ones the
-// use is written and announced with.
-func (s *Service) contentUseScope(w http.ResponseWriter, claims auth.Claims, scope, roomID string) (auth.Claims, store.ContentUseScope, string, bool) {
+// contentUseScope validates a use scope: "member" is the caller; "room",
+// "room-expert" and "channel-expert" need the room's owner or an admin, and
+// act in the room's tenant (tenant_scope.go): the returned claims are the
+// ones the use is written and announced with. A channel's expert is keyed
+// by the room and the channel (store.ChannelExpertScopeID).
+func (s *Service) contentUseScope(w http.ResponseWriter, claims auth.Claims, scope, roomID, channelID string) (auth.Claims, store.ContentUseScope, string, bool) {
 	switch scope {
 	case wire.ContentUseMember:
 		return claims, store.ContentUseMember, claims.Subject, true
+	case wire.ContentUseChannelExpert:
+		roomID, channelID = strings.TrimSpace(roomID), strings.TrimSpace(channelID)
+		if roomID == "" || channelID == "" {
+			httpx.Error(w, "roomId and channelId required", http.StatusBadRequest)
+			return claims, "", "", false
+		}
+		editor, ok := s.roomEditorClaims(claims, roomID)
+		if !ok {
+			httpx.Error(w, "only the room's owner or admins change its experts and skills", http.StatusForbidden)
+			return claims, "", "", false
+		}
+		return editor, store.ContentUseChannelExpert, store.ChannelExpertScopeID(roomID, channelID), true
 	case wire.ContentUseRoom, wire.ContentUseRoomExpert:
 		roomID = strings.TrimSpace(roomID)
 		if roomID == "" {
@@ -1148,7 +1180,7 @@ func (s *Service) contentUseScope(w http.ResponseWriter, claims auth.Claims, sco
 		}
 		return editor, store.ContentUseScope(scope), roomID, true
 	default:
-		httpx.Error(w, "scope must be member, room or room-expert", http.StatusBadRequest)
+		httpx.Error(w, "scope must be member, room, room-expert or channel-expert", http.StatusBadRequest)
 		return claims, "", "", false
 	}
 }
@@ -1167,7 +1199,7 @@ func (s *Service) handleDeleteContentUse(w http.ResponseWriter, r *http.Request,
 	}
 	w, audited := s.grantedSetup(w, r, actor, "unuse", &room, &what)
 	defer audited()
-	claims, scope, scopeID, ok := s.contentUseScope(w, claims, q.Get("scope"), q.Get("roomId"))
+	claims, scope, scopeID, ok := s.contentUseScope(w, claims, q.Get("scope"), q.Get("roomId"), q.Get("channelId"))
 	if !ok {
 		return
 	}
@@ -1185,8 +1217,17 @@ func (s *Service) handleDeleteContentUse(w http.ResponseWriter, r *http.Request,
 			return
 		}
 	}
-	s.contentUsesChanged(r.Context(), claims, scope, scopeID, componentID)
+	s.contentUsesChanged(r.Context(), claims, scope, scopeRoom(scope, scopeID, q.Get("roomId")), componentID)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// scopeRoom is the room a use scope's change is announced in: a channel
+// expert's scope id names the channel too, so its room is the request's.
+func scopeRoom(scope store.ContentUseScope, scopeID, roomID string) string {
+	if scope == store.ContentUseChannelExpert {
+		return strings.TrimSpace(roomID)
+	}
+	return scopeID
 }
 
 // handleContentEffective answers the bridge driving a job: the expert and
@@ -1202,7 +1243,7 @@ func (s *Service) handleContentEffective(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	job := *actor.Job
-	eff, err := contentuse.Effective(r.Context(), s.ContentComponents, job)
+	eff, err := s.effectiveContent(r.Context(), job)
 	if err != nil {
 		obs.ServerError(w, "resolve job content failed", err)
 		httpx.Error(w, "resolve job content failed", http.StatusInternalServerError)
@@ -1278,7 +1319,7 @@ func (s *Service) contentBundleEntitled(ctx context.Context, actor contentActor,
 	if actor.Job == nil {
 		return false, nil
 	}
-	eff, err := contentuse.Effective(ctx, s.ContentComponents, *actor.Job)
+	eff, err := s.effectiveContent(ctx, *actor.Job)
 	if err != nil {
 		return false, err
 	}

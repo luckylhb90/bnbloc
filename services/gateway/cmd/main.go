@@ -143,6 +143,7 @@ type tenantWiring struct {
 	// sources (room_sources.go, read_records).
 	RoomSources store.RoomSourceStore
 	RoomInfo    func(ctx context.Context, roomID string) (store.Room, error)
+	ChannelInfo func(ctx context.Context, roomID, channelID string) (store.RoomChannel, bool, error)
 	AgentRuns   store.AgentRunReader
 	// Health pings the control-plane store for the readiness probe; nil when no
 	// DB is configured (dev/in-memory), which reads as always-ready.
@@ -238,7 +239,7 @@ func resolveTenantWiring() tenantWiring {
 	}
 	return tenantWiring{Resolve: res.Resolve, RoomMembers: roomMembers, OrgAdmins: orgAdmins, TenantSettings: tenants.GetTenant, Suspended: suspended, MemberRole: memberRole, Settings: backends.Settings, ExtAudit: backends.ExtAudit, ComponentInstalls: backends.ComponentInstalls, NotifierReplies: backends.ReplyTokens, ComponentValues: backends.ComponentValues, SSOHandoffs: backends.SSOHandoffs, RefreshTokens: backends.RefreshTokens, Profiles: backends.Profiles, MemberCount: memberCount, Health: backends.HealthCheck(),
 		APITokens:   backends.APITokens,
-		RoomSources: backends.RoomSources, RoomInfo: backends.Room.GetRoom, AgentRuns: backends.AgentRuns(),
+		RoomSources: backends.RoomSources, RoomInfo: backends.Room.GetRoom, ChannelInfo: backends.Channel.GetChannel, AgentRuns: backends.AgentRuns(),
 		ContentComponents: backends.ContentComponents,
 		ContentJobs:       contentJobs(backends.BridgeJobs),
 		BridgeSends:       backends.BridgeSends,
@@ -334,6 +335,7 @@ func main() {
 		TenantSettings:    tw.TenantSettings,
 		RoomSources:       tw.RoomSources,
 		RoomInfo:          tw.RoomInfo,
+		ChannelInfo:       tw.ChannelInfo,
 		AgentRuns:         tw.AgentRuns,
 		AllowedOrigins:    config.List("BNBLOC_ALLOWED_ORIGINS"),
 		TrustedProxies:    resolveTrustedProxies(),

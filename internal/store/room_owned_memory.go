@@ -200,7 +200,8 @@ func (s *MemoryContentComponents) deleteRoomRows(tenantID, roomID string) {
 		}
 	}
 	for k, u := range s.uses {
-		if (u.ScopeKind == ContentUseRoom || u.ScopeKind == ContentUseRoomExpert) && u.ScopeID == roomID {
+		if (u.ScopeKind == ContentUseRoom || u.ScopeKind == ContentUseRoomExpert) && u.ScopeID == roomID ||
+			u.ScopeKind == ContentUseChannelExpert && strings.HasPrefix(u.ScopeID, roomID+":") {
 			delete(s.uses, k)
 		}
 	}

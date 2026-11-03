@@ -50,6 +50,10 @@ const (
 	// create (instructions, skills, MCP servers, env) and maps it onto its
 	// agent natively. See AgentProfile.
 	CapabilityAgentProfile = string(core.CapabilityAgentProfile)
+	// CapabilityProfilePerSession: the core gives each session its own
+	// instructions instead of writing them into the shared workspace (see
+	// core.CapabilityProfilePerSession).
+	CapabilityProfilePerSession = string(core.CapabilityProfilePerSession)
 	// CapabilityDiscover marks a package whose daemon can be located without an
 	// explicit endpoint (package metadata only; not a runtime method).
 	CapabilityDiscover = string(core.CapabilityDiscover)
@@ -67,7 +71,7 @@ const (
 var Capabilities = []string{
 	CapabilityInterrupt, CapabilitySteer, CapabilityWriteFile, CapabilityDeleteWorkspace, CapabilitySandboxExec,
 	CapabilitySessionFiles, CapabilitySessionFileBytes, CapabilityAgentProfile, CapabilityDiscover,
-	CapabilityTurnActivity, CapabilityExecutionRefresh, CapabilityEgressProvider,
+	CapabilityTurnActivity, CapabilityExecutionRefresh, CapabilityEgressProvider, CapabilityProfilePerSession,
 }
 
 // KnownCapability reports whether name is a Core Protocol capability.

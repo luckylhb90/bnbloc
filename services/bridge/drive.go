@@ -101,7 +101,20 @@ func (d *drive) ref() jobRef {
 
 // key is the drive's slot: its session and drive lock.
 func (d *drive) key() driveKey {
-	return driveKey{room: d.job.RoomID, core: d.core, provider: d.job.Provider, sandboxed: d.prepareExec != nil, ownMachine: d.ownMachine, owner: d.seatOwner, requester: d.seatRequester()}
+	return driveKey{room: d.job.RoomID, core: d.core, provider: d.job.Provider, sandboxed: d.prepareExec != nil, ownMachine: d.ownMachine, owner: d.seatOwner, requester: d.seatRequester(), apart: d.apartChannel()}
+}
+
+// apartChannel is the channel whose turns run in a workspace of their own
+// (channels PRD C9): one wearing an expert of its own, on a core that does
+// not give each session its own instructions (any core without
+// profilePerSession is taken to write them into the shared workspace, where
+// two channels' experts would overwrite each other).
+// decision: owner accepted 2026-11-02 (E6)
+func (d *drive) apartChannel() string {
+	if d.content == nil || d.content.expertChannel == "" || d.caps.perSession {
+		return ""
+	}
+	return d.content.expertChannel
 }
 
 // seatRequester is the requester whose seat the drive takes: none for the
@@ -248,6 +261,9 @@ type driveCaps struct {
 	unknown error
 	// profile: agentProfile (an agent profile, MCP servers, room tools).
 	profile bool
+	// perSession: profilePerSession (each session's instructions are its
+	// own, never files of the shared workspace; drive.apartChannel).
+	perSession bool
 	// workdir: sandboxExec (a workspace created in the sandbox workdir).
 	workdir corepkg.WorkdirWorkspaceCreator
 	// writer / bytesWriter: writeFile (.room/ context, attachments,
@@ -291,7 +307,8 @@ func (b *Bridge) coreCaps(ctx context.Context, coreName string) driveCaps {
 	if err := corepkg.CapabilitiesKnown(ctx, p, ep); err != nil {
 		return driveCaps{reachable: true, unknown: err}
 	}
-	caps := driveCaps{reachable: true, profile: corepkg.Supports(ctx, p, ep, corepkg.CapabilityAgentProfile)}
+	caps := driveCaps{reachable: true, profile: corepkg.Supports(ctx, p, ep, corepkg.CapabilityAgentProfile),
+		perSession: corepkg.Supports(ctx, p, ep, corepkg.CapabilityProfilePerSession)}
 	caps.workdir, _ = corepkg.As[corepkg.WorkdirWorkspaceCreator](ctx, p, ep, corepkg.CapabilitySandboxExec)
 	caps.writer, _ = corepkg.As[corepkg.WorkspaceFileWriter](ctx, p, ep, corepkg.CapabilityWriteFile)
 	caps.bytesWriter, _ = corepkg.As[corepkg.WorkspaceFileBytesWriter](ctx, p, ep, corepkg.CapabilityWriteFile)
@@ -549,6 +566,10 @@ type driveKey struct {
 	// shared one: a session, workspace and space of its own.
 	ownMachine       bool
 	owner, requester string
+	// apart is the channel that runs in a workspace of its own: it wears
+	// an expert of its own on a core that writes instructions into the
+	// workspace (drive.apartChannel; channels PRD C9, decision E6).
+	apart string
 }
 
 // sessionKey is one channel's session of a drive slot
@@ -592,10 +613,14 @@ func (k driveKey) agentID() string { return k.room + "\x00" + k.core + "\x00" + 
 // owner's own seat (the identity every own-seat name and id is derived
 // from, unchanged), else the owner and requester.
 func (k driveKey) seatID() string {
-	if k.owner == "" && k.requester == "" {
+	if k.owner == "" && k.requester == "" && k.apart == "" {
 		return ""
 	}
-	return k.owner + "\x00" + k.requester
+	id := k.owner + "\x00" + k.requester
+	if k.apart != "" {
+		id += "\x00channel:" + k.apart
+	}
+	return id
 }
 
 // seatAgentID is the identity of one seat of the agent: agentID for the

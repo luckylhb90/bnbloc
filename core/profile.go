@@ -17,6 +17,15 @@ import (
 // the prompt and summarizing the skills into them.
 const CapabilityAgentProfile Capability = "agentProfile"
 
+// CapabilityProfilePerSession marks a core that gives each session its own
+// instructions (an agentProfile core that never writes them into the shared
+// workspace, e.g. an ACP adapter's per-session meta): two channel sessions
+// of one agent then wear two experts without overwriting each other. A core
+// without it is taken to write them into the workspace (the instructions
+// file the harness reads), so the bridge runs a channel whose expert differs
+// from the room's in a workspace of its own (channels PRD C9, decision E6).
+const CapabilityProfilePerSession Capability = "profilePerSession"
+
 // AgentProfile is the role an agent session wears: the always-on
 // instructions of an expert, the skills it loads on demand, the MCP servers
 // it may call and the env those need. It is carried on session create only;
