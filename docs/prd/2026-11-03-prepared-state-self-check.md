@@ -1,7 +1,8 @@
 # Prepared state checks itself: one rule for what a core builds for others' programs (2026-11-03)
 
-Status: proposal; decisions P1-P5 open. The case that started it is fixed
-(`docs/bugs/2026-11-03-opencode-upgrade-strands-sandbox-setup.md`).
+Status: built in bnbloc-acp 0.2.28 (`a6f8674`), published to QA as optin;
+decisions P1-P5 accepted by the owner 2026-11-03. The case that started it is
+fixed (`docs/bugs/2026-11-03-opencode-upgrade-strands-sandbox-setup.md`).
 
 ## Why
 
@@ -158,7 +159,7 @@ keeps a `package.json` it finds), and one that removes the stamp mid-build.
   path) rebuilds forever: the upgrade test with two runs of one version
   catches it.
 
-## Decisions (open)
+## Decisions (accepted by the owner 2026-11-03: every recommendation)
 
 - **P1. Unstamped state at first run:** rebuild every directory once
   (recommended: simple, the cost is one reinstall per space), or adopt one
@@ -173,3 +174,29 @@ keeps a `package.json` it finds), and one that removes the stamp mid-build.
   lens 11's new question covers the rest at review (recommended); or a
   shared Go package in `core/` that every core uses (only once a second
   core prepares state: AGENTS.md "extract on the second occurrence").
+
+## Progress
+
+- bnbloc-acp `prepared.go` (`a6f8674`, v0.2.28): `ensurePrepared` is the one
+  builder and truster; the opencode routing dir (key: opencode version and
+  the routing plugin's hash, which names the sandbox helper) and the npx
+  entries (key: the package spec) go through it; the npx marker is gone;
+  `distrustPrepared` after a failed start; a failed build is held for its
+  key (P2); `check` lists every prepared directory and `--repair` clears
+  failed and unfinished ones and removes unused ones (P3); a space's npm cache
+  unused 30 days is removed at start (P4); `TestEveryPreparedKindHasAnUpgradeTest`
+  holds every built kind to an upgrade test. Each test was checked red with
+  its rule removed.
+- Differs from §1: an npx entry's key is the spec only (the resolved version
+  is read by check); a working entry of an older version is kept until a start
+  from it fails, which distrusts it (the version npm resolves a range to can
+  change without the agent breaking, and reinstalling every space at every
+  publish is the cost the seeded install avoids).
+- Verified on the owner's machine (2026-11-03, desktop with 0.2.28): the
+  unstamped opencode directory was rebuilt once and stamped
+  (`opencode 1.19.5`), `bnbloc smoke --agent acp/opencode --model
+  <haiku>` passed twice, the second without a rebuild. `check` on that
+  machine listed 46 directories, 8.3 GB.
+- Not run: the 30-day expiry on the owner's machine (nothing is that old
+  yet); Windows (the sandbox does not run there); `check --repair` on the
+  owner's machine (it removes state; the owner runs it).
