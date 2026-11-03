@@ -294,7 +294,7 @@ dependencies = [
 
 [[package]]
 name = "bnbloc-desktop"
-version = "0.1.137"
+version = "0.1.138"
 dependencies = [
  "futures-util",
  "getrandom 0.3.4",
