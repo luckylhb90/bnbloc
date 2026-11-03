@@ -208,7 +208,7 @@ Name test: room state, frame, gap, delta, resume. No use case.
 | Time and lifecycle | Restart: caches empty, slow-mode windows and a few seconds of "posted" marks forgotten (said in §4.2). Ownership move: the room's state dropped with its subscribers. |
 | Scale and cost | Per-message work no longer grows with the channel's listeners on the database; memory per room is its channels, sections and members (a 1,024-member room: well under a megabyte). |
 | Failure and recovery | A lost invalidation is bounded by 30 s; a stream that overflows recovers by the difference without reconnecting; a write-behind failure is retried and logged. |
-| Boundaries and privacy | The cached access is the rule's input, invalidated by the events that change it; a removed member's stream ends on `member_removed` as today; a 30 s net is the worst case for a section change whose event was lost (pending owner). |
+| Boundaries and privacy | The cached access is the rule's input, invalidated by the events that change it; a removed member's stream ends on `member_removed` as today; a 30 s net is the worst case for a section change whose event was lost (P2, accepted 2026-11-02). |
 | One owner | `LoadChannelAccess` stays the one rule; the hub owns encoding; the activity payload owns the unread delta. |
 | Release and compatibility | `room_updated`, `presence_delta`, `stream_gap` are new kinds (an old web ignores them; it re-reads unread on activity as today). `since` is optional. An old realtime pod ignores `since` and replays as now. |
 | Observability | §4.6. |
@@ -227,7 +227,9 @@ Name test: room state, frame, gap, delta, resume. No use case.
 6. Re-measure each slice on the same stack; record before/after in
    `docs/load-testing.md`; then the QA run (§9).
 
-## 9. Decisions pending owner
+## 9. Decisions
+
+Decided by the owner 2026-11-02: every recommendation accepted ("按你建议都做了吧"). P2 and P3 as built; P1 (the QA acceptance run) is run with the owner.
 
 - **P1.** Run the acceptance load on QA (real database and disk) once
   slices 1 to 3 are in, after hours, with its own sandbox room and tokens?

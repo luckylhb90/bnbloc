@@ -4,8 +4,9 @@ Status: proposed (2026-10-26), revised 2026-10-27 after a review of its own
 diagrams (§10), the owner's question about collaborative rooms (§2.7), and
 the practice of a team that runs agent-to-agent review at scale, and a study
 of self-organizing agents at scale (§1, §10).
-Nothing is built. The decisions in §7 are open and wait for the owner
-(AGENTS.md "Decision gate"); no code is written before they are answered.
+Decided 2026-11-02: the owner accepted every recommendation of §7 (D1 to
+D28, each alternative declined); the code cites them as
+`decision: flows PRD D<n>`. Building starts with §8 slice 1.
 Owner: the event bus (`services/realtime/events.go`, the one dispatcher;
 `internal/schedule` the one match), the schedules store
 (`internal/store/room_schedules.go`), the borrow grants
@@ -613,7 +614,7 @@ domain, workshop, swarm or work item.
    first, takes a few items, and the reopen rate shows a regression; one step
    rolls it back.
 
-## 7. Decisions (open: the owner answers before code)
+## 7. Decisions (accepted by the owner, 2026-11-02: every recommendation)
 
 **D1. Link consent.** A's owner or admin grants; a flow owner who is admin of
 both grants while building; pinned to room B; suspended when B goes from

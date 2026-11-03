@@ -253,7 +253,9 @@ So the target is **A** (interchangeable realtime replicas over a bus, the
 sequence in MySQL) then **B** (one stream per client). Slices of B follow
 A's in §5.
 
-## 7. Decisions pending owner
+## 7. Decisions
+
+Decided by the owner 2026-11-02: every recommendation accepted ("按你建议都做了吧"). R1 and R2 as recommended; R3 (which Redis on QA) has no recommendation and stays the operator's.
 
 - **R1.** Build it: realtime without owners, Redis as the multi-replica bus
   (single node stays dependency-free)? Recommended.

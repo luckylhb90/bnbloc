@@ -37,27 +37,27 @@ const (
 	// MaxChannelPurpose, MaxChannelRules and MaxRoomRules bound a channel's
 	// purpose and rules and a room's rules, in characters
 	// (docs/prd/2026-10-28-channels-and-threads.md, slice 1). A section's
-	// rules take MaxChannelRules (decision: pending owner; the PRD gives no
+	// rules take MaxChannelRules (decision: owner accepted 2026-11-02; the PRD gives no
 	// bound for them).
 	MaxChannelPurpose = 250
 	MaxChannelRules   = 4000
 	MaxRoomRules      = 8000
 	// MaxChannelGroupName bounds a member's rail group's name, and
 	// MaxChannelGroups how many groups a member keeps in one room (C24;
-	// decision: pending owner, the PRD gives no bound).
+	// decision: owner accepted 2026-11-02, the PRD gives no bound).
 	MaxChannelGroupName = 64
 	MaxChannelGroups    = 50
 	// Message marks (§2.3): at most MaxMessageReactions distinct reactions
 	// on one message, each at most MaxReactionBytes (one emoji with its
 	// modifiers); a room's marks listing answers at most MaxRoomMarks
-	// (decision: pending owner, the PRD gives no bounds).
+	// (decision: owner accepted 2026-11-02, the PRD gives no bounds).
 	MaxMessageReactions = 20
 	MaxReactionBytes    = 32
 	MaxRoomMarks        = 2000
 	// A forum's vocabulary (C20): at most MaxChannelTags tags and
 	// MaxChannelStatuses statuses, each name at most MaxChannelTagName
 	// characters, a thread at most MaxThreadTags tags; a post template at
-	// most MaxPostTemplate characters (decision: pending owner, the PRD
+	// most MaxPostTemplate characters (decision: owner accepted 2026-11-02, the PRD
 	// gives no bounds).
 	MaxChannelTags     = 30
 	MaxChannelStatuses = 12

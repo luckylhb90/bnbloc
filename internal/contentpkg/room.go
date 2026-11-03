@@ -39,7 +39,7 @@ const (
 	maxRoomDescription = 500
 	maxRoomChannels    = 20
 	// maxRoomSections bounds a package's sections, and maxRoomChannelName
-	// a channel's and a section's name (decision: pending owner; the room
+	// a channel's and a section's name (decision: owner accepted 2026-11-02; the room
 	// service bounds neither).
 	maxRoomSections    = 10
 	maxRoomChannelName = 80

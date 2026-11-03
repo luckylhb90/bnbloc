@@ -46,7 +46,7 @@ func (s *Service) membersOnlySection(w http.ResponseWriter, r *http.Request, roo
 
 // sectionMemberCaller is a membership route's caller: a human member of the
 // room who may post (a visitor reads open channels only and joins nothing,
-// decision: pending owner).
+// decision: owner accepted 2026-11-02).
 func (s *Service) sectionMemberCaller(w http.ResponseWriter, r *http.Request, roomID string) (channelCaller, bool) {
 	who, ok := s.humanCaller(w, r, roomID)
 	if !ok {

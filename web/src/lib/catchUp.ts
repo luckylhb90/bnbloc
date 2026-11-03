@@ -51,7 +51,7 @@ export function catchUpOf(fields: AssistJSONReply["fields"]): CatchUp {
 }
 
 /** translateAsk is translate's text: the language to write in (the
- *  member's browser language; decision: pending owner), then the message. */
+ *  member's browser language; decision: owner accepted 2026-11-02), then the message. */
 export function translateAsk(language: string, text: string): string {
   return `Language: ${language || "en"}\nMessage:\n${text.slice(0, MaxAssistText - 200)}`;
 }

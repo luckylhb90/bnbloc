@@ -166,7 +166,7 @@ func (s *Service) agentChangeAllowed(w http.ResponseWriter, r *http.Request, p a
 			httpx.Error(w, "invalid json body", http.StatusBadRequest)
 			return false, false
 		}
-		// decision: pending owner. Who answers for a channel is the person's
+		// decision: owner accepted 2026-11-02. Who answers for a channel is the person's
 		// to hand over (§2.6 lists no owner among the agent's fields; the
 		// fail-closed reading refuses it).
 		if _, ok := fields["ownerId"]; ok {
@@ -196,7 +196,7 @@ func (s *Service) agentChangeAllowed(w http.ResponseWriter, r *http.Request, p a
 // alone (the owner's), or the room's rules and recommended channels (the
 // owner's or an admin's), never both in one request, so the audit names one
 // change. The agreement switch and the channel creation policy stay the
-// person's (decision: pending owner; §2.6 names the rules and the
+// person's (decision: owner accepted 2026-11-02; §2.6 names the rules and the
 // recommended channels only, and the fail-closed reading keeps the rest).
 func roomPatchAllowed(w http.ResponseWriter, raw []byte) (roomRules, ok bool) {
 	var fields map[string]json.RawMessage

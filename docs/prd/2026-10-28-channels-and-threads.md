@@ -619,8 +619,8 @@ Not in it: a channel's purpose in the agents' records header (§2.5a) and
 the resumed-session proof that goes with it; the tidying proposals (§2.1b,
 slice 2).
 
-**Decisions pending owner, added in this half** (each marked
-`decision: pending owner` in the code):
+**Decisions accepted by the owner 2026-11-02 (were pending), added in this half** (each marked
+`decision: owner accepted 2026-11-02` in the code):
 
 1. An agent's room patch is the description alone, or the rules and
    recommended channels alone; the agreement switch and the channel
@@ -647,7 +647,7 @@ open channel and those with unread); a channel's menu offers "Move to …",
 "New group…" and "Remove from my group", a group's menu rename and delete.
 The agent door does not open the routes (a member's rail is theirs).
 
-**Decisions pending owner, added in slice 7a:**
+**Decisions accepted by the owner 2026-11-02 (were pending), added in slice 7a:**
 
 1. Groups are kept by any human member, a visitor included, as stars and
    following are (the same rule as following).
@@ -683,7 +683,7 @@ The agent door does not open the routes (a member's rail is theirs).
 - Samples (team, project, release, support desk, end-to-end testing) and
   the plan-room prompt are in the default content repository.
 
-**Decision pending owner, added in this slice** (marked in the code):
+**Decision accepted by the owner 2026-11-02 (was pending), added in this slice** (marked in the code):
 
 1. A package's sections are at most 10 and its channels' names share the
    80-character bound (`maxRoomSections`, `maxRoomChannelName`): the room
@@ -727,7 +727,7 @@ The agent door does not open the routes (a member's rail is theirs).
   The channels e2e covers asking, approving and making an invite-only
   section.
 
-**Decisions pending owner, added in slice 2:**
+**Decisions accepted by the owner 2026-11-02 (were pending), added in slice 2:**
 
 1. A members-only section is **invite-only by default** (`joinPolicy`
    `invite`: its owners add members; the rest of the room sees nothing of
@@ -846,7 +846,7 @@ change, and the two meet at the settings keys):
   validator are platform; every preset, including the six samples and the
   assist's prompt, is content).
 
-**Decisions pending owner, slice 3b:**
+**Decisions accepted by the owner 2026-11-02 (were pending), slice 3b:**
 
 1. A preset never carries a default agent (a person's agent), and Save as
    preset drops it.
@@ -887,7 +887,7 @@ change, and the two meet at the settings keys):
   it handles (it does not know them): set up forums after every pod runs
   this release.
 
-**Decisions pending owner, slice 3b:** the vocabulary bounds (30 tags, 12
+**Decisions accepted by the owner 2026-11-02 (were pending), slice 3b:** the vocabulary bounds (30 tags, 12
 statuses, names of 32 characters, 8 tags a thread, a template of 4000
 characters); a thread's marks are set only on an open thread of a forum.
 
@@ -925,7 +925,7 @@ C5; delivery lanes are the rest of the slice):
   leaves them untouched; an old room pod ignores `level` on a follow (set
   levels after every pod runs this release).
 
-**Decisions pending owner, slice 4:** a direct mention still notifies in a
+**Decisions accepted by the owner 2026-11-02 (were pending), slice 4:** a direct mention still notifies in a
 channel the member muted (Slack's default; the room mute still wins); quiet
 hours drop what they hold back rather than send it at the end; agents'
 replies are not `channel_message` (a member hears their own requests'
@@ -1009,7 +1009,7 @@ hour; `@channel` is open to every member who may post (C5's proposal).
 - Not in it: the rest of slice 5 (reactions, pins, saved, forward, @-group
   mentions, catch-up, digest, translation).
 
-**Decisions pending owner, slice 5a:**
+**Decisions accepted by the owner 2026-11-02 (were pending), slice 5a:**
 
 1. An image in any message (a person's or an agent's) is shown as a link,
    never loaded (C7 says "no remote images"; a `data:` image is a link too).
@@ -1045,7 +1045,7 @@ hour; `@channel` is open to every member who may post (C5's proposal).
 - Not in it: a "Saved" view across rooms (the saves are listed per room),
   forward, @-group mentions, catch-up, digest, translation (slice 5c).
 
-**Decisions pending owner, slice 5b:**
+**Decisions accepted by the owner 2026-11-02 (were pending), slice 5b:**
 
 1. Pinning is for who manages the channel (the room's owners and admins,
    the channel's owner, its section's owners); the PRD names no one.
@@ -1081,7 +1081,7 @@ hour; `@channel` is open to every member who may post (C5's proposal).
   translation (each an assist task with its contract and its prompt in the
   default content repository: a slice of their own).
 
-**Decision pending owner, slice 5c:** a forward carries a reference only
+**Decision accepted by the owner 2026-11-02 (was pending), slice 5c:** a forward carries a reference only
 (PRD: "a new message that links its source"); a member who wants the words
 copied into the new room pastes them as their note, as their own act.
 
@@ -1107,11 +1107,28 @@ copied into the new room pastes them as their note, as their own act.
   and routing suggestions (they act on the feed as it is written: a gated
   assist each), saving an answer to the room's knowledge.
 
-**Decisions pending owner, slice 5d:**
+**Decisions accepted by the owner 2026-11-02 (were pending), slice 5d:**
 
 1. Translate writes in the browser's language (`navigator.language`); the
    member has no language setting yet.
 2. Catch me up reads the open channel's unread messages as this browser
    loaded them (the visit's first unread on); messages older than the loaded
    history are not read.
+
+**Decisions E1 to E6 (slice 6 and C9), accepted by the owner 2026-11-02:**
+
+- **E1.** A thread's retention is its parent channel's, or the thread's own
+  when shorter.
+- **E2.** A channel's retention only shortens the organization's (C22): the
+  shorter of the two applies, so an organization that shortens its policy
+  wins.
+- **E3.** Every per-channel purge writes one audit row: the channel, the
+  days, what was deleted.
+- **E4.** The search index gains a purge by channel (MySQL and OpenSearch).
+- **E5.** A channel pins at most 5 tabs (an interactive app or a file); a
+  channel opens on its chat, the tabs after it.
+- **E6.** C9 by option A: a core declares `profilePerSession` when it gives
+  each session its own instructions; any other core is taken to write them
+  into the shared workspace, so a channel whose expert differs from the
+  room's runs in a workspace of its own, said before the setting is saved.
 

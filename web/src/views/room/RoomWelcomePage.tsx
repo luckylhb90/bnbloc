@@ -87,7 +87,7 @@ export function RoomWelcomePage({
             <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--color-fg-subtle)]">Sections</h3>
             <ul className="flex flex-col gap-1.5">
               {sections.map((s) => {
-                // decision: pending owner. Joining an open section follows its
+                // decision: owner accepted 2026-11-02. Joining an open section follows its
                 // channels (C17: joining an open section is only following);
                 // which of them the PRD leaves open, so the member sees them
                 // listed and joins them all with one click.

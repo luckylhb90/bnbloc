@@ -2408,7 +2408,7 @@ export const SectionMembers = "members";
 // How a member joins a members-only section (C11, C17).
 // SectionJoinInvite: the section's owners add its members; a member of
 // the room who is not one sees nothing of it (C11's default; the
-// default for a members-only section, decision: pending owner: C17
+// default for a members-only section, decision: owner accepted 2026-11-02: C17
 // names "ask" the default, but asking needs the section's name shown,
 // which C11 leaves to its owners).
 export const SectionJoinInvite = "invite";
@@ -2571,7 +2571,7 @@ export interface SectionCreateRequest {
 }
 
 // SectionPatchRequest is PATCH /v1/rooms/{id}/sections/{sectionId}. A
-// section's visibility is fixed at creation (decision: pending owner):
+// section's visibility is fixed at creation (decision: owner accepted 2026-11-02):
 // opening a members-only section would show its history to the room, and
 // closing an open one would take it from members mid-conversation.
 export interface SectionPatchRequest {
@@ -5084,27 +5084,27 @@ export const MaxContentTagRunes = 32;
 // MaxChannelPurpose, MaxChannelRules and MaxRoomRules bound a channel's
 // purpose and rules and a room's rules, in characters
 // (docs/prd/2026-10-28-channels-and-threads.md, slice 1). A section's
-// rules take MaxChannelRules (decision: pending owner; the PRD gives no
+// rules take MaxChannelRules (decision: owner accepted 2026-11-02; the PRD gives no
 // bound for them).
 export const MaxChannelPurpose = 250;
 export const MaxChannelRules = 4000;
 export const MaxRoomRules = 8000;
 // MaxChannelGroupName bounds a member's rail group's name, and
 // MaxChannelGroups how many groups a member keeps in one room (C24;
-// decision: pending owner, the PRD gives no bound).
+// decision: owner accepted 2026-11-02, the PRD gives no bound).
 export const MaxChannelGroupName = 64;
 export const MaxChannelGroups = 50;
 // Message marks (§2.3): at most MaxMessageReactions distinct reactions
 // on one message, each at most MaxReactionBytes (one emoji with its
 // modifiers); a room's marks listing answers at most MaxRoomMarks
-// (decision: pending owner, the PRD gives no bounds).
+// (decision: owner accepted 2026-11-02, the PRD gives no bounds).
 export const MaxMessageReactions = 20;
 export const MaxReactionBytes = 32;
 export const MaxRoomMarks = 2000;
 // A forum's vocabulary (C20): at most MaxChannelTags tags and
 // MaxChannelStatuses statuses, each name at most MaxChannelTagName
 // characters, a thread at most MaxThreadTags tags; a post template at
-// most MaxPostTemplate characters (decision: pending owner, the PRD
+// most MaxPostTemplate characters (decision: owner accepted 2026-11-02, the PRD
 // gives no bounds).
 export const MaxChannelTags = 30;
 export const MaxChannelStatuses = 12;

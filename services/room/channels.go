@@ -42,7 +42,7 @@ import (
 // level or in a section they belong to; "sections" keeps the top level to
 // owners and admins; "admins" keeps creation to them). Until a section has
 // members (slice 2), a member belongs to an open section by being one of
-// its owners (decision: pending owner; the narrowest reading of "a section
+// its owners (decision: owner accepted 2026-11-02; the narrowest reading of "a section
 // they belong to").
 func mayPlaceChannel(room store.Room, role store.Role, user string, sec *store.RoomSection) bool {
 	if role.CanInvite() {
@@ -579,7 +579,7 @@ func (s *Service) targetSection(w http.ResponseWriter, r *http.Request, roomID, 
 // createChannel adds a non-default channel created and owned by creator
 // (the creator may later change its setup). Every channel-adding path (the
 // route, a handoff import) goes through it. The creator follows the channel
-// they made (decision: pending owner; C18 names posting and mentions as
+// they made (decision: owner accepted 2026-11-02; C18 names posting and mentions as
 // joining, and a creator's rail without their own new channel would hide
 // it from them).
 func (s *Service) createChannel(ctx context.Context, roomID, creator string, req wire.ChannelCreateRequest) (store.RoomChannel, error) {
@@ -718,7 +718,7 @@ func (s *Service) channelPatch(r *http.Request, roomID string, who channelCaller
 	p.Position = body.Position
 	if body.OwnerID != nil {
 		owner := strings.TrimSpace(*body.OwnerID)
-		// decision: pending owner (a channel's owner answers for its setup,
+		// decision: owner accepted 2026-11-02 (a channel's owner answers for its setup,
 		// §2.1b; a visitor is read-only, so only a member who may chat owns
 		// one).
 		m, ok, err := s.Store.GetMember(r.Context(), roomID, owner)
@@ -735,7 +735,7 @@ func (s *Service) channelPatch(r *http.Request, roomID string, who channelCaller
 		if err != nil {
 			return p, http.StatusBadRequest, err
 		}
-		// decision: pending owner. The default channel never bars agents:
+		// decision: owner accepted 2026-11-02. The default channel never bars agents:
 		// it is where a request goes when it names no channel, and an
 		// agent's degraded read of the room falls back to it
 		// (roomlog.AgentChannelList).
@@ -838,7 +838,7 @@ func (s *Service) handleDeleteChannel(w http.ResponseWriter, r *http.Request) {
 // body names them, star or hide it for themselves or put it in one of their
 // groups (C24); follow false unfollows, which takes it out of its group.
 // Following is the caller's own order, never access: any human member of
-// the room follows, a visitor included (decision: pending owner; §2.1b
+// the room follows, a visitor included (decision: owner accepted 2026-11-02; §2.1b
 // "personal order ... changes nothing for others"). The people chat is
 // never followed (it is reached through its own panel).
 func (s *Service) handleFollowChannel(follow bool) http.HandlerFunc {

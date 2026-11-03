@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { channelsApi } from "@/lib/channelsApi";
 import { draftAction, restoreDraft } from "@/lib/channelDrafts";
 
-// How long typing pauses before the draft is saved (decision: pending owner;
+// How long typing pauses before the draft is saved (decision: owner accepted 2026-11-02;
 // the PRD names no interval).
 const SAVE_AFTER_MS = 800;
 

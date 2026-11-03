@@ -20,7 +20,7 @@ import (
 // they see, holding any channel they joined; a channel's section is
 // unchanged for everyone else. They are the member's own marks, like stars,
 // so any human member keeps them, a visitor included (the same rule as
-// following; decision: pending owner, as for following).
+// following; decision: owner accepted 2026-11-02, as for following).
 //
 //	POST   /v1/rooms/{roomId}/channel-groups             wire.ChannelGroupCreateRequest → wire.ChannelGroup
 //	PATCH  /v1/rooms/{roomId}/channel-groups/{groupId}   wire.ChannelGroupPatchRequest → wire.ChannelGroup

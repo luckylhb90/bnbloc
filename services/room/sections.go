@@ -39,7 +39,7 @@ import (
 // and admins, and any member who may chat while the room's channel creation
 // policy is not "admins" (a section is where members create channels, C15;
 // §2.1a "people form a section for their team"). The creator owns it.
-// decision: pending owner (the PRD names who makes channels, C15, not who
+// decision: owner accepted 2026-11-02 (the PRD names who makes channels, C15, not who
 // makes sections; this reads C15's policy for both).
 func mayCreateSection(room store.Room, role store.Role) bool {
 	if role.CanInvite() {

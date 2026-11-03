@@ -305,7 +305,7 @@ const (
 const (
 	// SectionJoinInvite: the section's owners add its members; a member of
 	// the room who is not one sees nothing of it (C11's default; the
-	// default for a members-only section, decision: pending owner: C17
+	// default for a members-only section, decision: owner accepted 2026-11-02: C17
 	// names "ask" the default, but asking needs the section's name shown,
 	// which C11 leaves to its owners).
 	SectionJoinInvite = "invite"
@@ -472,7 +472,7 @@ type SectionCreateRequest struct {
 }
 
 // SectionPatchRequest is PATCH /v1/rooms/{id}/sections/{sectionId}. A
-// section's visibility is fixed at creation (decision: pending owner):
+// section's visibility is fixed at creation (decision: owner accepted 2026-11-02):
 // opening a members-only section would show its history to the room, and
 // closing an open one would take it from members mid-conversation.
 type SectionPatchRequest struct {

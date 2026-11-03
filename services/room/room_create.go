@@ -51,7 +51,7 @@ func (s *Service) createRoom(ctx context.Context, room store.Room, owner, defaul
 		return store.RoomChannel{}, err
 	}
 	// The creator follows the channel they made, as for any channel
-	// (createChannel; decision: pending owner). Best effort: the room exists.
+	// (createChannel; decision: owner accepted 2026-11-02). Best effort: the room exists.
 	if s.Channels != nil {
 		if err := s.Channels.FollowChannel(ctx, room.RoomID, def.ChannelID, owner, room.CreatedAtMs, store.FollowMarks{}); err != nil {
 			log.Printf("room: room=%s: the creator's follow of the default channel failed: %v", room.RoomID, err)

@@ -76,7 +76,9 @@ run under load (`docs/bugs/2026-10-30-owner-change-loses-messages.md`):
 | Release and compatibility | Old clients still reconnect (no `since`: a full replay, as before) and do not resend; nothing they send is refused. |
 | Pre-mortem | A hand-over watch that misses a row (more than 200 rows in 300 ms in one room) leaves the client to its gap reads; a replica that cannot read the store during its watch delivers nothing extra (the gap reads cover). |
 
-## 5. Decisions pending owner
+## 5. Decisions
+
+Decided by the owner 2026-11-02: every recommendation accepted ("按你建议都做了吧"). H1 is applied by an operator; H2 (the joint load test) is run with the owner.
 
 - **H1.** QA's own manifests (not the chart): realtime to 3 replicas with S3,
   the others to 2, and the drain settings (internal runbook

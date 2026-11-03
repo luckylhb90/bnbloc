@@ -88,7 +88,7 @@ export interface Translations {
 
 // useTranslations keeps the member's translations of messages (§4): asked
 // one message at a time, shown under the original, never sent to anyone.
-// The language is the browser's (decision: pending owner).
+// The language is the browser's (decision: owner accepted 2026-11-02).
 export function useTranslations(roomId: string, channelId: string | null): Translations {
   const task = useAssistTask(TRANSLATE);
   const [bySeq, setBySeq] = useState<ReadonlyMap<number, string>>(new Map());

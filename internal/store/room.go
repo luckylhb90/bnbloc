@@ -144,7 +144,7 @@ func (r Room) ChannelCreationPolicy() string {
 // RulesAgreementDue reports whether m must agree to the room's current rules
 // before posting (C16): the room requires it, it has rules (a version), and
 // m agreed to an older version or none. A room that requires agreeing but
-// never had rules (version 0) asks nothing (decision: pending owner; there
+// never had rules (version 0) asks nothing (decision: owner accepted 2026-11-02; there
 // is nothing to agree to).
 func (r Room) RulesAgreementDue(m Membership) bool {
 	return r.RequireRulesAgreement && r.RulesVersion > 0 && m.RulesAgreedVersion < r.RulesVersion

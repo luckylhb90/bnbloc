@@ -60,7 +60,7 @@ func writePostRefusal(w http.ResponseWriter, e postRefusal) {
 func (s *Service) admitPost(ctx context.Context, roomID, author string, m membership.Member, ch store.RoomChannel) error {
 	// Every rule below applies to a scheduled post and a dispatch (an agent's
 	// task posted as its requester) exactly as to a typed one, which refuses
-	// them with the same code (decision: pending owner; the PRD does not say
+	// them with the same code (decision: owner accepted 2026-11-02; the PRD does not say
 	// whether such posts are exempt, and refusing is the fail-closed reading).
 	// decision: channels PRD C10 (an archived channel is read-only).
 	if ch.Archived() {
@@ -80,7 +80,7 @@ func (s *Service) admitPost(ctx context.Context, roomID, author string, m member
 	// decision: channels PRD C22 (slow mode is the channel owners' value, no
 	// platform default) and C18 (posting joins). Slow mode applies to every
 	// post of the member, typed, scheduled or dispatched as them, and to
-	// owners and admins alike (decision: pending owner; the PRD names no
+	// owners and admins alike (decision: owner accepted 2026-11-02; the PRD names no
 	// exemption, so none is made). The claim is taken in the owner's memory
 	// before the message is stored, so two posts cannot both pass; a post
 	// whose store then fails has still spent the interval (decision:

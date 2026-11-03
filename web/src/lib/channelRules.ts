@@ -97,7 +97,7 @@ export interface RailGroup {
  *  name. The top level comes first (the default channel leads it), then the
  *  member's own groups (C24) by their position, then the room's open
  *  sections by theirs, as Slack lists custom sections above channels
- *  (decision: pending owner, the PRD does not place them). A
+ *  (decision: owner accepted 2026-11-02, the PRD does not place them). A
  *  channel in one of the member's groups shows there and not in its section
  *  (for them only); a channel naming a group they no longer have shows where
  *  it would without one. Every group of the member is listed, empty or not
