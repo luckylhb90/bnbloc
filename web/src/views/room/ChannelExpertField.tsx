@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { contentLabel, isTeam, type ContentUse } from "@/lib/contentComponents";
 import { contentApi } from "@/lib/contentComponentsApi";
+import { errorText } from "@/lib/errors";
 import { Field } from "@/ui/Input";
+import { LoadFailed } from "@/ui/QueryState";
 import { Select } from "@/ui/Select";
 
 // A channel's expert (channels PRD C9, decision E6): one of the room's
@@ -15,8 +17,12 @@ export function useChannelExpert(roomId: string, channelId: string) {
   const [saved, setSaved] = useState("");
   const [chosen, setChosen] = useState("");
   const [loaded, setLoaded] = useState(false);
+  // A failed load is shown with a retry, never as a missing field.
+  const [failed, setFailed] = useState("");
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let live = true;
+    setFailed("");
     contentApi.uses(roomId).then(
       (r) => {
         if (!live) return;
@@ -26,13 +32,18 @@ export function useChannelExpert(roomId: string, channelId: string) {
         setChosen(id);
         setLoaded(true);
       },
-      () => live && setLoaded(false),
+      (e) => {
+        if (!live) return;
+        setLoaded(false);
+        setFailed(errorText(e, "Could not load the room's experts"));
+      },
     );
     return () => {
       live = false;
     };
-  }, [roomId, channelId]);
-  return { experts, saved, chosen, setChosen, loaded };
+  }, [roomId, channelId, attempt]);
+  const retry = () => setAttempt((n) => n + 1);
+  return { experts, saved, chosen, setChosen, loaded, failed, retry };
 }
 
 export type ChannelExpertState = ReturnType<typeof useChannelExpert>;
@@ -46,6 +57,14 @@ export async function saveChannelExpert(roomId: string, channelId: string, st: C
 }
 
 export function ChannelExpertField({ st }: { readonly st: ChannelExpertState }) {
+  if (st.failed) {
+    return (
+      <div className="flex flex-col gap-2">
+        <span className="text-xs font-medium uppercase tracking-wide text-[var(--color-fg-muted)]">Channel expert</span>
+        <LoadFailed message={st.failed} onRetry={st.retry} />
+      </div>
+    );
+  }
   if (!st.loaded) return null;
   const changed = st.chosen !== st.saved && st.chosen !== "";
   return (
