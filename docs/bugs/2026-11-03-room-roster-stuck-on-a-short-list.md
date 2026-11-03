@@ -1,6 +1,6 @@
 # A room's agent roster stayed on a short list after a core restart (2026-11-03)
 
-Status: fixed (see Fix); verified in tests, not yet on QA.
+Status: fixed (see Fix); verified on QA 2026-11-03.
 
 ## Repro
 
@@ -74,3 +74,19 @@ Lens 7b (identity, "test it with two") and lens 2 (time and lifecycle): the
 roster tests use one stream per owner; none holds two streams of one owner
 with different lists, closed in either order. Lens 11: no test restarts a
 core under a running bridge and checks the rooms' rosters afterwards.
+
+## Verified
+
+On QA (services `0bed7acd`), the owner's desktop 0.1.136 (bridge with the
+pending-target handling and the re-advertise) and bnbloc-acp 0.2.29:
+
+- After the service deploy the stuck room `e2e-sandbox-20261030-0041` listed
+  all 13 agents again, without a desktop restart (the bridge's reconnect
+  advertised its full list, which no older subscription overwrote).
+- The acp daemon was stopped twice and restarted by the desktop's
+  supervisor. During each restart the core listed 6 targets with 3 pending,
+  then 9; three rooms polled every 3 s for 90 s kept all 9 acp agents
+  throughout (before the fix the same restart left rooms with the 6).
+- Not run: two realtime replicas each holding a stream of the same owner in
+  one room (the tests cover the interleavings; QA ran both replicas but which
+  one held each stream was not observed).
