@@ -382,6 +382,10 @@ func (s *Service) Handler() http.Handler {
 	// gateway, posts a task for another agent on behalf of the requester of
 	// the job it is running. Room-keyed, so it runs on the room's owner.
 	mux.Handle("POST /internal/v1/rooms/{roomId}/dispatch", forMember(s.handleInternalDispatch))
+	// A signal (signals.go): a bridge's room tool, signed as its owner by the
+	// gateway, or a task's AI run, signed as its creator, sends an event to
+	// the room as the job's requester (or the task's creator).
+	mux.Handle("POST /internal/v1/rooms/{roomId}/signals", forMember(s.handleInternalSignal))
 	// A card decision that lets an agent's work go on (continue.go): the
 	// gateway, signed as the member who decided it, posts their message to the
 	// agent of the job the card belongs to.

@@ -115,6 +115,12 @@ func scheduleActions() []scheduleAction {
 		{tool: assist.Tool{Name: "ask_agent", Description: "Ask one of the room's agents for work that needs files or judgement (a report, a deck): the request is posted to it, as the schedule's owner. agent is ownerId/provider from list_agents.",
 			Parameters: objectParams(map[string]any{"agent": map[string]any{"type": "string"}, "text": map[string]any{"type": "string"}}, "agent", "text")}, run: (*scheduleRun).askAgent},
 		{tool: assist.Tool{Name: "list_agents", Description: "The room's agents online now (ownerId/provider).", Parameters: objectParams(map[string]any{})}, run: (*scheduleRun).listAgents},
+		{tool: assist.Tool{Name: "signal", Description: "Tell the room a step is done, so the room's other tasks waiting for it run (the next step of a flow). type is the event's name (e.g. draft.ready; never starting platform., room., component. or desktop.); subject and data (a JSON object) are optional. Once, when the step is done.",
+			Parameters: objectParams(map[string]any{
+				"type":    map[string]any{"type": "string"},
+				"subject": map[string]any{"type": "string"},
+				"data":    map[string]any{"type": "object"},
+			}, "type")}, run: (*scheduleRun).signal},
 	}
 }
 
@@ -509,6 +515,37 @@ func (r *scheduleRun) post(ctx context.Context, name, text string, recipient map
 	}
 	r.record(name, "posted: "+text)
 	return "posted", nil
+}
+
+// signal sends an event to the room as the task's creator, naming the run's
+// event as its cause (realtime's signals route, which keeps the task itself
+// from running on it).
+func (r *scheduleRun) signal(ctx context.Context, raw json.RawMessage) (string, error) {
+	var in struct {
+		Type    string          `json:"type"`
+		Subject string          `json:"subject"`
+		Data    json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &in); err != nil || strings.TrimSpace(in.Type) == "" {
+		return "", errors.New("signal needs type")
+	}
+	if r.dry {
+		r.record("signal", "would send: "+in.Type)
+		return "dry run: would send it", nil
+	}
+	body, _ := json.Marshal(wire.SignalRequest{ScheduleID: r.sc.ScheduleID, Type: strings.TrimSpace(in.Type), Subject: strings.TrimSpace(in.Subject), Data: in.Data})
+	base := strings.TrimRight(r.s.Backends.Realtime, "/")
+	resp, err := callBackend(ctx, http.MethodPost, base+"/internal/v1/rooms/"+url.PathEscape(r.sc.RoomID)+"/signals", body, r.claims.Subject, r.claims.Tenant)
+	if err != nil {
+		return "", errors.New("the event could not be sent")
+	}
+	defer resp.Body.Close()
+	out, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return "", errors.New(httpx.ErrorText(out))
+	}
+	r.record("signal", "sent: "+in.Type)
+	return "sent", nil
 }
 
 // listAgents reads the room's agents online now (realtime's roster).

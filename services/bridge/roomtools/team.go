@@ -197,7 +197,7 @@ const (
 func postProgressTool() Tool {
 	return Tool{
 		Name:  "post_progress",
-		Title: "Post a progress line",
+		Title: "Progress",
 		Description: "Post one short progress line to the room, for example \"Phase 2/3: tests dispatched to tester\". " +
 			"It shows as a notice of your current request, not as your reply. Use it once per phase of a longer task.",
 		InputSchema: objectSchema(map[string]any{

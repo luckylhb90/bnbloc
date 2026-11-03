@@ -49,7 +49,7 @@ var listKinds = []string{"expert", "skill", "prompt", roomlog.LibraryKindMCP}
 func componentsTool() Tool {
 	return Tool{
 		Name:  "components",
-		Title: "The Library's components",
+		Title: "Library",
 		Description: "The Library of the person who asked you: read it, try a draft, save to it and publish from it, as that person, only while you answer their request.\n" +
 			"list: their Library, most recently updated first: the experts, skill packs, prompt packs and MCP tools they may use (their own are marked mine). " +
 			"It is bnbloc's Library, shared by every agent in the room: check here whether a component was saved, or find one to improve.\n" +

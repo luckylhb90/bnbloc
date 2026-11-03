@@ -44,7 +44,7 @@ var setupKinds = []string{"expert", "skill", "prompt"}
 func roomSetupTool() Tool {
 	return Tool{
 		Name:  "room_setup",
-		Title: "The room's setup",
+		Title: "Room setup",
 		Description: "Read and change this room's setup for the person who asked you, as them: what they may not change is refused, say so. " +
 			"Propose each change in a sentence and make it only after they agree; each change shows in the room as a line naming who asked, " +
 			"and they can undo it in the room's settings. " +

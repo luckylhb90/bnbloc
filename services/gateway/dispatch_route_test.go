@@ -64,3 +64,46 @@ func TestDispatchRouteRewritesToTheInternalRoute(t *testing.T) {
 		t.Error("only POST /v1/rooms/{id}/dispatch is the dispatch door")
 	}
 }
+
+// The signals door (the room tool signal) is mapped like dispatch: room
+// scoped, the chat budget and drive_agent, rewritten to realtime's
+// /internal/v1/rooms/{id}/signals with the caller signed.
+func TestSignalRouteRewritesToTheInternalRoute(t *testing.T) {
+	const key = "signal-route-test-key"
+	t.Setenv("BNBLOC_INTERNAL_KEY", key)
+	var gotPath, gotUser string
+	backend := httptest.NewServer(svcauth.RequireSigned(key, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotUser = r.URL.Path, r.Header.Get("X-Bnbloc-User")
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = io.WriteString(w, `{"event":{},"triggered":0}`)
+	})))
+	defer backend.Close()
+	gw := newGateway(t, "")
+	gw.Backends.Realtime = backend.URL
+	srv := httptest.NewServer(gw.Handler())
+	defer srv.Close()
+	token, _ := login(t, srv, "good")
+	post := func(room string) int {
+		req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/rooms/"+room+"/signals", strings.NewReader(`{"jobId":"job_p","type":"draft.ready"}`))
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if code := post("room-1"); code != http.StatusAccepted || gotPath != "/internal/v1/rooms/room-1/signals" || gotUser != "alice" {
+		t.Fatalf("signal = %d; backend saw %q as %q", code, gotPath, gotUser)
+	}
+	if code := post("room-other"); code != http.StatusForbidden {
+		t.Fatalf("signal outside the token's rooms = %d; want 403", code)
+	}
+	p := mustParseAPIPath(t, http.MethodPost, "/v1/rooms/r1/signals")
+	if !rateLimited(http.MethodPost, p) || requiredPermission(http.MethodPost, p) != rbac.PermDriveAgent {
+		t.Error("a signal must spend the chat budget and need drive_agent")
+	}
+	if mustParseAPIPath(t, http.MethodPost, "/v1/rooms/r1/signals/x").isRoomSignal(http.MethodPost) {
+		t.Error("only POST /v1/rooms/{id}/signals is the signal door")
+	}
+}

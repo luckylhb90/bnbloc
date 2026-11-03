@@ -68,6 +68,7 @@ func TestBriefsKeepTheirConstraintsAndStayShort(t *testing.T) {
 		"app_data":   {"wipe", "only when the person asked", "confirm"},
 		"ask_agent":  {"under their authority"},
 		"room_setup": {"as the person who asked you", "only after they agree", "Actions: get set use unuse"},
+		"signal":     {"once", "not for progress"},
 	} {
 		for _, s := range want {
 			if !strings.Contains(briefs[name].Text, s) {

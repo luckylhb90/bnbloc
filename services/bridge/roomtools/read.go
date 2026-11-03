@@ -25,7 +25,7 @@ const readAuthor = "the room's people and agents (each line names its author)"
 func readRoomTool() Tool {
 	return Tool{
 		Name:  "read_room",
-		Title: "Read the conversation",
+		Title: "Conversation",
 		Description: "Recent messages of this conversation (people's messages and agents' replies), oldest first, " +
 			"one line each: \"#<seq> <author>: <text>\". Pass since (a seq from an earlier read) to get only newer messages.",
 		InputSchema: objectSchema(map[string]any{

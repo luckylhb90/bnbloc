@@ -65,6 +65,22 @@ type MemberEvent struct {
 	Data    json.RawMessage `json:"data,omitempty"`
 }
 
+// SignalRequest is the body of POST /v1/rooms/{roomId}/signals (and of
+// realtime's POST /internal/v1/rooms/{roomId}/signals): an event an agent's
+// job (JobID: the job the caller's bridge runs) or an AI task's run
+// (ScheduleID: a task of the caller's) sends to its own room, as the job's
+// requester or the task's creator
+// (docs/prd/2026-10-26-rooms-work-together.md §2.3, D8). The platform sets
+// the rest (source, id, time, channel, cause and chain); the type is never
+// one of the platform's.
+type SignalRequest struct {
+	JobID      string          `json:"jobId,omitempty"`
+	ScheduleID string          `json:"scheduleId,omitempty"`
+	Type       string          `json:"type"`
+	Subject    string          `json:"subject,omitempty"`
+	Data       json.RawMessage `json:"data,omitempty"`
+}
+
 // MemberEventReply answers a member's event: the event as sent (its id
 // and time) and how many of the room's tasks it set to run.
 type MemberEventReply struct {

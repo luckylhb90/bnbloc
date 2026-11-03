@@ -61,7 +61,7 @@ func settled(status string) bool {
 func askAgentTool() Tool {
 	return Tool{
 		Name:  "ask_agent",
-		Title: "Ask another agent of the room",
+		Title: "Ask an agent",
 		Description: "Send a task to another agent of this room and wait for it to finish. It is posted in the room for the person who asked you " +
 			"(visible to everyone, attributed to you) and runs under their authority. Returns the agent's reply and the files it delivered " +
 			"(each with its copy's path in your workspace when it has one; read_artifact reads one by its artifactId); if the agent is still working when the wait ends, its handle for room_status.",
@@ -337,7 +337,7 @@ func deliverables(ctx context.Context, env *Env, run wire.AgentRun) []deliverabl
 func roomStatusTool() Tool {
 	return Tool{
 		Name:        "room_status",
-		Title:       "Status of dispatched tasks",
+		Title:       "Dispatched tasks",
 		Description: "The state of the tasks you dispatched with ask_agent. With a handle: that task, with its reply and deliverables once finished. Without: every task you dispatched in this session.",
 		InputSchema: objectSchema(map[string]any{
 			"handle": map[string]any{"type": "string", "description": "A handle ask_agent returned (optional)."},

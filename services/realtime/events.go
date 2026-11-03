@@ -85,6 +85,18 @@ type eventDelivery struct {
 	reach     store.EventScheduleQuery
 	only      *wire.RoomSchedule
 	causeRoom string
+	// signal: an event a job or a run sent (signals.go); the self-trigger
+	// rule is then causeTask's (schedule.SignalTriggers), never the room's.
+	signal    bool
+	causeTask string
+}
+
+// triggers is the one rule of which tasks d's event runs.
+func (d eventDelivery) triggers(sc wire.RoomSchedule) bool {
+	if d.signal {
+		return schedule.SignalTriggers(sc, d.event, d.causeTask)
+	}
+	return schedule.Triggers(sc, d.event, d.causeRoom)
 }
 
 // handleInternalEvent dispatches one platform event from the gateway.
@@ -141,7 +153,7 @@ func (s *Service) dispatchEvent(ctx context.Context, d eventDelivery, now time.T
 	}
 	var takers []wire.RoomSchedule
 	for _, sc := range list {
-		if schedule.Triggers(sc, ev, d.causeRoom) && runnable(sc) == nil {
+		if d.triggers(sc) && runnable(sc) == nil {
 			takers = append(takers, sc)
 		}
 	}

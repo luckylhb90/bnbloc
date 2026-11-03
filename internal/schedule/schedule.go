@@ -201,6 +201,17 @@ const runSlotPrefix = "sched:"
 // message a schedule posted on its creator's behalf, not one they typed.
 func IsRunSlotClientMsgID(id string) bool { return strings.HasPrefix(id, runSlotPrefix) }
 
+// RunSlotSchedule is the schedule id a run slot's client id names ("" when
+// id is not one, RunSlotClientMsgID).
+func RunSlotSchedule(id string) string {
+	rest, ok := strings.CutPrefix(id, runSlotPrefix)
+	if !ok {
+		return ""
+	}
+	sched, _, _ := strings.Cut(rest, ":")
+	return sched
+}
+
 // compile turns a validated, normalized recurrence into a spec.
 func compile(rec wire.ScheduleRecurrence) (*spec, error) {
 	sp := &spec{}

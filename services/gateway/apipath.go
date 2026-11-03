@@ -294,9 +294,9 @@ func (s *Service) route(p apiPath) string {
 			// The room's live views now (wire.JobLiveList), beside each
 			// job's own.
 			return s.Backends.Realtime
-		case "dispatch":
-			// Agent dispatch (room tools): realtime's internal route, see
-			// isRoomDispatch.
+		case "dispatch", "signals":
+			// Agent dispatch and signals (room tools): realtime's internal
+			// routes, see isRoomDispatch and isRoomSignal.
 			return s.Backends.Realtime
 		case "schedules":
 			// Scheduled prompts (N2) run beside the chat publish they use.
@@ -447,7 +447,16 @@ func rateLimited(method string, p apiPath) bool {
 	}
 	// An agent dispatch posts chat on a member's behalf (and drives an
 	// agent): the dispatching member's chat budget.
-	return p.RoomSub == "chat" || p.RoomSub == "shared-agents" || p.isRoomDispatch(method)
+	return p.RoomSub == "chat" || p.RoomSub == "shared-agents" || p.isRoomDispatch(method) || p.isRoomSignal(method)
+}
+
+// isRoomSignal reports POST /v1/rooms/{id}/signals: a bridge's room tools
+// server sending an event for the job it runs (the room tool signal). Like
+// dispatch, the public door of a realtime internal route
+// (/internal/v1/rooms/{id}/signals) after the edge checks; it may run the
+// room's tasks, so it spends the chat budget.
+func (p apiPath) isRoomSignal(method string) bool {
+	return method == http.MethodPost && len(p.segs) == 4 && p.RoomSub == "signals"
 }
 
 // isRoomDispatch reports POST /v1/rooms/{id}/dispatch: a bridge's room tools

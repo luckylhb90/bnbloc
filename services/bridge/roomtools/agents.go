@@ -101,7 +101,7 @@ func handles(agents []roomAgent) string {
 func listRoomAgentsTool() Tool {
 	return Tool{
 		Name:  "list_room_agents",
-		Title: "List the room's agents",
+		Title: "Room agents",
 		Description: "List the agents you can ask in this room right now: each one's handle (pass it to ask_agent), owner, core and provider. " +
 			"The agent marked you=true is you. When you lead a team, team lists who takes each role right now, or why nobody can.",
 		InputSchema: objectSchema(map[string]any{}),

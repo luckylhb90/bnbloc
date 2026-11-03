@@ -178,6 +178,16 @@ func Triggers(sc wire.RoomSchedule, ev wire.CloudEvent, causeRoom string) bool {
 	return (causeRoom == "" || causeRoom != sc.RoomID) && Takes(sc, ev)
 }
 
+// SignalTriggers is Triggers for a signal (an event an agent's job or an
+// AI task's run sent, wire.SignalRequest): the no-self-trigger rule narrows
+// to the task whose run sent it (causeTask, "" for none), so a flow's next
+// station in the same room takes it and the sending task never re-runs on
+// it. Loops between tasks are bounded by the dispatch's rate limits.
+// decision: owner accepted 2026-11-03 (signals: same task only)
+func SignalTriggers(sc wire.RoomSchedule, ev wire.CloudEvent, causeTask string) bool {
+	return (causeTask == "" || causeTask != sc.ScheduleID) && Takes(sc, ev)
+}
+
 // Takes reports whether sc's event trigger takes ev: its source (the
 // platform; its own room; its own webhook URL), one of its type patterns,
 // and its filter.

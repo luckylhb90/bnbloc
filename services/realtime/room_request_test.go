@@ -32,6 +32,7 @@ func TestRoomPreambleOwned(t *testing.T) {
 		"chat_send.go:PostChat":                 "the operation's own Chat check of the author, so no post path skips it",
 		"forward.go:forwardSource":              "a forward's source room, named in the body (may be another room): the author must read the source there",
 		"dispatch.go:checkDispatchAuthority":    "the dispatch guards: the bridge owner and the parent job's requester",
+		"signals.go:Signal":                     "the signal's sender (the job's requester or the task's creator), not the caller: Chat, as PostChat asks of an author",
 	}
 	files, err := filepath.Glob("*.go")
 	if err != nil {

@@ -172,7 +172,7 @@ func DefaultRegistry() *Registry {
 	for _, t := range []Tool{
 		listRoomAgentsTool(), askAgentTool(), roomStatusTool(), readRoomTool(), readArtifactTool(),
 		componentsTool(),
-		postProgressTool(), appDataTool(), roomSetupTool(),
+		postProgressTool(), signalTool(), appDataTool(), roomSetupTool(),
 	} {
 		if err := r.Register(t); err != nil {
 			panic(err) // a static registration bug

@@ -606,10 +606,11 @@ func (s *Service) handleProxy(w http.ResponseWriter, r *http.Request) {
 		w = sw
 	}
 	r.Header.Del(actingTenantHeader)
-	if p.isRoomDispatch(r.Method) {
-		// The only route the edge maps onto an internal one (isRoomDispatch).
-		r.URL.Path = "/internal/v1/rooms/" + p.RoomID + "/dispatch"
-		r.URL.RawPath = "/internal/v1/rooms/" + url.PathEscape(p.RoomID) + "/dispatch"
+	if p.isRoomDispatch(r.Method) || p.isRoomSignal(r.Method) {
+		// The only routes the edge maps onto internal ones (isRoomDispatch,
+		// isRoomSignal).
+		r.URL.Path = "/internal/v1/rooms/" + p.RoomID + "/" + p.RoomSub
+		r.URL.RawPath = "/internal/v1/rooms/" + url.PathEscape(p.RoomID) + "/" + p.RoomSub
 	}
 	s.proxyAs(w, r, p, claims)
 	// A membership this request may have ended (a removal, a leave, the

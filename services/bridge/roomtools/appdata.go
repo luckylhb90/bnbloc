@@ -60,7 +60,7 @@ const appDataAuthor = "the app's users (each document's _author names its writer
 func appDataTool() Tool {
 	return Tool{
 		Name:  "app_data",
-		Title: "Read and change an app's data",
+		Title: "App data",
 		Description: "Read and change the data of this room's interactive apps (sites whose pages store JSON documents in collections). " +
 			"You are an owner: you see every document, with _author, and may change any. Actions: list (apps; with artifactId, its collections); " +
 			"find (filter, sort, limit (default " + strconv.Itoa(defaultAppFindLimit) + "), after=next); get; insert; put (ifAbsent, ifVersion); " +

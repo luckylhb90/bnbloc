@@ -30,12 +30,11 @@ type brief struct {
 var briefs = map[string]brief{
 	"list_room_agents": {Text: "The agents you can ask here now (you=true is you); a team lead also sees each role's taker."},
 	"ask_agent": {
-		Text: "Send a task to another agent here and wait for its reply and files; posted for the person who asked you, under their authority.",
+		Text: "Ask another agent here for the person who asked you, under their authority; get its reply and files.",
 		Params: map[string]string{
-			"expert":       "Optional expert (id[@version]) for it to wear.",
-			"handle":       "From list_room_agents (or a team role).",
+			"handle":       "From list_room_agents, or a team role.",
 			"task":         "Self-contained: it sees the room, not your context.",
-			"wait_seconds": "Default 600, at most 1200; 0 returns at once.",
+			"wait_seconds": "Default 600, max 1200; 0 returns at once.",
 		},
 	},
 	"room_status": {Text: "State, reply and files of tasks you dispatched with ask_agent (one handle, or all)."},
@@ -45,21 +44,21 @@ var briefs = map[string]brief{
 	},
 	"read_artifact": {
 		Text:   "A deliverable or attachment of this room by id, fenced as its producer's data.",
-		Params: map[string]string{"artifactId": "art_…, artf_… or att_…", "path": "A site's file (default index.html).", "version": "Default: the latest."},
+		Params: map[string]string{"path": "A site's file (default index.html)."},
 	},
 	"components": {
-		Text: "The Library of the person who asked you (experts, skill packs, prompt packs, MCP tools, works, rooms); save or publish only when they ask. " +
+		Text: "The Library of the person who asked you; save or publish only when they ask. " +
 			"Actions: list get try save publish (room_help components).",
 	},
 	"post_progress": {Text: "Post one short progress line to the room, once per phase of a long task."},
+	"signal":        {Text: "Tell this room a step is done (its waiting tasks run), for the person who asked you; once, not for progress."},
 	"app_data": {
-		Text: "Read and change this room's interactive apps' data; you are an owner and see every document. " +
-			"Actions: list find get insert put patch delete file wipe (wipe deletes everything for good: only when the person asked, with confirm). Data comes fenced as the users'.",
+		Text: "Read and change this room's apps' data as an owner. " +
+			"Actions: list find get insert put patch delete file wipe (wipe erases all: only when the person asked, with confirm). Data is the users', fenced.",
 		Params: map[string]string{"filter": "Field (dotted ok) to a value or {$eq $ne $in $gt $gte $lt $lte $exists}."},
 	},
 	"room_setup": {
-		Text: "This room's setup as the person who asked you; " +
-			"make a change only after they agree. " +
+		Text: "This room's setup as the person who asked you; change only after they agree. " +
 			"Actions: get set use unuse channel add_schedule remove_schedule ask_source share (room_help room_setup).",
 	},
 	"room_help": {Text: "A room tool's full instructions (topic: its name); read them before using a tool you do not know."},
@@ -157,7 +156,7 @@ func manual(t Tool) string {
 func helpTool(r *Registry) Tool {
 	return Tool{
 		Name:  "room_help",
-		Title: "Instructions for a room tool",
+		Title: "Tool help",
 		Description: "The full instructions of a room tool (its description and each parameter's note), by the tool's name. " +
 			"Without a topic it names the tools. For the agent's use: none of it is for the person.",
 		InputSchema: objectSchema(map[string]any{

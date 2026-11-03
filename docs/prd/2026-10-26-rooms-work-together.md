@@ -1124,3 +1124,30 @@ What it adds:
 - Not yet: D7's "under the link's consent" applies when links exist (1d);
   `room.job.quiet` (D6) needs the bridge's idle report and comes with 1b.
 
+**Slice 1b (2026-11-03): signal send.**
+
+- `POST /v1/rooms/{id}/signals` (the gateway's door, rewritten like dispatch
+  to realtime's `/internal/v1/rooms/{id}/signals`; room scoped, drive_agent,
+  the chat budget) takes a `wire.SignalRequest` naming its job (a job the
+  caller's bridge runs now, `store.LoadLeasedJob`) or its task (a task of the
+  caller's, for its AI run). The event is sent as the job's requester (or the
+  task's creator), who must still be able to post (`membership.Chat`): source
+  `bnbloc/member/<them>`, never a platform type, the job's (or run's) channel,
+  its event as the cause and its chain kept. Audited (type and subject).
+- Self-trigger rule for signals (decision 2026-11-03): the task whose run
+  started the job, directly or through its dispatch chain
+  (`schedule.RunSlotSchedule` over the job's client id), never takes it; the
+  room's other tasks do (`schedule.SignalTriggers`), within the dispatch's
+  rate limits.
+- The room tool `signal` (action send; decision 2026-11-03: listed now,
+  request comes with slice 3) and the AI task action `signal`. tools/list
+  stays within its budget (1790 of 1790) by shorter titles and briefs, every
+  pinned constraint kept.
+- Tests: `TestSignalFromAJobRunsTheNextTaskNotItsOwn`,
+  `TestSignalFromADispatchedJobKeepsItsTask`, `TestSignalRefusals`,
+  `TestSignalToolSendsForTheBoundJob`, `TestSignalRouteRewritesToTheInternalRoute`;
+  red-checked with the same-task rule, the chain walk, the requester check
+  and the lineage removed.
+- Not yet: `room.job.quiet` (D6, needs the bridge's idle report); the AI
+  task's `signal` has no test of its own beyond the realtime route.
+

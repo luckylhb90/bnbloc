@@ -4394,6 +4394,22 @@ export interface MemberEvent {
   data?: unknown;
 }
 
+// SignalRequest is the body of POST /v1/rooms/{roomId}/signals (and of
+// realtime's POST /internal/v1/rooms/{roomId}/signals): an event an agent's
+// job (JobID: the job the caller's bridge runs) or an AI task's run
+// (ScheduleID: a task of the caller's) sends to its own room, as the job's
+// requester or the task's creator
+// (docs/prd/2026-10-26-rooms-work-together.md §2.3, D8). The platform sets
+// the rest (source, id, time, channel, cause and chain); the type is never
+// one of the platform's.
+export interface SignalRequest {
+  jobId?: string;
+  scheduleId?: string;
+  type: string;
+  subject?: string;
+  data?: unknown;
+}
+
 // MemberEventReply answers a member's event: the event as sent (its id
 // and time) and how many of the room's tasks it set to run.
 export interface MemberEventReply {
