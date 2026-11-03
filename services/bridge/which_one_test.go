@@ -21,6 +21,27 @@ import (
 // written down yet.
 var firstOfThings = regexp.MustCompile(`\b(?:agents?|targets?|cores?|sessions?|workspaces?|rooms?|recipients?|hosts?)\s*\[\s*0\s*\]`)
 
+func TestToolPlacementFactsSetOnlyByHostToolEnv(t *testing.T) {
+	var found []string
+	archtest.Scan(t, archtest.Opts{Lang: archtest.Go, Roots: []string{"services", "internal", "cmd"}}, func(rel string, src []byte) {
+		if rel == "services/bridge/roomtools_contrib.go" {
+			return
+		}
+		for i, line := range strings.Split(string(src), "\n") {
+			if strings.HasPrefix(strings.TrimSpace(line), "//") {
+				continue
+			}
+			if strings.Contains(line, "ToolPlacementEnv") || strings.Contains(line, "ToolOwnRunEnv") ||
+				strings.Contains(line, "BNBLOC_TOOL_PLACEMENT") || strings.Contains(line, "BNBLOC_TOOL_OWN_RUN") {
+				found = append(found, rel+":"+strconv.Itoa(i+1)+": "+strings.TrimSpace(line))
+			}
+		}
+	})
+	if len(found) > 0 {
+		t.Fatalf("the placement facts are told to a host tool only by hostToolEnv (docs/prd/2026-11-03-mysql-connector.md §2.5); a second setter lets something else claim them:\n%s", strings.Join(found, "\n"))
+	}
+}
+
 func TestNoFirstOfAListAsTheTarget(t *testing.T) {
 	var found []string
 	archtest.Scan(t, archtest.Opts{Lang: archtest.Go, Roots: []string{"services/bridge", "services/gateway", "services/room", "services/activity"}}, func(rel string, src []byte) {

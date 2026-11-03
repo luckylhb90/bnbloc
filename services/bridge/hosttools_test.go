@@ -258,6 +258,80 @@ func TestHostToolEndToEnd(t *testing.T) {
 
 func toJSON(v any) string { raw, _ := json.Marshal(v); return string(raw) }
 
+// hostToolEnvOf is hostToolEnv as a map, so a test reads what a tool would see.
+func hostToolEnvOf(tool HostTool, ownRun bool) map[string]string {
+	out := map[string]string{}
+	for _, kv := range hostToolEnv(tool, "http://127.0.0.1:1/relay", "tok", ownRun) {
+		if k, v, ok := strings.Cut(kv, "="); ok {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+// A host-run tool is told where it runs and whether the run is the member's own
+// (docs/prd/2026-11-03-mysql-connector.md §2.5, D3, D6). Both come only from the bridge:
+// a value the inherited environment, the tool's own settings or a package carries under
+// either name is replaced or dropped, so "present" means "the bridge said so".
+func TestHostToolIsToldWhereItRunsAndWhoseRunItIs(t *testing.T) {
+	t.Setenv(pkgmeta.ToolPlacementEnv, "agent") // an operator's variable must not leak through
+	t.Setenv(pkgmeta.ToolOwnRunEnv, "1")        // ...nor claim an own run the bridge did not
+	t.Setenv("BNBLOC_BRIDGE_SECRET", "bridge-only")
+
+	own := hostToolEnvOf(HostTool{Server: mailerServer()}, true)
+	if own[pkgmeta.ToolPlacementEnv] != "host" || own[pkgmeta.ToolOwnRunEnv] != "1" {
+		t.Fatalf("an own run's host tool: placement=%q ownRun=%q, want host and 1", own[pkgmeta.ToolPlacementEnv], own[pkgmeta.ToolOwnRunEnv])
+	}
+
+	// Borrowed, platform, or an own run wearing foreign scripts: placed on the host, not the member's own.
+	other := hostToolEnvOf(HostTool{Server: mailerServer()}, false)
+	if other[pkgmeta.ToolPlacementEnv] != "host" {
+		t.Fatalf("a host tool must still be told it is hosted: %v", other)
+	}
+	if v, ok := other[pkgmeta.ToolOwnRunEnv]; ok {
+		t.Fatalf("a run that is not the member's own got %s=%q (an inherited value leaked, or the bridge claimed it)", pkgmeta.ToolOwnRunEnv, v)
+	}
+
+	// A value the tool's own server entry carries under either name never wins: the
+	// bridge's is appended last, and without an own run the name is dropped entirely.
+	spoof := mailerServer()
+	spoof.Env = append(spoof.Env,
+		corepkg.NameValue{Name: pkgmeta.ToolPlacementEnv, Value: "agent"},
+		corepkg.NameValue{Name: pkgmeta.ToolOwnRunEnv, Value: "1"})
+	got := hostToolEnvOf(HostTool{Server: spoof}, false)
+	if got[pkgmeta.ToolPlacementEnv] != "host" {
+		t.Fatalf("a server entry's placement won over the bridge's: %q", got[pkgmeta.ToolPlacementEnv])
+	}
+	if v, ok := got[pkgmeta.ToolOwnRunEnv]; ok {
+		t.Fatalf("a server entry claimed an own run on a run that is not: %s=%q", pkgmeta.ToolOwnRunEnv, v)
+	}
+	if got["BNBLOC_BRIDGE_SECRET"] != "" {
+		t.Fatal("the bridge's own environment leaked to the tool")
+	}
+}
+
+// The agent's child is told neither: what its server entry carries is the profile's, which the
+// agent can read, so a variable there would be the agent's to set. A tool that sees neither
+// refuses as the least trusted case.
+func TestAnAgentsChildIsNeverToldItIsHostedOrOwn(t *testing.T) {
+	f := newMCPFixture(t)
+	f.setMember(t, "codeword", map[string]string{"salt": "s"})
+	tool := codewordTool(f.sha)
+	tool.Placement, tool.PrivatePaths = pkgmeta.MCPPlacementHost, []string{"acme/codeword"}
+	b := &Bridge{cfg: Config{MCPToolsDir: f.tools, ComponentSettingsDir: f.settings, StateDir: t.TempDir()}}
+	mcp, missing, _ := b.resolveMCP([]wire.ContentMCPTool{tool}, nil, "maya", "home", true)
+	if len(missing) != 0 || len(mcp.servers) != 1 {
+		t.Fatalf("the tool did not attach, so nothing below would be checked: servers=%+v missing=%v", mcp.servers, missing)
+	}
+	for _, s := range mcp.servers {
+		for _, e := range s.Env {
+			if e.Name == pkgmeta.ToolPlacementEnv || e.Name == pkgmeta.ToolOwnRunEnv {
+				t.Fatalf("the profile's server entry carries %s: the agent could read or change it", e.Name)
+			}
+		}
+	}
+}
+
 func mustEval(t *testing.T, p string) string {
 	t.Helper()
 	r, err := filepath.EvalSymlinks(p)

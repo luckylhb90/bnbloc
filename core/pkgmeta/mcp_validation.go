@@ -49,6 +49,21 @@ const (
 	RoomRelayTokenEnv = "BNBLOC_ROOM_RELAY_TOKEN"
 )
 
+// The two facts the bridge tells a stdio tool it runs as a host process
+// (docs/prd/2026-11-03-mysql-connector.md §2.5): where it runs, and whether
+// the run is the member's own. They are set only by the bridge's hostToolEnv
+// and absent otherwise (an agent's child, a borrowed or platform run, an
+// older bridge), so a tool that holds something the agent must not reach
+// treats absence as the least trusted case. They tell an honest tool where
+// it is; they are not a boundary against an agent that can run the tool's
+// binary itself, which confinement and the sandbox are.
+const (
+	ToolPlacementEnv  = "BNBLOC_TOOL_PLACEMENT"
+	ToolOwnRunEnv     = "BNBLOC_TOOL_OWN_RUN"
+	ToolPlacementHost = "host"
+	ToolOwnRunYes     = "1"
+)
+
 // Where a stdio MCP server runs (MCP.Stdio.Placement,
 // docs/prd/2026-10-22-host-run-mcp-tools.md); the values and the question
 // RunsOnHost live with the wire shape.

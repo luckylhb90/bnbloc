@@ -1031,6 +1031,21 @@ tool by name and can never inline a command.
     revoked with the session binding. A route joins the list only with
     job-grant admission. Platform content (a default pack) requiring a
     stdio tool does not force the sandbox; another member's still does.
+  - **Where a host tool is told it runs** (docs/prd/2026-11-03-mysql-connector.md
+    §2.5). The bridge's `hostToolEnv` is the one place that sets two variables on
+    a tool it starts as a host process: `BNBLOC_TOOL_PLACEMENT=host`, and
+    `BNBLOC_TOOL_OWN_RUN=1` only when the run is the member's own (`drive.ownRun`:
+    their own drive, not a platform agent, not one wearing someone else's
+    scripts). Both names are `pkgmeta.ToolPlacementEnv`/`ToolOwnRunEnv`, reserved
+    (`platformEnv`): a package cannot deliver them, a server entry's value under
+    either is dropped, and the bridge's own `BNBLOC_*` never reaches the tool.
+    An agent's child, a borrowed or platform run, and an older bridge get
+    neither, so a tool that holds something the agent must not reach treats
+    absence as the least trusted case. They tell an honest tool where it runs;
+    they are **not** a boundary: an agent that can run the tool's binary can set
+    both itself, so what actually protects a tool's private state is the sandbox
+    and `denyRead` on its `privatePaths`
+    (`TestToolPlacementFactsSetOnlyByHostToolEnv` keeps the setter single).
   - `mcp.stdio.placement: "host"` (stdio only; with `privatePaths`, relative to
     the user's config directory): where the tool runs
     ([`docs/prd/2026-10-22-host-run-mcp-tools.md`](../prd/2026-10-22-host-run-mcp-tools.md)).

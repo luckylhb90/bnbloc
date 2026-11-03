@@ -159,7 +159,12 @@ func TestSettingEnvRule(t *testing.T) {
 		}
 	}
 	// Inside its own namespace, a name the platform sets stays the platform's.
-	for _, c := range [][2]string{{"room", RoomRelayTokenEnv}, {"component", ComponentSettingsFileEnv}, {"plugin", "BNBLOC_PLUGIN_HOST_TOKEN"}} {
+	for _, c := range [][2]string{
+		{"room", RoomRelayTokenEnv}, {"component", ComponentSettingsFileEnv}, {"plugin", "BNBLOC_PLUGIN_HOST_TOKEN"},
+		// docs/prd/2026-11-03-mysql-connector.md §2.5: a tool is told where it runs, so a package
+		// must never be able to deliver the answer itself, even under a namespace it owns ("tool").
+		{"tool", ToolPlacementEnv}, {"tool", ToolOwnRunEnv},
+	} {
 		if err := ValidSettingEnv(c[0], c[1]); err == nil || !strings.Contains(err.Error(), "set by the platform") {
 			t.Errorf("ValidSettingEnv(%s, %s) = %v", c[0], c[1], err)
 		}

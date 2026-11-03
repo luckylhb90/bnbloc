@@ -153,8 +153,13 @@ func (g roomToolsGateway) client(rb roomtools.RawBody) *http.Client {
 // hostToolEnv is the environment of a tool the bridge runs on the host: this
 // process's, without the bridge's own settings and credentials (BNBLOC_*), then
 // the tool's own (its settings), then the room relay when the room is its
-// credential. Never the agent's environment.
-func hostToolEnv(tool HostTool, relayURL, token string) []string {
+// credential, then what only the bridge can say: that the tool is hosted, and
+// whether the run is the member's own (ownRun, drive.ownRun: never a borrowed or
+// platform drive, never one wearing someone else's scripts). A value the tool's
+// own entry carries under either of those names is dropped, so a tool that
+// sees them knows the bridge said so (docs/prd/2026-11-03-mysql-connector.md
+// §2.5, D3, D6). Never the agent's environment.
+func hostToolEnv(tool HostTool, relayURL, token string, ownRun bool) []string {
 	var env []string
 	for _, kv := range os.Environ() {
 		if !strings.HasPrefix(kv, "BNBLOC_") {
@@ -162,10 +167,17 @@ func hostToolEnv(tool HostTool, relayURL, token string) []string {
 		}
 	}
 	for _, nv := range tool.Server.Env {
+		if nv.Name == pkgmeta.ToolPlacementEnv || nv.Name == pkgmeta.ToolOwnRunEnv {
+			continue
+		}
 		env = append(env, nv.Name+"="+nv.Value)
 	}
 	if tool.Relayed {
 		env = append(env, pkgmeta.RoomRelayURLEnv+"="+relayURL, pkgmeta.RoomRelayTokenEnv+"="+token)
+	}
+	env = append(env, pkgmeta.ToolPlacementEnv+"="+pkgmeta.ToolPlacementHost)
+	if ownRun {
+		env = append(env, pkgmeta.ToolOwnRunEnv+"="+pkgmeta.ToolOwnRunYes)
 	}
 	return env
 }
@@ -205,7 +217,7 @@ func (c *roomToolsContributor) attachHostTools(sess *roomtools.Session, info Ses
 	for _, tool := range info.HostTools {
 		sess.AttachHostTool(tool.Server.Name, hosttool.New(hosttool.Spec{
 			Name: tool.Server.Name, Command: tool.Server.Command, Args: tool.Server.Args,
-			Env: hostToolEnv(tool, c.srv.RelayURL(), token), Dir: info.Workdir,
+			Env: hostToolEnv(tool, c.srv.RelayURL(), token, info.OwnRun), Dir: info.Workdir,
 		}))
 	}
 }

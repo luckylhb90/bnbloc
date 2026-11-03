@@ -107,6 +107,7 @@ var processEnv = []string{
 var platformEnv = []string{
 	ComponentSettingsFileEnv,
 	RoomRelayURLEnv, RoomRelayTokenEnv,
+	ToolPlacementEnv, ToolOwnRunEnv,
 	"BNBLOC_PLUGIN_HOST_URL", "BNBLOC_PLUGIN_HOST_TOKEN",
 }
 
